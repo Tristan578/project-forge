@@ -101,12 +101,37 @@ export const GAME_CAMERA_WIRE_KEYS = Object.keys(
   WIRE_PARAM_SHAPES,
 ) as (keyof GameCameraWireParams)[];
 
+/**
+ * Wire keys the engine HARD-REJECTS below zero (`flat_damping`).
+ *
+ * A negative rate is not a slower camera, it is a lerp factor pointing the wrong
+ * way — the camera extrapolates away from its target and compounds the gap every
+ * frame (PF-1166). The engine refuses it, and `set_game_camera` is a full-replace
+ * command, so one bad rate loses `mode`, `targetEntity` and `offset` along with
+ * it. Screening the key here keeps the rest of the command dispatchable, which is
+ * the whole reason the tightening needs a matching guard on this side.
+ *
+ * Pinned against the Rust readers by `__tests__/gameCameraPayload.test.ts`, so a
+ * second field adopting a sign policy cannot leave this set behind.
+ */
+export const NON_NEGATIVE_WIRE_KEYS = new Set<keyof GameCameraWireParams>([
+  'damping',
+]);
+
 /** Is `value` a well-formed value for the wire parameter `key`? */
 function isWireValue(key: keyof GameCameraWireParams, value: unknown): boolean {
   const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
   switch (WIRE_PARAM_SHAPES[key]) {
     case 'number':
-      return finite(value);
+      // A sign policy is part of being well-formed, not a separate later check:
+      // this predicate is what decides whether a preserved `engineParams` value
+      // is copied forward, and `parseGameCameraWire` round-trips a `.forge`
+      // scene through that field. Admitting a negative `damping` here would let
+      // one bad scene file hard-reject every later `set_game_camera`.
+      return (
+        finite(value) &&
+        (!NON_NEGATIVE_WIRE_KEYS.has(key) || (value as number) >= 0)
+      );
     case 'bool':
       return typeof value === 'boolean';
     case 'pair':
@@ -198,6 +223,84 @@ export const ENGINE_CAMERA_DEFAULTS = {
   orbitalDistance: 8,
   orbitalAutoRotateSpeed: 15,
 } as const satisfies Record<NumericCameraField, number>;
+
+/**
+ * Which authoring fields accept a negative number, and which do not.
+ *
+ * `Number.isFinite()` alone is not the whole guard. A negative `followSmoothing`
+ * reaches the engine as a negative `damping`, and the follow step is a `lerp`
+ * toward the target by `damping * delta` — `lerp` does not bound its parameter,
+ * so a negative one EXTRAPOLATES: the camera moves directly away from where it
+ * is converging, by a fixed fraction of the remaining gap, every frame. That
+ * compounds into a view receding toward infinity while still pointing at the
+ * target, so nothing looks wrong at the target itself. (The engine now clamps
+ * the factor to `[0, 1]` in `damping_t` as well — a public `from_flat` cannot
+ * assume it was reached through this module — but a value that can only ever
+ * mean "the author made a mistake" should not be dispatched in the first place.)
+ * The remaining seven are incoherent rather than divergent: a negative
+ * `followDistance` puts the camera in front of what it follows, a negative
+ * `topDownHeight` puts it under the floor.
+ *
+ * Three are deliberately SIGNED, and a blanket non-negative rule would silently
+ * break all three:
+ *   - `followHeight` is `offset.y`, so a negative one places the camera below
+ *     the target — the low-angle hero shot, a real framing choice.
+ *   - `followOffsetX` is `offset.x`, the lateral shoulder offset. Its sign picks
+ *     WHICH shoulder the camera sits over, so forcing it non-negative would pin
+ *     every over-the-shoulder camera in the product to the right shoulder.
+ *   - `orbitalAutoRotateSpeed` is degrees per second applied as
+ *     `angle += speed.to_radians() * dt`, so a negative one orbits the other
+ *     way. There is no separate direction flag; the sign IS the direction.
+ *
+ * `firstPersonMouseSensitivity` is the near miss: inverted look is a real
+ * preference, but this is ONE scalar applied to both axes, so negating it would
+ * invert horizontal too, which no game does. No invert-look convention exists
+ * anywhere in this codebase, and every sensitivity value in the tree is
+ * positive, so a negative one here is a mistake rather than a preference.
+ *
+ * `satisfies Record<NumericCameraField, …>` for the usual reason: a new numeric
+ * authoring field cannot be added without a decision about its sign.
+ */
+const CAMERA_FIELD_SIGN = {
+  followDistance: 'nonNegative',
+  followHeight: 'signed',
+  followOffsetX: 'signed',
+  followSmoothing: 'nonNegative',
+  firstPersonHeight: 'nonNegative',
+  firstPersonMouseSensitivity: 'nonNegative',
+  sideScrollerDistance: 'nonNegative',
+  topDownHeight: 'nonNegative',
+  orbitalDistance: 'nonNegative',
+  orbitalAutoRotateSpeed: 'signed',
+} as const satisfies Record<NumericCameraField, 'nonNegative' | 'signed'>;
+
+/** Does `field` accept a negative value? See {@link CAMERA_FIELD_SIGN}. */
+export function acceptsNegative(field: NumericCameraField): boolean {
+  return CAMERA_FIELD_SIGN[field] === 'signed';
+}
+
+/**
+ * Read one authored camera parameter, or `undefined` if the field cannot hold it.
+ *
+ * The single spelling of the sign policy for every surface that accepts camera
+ * parameters from something other than a typed store write — generated cutscene
+ * keyframes, GDD camera config, the inspector. Each of those used its own
+ * `typeof val === 'number' && Number.isFinite(val)`, which is the same check
+ * three times and none of them the whole check.
+ *
+ * Out of range is DROPPED, not clamped, matching the rest of the sanitizing
+ * boundary: the engine default then applies, which is a value the camera was
+ * designed around. Clamping would invent an opinion — pinning a negative
+ * `orbitalDistance` to 0 asks for a camera sitting exactly on its target.
+ */
+export function readCameraFieldValue(
+  field: NumericCameraField,
+  value: unknown,
+): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  if (value < 0 && !acceptsNegative(field)) return undefined;
+  return value;
+}
 
 const DEFAULT_FOLLOW_HEIGHT = ENGINE_CAMERA_DEFAULTS.followHeight;
 const DEFAULT_FOLLOW_DISTANCE = ENGINE_CAMERA_DEFAULTS.followDistance;
@@ -343,8 +446,18 @@ export function buildSetGameCameraPayload(
           -(distance ?? DEFAULT_FOLLOW_DISTANCE),
         ];
       }
+      // `num` proves finiteness; `isWireValue` adds the engine's sign policy, so
+      // the two write paths into `damping` — this mapping and the `engineParams`
+      // passthrough below — cannot disagree about what the engine will take.
+      // Omission is how this builder says "engine default" (PF-1126), so a
+      // refused rate keeps the rest of this full-replace command intact rather
+      // than losing mode/targetEntity/offset to a hard reject. The signal a human
+      // or the AI can act on lives at the input surfaces instead: `min={0}` on
+      // the inspector field, and a non-negative schema on the chat tool.
       const smoothing = num(data, 'followSmoothing');
-      if (smoothing !== undefined) payload.damping = smoothing;
+      if (smoothing !== undefined && isWireValue('damping', smoothing)) {
+        payload.damping = smoothing;
+      }
       break;
     }
     case 'firstPerson': {
@@ -417,11 +530,27 @@ export function buildSetGameCameraPayload(
   return payload;
 }
 
-/** Read one finite number out of an engine wire payload. */
-function wireNum(params: Record<string, unknown>, key: string): number | undefined {
+/**
+ * Read one well-formed number out of an engine wire payload.
+ *
+ * Screened by {@link isWireValue}, not a local finiteness check, so the mode arms
+ * below cannot admit a value the `engineParams` passthrough refuses. That matters
+ * for `damping`: a `.forge` scene file deserializes straight into the camera
+ * struct without passing through `from_flat`, so a negative rate really can
+ * arrive here, and letting it into the store would put a value on the inspector
+ * that hard-rejects the entity's every later `set_game_camera` (PF-1166).
+ * Omitting it instead means the authoring layer sees the engine's own default.
+ */
+function wireNum(
+  params: Record<string, unknown>,
+  key: keyof GameCameraWireParams,
+): number | undefined {
   if (!Object.hasOwn(params, key)) return undefined;
   const value = params[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  // The `typeof` is what narrows — `isWireValue` returns a plain boolean, and a
+  // cast here would keep type-checking if a caller ever passed a `pair`/`vec3`
+  // key, handing an array back as a `number`.
+  return typeof value === 'number' && isWireValue(key, value) ? value : undefined;
 }
 
 /**
@@ -470,16 +599,28 @@ export function isCameraMode(value: unknown): value is GameCameraMode {
  * invisible to the type checker.
  */
 export function parseGameCameraWire(payload: Record<string, unknown>): GameCameraData | null {
-  const rawMode = payload.mode;
+  // Own keys only, matching `wireNum` below and the keyframe/GDD readers. This
+  // is defense-in-depth, NOT a fix: today's input is engine-produced JSON, and
+  // `mode`/`targetEntity`/`offset` are not names `Object.prototype` carries, so
+  // no reachable call can differ. The parameter promises only
+  // `Record<string, unknown>` though, so a second call site reading a payload
+  // from elsewhere would inherit a bare read rather than a type error — the
+  // same reasoning `player.readCameraData` records for its guards.
+  const rawMode = Object.hasOwn(payload, 'mode') ? payload.mode : undefined;
   if (!isCameraMode(rawMode)) return null;
   const mode = rawMode;
 
-  const targetEntity = normalizeTargetEntity(payload.targetEntity);
+  // Own key, for the same reason as `mode` above. `normalizeTargetEntity` folds
+  // an empty string to null: nothing downstream distinguishes "" from "no
+  // target", and leaving it a string would make `targetEntity`
+  // truthy-but-unresolvable in every consumer.
+  const rawTarget = Object.hasOwn(payload, 'targetEntity') ? payload.targetEntity : undefined;
+  const targetEntity = normalizeTargetEntity(rawTarget);
   const data: GameCameraData = { mode, targetEntity };
 
   switch (mode) {
     case 'thirdPersonFollow': {
-      const offset = payload.offset;
+      const offset = Object.hasOwn(payload, 'offset') ? payload.offset : undefined;
       if (Array.isArray(offset) && offset.length === 3) {
         // X is read even though no control edits it. It used to be discarded here
         // and hardcoded to 0 on the way back out, so reading a camera and then

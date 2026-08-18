@@ -73,7 +73,7 @@ describe('editorStore', () => {
       primaryScript: null,
       allScripts: {},
       scriptLogs: [],
-      primaryAudio: null,
+      entityAudio: {},
       audioBuses: [
         { name: 'master', volume: 1.0, muted: false, soloed: false, effects: [] },
         { name: 'sfx', volume: 1.0, muted: false, soloed: false, effects: [] },

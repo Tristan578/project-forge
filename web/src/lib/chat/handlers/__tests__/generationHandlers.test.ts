@@ -430,6 +430,33 @@ describe('generationHandlers', () => {
       const { result } = await invoke('generate_sfx', { prompt: 'boom' });
       expect(result.success).toBe(false);
     });
+
+    it.each([
+      ['absent', {}],
+      ['empty', { audioBase64: '' }],
+      ['not a string', { audioBase64: { url: 'https://example.com/clip.mp3' } }],
+    ])('reports a failure when the provider returns 200 with audio %s', async (_label, body) => {
+      // The documented provider-success-with-no-artifact class: the request
+      // succeeded, the artifact did not arrive. Without this guard the value
+      // was cast to `string` on the way into `importAudio`, so an object
+      // reached `atob` and a missing field became the text "undefined".
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(body),
+      });
+
+      const { result, store } = await invoke('generate_sfx', {
+        prompt: 'explosion',
+        entityId: 'ent-1',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Sound effect generation produced no audio');
+      // And it stops there: an entity pointed at an asset that was never
+      // imported is a permanently silent entity.
+      expect(store.importAudio).not.toHaveBeenCalled();
+      expect(store.setAudio).not.toHaveBeenCalled();
+    });
   });
 
   // =========================================================================
@@ -467,6 +494,27 @@ describe('generationHandlers', () => {
     it('fails without text', async () => {
       const { result } = await invoke('generate_voice', {});
       expect(result.success).toBe(false);
+    });
+
+    it.each([
+      ['absent', {}],
+      ['empty', { audioBase64: '' }],
+      ['not a string', { audioBase64: 12345 }],
+    ])('reports a failure when the provider returns 200 with audio %s', async (_label, body) => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(body),
+      });
+
+      const { result, store } = await invoke('generate_voice', {
+        text: 'Hello',
+        entityId: 'ent-1',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Voice generation produced no audio');
+      expect(store.importAudio).not.toHaveBeenCalled();
+      expect(store.setAudio).not.toHaveBeenCalled();
     });
   });
 
@@ -559,6 +607,27 @@ describe('generationHandlers', () => {
       expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
         autoPlace: false,
       }));
+    });
+
+    it.each([
+      ['empty', ''],
+      ['not a string', { url: 'https://example.com/track.mp3' }],
+    ])('takes the async path when audioBase64 is %s', async (_label, audioBase64) => {
+      // Music is the one audio handler with two legitimate shapes, so a bad
+      // artifact is not an error here — it is the async path. The branch tests
+      // `typeof`, not truthiness: a truthy non-string would otherwise be cast
+      // to `string` and handed to `importAudio`.
+      mockFetchSuccess({ audioBase64 });
+
+      const { result, store } = await invoke('generate_music', {
+        prompt: 'calm ambient',
+        entityId: 'ent-1',
+      });
+
+      expect(result.success).toBe(true);
+      expect(store.importAudio).not.toHaveBeenCalled();
+      expect(store.setAudio).not.toHaveBeenCalled();
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({ type: 'music' }));
     });
   });
 

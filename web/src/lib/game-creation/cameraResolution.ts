@@ -164,6 +164,88 @@ export function resolveCameraEntityId(nodes: readonly CameraCandidateNode[]): st
 }
 
 /**
+ * A finite number that the engine still cannot use for a particular field.
+ *
+ * Almost every camera parameter is coherent across the whole real line, and this
+ * module has no business refusing an unusual framing an author chose on purpose:
+ * a negative `followDistance` frames from in front (the engine writes
+ * `offset[2] = -distance`), a negative `firstPersonMouseSensitivity` is inverted
+ * look, a negative `orbitalDistance` is a 180-degree phase shift, and a negative
+ * `orbitalAutoRotateSpeed` orbits the other way. Refusing those would substitute
+ * this module's taste for the author's, which is the same silent substitution
+ * the range policy exists to prevent.
+ *
+ * `followSmoothing` is the one field where a sign is not a preference. The
+ * engine follows with `t = (damping * delta).min(1.0)` and then
+ * `translation.lerp(target, t)`: `t` is capped ABOVE but never below, so a
+ * negative damping produces a negative lerp factor, which extrapolates AWAY from
+ * the target every frame and compounds geometrically. At 60fps with damping -3,
+ * `t` is -0.048 and the camera-to-target gap multiplies by ~1.048 per frame —
+ * about 16x per second, so the camera is somewhere unreachable within two
+ * seconds and never comes back. There is no framing that describes.
+ *
+ * Exactly 0.0 stays legal: it is a frozen follow, the engine has a test pinning
+ * that it survives `from_flat`, and it is reachable by other means.
+ *
+ * No upper bound is needed for the same reason the lower one is: `.min(1.0)`
+ * already saturates a too-large damping into "snap to the target", which is a
+ * coherent outcome. The asymmetry is the engine's, not an omission here.
+ */
+interface CameraValuePolicy {
+  accepts: (value: number) => boolean;
+  /** Reported verbatim to the author, so it must read as a sentence fragment. */
+  reason: string;
+}
+
+const CAMERA_VALUE_POLICIES: Partial<Record<NumericCameraField, CameraValuePolicy>> = {
+  followSmoothing: {
+    accepts: (value) => value >= 0,
+    reason: 'must not be negative',
+  },
+};
+
+const NOT_A_FINITE_NUMBER = 'not a finite number';
+
+/**
+ * Why this value cannot be sent for this field, or `null` if it can.
+ *
+ * The single predicate behind both {@link filterCameraNumerics} and
+ * {@link classifyCameraConfigKeys}. They used to duplicate the finite/alias
+ * logic, which meant a value one of them started refusing was reported by
+ * NEITHER: the filter dropped it and the reporter, seeing a finite number under
+ * a real field name, called it applied.
+ */
+function cameraValueRejection(field: NumericCameraField, value: unknown): string | null {
+  // `Number.isFinite`, not a truthiness check: `0` is a legitimate value for
+  // several of these, and `NaN`/`Infinity` would deserialize into the engine as
+  // a f32 the transform step then propagates through the whole scene.
+  if (typeof value !== 'number' || !Number.isFinite(value)) return NOT_A_FINITE_NUMBER;
+  const policy = CAMERA_VALUE_POLICIES[field];
+  return policy && !policy.accepts(value) ? policy.reason : null;
+}
+
+/**
+ * Narrowing view of {@link cameraValueRejection}, for the write path.
+ *
+ * A type predicate rather than `out[key] = val as number` after the check: the
+ * cast asserts the very thing the check just proved, so it keeps type-checking if
+ * the check is ever reordered, weakened or dropped — which is how a value the
+ * policy refuses reaches the engine anyway. Same shape as `usableOverride` in
+ * `physicsProfileResolution.ts`, the house pattern for this.
+ */
+function isSendableCameraValue(
+  field: NumericCameraField,
+  value: unknown,
+): value is number {
+  return cameraValueRejection(field, value) === null;
+}
+
+function asCameraField(key: string): NumericCameraField | undefined {
+  const fields: readonly string[] = NUMERIC_CAMERA_FIELDS;
+  return fields.includes(key) ? (key as NumericCameraField) : undefined;
+}
+
+/**
  * Project a GDD-authored camera config onto the numeric fields the engine can
  * actually receive.
  *
@@ -172,6 +254,9 @@ export function resolveCameraEntityId(nodes: readonly CameraCandidateNode[]): st
  * The hand-written lists this replaces carried two names no engine variant has
  * (`sideScrollerHeight`, `topDownAngle`) and one of them omitted
  * `firstPersonMouseSensitivity`, which a variant does have.
+ *
+ * Everything this drops is reported by {@link classifyCameraConfigKeys} — the
+ * drop being silent is the PF-1125/PF-1166 defect itself.
  */
 export function filterCameraNumerics(
   raw: unknown,
@@ -184,10 +269,7 @@ export function filterCameraNumerics(
     // and a bare read walks the prototype chain.
     if (!Object.hasOwn(obj, key)) continue;
     const val = obj[key];
-    // `Number.isFinite`, not a truthiness check: `0` is a legitimate value for
-    // several of these, and `NaN`/`Infinity` would deserialize into the engine
-    // as a f32 the physics step then propagates through the whole transform.
-    if (typeof val === 'number' && Number.isFinite(val)) out[key] = val;
+    if (isSendableCameraValue(key, val)) out[key] = val;
   }
   // A GDD-spelled key only fills a field the translator's own names left unset,
   // so an explicit `topDownHeight` always beats an aliased `altitude`.
@@ -195,7 +277,7 @@ export function filterCameraNumerics(
     if (out[field] !== undefined) continue;
     if (!Object.hasOwn(obj, alias)) continue;
     const val = obj[alias];
-    if (typeof val === 'number' && Number.isFinite(val)) out[field] = val;
+    if (isSendableCameraValue(field, val)) out[field] = val;
   }
   return out;
 }
@@ -219,7 +301,7 @@ export function filterCameraNumerics(
  * a camera that visibly lags the player. A wrong number is worse than a reported
  * omission, so the unit-converting entries are tracked separately (PF-1134)
  * rather than guessed at here. Everything unmapped is REPORTED by
- * {@link unmappedCameraConfigKeys}, which is the part PF-1125 is actually about:
+ * {@link classifyCameraConfigKeys}, which is the part PF-1125 is actually about:
  * the drop was silent.
  */
 const GDD_CONFIG_KEY_ALIASES: Record<string, NumericCameraField> = {
@@ -227,29 +309,60 @@ const GDD_CONFIG_KEY_ALIASES: Record<string, NumericCameraField> = {
 };
 
 /**
- * The config keys that reached the engine as nothing.
+ * The config keys that reached the engine as nothing, sorted by WHY.
  *
- * A key lands here when it is neither a translator field nor an alias, and also
- * when it names a real field but carries a value that cannot be sent (a string,
- * `NaN`). Both are the same thing from the user's point of view: they asked for
- * something and the camera ignored it.
+ * These were one list under one sentence — "camera settings the engine has no
+ * parameter for were ignored" — which is true only of {@link unknown}. It was
+ * already false for a real field carrying a bad value (`topDownHeight: '25'`
+ * names a parameter the engine very much has), and it would be false again for
+ * an out-of-range value, which is a number the engine understands and refuses.
+ * An author told the wrong reason looks for the wrong fix.
  */
-export function unmappedCameraConfigKeys(raw: unknown): string[] {
-  if (!raw || typeof raw !== 'object') return [];
+export interface CameraConfigReport {
+  /** Keys the engine has no parameter for under any spelling. */
+  unknown: string[];
+  /** Keys naming a real parameter, carrying a value it cannot take. */
+  unusable: { key: string; reason: string }[];
+  /** Aliases that lost to an explicit spelling of the same field. */
+  overridden: { key: string; field: NumericCameraField }[];
+}
+
+/**
+ * Explain every config key that did not reach the engine.
+ *
+ * Shares {@link cameraValueRejection} with {@link filterCameraNumerics}, so the
+ * two cannot disagree about what "sendable" means — a value dropped there is
+ * always named here.
+ */
+export function classifyCameraConfigKeys(raw: unknown): CameraConfigReport {
+  const report: CameraConfigReport = { unknown: [], unusable: [], overridden: [] };
+  if (!raw || typeof raw !== 'object') return report;
   const obj = raw as Record<string, unknown>;
-  const fields: readonly string[] = NUMERIC_CAMERA_FIELDS;
-  return Object.keys(obj).filter((key) => {
+
+  // The author's own key order, so the report reads back in the order they wrote.
+  for (const key of Object.keys(obj)) {
     const isAlias = Object.hasOwn(GDD_CONFIG_KEY_ALIASES, key);
-    const field = isAlias ? GDD_CONFIG_KEY_ALIASES[key] : key;
-    if (!fields.includes(field)) return true;
-    const val = obj[key];
-    if (typeof val !== 'number' || !Number.isFinite(val)) return true;
+    const field = isAlias ? GDD_CONFIG_KEY_ALIASES[key] : asCameraField(key);
+    if (field === undefined) {
+      report.unknown.push(key);
+      continue;
+    }
+    const reason = cameraValueRejection(field, obj[key]);
+    if (reason !== null) {
+      report.unusable.push({ key, reason });
+      continue;
+    }
     // An alias loses to an explicit spelling of the same field, so it was
-    // accepted-then-overridden — which is still "this key did nothing". It only
-    // loses to a SENDABLE value, matching `filterCameraNumerics`: an explicit
+    // accepted-then-overridden — still "this key did nothing". It only loses to
+    // a SENDABLE value, matching `filterCameraNumerics`: an explicit
     // `topDownHeight: NaN` is dropped, and then the alias is what applies.
-    if (!isAlias) return false;
-    const direct = obj[field];
-    return typeof direct === 'number' && Number.isFinite(direct);
-  });
+    if (
+      isAlias &&
+      Object.hasOwn(obj, field) &&
+      cameraValueRejection(field, obj[field]) === null
+    ) {
+      report.overridden.push({ key, field });
+    }
+  }
+  return report;
 }

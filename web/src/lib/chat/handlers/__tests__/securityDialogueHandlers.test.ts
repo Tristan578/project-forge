@@ -46,7 +46,19 @@ let mockDialogueTrees: Record<string, {
   variables: Record<string, unknown>;
 }> = {};
 
-vi.mock('@/stores/dialogueStore', () => ({
+// `getTree` is pulled from the REAL module rather than stubbed. The handlers'
+// prototype-chain guard IS `getTree`, so a hand-written stub here would let the
+// mock drift from the guard and these tests would pass against a store that no
+// longer has one.
+vi.mock('@/stores/dialogueStore', async () => ({
+  getTree: (await vi.importActual<typeof import('@/stores/dialogueStore')>(
+    '@/stores/dialogueStore',
+  )).getTree,
+  // Real, for the same reason `getTree` is: `choicesOf` is the guard on a node's
+  // `choices`, which `getTree` never vouched for.
+  choicesOf: (await vi.importActual<typeof import('@/stores/dialogueStore')>(
+    '@/stores/dialogueStore',
+  )).choicesOf,
   useDialogueStore: {
     getState: () => ({
       dialogueTrees: mockDialogueTrees,

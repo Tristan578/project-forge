@@ -8,6 +8,8 @@
 
 import { create } from 'zustand';
 
+import { lookupOwn } from '@/lib/utils/ownLookup';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -100,9 +102,15 @@ export const useCutsceneStore = create<CutsceneState>()((set) => ({
       cutscenes: { ...state.cutscenes, [cutscene.id]: cutscene },
     })),
 
+  // Every read below goes through `lookupOwn`. Cutscene ids arrive from AI tool
+  // arguments and from saved projects, so `__proto__` and friends are reachable;
+  // a bare index returns the truthy `Object.prototype` and walks past the
+  // `if (!cutscene) return state` guard. In `updateCutscene` that does not even
+  // throw — it writes `{ ...Object.prototype, ...patch }` back under that key,
+  // materialising a bogus cutscene the rest of the store then treats as real.
   updateCutscene: (id, patch) =>
     set((state) => {
-      const existing = state.cutscenes[id];
+      const existing = lookupOwn(state.cutscenes, id);
       if (!existing) return state;
       return {
         cutscenes: {
@@ -123,7 +131,7 @@ export const useCutsceneStore = create<CutsceneState>()((set) => ({
 
   addTrack: (cutsceneId, track) =>
     set((state) => {
-      const cutscene = state.cutscenes[cutsceneId];
+      const cutscene = lookupOwn(state.cutscenes, cutsceneId);
       if (!cutscene) return state;
       return {
         cutscenes: {
@@ -139,7 +147,7 @@ export const useCutsceneStore = create<CutsceneState>()((set) => ({
 
   updateTrack: (cutsceneId, trackId, patch) =>
     set((state) => {
-      const cutscene = state.cutscenes[cutsceneId];
+      const cutscene = lookupOwn(state.cutscenes, cutsceneId);
       if (!cutscene) return state;
       return {
         cutscenes: {
@@ -157,7 +165,7 @@ export const useCutsceneStore = create<CutsceneState>()((set) => ({
 
   removeTrack: (cutsceneId, trackId) =>
     set((state) => {
-      const cutscene = state.cutscenes[cutsceneId];
+      const cutscene = lookupOwn(state.cutscenes, cutsceneId);
       if (!cutscene) return state;
       return {
         cutscenes: {
@@ -173,7 +181,7 @@ export const useCutsceneStore = create<CutsceneState>()((set) => ({
 
   addKeyframe: (cutsceneId, trackId, keyframe) =>
     set((state) => {
-      const cutscene = state.cutscenes[cutsceneId];
+      const cutscene = lookupOwn(state.cutscenes, cutsceneId);
       if (!cutscene) return state;
       return {
         cutscenes: {
@@ -193,7 +201,7 @@ export const useCutsceneStore = create<CutsceneState>()((set) => ({
 
   removeKeyframe: (cutsceneId, trackId, timestamp) =>
     set((state) => {
-      const cutscene = state.cutscenes[cutsceneId];
+      const cutscene = lookupOwn(state.cutscenes, cutsceneId);
       if (!cutscene) return state;
       return {
         cutscenes: {

@@ -217,8 +217,12 @@ describe('cameraSetupExecutor', () => {
       height: 25,
     });
     // The alias was accepted-then-overridden, which from the user's side is still
-    // "this key did nothing", so it is reported rather than quietly discarded.
-    expect(result.output?.warning).toContain('altitude');
+    // "this key did nothing", so it is reported rather than quietly discarded —
+    // but with its own reason, because the fix is to delete one of the two
+    // spellings, not to correct a name or a value.
+    expect(result.output?.warning).toContain('given twice');
+    expect(result.output?.warning).toContain('altitude (superseded by topDownHeight)');
+    expect(result.output?.warning).not.toContain('no parameter for');
   });
 
   it('reports the config keys the engine has no parameter for', async () => {
@@ -242,6 +246,7 @@ describe('cameraSetupExecutor', () => {
       mode: 'sideScroller',
       targetEntity: 'p',
     });
+    expect(result.output?.warning).toContain('no parameter for');
     for (const key of ['smoothing', 'leadAhead', 'locked']) {
       expect(result.output?.warning).toContain(key);
     }
@@ -255,9 +260,46 @@ describe('cameraSetupExecutor', () => {
       ctx,
     );
 
-    // Naming a real parameter is not the same as setting it: a string is dropped
-    // by the allowlist exactly like an unknown key, so the user hears about it.
-    expect(result.output?.warning).toContain('topDownHeight');
+    // Naming a real parameter is not the same as setting it — but it is also not
+    // the same as naming a parameter that does not exist, which is what this used
+    // to be told. `topDownHeight` is a field the engine very much has, and an
+    // author sent to look for a different key would never find one.
+    expect(result.output?.warning).toContain('cannot accept');
+    expect(result.output?.warning).toContain('topDownHeight (not a finite number)');
+    expect(result.output?.warning).not.toContain('no parameter for');
+  });
+
+  it('reports a value the range policy refuses, naming the range as the reason', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // A negative follow damping is the PF-1166 defect: the engine computes
+    // `t = (damping * delta).min(1.0)` and lerps by it, so `t` is capped above
+    // but never below — a negative rate extrapolates AWAY from the target and
+    // compounds ~16x per second at 60fps. It used to be accepted here, sent, and
+    // reported as applied.
+    const result = await cameraSetupExecutor.execute(
+      {
+        cameraMode: 'follow',
+        cameraConfig: { followSmoothing: -3, followDistance: 7 },
+        targetEntityId: 'p',
+      },
+      ctx,
+    );
+
+    // The refused value is absent from the wire and the good one still lands.
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'thirdPersonFollow',
+      targetEntity: 'p',
+      // `followHeight` was not given, so the engine's own default fills it —
+      // omission and the default are the same thing by construction (PF-1126).
+      offset: [0, 2, -7],
+    });
+    expect(result.output?.warning).toContain('followSmoothing (must not be negative)');
+    // Between the filter and the report, this was the value announced by NEITHER:
+    // dropped by one, and seen as a finite number under a real field name by the
+    // other. It must never fall back to the wrong-parameter sentence.
+    expect(result.output?.warning).not.toContain('no parameter for');
   });
 
   it('combines the targetless and ignored-key warnings into one report', async () => {

@@ -3,6 +3,7 @@
  */
 
 import { StateCreator } from 'zustand';
+import { decodeBase64ToArrayBuffer, queueAudioImport } from '@/lib/audio/entityAudioGraph';
 import type { AssetMetadata } from './types';
 
 export interface AssetSlice {
@@ -48,7 +49,19 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
     if (dispatchCommand) dispatchCommand('remove_texture', { entityId, slot });
   },
   importAudio: (dataBase64, name) => {
-    if (dispatchCommand) dispatchCommand('import_audio', { dataBase64, name });
+    // The engine drops `dataBase64` — `ImportAudioPayload` declares only `name` —
+    // so these bytes are the ONLY copy the Web Audio graph will ever see. Hold
+    // them until `ASSET_IMPORTED` names the asset id the engine minted, then
+    // `ingestImportedAudioAsset` decodes them under that id.
+    //
+    // Queued only when the dispatch actually happens: the queue is drained by
+    // `ASSET_IMPORTED`, which only ever arrives in response to this command, so
+    // queueing without dispatching leaves an entry that nothing can claim —
+    // occupying one of the FIFO's slots until it is evicted by real imports.
+    if (!dispatchCommand) return;
+    const bytes = decodeBase64ToArrayBuffer(dataBase64);
+    if (bytes) queueAudioImport(name, bytes);
+    dispatchCommand('import_audio', { dataBase64, name });
   },
   placeAsset: (assetId) => {
     if (dispatchCommand) dispatchCommand('place_asset', { assetId });

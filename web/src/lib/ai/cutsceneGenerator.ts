@@ -8,6 +8,7 @@
 
 import { fetchAI } from './client';
 import { getDeepGenerationModel } from './deepTier';
+import { sanitizeKeyframePayload } from '@/lib/cutscene/keyframePayload';
 import { CUTSCENE_TRACK_TYPES } from '@/stores/cutsceneStore';
 import type { Cutscene, CutsceneTrack, CutsceneKeyframe, CutsceneTrackType, EasingMode } from '@/stores/cutsceneStore';
 
@@ -74,7 +75,7 @@ Return a JSON object matching this EXACT schema:
 
 Track type payload schemas:
 - camera: { "mode": "thirdPersonFollow|firstPerson|sideScroller|topDown|fixed|orbital", "targetEntity": "string|null", plus the params for that mode:
-    thirdPersonFollow: "followDistance", "followHeight", "followSmoothing"
+    thirdPersonFollow: "followDistance", "followHeight", "followOffsetX", "followSmoothing"
     firstPerson: "firstPersonHeight", "firstPersonMouseSensitivity"
     sideScroller: "sideScrollerDistance"
     topDown: "topDownHeight"
@@ -106,10 +107,22 @@ function isObject(v: unknown): v is Record<string, unknown> {
 // Derived from the store's own list, never re-typed: a second copy drifts, and a
 // track type the validator accepts but `buildCommand` has no arm for dispatches
 // nothing at playback time — silently, since the player drops a null command.
+//
+// The payload schema cannot disagree with it either, for the same reason and
+// without a second derivation: `CutsceneTrackType` IS this array's element type,
+// and `TRACK_PAYLOAD_FIELDS` is a `Record` over it, so a type here with no
+// vocabulary there is a compile error rather than a track whose every keyframe
+// sanitizes to `{}`.
+
 const VALID_TRACK_TYPES = new Set<string>(CUTSCENE_TRACK_TYPES);
 const VALID_EASING = new Set<string>(['linear', 'ease_in', 'ease_out', 'ease_in_out']);
 
-function validateKeyframe(data: unknown, trackIndex: number, kfIndex: number): CutsceneKeyframe {
+function validateKeyframe(
+  data: unknown,
+  trackType: CutsceneTrackType,
+  trackIndex: number,
+  kfIndex: number,
+): CutsceneKeyframe {
   if (!isObject(data)) {
     throw new Error(`Track[${trackIndex}] keyframe[${kfIndex}] must be an object`);
   }
@@ -122,7 +135,17 @@ function validateKeyframe(data: unknown, trackIndex: number, kfIndex: number): C
   const easing = typeof data.easing === 'string' && VALID_EASING.has(data.easing)
     ? (data.easing as EasingMode)
     : 'linear';
-  const payload = isObject(data.payload) ? (data.payload as Record<string, unknown>) : {};
+  // Every other field on this keyframe is checked; the payload used to be copied
+  // through whole, which made it the one place a model could put an arbitrary key
+  // into a structure that ends up dispatched as an engine command. It is now
+  // rebuilt from the track type's own vocabulary — see `sanitizeKeyframePayload`
+  // for why the schema lives outside this file.
+  //
+  // A payload that survives as `{}` is kept rather than rejected: the keyframe's
+  // timing is real even when its content is not, and dropping a beat mid-timeline
+  // shifts nothing but silently loses the author's intent to have something
+  // happen there. `buildCommand` already treats a contentless payload as a no-op.
+  const payload = sanitizeKeyframePayload(trackType, data.payload);
 
   return {
     timestamp: data.timestamp as number,
@@ -146,15 +169,20 @@ function validateTrack(data: unknown, index: number): CutsceneTrack {
     throw new Error(`Track[${index}] must have a keyframes array`);
   }
 
+  // The type check above is what makes this cast safe, and it has to stay above
+  // this line: the payload vocabulary is chosen by track type, so a keyframe
+  // validated before its track's type is known would have no schema to check
+  // against and would fall back to keeping nothing.
+  const trackType = data.type as CutsceneTrackType;
   const keyframes = (data.keyframes as unknown[]).map((kf, kfIdx) =>
-    validateKeyframe(kf, index, kfIdx),
+    validateKeyframe(kf, trackType, index, kfIdx),
   );
   const entityId = typeof data.entityId === 'string' ? data.entityId : null;
   const muted = data.muted === true;
 
   return {
     id: data.id as string,
-    type: data.type as CutsceneTrackType,
+    type: trackType,
     entityId,
     keyframes,
     muted,

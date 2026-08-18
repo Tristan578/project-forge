@@ -9,7 +9,12 @@ import { InfoTooltip } from '@/components/ui/InfoTooltip';
 // `GameCameraData` grew a non-numeric field the local copy swept it into the
 // numeric row type while the shared one did not — a divergence that only
 // surfaced as an index error against `ENGINE_CAMERA_DEFAULTS`.
-import { ENGINE_CAMERA_DEFAULTS, type NumericCameraField } from '@/lib/game/gameCameraPayload';
+import {
+  acceptsNegative,
+  ENGINE_CAMERA_DEFAULTS,
+  readCameraFieldValue,
+  type NumericCameraField,
+} from '@/lib/game/gameCameraPayload';
 
 /**
  * Which parameters each mode starts with. Every VALUE is read from
@@ -46,16 +51,27 @@ const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
 };
 
 /**
- * Parse a number input, keeping the previous value when the field is not a
- * finite number.
+ * Parse a number input, keeping the previous value when the field cannot hold
+ * what was typed.
  *
  * `parseFloat(v) || 0` — the shape this panel used everywhere — collapses both
  * an empty field and a typo to `0`, silently dispatching a real 0 to the engine
  * (a 0 follow distance puts the camera inside the player).
+ *
+ * The range half goes through `readCameraFieldValue` rather than a local
+ * `>= 0`, because it is not `>= 0` for every field: `followHeight` and
+ * `orbitalAutoRotateSpeed` are legitimately signed. This panel is the fourth
+ * surface that feeds authored camera parameters toward the engine, and the only
+ * one where the author sees the result immediately — so an out-of-range entry
+ * reverts visibly to the previous value instead of being dropped silently.
  */
-function parseNumberInput(raw: string, fallback: number): number {
-  const parsed = parseFloat(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
+function parseNumberInput(raw: string, field: NumericCameraField, fallback: number): number {
+  // A value outside the field's range is refused exactly like a typo — keep the
+  // previous one. That matters most for `followSmoothing`, where the engine HARD
+  // REJECTS a negative rate and so drops the entire full-replace
+  // `set_game_camera` command rather than just that one rate (PF-1166).
+  const parsed = readCameraFieldValue(field, parseFloat(raw));
+  return parsed ?? fallback;
 }
 
 
@@ -102,11 +118,17 @@ function NumberParamRow({
         id={id}
         type="number"
         step={step}
+        // Advisory, not the guard: `min` stops the spinner and marks the input
+        // invalid, but nothing prevents typing past it — `parseNumberInput` is
+        // what actually holds the range.
+        min={acceptsNegative(field) ? undefined : 0}
         value={current}
         onChange={(e) =>
           // A computed key widens to `{ [x: string]: number }`, which is why
           // this needs the assertion; `field` is constrained above.
-          onChange({ [field]: parseNumberInput(e.target.value, current) } as Partial<GameCameraData>)
+          onChange({
+            [field]: parseNumberInput(e.target.value, field, current),
+          } as Partial<GameCameraData>)
         }
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
           focus:ring-1 focus:ring-blue-500"
@@ -286,6 +308,7 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
           <>
             <NumberParamRow label="Distance" term="gameCameraFollowDist" field="followDistance" camera={primaryGameCamera} onChange={handleParamChange} />
             <NumberParamRow label="Height" term="gameCameraFollowHeight" field="followHeight" camera={primaryGameCamera} onChange={handleParamChange} />
+            {/* min=0: the engine refuses a negative follow rate outright (PF-1166). */}
             <NumberParamRow label="Smoothing" term="gameCameraSmoothing" field="followSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
           </>
         )}

@@ -37,7 +37,7 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
       args,
     );
     if (p.error) return p.error;
-    const { useDialogueStore } = await import('@/stores/dialogueStore');
+    const { useDialogueStore, getTree } = await import('@/stores/dialogueStore');
     const { treeId, nodeType, text, speaker, connectFromNodeId } = p.data;
     const nodeId = `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     let node;
@@ -63,7 +63,9 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
     useDialogueStore.getState().addNode(treeId, node);
     // Connect from another node if specified
     if (connectFromNodeId) {
-      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      // `getTree`: `z.string().min(1)` accepts `__proto__`, and a bare read
+      // would hand back the truthy `Object.prototype`, which has no `.nodes`.
+      const tree = getTree(useDialogueStore.getState().dialogueTrees, treeId);
       if (tree) {
         const fromNode = tree.nodes.find(n => n.id === connectFromNodeId);
         if (fromNode && 'next' in fromNode) {
@@ -85,14 +87,18 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
       args,
     );
     if (p.error) return p.error;
-    const { useDialogueStore } = await import('@/stores/dialogueStore');
+    const { useDialogueStore, getTree, choicesOf } = await import('@/stores/dialogueStore');
     const { treeId, nodeId, choiceText, nextNodeId } = p.data;
-    const tree = useDialogueStore.getState().dialogueTrees[treeId];
+    const tree = getTree(useDialogueStore.getState().dialogueTrees, treeId);
     if (!tree) return { success: false, error: 'Tree not found' };
     const choiceNode = tree.nodes.find(n => n.id === nodeId);
     if (!choiceNode || choiceNode.type !== 'choice') return { success: false, error: 'Choice node not found' };
     const choiceId = `choice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const newChoices = [...choiceNode.choices, { id: choiceId, text: choiceText, nextNodeId: nextNodeId ?? null }];
+    // `choicesOf`, not a bare spread. `getTree` vouches for the tree, not for this
+    // node's `choices`: a `"choices": "ab"` node spreads to `['a','b']` and the
+    // `updateNode` below PERSISTS that back into the store, so the bad shape
+    // survives the reload that would otherwise have cleared it.
+    const newChoices = [...choicesOf(choiceNode), { id: choiceId, text: choiceText, nextNodeId: nextNodeId ?? null }];
     useDialogueStore.getState().updateNode(treeId, nodeId, { choices: newChoices } as Record<string, unknown>);
     return { success: true, result: { choiceId, message: 'Choice added' } };
   },
@@ -108,8 +114,11 @@ export const dialogueHandlers: Record<string, ToolHandler> = {
   get_dialogue_tree: async (args, _ctx) => {
     const p = parseArgs(z.object({ treeId: z.string().min(1) }), args);
     if (p.error) return p.error;
-    const { useDialogueStore } = await import('@/stores/dialogueStore');
-    const tree = useDialogueStore.getState().dialogueTrees[p.data.treeId];
+    const { useDialogueStore, getTree } = await import('@/stores/dialogueStore');
+    // The worst shape of the bare read: this one does not throw. A `treeId` of
+    // `constructor` would return `success: true` and hand the model the `Object`
+    // constructor dressed up as a dialogue tree.
+    const tree = getTree(useDialogueStore.getState().dialogueTrees, p.data.treeId);
     if (!tree) return { success: false, error: 'Tree not found' };
     return { success: true, result: tree };
   },

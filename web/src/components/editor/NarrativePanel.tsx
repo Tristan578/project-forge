@@ -350,7 +350,17 @@ export function NarrativePanel() {
     if (!arc) return;
     const tree = narrativeToDialogueTree(arc);
     const treeId = importTree(JSON.stringify(tree));
-    if (treeId) selectTree(treeId);
+    if (treeId) {
+      setError(null);
+      selectTree(treeId);
+      return;
+    }
+    // `importTree` returns null for a tree the runtime would refuse to walk. The
+    // button otherwise does nothing at all — no tree in the editor, no reason
+    // given — and the author's only remaining move is to press it again.
+    // Unreachable while `narrativeToDialogueTree` emits a walkable tree; that is
+    // a property of the generator, not a guarantee this call site holds.
+    setError('Could not export this arc as a dialogue tree — the generated tree was rejected.');
   }, [arc, importTree, selectTree]);
 
   return (

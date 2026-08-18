@@ -252,6 +252,59 @@ fn flat_range(params: &serde_json::Value, key: &str) -> Result<Option<(f32, f32)
     Ok(Some((min, max)))
 }
 
+/// Read a follow damping rate, rejecting a negative one.
+///
+/// The follow systems compute `t = (damping * delta).min(1.0)` and then
+/// `translation.lerp(target, t)`. `t` is capped ABOVE but never below, so a
+/// negative damping is a negative lerp factor, which extrapolates AWAY from the
+/// target every frame and compounds: at 60fps with `damping = -3`, `t` is
+/// -0.048, the camera-to-target gap grows by ~4.8% per frame — roughly 16x per
+/// second — and the camera is somewhere unreachable within two seconds.
+///
+/// Unlike an inverted `pitchClamp` this does not panic, which is exactly why it
+/// has to be caught here: it produces a plausible-looking scene that is simply
+/// unplayable, and `dispatchCommand` returns void, so this error message is the
+/// only signal a caller who typed a minus sign will ever get.
+///
+/// Exactly `0.0` is legal — a frozen follow, pinned by a test below. No upper
+/// bound is needed because `.min(1.0)` already saturates a too-large rate into
+/// "snap to the target", which is a coherent outcome rather than a broken one.
+fn flat_damping(params: &serde_json::Value, key: &str, default: f32) -> Result<f32, String> {
+    let value = flat_f32(params, key, default)?;
+    if value < 0.0 {
+        return Err(format!(
+            "`{}` must be zero or greater, got {} — a negative rate moves the camera away from its target",
+            key, value
+        ));
+    }
+    Ok(value)
+}
+
+/// The per-frame lerp factor for a damped follow, on `0.0..=1.0`.
+///
+/// [`flat_damping`] refuses a negative rate at the command boundary, but that is
+/// not the only way one arrives: `.forge` scene files deserialize straight into
+/// [`GameCameraData`] through the derived impl and never pass through
+/// `from_flat` at all — the same gap [`clamp_ordered`] exists to cover. An
+/// unclamped negative factor here extrapolates the camera away from its target
+/// and compounds every frame, so the floor is what keeps a bad scene file merely
+/// stiff instead of unplayable.
+///
+/// `NaN` needs its own branch and the infinities do not. `f32::clamp` panics
+/// only on a NaN BOUND, and both bounds here are literals — so `NaN.clamp(0.0,
+/// 1.0)` quietly returns `NaN`, which would poison the translation and every
+/// transform derived from it. The infinities clamp correctly on their own, and
+/// letting them do so keeps this continuous: `1e38` and `INFINITY` both mean
+/// "snap", where projecting all non-finite input to `0.0` would have made an
+/// infinite rate freeze while a merely enormous one snapped.
+fn follow_lerp_factor(damping: f32, delta: f32) -> f32 {
+    let t = damping * delta;
+    if t.is_nan() {
+        return 0.0;
+    }
+    t.clamp(0.0, 1.0)
+}
+
 /// Clamp with bounds that are not trusted to be ordered or finite.
 ///
 /// [`GameCameraMode::from_flat`] rejects an inverted range at the command
@@ -307,7 +360,7 @@ impl GameCameraMode {
                     offset: flat_numbers::<3>(params, "offset")?
                         .map(Vec3::from)
                         .unwrap_or(Vec3::new(0.0, 2.0, -5.0)),
-                    damping: flat_f32(params, "damping", 5.0)?,
+                    damping: flat_damping(params, "damping", 5.0)?,
                     min_distance,
                     max_distance,
                     look_at_target: flat_bool(params, "lookAtTarget", true)?,
@@ -324,11 +377,11 @@ impl GameCameraMode {
                 z_offset: flat_f32(params, "zOffset", 10.0)?,
                 follow_y: flat_bool(params, "followY", true)?,
                 y_bounds: flat_range(params, "yBounds")?,
-                damping: flat_f32(params, "damping", 5.0)?,
+                damping: flat_damping(params, "damping", 5.0)?,
             }),
             "topDown" => Ok(Self::TopDown {
                 height: flat_f32(params, "height", 15.0)?,
-                damping: flat_f32(params, "damping", 5.0)?,
+                damping: flat_damping(params, "damping", 5.0)?,
                 follow_rotation: flat_bool(params, "followRotation", false)?,
             }),
             "fixed" => Ok(Self::Fixed {
@@ -647,7 +700,7 @@ fn update_third_person(
     };
 
     // Damped follow
-    let t = (damping * delta).min(1.0);
+    let t = follow_lerp_factor(damping, delta);
     camera_transform.translation = camera_transform.translation.lerp(final_pos, t);
 
     // Look at target
@@ -693,7 +746,7 @@ fn update_side_scroller(
         desired_pos.y = target_y;
     }
 
-    let t = (damping * delta).min(1.0);
+    let t = follow_lerp_factor(damping, delta);
     camera_transform.translation = camera_transform.translation.lerp(desired_pos, t);
 
     // Face forward (negative Z)
@@ -709,7 +762,7 @@ fn update_top_down(
     delta: f32,
 ) {
     let desired_pos = target_transform.translation + Vec3::Y * height;
-    let t = (damping * delta).min(1.0);
+    let t = follow_lerp_factor(damping, delta);
     camera_transform.translation = camera_transform.translation.lerp(desired_pos, t);
 
     if follow_rotation {
@@ -1121,7 +1174,7 @@ mod from_flat_tests {
         match third_person {
             GameCameraMode::ThirdPersonFollow { damping, .. } => {
                 // Damping is a RATE PER SECOND, not a 0..1 blend factor: the follow
-                // systems compute `t = (damping * delta).min(1.0)`, so 0.0 yields
+                // systems compute `t = damping_t(damping, delta)`, so 0.0 yields
                 // t = 0 and the camera never converges on its target — it freezes
                 // where it is. That is a legitimate thing to ask for and a
                 // completely different outcome from the 5.0 default, which is
@@ -1129,6 +1182,39 @@ mod from_flat_tests {
                 assert_eq!(damping, 0.0, "an exact 0.0 damping (frozen follow) must survive");
             }
             other => panic!("expected ThirdPersonFollow, got {:?}", other),
+        }
+    }
+
+    // ---- a negative damping is refused at the wire ----
+
+    #[test]
+    fn negative_damping_is_rejected_on_every_variant_that_reads_it() {
+        // `t = (damping * delta).min(1.0)` is capped above but not below, so a
+        // negative rate is a negative lerp factor: the camera extrapolates AWAY
+        // from its target and the gap compounds — ~16x per second at 60fps with
+        // -3. There is no framing that describes, and nothing downstream can
+        // tell it apart from a rate the caller meant, so the wire is the place.
+        for mode in ["thirdPersonFollow", "sideScroller", "topDown"] {
+            let err = GameCameraMode::from_flat(mode, &json!({"damping": -3.0}))
+                .expect_err(&format!("{} must refuse a negative damping", mode));
+            assert!(
+                err.contains("damping"),
+                "{}: the error must name the field the caller mistyped, got {:?}",
+                mode,
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn a_large_damping_is_accepted_because_the_follow_saturates_it() {
+        // The floor is not a general range policy. `.min(1.0)` already turns a
+        // too-large rate into "snap to the target", which is coherent, so
+        // refusing one would substitute this module's taste for the author's.
+        let mode = GameCameraMode::from_flat("topDown", &json!({"damping": 10_000.0})).unwrap();
+        match mode {
+            GameCameraMode::TopDown { damping, .. } => assert_eq!(damping, 10_000.0),
+            other => panic!("expected TopDown, got {:?}", other),
         }
     }
 
@@ -1228,6 +1314,105 @@ mod from_flat_tests {
         // Unusable bounds frame the shot wrongly rather than taking the engine down.
         assert_eq!(clamp_ordered(7.0, f32::NAN, f32::NAN), 7.0);
         assert_eq!(clamp_ordered(7.0, f32::INFINITY, f32::NEG_INFINITY), 7.0);
+    }
+
+    /// Same gap, same reasoning: `flat_damping` guards the command path, and a
+    /// `.forge` file reaches `damping` without passing through it.
+    #[test]
+    fn follow_lerp_factor_stays_on_the_unit_interval() {
+        // The ordinary case is untouched — 5.0 at 60fps is the shipped default.
+        assert!((follow_lerp_factor(5.0, 1.0 / 60.0) - 5.0 / 60.0).abs() < 1e-6);
+        // A frozen follow is a legitimate authored outcome and must stay exact.
+        assert_eq!(follow_lerp_factor(0.0, 1.0 / 60.0), 0.0);
+        // Above 1.0 still saturates to "snap", as it always did.
+        assert_eq!(follow_lerp_factor(10_000.0, 1.0 / 60.0), 1.0);
+        // The fix: a negative factor would extrapolate away from the target and
+        // compound every frame. Floored to a frozen camera the author can see.
+        assert_eq!(follow_lerp_factor(-3.0, 1.0 / 60.0), 0.0);
+        // No magnitude of negative rate may reverse the follow, and the bound
+        // that was already here has to hold for a long frame after a stall as
+        // well as for a large rate — the product is what saturates, so both
+        // factors need their own case.
+        assert_eq!(follow_lerp_factor(-1e9, 1.0), 0.0);
+        assert_eq!(follow_lerp_factor(5.0, 10.0), 1.0);
+        // NaN must not reach `lerp`: `clamp` panics only on a NaN BOUND, so with
+        // literal bounds it returns NaN quietly, and a NaN translation poisons
+        // every transform derived from it.
+        assert_eq!(follow_lerp_factor(f32::NAN, 1.0 / 60.0), 0.0);
+        // `INFINITY * 0.0` is NaN — a paused frame with an infinite rate.
+        assert_eq!(follow_lerp_factor(f32::INFINITY, 0.0), 0.0);
+        // The infinities clamp on their own, and are left to: an infinite rate
+        // has to mean the same thing as an enormous one, or the function is
+        // discontinuous exactly where nobody would look for it.
+        assert_eq!(follow_lerp_factor(f32::INFINITY, 1.0 / 60.0), 1.0);
+        assert_eq!(follow_lerp_factor(f32::NEG_INFINITY, 1.0 / 60.0), 0.0);
+        assert_eq!(follow_lerp_factor(1e38, 1.0 / 60.0), 1.0);
+    }
+
+    /// Distance from `camera` to where a follow mode wants it to be.
+    fn gap(camera: &Transform, desired: Vec3) -> f32 {
+        (camera.translation - desired).length()
+    }
+
+    // The three tests below exist because testing `follow_lerp_factor` alone does
+    // not pin the fix: revert just the three call sites to
+    // `let t = (damping * delta).min(1.0);` and every other test in this file
+    // still passes. Each consume site is a separate `let t = …`, so each needs its
+    // own assertion that it is the guarded one.
+    //
+    // A negative rate is asserted as an EXACT freeze rather than "moved less":
+    // `lerp(a, b, 0.0)` is `a` bit-for-bit, and a frozen camera is the authored
+    // outcome the floor chooses deliberately (see `follow_lerp_factor`). The
+    // companion gap assertion is what states the defect — the old factor pushed
+    // the camera the wrong way and compounded it every frame.
+
+    #[test]
+    fn third_person_never_extrapolates_away_from_the_target() {
+        let target = Transform::from_translation(Vec3::new(10.0, 0.0, 0.0));
+        let offset = Vec3::new(0.0, 5.0, 10.0);
+        let desired = target.translation + offset;
+        let mut camera = Transform::from_translation(Vec3::ZERO);
+        let before = gap(&camera, desired);
+
+        update_third_person(
+            &mut camera,
+            &target,
+            offset,
+            -3.0,
+            0.0,
+            true,
+            false,
+            1.0 / 60.0,
+        );
+
+        assert_eq!(camera.translation, Vec3::ZERO);
+        assert!(gap(&camera, desired) <= before);
+    }
+
+    #[test]
+    fn side_scroller_never_extrapolates_away_from_the_target() {
+        let target = Transform::from_translation(Vec3::new(10.0, 3.0, 0.0));
+        let desired = Vec3::new(10.0, 3.0, 12.0);
+        let mut camera = Transform::from_translation(Vec3::ZERO);
+        let before = gap(&camera, desired);
+
+        update_side_scroller(&mut camera, &target, 12.0, true, None, -3.0, 1.0 / 60.0);
+
+        assert_eq!(camera.translation, Vec3::ZERO);
+        assert!(gap(&camera, desired) <= before);
+    }
+
+    #[test]
+    fn top_down_never_extrapolates_away_from_the_target() {
+        let target = Transform::from_translation(Vec3::new(10.0, 0.0, 0.0));
+        let desired = target.translation + Vec3::Y * 20.0;
+        let mut camera = Transform::from_translation(Vec3::ZERO);
+        let before = gap(&camera, desired);
+
+        update_top_down(&mut camera, &target, 20.0, -3.0, false, 1.0 / 60.0);
+
+        assert_eq!(camera.translation, Vec3::ZERO);
+        assert!(gap(&camera, desired) <= before);
     }
 }
 

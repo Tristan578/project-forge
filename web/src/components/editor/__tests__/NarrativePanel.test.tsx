@@ -93,9 +93,17 @@ vi.mock('@/lib/ai/narrativeGenerator', () => ({
   buildSceneGraph: vi.fn(() => new Map([['scene-1', { sceneName: 'The Beginning', targets: [] }]])),
 }));
 
+// Hoisted rather than inline `vi.fn()`s: the inline form built a fresh pair on
+// every selector call, so nothing could assert on them and nothing could make
+// `importTree` refuse.
+const { mockImportTree, mockSelectTree } = vi.hoisted(() => ({
+  mockImportTree: vi.fn((): string | null => 'tree-1'),
+  mockSelectTree: vi.fn(),
+}));
+
 vi.mock('@/stores/dialogueStore', () => ({
-  useDialogueStore: vi.fn((selector: (s: { importTree: () => string; selectTree: () => void }) => unknown) =>
-    selector({ importTree: vi.fn(() => 'tree-1'), selectTree: vi.fn() })
+  useDialogueStore: vi.fn((selector: (s: { importTree: () => string | null; selectTree: () => void }) => unknown) =>
+    selector({ importTree: mockImportTree, selectTree: mockSelectTree })
   ),
 }));
 
@@ -115,6 +123,7 @@ describe('NarrativePanel', () => {
     vi.clearAllMocks();
     vi.mocked(generateNarrative).mockResolvedValue(mockArc);
     vi.mocked(findDeadEnds).mockReturnValue([]);
+    mockImportTree.mockReturnValue('tree-1');
   });
   afterEach(() => cleanup());
 
@@ -238,6 +247,40 @@ describe('NarrativePanel', () => {
     fireEvent.click(screen.getByLabelText('Generate narrative'));
     await waitFor(() => screen.getByLabelText('Export narrative to dialogue system'));
     expect(screen.getByLabelText('Export narrative to dialogue system')).toBeInTheDocument();
+  });
+
+  it('says so when the export is refused, instead of doing nothing', async () => {
+    // `importTree` returns null for a tree the runtime would refuse to walk.
+    // The button otherwise did nothing at all — no tree in the editor, no
+    // reason given — so the author's only remaining move was to press it again.
+    mockImportTree.mockReturnValue(null);
+    render(<NarrativePanel />);
+    fireEvent.change(screen.getByLabelText('Story premise input'), {
+      target: { value: 'A guardian protects the realm' },
+    });
+    fireEvent.click(screen.getByLabelText('Generate narrative'));
+    await waitFor(() => screen.getByLabelText('Export narrative to dialogue system'));
+
+    fireEvent.click(screen.getByLabelText('Export narrative to dialogue system'));
+
+    await waitFor(() => screen.getByText(/generated tree was rejected/));
+    // And it must not send the author to a tree that was never imported.
+    expect(mockSelectTree).not.toHaveBeenCalled();
+  });
+
+  it('opens the imported tree and reports nothing when the export succeeds', async () => {
+    // Without this, an unconditional error message passes the test above.
+    render(<NarrativePanel />);
+    fireEvent.change(screen.getByLabelText('Story premise input'), {
+      target: { value: 'A guardian protects the realm' },
+    });
+    fireEvent.click(screen.getByLabelText('Generate narrative'));
+    await waitFor(() => screen.getByLabelText('Export narrative to dialogue system'));
+
+    fireEvent.click(screen.getByLabelText('Export narrative to dialogue system'));
+
+    expect(mockSelectTree).toHaveBeenCalledWith('tree-1');
+    expect(screen.queryByText(/generated tree was rejected/)).toBeNull();
   });
 
   it('shows error message when generateNarrative throws', async () => {

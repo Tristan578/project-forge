@@ -36,7 +36,18 @@ let mockDialogueTrees: Record<string, {
   variables: Record<string, unknown>;
 }> = {};
 
-vi.mock('@/stores/dialogueStore', () => ({
+// `getTree` is pulled from the REAL module rather than stubbed. The handlers'
+// prototype-chain guard IS `getTree`, so a hand-written stub here would let the
+// mock drift from the guard and these tests would pass against a store that no
+// longer has one. `choicesOf` is pulled in for the same reason: it is the guard on
+// a node's `choices`, which `getTree` never vouched for.
+vi.mock('@/stores/dialogueStore', async () => ({
+  getTree: (await vi.importActual<typeof import('@/stores/dialogueStore')>(
+    '@/stores/dialogueStore',
+  )).getTree,
+  choicesOf: (await vi.importActual<typeof import('@/stores/dialogueStore')>(
+    '@/stores/dialogueStore',
+  )).choicesOf,
   useDialogueStore: {
     getState: () => ({
       dialogueTrees: mockDialogueTrees,
@@ -314,6 +325,36 @@ describe('set_dialogue_choice', () => {
     expect(updates.choices[0].text).toBe('Attack');
     expect(updates.choices[0].nextNodeId).toBe('n2');
   });
+
+  it('does not spread a non-array choices field into the update it persists', async () => {
+    // `getTree` vouches for the tree, never for this node's `choices` — that field is
+    // whatever the imported or generated JSON said. A bare `[...choiceNode.choices]`
+    // turns `"ab"` into `['a','b']`, and the `updateNode` here WRITES that back, so
+    // the malformed shape outlives the reload that would otherwise have cleared it.
+    mockDialogueTrees = {
+      tree_1: {
+        id: 'tree_1',
+        name: 'T',
+        nodes: [{ id: 'n1', type: 'choice', choices: 'ab' as unknown as [] }],
+        startNodeId: 'n1',
+        variables: {},
+      },
+    };
+    const { result } = await invokeHandler(dialogueHandlers, 'set_dialogue_choice', {
+      treeId: 'tree_1',
+      nodeId: 'n1',
+      choiceText: 'Attack',
+    });
+
+    expect(result.success).toBe(true);
+    const [, , updates] = mockUpdateNode.mock.calls[0] as [
+      string,
+      string,
+      { choices: Array<{ text: string }> },
+    ];
+    expect(updates.choices).toHaveLength(1);
+    expect(updates.choices[0].text).toBe('Attack');
+  });
 });
 
 // ===========================================================================
@@ -455,5 +496,65 @@ describe('import_dialogue_tree', () => {
     expect(data.treeId).toBe('tree_imported_77');
     expect(data.message).toBe('Dialogue tree imported');
     expect(mockImportTree).toHaveBeenCalledWith('{"id":"old"}');
+  });
+});
+
+// ===========================================================================
+// PF-1144 — an inherited key is not a tree
+// ===========================================================================
+
+describe('tree ids from tool arguments do not reach the prototype chain', () => {
+  // `treeId` is `z.string().min(1)` with no character restriction, and these
+  // handlers are driven by model output. A bare `dialogueTrees[treeId]` answers
+  // `Object.prototype` for `"__proto__"` and a function for `"constructor"` —
+  // both truthy, so the `if (!tree)` below each lookup passed them straight
+  // through to `tree.nodes.find(...)`, which throws on a value with no `nodes`.
+  const INHERITED = ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf'];
+
+  for (const treeId of INHERITED) {
+    it(`get_dialogue_tree("${treeId}") reports not-found instead of handing back a builtin`, async () => {
+      const { result } = await invokeHandler(dialogueHandlers, 'get_dialogue_tree', { treeId });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Tree not found');
+    });
+
+    it(`set_dialogue_choice("${treeId}") reports not-found instead of throwing`, async () => {
+      const { result } = await invokeHandler(dialogueHandlers, 'set_dialogue_choice', {
+        treeId, nodeId: 'n1', choiceText: 'Yes',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Tree not found');
+      expect(mockUpdateNode).not.toHaveBeenCalled();
+    });
+
+    it(`add_dialogue_node("${treeId}") skips the connect step instead of throwing`, async () => {
+      const { result } = await invokeHandler(dialogueHandlers, 'add_dialogue_node', {
+        treeId, nodeType: 'text', text: 'hi', connectFromNodeId: 'n0',
+      });
+      // The node write itself is the store's business; what must not happen is a
+      // throw out of the connect step, or a connect against an inherited value.
+      expect(result.success).toBe(true);
+      expect(mockUpdateNode).not.toHaveBeenCalled();
+    });
+  }
+
+  it('a real tree stored under the id "__proto__" is still reachable', async () => {
+    // The guard rejects INHERITED keys, not the spelling — an own key wins.
+    const tree = { id: '__proto__', name: 'Odd', nodes: [], startNodeId: 'n0', variables: {} };
+    // Built with defineProperty because `{ __proto__: tree }` in a literal sets
+    // the prototype rather than creating the own key this test is about.
+    const bag = {} as typeof mockDialogueTrees;
+    Object.defineProperty(bag, '__proto__', {
+      value: tree, enumerable: true, writable: true, configurable: true,
+    });
+    mockDialogueTrees = bag;
+
+    const { result } = await invokeHandler(dialogueHandlers, 'get_dialogue_tree', {
+      treeId: '__proto__',
+    });
+    expect(result.success).toBe(true);
+    // Identity, not deep equality: the point is that the OWN value came back,
+    // and a `toEqual` would also pass against a lookalike built by the guard.
+    expect(result.result).toBe(tree);
   });
 });

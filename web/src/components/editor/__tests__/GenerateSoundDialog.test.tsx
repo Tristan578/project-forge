@@ -4,10 +4,15 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
 import { GenerateSoundDialog } from '../GenerateSoundDialog';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { toast } from 'sonner';
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 vi.mock('@/stores/userStore', () => ({
   useUserStore: vi.fn(() => ({})),
@@ -20,10 +25,13 @@ vi.mock('@/stores/editorStore', () => ({
 vi.mock('lucide-react', () => ({
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
   Sparkles: (props: Record<string, unknown>) => <span data-testid="sparkles-icon" {...props} />,
+  Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
 
 describe('GenerateSoundDialog', () => {
   const mockOnClose = vi.fn();
+  const importAudio = vi.fn();
+  const setAudio = vi.fn();
 
   function setupStore(balance = 1000, primaryName = '') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,6 +46,8 @@ describe('GenerateSoundDialog', () => {
       const state = { primaryName };
       return typeof selector === 'function' ? selector(state) : state;
     });
+    // The submit path reaches for the store imperatively, outside React.
+    vi.mocked(useEditorStore).getState = vi.fn(() => ({ importAudio, setAudio })) as never;
   }
 
   beforeEach(() => {
@@ -139,5 +149,75 @@ describe('GenerateSoundDialog', () => {
   it('hides auto-attach checkbox when no entityId', () => {
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} />);
     expect(screen.queryByText(/Auto-attach to/)).toBeNull();
+  });
+
+  /**
+   * The response body is the only copy of the clip. This dialog used to POST,
+   * throw the body away and report success, so a sound generated from the UI
+   * spent the user's tokens and produced nothing at all.
+   */
+  describe('submit', () => {
+    function respondWith(body: unknown, ok = true) {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok,
+        json: async () => body,
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    async function generateSfx(entityId?: string) {
+      setupStore(1000, 'Player');
+      render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} entityId={entityId} />);
+      fireEvent.change(screen.getByPlaceholderText('Sword clashing against metal shield'), {
+        target: { value: 'Explosion with reverb' },
+      });
+      fireEvent.click(screen.getByText('Generate'));
+    }
+
+    it('imports the returned clip and attaches it to the entity', async () => {
+      respondWith({ audioBase64: 'AAAA' });
+      await generateSfx('entity-1');
+
+      await waitFor(() => expect(importAudio).toHaveBeenCalledTimes(1));
+      expect(importAudio).toHaveBeenCalledWith('AAAA', 'sfx-Explosion with rever');
+      expect(setAudio).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ assetId: 'sfx-Explosion with rever', bus: 'sfx' })
+      );
+      expect(toast.success).toHaveBeenCalledWith(
+        'Sound generated and attached as "sfx-Explosion with rever".'
+      );
+    });
+
+    it('imports without attaching when no entity is selected', async () => {
+      respondWith({ audioBase64: 'AAAA' });
+      await generateSfx();
+
+      await waitFor(() => expect(importAudio).toHaveBeenCalledTimes(1));
+      expect(setAudio).not.toHaveBeenCalled();
+      expect(toast.success).toHaveBeenCalledWith(
+        'Sound generated and imported as "sfx-Explosion with rever".'
+      );
+    });
+
+    it('reports a 200 that carries no clip as a failure, not a success', async () => {
+      // A provider can answer 200 with nothing in it. Reporting that as success
+      // is what leaves the user hunting for an asset that was never created.
+      respondWith({});
+      await generateSfx('entity-1');
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringContaining('Sound effect generation produced no audio')
+        )
+      );
+      expect(importAudio).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+    });
   });
 });

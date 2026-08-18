@@ -2,13 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  acceptsNegative,
   blendGameCameraData,
   buildSetGameCameraPayload,
   parseGameCameraWire,
+  readCameraFieldValue,
   ENGINE_CAMERA_DEFAULTS,
   NUMERIC_CAMERA_FIELDS,
   TRANSLATED_CAMERA_FIELDS,
   GAME_CAMERA_WIRE_KEYS,
+  NON_NEGATIVE_WIRE_KEYS,
   type SetGameCameraPayload,
   type NumericCameraField,
 } from '../gameCameraPayload';
@@ -357,6 +360,46 @@ describe('gameCameraPayload', () => {
           offset: [0, 2, -5],
         });
         expect(payload).not.toHaveProperty('damping');
+      });
+
+      // A sign policy, not a finiteness one, but the same reason and the same
+      // remedy: `flat_damping` HARD-REJECTS a negative rate, and because
+      // `set_game_camera` rebuilds the whole component, sending one would lose
+      // mode, targetEntity and offset with it rather than just the rate (PF-1166).
+      it('negative followSmoothing is dropped, and the rest of the command survives', () => {
+        const payload = buildSetGameCameraPayload('cam-1', {
+          mode: 'thirdPersonFollow',
+          targetEntity: 'player',
+          followDistance: 5,
+          followHeight: 2,
+          followSmoothing: -3,
+        });
+
+        expect(payload).toEqual({
+          entityId: 'cam-1',
+          mode: 'thirdPersonFollow',
+          targetEntity: 'player',
+          offset: [0, 2, -5],
+        });
+        expect(payload).not.toHaveProperty('damping');
+      });
+
+      it('zero followSmoothing is a legitimate authored value and is sent', () => {
+        const payload = buildSetGameCameraPayload('cam-1', {
+          mode: 'thirdPersonFollow',
+          targetEntity: null,
+          followDistance: 5,
+          followHeight: 2,
+          followSmoothing: 0,
+        });
+
+        expect(payload).toEqual({
+          entityId: 'cam-1',
+          mode: 'thirdPersonFollow',
+          targetEntity: null,
+          offset: [0, 2, -5],
+          damping: 0,
+        });
       });
 
       it('non-finite firstPersonMouseSensitivity is dropped', () => {
@@ -792,6 +835,11 @@ describe('gameCameraPayload', () => {
         ['pair of the wrong length', { pitchClamp: [1] }],
         ['vec3 with a non-numeric member', { lookAt: [0, 'x', 0] }],
         ['unknown key the engine never reads', { notAWireKey: 5 }],
+        // A `.forge` scene file deserializes straight into the camera struct
+        // without passing through `from_flat`, so a negative `damping` really can
+        // arrive here. Admitting it would let one bad scene file hard-reject every
+        // later `set_game_camera` for that entity (PF-1166).
+        ['negative value on a key the engine refuses below zero', { damping: -3 }],
       ])('drops a %s on capture', (_label, bad) => {
         const parsed = parseGameCameraWire({ mode: 'fixed', targetEntity: null, ...bad });
         expect(parsed).toEqual({ mode: 'fixed', targetEntity: null });
@@ -802,6 +850,7 @@ describe('gameCameraPayload', () => {
         ['non-finite number', { fov: Infinity }],
         ['pair of the wrong length', { pitchClamp: [1, 2, 3] }],
         ['unknown key the engine never reads', { notAWireKey: 5 }],
+        ['negative value on a key the engine refuses below zero', { damping: -3 }],
       ])('drops a %s on re-emit', (_label, bad) => {
         const payload = buildSetGameCameraPayload('cam-1', {
           mode: 'fixed',
@@ -899,13 +948,21 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
     return value;
   }
 
-  /** The literal default in `flat_f32(params, "<wireKey>", <default>)`. */
+  /**
+   * The literal default in `flat_<reader>(params, "<wireKey>", <default>, …)`.
+   *
+   * Matches ANY `flat_*` reader rather than `flat_f32` specifically. Every one of
+   * them takes the default immediately after the key, and pinning the reader
+   * name means a field that gains a range or sign policy — `flat_f32` ->
+   * `flat_damping`, as `damping` just did — drops out of this scan and takes its
+   * default pin with it, silently, at the moment its handling got stricter.
+   */
   function rustDefault(arm: string, wireKey: string): number {
     const m = new RegExp(
-      `flat_f32\\(params, "${wireKey}", (${RUST_F32})\\)`,
+      `flat_\\w+\\(params, "${wireKey}", (${RUST_F32})`,
     ).exec(arm);
-    expect(m, `no flat_f32 default for "${wireKey}"`).not.toBeNull();
-    return parseRustF32(m![1]!, `flat_f32 "${wireKey}"`);
+    expect(m, `no flat_* default for "${wireKey}"`).not.toBeNull();
+    return parseRustF32(m![1]!, `flat_* "${wireKey}"`);
   }
 
   const arms = fromFlatArms();
@@ -918,10 +975,18 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
   // and `parseGameCameraWire` silently drops it on every round trip, which under
   // a full-replace command means resetting it.
   describe('GAME_CAMERA_WIRE_KEYS matches the keys from_flat reads', () => {
-    /** Every `"<key>"` passed to a `flat_*` reader inside a from_flat arm. */
+    /**
+     * Every `"<key>"` passed to a `flat_*` reader inside a from_flat arm.
+     *
+     * Deliberately matches any reader name, not an enumerated set: an
+     * enumeration goes stale silently in the false-negative direction, because a
+     * key whose reader was renamed simply stops being seen and the scan reports
+     * that the engine no longer reads it. `damping` did exactly that when it
+     * moved to `flat_damping`.
+     */
     const rustKeys = new Set(
       [...Object.values(arms).join('\n').matchAll(
-        /flat_(?:f32|bool|range|numbers::<\d+>)\(params, "(\w+)"/g,
+        /flat_\w+(?:::<\d+>)?\(params, "(\w+)"/g,
       )].map(m => m[1]!),
     );
 
@@ -936,6 +1001,27 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
 
     it('declares no key the engine does not read', () => {
       expect(GAME_CAMERA_WIRE_KEYS.filter(k => !rustKeys.has(k))).toEqual([]);
+    });
+
+    /**
+     * Keys read through `flat_damping`, the engine's non-negative reader.
+     *
+     * Pinned in BOTH directions. Missing a key means a value the engine
+     * hard-rejects is dispatched, and since `set_game_camera` is full-replace the
+     * whole command is lost, not just that key. Carrying a key the engine reads
+     * with an unrestricted reader is the mirror defect: this side would refuse a
+     * value the engine would have taken.
+     */
+    const rustNonNegativeKeys = new Set(
+      [...Object.values(arms).join('\n').matchAll(
+        /flat_damping\(params, "(\w+)"/g,
+      )].map(m => m[1]!),
+    );
+
+    it('screens exactly the keys the engine refuses below zero', () => {
+      expect(rustNonNegativeKeys.size).toBeGreaterThan(0);
+      expect([...rustNonNegativeKeys].sort())
+        .toEqual([...NON_NEGATIVE_WIRE_KEYS].sort());
     });
   });
 
@@ -1112,5 +1198,94 @@ describe('blendGameCameraData', () => {
     expect(midpoints).toEqual(
       Object.fromEntries(NUMERIC_CAMERA_FIELDS.map((field) => [field, 50])),
     );
+  });
+});
+
+/**
+ * The per-field sign policy (PF-1145, Sentry finding on #9246).
+ *
+ * `Number.isFinite()` was the whole guard at four separate surfaces, and it is
+ * not enough: a negative `followSmoothing` reaches the engine as a negative
+ * `damping`, and the follow step lerps toward the target by `damping * delta`.
+ * `lerp` does not bound its parameter, so a negative one EXTRAPOLATES — the
+ * camera moves away from what it is converging on by a fixed fraction of the
+ * remaining gap every frame, which compounds into divergence while the view
+ * stays pointed at the target.
+ *
+ * A blanket non-negative rule is equally wrong, which is why this is a policy
+ * per field rather than one reader: three of the ten are legitimately signed.
+ */
+describe('camera field sign policy', () => {
+  /**
+   * The whole classification, spelled out, rather than "these two are signed".
+   *
+   * A `toEqual` on the full record is what makes a NEWLY added numeric field
+   * fail here: an exact list of the signed ones would stay green while an
+   * unconsidered field slipped in as non-negative. `satisfies` in the source
+   * forces a decision at compile time; this forces the decision to be reviewed.
+   */
+  const EXPECTED_SIGN: Record<NumericCameraField, 'nonNegative' | 'signed'> = {
+    followDistance: 'nonNegative',
+    followHeight: 'signed',
+    followOffsetX: 'signed',
+    followSmoothing: 'nonNegative',
+    firstPersonHeight: 'nonNegative',
+    firstPersonMouseSensitivity: 'nonNegative',
+    sideScrollerDistance: 'nonNegative',
+    topDownHeight: 'nonNegative',
+    orbitalDistance: 'nonNegative',
+    orbitalAutoRotateSpeed: 'signed',
+  };
+
+  it('classifies every numeric camera field, and only those', () => {
+    const actual = Object.fromEntries(
+      NUMERIC_CAMERA_FIELDS.map((f) => [f, acceptsNegative(f) ? 'signed' : 'nonNegative']),
+    );
+    expect(actual).toEqual(EXPECTED_SIGN);
+  });
+
+  describe('readCameraFieldValue', () => {
+    it('drops a negative value for every field that cannot hold one', () => {
+      for (const field of NUMERIC_CAMERA_FIELDS) {
+        if (EXPECTED_SIGN[field] === 'signed') continue;
+        expect(readCameraFieldValue(field, -1), field).toBeUndefined();
+        expect(readCameraFieldValue(field, -0.0001), field).toBeUndefined();
+      }
+    });
+
+    it('keeps a negative value for the two fields where the sign is the meaning', () => {
+      // `followHeight` is `offset.y`: below the target is the low-angle hero shot.
+      expect(readCameraFieldValue('followHeight', -3)).toBe(-3);
+      // `orbitalAutoRotateSpeed` is degrees/sec with no separate direction flag,
+      // so negating it is the ONLY way to orbit the other way.
+      expect(readCameraFieldValue('orbitalAutoRotateSpeed', -15)).toBe(-15);
+    });
+
+    it('keeps zero and positive values for every field', () => {
+      for (const field of NUMERIC_CAMERA_FIELDS) {
+        expect(readCameraFieldValue(field, 0), field).toBe(0);
+        expect(readCameraFieldValue(field, 7.5), field).toBe(7.5);
+      }
+    });
+
+    it('drops non-finite and non-number input for every field', () => {
+      for (const field of NUMERIC_CAMERA_FIELDS) {
+        for (const bad of [NaN, Infinity, -Infinity, '5', null, undefined, {}, [], true]) {
+          expect(readCameraFieldValue(field, bad), `${field} <- ${String(bad)}`).toBeUndefined();
+        }
+      }
+    });
+
+    it('keeps negative zero, which is not a negative value', () => {
+      // `-0 < 0` is false, so this passes the range check on its own. Asserted
+      // because it looks like a hole and is not one: -0 === 0 everywhere the
+      // engine reads it.
+      // Both `toBe` and `toEqual` compare with `Object.is`, which separates -0
+      // from 0 — so the value is asserted with its sign intact, and the
+      // property that actually matters (it is zero, not a negative) is asserted
+      // with `===`, which is what every downstream consumer uses.
+      expect(readCameraFieldValue('followDistance', -0)).toBe(-0);
+      expect(readCameraFieldValue('followDistance', -0) === 0).toBe(true);
+    });
   });
 });

@@ -147,6 +147,51 @@ describe('GameCameraInspector', () => {
     expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', expect.objectContaining({ mode: 'firstPerson' }));
   });
 
+  describe('numeric parameter floors', () => {
+    /**
+     * The Smoothing row carries `min={0}` because the engine HARD-REJECTS a
+     * negative follow rate, and `set_game_camera` is full-replace — so one typed
+     * `-3` would drop mode, targetEntity and offset along with the rate
+     * (PF-1166). The `min` attribute alone is advisory: a typed value still fires
+     * `change`, so the floor has to be enforced in the parse.
+     */
+    function smoothingInput(container: HTMLElement): HTMLInputElement {
+      const label = Array.from(container.querySelectorAll('label')).find(
+        (l) => l.textContent?.trim() === 'Smoothing',
+      );
+      const id = label?.getAttribute('for');
+      expect(id, 'no <label for> pointing at the Smoothing control').toBeTruthy();
+      return container.querySelector(`#${CSS.escape(id!)}`) as HTMLInputElement;
+    }
+
+    it('advertises the floor to the browser and to assistive tech', () => {
+      setupStore();
+      const { container } = render(<GameCameraInspector />);
+      expect(smoothingInput(container).min).toBe('0');
+    });
+
+    it('refuses a negative Smoothing rather than dispatching it', () => {
+      setupStore();
+      const { container } = render(<GameCameraInspector />);
+      fireEvent.change(smoothingInput(container), { target: { value: '-3' } });
+      // Held at the previous value, exactly as a typo is — never sent as -3.
+      expect(mockSetGameCamera).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ followSmoothing: 5 }),
+      );
+    });
+
+    it('accepts zero, which freezes the camera on purpose', () => {
+      setupStore();
+      const { container } = render(<GameCameraInspector />);
+      fireEvent.change(smoothingInput(container), { target: { value: '0' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith(
+        'entity-1',
+        expect.objectContaining({ followSmoothing: 0 }),
+      );
+    });
+  });
+
   it('shows fixed camera message for fixed mode', () => {
     setupStore({
       primaryGameCamera: { ...baseGameCamera, mode: 'fixed' as const },
@@ -212,6 +257,86 @@ describe('GameCameraInspector', () => {
       const ids = Array.from(container.querySelectorAll('input, select')).map((c) => c.getAttribute('id'));
       expect(ids.every((id) => id)).toBe(true);
       expect(new Set(ids).size).toBe(ids.length);
+    });
+  });
+
+  /**
+   * The numeric rows are the fourth surface that feeds authored camera
+   * parameters toward the engine, and the only one where the author sees the
+   * result immediately — so a value the field cannot hold reverts visibly to
+   * what was there rather than being dropped silently.
+   *
+   * The shape these rows shipped with was `parseFloat(v) || 0`, which collapses
+   * an empty field, a typo AND a real 0 into the same dispatch: a 0 follow
+   * distance puts the camera inside the player, and nothing distinguishes it
+   * from the user having cleared the box mid-edit.
+   */
+  describe('numeric parameter entry', () => {
+    /**
+     * Each row merges its one field into the whole camera before dispatching, so
+     * the assertions are on the FULL object rather than the changed key: what a
+     * row must not do is carry a neighbouring field along in a mangled state,
+     * and `objectContaining` is blind to exactly that.
+     */
+    it('dispatches a typed value', () => {
+      setupStore();
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Distance'), { target: { value: '12' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', {
+        ...baseGameCamera,
+        followDistance: 12,
+      });
+    });
+
+    it('keeps the previous value while the field is empty, instead of dispatching 0', () => {
+      setupStore();
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Distance'), { target: { value: '' } });
+      // `followDistance` stays at 5 — unchanged, not zeroed.
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', baseGameCamera);
+    });
+
+    it('rejects a negative value for a param whose engine meaning has no negative', () => {
+      setupStore();
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Smoothing'), { target: { value: '-3' } });
+      // A negative `damping` makes the follow lerp extrapolate away from the
+      // target. The row reverts to the current value rather than sending it.
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', baseGameCamera);
+    });
+
+    it('accepts a negative Height, which frames the target from below', () => {
+      setupStore();
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Height'), { target: { value: '-2' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', {
+        ...baseGameCamera,
+        followHeight: -2,
+      });
+    });
+
+    it('accepts a negative Auto Rotate speed, which orbits the other way', () => {
+      setupStore({ primaryGameCamera: { ...baseGameCamera, mode: 'orbital' } });
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Auto Rotate'), { target: { value: '-15' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', {
+        ...baseGameCamera,
+        mode: 'orbital',
+        orbitalAutoRotateSpeed: -15,
+      });
+    });
+
+    it('constrains only the rows that cannot hold a negative', () => {
+      setupStore();
+      const { container } = render(<GameCameraInspector />);
+      // Advisory only — `min` stops the spinner and marks the input invalid, but
+      // nothing prevents typing past it. Asserted so the two signed rows are not
+      // quietly given a floor that contradicts the reader.
+      const mins = Array.from(container.querySelectorAll('input[type="number"]')).map((c) =>
+        c.getAttribute('min'),
+      );
+      // Distance, Height, Smoothing — Height is the signed one.
+      expect(mins).toEqual(['0', null, '0']);
     });
   });
 });

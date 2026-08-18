@@ -194,8 +194,10 @@ export function extractTranslatableStrings(scene: SceneForExtraction): Translata
             context: 'Name of the character speaking this dialogue',
           });
         }
-        // Choice labels
-        if (node.choices) {
+        // Choice labels. `Array.isArray`, not truthiness: these nodes come from a
+        // generated or imported tree, and a `choices` of `123` is truthy and then
+        // throws on `for…of`, taking the whole string extraction down with it.
+        if (Array.isArray(node.choices)) {
           for (const choice of node.choices) {
             if (choice.label && choice.label.trim().length > 0) {
               strings.push({
