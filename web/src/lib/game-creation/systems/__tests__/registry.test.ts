@@ -72,8 +72,12 @@ describe('SYSTEM_REGISTRY', () => {
     expect(SYSTEM_REGISTRY.has('world')).toBe(true);
   });
 
-  it('does not have entities system registered (handled by planBuilder)', () => {
-    expect(SYSTEM_REGISTRY.has('entities')).toBe(false);
+  it('has entities system registered (components only — planBuilder still spawns)', () => {
+    expect(SYSTEM_REGISTRY.has('entities')).toBe(true);
+  });
+
+  it('has challenge system registered', () => {
+    expect(SYSTEM_REGISTRY.has('challenge')).toBe(true);
   });
 });
 
@@ -219,16 +223,87 @@ describe('camera system', () => {
 });
 
 describe('world system', () => {
-  it('produces scene_create step with world config', () => {
+  /**
+   * PF-1138 — this used to plan a `scene_create` step carrying `worldConfig`,
+   * which that executor accepted and then dropped, so every generated game was
+   * an empty room. The world is now built as real entities.
+   */
+  it('plans a world_build step carrying spawn descriptors, not a config blob', () => {
     const def = SYSTEM_REGISTRY.get('world')!;
-    const system = makeSystem({ category: 'world', type: 'procedural', config: { biome: 'forest' } });
-    const gdd = makeGDD();
+    const system = makeSystem({
+      category: 'world',
+      type: 'flat',
+      config: { width: 30, depth: 20 },
+    });
 
-    const steps = def.setupSteps(system, gdd, makeCtx());
+    const steps = def.setupSteps(system, makeGDD(), makeCtx());
 
     expect(steps).toHaveLength(1);
-    expect(steps[0].executor).toBe('scene_create');
-    expect(steps[0].input).toEqual({ worldType: 'procedural', worldConfig: { biome: 'forest' } });
+    expect(steps[0].executor).toBe('world_build');
+
+    const input = steps[0].input as {
+      worldType: string;
+      entities: Array<Record<string, unknown>>;
+    };
+    expect(input.worldType).toBe('flat');
+    // No `worldConfig` key at all: an accepted-but-unused field is the exact
+    // shape of the silent drop this step exists to close.
+    expect(Object.keys(input).sort()).toEqual(['entities', 'worldType']);
+    expect(input.entities).toHaveLength(1);
+    expect(input.entities[0]).toEqual({
+      entityId: expect.any(String),
+      name: 'Ground',
+      entityType: 'cube',
+      position: [0, -0.5, 0],
+      scale: [30, 1, 20],
+    });
+  });
+
+  it('binds every descriptor to a distinct engine UUID', () => {
+    const def = SYSTEM_REGISTRY.get('world')!;
+    const system = makeSystem({
+      category: 'world',
+      type: 'platformer',
+      config: { width: 40, platformCount: 3, bounds: true },
+    });
+
+    const steps = def.setupSteps(system, makeGDD(), makeCtx());
+    const entities = (steps[0].input as { entities: Array<{ entityId: string }> }).entities;
+
+    const ids = new Set<string>();
+    for (let i = 0; i < entities.length; i += 1) {
+      expect(entities[i].entityId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+      ids.add(entities[i].entityId);
+    }
+    expect(ids.size).toBe(entities.length);
+    expect(entities.length).toBeGreaterThan(1);
+  });
+
+  it('forwards a dropped piece of config to the user rather than swallowing it', () => {
+    const def = SYSTEM_REGISTRY.get('world')!;
+    const warn = vi.fn();
+    const system = makeSystem({
+      category: 'world',
+      type: 'procedural',
+      config: { biome: 'forest' },
+    });
+
+    def.setupSteps(system, makeGDD(), makeCtx({ warn }));
+
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls.map((c) => String(c[0])).join(' ')).toMatch(/biome/);
+  });
+
+  it('builds 2D worlds in the plane the side view can actually show', () => {
+    const def = SYSTEM_REGISTRY.get('world')!;
+    const system = makeSystem({ category: 'world', type: 'flat', config: { width: 40 } });
+
+    const steps = def.setupSteps(system, makeGDD({ projectType: '2d' }), makeCtx());
+    const entities = (steps[0].input as { entities: Array<{ scale: number[] }> }).entities;
+
+    expect(entities[0].scale).toEqual([40, 1, 1]);
   });
 });
 

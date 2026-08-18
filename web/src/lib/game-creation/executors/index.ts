@@ -3,7 +3,9 @@ import { sceneCreateExecutor } from './sceneCreateExecutor';
 import { physicsProfileExecutor } from './physicsProfileExecutor';
 import { cameraSetupExecutor } from './cameraSetupExecutor';
 import { characterSetupExecutor } from './characterSetupExecutor';
+import { gameComponentExecutor } from './gameComponentExecutor';
 import { entitySetupExecutor } from './entitySetupExecutor';
+import { worldBuildExecutor } from './worldBuildExecutor';
 import { assetGenerateExecutor } from './assetGenerateExecutor';
 import { customScriptExecutor } from './customScriptExecutor';
 import { verifyExecutor } from './verifyExecutor';
@@ -16,7 +18,9 @@ export const EXECUTOR_REGISTRY = new Map<ExecutorName, ExecutorDefinition>([
   [physicsProfileExecutor.name, physicsProfileExecutor],
   [cameraSetupExecutor.name, cameraSetupExecutor],
   [characterSetupExecutor.name, characterSetupExecutor],
+  [gameComponentExecutor.name, gameComponentExecutor],
   [entitySetupExecutor.name, entitySetupExecutor],
+  [worldBuildExecutor.name, worldBuildExecutor],
   [assetGenerateExecutor.name, assetGenerateExecutor],
   [customScriptExecutor.name, customScriptExecutor],
   [verifyExecutor.name, verifyExecutor],

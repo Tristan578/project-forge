@@ -56,6 +56,29 @@ function dependenciesMet(step: PlanStep, stepMap: Map<string, PlanStep>): boolea
 }
 
 /**
+ * Keep a failed step's diagnostic output on the step.
+ *
+ * A failing executor is not necessarily silent: `verify_all_scenes` reports
+ * WHY the game cannot be won on its output (`warnings`, `winnable`,
+ * `winnabilityIssues`) and then returns `success: false`, because an unwinnable
+ * game must fail the plan rather than be handed over. `step.output` used to be
+ * assigned on the success path only, so everything the step had to say was
+ * dropped the moment it said it — the live `onStepComplete` callback saw the
+ * result, but the plan itself carried an empty step, and the plan is what
+ * `resolveStepOutput` reads and what the orchestrator store keeps to re-render
+ * a finished run.
+ *
+ * Only assigned when the executor really produced output: a genuinely empty
+ * failure must stay `undefined` rather than become `{}`, which a dependent
+ * would read as "ran, produced nothing".
+ */
+function retainDiagnosticOutput(step: PlanStep, result: ExecutorResult | undefined): void {
+  if (result?.output !== undefined) {
+    step.output = result.output;
+  }
+}
+
+/**
  * Find gates that fire after the given step ID.
  */
 function gatesAfterStep(stepId: string, gates: ApprovalGate[]): ApprovalGate[] {
@@ -218,6 +241,7 @@ export async function runPipeline(
     if (cancelledMidRetry) {
       setStepStatus(step, 'skipped');
       step.error = lastResult?.error;
+      retainDiagnosticOutput(step, lastResult);
       for (let j = i + 1; j < plan.steps.length; j++) {
         setStepStatus(plan.steps[j], 'skipped');
       }
@@ -234,10 +258,12 @@ export async function runPipeline(
       if (step.optional) {
         setStepStatus(step, 'skipped');
         step.error = lastResult?.error;
+        retainDiagnosticOutput(step, lastResult);
         callbacks?.onStepComplete?.(step.id, lastResult ?? { success: false });
       } else {
         setStepStatus(step, 'failed');
         step.error = lastResult?.error;
+        retainDiagnosticOutput(step, lastResult);
         callbacks?.onStepComplete?.(step.id, lastResult ?? { success: false });
         setPlanStatus(plan, 'failed', callbacks);
         // Skip remaining steps

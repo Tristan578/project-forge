@@ -112,14 +112,23 @@ describe('SYSTEM_REGISTRY', () => {
     SYSTEM_REGISTRY = mod.SYSTEM_REGISTRY;
   });
 
-  it('has exactly 3 registered entries (movement, camera, world)', () => {
-    // NOTE: 'entities' is NOT registered — planBuilder Phase 2 handles entity
-    // setup directly to avoid duplicate spawn_entity calls.
-    expect(SYSTEM_REGISTRY.size).toBe(3);
-    expect(SYSTEM_REGISTRY.has('movement')).toBe(true);
-    expect(SYSTEM_REGISTRY.has('camera')).toBe(true);
-    expect(SYSTEM_REGISTRY.has('world')).toBe(true);
-    expect(SYSTEM_REGISTRY.has('entities')).toBe(false);
+  it('has exactly 7 registered entries (movement, camera, world, progression, feedback, entities, challenge)', () => {
+    // Entity SPAWNING is still planBuilder Phase 2's alone. The 'entities' and
+    // 'challenge' systems plan `game_component` steps only — they never emit
+    // spawn_entity — so registering them cannot duplicate Phase 2's spawns.
+    //
+    // Registering a category also REMOVES planBuilder's `custom_script_generate`
+    // fall-through for it, so this count is a deliberate wiring pin: a category
+    // added here must plan real steps or warn, never silently produce nothing.
+    expect([...SYSTEM_REGISTRY.keys()]).toEqual([
+      'movement',
+      'camera',
+      'world',
+      'progression',
+      'feedback',
+      'entities',
+      'challenge',
+    ]);
   });
 
   it('returns undefined for an unknown category', () => {
@@ -233,16 +242,18 @@ describe('SYSTEM_REGISTRY', () => {
       expect(steps).toHaveLength(1);
     });
 
-    it('uses scene_create executor with worldType + worldConfig', () => {
+    it('uses world_build and never forwards the raw config (PF-1138)', () => {
       const def = SYSTEM_REGISTRY.get('world')!;
       const system = makeSystem('world', 'dungeon');
       system.config = { rooms: 10 };
       const steps = def.setupSteps(system, makeGdd(), makeCtx());
-      expect(steps[0].executor).toBe('scene_create');
-      expect(steps[0].input).toMatchObject({
-        worldType: system.type,
-        worldConfig: system.config,
-      });
+
+      expect(steps[0].executor).toBe('world_build');
+      // Asserted on the full key set rather than `toMatchObject`: the defect
+      // being closed is a field that is accepted and then dropped, and a
+      // partial matcher is structurally blind to exactly that.
+      expect(Object.keys(steps[0].input).sort()).toEqual(['entities', 'worldType']);
+      expect((steps[0].input as { worldType: string }).worldType).toBe('dungeon');
     });
   });
 
