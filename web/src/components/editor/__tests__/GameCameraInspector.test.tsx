@@ -259,4 +259,84 @@ describe('GameCameraInspector', () => {
       expect(new Set(ids).size).toBe(ids.length);
     });
   });
+
+  /**
+   * The numeric rows are the fourth surface that feeds authored camera
+   * parameters toward the engine, and the only one where the author sees the
+   * result immediately — so a value the field cannot hold reverts visibly to
+   * what was there rather than being dropped silently.
+   *
+   * The shape these rows shipped with was `parseFloat(v) || 0`, which collapses
+   * an empty field, a typo AND a real 0 into the same dispatch: a 0 follow
+   * distance puts the camera inside the player, and nothing distinguishes it
+   * from the user having cleared the box mid-edit.
+   */
+  describe('numeric parameter entry', () => {
+    /**
+     * Each row merges its one field into the whole camera before dispatching, so
+     * the assertions are on the FULL object rather than the changed key: what a
+     * row must not do is carry a neighbouring field along in a mangled state,
+     * and `objectContaining` is blind to exactly that.
+     */
+    it('dispatches a typed value', () => {
+      setupStore();
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Distance'), { target: { value: '12' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', {
+        ...baseGameCamera,
+        followDistance: 12,
+      });
+    });
+
+    it('keeps the previous value while the field is empty, instead of dispatching 0', () => {
+      setupStore();
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Distance'), { target: { value: '' } });
+      // `followDistance` stays at 5 — unchanged, not zeroed.
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', baseGameCamera);
+    });
+
+    it('rejects a negative value for a param whose engine meaning has no negative', () => {
+      setupStore();
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Smoothing'), { target: { value: '-3' } });
+      // A negative `damping` makes the follow lerp extrapolate away from the
+      // target. The row reverts to the current value rather than sending it.
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', baseGameCamera);
+    });
+
+    it('accepts a negative Height, which frames the target from below', () => {
+      setupStore();
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Height'), { target: { value: '-2' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', {
+        ...baseGameCamera,
+        followHeight: -2,
+      });
+    });
+
+    it('accepts a negative Auto Rotate speed, which orbits the other way', () => {
+      setupStore({ primaryGameCamera: { ...baseGameCamera, mode: 'orbital' } });
+      render(<GameCameraInspector />);
+      fireEvent.change(screen.getByLabelText('Auto Rotate'), { target: { value: '-15' } });
+      expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', {
+        ...baseGameCamera,
+        mode: 'orbital',
+        orbitalAutoRotateSpeed: -15,
+      });
+    });
+
+    it('constrains only the rows that cannot hold a negative', () => {
+      setupStore();
+      const { container } = render(<GameCameraInspector />);
+      // Advisory only — `min` stops the spinner and marks the input invalid, but
+      // nothing prevents typing past it. Asserted so the two signed rows are not
+      // quietly given a floor that contradicts the reader.
+      const mins = Array.from(container.querySelectorAll('input[type="number"]')).map((c) =>
+        c.getAttribute('min'),
+      );
+      // Distance, Height, Smoothing — Height is the signed one.
+      expect(mins).toEqual(['0', null, '0']);
+    });
+  });
 });

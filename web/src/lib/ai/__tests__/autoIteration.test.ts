@@ -454,9 +454,10 @@ describe('applyFixes', () => {
 
     applyFixes(fixes, dispatch, 1);
     expect(dispatch).toHaveBeenCalledTimes(2);
-    // The engine deserializes the bag with strict serde, so the dispatch has to
-    // carry EVERY field — and the untouched ones keep the entity's own values
-    // rather than being reset to the Rust defaults (`oneShot` defaults false).
+    // `build_game_component` merges onto the type's `Default`, so an omitted
+    // field is not an error — it is a silent reset. The dispatch therefore has
+    // to carry EVERY field, and the untouched ones keep the entity's own values
+    // rather than falling back to the Rust defaults (`oneShot` defaults false).
     expect(dispatch).toHaveBeenCalledWith('update_game_component', {
       entityId: 'dz-1',
       componentType: 'damage_zone',
@@ -716,8 +717,10 @@ describe('applyFixes', () => {
 
     // Third frame: attach second game component to second entity
     vi.advanceTimersByTime(16);
-    // The queue only carries one property, so the rest of the bag comes from the
-    // Rust struct's own defaults — a single-key payload fails strict serde.
+    // The queue only carries one property, so the rest of the bag is filled in
+    // here from the same defaults the Rust struct uses. A single-key payload
+    // would be accepted by the engine and reset everything else to those
+    // defaults without the store hearing about it.
     expect(dispatch).toHaveBeenCalledWith('add_game_component', {
       entityId: 'entity-collectible',
       componentType: 'collectible',

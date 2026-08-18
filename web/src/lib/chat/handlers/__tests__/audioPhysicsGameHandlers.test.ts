@@ -1107,12 +1107,34 @@ describe('gameplayHandlers', () => {
       const { result, store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
         entityId: 'coin',
         componentType: 'collectible',
-        properties: { value: 10, rotateSpeed: 180 },
+        properties: { value: 10, rotateSpeed: 60 },
       });
       expect(result.success).toBe(true);
       expect(store.addGameComponent).toHaveBeenCalledWith('coin', expect.objectContaining({
         type: 'collectible',
-        collectible: expect.objectContaining({ value: 10, rotateSpeed: 180 }),
+        collectible: expect.objectContaining({ value: 10, rotateSpeed: 60 }),
+      }));
+    });
+
+    // The handler is a second call site into the wire layer, and it is the one a
+    // model actually reaches. A range the wire unit tests pin is only enforced
+    // here if the handler routes through `buildGameComponent` rather than
+    // forwarding `properties` as authored — so the clamp is asserted on the path
+    // the model uses, not only on the module that owns the table.
+    it('clamps an out-of-range collectible rotateSpeed the way the engine does', async () => {
+      const { result, store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'coin',
+        componentType: 'collectible',
+        // `prop_f32(&props, "rotateSpeed", -100.0, 100.0)` in `build_game_component`.
+        properties: { rotateSpeed: 180 },
+      });
+      expect(result.success).toBe(true);
+      expect(store.addGameComponent).toHaveBeenCalledWith('coin', expect.objectContaining({
+        type: 'collectible',
+        // 180 is outside the engine's own bound — `prop_f32(&props, "rotateSpeed",
+        // -100.0, 100.0)` clamps it. The store used to keep 180 while the engine
+        // spun the coin at 100, and nothing reported the disagreement.
+        collectible: expect.objectContaining({ rotateSpeed: 100 }),
       }));
     });
 
@@ -1224,12 +1246,28 @@ describe('gameplayHandlers', () => {
       const { result, store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
         entityId: 'goal',
         componentType: 'win_condition',
+        properties: { conditionType: 'reachGoal', targetEntityId: 'flag' },
+      });
+      expect(result.success).toBe(true);
+      expect(store.addGameComponent).toHaveBeenCalledWith('goal', expect.objectContaining({
+        type: 'winCondition',
+        winCondition: expect.objectContaining({ conditionType: 'reachGoal', targetEntityId: 'flag' }),
+      }));
+    });
+
+    it('collapses an unknown conditionType the way the engine does', async () => {
+      // `snake_case` is not one of the three spellings the engine matches on, and
+      // its parser does not reject — it falls through `_ => WinConditionType::Score`.
+      // So the entity really is a score win; the store now says so too.
+      const { result, store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'goal',
+        componentType: 'win_condition',
         properties: { conditionType: 'reach_goal', targetEntityId: 'flag' },
       });
       expect(result.success).toBe(true);
       expect(store.addGameComponent).toHaveBeenCalledWith('goal', expect.objectContaining({
         type: 'winCondition',
-        winCondition: expect.objectContaining({ conditionType: 'reach_goal', targetEntityId: 'flag' }),
+        winCondition: expect.objectContaining({ conditionType: 'score', targetEntityId: 'flag' }),
       }));
     });
   });

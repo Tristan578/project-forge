@@ -5,6 +5,7 @@ import {
   resolvePhysicsProfile,
   characterControllerFromProfile,
 } from '../../physicsProfileResolution';
+import { normalizeGameComponent, toWireComponent } from '@/lib/engine/gameComponentWire';
 
 /**
  * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
@@ -46,6 +47,26 @@ function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
 /** The store the ctx was built with, typed for assertion. */
 function storeOf(ctx: ExecutorContext): TestStore {
   return ctx.getStore() as unknown as TestStore;
+}
+
+/**
+ * The engine payload the store will dispatch for the component this executor
+ * handed it.
+ *
+ * The executor no longer builds a wire payload itself — it calls
+ * `addGameComponent`, and `gameSlice` is what runs `normalizeGameComponent` and
+ * `toWireComponent` before dispatching (see gameSlice.ts). `ctx.getStore()` is a
+ * `vi.fn()` here, so the mock records the component as the executor wrote it,
+ * BEFORE any clamping. Composing the two real functions over the captured value
+ * reproduces exactly what the live store sends, which is the thing the range
+ * assertions are about: a `moveSpeed` the model invented must not reach the
+ * engine unclamped, and the store and the engine must agree on the number that
+ * does.
+ */
+function wireOf(store: TestStore, entityId: string): unknown {
+  const call = store.addGameComponent.mock.calls.find(([id]) => id === entityId);
+  if (!call) throw new Error(`no addGameComponent call for ${entityId}`);
+  return { entityId, ...toWireComponent(normalizeGameComponent(call[1] as never)) };
 }
 
 /**
@@ -548,6 +569,74 @@ describe('characterSetupExecutor', () => {
       expect(props(storeOf(noDirective))).toEqual({
         ...characterControllerFromProfile(resolvePhysicsProfile(rogue)),
         canDoubleJump: false,
+      });
+    });
+
+    // `systemConfig` is an LLM-authored bag with no upper bound, and `moveSpeed`
+    // and `jumpForce` are the two knobs it is allowed to move. `dispatchCommand`
+    // returns void, so an out-of-range value that survived this far would leave
+    // the step reporting success on a player moving at a speed nothing asked for.
+    //
+    // `resolvePhysicsProfile` REJECTS such an override rather than clamping it,
+    // and the difference matters: clamping to the ceiling substitutes a number
+    // nobody chose and looks deliberate downstream, whereas rejecting keeps the
+    // preset the feel directive actually selected. `physicsProfileResolution`
+    // owns that policy and tests it directly; what these two cover is the
+    // composition — that the executor forwards the resolved profile, and the
+    // store's own `normalizeGameComponent` / `toWireComponent` turn it into a
+    // wire payload carrying the designed numbers and not the invented ones.
+    it('keeps the designed profile when systemConfig invents an out-of-range knob', async () => {
+      const ctx = makeCtx();
+      await characterSetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player' },
+        projectType: '3d',
+        entityId: 'ent_huge',
+        systemConfig: { moveSpeed: 1e9, jumpForce: 5000 },
+        feelDirective: {
+          mood: 'dreamy',
+          pacing: 'medium',
+          weight: 'floaty',
+          referenceGames: [],
+          oneLiner: 'drifting',
+        },
+      }, ctx);
+
+      // `floaty` / `dreamy` / `medium`, untouched by either override. Neither
+      // `1e9` nor `5000` appears anywhere in the payload — that is the assertion.
+      expect(wireOf(storeOf(ctx), 'ent_huge')).toEqual({
+        entityId: 'ent_huge',
+        componentType: 'character_controller',
+        properties: { speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false },
+      });
+    });
+
+    // A double too large to survive `as f32` is the same case as a merely
+    // oversized one, and must not be special: rejected at the resolver, so the
+    // selected preset stands. Reaching the engine it would be dropped by
+    // `prop_f32` and the Rust default would stand instead — a third set of
+    // numbers, differing from both the store's and the designer's.
+    it('keeps the designed speed for a value the engine could not hold', async () => {
+      const ctx = makeCtx();
+      await characterSetupExecutor.execute({
+        entity: { name: 'Hero', role: 'player' },
+        projectType: '3d',
+        entityId: 'ent_inf',
+        systemConfig: { moveSpeed: 1e300 },
+        feelDirective: {
+          mood: 'dreamy',
+          pacing: 'medium',
+          weight: 'floaty',
+          referenceGames: [],
+          oneLiner: 'drifting',
+        },
+      }, ctx);
+
+      expect(wireOf(storeOf(ctx), 'ent_inf')).toEqual({
+        entityId: 'ent_inf',
+        componentType: 'character_controller',
+        // 6 is the preset's speed. 5 would be `CharacterControllerData::default()
+        // .speed` — what the engine would fall back to had the value reached it.
+        properties: { speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false },
       });
     });
   });
