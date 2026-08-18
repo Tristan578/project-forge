@@ -100,3 +100,24 @@ export function parseArgs<T>(
   ).join('; ');
   return { error: { success: false, error: `Invalid arguments: ${issues}` } };
 }
+
+/**
+ * Read a keyed entry out of a store `Record` without walking the prototype chain.
+ *
+ * Handler entity ids come from the model through `zEntityId`, which is
+ * `z.string().min(1)` and therefore accepts `'__proto__'`, `'constructor'` and
+ * `'toString'`. A bare `record[id]` then resolves to an inherited value —
+ * `Object.prototype` or a function — which is TRUTHY, so both of the guards
+ * handlers rely on fail open: `record[id] ?? defaults()` never reaches the
+ * fallback, and `if (!data) return error` never reports the entity as missing.
+ * The first produces a full-replace command built from almost no real fields; the
+ * second returns `Object.prototype` to the model as if it were entity data
+ * (PF-1167).
+ *
+ * Tightening `zEntityId` would not be sufficient on its own — every handler that
+ * indexes a `Record` by a model-supplied key has this shape, so the read is the
+ * right place to fix it.
+ */
+export function ownEntry<T>(record: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}

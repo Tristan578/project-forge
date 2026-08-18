@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { HelpCircle } from 'lucide-react';
 import { useEditorStore, type Physics2dData } from '@/stores/editorStore';
+import { defaultPhysics2dData } from '@/lib/physics/physics2dPayload';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
@@ -99,24 +100,11 @@ export function Physics2dInspector() {
     (enabled: boolean) => {
       if (primaryId) {
         if (enabled && !physics2d) {
-          // Initialize default physics data
-          const defaultData: Physics2dData = {
-            bodyType: 'dynamic',
-            colliderShape: 'auto',
-            size: [1.0, 1.0],
-            radius: 0.5,
-            vertices: [],
-            mass: 1.0,
-            friction: 0.5,
-            restitution: 0.0,
-            gravityScale: 1.0,
-            isSensor: false,
-            lockRotation: false,
-            continuousDetection: false,
-            oneWayPlatform: false,
-            surfaceVelocity: [0.0, 0.0],
-          };
-          updatePhysics2d(primaryId, defaultData);
+          // The shared factory, never a local copy of the table: this one had
+          // already drifted to `colliderShape: 'auto'` against the engine's
+          // `Box`, so ticking the box showed a shape the simulation never used
+          // (PF-1167).
+          updatePhysics2d(primaryId, defaultPhysics2dData());
         }
         togglePhysics2d(primaryId, enabled);
       }

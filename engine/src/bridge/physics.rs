@@ -299,31 +299,110 @@ pub(super) fn apply_remove_joint_requests(
 // ============================================================================
 
 /// System that applies pending 2D physics update requests (always-active, metadata-only).
+///
+/// Mirrors `apply_physics_updates` (3D): merge the patch, and push history plus
+/// emit only when the merge actually changed something. The no-op guard is not an
+/// optimisation — `HistoryStack::push` clears the redo stack, so pushing on a
+/// patch that changed nothing would silently destroy the user's redo history, and
+/// this system previously pushed unconditionally on every update.
+///
+/// The second query handles an entity that has no `Physics2dData` at all. Without
+/// it, configuring 2D physics on a fresh entity was a total no-op: the loop found
+/// no match and dropped the command. `Without<Physics2dData>` makes the two
+/// queries disjoint, so there is no B0001 access conflict.
+///
+/// Two updates for the SAME fresh entity in one drain are accumulated rather than
+/// applied one at a time. `Commands` is deferred, so the insert issued for the
+/// first update is invisible to both queries on the second iteration: `query`
+/// still misses and `missing_query` still matches, so the second update would
+/// rebuild from `Physics2dData::default()` and DISCARD the first patch, then push
+/// a second history entry and emit a second event for one logical change. A
+/// batch carrying `set_physics_2d` plus an `update_physics_2d` for one entity
+/// reaches that directly. Accumulating makes a fresh entity behave exactly like
+/// an existing one: one insert, one history entry, one event.
 pub(super) fn apply_physics2d_updates(
     mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
     mut query: Query<(&EntityId, &mut Physics2dData)>,
+    missing_query: Query<(Entity, &EntityId), Without<Physics2dData>>,
     phys2d_enabled_query: Query<&EntityId, With<Physics2dEnabled>>,
     mut history: ResMut<HistoryStack>,
 ) {
+    // Fresh entities awaiting their first insert, in first-seen order. A `Vec` and
+    // not a map: the count is one drain's worth of commands, and the order has to
+    // be deterministic because history entries and events are emitted from it.
+    let mut fresh: Vec<(Entity, String, Physics2dData)> = Vec::new();
+
     for update in pending.physics2d_updates.drain(..) {
+        let enabled = phys2d_enabled_query.iter().any(|eid| eid.0 == update.entity_id);
+        let mut matched = false;
+
         for (entity_id, mut current_physics) in query.iter_mut() {
             if entity_id.0 == update.entity_id {
-                let old_physics = current_physics.clone();
-                *current_physics = update.physics_data.clone();
+                matched = true;
 
-                // Record for undo (using Physics2dChange action)
-                history.push(crate::core::history::UndoableAction::Physics2dChange {
-                    entity_id: update.entity_id.clone(),
-                    old_physics: Some(old_physics),
-                    new_physics: Some(update.physics_data.clone()),
-                });
+                // `bypass_change_detection` so a no-op patch does not mark the
+                // component `Changed` and re-trigger the selection emit system.
+                let (old_physics, new_physics) = update
+                    .patch
+                    .apply_recording(current_physics.bypass_change_detection());
 
-                // Emit change event
-                let enabled = phys2d_enabled_query.iter().any(|eid| eid.0 == update.entity_id);
-                events::emit_physics2d_changed(&update.entity_id, &update.physics_data, enabled);
+                if new_physics != old_physics {
+                    current_physics.set_changed();
+                    history.push(crate::core::history::UndoableAction::Physics2dChange {
+                        entity_id: update.entity_id.clone(),
+                        old_physics: Some(old_physics),
+                        new_physics: Some(new_physics.clone()),
+                    });
+                    events::emit_physics2d_changed(&update.entity_id, &new_physics, enabled);
+                }
                 break;
             }
         }
+
+        if matched {
+            continue;
+        }
+
+        // Already staged by an earlier update in this same drain — merge onto the
+        // accumulated value instead of starting over from the defaults.
+        if let Some((_, _, staged)) = fresh.iter_mut().find(|(_, id, _)| *id == update.entity_id) {
+            update.patch.apply_to(staged);
+            continue;
+        }
+
+        // No `Physics2dData` yet — build it from defaults plus the patch and stage
+        // it, so this command is how 2D physics gets configured on an entity for
+        // the first time rather than being silently dropped.
+        for (entity, entity_id) in missing_query.iter() {
+            if entity_id.0 == update.entity_id {
+                let mut new_physics = Physics2dData::default();
+                update.patch.apply_to(&mut new_physics);
+                fresh.push((entity, update.entity_id.clone(), new_physics));
+                matched = true;
+                break;
+            }
+        }
+
+        if !matched {
+            tracing::warn!(
+                "2D physics update ignored: no entity with id '{}'",
+                update.entity_id
+            );
+        }
+    }
+
+    // One insert, one history entry and one event per fresh entity, whatever the
+    // number of updates that contributed to it.
+    for (entity, entity_id, new_physics) in fresh {
+        let enabled = phys2d_enabled_query.iter().any(|eid| eid.0 == entity_id);
+        commands.entity(entity).insert(new_physics.clone());
+        history.push(crate::core::history::UndoableAction::Physics2dChange {
+            entity_id: entity_id.clone(),
+            old_physics: None,
+            new_physics: Some(new_physics.clone()),
+        });
+        events::emit_physics2d_changed(&entity_id, &new_physics, enabled);
     }
 }
 

@@ -14,7 +14,7 @@ fn next_request_id() -> String {
     format!("ray_{}", id)
 }
 use crate::core::physics_2d::{
-    Physics2dData, ColliderShape2d, BodyType2d, PhysicsJoint2d,
+    Physics2dData, Physics2dPatch, ColliderShape2d, BodyType2d, PhysicsJoint2d,
 };
 
 /// Dispatch physics-related commands.
@@ -39,6 +39,8 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
 
         // 2D Physics
         "set_physics2d" => Some(handle_set_physics2d(payload.clone())),
+        "update_physics2d" => Some(handle_update_physics2d(payload.clone())),
+        "toggle_physics2d" => Some(handle_toggle_physics2d(payload.clone())),
         "remove_physics2d" => Some(handle_remove_physics2d(payload.clone())),
         "set_2d_collider_shape" => Some(handle_set_2d_collider_shape(payload.clone())),
         "set_2d_body_type" => Some(handle_set_2d_body_type(payload.clone())),
@@ -75,8 +77,12 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "raycast" => Some(handle_raycast_query(payload.clone())),
         "get_joint" => Some(super::handle_query(QueryRequest::ListJoints)),
         "set_physics_2d" => Some(handle_set_physics2d(payload.clone())),
+        "update_physics_2d" => Some(handle_update_physics2d(payload.clone())),
+        "toggle_physics_2d" => Some(handle_toggle_physics2d(payload.clone())),
         "remove_physics_2d" => Some(handle_remove_physics2d(payload.clone())),
-        "set_physics_2d_enabled" => Some(Err("Not yet implemented: set_physics_2d_enabled".to_string())),
+        // Was `Err("Not yet implemented")` — the toggle it needed already existed
+        // in the pending queue, only the arm was missing.
+        "set_physics_2d_enabled" => Some(handle_toggle_physics2d(payload.clone())),
         "get_physics_2d" => {
             let entity_id = payload.get("entityId")?.as_str()?.to_string();
             Some(super::handle_query(QueryRequest::Physics2dState { entity_id }))
@@ -501,11 +507,27 @@ fn handle_remove_joint(payload: serde_json::Value) -> super::CommandResult {
 // ============================================================================
 
 /// Payload for set_physics2d command.
+///
+/// `physics_data` is a `Physics2dPatch` rather than a `Physics2dData` so the
+/// command wire speaks one vocabulary (camelCase, with snake_case aliases) across
+/// both `set_physics2d` and `update_physics2d`. The full-replace meaning is
+/// preserved below by applying the patch onto `Physics2dData::default()`, so an
+/// omitted field still resets rather than being left alone — that is the
+/// documented difference between this command and `update_physics2d`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetPhysics2dPayload {
     entity_id: String,
-    physics_data: Physics2dData,
+    physics_data: Physics2dPatch,
+    /// Whether 2D physics should be simulating for this entity.
+    ///
+    /// Optional, and absent means "leave the current enabled state alone" —
+    /// configuring a collider must not be able to silently stop an already-running
+    /// body. When present it queues a `Physics2dToggle` alongside the data update,
+    /// so a caller that wants "configure and turn on" needs one command rather than
+    /// two. The apply systems are `.chain()`ed toggle-before-update precisely so
+    /// this pair cannot race on a fresh entity (see `bridge/mod.rs`).
+    enabled: Option<bool>,
 }
 
 /// Handle set_physics2d command.
@@ -513,13 +535,109 @@ fn handle_set_physics2d(payload: serde_json::Value) -> super::CommandResult {
     let data: SetPhysics2dPayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid set_physics2d payload: {}", e))?;
 
+    let mut resolved = Physics2dData::default();
+    data.physics_data.apply_to(&mut resolved);
+
+    if let Some(enabled) = data.enabled {
+        // Queued before the update, and CHECKED rather than discarded. Both queues
+        // read the same thread-local today, so in practice they fail together and
+        // the update arm below would report it — but that is a property of the
+        // current implementation, not of this function, and the failure mode it
+        // buys is the bad kind: a dropped enable reported as `Ok`, i.e. a body the
+        // caller believes is simulating and never is.
+        if !queue_physics2d_toggle_from_bridge(Physics2dToggle {
+            entity_id: data.entity_id.clone(),
+            enabled,
+        }) {
+            return Err("PendingCommands resource not initialized".to_string());
+        }
+    }
+
     let update = Physics2dUpdate {
         entity_id: data.entity_id.clone(),
-        physics_data: data.physics_data,
+        patch: Physics2dPatch::full(&resolved),
     };
 
     if queue_physics2d_update_from_bridge(update) {
         tracing::info!("Queued 2D physics update for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for update_physics2d command — a partial update.
+///
+/// Flattened, mirroring the 3D `update_physics` payload, so a caller sends
+/// `{ entityId, friction: 0.9 }` rather than nesting the changed fields.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdatePhysics2dPayload {
+    entity_id: String,
+    #[serde(flatten)]
+    patch: Physics2dPatch,
+}
+
+/// Handle update_physics2d command.
+///
+/// This command did not exist. The editor and the chat tools both dispatched
+/// `update_physics_2d` regardless, which reached `Err("Unknown command")` and was
+/// dropped — a total no-op that nothing surfaced, because `dispatchCommand`
+/// returns `void` (PF-1167).
+fn handle_update_physics2d(payload: serde_json::Value) -> super::CommandResult {
+    let data: UpdatePhysics2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid update_physics2d payload: {}", e))?;
+
+    let update = Physics2dUpdate {
+        entity_id: data.entity_id.clone(),
+        patch: data.patch,
+    };
+
+    if queue_physics2d_update_from_bridge(update) {
+        tracing::info!("Queued partial 2D physics update for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Read the `enabled` flag off a `toggle_physics2d` payload.
+///
+/// Absent means "turn it on": every caller of this command is doing so to enable
+/// physics, and `remove_physics2d` is the documented way to disable. Defaulting
+/// to `false` would make a missing key destructive — the same class of silent
+/// damage this whole change removes. A non-boolean value is treated as absent
+/// rather than as `false` for the same reason.
+///
+/// Extracted from the handler so the default is assertable: the handler itself
+/// can only be observed through the pending queue, which does not exist under
+/// native `cargo test`.
+fn resolve_toggle_enabled(payload: &serde_json::Value) -> bool {
+    payload.get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+/// Handle toggle_physics2d command.
+///
+/// Also previously missing, despite `Physics2dToggle` already existing in the
+/// pending queue and `remove_physics2d` already queueing one with `enabled:
+/// false` — there was simply no way to turn 2D physics back on.
+fn handle_toggle_physics2d(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let enabled = resolve_toggle_enabled(&payload);
+
+    let toggle = Physics2dToggle {
+        entity_id: entity_id.clone(),
+        enabled,
+    };
+
+    if queue_physics2d_toggle_from_bridge(toggle) {
+        tracing::info!("Queued 2D physics toggle for entity {}: {}", entity_id, enabled);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -562,24 +680,23 @@ fn handle_set_2d_collider_shape(payload: serde_json::Value) -> super::CommandRes
     let data: Set2dColliderShapePayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid set_2d_collider_shape payload: {}", e))?;
 
-    // Build minimal physics data with just the shape change
-    let mut physics_data = Physics2dData {
-        collider_shape: data.collider_shape,
+    // A patch, not a `Physics2dData { .., ..Default::default() }`: this command
+    // means "change the collider shape", and building a whole struct made it also
+    // reset mass, friction, restitution, gravity scale, the sensor/lock/CCD flags
+    // and the conveyor velocity to their defaults (PF-1167). `size`, `radius` and
+    // `vertices` stay optional and are only sent when the caller supplied them,
+    // so a Box→Circle change does not clobber a radius the caller did not mention.
+    let patch = Physics2dPatch {
+        collider_shape: Some(data.collider_shape),
+        size: data.size,
+        radius: data.radius,
+        vertices: data.vertices,
         ..Default::default()
     };
-    if let Some(size) = data.size {
-        physics_data.size = size;
-    }
-    if let Some(radius) = data.radius {
-        physics_data.radius = radius;
-    }
-    if let Some(vertices) = data.vertices {
-        physics_data.vertices = vertices;
-    }
 
     let update = Physics2dUpdate {
         entity_id: data.entity_id.clone(),
-        physics_data,
+        patch,
     };
 
     if queue_physics2d_update_from_bridge(update) {
@@ -603,14 +720,16 @@ fn handle_set_2d_body_type(payload: serde_json::Value) -> super::CommandResult {
     let data: Set2dBodyTypePayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid set_2d_body_type payload: {}", e))?;
 
-    let physics_data = Physics2dData {
-        body_type: data.body_type,
+    // Same defect as `set_2d_collider_shape` — flipping a platform to Static must
+    // not reset its friction and conveyor velocity along the way (PF-1167).
+    let patch = Physics2dPatch {
+        body_type: Some(data.body_type),
         ..Default::default()
     };
 
     let update = Physics2dUpdate {
         entity_id: data.entity_id.clone(),
-        physics_data,
+        patch,
     };
 
     if queue_physics2d_update_from_bridge(update) {
@@ -621,26 +740,40 @@ fn handle_set_2d_body_type(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
-/// Payload for create_2d_joint command.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Create2dJointPayload {
-    entity_id: String,
-    joint_data: PhysicsJoint2d,
+/// Read the `{ entityId, ...jointFields }` payload both 2D joint commands carry.
+///
+/// This used to be a `#[derive(Deserialize)]` struct expecting the joint NESTED
+/// under `jointData`, which nothing has ever sent: the store dispatches
+/// `set_joint_2d` with the joint's fields flat next to `entityId`. That was a
+/// hard serde reject on three counts at once — nesting, snake_case field names,
+/// and an externally-tagged `JointType2d` that cannot read a bare mode string —
+/// so the entire outbound 2D joint surface was inert (PF-1167). One flat
+/// vocabulary now serves every joint command, in both directions.
+fn parse_joint_2d_payload(
+    payload: &serde_json::Value,
+    command: &str,
+) -> Result<(String, PhysicsJoint2d), String> {
+    let entity_id = payload
+        .get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Invalid {} payload: missing entityId", command))?
+        .to_string();
+    let joint_data = PhysicsJoint2d::from_flat(payload)
+        .map_err(|e| format!("Invalid {} payload: {}", command, e))?;
+    Ok((entity_id, joint_data))
 }
 
-/// Handle create_2d_joint command.
+/// Handle create_2d_joint / set_joint_2d.
 fn handle_create_2d_joint(payload: serde_json::Value) -> super::CommandResult {
-    let data: Create2dJointPayload = serde_json::from_value(payload)
-        .map_err(|e| format!("Invalid create_2d_joint payload: {}", e))?;
+    let (entity_id, joint_data) = parse_joint_2d_payload(&payload, "create_2d_joint")?;
 
     let request = CreateJoint2dRequest {
-        entity_id: data.entity_id.clone(),
-        joint_data: data.joint_data,
+        entity_id: entity_id.clone(),
+        joint_data,
     };
 
     if queue_create_joint2d_from_bridge(request) {
-        tracing::info!("Queued 2D joint creation for entity: {}", data.entity_id);
+        tracing::info!("Queued 2D joint creation for entity: {}", entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -648,18 +781,17 @@ fn handle_create_2d_joint(payload: serde_json::Value) -> super::CommandResult {
 }
 
 /// Handle update_2d_joint command.
-/// Payload: { entityId, jointData: PhysicsJoint2d }
+/// Payload: { entityId, targetEntityId, jointType, ...typeSpecificParams }
 fn handle_update_2d_joint(payload: serde_json::Value) -> super::CommandResult {
-    let data: Create2dJointPayload = serde_json::from_value(payload)
-        .map_err(|e| format!("Invalid update_2d_joint payload: {}", e))?;
+    let (entity_id, joint_data) = parse_joint_2d_payload(&payload, "update_2d_joint")?;
 
     let request = UpdateJoint2dRequest {
-        entity_id: data.entity_id.clone(),
-        joint_data: data.joint_data,
+        entity_id: entity_id.clone(),
+        joint_data,
     };
 
     if queue_update_joint2d_from_bridge(request) {
-        tracing::info!("Queued 2D joint update for entity: {}", data.entity_id);
+        tracing::info!("Queued 2D joint update for entity: {}", entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -1095,12 +1227,127 @@ mod tests {
         );
     }
 
+    /// `physicsData` stays REQUIRED here — the `serde(default)` is on the patch's
+    /// fields, not on the outer payload — so an entity id alone is a payload error,
+    /// not a full reset to defaults. The old assertion here was
+    /// `!err.contains("Unknown")`, which this deserialization failure satisfies just
+    /// as happily as a real handler would; name the actual error instead.
     #[test]
-    fn set_physics2d_accepts_entity_id() {
-        let result = run("set_physics2d", json!({"entityId": "entity-1"}));
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(!err.contains("Unknown"), "Should reach 2D physics handler, got: {}", err);
+    fn set_physics2d_requires_a_physics_data_block() {
+        let err = run("set_physics2d", json!({"entityId": "entity-1"})).unwrap_err();
+        assert!(
+            err.contains("Invalid set_physics2d payload") && err.contains("physicsData"),
+            "expected a missing-physicsData payload error, got: {err}"
+        );
+    }
+
+    // === 2D partial update / toggle (PF-1167) ===
+    //
+    // These commands were dispatched by the web client for their whole life and
+    // were never known to the engine, so every call hit `Unknown command` and the
+    // browser saw nothing — `dispatchCommand` returns `void`. Both spellings must
+    // resolve to a real handler, so the assertion is that the payload gets far
+    // enough to fail on the missing pending queue (which native tests never have)
+    // rather than on the command name.
+
+    /// `run` panics when `dispatch` returns `None`, so reaching this assertion at
+    /// all proves the arm exists. The assertion itself proves the PAYLOAD got
+    /// through, and it has to be a POSITIVE one.
+    ///
+    /// A negative exclusion (`!err.contains("Unknown")`) is satisfied by a hard
+    /// deserialization reject as readily as by a real handler: handlers format
+    /// those as `Invalid <cmd> payload: {e}`, and serde's own text is lowercase
+    /// (`unknown variant ...`, `missing field ...`), which a case-sensitive
+    /// `contains("Unknown")` never sees. So a renamed field or a dropped
+    /// `serde(alias)` — the exact PF-1167 regression — would have passed.
+    ///
+    /// The one error only a command that got past deserialization can produce is
+    /// the missing thread-local queue, which native tests never have.
+    fn assert_reaches_handler(command: &str, payload: serde_json::Value) {
+        let err = run(command, payload).expect_err("no pending queue under native test");
+        assert!(
+            err.contains("PendingCommands resource not initialized"),
+            "{command} must deserialize and reach the pending queue, got: {err}"
+        );
+    }
+
+    #[test]
+    fn update_physics2d_is_a_known_command_under_both_spellings() {
+        for command in ["update_physics2d", "update_physics_2d"] {
+            assert_reaches_handler(command, json!({"entityId": "entity-1", "friction": 0.9}));
+        }
+    }
+
+    #[test]
+    fn update_physics2d_accepts_a_single_field() {
+        // The point of the command: one field, thirteen left alone. A payload this
+        // partial used to be a hard deserialization failure.
+        assert_reaches_handler("update_physics2d", json!({"entityId": "e", "bodyType": "static"}));
+        assert_reaches_handler("update_physics2d", json!({"entityId": "e"}));
+    }
+
+    #[test]
+    fn update_physics2d_rejects_missing_entity_id() {
+        let err = run("update_physics2d", json!({"friction": 0.5})).unwrap_err();
+        assert!(
+            err.contains("Invalid update_physics2d payload"),
+            "expected a payload error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn toggle_physics2d_is_a_known_command_under_all_three_spellings() {
+        for command in ["toggle_physics2d", "toggle_physics_2d", "set_physics_2d_enabled"] {
+            assert_reaches_handler(command, json!({"entityId": "entity-1", "enabled": true}));
+        }
+    }
+
+    #[test]
+    fn toggle_physics2d_rejects_missing_entity_id() {
+        let err = run("toggle_physics2d", json!({"enabled": true})).unwrap_err();
+        assert!(err.contains("Missing entityId"), "got: {err}");
+    }
+
+    /// An absent (or non-boolean) `enabled` must mean "turn it on". Defaulting to
+    /// `false` would make a missing key silently disable physics.
+    #[test]
+    fn toggle_enabled_defaults_to_true_when_absent_or_unusable() {
+        assert!(resolve_toggle_enabled(&json!({"entityId": "e"})));
+        assert!(resolve_toggle_enabled(&json!({"entityId": "e", "enabled": null})));
+        assert!(resolve_toggle_enabled(&json!({"entityId": "e", "enabled": "false"})));
+        assert!(resolve_toggle_enabled(&json!({"entityId": "e", "enabled": true})));
+        assert!(!resolve_toggle_enabled(&json!({"entityId": "e", "enabled": false})));
+    }
+
+    /// The granular commands accept the browser's lowercase enum spellings. Before
+    /// the `serde(alias)` attributes these were hard rejects, so no shape or body
+    /// type change from the editor ever reached the engine.
+    #[test]
+    fn granular_2d_commands_accept_lowercase_enum_values() {
+        assert_reaches_handler(
+            "set_2d_collider_shape",
+            json!({"entityId": "e", "colliderShape": "circle", "radius": 2.0}),
+        );
+        assert_reaches_handler("set_2d_body_type", json!({"entityId": "e", "bodyType": "static"}));
+    }
+
+    #[test]
+    fn granular_2d_commands_still_accept_pascal_case_enum_values() {
+        assert_reaches_handler(
+            "set_2d_collider_shape",
+            json!({"entityId": "e", "colliderShape": "ConvexPolygon"}),
+        );
+        assert_reaches_handler("set_2d_body_type", json!({"entityId": "e", "bodyType": "Kinematic"}));
+    }
+
+    #[test]
+    fn set_physics2d_accepts_a_partial_physics_data_block() {
+        // `physicsData` stays REQUIRED (the `serde(default)` is on the patch, not
+        // on the outer payload) but the block itself may now be partial.
+        assert_reaches_handler(
+            "set_physics2d",
+            json!({"entityId": "e", "physicsData": {"bodyType": "static"}}),
+        );
     }
 
     // === remove_joint ===
@@ -1128,5 +1375,62 @@ mod tests {
     fn dispatch_returns_none_for_unknown_command() {
         let result = dispatch("definitely_not_physics", &json!({}));
         assert!(result.is_none(), "Unknown command should return None");
+    }
+
+    // === the REAL entry point (PF-1167 round 2) ===
+    //
+    // Every test above calls this module's own `dispatch`, which is NOT how a
+    // command arrives. `commands::dispatch` matches `route_domain` FIRST, and
+    // `route_domain` ends in `_ => 255` whose arm returns `Unknown command`. So a
+    // perfect arm in this file is dead code unless the router also names it, and
+    // a domain-level test passes either way.
+    //
+    // That is not hypothetical: `update_physics2d` and `toggle_physics2d` (both
+    // spellings each) had complete handlers, four green tests above, and no
+    // router entry — so every call from the browser hit `Unknown command` and
+    // `dispatchCommand` swallowed it. These tests go through the real front door.
+
+    /// Reaching the pending queue is the only outcome that proves BOTH gates were
+    /// passed. A name-only assertion (`!err.contains("Unknown command")`) would be
+    /// satisfied by a deserialization reject, which is the other half of this
+    /// defect class.
+    fn assert_routed_and_reaches_handler(command: &str, payload: serde_json::Value) {
+        let err = super::super::dispatch(command, payload)
+            .expect_err("no pending queue under native test");
+        assert!(
+            err.contains("PendingCommands resource not initialized"),
+            "{command} must be routed by route_domain AND deserialize, got: {err}"
+        );
+    }
+
+    #[test]
+    fn every_2d_physics_command_is_routed_by_the_real_dispatch() {
+        for command in ["update_physics2d", "update_physics_2d"] {
+            assert_routed_and_reaches_handler(command, json!({"entityId": "e", "friction": 0.9}));
+        }
+        for command in ["toggle_physics2d", "toggle_physics_2d", "set_physics_2d_enabled"] {
+            assert_routed_and_reaches_handler(command, json!({"entityId": "e", "enabled": true}));
+        }
+        for command in ["set_physics2d", "set_physics_2d"] {
+            assert_routed_and_reaches_handler(
+                command,
+                json!({"entityId": "e", "physicsData": {"bodyType": "static"}}),
+            );
+        }
+        for command in ["set_2d_collider_shape", "set_2d_body_type"] {
+            assert_routed_and_reaches_handler(
+                command,
+                json!({"entityId": "e", "colliderShape": "circle", "bodyType": "static"}),
+            );
+        }
+    }
+
+    /// The router's fallthrough, so the assertion above is not vacuously true for
+    /// any string at all.
+    #[test]
+    fn an_unrouted_name_is_rejected_by_the_real_dispatch() {
+        let err = super::super::dispatch("update_physics3d", json!({"entityId": "e"}))
+            .expect_err("an unrouted name must not dispatch");
+        assert!(err.contains("Unknown command"), "got: {err}");
     }
 }

@@ -2,7 +2,7 @@
 
 use super::PendingCommands;
 use crate::core::physics::{JointData, JointLimits, JointMotor, JointType, PhysicsPatch};
-use crate::core::physics_2d::{Physics2dData, PhysicsJoint2d};
+use crate::core::physics_2d::{Physics2dPatch, PhysicsJoint2d};
 
 // === 3D Physics Request Structs ===
 
@@ -69,10 +69,16 @@ pub struct RaycastRequest {
 
 // === 2D Physics Request Structs ===
 
+/// A queued change to an entity's 2D physics.
+///
+/// Carries a `Physics2dPatch` rather than a whole `Physics2dData` so a command
+/// that means "change the collider shape" cannot also reset the thirteen fields
+/// it never mentioned (PF-1167). `set_physics2d` keeps its full-replace meaning
+/// by queueing `Physics2dPatch::full(..)`.
 #[derive(Debug, Clone)]
 pub struct Physics2dUpdate {
     pub entity_id: String,
-    pub physics_data: Physics2dData,
+    pub patch: Physics2dPatch,
 }
 
 #[derive(Debug, Clone)]

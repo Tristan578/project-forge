@@ -369,7 +369,15 @@ export interface Physics2dData {
 
 // 2D Joint data matching Rust's PhysicsJoint2d struct
 export interface Joint2dData {
-  targetEntityId: number;
+  /**
+   * The entity this joint anchors to.
+   *
+   * A `string`, matching the engine's `PhysicsJoint2d.target_entity_id: String` —
+   * every entity id in this codebase is a UUID string. This was declared `number`
+   * for its whole life, so the only correct value a caller could construct was
+   * one serde rejects (PF-1167).
+   */
+  targetEntityId: string;
   jointType: 'revolute' | 'prismatic' | 'rope' | 'spring';
   localAnchor1: [number, number];
   localAnchor2: [number, number];
