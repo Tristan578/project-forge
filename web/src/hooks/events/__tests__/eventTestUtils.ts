@@ -82,6 +82,13 @@ export function createMockActions() {
     setSpriteData: vi.fn(),
     setTilemapData: vi.fn(),
     setSkeleton2d: vi.fn(),
+    // State-only mirrors of engine-reported state. An inbound handler MUST use
+    // these, never the dispatching siblings above — those echo a full-replace
+    // command straight back at the engine that just described the state.
+    applySpriteFromEngine: vi.fn(),
+    applyCamera2dFromEngine: vi.fn(),
+    applyTilemapFromEngine: vi.fn(),
+    applySkeleton2dFromEngine: vi.fn(),
     // Particle events
     setPrimaryParticle: vi.fn(),
     setParticleEnabled: vi.fn(),

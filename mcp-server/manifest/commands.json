@@ -10554,18 +10554,18 @@
           },
           "name": {
             "type": "string",
-            "description": "IK constraint name"
+            "description": "IK constraint name (accepted as chainName)"
           },
           "bones": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Bone chain (2 bones)"
+            "description": "Bone chain, root-first: 2 to 64 bone names. Omit to derive the chain from startBone/endBone"
           },
           "targetEntityId": {
-            "type": "number",
-            "description": "Target entity ID"
+            "type": "string",
+            "description": "Target entity ID (UUID string; empty means no target yet)"
           },
           "bendDirection": {
             "type": "number",
@@ -10574,6 +10574,14 @@
           "mix": {
             "type": "number",
             "description": "IK/FK blend (0-1)"
+          },
+          "startBone": {
+            "type": "string",
+            "description": "Chain root, when bones is omitted"
+          },
+          "endBone": {
+            "type": "string",
+            "description": "Chain tip, when bones is omitted; its parents are walked up to startBone"
           }
         },
         "required": [
@@ -10609,7 +10617,7 @@
     },
     {
       "name": "import_skeleton_json",
-      "description": "Import skeleton data from JSON (custom, DragonBones, or Spine format)",
+      "description": "Import skeleton data from SpawnForge's own skeleton JSON",
       "category": "skeleton2d",
       "parameters": {
         "type": "object",
@@ -10620,22 +10628,19 @@
           },
           "jsonData": {
             "type": "string",
-            "description": "JSON skeleton data"
+            "description": "Skeleton JSON: an object with a non-empty `bones` array, each bone carrying a unique `name`"
           },
           "format": {
             "type": "string",
             "enum": [
-              "custom",
-              "dragonbones",
-              "spine"
+              "custom"
             ],
-            "description": "Source format"
+            "description": "Source format. Only 'custom' (SpawnForge's own skeleton JSON) is supported; dragonbones and spine need converting first"
           }
         },
         "required": [
           "entityId",
-          "jsonData",
-          "format"
+          "jsonData"
         ]
       },
       "tokenCost": 25,
@@ -10644,7 +10649,7 @@
     },
     {
       "name": "auto_weight_skeleton2d",
-      "description": "Automatically generate vertex weights for a skeleton mesh",
+      "description": "Automatically generate vertex weights for a skeleton mesh (engine-chosen algorithm)",
       "category": "skeleton2d",
       "parameters": {
         "type": "object",
@@ -10652,23 +10657,10 @@
           "entityId": {
             "type": "string",
             "description": "Skeleton entity ID"
-          },
-          "method": {
-            "type": "string",
-            "enum": [
-              "heat",
-              "envelope"
-            ],
-            "description": "Auto-weighting algorithm"
-          },
-          "iterations": {
-            "type": "number",
-            "description": "Iteration count for heat method"
           }
         },
         "required": [
-          "entityId",
-          "method"
+          "entityId"
         ]
       },
       "tokenCost": 20,

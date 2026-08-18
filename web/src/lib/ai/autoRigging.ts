@@ -5,6 +5,8 @@
  * so that AI-generated models can be animated without manual rigging work.
  */
 
+import { buildCreateSkeleton2dPayload } from '@/lib/skeleton2d/skeletonPayload';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -427,46 +429,48 @@ export function validateRig(rig: RigTemplate): RigValidationResult {
  * Convert a rig template into engine commands that attach a skeleton
  * to the specified entity. Uses the skeleton2d command interface which
  * supports both 2D and 3D bone hierarchies.
+ *
+ * A rig can arrive from an LLM, so `warnings` is worth passing: an IK chain the
+ * builder had to bound is a chain that will not move the bones the caller named.
  */
-export function rigToCommands(rig: RigTemplate, entityId: string): EngineCommand[] {
+export function rigToCommands(
+  rig: RigTemplate,
+  entityId: string,
+  warnings?: string[],
+): EngineCommand[] {
   const commands: EngineCommand[] = [];
 
-  // Build bones array in the format expected by `SkeletonData2d`
-  const bones = rig.bones.map((bone) => ({
-    name: bone.name,
-    parentBone: bone.parent ?? null,
-    // Send all 3 coordinates — the engine preserves Z for round-trip fidelity
-    // even though only XY is used for 2D rendering.
-    localPosition: [bone.position.x, bone.position.y, bone.position.z] as [number, number, number],
-    localRotation: bone.rotation ? bone.rotation.z : 0,
-    localScale: [1, 1] as [number, number],
-    length: bone.length,
-    color: [1, 1, 1, 1] as [number, number, number, number],
-  }));
-
-  // Set skeleton data on the entity. `create_skeleton2d` is the command the
-  // engine actually implements — it takes the whole `SkeletonData2d` nested
-  // under `skeletonData`, not the fields spread across the payload root.
+  // `create_skeleton2d` is the command the engine actually implements, and it takes
+  // the whole `SkeletonData2d` nested under `skeletonData` rather than the fields
+  // spread across the payload root. Everything about the wire shape — the 3-element
+  // `localPosition`, the string `targetEntityId`, the finite-number guards — lives in
+  // `buildCreateSkeleton2dPayload`, because a rig can arrive from an LLM and a single
+  // NaN or wrong arity is a hard reject that loses the entire skeleton.
   commands.push({
     command: 'create_skeleton2d',
-    payload: {
-      entityId,
-      skeletonData: {
-        bones,
-        slots: [],
-        skins: {},
-        activeSkin: 'default',
-        ikConstraints: rig.ik_chains.map((chain) => ({
-          name: chain.name,
-          boneChain: buildBoneChain(rig.bones, chain.startBone, chain.endBone),
-          // `IkConstraint2d.target_entity_id` is a UUID string, not a number.
-          // Empty means "no target yet" — the user picks one in the panel.
-          targetEntityId: '',
-          bendDirection: 1,
-          mix: 1.0,
-        })),
-      },
-    },
+    payload: buildCreateSkeleton2dPayload(entityId, {
+      bones: rig.bones.map((bone) => ({
+        name: bone.name,
+        parentBone: bone.parent ?? null,
+        localPosition: [bone.position.x, bone.position.y, bone.position.z],
+        localRotation: bone.rotation ? bone.rotation.z : 0,
+        localScale: [1, 1],
+        length: bone.length,
+        color: [1, 1, 1, 1],
+      })),
+      slots: [],
+      skins: {},
+      activeSkin: 'default',
+      ikConstraints: rig.ik_chains.map((chain) => ({
+        name: chain.name,
+        boneChain: buildBoneChain(rig.bones, chain.startBone, chain.endBone),
+        // `IkConstraint2d.target_entity_id` is a UUID string, not a number.
+        // Empty means "no target yet" — the user picks one in the panel.
+        targetEntityId: '',
+        bendDirection: 1,
+        mix: 1.0,
+      })),
+    }, warnings),
   });
 
   return commands;

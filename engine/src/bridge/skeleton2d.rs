@@ -273,7 +273,8 @@ pub(super) fn apply_auto_weight_skeleton2d(
 
         // Clone bones to avoid borrow conflict with mutable skin iteration
         let bones = skeleton.bones.clone();
-        let bone_world_positions = compute_bone_world_positions(&bones);
+        let bone_world_positions =
+            crate::core::skeleton2d::compute_bone_world_positions(&bones);
         let iterations = request.iterations.max(1);
 
         // Auto-weight each mesh attachment in each skin
@@ -305,38 +306,6 @@ pub(super) fn apply_auto_weight_skeleton2d(
             request.entity_id, request.method, request.iterations
         );
     }
-}
-
-/// Compute world-space positions for each bone by traversing the parent hierarchy.
-fn compute_bone_world_positions(
-    bones: &[crate::core::skeleton2d::Bone2dDef],
-) -> std::collections::HashMap<String, [f32; 2]> {
-    let mut positions = std::collections::HashMap::new();
-    // Build name -> index lookup
-    let name_to_idx: std::collections::HashMap<&str, usize> = bones
-        .iter()
-        .enumerate()
-        .map(|(i, b)| (b.name.as_str(), i))
-        .collect();
-
-    for bone in bones {
-        // Use only XY for 2D world-position accumulation; Z is stored but not used here.
-        let mut pos_x = bone.local_position[0];
-        let mut pos_y = bone.local_position[1];
-        let mut current = bone.parent_bone.as_deref();
-        // Walk up the hierarchy, accumulating positions
-        while let Some(parent_name) = current {
-            if let Some(&idx) = name_to_idx.get(parent_name) {
-                pos_x += bones[idx].local_position[0];
-                pos_y += bones[idx].local_position[1];
-                current = bones[idx].parent_bone.as_deref();
-            } else {
-                break;
-            }
-        }
-        positions.insert(bone.name.clone(), [pos_x, pos_y]);
-    }
-    positions
 }
 
 /// Compute distance-based vertex weights with optional smoothing iterations.

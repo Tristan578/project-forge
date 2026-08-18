@@ -5,6 +5,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { boneNameList } from '@/lib/skeleton2d/skeletonPayload';
 import type { Bone2dDef } from '@/stores/slices/types';
 
 export function SkeletonInspector({ entityId }: { entityId: string }) {
@@ -25,6 +26,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
       <div className="px-3 py-2 space-y-2">
         <div className="text-sm text-zinc-400 mb-2">No skeleton data</div>
         <button
+          type="button"
           onClick={() => {
             setSkeleton2d(entityId, {
               bones: [],
@@ -100,6 +102,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
       <div key={bone.name} className="flex items-center gap-2 py-1">
         <div style={{ paddingLeft: `${indent * 12}px` }} className="flex-1 flex items-center gap-2">
           <button
+            type="button"
             onClick={() => setSelectedBone(bone.name)}
             className={`px-2 py-1 rounded text-sm flex-1 text-left ${
               selectedBone === bone.name ? 'bg-blue-600' : 'bg-zinc-700 hover:bg-zinc-600'
@@ -108,10 +111,12 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             {bone.name}
           </button>
           <button
+            type="button"
             onClick={() => handleDeleteBone(bone.name)}
             className="p-1 hover:bg-red-600 rounded"
+            aria-label={`Delete bone ${bone.name}`}
           >
-            <Trash2 className="w-3 h-3" />
+            <Trash2 className="w-3 h-3" aria-hidden="true" />
           </button>
         </div>
       </div>,
@@ -151,10 +156,12 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             onKeyDown={(e) => e.key === 'Enter' && handleAddBone()}
           />
           <button
+            type="button"
             onClick={handleAddBone}
             className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
+            aria-label={selectedBone ? `Add bone as a child of ${selectedBone}` : 'Add root bone'}
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
         <div className="text-xs text-zinc-400 mt-1">
@@ -267,17 +274,80 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
         <div>
           <label className="text-sm font-medium block mb-1">IK Constraints</label>
           <div className="space-y-1">
-            {skeleton.ikConstraints.map((ik, idx) => (
-              <div key={idx} className="text-xs bg-zinc-800 rounded px-2 py-1">
-                <div className="font-medium">{ik.name}</div>
-                <div className="text-zinc-400">
-                  Bones: {ik.boneChain.join(' → ')}
+            {skeleton.ikConstraints.map((ik, idx) => {
+              // The engine's solver skips any constraint whose `target_entity_id`
+              // it cannot resolve, and an empty one never resolves. The panel used
+              // to render such a constraint identically to a working one — name,
+              // chain, mix — so a chain that could never move a bone looked live.
+              //
+              // `!== ''` is not the test. `setSkeleton2d` writes its argument into
+              // the store verbatim, so the key can be absent entirely, and
+              // `undefined !== ''` is `true` — the inactive treatment would then
+              // miss the very case it was written for and render a bare "Target: ".
+              const rawTarget: unknown = ik.targetEntityId;
+              const target =
+                typeof rawTarget === 'string' || typeof rawTarget === 'number'
+                  ? String(rawTarget)
+                  : '';
+              const hasTarget = target.length > 0;
+              const bendsNegative =
+                typeof ik.bendDirection === 'number' &&
+                Number.isFinite(ik.bendDirection) &&
+                ik.bendDirection < 0;
+              // Same reason as `rawTarget` above, one field over. `boneChain` can
+              // be absent, so `.join` threw a TypeError out of render and blanked
+              // the whole inspector — a user imports a rig and the panel vanishes.
+              // It can also hold a `null`, which rendered as an empty segment
+              // ("a →  → b") while the builder drops it and sends "a → b".
+              const chain = boneNameList(ik.boneChain);
+              // The last of the three numeric fields to be brought into line with
+              // `wireIkConstraint`. The raw read printed `Mix: NaN%` for a missing
+              // key while the engine received 100%, and `150%` for a value the
+              // builder clamps to 100%.
+              const mixSource: unknown = ik.mix;
+              const mix =
+                typeof mixSource === 'number' && Number.isFinite(mixSource)
+                  ? Math.min(1, Math.max(0, mixSource))
+                  : 1;
+              return (
+                <div
+                  key={idx}
+                  // A left rule rather than `opacity-60`: group opacity compounds
+                  // with the row's already-dim colours, and it dropped the amber
+                  // "(inactive)" flag to 4.13:1 and the zinc body text to 2.99:1 —
+                  // making the one row that reports a problem the hardest to read.
+                  //
+                  // The rule is reserved on BOTH branches. `box-sizing: border-box`
+                  // means a border only on the flagged row insets its text by 2px
+                  // against every sibling, so the column reads ragged on precisely
+                  // the row you most want to read cleanly. Same `amber-400` as the
+                  // "(inactive)" text it reinforces — one state, one accent.
+                  className={`text-xs bg-zinc-800 rounded px-2 py-1 border-l-2 ${hasTarget ? 'border-transparent' : 'border-amber-400'}`}
+                >
+                  <div className="font-medium">
+                    {ik.name}
+                    {!hasTarget && (
+                      <span className="ml-1.5 font-normal text-amber-400">(inactive)</span>
+                    )}
+                  </div>
+                  <div className="text-zinc-400">
+                    Bones: {chain.length > 0 ? chain.join(' → ') : 'none'}
+                  </div>
+                  <div className={hasTarget ? 'text-zinc-400' : 'text-amber-400'}>
+                    Target: {hasTarget ? target : 'not set — this chain will not solve'}
+                  </div>
+                  <div className="text-zinc-400">
+                    {/* Mirrors `wireIkConstraint`'s rule exactly. `>= 0` reads a
+                        missing or NaN bend direction as "negative" while the
+                        builder sends +1, so the panel contradicted the payload. */}
+                    Bend: {bendsNegative ? 'negative' : 'positive'}
+                  </div>
+                  <div className="text-zinc-400">
+                    Mix: {(mix * 100).toFixed(0)}%
+                  </div>
                 </div>
-                <div className="text-zinc-400">
-                  Mix: {(ik.mix * 100).toFixed(0)}%
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -290,6 +360,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             {animations.map((anim) => (
               <button
                 key={anim.name}
+                type="button"
                 onClick={() => handlePlayAnimation(anim.name)}
                 className="w-full text-left px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-sm"
               >
@@ -302,6 +373,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
 
       {/* Remove Skeleton */}
       <button
+        type="button"
         onClick={async () => {
           if (await confirm('Remove skeleton data?')) {
             removeSkeleton2d(entityId);

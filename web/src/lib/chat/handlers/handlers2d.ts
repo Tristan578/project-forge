@@ -30,6 +30,10 @@ import type {
   SliceMode,
   Grid2dSettings,
 } from '@/stores/slices/types';
+import {
+  MAX_IK_BONE_CHAIN_2D,
+  collectSkeleton2dWarnings,
+} from '@/lib/skeleton2d/skeletonPayload';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1110,6 +1114,191 @@ function defaultSkeleton2d(): SkeletonData2d {
   };
 }
 
+/** What a value IS, for an error message that names the caller's mistake. */
+function jsonKind(value: unknown): string {
+  if (value === null) return 'null';
+  // A round-tripped array hole reads back as `undefined` through an indexed access,
+  // and `a undefined` reads like a typo rather than a diagnosis.
+  if (value === undefined) return 'missing';
+  if (Array.isArray(value)) return 'an array';
+  return `a ${typeof value}`;
+}
+
+/**
+ * An array of objects, checked by INDEX. `.every`/`.some`/`.filter` skip a hole
+ * entirely, so a callback form reports itself satisfied on input it never looked
+ * at (PF-1143) — and `for...of` yields `undefined` for a hole rather than
+ * skipping it, so the guard would admit an array whose consumer throws.
+ */
+function rejectNonObjectEntries(value: unknown, field: string): string | null {
+  if (!Array.isArray(value)) return `\`${field}\` must be an array, got ${jsonKind(value)}`;
+  for (let i = 0; i < value.length; i += 1) {
+    const entry = value[i];
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return `\`${field}[${i}]\` is ${jsonKind(entry)}, not an object`;
+    }
+  }
+  return null;
+}
+
+type SkeletonImportResult =
+  | { ok: true; data: SkeletonData2d }
+  | { ok: false; reason: string };
+
+/**
+ * `import_skeleton_json` hands `JSON.parse` a caller-supplied string, and that
+ * result is whatever the file says: `null`, a string, an array, or an object whose
+ * `bones` is a number. Every reader downstream (`bones.find`, `[...ikConstraints]`,
+ * the inspector's `.map`) assumes the stored copy is well-shaped, so one malformed
+ * import throws somewhere far from the import that caused it.
+ *
+ * This used to coerce all of that to an empty skeleton and report `success: true`.
+ * That is the destructive direction: `setSkeleton2d` is a full replace, so a
+ * mistyped file silently REPLACED a real rig with nothing while the tool call
+ * reported that it had imported one. A rejection names the field instead, and the
+ * store is left untouched.
+ *
+ * Containers and identity only — the numeric per-bone fields are defaulted at the
+ * wire boundary by `buildWireSkeletonData2d`. What cannot be defaulted is a bone's
+ * `name` (every lookup in this file is `bones.find(b => b.name === …)`) or the
+ * `parentBone` that places it in the tree.
+ */
+function normalizeImportedSkeleton(parsed: unknown): SkeletonImportResult {
+  const base = defaultSkeleton2d();
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, reason: `expected a JSON object describing a skeleton, got ${jsonKind(parsed)}` };
+  }
+
+  const src = parsed as Record<string, unknown>;
+
+  if (!Object.hasOwn(src, 'bones')) {
+    return { ok: false, reason: 'missing required field `bones`' };
+  }
+  const boneError = rejectNonObjectEntries(src.bones, 'bones');
+  if (boneError) return { ok: false, reason: boneError };
+  const rawBones = src.bones as Record<string, unknown>[];
+  if (rawBones.length === 0) {
+    return { ok: false, reason: '`bones` is empty — importing it would replace the entity\'s rig with nothing' };
+  }
+
+  const names = new Set<string>();
+  for (let i = 0; i < rawBones.length; i += 1) {
+    const name = rawBones[i]!.name;
+    if (typeof name !== 'string' || name.length === 0) {
+      return { ok: false, reason: `\`bones[${i}]\` has no \`name\` — every bone lookup here is by name` };
+    }
+    if (names.has(name)) {
+      return { ok: false, reason: `\`bones[${i}]\` repeats the bone name "${name}" — a name lookup would always resolve to the first` };
+    }
+    names.add(name);
+  }
+  for (let i = 0; i < rawBones.length; i += 1) {
+    const parent = rawBones[i]!.parentBone;
+    if (parent === undefined || parent === null) continue;
+    if (typeof parent !== 'string') {
+      return { ok: false, reason: `\`bones[${i}].parentBone\` is ${jsonKind(parent)}, not a bone name or null` };
+    }
+    if (!names.has(parent)) {
+      return { ok: false, reason: `\`bones[${i}].parentBone\` names "${parent}", which is not among the imported bones` };
+    }
+  }
+
+  // Every `parentBone` naming a real bone still permits a cycle (a -> b -> a), and a
+  // cycle is not merely invalid data — it is unreachable from the root, so the
+  // inspector's tree silently omits those bones while the engine's world-position
+  // walk visits every bone including the ones inside the loop. This is the last
+  // boundary that sees the whole rig at once, so it is the one that can say which
+  // bones form the cycle rather than leaving a rig that half-renders.
+  const parentOf = new Map<string, string | null>();
+  for (const raw of rawBones) {
+    const parent = raw.parentBone;
+    parentOf.set(raw.name as string, typeof parent === 'string' ? parent : null);
+  }
+  // Bones proven to reach a root. Sharing this across the outer loop keeps the scan
+  // linear — without it a long chain is re-walked once per bone on it.
+  const acyclic = new Set<string>();
+  for (const raw of rawBones) {
+    const start = raw.name as string;
+    if (acyclic.has(start)) continue;
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    let current: string | null = start;
+    while (current !== null && !acyclic.has(current)) {
+      if (onPath.has(current)) {
+        const cycle = path.slice(path.indexOf(current));
+        return {
+          ok: false,
+          reason: `\`parentBone\` forms a cycle: ${cycle.map(n => `"${n}"`).join(' -> ')} -> "${current}". A bone inside a cycle has no root, so it would never appear in the hierarchy.`,
+        };
+      }
+      onPath.add(current);
+      path.push(current);
+      current = parentOf.get(current) ?? null;
+    }
+    for (const name of path) acyclic.add(name);
+  }
+
+  for (const field of ['slots', 'ikConstraints'] as const) {
+    if (!Object.hasOwn(src, field)) continue;
+    const error = rejectNonObjectEntries(src[field], field);
+    if (error) return { ok: false, reason: error };
+  }
+
+  // `boneChain` was the one field this function stored by cast rather than by
+  // check, and the cast says `string[]` about whatever the file happened to hold.
+  // The damage is not a crash — every reader defends itself (`boneNameList`
+  // returns `[]` for a non-array, the outbound builder drops the chain and warns)
+  // — it is the exact failure this function exists to prevent: the import reports
+  // success, `setSkeleton2d` replaces the rig, and the solver then silently skips
+  // a constraint whose chain is a number or names bones the rig does not have.
+  // Checked by INDEX for the PF-1143 reason: a round-tripped hole arrives as the
+  // `null` a callback form would never look at.
+  if (Object.hasOwn(src, 'ikConstraints')) {
+    const constraints = src.ikConstraints as Record<string, unknown>[];
+    for (let i = 0; i < constraints.length; i += 1) {
+      const chain = constraints[i]!.boneChain;
+      if (chain === undefined) {
+        return { ok: false, reason: `\`ikConstraints[${i}]\` has no \`boneChain\` — a constraint is the bones it solves` };
+      }
+      if (!Array.isArray(chain)) {
+        return { ok: false, reason: `\`ikConstraints[${i}].boneChain\` is ${jsonKind(chain)}, not an array of bone names` };
+      }
+      for (let j = 0; j < chain.length; j += 1) {
+        const boneName: unknown = chain[j];
+        if (typeof boneName !== 'string' || boneName.length === 0) {
+          return { ok: false, reason: `\`ikConstraints[${i}].boneChain[${j}]\` is ${jsonKind(boneName)}, not a bone name` };
+        }
+        if (!names.has(boneName)) {
+          return { ok: false, reason: `\`ikConstraints[${i}].boneChain[${j}]\` names "${boneName}", which is not among the imported bones` };
+        }
+      }
+    }
+  }
+
+  if (Object.hasOwn(src, 'skins')) {
+    const skins = src.skins;
+    if (typeof skins !== 'object' || skins === null || Array.isArray(skins)) {
+      return { ok: false, reason: `\`skins\` must be an object keyed by skin name, got ${jsonKind(skins)}` };
+    }
+  }
+  if (Object.hasOwn(src, 'activeSkin') && typeof src.activeSkin !== 'string') {
+    return { ok: false, reason: `\`activeSkin\` must be a string, got ${jsonKind(src.activeSkin)}` };
+  }
+
+  return {
+    ok: true,
+    data: {
+      bones: rawBones as unknown as SkeletonData2d['bones'],
+      slots: (Object.hasOwn(src, 'slots') ? src.slots : base.slots) as SkeletonData2d['slots'],
+      skins: (Object.hasOwn(src, 'skins') ? src.skins : base.skins) as SkeletonData2d['skins'],
+      activeSkin: Object.hasOwn(src, 'activeSkin') ? (src.activeSkin as string) : base.activeSkin,
+      ikConstraints: (Object.hasOwn(src, 'ikConstraints')
+        ? src.ikConstraints
+        : base.ikConstraints) as SkeletonData2d['ikConstraints'],
+    },
+  };
+}
+
 const skeleton2dHandlers: Record<string, ToolHandler> = {
   create_skeleton2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
@@ -1341,35 +1530,83 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(
         z.object({
           entityId: zEntityId,
-          chainName: z.string(),
-          startBone: z.string(),
-          endBone: z.string(),
+          // `name` + `bones` is the vocabulary the MCP manifest publishes, so an
+          // LLM following the documented schema sent a payload this handler used to
+          // reject outright. `chainName` + `startBone`/`endBone` is the traversal
+          // form it shipped with, and is what the auto-rigger's own `IKChain` speaks.
+          // Both are accepted; neither is guessed at.
+          name: z.string().min(1).optional(),
+          chainName: z.string().min(1).optional(),
+          bones: z.array(z.string().min(1)).min(2).max(MAX_IK_BONE_CHAIN_2D).optional(),
+          startBone: z.string().min(1).optional(),
+          endBone: z.string().min(1).optional(),
+          targetEntityId: zEntityId.optional(),
+          bendDirection: z.number().optional(),
+          mix: z.number().min(0).max(1).optional(),
         }),
         args,
       );
       if (p.error) return p.error;
 
-      const { entityId, chainName, startBone, endBone } = p.data;
+      const { entityId, bones: explicitChain, startBone, endBone, targetEntityId, bendDirection, mix } = p.data;
+      const chainName = p.data.name ?? p.data.chainName;
+      if (!chainName) {
+        return { success: false, error: 'Missing name (or chainName) for the IK chain' };
+      }
 
       const existing = ownEntry(ctx.store.skeletons2d, entityId) ?? defaultSkeleton2d();
 
-      // Build bone chain from skeleton bones
-      const bones = existing.bones;
-      const chain: string[] = [];
-      let current: string | null = endBone;
-      while (current && current !== startBone) {
-        chain.unshift(current);
-        const bone = bones.find(b => b.name === current);
-        current = bone?.parentBone ?? null;
+      let boneChain: string[];
+      if (explicitChain) {
+        boneChain = explicitChain;
+      } else if (startBone && endBone) {
+        // Walk endBone's parents up to startBone. `parentBone` is caller-supplied
+        // data, so a cycle (a -> b -> a) is representable and would spin forever;
+        // the seen-set ends the walk instead of hanging the tab.
+        const chain: string[] = [];
+        const seen = new Set<string>();
+        let current: string | null = endBone;
+        while (current && current !== startBone && !seen.has(current)) {
+          seen.add(current);
+          chain.unshift(current);
+          const bone = existing.bones.find(b => b.name === current);
+          current = bone?.parentBone ?? null;
+        }
+        if (current !== startBone) {
+          return {
+            success: false,
+            error: `No bone path from "${startBone}" to "${endBone}" — check the parentBone hierarchy`,
+          };
+        }
+        chain.unshift(startBone);
+        if (chain.length < 2) {
+          return { success: false, error: 'startBone and endBone must name different bones' };
+        }
+        if (chain.length > MAX_IK_BONE_CHAIN_2D) {
+          return {
+            success: false,
+            error: `Bone path is ${chain.length} long, over the ${MAX_IK_BONE_CHAIN_2D} limit`,
+          };
+        }
+        boneChain = chain;
+      } else {
+        return { success: false, error: 'Provide either bones, or both startBone and endBone' };
       }
-      if (current === startBone) chain.unshift(startBone);
 
       const ik: IkConstraint2d = {
         name: chainName,
-        boneChain: chain.length > 0 ? chain : [startBone, endBone],
-        targetEntityId: 0,
-        bendDirection: 1,
-        mix: 1,
+        boneChain,
+        // Was hardcoded to 0 with no way to override, so every constraint the AI
+        // created was inert: the engine's solver skips any whose target entity it
+        // cannot find, and 0 — a number, where the engine field is an `EntityId`
+        // UUID string — matches nothing. Absent means "no target yet", which the
+        // solver also skips, but the user can pick one in the panel; a bogus id
+        // looks configured and never will be.
+        targetEntityId: targetEntityId ?? '',
+        // Normalized to ±1 — the engine treats the sign, not the magnitude.
+        // Omitted and `0` both mean "bend positive"; only a negative flips it.
+        bendDirection: (bendDirection ?? 1) < 0 ? -1 : 1,
+        mix: mix ?? 1,
       };
 
       ctx.store.setSkeleton2d(entityId, {
@@ -1399,12 +1636,67 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   import_skeleton_json: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const p = parseArgs(z.object({ entityId: zEntityId, json: z.string() }), args);
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          // `jsonData` is the name the MCP manifest publishes, so it is the only
+          // spelling a caller following the documented schema sends — and this
+          // handler read `json`, which the manifest has never mentioned, so every
+          // documented call failed validation. `json` stays accepted because it is
+          // the spelling the handler shipped with; neither is guessed at.
+          jsonData: z.string().optional(),
+          json: z.string().optional(),
+          format: z.enum(['custom', 'dragonbones', 'spine']).optional(),
+        }),
+        args,
+      );
       if (p.error) return p.error;
-      const { entityId, json } = p.data;
-      const parsed = JSON.parse(json) as SkeletonData2d;
-      ctx.store.setSkeleton2d(entityId, parsed);
-      return { success: true, result: { message: `Imported skeleton from JSON for entity ${entityId}` } };
+      const { entityId, format } = p.data;
+      const source = p.data.jsonData ?? p.data.json;
+      if (source === undefined) {
+        return { success: false, error: 'Missing jsonData — the skeleton JSON to import' };
+      }
+      // The manifest advertised dragonbones and spine. Neither has ever had a
+      // converter here, and both are genuinely different schemas: read as the
+      // custom format, a DragonBones file has no top-level `bones` at all. Naming
+      // that beats importing an empty rig and calling it success.
+      if (format !== undefined && format !== 'custom') {
+        return {
+          success: false,
+          error: `Skeleton format "${format}" is not supported yet — only "custom" (SpawnForge's own skeleton JSON) can be imported. Convert the file first.`,
+        };
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(source);
+      } catch (err) {
+        return {
+          success: false,
+          error: `jsonData is not valid JSON: ${err instanceof Error ? err.message : 'parse failed'}`,
+        };
+      }
+
+      const imported = normalizeImportedSkeleton(parsed);
+      if (!imported.ok) {
+        // `setSkeleton2d` is a full replace, so the store is deliberately left
+        // untouched: a rejected import must not cost the caller the rig they had.
+        return { success: false, error: `Skeleton JSON rejected — ${imported.reason}` };
+      }
+      // `normalizeImportedSkeleton` does not bound IK chains — the payload builder
+      // does, because the engine's own limit lives there. A file whose chain was
+      // truncated or whose bend direction was collapsed still imports, but the caller
+      // is told what changed rather than discovering it from a bone that will not move.
+      const warnings = collectSkeleton2dWarnings(imported.data);
+      ctx.store.setSkeleton2d(entityId, imported.data);
+      return {
+        success: true,
+        result: {
+          message: `Imported skeleton with ${imported.data.bones.length} bone(s) for entity ${entityId}`,
+          // `ExecutionResult` has no warning field, so these ride inside `result`.
+          ...(warnings.length > 0 ? { warnings } : {}),
+        },
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to import skeleton JSON' };
     }
@@ -1412,16 +1704,53 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   auto_weight_skeleton2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          // Accepted, deliberately not forwarded, and no longer published by the
+          // manifest — see the PF-1186 note below. A caller that still sends either
+          // gets its weighting done and is told the knob did nothing, which beats
+          // failing a call the engine would have honoured anyway.
+          method: z.enum(['heat', 'envelope']).optional(),
+          iterations: z.number().int().min(1).max(100).optional(),
+        }),
+        args,
+      );
       if (p.error) return p.error;
-      const { entityId } = p.data;
+      const { entityId, method, iterations } = p.data;
       const existing = ownEntry(ctx.store.skeletons2d, entityId);
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
       }
-      // Auto-weighting is computed in the engine; trigger a re-dispatch.
-      ctx.store.setSkeleton2d(entityId, { ...existing });
-      return { success: true, result: { message: `Auto-weighting skeleton for entity ${entityId}` } };
+      // `auto_weight_skeleton2d` is a real engine command that recomputes every mesh
+      // attachment's vertex weights in place and emits SKELETON2D_UPDATED. Re-dispatching
+      // `setSkeleton2d` instead did the opposite of what it says: that sends a
+      // full-replace `create_skeleton2d` built from the STORE mirror, whose attachment
+      // type carries no `weights` field at all — so it would overwrite the weights this
+      // command exists to compute.
+      //
+      // PF-1186: the engine accepts `method` and `iterations` and acts on neither
+      // — `compute_linear_weights(.., _iterations: u32)` discards the count and
+      // `method` is only logged, so `heat` and `envelope` are the same output.
+      // Forwarding them made the tool report that it had honoured a choice it had
+      // not, so they are dropped from the payload and from the manifest until the
+      // engine really implements them, and a caller who sends one is told.
+      ctx.dispatchCommand('auto_weight_skeleton2d', { entityId });
+      const ignored = [
+        method !== undefined ? 'method' : null,
+        iterations !== undefined ? 'iterations' : null,
+      ].filter((field): field is string => field !== null);
+      return {
+        success: true,
+        result: {
+          message: `Auto-weighting skeleton for entity ${entityId}`,
+          ...(ignored.length > 0
+            ? {
+                warning: `Ignored ${ignored.join(' and ')}: the engine's weighting has no such option yet (PF-1186).`,
+              }
+            : {}),
+        },
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to auto-weight skeleton 2D' };
     }

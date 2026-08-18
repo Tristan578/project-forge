@@ -749,13 +749,41 @@ describe('handlers2d skeleton2d edge cases', () => {
   describe('auto_weight_skeleton2d', () => {
     it('triggers auto-weight on entity', async () => {
       const skel = { bones: [{ name: 'root', parentBone: null, localPosition: [0, 0], localRotation: 0, localScale: [1, 1], length: 1, color: [1, 1, 1, 1] }], skins: {}, ikConstraints: [], activeSkin: null };
-      const { result, store } = await invoke(
+      const { result, dispatch, store } = await invoke(
         'auto_weight_skeleton2d',
-        { entityId: 'e1' },
+        { entityId: 'e1', method: 'heat', iterations: 4 },
         { skeletons2d: { e1: skel } },
       );
       expect(result.success).toBe(true);
-      expect(store.setSkeleton2d).toHaveBeenCalled();
+      // PF-1186: the engine's `compute_linear_weights(.., _iterations: u32)` discards
+      // the count and only LOGS `method`, so `heat` and `envelope` are the same
+      // output. Forwarding either made the tool report a choice it had not honoured,
+      // so both are dropped from the payload — and the caller is told so rather than
+      // having a call rejected that the engine would have done anyway.
+      expect(dispatch).toHaveBeenCalledWith('auto_weight_skeleton2d', { entityId: 'e1' });
+      expect((result.result as { warning?: string }).warning).toContain('method and iterations');
+      // Must NOT round-trip the store mirror back to the engine: that is a
+      // full-replace `create_skeleton2d` whose attachments carry no weights.
+      expect(store.setSkeleton2d).not.toHaveBeenCalled();
+    });
+
+    it('says nothing about ignored options when none were sent', async () => {
+      const { result } = await invoke(
+        'auto_weight_skeleton2d',
+        { entityId: 'e1' },
+        { skeletons2d: { e1: { bones: [], skins: {}, ikConstraints: [], activeSkin: null } } },
+      );
+      expect(result.success).toBe(true);
+      expect(result.result).not.toHaveProperty('warning');
+    });
+
+    it('rejects an auto-weight method the manifest does not declare', async () => {
+      const { result } = await invoke(
+        'auto_weight_skeleton2d',
+        { entityId: 'e1', method: 'linear' },
+        { skeletons2d: { e1: { bones: [], skins: {}, ikConstraints: [], activeSkin: null } } },
+      );
+      expect(result.success).toBe(false);
     });
   });
 });
