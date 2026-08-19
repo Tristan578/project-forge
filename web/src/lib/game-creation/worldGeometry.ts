@@ -175,7 +175,16 @@ function readPositive(
 
     const value = config[key];
     if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      if (found === null) found = value;
+      if (found === null) {
+        found = value;
+      } else if (value !== found) {
+        // Two spellings, both usable, disagreeing. Key order decides, which is
+        // deterministic but arbitrary from the design's point of view — and the
+        // number that lost is the likelier authoring mistake of the two.
+        warnings.push(
+          `The world's ${label} was given two different values and "${key}" (${describe(value)}) was not the one used; ${describe(found)} was.`,
+        );
+      }
       continue;
     }
     // The consequence differs depending on whether another spelling of the same
@@ -214,7 +223,13 @@ function readBoolean(
 
     const value = config[key];
     if (typeof value === 'boolean') {
-      if (found === null) found = value;
+      if (found === null) {
+        found = value;
+      } else if (value !== found) {
+        warnings.push(
+          `The design both asked for and declined ${label}; "${key}" (${describe(value)}) was not the one used.`,
+        );
+      }
       continue;
     }
     warnings.push(

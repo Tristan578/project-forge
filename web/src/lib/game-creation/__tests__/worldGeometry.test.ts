@@ -331,3 +331,32 @@ describe('buildWorldGeometry — explaining an unusable key', () => {
     expect(warnings).toEqual([]);
   });
 });
+
+/**
+ * Two spellings of one concept that are both usable and disagree. Key order
+ * decides, which is deterministic but arbitrary from the design's point of
+ * view — and the value that lost is the likelier authoring mistake.
+ */
+describe('buildWorldGeometry — two usable spellings that disagree', () => {
+  it('names the size that lost rather than resolving it in silence', () => {
+    const { descriptors, warnings } = build3d({ width: 40, worldWidth: 60 });
+
+    expect(descriptors.find(d => d.name === 'Ground')?.scale[0]).toBe(40);
+
+    const about = warnings.filter(w => w.includes('worldWidth'));
+    expect(about).toHaveLength(1);
+    expect(about[0]).toMatch(/two different values/i);
+  });
+
+  it('says nothing when the two spellings agree', () => {
+    const { warnings } = build3d({ width: 40, worldWidth: 40, depth: 40 });
+    expect(warnings).toEqual([]);
+  });
+
+  it('names the walls flag that lost', () => {
+    const { descriptors, warnings } = build3d({ width: 30, depth: 30, bounds: true, walls: false });
+
+    expect(descriptors.some(d => d.name.startsWith('Wall'))).toBe(true);
+    expect(warnings.filter(w => w.includes('"walls"'))).toHaveLength(1);
+  });
+});
