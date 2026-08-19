@@ -411,3 +411,137 @@ describe('progression — a target score that overflows', () => {
     expect(report.winnable).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PF-1201 — checkpoints
+// ---------------------------------------------------------------------------
+
+/** Every checkpoint the steps plan. */
+function checkpoints(steps: SystemStepInput[]): Array<Record<string, unknown>> {
+  return steps.map(s => s.input).filter(input => input.type === 'checkpoint');
+}
+
+describe('progression system — checkpoints', () => {
+  it('plans a checkpoint for each name the design gave', () => {
+    const entities = [
+      planned('id-hero', 'Hero', 'player'),
+      planned('id-cp1', 'Checkpoint A', 'decoration'),
+      planned('id-cp2', 'Checkpoint B', 'decoration'),
+      // Something to score off, so the score branch has no warning of its own.
+      planned('id-coin', 'Coin', 'interactable'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(
+      makeSystem('score', { checkpoints: ['Checkpoint A', 'Checkpoint B'] }),
+      gddWithMovement(),
+      ctx,
+    );
+
+    expect(checkpoints(steps)).toEqual([
+      { entityId: 'id-cp1', type: 'checkpoint', autoSave: true },
+      { entityId: 'id-cp2', type: 'checkpoint', autoSave: true },
+    ]);
+    expect(ctx.warn).not.toHaveBeenCalled();
+  });
+
+  it('falls back to an unmistakable name when the design names none', () => {
+    const entities = [
+      planned('id-hero', 'Hero', 'player'),
+      planned('id-cp', 'Respawn Point', 'decoration'),
+      planned('id-rock', 'Rock', 'decoration'),
+    ];
+
+    const steps = run(makeSystem('score', {}), gddWithMovement(), makeCtx(entities));
+
+    expect(checkpoints(steps).map(c => c.entityId)).toEqual(['id-cp']);
+  });
+
+  it('plans none when nothing in the world looks like one', () => {
+    const entities = [
+      planned('id-hero', 'Hero', 'player'),
+      planned('id-rock', 'Rock', 'decoration'),
+    ];
+
+    const steps = run(makeSystem('score', {}), gddWithMovement(), makeCtx(entities));
+
+    expect(checkpoints(steps)).toEqual([]);
+  });
+
+  it('DROPS the player named as a checkpoint and warns', () => {
+    const entities = [
+      planned('id-hero', 'Hero', 'player'),
+      planned('id-cp', 'Checkpoint A', 'decoration'),
+      planned('id-coin', 'Coin', 'interactable'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(
+      makeSystem('score', { checkpoints: ['Hero', 'Checkpoint A'] }),
+      gddWithMovement(),
+      ctx,
+    );
+
+    expect(checkpoints(steps).map(c => c.entityId)).toEqual(['id-cp']);
+    expect(ctx.warn).toHaveBeenCalledTimes(1);
+    expect(ctx.warn.mock.calls[0]?.[0]).toContain('save progress constantly');
+  });
+
+  it('DROPS a checkpoint name that resolves to nothing and warns', () => {
+    const entities = [
+      planned('id-hero', 'Hero', 'player'),
+      planned('id-coin', 'Coin', 'interactable'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(
+      makeSystem('score', { savePoints: 'Ghost Checkpoint' }),
+      gddWithMovement(),
+      ctx,
+    );
+
+    expect(checkpoints(steps)).toEqual([]);
+    expect(ctx.warn).toHaveBeenCalledTimes(1);
+    expect(ctx.warn.mock.calls[0]?.[0]).toContain('Ghost Checkpoint');
+  });
+
+  it.each([
+    ['score', 'score'],
+    ['collect the coins', 'collectAll'],
+    ['reach the exit', 'reachGoal'],
+  ])('survives the %s branch, which returns before the others', (type, expectedCondition) => {
+    const entities = [
+      planned('id-hero', 'Hero', 'player'),
+      planned('id-coin', 'Coin', 'interactable'),
+      planned('id-exit', 'ExitDoor', 'trigger'),
+      planned('id-cp', 'Checkpoint A', 'decoration'),
+    ];
+
+    const steps = run(makeSystem(type, {}), gddWithMovement(), makeCtx(entities));
+
+    // Each condition branch returns early, so a checkpoint planned after the
+    // branch would reach only one of the three.
+    expect(winConditions(steps)[0]).toMatchObject({ conditionType: expectedCondition });
+    expect(checkpoints(steps).map(c => c.entityId)).toEqual(['id-cp']);
+  });
+
+  it('plans a checkpoint bag the real executor accepts, without disturbing winnability', async () => {
+    const entities = [
+      planned('id-hero', 'Hero', 'player'),
+      planned('id-cp', 'Checkpoint A', 'decoration'),
+      planned('id-coin', 'Coin', 'interactable'),
+    ];
+
+    const steps = run(
+      makeSystem('score', { checkpoints: ['Checkpoint A'] }),
+      gddWithMovement(),
+      makeCtx(entities),
+    );
+    const { components, sceneGraph } = await applySteps(steps, entities, {
+      'id-hero': [CONTROLLER],
+    });
+
+    expect(components['id-cp']).toEqual([{ type: 'checkpoint', checkpoint: { autoSave: true } }]);
+    expect(validateWinnability(sceneGraph, components).winnable).toBe(true);
+  });
+});

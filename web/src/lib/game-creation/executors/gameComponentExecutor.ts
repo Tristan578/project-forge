@@ -4,7 +4,7 @@ import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../typ
 // a wrapped `import type` puts the specifier on a line with no `type` keyword
 // and reads as a value import of a client-only module.
 // prettier-ignore
-import type { GameComponentData, HealthData, CollectibleData, DamageZoneData, WinConditionData } from '@/stores/slices/types';
+import type { GameComponentData, HealthData, CollectibleData, DamageZoneData, WinConditionData, CheckpointData, FollowerData, MovingPlatformData, SpawnerData } from '@/stores/slices/types';
 import { makeStepError, successResult, failResult } from './shared';
 
 /**
@@ -97,11 +97,59 @@ const zDamageZone = z.object({
   oneShot: z.boolean(),
 });
 
+const zCheckpoint = z.object({
+  type: z.literal('checkpoint'),
+  entityId: zEntityId,
+  autoSave: z.boolean(),
+});
+
+const zFollower = z.object({
+  type: z.literal('follower'),
+  entityId: zEntityId,
+  // Non-nullable, unlike `FollowerData`: a follower with no target stands
+  // still, and planning one is planning a component that does nothing. The
+  // caller has a target or it has no business planning this.
+  targetEntityId: zEntityId,
+  speed: zFinite,
+  stopDistance: zFinite,
+  lookAtTarget: z.boolean(),
+});
+
+/** The four meshes `system_spawner` can build. Anything else becomes a cube. */
+const zSpawnEntityType = z.enum(['cube', 'sphere', 'cylinder', 'capsule']);
+
+const zSpawner = z.object({
+  type: z.literal('spawner'),
+  entityId: zEntityId,
+  entityType: zSpawnEntityType,
+  intervalSecs: zFinite,
+  maxCount: zFinite,
+  spawnOffset: zVec3,
+  onTrigger: z.string().nullable(),
+});
+
+const zMovingPlatform = z.object({
+  type: z.literal('movingPlatform'),
+  entityId: zEntityId,
+  speed: zFinite,
+  // At least two, because `system_moving_platform` returns early below that,
+  // and at most MAX_WAYPOINTS, because the engine TRUNCATES past it rather
+  // than refusing — a platform silently missing the end of its route is worse
+  // than a step that says why it was dropped.
+  waypoints: z.array(zVec3).min(2).max(64),
+  pauseDuration: zFinite,
+  loopMode: z.enum(['pingPong', 'loop', 'once']),
+});
+
 const inputSchema = z.discriminatedUnion('type', [
   zWinCondition,
   zHealth,
   zCollectible,
   zDamageZone,
+  zCheckpoint,
+  zFollower,
+  zSpawner,
+  zMovingPlatform,
 ]);
 
 type ParsedInput = z.infer<typeof inputSchema>;
@@ -125,6 +173,23 @@ function winConditionProblem(input: z.infer<typeof zWinCondition>): string | nul
   if (input.conditionType === 'reachGoal' && input.targetEntityId === null) {
     return 'A reach-goal win condition needs the entity the player must reach.';
   }
+  return null;
+}
+
+/**
+ * A component the schema accepts but that could not do anything once attached.
+ *
+ * Every one of these is a step that would "succeed" — `dispatchCommand` returns
+ * void, and the engine's own systems just skip a component they cannot act on —
+ * so the only place the design error can still be named is here.
+ */
+function semanticProblem(input: ParsedInput): string | null {
+  if (input.type === 'winCondition') return winConditionProblem(input);
+
+  if (input.type === 'follower' && input.targetEntityId === input.entityId) {
+    return 'A follower cannot be told to chase itself.';
+  }
+
   return null;
 }
 
@@ -165,6 +230,52 @@ function buildComponent(input: ParsedInput): GameComponentData {
         oneShot: input.oneShot,
       };
       return { type: 'damageZone', damageZone };
+    }
+    case 'checkpoint': {
+      const checkpoint: CheckpointData = {
+        autoSave: input.autoSave,
+      };
+      return { type: 'checkpoint', checkpoint };
+    }
+    case 'follower': {
+      const follower: FollowerData = {
+        targetEntityId: input.targetEntityId,
+        speed: input.speed,
+        stopDistance: input.stopDistance,
+        lookAtTarget: input.lookAtTarget,
+      };
+      return { type: 'follower', follower };
+    }
+    case 'spawner': {
+      const spawner: SpawnerData = {
+        entityType: input.entityType,
+        intervalSecs: input.intervalSecs,
+        maxCount: input.maxCount,
+        spawnOffset: [
+          input.spawnOffset[0],
+          input.spawnOffset[1],
+          input.spawnOffset[2],
+        ],
+        onTrigger: input.onTrigger,
+      };
+      return { type: 'spawner', spawner };
+    }
+    case 'movingPlatform': {
+      const waypoints: [number, number, number][] = [];
+      // Indexed, and rebuilt rather than reused: `.map` preserves a hole
+      // positionally, so a gap would survive every callback-shaped transform
+      // between the guard and the engine.
+      for (let i = 0; i < input.waypoints.length; i += 1) {
+        const point = input.waypoints[i];
+        waypoints.push([point[0], point[1], point[2]]);
+      }
+      const movingPlatform: MovingPlatformData = {
+        speed: input.speed,
+        waypoints,
+        pauseDuration: input.pauseDuration,
+        loopMode: input.loopMode,
+      };
+      return { type: 'movingPlatform', movingPlatform };
     }
   }
 }
@@ -209,11 +320,22 @@ export const gameComponentExecutor: ExecutorDefinition = {
 
     const data = parsed.data;
 
-    if (data.type === 'winCondition') {
-      const problem = winConditionProblem(data);
-      if (problem) {
-        return failResult(makeStepError('INVALID_INPUT', problem, problem));
-      }
+    const problem = semanticProblem(data);
+    if (problem) {
+      return failResult(makeStepError('INVALID_INPUT', problem, problem));
+    }
+
+    // The thing a follower chases has to be in the scene too. Bound to an id
+    // the engine never reports, `system_follower` finds no target transform and
+    // the enemy stands still — a game that looks built and does not play.
+    if (data.type === 'follower' && entityIsKnownMissing(ctx, data.targetEntityId)) {
+      return failResult(
+        makeStepError(
+          'ENTITY_NOT_FOUND',
+          `No entity ${data.targetEntityId} in the scene graph to follow`,
+          'One of the enemies was told to chase an object that is not in the scene, so it was left standing still.',
+        ),
+      );
     }
 
     if (entityIsKnownMissing(ctx, data.entityId)) {

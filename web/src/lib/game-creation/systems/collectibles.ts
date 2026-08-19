@@ -21,6 +21,7 @@
 
 import type { SystemStepInput, SystemStepContext, PlannedEntity } from './registry';
 import type { GameSystem, OrchestratorGDD } from '../types';
+import { readNameList, readPositiveNumber, resolveNames } from './configRead';
 
 /** Points awarded per pickup when the design named no number. */
 export const DEFAULT_COLLECTIBLE_VALUE = 10;
@@ -36,76 +37,6 @@ const NAME_LIST_KEYS = ['collectibles', 'pickups', 'entities', 'items', 'objects
  * the same design ended up with two different values in the first place.
  */
 const VALUE_KEYS = ['value', 'collectibleValue', 'pointsPerPickup', 'pointValue', 'points'];
-
-/** LLM-authored names arrive in every casing and punctuation. */
-function normalize(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-/**
- * A positive finite number from an LLM-authored config bag, or null.
- *
- * `Object.hasOwn` rather than a bare index: `config['constructor']` resolves on
- * the prototype chain and would hand back a function.
- */
-export function readPositiveNumber(
-  config: Record<string, unknown>,
-  keys: string[],
-): number | null {
-  for (const key of keys) {
-    if (!Object.hasOwn(config, key)) continue;
-    const value = config[key];
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
-  }
-  return null;
-}
-
-/**
- * Read a list of entity names out of an LLM-authored config bag.
- *
- * A single comma-separated string is accepted alongside an array because both
- * spellings come back from the model for the same field. Non-string members are
- * ignored rather than coerced: `String({})` is `"[object Object]"`, which would
- * resolve to nothing and produce a warning about a name nobody wrote.
- */
-function readNameList(config: Record<string, unknown>): string[] {
-  for (const key of NAME_LIST_KEYS) {
-    if (!Object.hasOwn(config, key)) continue;
-    const value = config[key];
-
-    if (typeof value === 'string') {
-      const names = value.split(',').map(part => part.trim()).filter(part => part.length > 0);
-      if (names.length > 0) return names;
-      continue;
-    }
-
-    if (Array.isArray(value)) {
-      const names: string[] = [];
-      // Indexed read, not `.filter`: a callback form skips array holes, so a
-      // sparse list would report itself fully processed while silently losing
-      // an entry.
-      for (let i = 0; i < value.length; i += 1) {
-        const member = value[i];
-        if (typeof member !== 'string') continue;
-        const trimmed = member.trim();
-        if (trimmed.length > 0) names.push(trimmed);
-      }
-      if (names.length > 0) return names;
-    }
-  }
-  return [];
-}
-
-/** First entity wins a duplicated name — a later duplicate is a design error. */
-function indexByName(entities: PlannedEntity[]): Map<string, PlannedEntity> {
-  const index = new Map<string, PlannedEntity>();
-  for (const entity of entities) {
-    const key = normalize(entity.entity.name);
-    if (key.length === 0 || index.has(key)) continue;
-    index.set(key, entity);
-  }
-  return index;
-}
 
 /** The step that makes one entity a pickup. */
 export function collectibleStep(entity: PlannedEntity, value: number): SystemStepInput {
@@ -197,39 +128,27 @@ export function resolveCollectibles(
     ?? (otherSystem ? readPositiveNumber(otherSystem.config, VALUE_KEYS) : null)
     ?? DEFAULT_COLLECTIBLE_VALUE;
 
-  const names = ownerSystem ? readNameList(ownerSystem.config) : [];
-  const targets: PlannedEntity[] = [];
-  const seen = new Set<string>();
+  const names = ownerSystem ? readNameList(ownerSystem.config, NAME_LIST_KEYS) : [];
 
   if (names.length > 0) {
-    const index = indexByName(ctx.entities);
-
-    for (const name of names) {
-      const match = index.get(normalize(name));
-
-      if (!match) {
-        warn(
-          `The design named "${name}" as something to pick up, but no such object was placed in the world, so it was left out.`,
-        );
-        continue;
-      }
-
+    const targets = resolveNames(
+      names,
+      ctx.entities,
+      warn,
+      name =>
+        `The design named "${name}" as something to pick up, but no such object was placed in the world, so it was left out.`,
       // A collectible is destroyed on contact with the player. Making the
       // player one would delete the player the instant the game started.
-      if (match.entity.role === 'player') {
-        warn(
-          `The design named the player "${name}" as something to pick up, which would remove the player on the first frame, so it was left out.`,
-        );
-        continue;
-      }
-
-      if (seen.has(match.entityId)) continue;
-      seen.add(match.entityId);
-      targets.push(match);
-    }
-
+      (entity, name) =>
+        entity.entity.role === 'player'
+          ? `The design named the player "${name}" as something to pick up, which would remove the player on the first frame, so it was left out.`
+          : null,
+    );
     return { targets, value, named: true };
   }
+
+  const targets: PlannedEntity[] = [];
+  const seen = new Set<string>();
 
   // Nothing named: the GDD marks pickups by role.
   for (const entity of ctx.entities) {

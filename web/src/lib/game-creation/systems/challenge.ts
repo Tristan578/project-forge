@@ -1,17 +1,22 @@
 /**
- * Challenge system definition — the GDD category that carries hazards and
- * obstacles.
+ * Challenge system definition — the GDD category that carries hazards,
+ * obstacles, the enemies that chase, the platforms that move and the nests that
+ * keep producing more.
  *
  * Before PF-1199 this category fell through to `custom_script_generate`, so the
  * spikes and the lava the design asked for were spawned as scenery: touching
- * one did nothing. Nothing in a generated game could hurt the player.
+ * one did nothing. PF-1201 is the rest of the same defect — an enemy that never
+ * moves, a platform that never travels and a spawner that never spawns are all
+ * scenery too, and all four component kinds already exist end to end (the
+ * engine runs their systems, `gameComponentWire` maps them, the executor
+ * accepts them). The only thing missing was a definition that planned them.
  *
- * Two rules are load-bearing:
+ * Rules that are load-bearing:
  *
- *  1. A `damageZone` is bound to `entityId` — the engine UUID — never to the
+ *  1. Every component is bound to `entityId` — the engine UUID — never to the
  *     authored name. The engine matches on the `EntityId` component and emits
  *     nothing when nothing matches, and `dispatchCommand` returns void, so a
- *     step bound to a name fails in complete silence. A named hazard that
+ *     step bound to a name fails in complete silence. A named thing that
  *     resolves to no planned entity is therefore DROPPED with a warning rather
  *     than planned as a step certain to fail.
  *  2. The player's `health` is planned here ONLY when no health-shaped
@@ -19,6 +24,12 @@
  *     damage zone with nothing to damage is a hazard the player walks through,
  *     so the fallback exists — but two writers for one component is a race, not
  *     a design.
+ *  3. Followers are planned for enemies by DEFAULT and platforms and spawners
+ *     ONLY on explicit config. An enemy that stands still is the failure this
+ *     ticket exists to fix, whereas making every object whose name contains
+ *     "platform" start moving would break a level the design meant to be
+ *     static. Default-on still honours an explicit `false` — that is why
+ *     `readOptionalBoolean` distinguishes "absent" from "said no".
  */
 
 import { registerSystem } from './registry';
@@ -29,6 +40,13 @@ import type { GameSystem, OrchestratorGDD } from '../types';
 // (the engine merges a partial one onto `HealthData::default()` and reports
 // nothing).
 import { DEFAULT_MAX_HP, feedbackPlansHealth, healthStep, readMaxHp } from './feedback';
+import {
+  readNameList,
+  readPositiveNumber,
+  readBoolean,
+  readOptionalBoolean,
+  resolveNames,
+} from './configRead';
 
 /** Matches `DamageZoneData::default()`, so an unstated rate is the engine's. */
 const DEFAULT_DAMAGE_PER_SECOND = 25;
@@ -50,73 +68,86 @@ const ONE_SHOT_KEYS = ['oneShot', 'instantKill', 'lethal', 'instaKill'];
 const HAZARD_NAME_PATTERN =
   /spike|lava|acid|fire|flame|burn|trap|hazard|saw|blade|laser|pit|chasm|poison|toxic|thorn|electric|shock|bomb|mine|crush|danger|damage|obstacle/i;
 
-function normalize(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
+// ---------------------------------------------------------------------------
+// Follower — the enemies that come after the player
+// ---------------------------------------------------------------------------
+
+/** Config keys that turn chasing off. Default is on; only `false` opts out. */
+const CHASE_KEYS = ['chasePlayer', 'chase', 'pursue', 'followPlayer', 'seekPlayer', 'aiChase'];
+/** Config keys an LLM plausibly uses for "how fast the enemy chases". */
+const CHASE_SPEED_KEYS = ['chaseSpeed', 'enemySpeed', 'pursuitSpeed', 'speed'];
+/** Config keys an LLM plausibly uses for "how close it gets before stopping". */
+const STOP_DISTANCE_KEYS = ['stopDistance', 'attackRange', 'keepDistance'];
+
+/** `FollowerData::default()`, so an unstated value is the engine's own. */
+const DEFAULT_CHASE_SPEED = 3;
+const DEFAULT_STOP_DISTANCE = 1.5;
+/** `ENGINE_PROP_RANGES.follower` — past these the engine clamps anyway. */
+const MAX_CHASE_SPEED = 1000;
+const MAX_STOP_DISTANCE = 1000;
+
+// ---------------------------------------------------------------------------
+// Moving platform — explicit config only
+// ---------------------------------------------------------------------------
+
+const PLATFORM_NAME_KEYS = ['movingPlatforms', 'platforms', 'movers', 'elevators'];
+const PLATFORM_SPEED_KEYS = ['platformSpeed', 'moveSpeed'];
+const PLATFORM_DISTANCE_KEYS = ['distance', 'range', 'travelDistance', 'amplitude'];
+const PLATFORM_PAUSE_KEYS = ['pauseDuration', 'pause', 'waitTime'];
+
+/** `MovingPlatformData::default()`. */
+const DEFAULT_PLATFORM_SPEED = 2;
+const DEFAULT_PLATFORM_PAUSE = 0.5;
+/** How far a platform travels when the design named no distance. */
+const DEFAULT_PLATFORM_DISTANCE = 4;
+/** `ENGINE_PROP_RANGES.moving_platform`. */
+const MAX_PLATFORM_SPEED = 1000;
+const MAX_PLATFORM_PAUSE = 60;
+/**
+ * A route longer than this is TRUNCATED by the engine (`MAX_WAYPOINTS`), not
+ * refused — so the cap belongs here, where the drop can still be explained.
+ * Two waypoints is the engine's floor: `system_moving_platform` returns early
+ * below it and the platform never moves.
+ */
+const MAX_PLATFORM_TRAVEL = 1000;
+
+/** Names that describe something that goes up rather than across. */
+const VERTICAL_NAME_PATTERN = /elevator|lift|riser|hoist|ascend/i;
+
+// ---------------------------------------------------------------------------
+// Spawner — explicit config, or an unmistakable name
+// ---------------------------------------------------------------------------
+
+const SPAWNER_NAME_KEYS = ['spawners', 'generators', 'nests', 'spawnPoints'];
+const SPAWN_TYPE_KEYS = ['spawnEntityType', 'spawnType', 'spawns', 'spawnShape'];
+const SPAWN_INTERVAL_KEYS = ['spawnInterval', 'intervalSecs', 'interval', 'spawnRate'];
+const SPAWN_MAX_KEYS = ['maxSpawns', 'maxCount', 'spawnLimit'];
 
 /**
- * Read a list of entity names out of an LLM-authored config bag. A single
- * comma-separated string is accepted alongside an array because the model
- * returns both spellings for the same field.
- *
- * `Object.hasOwn` rather than a bare index: `config['constructor']` resolves on
- * the prototype chain.
+ * `portal` is deliberately absent: `progression`'s goal detection already
+ * claims that word, and one entity cannot be both the exit and a nest.
  */
-function readNameList(config: Record<string, unknown>): string[] {
-  for (const key of NAME_LIST_KEYS) {
-    if (!Object.hasOwn(config, key)) continue;
-    const value = config[key];
+const SPAWNER_NAME_PATTERN = /spawner|generator|nest|hive|dispenser/i;
 
-    if (typeof value === 'string') {
-      const names = value.split(',').map(part => part.trim()).filter(part => part.length > 0);
-      if (names.length > 0) return names;
-      continue;
-    }
+/** The four meshes `system_spawner` can build — anything else becomes a cube. */
+const SPAWNABLE_TYPES = ['cube', 'sphere', 'cylinder', 'capsule'] as const;
+type SpawnableType = (typeof SPAWNABLE_TYPES)[number];
 
-    if (Array.isArray(value)) {
-      const names: string[] = [];
-      // Indexed read, not `.filter`: a callback form skips array holes, so a
-      // sparse list would report itself fully processed while losing an entry.
-      for (let i = 0; i < value.length; i += 1) {
-        const member = value[i];
-        if (typeof member !== 'string') continue;
-        const trimmed = member.trim();
-        if (trimmed.length > 0) names.push(trimmed);
-      }
-      if (names.length > 0) return names;
-    }
-  }
-  return [];
-}
+/** `SpawnerData::default()`. */
+const DEFAULT_SPAWN_TYPE: SpawnableType = 'cube';
+const DEFAULT_SPAWN_INTERVAL = 3;
+const DEFAULT_SPAWN_MAX = 5;
+/** `ENGINE_PROP_RANGES.spawner` — a zero interval spawns every frame forever. */
+const MIN_SPAWN_INTERVAL = 0.1;
+const MAX_SPAWN_INTERVAL = 3600;
+/** No engine clamp; a runaway count is a typo, and 1000 entities is already a lot. */
+const MAX_SPAWN_COUNT = 1000;
+/** `SpawnerData::default().spawn_offset` — above the nest, not inside it. */
+const SPAWN_OFFSET: [number, number, number] = [0, 1, 0];
 
-function readPositiveNumber(config: Record<string, unknown>, keys: string[]): number | null {
-  for (const key of keys) {
-    if (!Object.hasOwn(config, key)) continue;
-    const value = config[key];
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
-  }
-  return null;
-}
-
-/** Only a real boolean. A truthy string is not a design decision. */
-function readBoolean(config: Record<string, unknown>, keys: string[]): boolean {
-  for (const key of keys) {
-    if (!Object.hasOwn(config, key)) continue;
-    const value = config[key];
-    if (typeof value === 'boolean') return value;
-  }
-  return false;
-}
-
-function indexByName(entities: PlannedEntity[]): Map<string, PlannedEntity> {
-  const index = new Map<string, PlannedEntity>();
-  for (const entity of entities) {
-    const key = normalize(entity.entity.name);
-    if (key.length === 0 || index.has(key)) continue;
-    index.set(key, entity);
-  }
-  return index;
-}
+// ---------------------------------------------------------------------------
+// Steps
+// ---------------------------------------------------------------------------
 
 function damageZoneStep(
   entity: PlannedEntity,
@@ -134,6 +165,333 @@ function damageZoneStep(
   };
 }
 
+function followerStep(
+  entity: PlannedEntity,
+  targetEntityId: string,
+  speed: number,
+  stopDistance: number,
+): SystemStepInput {
+  return {
+    executor: 'game_component',
+    input: {
+      entityId: entity.entityId,
+      type: 'follower',
+      targetEntityId,
+      speed,
+      stopDistance,
+      lookAtTarget: true,
+    },
+  };
+}
+
+function movingPlatformStep(
+  entity: PlannedEntity,
+  speed: number,
+  waypoints: [number, number, number][],
+  pauseDuration: number,
+): SystemStepInput {
+  return {
+    executor: 'game_component',
+    input: {
+      entityId: entity.entityId,
+      type: 'movingPlatform',
+      speed,
+      waypoints,
+      pauseDuration,
+      // Back and forth, because a platform that travels once and stops is a
+      // one-way trip the player can be stranded by.
+      loopMode: 'pingPong',
+    },
+  };
+}
+
+function spawnerStep(
+  entity: PlannedEntity,
+  entityType: SpawnableType,
+  intervalSecs: number,
+  maxCount: number,
+): SystemStepInput {
+  return {
+    executor: 'game_component',
+    input: {
+      entityId: entity.entityId,
+      type: 'spawner',
+      entityType,
+      intervalSecs,
+      maxCount,
+      spawnOffset: [...SPAWN_OFFSET] as [number, number, number],
+      // Free-running. A trigger name the design never wired to anything would
+      // be a spawner that waits forever for an event nobody sends.
+      onTrigger: null,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Resolution
+// ---------------------------------------------------------------------------
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/** The things the design made dangerous, named explicitly or found by role. */
+function resolveHazards(system: GameSystem, ctx: SystemStepContext): PlannedEntity[] {
+  const names = readNameList(system.config, NAME_LIST_KEYS);
+
+  if (names.length > 0) {
+    // Each dropped name warns for itself inside `resolveNames`.
+    return resolveNames(
+      names,
+      ctx.entities,
+      ctx.warn,
+      name =>
+        `The design named "${name}" as a hazard, but no such object was placed in the world, so it was left out.`,
+      // A damage zone on the player damages the player continuously.
+      (entity, name) =>
+        entity.entity.role === 'player'
+          ? `The design named the player "${name}" as a hazard, which would hurt the player constantly, so it was left out.`
+          : null,
+    );
+  }
+
+  // Nothing named: an enemy hurts on contact by convention, and for everything
+  // else the name is the only signal there is.
+  const hazards: PlannedEntity[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < ctx.entities.length; i += 1) {
+    const entity = ctx.entities[i];
+    if (!entity || entity.entity.role === 'player') continue;
+    const isHazard =
+      entity.entity.role === 'enemy' || HAZARD_NAME_PATTERN.test(entity.entity.name);
+    if (!isHazard) continue;
+    if (seen.has(entity.entityId)) continue;
+    seen.add(entity.entityId);
+    hazards.push(entity);
+  }
+
+  if (hazards.length === 0) {
+    ctx.warn(
+      'The design asked for hazards but named none and placed no enemies, so nothing in the world can hurt the player.',
+    );
+  }
+
+  return hazards;
+}
+
+/**
+ * The enemies that chase the player.
+ *
+ * Silent when there is nothing to plan: this runs on every challenge system,
+ * including the ones whose whole job is a spike pit, and a warning per design
+ * that simply has no enemies would be noise.
+ */
+function planFollowers(
+  system: GameSystem,
+  ctx: SystemStepContext,
+  excluded: Set<string>,
+): SystemStepInput[] {
+  if (readOptionalBoolean(system.config, CHASE_KEYS) === false) return [];
+
+  const enemies: PlannedEntity[] = [];
+  let player: PlannedEntity | null = null;
+  for (let i = 0; i < ctx.entities.length; i += 1) {
+    const entity = ctx.entities[i];
+    if (!entity) continue;
+    if (entity.entity.role === 'player') {
+      player ??= entity;
+      continue;
+    }
+    if (entity.entity.role !== 'enemy') continue;
+    // A nest that walks is a design error, not a chase.
+    if (excluded.has(entity.entityId)) continue;
+    enemies.push(entity);
+  }
+
+  if (enemies.length === 0) return [];
+
+  if (!player) {
+    // Worth saying: the design placed enemies and nothing for them to hunt, so
+    // they will stand exactly where they spawned.
+    ctx.warn(
+      'The design placed enemies but no player, so they were left standing still rather than chasing nothing.',
+    );
+    return [];
+  }
+
+  const speed = clamp(
+    readPositiveNumber(system.config, CHASE_SPEED_KEYS) ?? DEFAULT_CHASE_SPEED,
+    0,
+    MAX_CHASE_SPEED,
+  );
+  const stopDistance = clamp(
+    readPositiveNumber(system.config, STOP_DISTANCE_KEYS) ?? DEFAULT_STOP_DISTANCE,
+    0,
+    MAX_STOP_DISTANCE,
+  );
+
+  const steps: SystemStepInput[] = [];
+  for (let i = 0; i < enemies.length; i += 1) {
+    const enemy = enemies[i];
+    if (!enemy) continue;
+    steps.push(followerStep(enemy, player.entityId, speed, stopDistance));
+  }
+  return steps;
+}
+
+/**
+ * The platforms the design asked to move, and only those.
+ *
+ * Waypoints are OFFSETS from where the entity spawned (`let target = origin +
+ * waypoint`), so the route is "stay put, then travel this far" rather than a
+ * pair of world positions — a world-space route would teleport every platform
+ * to the origin on the first frame.
+ */
+function planMovingPlatforms(system: GameSystem, ctx: SystemStepContext): SystemStepInput[] {
+  const names = readNameList(system.config, PLATFORM_NAME_KEYS);
+  if (names.length === 0) return [];
+
+  const platforms = resolveNames(
+    names,
+    ctx.entities,
+    ctx.warn,
+    name =>
+      `The design named "${name}" as a moving platform, but no such object was placed in the world, so it was left out.`,
+    (entity, name) =>
+      entity.entity.role === 'player'
+        ? `The design named the player "${name}" as a moving platform, which would take control away from the player, so it was left out.`
+        : null,
+  );
+  if (platforms.length === 0) return [];
+
+  const speed = clamp(
+    readPositiveNumber(system.config, PLATFORM_SPEED_KEYS) ?? DEFAULT_PLATFORM_SPEED,
+    0,
+    MAX_PLATFORM_SPEED,
+  );
+  const pauseDuration = clamp(
+    readPositiveNumber(system.config, PLATFORM_PAUSE_KEYS) ?? DEFAULT_PLATFORM_PAUSE,
+    0,
+    MAX_PLATFORM_PAUSE,
+  );
+  const distance = clamp(
+    readPositiveNumber(system.config, PLATFORM_DISTANCE_KEYS) ?? DEFAULT_PLATFORM_DISTANCE,
+    0,
+    MAX_PLATFORM_TRAVEL,
+  );
+
+  const steps: SystemStepInput[] = [];
+  for (let i = 0; i < platforms.length; i += 1) {
+    const platform = platforms[i];
+    if (!platform) continue;
+    const vertical = VERTICAL_NAME_PATTERN.test(platform.entity.name);
+    const waypoints: [number, number, number][] = [
+      [0, 0, 0],
+      vertical ? [0, distance, 0] : [distance, 0, 0],
+    ];
+    steps.push(movingPlatformStep(platform, speed, waypoints, pauseDuration));
+  }
+  return steps;
+}
+
+/** The one mesh name the engine will build, or null when it cannot tell. */
+function readSpawnType(config: Record<string, unknown>): string | null {
+  for (const key of SPAWN_TYPE_KEYS) {
+    if (!Object.hasOwn(config, key)) continue;
+    const value = config[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
+function asSpawnableType(raw: string): SpawnableType | null {
+  const normalized = raw.toLowerCase().replace(/[^a-z]/g, '');
+  for (let i = 0; i < SPAWNABLE_TYPES.length; i += 1) {
+    const candidate = SPAWNABLE_TYPES[i];
+    if (candidate && normalized === candidate) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The things that keep producing more things.
+ *
+ * Returns the steps AND the entities they were planned for, so the follower
+ * pass can leave those alone.
+ */
+function planSpawners(
+  system: GameSystem,
+  ctx: SystemStepContext,
+): { steps: SystemStepInput[]; entityIds: Set<string> } {
+  const names = readNameList(system.config, SPAWNER_NAME_KEYS);
+  const entityIds = new Set<string>();
+
+  let spawners: PlannedEntity[];
+  if (names.length > 0) {
+    spawners = resolveNames(
+      names,
+      ctx.entities,
+      ctx.warn,
+      name =>
+        `The design named "${name}" as a spawner, but no such object was placed in the world, so it was left out.`,
+      (entity, name) =>
+        entity.entity.role === 'player'
+          ? `The design named the player "${name}" as a spawner, so it was left out.`
+          : null,
+    );
+  } else {
+    // Nothing named: only an unmistakable name counts. Guessing wider would
+    // turn scenery into an endless enemy source nobody asked for.
+    spawners = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < ctx.entities.length; i += 1) {
+      const entity = ctx.entities[i];
+      if (!entity || entity.entity.role === 'player') continue;
+      if (!SPAWNER_NAME_PATTERN.test(entity.entity.name)) continue;
+      if (seen.has(entity.entityId)) continue;
+      seen.add(entity.entityId);
+      spawners.push(entity);
+    }
+  }
+
+  if (spawners.length === 0) return { steps: [], entityIds };
+
+  const authoredType = readSpawnType(system.config);
+  let entityType: SpawnableType = DEFAULT_SPAWN_TYPE;
+  if (authoredType !== null) {
+    const resolved = asSpawnableType(authoredType);
+    if (resolved) {
+      entityType = resolved;
+    } else {
+      // The executor's schema is a closed enum, so passing this through would
+      // fail the whole step rather than degrade it.
+      ctx.warn(
+        `The design asked the spawners to produce "${authoredType}", which the engine cannot build, so they produce a ${DEFAULT_SPAWN_TYPE} instead.`,
+      );
+    }
+  }
+
+  const intervalSecs = clamp(
+    readPositiveNumber(system.config, SPAWN_INTERVAL_KEYS) ?? DEFAULT_SPAWN_INTERVAL,
+    MIN_SPAWN_INTERVAL,
+    MAX_SPAWN_INTERVAL,
+  );
+  const maxCount = Math.round(
+    clamp(readPositiveNumber(system.config, SPAWN_MAX_KEYS) ?? DEFAULT_SPAWN_MAX, 1, MAX_SPAWN_COUNT),
+  );
+
+  const steps: SystemStepInput[] = [];
+  for (let i = 0; i < spawners.length; i += 1) {
+    const spawner = spawners[i];
+    if (!spawner) continue;
+    entityIds.add(spawner.entityId);
+    steps.push(spawnerStep(spawner, entityType, intervalSecs, maxCount));
+  }
+  return { steps, entityIds };
+}
+
+// ---------------------------------------------------------------------------
+
 registerSystem({
   category: 'challenge',
   setupSteps(
@@ -148,64 +506,30 @@ registerSystem({
       return [];
     }
 
-    const names = readNameList(system.config);
-    const hazards: PlannedEntity[] = [];
-    const seen = new Set<string>();
-
-    if (names.length > 0) {
-      const index = indexByName(ctx.entities);
-
-      for (const name of names) {
-        const match = index.get(normalize(name));
-
-        if (!match) {
-          ctx.warn(
-            `The design named "${name}" as a hazard, but no such object was placed in the world, so it was left out.`,
-          );
-          continue;
-        }
-
-        // A damage zone on the player damages the player continuously.
-        if (match.entity.role === 'player') {
-          ctx.warn(
-            `The design named the player "${name}" as a hazard, which would hurt the player constantly, so it was left out.`,
-          );
-          continue;
-        }
-
-        if (seen.has(match.entityId)) continue;
-        seen.add(match.entityId);
-        hazards.push(match);
-      }
-
-      // Each dropped name already warned for itself.
-      if (hazards.length === 0) return [];
-    } else {
-      // Nothing named: an enemy hurts on contact by convention, and for
-      // everything else the name is the only signal there is.
-      for (const entity of ctx.entities) {
-        if (entity.entity.role === 'player') continue;
-        const isHazard =
-          entity.entity.role === 'enemy' || HAZARD_NAME_PATTERN.test(entity.entity.name);
-        if (!isHazard) continue;
-        if (seen.has(entity.entityId)) continue;
-        seen.add(entity.entityId);
-        hazards.push(entity);
-      }
-
-      if (hazards.length === 0) {
-        ctx.warn(
-          'The design asked for hazards but named none and placed no enemies, so nothing in the world can hurt the player.',
-        );
-        return [];
-      }
-    }
+    const hazards = resolveHazards(system, ctx);
 
     const damagePerSecond = Math.min(
       readPositiveNumber(system.config, DAMAGE_KEYS) ?? DEFAULT_DAMAGE_PER_SECOND,
       MAX_DAMAGE_PER_SECOND,
     );
     const oneShot = readBoolean(system.config, ONE_SHOT_KEYS);
+
+    const spawners = planSpawners(system, ctx);
+
+    const body: SystemStepInput[] = [];
+    for (let i = 0; i < hazards.length; i += 1) {
+      const hazard = hazards[i];
+      if (!hazard) continue;
+      body.push(damageZoneStep(hazard, damagePerSecond, oneShot));
+    }
+    body.push(...planFollowers(system, ctx, spawners.entityIds));
+    body.push(...planMovingPlatforms(system, ctx));
+    body.push(...spawners.steps);
+
+    // Nothing to survive means nothing to give health to. A lone `health`
+    // component on a player nothing can hurt is a step that reads as work done
+    // while the design's actual request was dropped.
+    if (body.length === 0) return [];
 
     const steps: SystemStepInput[] = [];
 
@@ -216,10 +540,7 @@ registerSystem({
       steps.push(healthStep(player, readMaxHp(system.config) ?? DEFAULT_MAX_HP, true));
     }
 
-    for (const hazard of hazards) {
-      steps.push(damageZoneStep(hazard, damagePerSecond, oneShot));
-    }
-
+    steps.push(...body);
     return steps;
   },
 });

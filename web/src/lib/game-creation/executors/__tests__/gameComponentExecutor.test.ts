@@ -534,4 +534,248 @@ describe('gameComponentExecutor', () => {
 
     expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // PF-1201 — the kinds that used to fall through to a generated script
+  // -------------------------------------------------------------------------
+
+  describe('checkpoint', () => {
+    it('builds the whole bag, so no field falls back to an engine default', async () => {
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(
+        { type: 'checkpoint', entityId: 'id-flag', autoSave: false, ...PLAN_INJECTED },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+      expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('id-flag', {
+        type: 'checkpoint',
+        checkpoint: { autoSave: false },
+      });
+    });
+  });
+
+  describe('follower', () => {
+    it('builds the whole bag', async () => {
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'follower',
+          entityId: 'id-slime',
+          targetEntityId: 'id-hero',
+          speed: 4,
+          stopDistance: 2,
+          lookAtTarget: true,
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+      expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('id-slime', {
+        type: 'follower',
+        follower: {
+          targetEntityId: 'id-hero',
+          speed: 4,
+          stopDistance: 2,
+          lookAtTarget: true,
+        },
+      });
+    });
+
+    it('REFUSES to make something chase itself', async () => {
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'follower',
+          entityId: 'id-slime',
+          targetEntityId: 'id-slime',
+          speed: 4,
+          stopDistance: 2,
+          lookAtTarget: true,
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      expect(result.success).toBe(false);
+      expect(storeOf(ctx).addGameComponent).not.toHaveBeenCalled();
+    });
+
+    it('REFUSES a target the scene graph has reported as absent', async () => {
+      const ctx = makeCtx({
+        store: makeStore({
+          sceneGraph: { nodes: { 'id-slime': { id: 'id-slime' } }, rootIds: [] },
+        }),
+      });
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'follower',
+          entityId: 'id-slime',
+          targetEntityId: 'id-ghost',
+          speed: 4,
+          stopDistance: 2,
+          lookAtTarget: true,
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      // Attaching it anyway would leave an enemy that silently never moves:
+      // the engine matches the target on its `EntityId` component and emits
+      // nothing at all when nothing matches.
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ENTITY_NOT_FOUND');
+      expect(storeOf(ctx).addGameComponent).not.toHaveBeenCalled();
+    });
+
+    it('accepts a target while the scene graph is still empty', async () => {
+      // An empty graph means "the engine has not reported yet", not "absent".
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'follower',
+          entityId: 'id-slime',
+          targetEntityId: 'id-hero',
+          speed: 4,
+          stopDistance: 2,
+          lookAtTarget: true,
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('movingPlatform', () => {
+    it('builds the whole bag', async () => {
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'movingPlatform',
+          entityId: 'id-platform',
+          speed: 2,
+          waypoints: [
+            [0, 0, 0],
+            [4, 0, 0],
+          ],
+          pauseDuration: 0.5,
+          loopMode: 'pingPong',
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+      expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('id-platform', {
+        type: 'movingPlatform',
+        movingPlatform: {
+          speed: 2,
+          waypoints: [
+            [0, 0, 0],
+            [4, 0, 0],
+          ],
+          pauseDuration: 0.5,
+          loopMode: 'pingPong',
+        },
+      });
+    });
+
+    it('REFUSES a single waypoint, which the engine ignores in silence', async () => {
+      // `system_moving_platform` returns early below two waypoints, so a
+      // one-waypoint platform is a platform that never moves and never says so.
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'movingPlatform',
+          entityId: 'id-platform',
+          speed: 2,
+          waypoints: [[0, 0, 0]],
+          pauseDuration: 0.5,
+          loopMode: 'pingPong',
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      expect(result.success).toBe(false);
+      expect(storeOf(ctx).addGameComponent).not.toHaveBeenCalled();
+    });
+
+    it('REFUSES more waypoints than the engine keeps, rather than being truncated', async () => {
+      // The engine takes the first 64 and drops the rest without a word.
+      const ctx = makeCtx();
+      const waypoints = Array.from({ length: 65 }, (_, i) => [i, 0, 0]);
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'movingPlatform',
+          entityId: 'id-platform',
+          speed: 2,
+          waypoints,
+          pauseDuration: 0.5,
+          loopMode: 'pingPong',
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      expect(result.success).toBe(false);
+      expect(storeOf(ctx).addGameComponent).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('spawner', () => {
+    it('builds the whole bag', async () => {
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'spawner',
+          entityId: 'id-nest',
+          entityType: 'sphere',
+          intervalSecs: 3,
+          maxCount: 5,
+          spawnOffset: [0, 1, 0],
+          onTrigger: null,
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+      expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('id-nest', {
+        type: 'spawner',
+        spawner: {
+          entityType: 'sphere',
+          intervalSecs: 3,
+          maxCount: 5,
+          spawnOffset: [0, 1, 0],
+          onTrigger: null,
+        },
+      });
+    });
+
+    it('REFUSES a mesh the engine cannot build', async () => {
+      // The engine falls back to a cuboid for any unrecognised name, so a
+      // "dragon" would silently become a cube in the finished game.
+      const ctx = makeCtx();
+      const result = await gameComponentExecutor.execute(
+        {
+          type: 'spawner',
+          entityId: 'id-nest',
+          entityType: 'dragon',
+          intervalSecs: 3,
+          maxCount: 5,
+          spawnOffset: [0, 1, 0],
+          onTrigger: null,
+          ...PLAN_INJECTED,
+        },
+        ctx,
+      );
+
+      expect(result.success).toBe(false);
+      expect(storeOf(ctx).addGameComponent).not.toHaveBeenCalled();
+    });
+  });
 });

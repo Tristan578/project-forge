@@ -429,3 +429,411 @@ describe('challenge system', () => {
     expect(inputsOfType(steps, 'damageZone')).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PF-1201 — the component kinds that used to fall through to a generated script
+// ---------------------------------------------------------------------------
+
+describe('challenge system — enemies that chase', () => {
+  it('gives every enemy a follower bound to the player engine id', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-slime', 'Slime', 'enemy'),
+      planned('uuid-bat', 'Bat', 'enemy'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(makeSystem('enemies', {}), makeGdd(), ctx);
+
+    expect(inputsOfType(steps, 'follower')).toEqual([
+      {
+        entityId: 'uuid-slime',
+        type: 'follower',
+        targetEntityId: 'uuid-player',
+        speed: 3,
+        stopDistance: 1.5,
+        lookAtTarget: true,
+      },
+      {
+        entityId: 'uuid-bat',
+        type: 'follower',
+        targetEntityId: 'uuid-player',
+        speed: 3,
+        stopDistance: 1.5,
+        lookAtTarget: true,
+      },
+    ]);
+    expect(ctx.warn).not.toHaveBeenCalled();
+  });
+
+  it('reads an authored chase speed and stop distance', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-slime', 'Slime', 'enemy'),
+    ];
+
+    const steps = run(
+      makeSystem('enemies', { chaseSpeed: 7.5, attackRange: 2 }),
+      makeGdd(),
+      makeCtx(entities),
+    );
+
+    expect(inputsOfType(steps, 'follower')[0]).toMatchObject({
+      speed: 7.5,
+      stopDistance: 2,
+    });
+  });
+
+  it('clamps a chase speed the engine would clamp anyway', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-slime', 'Slime', 'enemy'),
+    ];
+
+    const steps = run(
+      makeSystem('enemies', { chaseSpeed: 1e9, stopDistance: 1e9 }),
+      makeGdd(),
+      makeCtx(entities),
+    );
+
+    expect(inputsOfType(steps, 'follower')[0]).toMatchObject({
+      speed: 1000,
+      stopDistance: 1000,
+    });
+  });
+
+  it('plans no follower when the design explicitly turns chasing off', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-slime', 'Slime', 'enemy'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(makeSystem('enemies', { chasePlayer: false }), makeGdd(), ctx);
+
+    expect(inputsOfType(steps, 'follower')).toEqual([]);
+    // The enemy is still dangerous to touch — only the pursuit was declined.
+    expect(inputsOfType(steps, 'damageZone')).toHaveLength(1);
+    expect(ctx.warn).not.toHaveBeenCalled();
+  });
+
+  it('ignores a non-boolean opt-out, because a string is not a decision', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-slime', 'Slime', 'enemy'),
+    ];
+
+    const steps = run(makeSystem('enemies', { chasePlayer: 'no' }), makeGdd(), makeCtx(entities));
+
+    expect(inputsOfType(steps, 'follower')).toHaveLength(1);
+  });
+
+  it('warns and plans no follower when enemies exist but no player does', () => {
+    const entities = [planned('uuid-slime', 'Slime', 'enemy')];
+    const ctx = makeCtx(entities);
+
+    const steps = run(makeSystem('enemies', {}), makeGdd(), ctx);
+
+    expect(inputsOfType(steps, 'follower')).toEqual([]);
+    expect(inputsOfType(steps, 'damageZone')).toHaveLength(1);
+    expect(ctx.warn).toHaveBeenCalledTimes(1);
+    expect(ctx.warn.mock.calls[0]?.[0]).toContain('no player');
+  });
+
+  it('plans a follower bag the real executor accepts', async () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-slime', 'Slime', 'enemy'),
+    ];
+
+    const steps = run(makeSystem('enemies', {}), makeGdd(), makeCtx(entities));
+    const components = await applySteps(steps, entities);
+
+    expect(components['uuid-slime']).toEqual([
+      expect.objectContaining({ type: 'damageZone' }),
+      {
+        type: 'follower',
+        follower: {
+          targetEntityId: 'uuid-player',
+          speed: 3,
+          stopDistance: 1.5,
+          lookAtTarget: true,
+        },
+      },
+    ]);
+  });
+});
+
+describe('challenge system — platforms that move', () => {
+  it('plans nothing unless the design names a platform', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-platform', 'Platform', 'decoration'),
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+
+    const steps = run(makeSystem('obstacles', {}), makeGdd(), makeCtx(entities));
+
+    // Nothing named: a level that meant its platforms to be static must stay
+    // static, so the name alone is not enough.
+    expect(inputsOfType(steps, 'movingPlatform')).toEqual([]);
+  });
+
+  it('routes a named platform along X as an offset from where it spawned', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-platform', 'Platform', 'decoration'),
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(
+      makeSystem('obstacles', { movingPlatforms: ['Platform'] }),
+      makeGdd(),
+      ctx,
+    );
+
+    expect(inputsOfType(steps, 'movingPlatform')).toEqual([
+      {
+        entityId: 'uuid-platform',
+        type: 'movingPlatform',
+        speed: 2,
+        // The first waypoint is the spawn point itself: the engine adds each
+        // waypoint to the spawn origin, so a world-space route would teleport
+        // the platform on the first frame.
+        waypoints: [
+          [0, 0, 0],
+          [4, 0, 0],
+        ],
+        pauseDuration: 0.5,
+        loopMode: 'pingPong',
+      },
+    ]);
+    expect(ctx.warn).not.toHaveBeenCalled();
+  });
+
+  it('routes something named like an elevator along Y instead', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-lift', 'Elevator', 'decoration'),
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+
+    const steps = run(
+      makeSystem('obstacles', { platforms: 'Elevator', distance: 6, platformSpeed: 3, pause: 0 }),
+      makeGdd(),
+      makeCtx(entities),
+    );
+
+    expect(inputsOfType(steps, 'movingPlatform')[0]).toEqual({
+      entityId: 'uuid-lift',
+      type: 'movingPlatform',
+      speed: 3,
+      waypoints: [
+        [0, 0, 0],
+        [0, 6, 0],
+      ],
+      // Zero is not a positive number, so an authored 0 falls to the engine
+      // default rather than being read as "never pause".
+      pauseDuration: 0.5,
+      loopMode: 'pingPong',
+    });
+  });
+
+  it('DROPS a named platform that resolves to nothing and warns instead', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(
+      makeSystem('obstacles', { movingPlatforms: ['Ghost Platform'] }),
+      makeGdd(),
+      ctx,
+    );
+
+    expect(inputsOfType(steps, 'movingPlatform')).toEqual([]);
+    expect(ctx.warn).toHaveBeenCalledTimes(1);
+    expect(ctx.warn.mock.calls[0]?.[0]).toContain('Ghost Platform');
+  });
+
+  it('DROPS the player when the design names it as a moving platform', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(makeSystem('obstacles', { platforms: ['Hero'] }), makeGdd(), ctx);
+
+    expect(inputsOfType(steps, 'movingPlatform')).toEqual([]);
+    expect(ctx.warn).toHaveBeenCalledTimes(1);
+    expect(ctx.warn.mock.calls[0]?.[0]).toContain('take control away');
+  });
+
+  it('plans a moving-platform bag the real executor accepts', async () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-platform', 'Platform', 'decoration'),
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+
+    const steps = run(
+      makeSystem('obstacles', { movingPlatforms: ['Platform'] }),
+      makeGdd(),
+      makeCtx(entities),
+    );
+    const components = await applySteps(steps, entities);
+
+    expect(components['uuid-platform']).toEqual([
+      {
+        type: 'movingPlatform',
+        movingPlatform: {
+          speed: 2,
+          waypoints: [
+            [0, 0, 0],
+            [4, 0, 0],
+          ],
+          pauseDuration: 0.5,
+          loopMode: 'pingPong',
+        },
+      },
+    ]);
+  });
+});
+
+describe('challenge system — the things that keep producing more things', () => {
+  it('plans a spawner for a name the design gave it', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-nest', 'Slime Pit', 'decoration'),
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(
+      makeSystem('waves', { spawners: ['Slime Pit'] }),
+      makeGdd(),
+      ctx,
+    );
+
+    expect(inputsOfType(steps, 'spawner')).toEqual([
+      {
+        entityId: 'uuid-nest',
+        type: 'spawner',
+        entityType: 'cube',
+        intervalSecs: 3,
+        maxCount: 5,
+        spawnOffset: [0, 1, 0],
+        onTrigger: null,
+      },
+    ]);
+    expect(ctx.warn).not.toHaveBeenCalled();
+  });
+
+  it('falls back to an unmistakable name when the design names none', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-nest', 'Bat Nest', 'decoration'),
+      planned('uuid-rock', 'Rock', 'decoration'),
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+
+    const steps = run(makeSystem('waves', {}), makeGdd(), makeCtx(entities));
+
+    expect(inputsOfType(steps, 'spawner').map(s => s.entityId)).toEqual(['uuid-nest']);
+  });
+
+  it('reads the mesh the design asked the spawner to produce', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-nest', 'Nest', 'decoration'),
+    ];
+
+    const steps = run(
+      makeSystem('waves', { spawnType: 'Sphere', spawnInterval: 1.5, maxSpawns: 12 }),
+      makeGdd(),
+      makeCtx(entities),
+    );
+
+    expect(inputsOfType(steps, 'spawner')[0]).toMatchObject({
+      entityType: 'sphere',
+      intervalSecs: 1.5,
+      maxCount: 12,
+    });
+  });
+
+  it('warns and falls back to a cube for a mesh the engine cannot build', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-nest', 'Nest', 'decoration'),
+      // Something hazardous, so the only warning left to count is the spawner's.
+      planned('uuid-spikes', 'Spikes', 'decoration'),
+    ];
+    const ctx = makeCtx(entities);
+
+    const steps = run(makeSystem('waves', { spawnType: 'dragon' }), makeGdd(), ctx);
+
+    // Passing it through would fail the executor's closed enum, which fails the
+    // whole step rather than degrading it.
+    expect(inputsOfType(steps, 'spawner')[0]).toMatchObject({ entityType: 'cube' });
+    expect(ctx.warn).toHaveBeenCalledTimes(1);
+    expect(ctx.warn.mock.calls[0]?.[0]).toContain('dragon');
+  });
+
+  it('clamps an interval the engine would reject and rounds a fractional count', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-nest', 'Nest', 'decoration'),
+    ];
+
+    const steps = run(
+      makeSystem('waves', { spawnInterval: 0.001, maxSpawns: 7.6 }),
+      makeGdd(),
+      makeCtx(entities),
+    );
+
+    expect(inputsOfType(steps, 'spawner')[0]).toMatchObject({
+      intervalSecs: 0.1,
+      maxCount: 8,
+    });
+  });
+
+  it('does not tell a nest to walk after the player', () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-nest', 'Nest', 'enemy'),
+      planned('uuid-slime', 'Slime', 'enemy'),
+    ];
+
+    const steps = run(makeSystem('waves', {}), makeGdd(), makeCtx(entities));
+
+    expect(inputsOfType(steps, 'spawner').map(s => s.entityId)).toEqual(['uuid-nest']);
+    // The nest stays put; the enemy that is not a nest still gives chase.
+    expect(inputsOfType(steps, 'follower').map(s => s.entityId)).toEqual(['uuid-slime']);
+  });
+
+  it('plans a spawner bag the real executor accepts', async () => {
+    const entities = [
+      planned('uuid-player', 'Hero', 'player'),
+      planned('uuid-nest', 'Nest', 'decoration'),
+    ];
+
+    const steps = run(makeSystem('waves', {}), makeGdd(), makeCtx(entities));
+    const components = await applySteps(steps, entities);
+
+    expect(components['uuid-nest']).toEqual([
+      {
+        type: 'spawner',
+        spawner: {
+          entityType: 'cube',
+          intervalSecs: 3,
+          maxCount: 5,
+          spawnOffset: [0, 1, 0],
+          onTrigger: null,
+        },
+      },
+    ]);
+  });
+});
