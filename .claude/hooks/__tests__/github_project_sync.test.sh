@@ -302,6 +302,78 @@ else
   FAILURES=$((FAILURES + 1))
 fi
 
+# --- reconcile stays inside this repo's tickets ---------------------------
+# The taskboard holds tickets for more than one repo, and an issue number only
+# means anything against the repo it was minted in. #500 exists nearly
+# everywhere, so a ticket belonging to another repo read against THIS repo's
+# issue list gets marked done off a closure that has nothing to do with it.
+out="$(run_py "
+tickets = [
+    {'id': 'mine',    'number': 1, 'status': 'in_progress'},
+    {'id': 'foreign', 'number': 2, 'status': 'in_progress'},
+]
+tmap = {
+    'mine':    {'githubIssueNumber': 500},
+    'foreign': {'githubIssueNumber': 500},
+}
+states = {500: 'CLOSED'}
+close, done, unlinked, never = m.classify_drift(
+    tickets, tmap, states, syncable_ids={'mine'}
+)
+print(','.join(sorted(t['id'] for t, _ in done)))
+")"
+assert_out "a ticket for another repo is not marked done off this repo's issue" "mine" "$out"
+
+# Omitted entirely, the filter must not silently engage — every existing
+# caller and test passes four arguments.
+out="$(run_py "
+tickets = [{'id': 'mine', 'number': 1, 'status': 'in_progress'}]
+tmap = {'mine': {'githubIssueNumber': 500}}
+close, done, unlinked, never = m.classify_drift(tickets, tmap, {500: 'CLOSED'})
+print(len(done))
+")"
+assert_out "an omitted scope filters nothing" "1" "$out"
+
+# An EMPTY scope is the database failing to read, not a repo that owns
+# nothing. Reconciling zero tickets would print a clean run over a broken one.
+out="$(run_py "
+import inspect
+src = inspect.getsource(m._reconcile_inner)
+i_get = src.find('db_get_syncable_ticket_ids')
+i_states = src.find('gh_get_issue_states')
+print('guarded' if (i_get != -1 and i_get < i_states and 'if not syncable_ids' in src) else 'unguarded')
+")"
+assert_out "reconcile refuses an empty sync_repo scope before doing any work" "guarded" "$out"
+
+out="$(run_py "
+import inspect
+print('wired' if 'syncable_ids=syncable_ids' in inspect.getsource(m._reconcile_inner) else 'not-wired')
+")"
+assert_out "reconcile wires the sync_repo scope into classify_drift" "wired" "$out"
+
+# --- a created issue is written down before anything can fail -------------
+# The issue exists on GitHub the moment gh_create_issue_and_add_to_project
+# returns. Every later call in that block can raise — gh_sync_issue_state does
+# so by design when it cannot verify the state it set — and the surrounding
+# `except` only counts the error. If the link is not persisted first, the
+# ticket looks new on the next run and push mints a SECOND issue for it,
+# forever. Source order IS the invariant here: the calls are wrapped in one
+# try, so nothing but their order decides what survives a failure.
+out="$(run_py "
+import inspect
+src = inspect.getsource(m._push_inner)
+# Matched as CALLS, not bare names: the comment above them names
+# gh_sync_issue_state in prose, and a bare-name search would score that
+# mention as the call and read the order backwards.
+i_create = src.find('gh_create_issue_and_add_to_project(')
+i_persist = src.find('db_set_github_issue_number(tid, new_gh_num)', i_create)
+i_status  = src.find('gh_set_status(config, item_id, status)', i_create)
+i_state   = src.find('gh_sync_issue_state(config, new_gh_num, status)', i_create)
+ok = -1 not in (i_create, i_persist, i_status, i_state) and i_create < i_persist < i_status and i_persist < i_state
+print('persist-first' if ok else 'persist-late')
+")"
+assert_out "push writes the new issue number down before any call that can raise" "persist-first" "$out"
+
 if [ "$FAILURES" -eq 0 ]; then
   echo "All github_project_sync tests passed."
   exit 0

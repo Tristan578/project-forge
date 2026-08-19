@@ -955,13 +955,26 @@ def _push_inner(include_done=False):
                 item_id, new_gh_num = gh_create_issue_and_add_to_project(
                     config, display, body
                 )
+
+                # Persist the link FIRST, before anything that can raise.
+                # The issue exists on GitHub the moment the call above returns,
+                # so from here on the only way to lose it is to fail before
+                # writing it down. Every later call in this block can raise —
+                # gh_sync_issue_state does so by design when it cannot verify
+                # the state it just set — and the surrounding `except` only
+                # counts the error. An unlinked ticket is then indistinguishable
+                # from a new one on the next run, so push creates a SECOND issue
+                # for it, forever.
+                #
+                # With the link written, a later failure falls through to the
+                # "existing ticket" branch below on the next run, which rebuilds
+                # the missing map entry and re-syncs status and body.
+                db_set_github_issue_number(tid, new_gh_num)
+
                 gh_set_status(config, item_id, status)
                 # Close the issue immediately if created as done
                 if status == "done":
                     gh_sync_issue_state(config, new_gh_num, status)
-
-                # IMMEDIATELY write github_issue_number back to SQLite
-                db_set_github_issue_number(tid, new_gh_num)
 
                 tmap[tid] = {
                     "githubItemId": item_id,
@@ -1818,7 +1831,7 @@ def assert_not_truncated(row_count, limit):
         )
 
 
-def classify_drift(tickets, tmap, states, resolve_link=None):
+def classify_drift(tickets, tmap, states, resolve_link=None, syncable_ids=None):
     """Sort tickets into the four reconciliation buckets.
 
     Does no I/O of its own — every input, including the link lookup, is
@@ -1834,6 +1847,14 @@ def classify_drift(tickets, tmap, states, resolve_link=None):
     file is a cache and can be stale or lost, and reconciling against a stale
     number is worse than not reconciling at all. Injected rather than called
     directly so this stays pure and testable; omitted, the map is used alone.
+
+    `syncable_ids` is the set of ticket IDs whose `sync_repo` names the repo
+    these `states` came from — the same hard filter push() applies. The
+    taskboard holds tickets for more than one repo, and an issue number is only
+    meaningful against the repo it was minted in: #500 exists in most repos, so
+    a ticket belonging to another one can be read against a same-numbered issue
+    here and marked done off a closure that has nothing to do with it. Injected
+    for the same reason as `resolve_link`; omitted, no scope filter is applied.
     """
     to_close = []      # local done, issue open
     to_done = []       # issue closed, local not done
@@ -1841,6 +1862,10 @@ def classify_drift(tickets, tmap, states, resolve_link=None):
     never_linked = []  # no issue number at all — nothing to reconcile against
 
     for t in tickets:
+        if syncable_ids is not None and t["id"] not in syncable_ids:
+            # Belongs to another repo. Its issue number indexes a different
+            # issue list, so nothing here can say anything true about it.
+            continue
         entry = tmap.get(t["id"])
         if not entry:
             continue
@@ -1936,11 +1961,37 @@ def _reconcile_inner(apply_changes=False):
         print("[SYNC] Taskboard API unavailable — skipping reconcile")
         return
 
+    # HARD FILTER: only reconcile tickets whose sync_repo matches this repo —
+    # the same scope push() enforces. Without it a ticket belonging to another
+    # repo is read against THIS repo's issue list, where its number names an
+    # unrelated issue, and a closure over there marks it done over here.
+    syncable_ids = db_get_syncable_ticket_ids(config["repo"])
+    if not syncable_ids:
+        # Empty means the database could not be read (db_connect returns None
+        # on failure and this returns an empty set for it), not that the repo
+        # legitimately owns nothing — push auto-tags every ticket it touches.
+        # Reconciling against an empty scope is a silent no-op that reads as a
+        # clean run, so say so and stop.
+        print(
+            "[SYNC] No tickets carry sync_repo for "
+            f"{config['repo']} (database unreadable?) — skipping reconcile",
+            file=sys.stderr,
+        )
+        return
+
     states = gh_get_issue_states(config)
-    print(f"  [reconcile] {len(tickets)} local tickets vs {len(states)} GitHub issues")
+    in_scope = sum(1 for t in tickets if t["id"] in syncable_ids)
+    print(
+        f"  [reconcile] {in_scope} local tickets in scope "
+        f"({len(tickets) - in_scope} for other repos) vs {len(states)} GitHub issues"
+    )
 
     to_close, to_done, unlinked, never_linked = classify_drift(
-        tickets, tmap, states, resolve_link=db_get_github_issue_number
+        tickets,
+        tmap,
+        states,
+        resolve_link=db_get_github_issue_number,
+        syncable_ids=syncable_ids,
     )
 
     print(f"  issue CLOSED but ticket not done : {len(to_done)}")
