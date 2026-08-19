@@ -17,9 +17,14 @@
 import { registerSystem } from './registry';
 import type { SystemStepInput, SystemStepContext, PlannedEntity } from './registry';
 import type { GameSystem, OrchestratorGDD } from '../types';
+import {
+  IGNORE_WARNINGS,
+  collectibleOwner,
+  collectibleStep,
+  readPositiveNumber,
+  resolveCollectibles,
+} from './collectibles';
 
-/** Points awarded per collectible when the GDD did not say. */
-const DEFAULT_COLLECTIBLE_VALUE = 10;
 /** A target the player can actually reach when the GDD named no number. */
 export const DEFAULT_TARGET_SCORE = 10;
 
@@ -45,26 +50,6 @@ function desiredCondition(system: GameSystem): ConditionKind {
 }
 
 /**
- * Read a positive finite number out of an LLM-authored config bag.
- *
- * `Object.hasOwn` rather than a bare index: `config['constructor']` resolves on
- * the prototype chain and would hand back a function.
- */
-function readPositiveNumber(config: Record<string, unknown>, keys: string[]): number | null {
-  for (const key of keys) {
-    if (!Object.hasOwn(config, key)) continue;
-    const value = config[key];
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
-  }
-  return null;
-}
-
-/** Entities a player can pick up. */
-function collectiblesOf(entities: PlannedEntity[]): PlannedEntity[] {
-  return entities.filter(e => e.entity.role === 'interactable');
-}
-
-/**
  * The entity the player must reach. Role first, name only as a fallback: a GDD
  * that marks its exit as a trigger is stating intent, whereas a name match is a
  * guess.
@@ -73,20 +58,6 @@ function goalOf(entities: PlannedEntity[]): PlannedEntity | undefined {
   const byRole = entities.find(e => e.entity.role === 'trigger');
   if (byRole) return byRole;
   return entities.find(e => /goal|exit|finish|flag|door|portal/i.test(e.entity.name));
-}
-
-function collectibleStep(entity: PlannedEntity, value: number): SystemStepInput {
-  return {
-    executor: 'game_component',
-    input: {
-      entityId: entity.entityId,
-      type: 'collectible',
-      value,
-      destroyOnCollect: true,
-      pickupSoundAsset: null,
-      rotateSpeed: 90,
-    },
-  };
 }
 
 function winConditionStep(
@@ -146,18 +117,34 @@ registerSystem({
     // It rides on the player where there is one so the Inspector shows it
     // somewhere meaningful.
     const owner = player ?? ctx.entities[0];
-    const collectibles = collectiblesOf(ctx.entities);
-    const collectibleValue =
-      readPositiveNumber(system.config, ['collectibleValue', 'pointsPerPickup', 'pointValue'])
-      ?? DEFAULT_COLLECTIBLE_VALUE;
+
+    // The pickups and their value are resolved in one shared place, and exactly
+    // one definition emits them. Where the design also declares an `entities`
+    // system, THAT one emits — it is the only one that can target pickups by
+    // name — and this one only reads, so its score target is derived from the
+    // very components that were planned rather than from a second, independent
+    // reading of the same design. Two readings is how a game ended up with a
+    // target no amount of collecting could reach: `add_game_component` replaces,
+    // so one value silently won while the target stayed derived from the loser.
+    const owns = collectibleOwner(system, gdd) === 'progression';
+    const { targets: collectibles, value: collectibleValue } = resolveCollectibles(
+      system,
+      gdd,
+      ctx,
+      // The definition that is only reading stays silent; the user should be
+      // told once that a named pickup does not exist, not once per system.
+      owns ? ctx.warn : IGNORE_WARNINGS,
+    );
 
     const wanted = desiredCondition(system);
     const steps: SystemStepInput[] = [];
 
     // Every design here scores points off pickups, so collectibles are attached
     // regardless of which condition ends up planned.
-    for (const collectible of collectibles) {
-      steps.push(collectibleStep(collectible, collectibleValue));
+    if (owns) {
+      for (const collectible of collectibles) {
+        steps.push(collectibleStep(collectible, collectibleValue));
+      }
     }
 
     if (wanted === 'collectAll') {
