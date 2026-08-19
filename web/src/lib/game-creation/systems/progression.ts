@@ -21,9 +21,77 @@ import {
   IGNORE_WARNINGS,
   collectibleOwner,
   collectibleStep,
-  readPositiveNumber,
   resolveCollectibles,
 } from './collectibles';
+import { readNameList, readPositiveNumber, resolveNames } from './configRead';
+
+/** Config keys an LLM plausibly uses for "the places progress is saved". */
+const CHECKPOINT_NAME_KEYS = ['checkpoints', 'savePoints', 'respawnPoints', 'flags'];
+
+/**
+ * Names that describe a place progress is saved. Used only when the design
+ * named none explicitly — no role in the blueprint means "checkpoint", so the
+ * name is the only signal left.
+ */
+const CHECKPOINT_NAME_PATTERN = /checkpoint|save\s*point|savepoint|respawn/i;
+
+/**
+ * The places that record progress.
+ *
+ * A checkpoint is progression, not challenge: it is the thing that decides
+ * where a death sends the player back to. Silent when there is nothing to
+ * plan, because most designs never ask for one and a warning per design that
+ * simply has no checkpoints would be noise.
+ */
+function planCheckpoints(system: GameSystem, ctx: SystemStepContext): SystemStepInput[] {
+  const names = readNameList(system.config, CHECKPOINT_NAME_KEYS);
+
+  let checkpoints: PlannedEntity[];
+  if (names.length > 0) {
+    checkpoints = resolveNames(
+      names,
+      ctx.entities,
+      ctx.warn,
+      name =>
+        `The design named "${name}" as a checkpoint, but no such object was placed in the world, so it was left out.`,
+      // A checkpoint on the player fires the instant the game starts and every
+      // frame after, which is not a saved place.
+      (entity, name) =>
+        entity.entity.role === 'player'
+          ? `The design named the player "${name}" as a checkpoint, which would save progress constantly, so it was left out.`
+          : null,
+    );
+  } else {
+    checkpoints = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < ctx.entities.length; i += 1) {
+      const entity = ctx.entities[i];
+      if (!entity || entity.entity.role === 'player') continue;
+      if (!CHECKPOINT_NAME_PATTERN.test(entity.entity.name)) continue;
+      if (seen.has(entity.entityId)) continue;
+      seen.add(entity.entityId);
+      checkpoints.push(entity);
+    }
+  }
+
+  const steps: SystemStepInput[] = [];
+  for (let i = 0; i < checkpoints.length; i += 1) {
+    const checkpoint = checkpoints[i];
+    if (!checkpoint) continue;
+    steps.push({
+      executor: 'game_component',
+      input: {
+        entityId: checkpoint.entityId,
+        type: 'checkpoint',
+        // Matches `CheckpointData::default()`. A checkpoint the player has to
+        // activate by some other means is a checkpoint that never fires, since
+        // nothing in the generated game sends that signal.
+        autoSave: true,
+      },
+    });
+  }
+  return steps;
+}
 
 /** A target the player can actually reach when the GDD named no number. */
 export const DEFAULT_TARGET_SCORE = 10;
@@ -138,6 +206,10 @@ registerSystem({
 
     const wanted = desiredCondition(system);
     const steps: SystemStepInput[] = [];
+
+    // Planned before the condition branches so that every path carries them —
+    // three of the four branches below return early.
+    steps.push(...planCheckpoints(system, ctx));
 
     // Every design here scores points off pickups, so collectibles are attached
     // regardless of which condition ends up planned.
