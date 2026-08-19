@@ -178,27 +178,53 @@ function readPositive(
       if (found === null) found = value;
       continue;
     }
+    // The consequence differs depending on whether another spelling of the same
+    // concept already supplied a usable number, and saying "the default was
+    // used" when it was not is a false explanation of the game the user got.
     warnings.push(
-      `The world's ${label} was set to a value the engine cannot use ("${describe(value)}"), so the default was used instead.`,
+      found === null
+        ? `The world's ${label} was set to a value the engine cannot use ("${describe(value)}"), so the default was used instead.`
+        : `The world's ${label} was written twice and one spelling ("${key}") was a value the engine cannot use ("${describe(value)}"), so the usable one was kept.`,
     );
   }
 
   return found;
 }
 
-/** Only a real boolean. A truthy string is not a design decision. */
+/**
+ * Only a real boolean. A truthy string is not a design decision.
+ *
+ * A present-but-unusable key is reported for the same reason `readPositive`
+ * reports one, and here it matters more: the key is marked consumed, so the
+ * leftover-key sweep at the end will not mention it either. Without this the
+ * design asks for walls, gets an open level, and nothing anywhere says why.
+ */
 function readBoolean(
   config: Record<string, unknown>,
   keys: string[],
   consumed: Set<string>,
+  warnings: string[],
+  label: string,
 ): boolean {
+  let found: boolean | null = null;
+
   for (const key of keys) {
     if (!Object.hasOwn(config, key)) continue;
     consumed.add(key);
+
     const value = config[key];
-    if (typeof value === 'boolean') return value;
+    if (typeof value === 'boolean') {
+      if (found === null) found = value;
+      continue;
+    }
+    warnings.push(
+      found === null
+        ? `The design asked for ${label} with a value the engine cannot read as yes or no ("${describe(value)}"), so it was treated as no.`
+        : `The design asked for ${label} twice and one spelling ("${key}") was a value the engine cannot read as yes or no ("${describe(value)}"), so the usable one was kept.`,
+    );
   }
-  return false;
+
+  return found ?? false;
 }
 
 function describe(value: unknown): string {
@@ -479,7 +505,7 @@ export function buildWorldGeometry(input: WorldGeometryInput): WorldGeometryResu
   }
 
   // --- bounds -------------------------------------------------------------
-  const wantsBounds = readBoolean(config, BOUNDS_KEYS, consumed);
+  const wantsBounds = readBoolean(config, BOUNDS_KEYS, consumed, warnings, 'walls around the level');
   if (wantsBounds) {
     const wallHeight = clamp(rawHeight ?? DEFAULT_WALL_HEIGHT, MIN_SCALE, MAX_WALL_HEIGHT);
     const halfWidth = groundWidth / 2;

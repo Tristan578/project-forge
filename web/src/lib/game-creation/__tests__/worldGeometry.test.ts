@@ -273,3 +273,61 @@ describe('buildWorldGeometry — hostile config', () => {
     }
   });
 });
+
+/**
+ * A design key that is present but unusable must always produce an explanation
+ * that matches the game the user actually got.
+ *
+ * Both of these are silent-failure shapes rather than crashes, which is why
+ * they survived: the geometry that comes back is perfectly valid, and only the
+ * words next to it are wrong or missing.
+ */
+describe('buildWorldGeometry — explaining an unusable key', () => {
+  it('does not claim the default was used when another spelling supplied the size', () => {
+    const { descriptors, warnings } = build3d({ width: 40, worldWidth: 'huge' });
+
+    // The usable number is the one that reached the engine.
+    const ground = descriptors.find(d => d.name === 'Ground');
+    expect(ground?.scale[0]).toBe(40);
+
+    // So an explanation saying the default was used instead would be false.
+    const about = warnings.filter(w => w.includes('worldWidth'));
+    expect(about).toHaveLength(1);
+    expect(about[0]).not.toMatch(/default was used/i);
+    expect(about[0]).toMatch(/written twice/i);
+  });
+
+  it('still says the default was used when no spelling supplied a usable size', () => {
+    const { warnings } = build3d({ width: 'huge' });
+
+    expect(warnings.join(' ')).toMatch(/default was used/i);
+  });
+
+  it('explains a walls flag the engine cannot read as yes or no', () => {
+    // `walls` is consumed by the bounds reader, so the leftover-key sweep at the
+    // end will never mention it. Without its own warning the design asks for an
+    // enclosed level, gets an open one, and nothing anywhere says why.
+    const { descriptors, warnings } = build3d({ width: 30, depth: 30, walls: 'yes' });
+
+    expect(descriptors.some(d => d.name.startsWith('Wall'))).toBe(false);
+
+    const about = warnings.filter(w => w.includes('walls'));
+    expect(about.length).toBeGreaterThan(0);
+    expect(about.join(' ')).toMatch(/yes or no/i);
+  });
+
+  it('keeps a usable walls flag and reports only the unusable spelling', () => {
+    const { descriptors, warnings } = build3d({ width: 30, depth: 30, bounds: true, walls: 'yes' });
+
+    expect(descriptors.some(d => d.name.startsWith('Wall'))).toBe(true);
+
+    const about = warnings.filter(w => w.includes('"walls"'));
+    expect(about).toHaveLength(1);
+    expect(about[0]).toMatch(/twice/i);
+  });
+
+  it('says nothing when every flag is a real boolean', () => {
+    const { warnings } = build3d({ width: 30, depth: 30, bounds: false });
+    expect(warnings).toEqual([]);
+  });
+});
