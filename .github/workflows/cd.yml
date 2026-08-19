@@ -271,6 +271,43 @@ jobs:
           echo "$WEB_FILES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
+  check-deployment-drift:
+    name: Detect Deployment Drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' }}
+    permissions:
+      contents: read
+    outputs:
+      docs-changed: ${{ steps.docs.outputs.changed }}
+      design-changed: ${{ steps.design.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check docs deployment drift
+        id: docs
+        env:
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: >-
+          bash scripts/check-vercel-deployment-drift.sh
+          '${{ secrets.VERCEL_DOCS_PROJECT_ID }}'
+          '^(apps/docs/|mcp-server/manifest/|packages/ui/|package(-lock)?\.json$|\.node-version$|\.github/workflows/cd\.yml$)'
+          docs
+
+      - name: Check design deployment drift
+        id: design
+        env:
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: >-
+          bash scripts/check-vercel-deployment-drift.sh
+          '${{ secrets.VERCEL_DESIGN_PROJECT_ID }}'
+          '^(apps/design/|packages/ui/|package(-lock)?\.json$|\.node-version$|\.github/workflows/cd\.yml$)'
+          design
+
   build-wasm:
     name: WASM Build
     runs-on: ubuntu-latest
@@ -579,6 +616,9 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
+      # spawnforge-staging is a separate Vercel project, so its Production target
+      # is the stable staging environment. A Preview target creates an ephemeral
+      # URL and leaves spawnforge-staging.vercel.app pinned to an old deployment.
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
       - name: Link Vercel project (staging)
@@ -586,7 +626,7 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Download WASM artifacts for same-origin fallback
         id: download-wasm-staging
@@ -617,7 +657,7 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           ENGINE_VERSION: ${{ github.sha }}
         run: |
-          url=$(vercel deploy --token="$VERCEL_TOKEN" \
+          url=$(vercel deploy --prod --token="$VERCEL_TOKEN" \
             --build-env NEXT_PUBLIC_ENGINE_VERSION="$ENGINE_VERSION")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to staging: $url"
@@ -939,8 +979,8 @@ jobs:
   # Independent of the main web deploy — docs can ship without a full Vercel web build.
   deploy-docs:
     name: Deploy Docs
-    needs: [check-changes, lint, typecheck, security]
-    if: (needs.check-changes.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'
+    needs: [check-deployment-drift, lint, typecheck, security]
+    if: (needs.check-deployment-drift.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -985,8 +1025,8 @@ jobs:
   # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
   deploy-design:
     name: Deploy Design Workbench
-    needs: [check-changes, lint, typecheck, security]
-    if: (needs.check-changes.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'
+    needs: [check-deployment-drift, lint, typecheck, security]
+    if: (needs.check-deployment-drift.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
