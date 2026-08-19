@@ -73,37 +73,30 @@ describe('sceneCreateExecutor', () => {
     expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('new_scene', {});
   });
 
-  it('does not create a scene or clear the viewport for a config-overlay step', async () => {
+  // PF-1138. `worldType`/`worldConfig` used to be accepted by this schema and
+  // then dropped — there was no world build command to send them to — and the
+  // world system's step pointed here because of it, so every generated game was
+  // an empty room. Both fields are now GONE from the schema rather than ignored,
+  // and the world is built by `world_build`. `z.object` strips unknown keys
+  // silently, so a still-accepted field would be the very silent-drop defect
+  // this closes; the assertion is on the full output for the same reason.
+  it('no longer carries world config — the fields are stripped, not stored', async () => {
     const ctx = makeCtx();
     const before = loadProjectScenes().scenes.length;
 
-    const result = await sceneCreateExecutor.execute({ worldType: 'tiled' }, ctx);
-
-    expect(result.success).toBe(true);
-    expect(loadProjectScenes().scenes.length).toBe(before);
-    expect(ctx.getStore().newScene).not.toHaveBeenCalled();
-    expect(ctx.getStore().setScenes).not.toHaveBeenCalled();
-    expect(result.output).toEqual({ sceneName: 'Untitled Scene', worldType: 'tiled' });
-  });
-
-  // `worldConfig` is accepted by the schema and then goes nowhere: there is no
-  // scene-level world build command to send it to. The executor used to carry an
-  // empty `if (worldType === 'tiled' || worldConfig) {}` with a comment claiming
-  // the config was "stored in step output for downstream use", which is exactly
-  // the shape a real handler would have. Assert the full output rather than a
-  // subset, so the drop is a stated fact here instead of a gap a reader has to
-  // notice — and so wiring it up later fails this test rather than passing
-  // quietly.
-  it('drops worldConfig — it reaches no engine command and no step output', async () => {
-    const ctx = makeCtx();
     const result = await sceneCreateExecutor.execute({
+      name: 'Cave Level',
       worldType: 'tiled',
       worldConfig: { tileSize: 32, gridWidth: 40, gridHeight: 24 },
     }, ctx);
 
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ sceneName: 'Untitled Scene', worldType: 'tiled' });
+    expect(result.output).toEqual({ sceneName: 'Cave Level' });
     expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+    // Still a real scene creation: the overlay branch that used to skip this
+    // work existed only for the world system's step, which no longer comes here.
+    expect(loadProjectScenes().scenes.length).toBe(before + 1);
+    expect(ctx.getStore().newScene).toHaveBeenCalled();
   });
 
   // Camera configuration moved out of this executor in PF-1125 — it lives in
@@ -122,7 +115,7 @@ describe('sceneCreateExecutor', () => {
     }, ctx);
 
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ sceneName: 'Arena', worldType: null });
+    expect(result.output).toEqual({ sceneName: 'Arena' });
 
     // The scene clear goes through `getStore().newScene()` as of PF-1155, so
     // this executor now dispatches nothing at all — which makes the assertion

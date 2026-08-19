@@ -68,6 +68,22 @@ describe('validateWinnability', () => {
       expect(report.issues.map(i => i.code)).toContain('GOAL_TARGET_MISSING');
     });
 
+    // `targetEntityId` is LLM-authored and also arrives from saved `.forge`
+    // scenes, so a bare `nodes[target]` read would resolve these off
+    // `Object.prototype`, come back truthy, and pass a scene whose goal entity
+    // does not exist — the gate failing OPEN in front of Play.
+    it.each(['constructor', 'toString', 'valueOf', '__proto__', 'hasOwnProperty'])(
+      'fails when the goal target is the inherited property %s',
+      (inherited) => {
+        const report = validateWinnability(graph(['player']), {
+          player: [player],
+          wc: [reachGoal(inherited)],
+        });
+        expect(report.winnable).toBe(false);
+        expect(report.issues.map(i => i.code)).toContain('GOAL_TARGET_MISSING');
+      },
+    );
+
     it('fails when the goal target is null', () => {
       const report = validateWinnability(graph(['player']), {
         player: [player],

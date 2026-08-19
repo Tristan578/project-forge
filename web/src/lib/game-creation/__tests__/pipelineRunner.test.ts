@@ -599,6 +599,60 @@ describe('runPipeline', () => {
     expect(statusDuringExecution).toBe('executing');
   });
 
+  // A failing executor is not necessarily a silent one — `verify_all_scenes`
+  // reports why the game cannot be won and THEN fails, so that the plan fails
+  // rather than handing over an unwinnable game. The diagnostic used to be
+  // dropped here: `step.output` was assigned on the success path only, so the
+  // plan carried an empty step and everything the executor had to say was lost
+  // to `resolveStepOutput` and to anything re-rendering a finished run.
+  describe('diagnostic output on a failing step', () => {
+    const diagnosticFailure: ExecutorDefinition = {
+      name: 'verify_all_scenes',
+      inputSchema: z.object({}),
+      execute: async (): Promise<ExecutorResult> => ({
+        success: false,
+        error: { code: 'NOT_WINNABLE', message: 'no win condition', userFacingMessage: 'Cannot be won', retryable: false },
+        output: { winnable: false, warnings: ['no win condition'] },
+      }),
+      userFacingErrorMessage: 'Verify failed',
+    };
+
+    it('keeps the output of a failed non-optional step', async () => {
+      const plan = makePlan({ steps: [makeStep('step_0', 'verify_all_scenes')] });
+      const ctx = makeContext(controller.signal);
+
+      const result = await runPipeline(plan, makeRegistry(diagnosticFailure), ctx);
+
+      expect(result.steps[0].status).toBe('failed');
+      expect(result.steps[0].output).toEqual({ winnable: false, warnings: ['no win condition'] });
+      expect(result.steps[0].error?.code).toBe('NOT_WINNABLE');
+    });
+
+    it('keeps the output of a failed optional step', async () => {
+      const plan = makePlan({
+        steps: [makeStep('step_0', 'verify_all_scenes', { optional: true })],
+      });
+      const ctx = makeContext(controller.signal);
+
+      const result = await runPipeline(plan, makeRegistry(diagnosticFailure), ctx);
+
+      expect(result.steps[0].status).toBe('skipped');
+      expect(result.steps[0].output).toEqual({ winnable: false, warnings: ['no win condition'] });
+    });
+
+    // An empty failure must stay undefined rather than become `{}` — a
+    // dependent reading `{}` would take it for "ran, produced nothing".
+    it('leaves output undefined when the failure carried none', async () => {
+      const plan = makePlan({ steps: [makeStep('step_0', 'physics_profile')] });
+      const ctx = makeContext(controller.signal);
+
+      const result = await runPipeline(plan, makeRegistry(failureExecutor), ctx);
+
+      expect(result.steps[0].status).toBe('failed');
+      expect(result.steps[0].output).toBeUndefined();
+    });
+  });
+
   it('gate without onGateReached callback defaults to approved', async () => {
     const gate = makeGate('gate-1', 'step_0');
     const plan = makePlan({

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { EXECUTOR_REGISTRY, registerExecutor } from '../index';
 
 describe('EXECUTOR_REGISTRY', () => {
-  it('contains all 10 built-in executors', () => {
+  it('contains all 12 built-in executors', () => {
     // Full-set equality, not per-name `has()` plus a size count: an executor
     // registered under an unexpected name satisfies both of those and is
     // invisible. A new executor belongs here explicitly — the registry entry is
@@ -14,7 +14,9 @@ describe('EXECUTOR_REGISTRY', () => {
       'physics_profile',
       'camera_setup',
       'character_setup',
+      'game_component',
       'entity_setup',
+      'world_build',
       'asset_generate',
       'custom_script_generate',
       'verify_all_scenes',

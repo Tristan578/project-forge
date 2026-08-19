@@ -20,7 +20,7 @@ import type {
   GameSystem,
 } from './types';
 import { FALLBACK_SCHEMA } from './types';
-import { SYSTEM_REGISTRY } from './systems';
+import { SYSTEM_REGISTRY, defaultWinConditionStep } from './systems';
 import type { PlannedEntity } from './systems';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
@@ -117,7 +117,11 @@ const PLAN_COST_ESTIMATES: Record<string, { base: number; variance: number }> = 
   // Pure engine dispatch, no model call — same as the two above.
   camera_setup: { base: 0, variance: 0 },
   character_setup: { base: 0, variance: 0 },
+  game_component: { base: 0, variance: 0 },
   entity_setup: { base: PRICING.plan_entity_setup, variance: 0.1 },
+  // Spawns the ground/platforms/walls the world system planned. Pure engine
+  // dispatch — the geometry was decided at plan time, so no model is called.
+  world_build: { base: 0, variance: 0 },
   asset_generate: { base: PRICING.plan_asset_generate, variance: 0.4 },
   custom_script_generate: { base: PRICING.plan_script_generate, variance: 0.3 },
   verify_all_scenes: { base: 0, variance: 0 },
@@ -138,6 +142,22 @@ const PLAN_COST_ESTIMATES: Record<string, { base: number; variance: number }> = 
 // TIER_MONTHLY_TOKENS from pricing.ts is NOT used here -- it is for
 // billing display, not orchestration. The orchestrator needs the user's
 // CURRENT balance, not their monthly allocation.
+/**
+ * Does the plan already carry a win condition?
+ *
+ * Indexed reads, never `.some`: a callback form skips array holes, so a sparse
+ * step list would report "yes, covered" for a plan carrying nothing — and this
+ * predicate failing open is exactly the unplayable game it exists to prevent.
+ */
+function plansAWinCondition(planned: PlanStep[]): boolean {
+  for (let i = 0; i < planned.length; i += 1) {
+    const step = planned[i];
+    if (!step) continue;
+    if (step.executor === 'game_component' && step.input.type === 'winCondition') return true;
+  }
+  return false;
+}
+
 export function buildPlan(
   gdd: OrchestratorGDD,
   projectId: string,
@@ -327,6 +347,58 @@ export function buildPlan(
         systemDeps,
       );
       steps.push(step);
+    }
+  }
+
+  // --- Phase 3b: The win-condition guarantee ---
+  //
+  // A scene with no `winCondition` component can never be won, so
+  // `validateWinnability` answers NO_WIN_CONDITION and `gameSlice.play()`
+  // returns before it dispatches anything — the generated game does not merely
+  // play badly, it does not start. Only the 'progression' system definition
+  // plans a win condition, and most GDDs never declare one, so leaving this to
+  // the system loop means most generated games are unplayable (PF-1199).
+  //
+  // This DEFERS to a real progression system: two win conditions on one scene
+  // is a second rule the player was never told about.
+  if (!plansAWinCondition(steps)) {
+    // The condition is a rule about the game rather than about a particular
+    // prop, so it rides on the player where there is one — that is where a user
+    // opening the Inspector will look for it.
+    let owner: PlannedEntity | undefined;
+    for (let i = 0; i < plannedEntities.length; i += 1) {
+      const candidate = plannedEntities[i];
+      if (!candidate) continue;
+      if (candidate.entity.role === 'player') {
+        owner = candidate;
+        break;
+      }
+      if (!owner) owner = candidate;
+    }
+
+    if (owner) {
+      // No warning on this path. Supplying a default is not the same as
+      // dropping something the design asked for, and a warnings channel that
+      // speaks on every ordinary plan is one users learn to skip.
+      const stepInput = defaultWinConditionStep(owner.entityId);
+      steps.push(
+        makeStep(
+          stepInput.executor,
+          {
+            ...stepInput.input,
+            projectType: gdd.projectType,
+            feelDirective: gdd.feelDirective,
+          },
+          allEntityStepIds,
+        ),
+      );
+    } else {
+      // Nothing in the world to carry the component. Binding to an empty id
+      // would be rejected by the engine, and a rejected non-optional step fails
+      // the entire plan — so say what happened instead.
+      planWarnings.push(
+        'The design never said how the game is won and placed nothing in the world to win with, so this game has no goal yet.',
+      );
     }
   }
 

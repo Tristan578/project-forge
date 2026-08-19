@@ -271,8 +271,11 @@ describe('buildPlan', () => {
   // 12. Unknown system categories -> custom_script_generate steps
   it('emits custom_script_generate step for unknown system categories', () => {
     const gdd = makeGdd({
-      // 'challenge' and 'narrative' are not in SYSTEM_REGISTRY (only 4 are registered)
-      systems: [makeSystem('challenge', 'combat')],
+      // 'narrative' has no entry in SYSTEM_REGISTRY, so it still falls through
+      // to a generated script. 'challenge' and 'entities' used to sit here too
+      // and no longer do: registering a category is exactly what REMOVES this
+      // fall-through, so this fixture must name a category nothing plans.
+      systems: [makeSystem('narrative', 'story-beats')],
     });
 
     const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
@@ -282,7 +285,7 @@ describe('buildPlan', () => {
 
     expect(customScriptSteps.length).toBeGreaterThan(0);
     const step = customScriptSteps[0];
-    expect(step.input).toMatchObject({ description: expect.stringContaining('challenge') });
+    expect(step.input).toMatchObject({ description: expect.stringContaining('narrative') });
   });
 
   // 13. FALLBACK_SCHEMA validates asset fallbacks
@@ -574,8 +577,8 @@ describe('buildPlan', () => {
   it('builds a custom_script step for every unknown-category system sharing that category', () => {
     const gdd = makeGdd({
       systems: [
-        makeSystem('challenge', 'enemy-waves'),
-        makeSystem('challenge', 'environmental-hazards'),
+        makeSystem('narrative', 'story-beats'),
+        makeSystem('narrative', 'ambient-dialogue'),
       ],
       scenes: [
         {
@@ -586,7 +589,7 @@ describe('buildPlan', () => {
             {
               name: 'Player',
               role: 'player',
-              systems: ['challenge'],
+              systems: ['narrative'],
               appearance: 'capsule',
             },
           ],
@@ -721,9 +724,9 @@ describe('buildPlan', () => {
 
   it('falls back to the first entity in the GDD when no entity declares the unknown category', () => {
     const gdd = makeGdd({
-      // 'challenge' is unknown to SYSTEM_REGISTRY; default gdd's only entity
-      // (Player) does not declare 'challenge' in its own systems list.
-      systems: [makeSystem('challenge', 'combat')],
+      // 'narrative' is unknown to SYSTEM_REGISTRY; default gdd's only entity
+      // (Player) does not declare 'narrative' in its own systems list.
+      systems: [makeSystem('narrative', 'story-beats')],
     });
 
     const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
@@ -819,7 +822,7 @@ describe('buildPlan', () => {
       scenes: [
         { name: 'Empty', purpose: 'no entities', systems: [], entities: [], transitions: [] },
       ],
-      systems: [makeSystem('challenge', 'combat')],
+      systems: [makeSystem('narrative', 'story-beats')],
     });
 
     const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
@@ -928,5 +931,134 @@ describe('buildPlan', () => {
         }
       },
     );
+  });
+});
+
+/**
+ * The plan-level win-condition guarantee.
+ *
+ * `progression.ts` is the only system definition that plans a `winCondition`,
+ * and it runs ONLY when the GDD declares a system whose category is
+ * 'progression'. Most GDDs do not declare one — so without a guarantee here the
+ * plan carries no win condition at all, `validateWinnability` answers
+ * NO_WIN_CONDITION, and `gameSlice.play()` returns before it dispatches
+ * anything. A generated game that cannot be played is the whole failure this
+ * work exists to remove, so the guarantee belongs in the builder rather than in
+ * any one system definition.
+ */
+describe('buildPlan — the win-condition guarantee', () => {
+  /** Every `game_component` step planning a win condition, read by index. */
+  function winConditionSteps(plan: {
+    steps: Array<{ executor: string; input: Record<string, unknown> }>;
+  }) {
+    const found: Array<Record<string, unknown>> = [];
+    // Indexed reads, never `.filter`: it skips array holes, so a sparse step
+    // list would report itself clean.
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      const step = plan.steps[i];
+      if (!step) continue;
+      if (step.executor === 'game_component' && step.input.type === 'winCondition') {
+        found.push(step.input);
+      }
+    }
+    return found;
+  }
+
+  function warningsOf(plan: ReturnType<typeof buildPlan>): string[] {
+    return plan.approvalGates.find(g => g.id === 'gate_final')!.displayData.completionSummary!
+      .warnings;
+  }
+
+  it('plans a satisfiable win condition for a GDD that declares no progression system', () => {
+    const gdd = makeGdd({ systems: [makeSystem('movement', 'platformer')] });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const conditions = winConditionSteps(plan);
+    expect(conditions).toHaveLength(1);
+    expect(conditions[0].conditionType).toBe('score');
+    // A score condition is winnable only with a positive finite target — the
+    // validator refuses zero, negative and non-finite alike.
+    const target = conditions[0].targetScore as number;
+    expect(Number.isFinite(target)).toBe(true);
+    expect(target).toBeGreaterThan(0);
+  });
+
+  it('binds the substituted condition to the player by engine id, never by name', () => {
+    const gdd = makeGdd({ systems: [makeSystem('movement', 'platformer')] });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const playerId = (findEntitySetup(plan, 'Player').input as { entityId: string }).entityId;
+    expect(typeof playerId).toBe('string');
+    expect(playerId.length).toBeGreaterThan(0);
+    expect(winConditionSteps(plan)[0].entityId).toBe(playerId);
+  });
+
+  /**
+   * Supplying a default is not the same as dropping something the user asked
+   * for. The warnings channel means "your design lost something", and a channel
+   * that speaks on every ordinary plan is one users stop reading — so the
+   * ordinary substitution stays silent, and `buildPlan`'s existing
+   * "quiet on the happy path" test stays true.
+   */
+  it('stays silent for the ordinary substitution — a default is not a dropped feature', () => {
+    const gdd = makeGdd({ systems: [makeSystem('movement', 'platformer')] });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    expect(winConditionSteps(plan)).toHaveLength(1);
+    expect(warningsOf(plan)).toEqual([]);
+  });
+
+  /**
+   * The guarantee must DEFER to a real progression system, never double up: two
+   * win conditions on one scene is a second rule the player was never told
+   * about.
+   */
+  it('does not add a second condition when a progression system already planned one', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('movement', 'platformer'), makeSystem('progression', 'score-attack')],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    expect(winConditionSteps(plan)).toHaveLength(1);
+  });
+
+  /**
+   * Verification has to run AFTER the substituted condition exists, or it would
+   * check a scene the plan had not finished describing and report a break the
+   * plan itself was about to fix.
+   */
+  it('runs verification after the substituted condition, not before it', () => {
+    const gdd = makeGdd({ systems: [makeSystem('movement', 'platformer')] });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    let winStepId = '';
+    let verifyStep: { dependsOn: string[] } | undefined;
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      const step = plan.steps[i];
+      if (step.executor === 'game_component' && step.input.type === 'winCondition') {
+        winStepId = step.id;
+      }
+      if (step.executor === 'verify_all_scenes') verifyStep = step;
+    }
+
+    expect(winStepId).not.toBe('');
+    expect(verifyStep?.dependsOn).toContain(winStepId);
+  });
+
+  /**
+   * A GDD with no entities anywhere has nothing to carry the component. THIS is
+   * a real loss rather than a default, so it speaks — and it must not emit a
+   * step bound to an empty id, which the engine would reject and which would
+   * fail the whole plan.
+   */
+  it('warns instead of planning an unbound condition when there is nothing to bind to', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('movement', 'platformer')],
+      scenes: [{ name: 'Main', purpose: 'Empty', systems: [], entities: [], transitions: [] }],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    expect(winConditionSteps(plan)).toHaveLength(0);
+    expect(warningsOf(plan).join(' ')).toMatch(/no goal yet/i);
   });
 });

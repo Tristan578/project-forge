@@ -1,13 +1,51 @@
 /**
- * Tests for the verify_all_scenes executor.
- * 10+ tests covering structural heuristics.
+ * Tests for the verify_all_scenes executor, reached through EXECUTOR_REGISTRY.
+ * Scope: the STRUCTURAL heuristics (empty scene, camera, light, ground plane).
+ *
+ * Winnability — the check the step now actually fails on — is covered by the
+ * canonical suite at `executors/__tests__/verifyExecutor.test.ts`, which
+ * imports the executor directly.
+ *
+ * CORRECTION (PF-1199): every fixture here used to omit `allGameComponents`
+ * entirely, and the suite still asserted `success === true` — i.e. it asserted
+ * that a scene with no win condition verifies clean. That is precisely the
+ * claim the executor had no evidence for and which `gameSlice.play()` refuses.
+ * The shared store fixture now carries a genuinely winnable component set, so
+ * these tests isolate the cosmetic heuristic they were written for instead of
+ * silently depending on winnability never being checked. No assertion was
+ * relaxed: this makes the fixtures honest, it does not lower the bar.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import type { ExecutorContext } from '../types';
 import type { EditorState } from '@/stores/editorStore';
-import type { SceneNode } from '@/stores/slices/types';
+import type { GameComponentData, SceneNode } from '@/stores/slices/types';
 import { EXECUTOR_REGISTRY } from '../executors/index';
+
+/**
+ * The smallest component set `validateWinnability` accepts, and deliberately
+ * one that does not depend on any scene node: a "reach score" win is
+ * satisfiable on its own, so the empty-scene fixture below still exercises the
+ * `empty_scene` heuristic rather than tripping the winnability gate first.
+ */
+const WINNABLE_COMPONENTS: Record<string, GameComponentData[]> = {
+  player: [
+    {
+      // `CharacterControllerData` is exactly these four fields — an invented
+      // wider shape needs an `as` to compile and then proves nothing.
+      type: 'characterController',
+      characterController: { speed: 5, jumpHeight: 2, gravityScale: 1, canDoubleJump: false },
+    },
+    {
+      type: 'winCondition',
+      winCondition: {
+        conditionType: 'score',
+        targetScore: 100,
+        targetEntityId: null,
+      },
+    },
+  ],
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,6 +71,7 @@ function makeMockStore(nodes: SceneNode[], physicsOverrides: Record<string, unkn
       nodes: nodesRecord,
       rootIds: nodes.map(n => n.entityId),
     },
+    allGameComponents: WINNABLE_COMPONENTS,
     primaryPhysics: null,
     physicsEnabled: false,
     debugPhysics: false,

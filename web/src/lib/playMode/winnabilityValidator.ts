@@ -88,7 +88,12 @@ function evaluateCondition(
     case 'reachGoal': {
       const issues: WinnabilityIssue[] = [];
       const target = data.targetEntityId;
-      if (!target || !facts.sceneGraph.nodes[target]) {
+      // `Object.hasOwn`, never a bare index: `targetEntityId` is LLM-authored
+      // and also arrives from saved `.forge` scenes, so a value like
+      // "constructor" or "toString" resolves off `Object.prototype`, reads as
+      // truthy, and declares a scene winnable whose goal entity does not exist
+      // — a fail-OPEN in the one gate that stands in front of Play.
+      if (!target || !Object.hasOwn(facts.sceneGraph.nodes, target)) {
         issues.push({
           code: 'GOAL_TARGET_MISSING',
           entityId,

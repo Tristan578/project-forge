@@ -31,6 +31,12 @@
  * `sceneCreateExecutor` began importing the game-camera wire contract (PF-1126):
  * that module needs `GameCameraData` from `@/stores/slices/types`, and the whole
  * boundary now rests on that import staying `import type`.
+ *
+ * `lib/playMode/` joined the same way (PF-1199): `verifyExecutor` value-imports
+ * `winnabilityValidator` so the verify step asks the REAL play gate whether the
+ * generated game can be won instead of restating its rules. That put the whole
+ * subtree on the server graph, and its own `@/stores/slices/types` import has to
+ * stay `import type` for the same reason `lib/game/` does.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -45,7 +51,11 @@ import {
 /** `web/src/lib` — the base every reported path is relative to. */
 const LIB = join(__dirname, '..', '..');
 
-const GUARDED_ROOTS = [join(LIB, 'game-creation'), join(LIB, 'game')];
+const GUARDED_ROOTS = [
+  join(LIB, 'game-creation'),
+  join(LIB, 'game'),
+  join(LIB, 'playMode'),
+];
 
 /** Modules that pull client-only React state into whatever imports them. */
 const CLIENT_ONLY_SPECIFIERS = ['@/stores/', '@/hooks/useEngine'];
