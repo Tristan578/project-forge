@@ -6,6 +6,27 @@ import { initPostHog } from '@/lib/analytics/posthog';
 const STORAGE_KEY = 'forge-cookie-consent';
 
 /**
+ * Safe localStorage accessor — returns null/no-ops when localStorage is
+ * unavailable (e.g. Android WebViews with storage disabled, private browsing).
+ */
+const safeLocalStorage = {
+  getItem(key: string): string | null {
+    try {
+      return window.localStorage?.getItem(key) ?? null;
+    } catch {
+      return null;
+    }
+  },
+  setItem(key: string, value: string): void {
+    try {
+      window.localStorage?.setItem(key, value);
+    } catch {
+      // Storage unavailable — silently no-op
+    }
+  },
+};
+
+/**
  * Mirror the consent choice into a server-readable cookie so server-side
  * analytics (e.g. LLM observability, PF-907) can honor it — `localStorage` is
  * client-only and invisible to route handlers. Non-`HttpOnly` so the client
@@ -23,7 +44,7 @@ function subscribeToStorage(callback: () => void) {
 }
 
 function getConsentSnapshot(): boolean {
-  return localStorage.getItem(STORAGE_KEY) !== null;
+  return safeLocalStorage.getItem(STORAGE_KEY) !== null;
 }
 
 function getServerSnapshot(): boolean {
@@ -42,7 +63,7 @@ export function CookieConsent() {
   const hasInteracted = useSyncExternalStore(subscribeToStorage, getConsentSnapshot, getServerSnapshot);
 
   const handleAccept = useCallback(() => {
-    localStorage.setItem(STORAGE_KEY, 'true');
+    safeLocalStorage.setItem(STORAGE_KEY, 'true');
     setConsentCookie(true);
     initPostHog();
     // Force re-render via storage event won't fire in same tab — trigger
@@ -51,7 +72,7 @@ export function CookieConsent() {
   }, []);
 
   const handleDecline = useCallback(() => {
-    localStorage.setItem(STORAGE_KEY, 'false');
+    safeLocalStorage.setItem(STORAGE_KEY, 'false');
     setConsentCookie(false);
     window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
