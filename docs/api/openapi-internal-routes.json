@@ -25,6 +25,7 @@
     "/api/admin/moderation/appeals": "admin",
     "/api/admin/moderation/appeals/{id}/review": "admin",
     "/api/admin/moderation/bulk": "admin",
+    "/api/admin/moderation/unpublish": "admin",
     "/api/admin/users": "admin",
     "/api/admin/users/{id}": "admin",
     "/api/auth/webhook": "webhook",
