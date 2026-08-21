@@ -5,6 +5,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
+import { checkTrademark } from '@/lib/moderation/trademarkFilter';
 import { PUBLISH_LIMITS } from '@/lib/projects/limits';
 import { logger } from '@/lib/logging/logger';
 import { extractRequestId } from '@/lib/logging/requestContext';
@@ -96,6 +97,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: `Slug "${slug}" is reserved and cannot be used` },
       { status: 400 },
+    );
+  }
+
+  // Trademark / copyrighted IP check — reject titles and slugs that reference
+  // well-known protected gaming IPs (e.g. "Sonic", "Mario") to avoid hosting
+  // infringing content and implying SpawnForge endorsement of third-party IP.
+  const titleTm = checkTrademark(title);
+  if (titleTm.matched) {
+    reqLogAuth.warn('Publish blocked: trademarked IP in title', { slug, matches: titleTm.matches });
+    return NextResponse.json(
+      { error: `Game title appears to reference a protected trademark/IP (${titleTm.matches.join(', ')}). Please choose an original name.` },
+      { status: 422 },
+    );
+  }
+  const slugTm = checkTrademark(slug);
+  if (slugTm.matched) {
+    reqLogAuth.warn('Publish blocked: trademarked IP in slug', { slug, matches: slugTm.matches });
+    return NextResponse.json(
+      { error: `Game URL slug appears to reference a protected trademark/IP (${slugTm.matches.join(', ')}). Please choose an original slug.` },
+      { status: 422 },
     );
   }
 
