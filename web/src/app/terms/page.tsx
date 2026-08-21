@@ -364,9 +364,11 @@ export default async function TermsOfServicePage() {
           <strong>dmca@spawnforge.ai</strong> including your signature, identification of
           the removed material, a statement under penalty of perjury of a good faith
           belief that the removal was a mistake, and your consent to the jurisdiction of
-          the federal courts in Delaware. If we do not receive notice from the copyright
-          owner within 10 business days that they have filed an action seeking a court
-          order, the removed material may be restored.
+          the federal courts in Delaware. Pursuant to 17 U.S.C. § 512(g)(3),
+          if we do not receive notice from the copyright owner within not less
+          than 10, nor more than 14, business days that they have filed an
+          action seeking a court order to restrain the alleged infringer, the
+          removed material shall be replaced or access to it shall be restored.
         </p>
         <p>
           <strong>Repeat Infringer Policy:</strong> SpawnForge will terminate the accounts
