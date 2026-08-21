@@ -10,12 +10,6 @@ import {
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-// Vercel BotID (PF-975 / #8948) — see botIdClient.ts for the dormancy note and
-// why registration lives in its own module: its wildcard path pattern pairs a
-// slash with an asterisk, which trips a naive comment-stripping regex in
-// sentry-regressions.test.ts.
-registerBotIdProtection();
-
 if (DSN) {
   Sentry.init({
     dsn: DSN,
@@ -117,6 +111,19 @@ if (DSN) {
 
   configureSentryFingerprinting();
 }
+
+// Vercel BotID (PF-975 / #8948) — see botIdClient.ts for the dormancy note and
+// why registration lives in its own module: its wildcard path pattern pairs a
+// slash with an asterisk, which trips a naive comment-stripping regex in
+// sentry-regressions.test.ts.
+//
+// ORDER IS LOAD-BEARING: registerBotIdProtection() must be called AFTER
+// Sentry.init(). botid/client/core monkey-patches addEventListener with its
+// own addEL_hook which reads .tagName assuming a DOM element target. If BotID
+// is registered first, Sentry's BrowserSession integration calls
+// top.addEventListener (window) during init and triggers the hook, which
+// crashes reading .tagName on null (SPAWNFORGE-AI-T).
+registerBotIdProtection();
 
 /**
  * Captures App Router navigation spans so client-side navigations appear
