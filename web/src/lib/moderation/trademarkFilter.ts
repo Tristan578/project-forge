@@ -27,7 +27,7 @@ const TRADEMARK_PATTERNS: { pattern: RegExp; name: string }[] = [
   { name: 'Mario', pattern: /\bmario\b/i },
   { name: 'Nintendo', pattern: /\bnintendo\b/i },
   { name: 'Sega', pattern: /\bsega\b/i },
-  { name: 'Pokemon', pattern: /\bpok[eé]mon\b/i },
+  { name: 'Pokemon', pattern: /(^|\W)pok[eé]mon(\W|$)/i },
   { name: 'Animal Crossing', pattern: /\banimal[\s-]*crossing\b/i },
   { name: 'The Legend of Zelda', pattern: /\bzelda\b/i },
   { name: 'Metroid', pattern: /\bmetroid\b/i },
@@ -79,9 +79,12 @@ export function checkTrademark(text: string): TrademarkResult {
     }
   }
 
-  // Check custom list from env (comma-separated additional terms)
+  // Check custom list from env (comma-separated additional terms).
+  // Replace spaces/hyphens in the term with [\s-]* so multi-word terms
+  // match both titles (spaces) and slugs (hyphens).
   for (const term of getCustomTrademarkList()) {
-    const regex = new RegExp(`\\b${escapeRegex(term)}\\b`, 'gi');
+    const escaped = escapeRegex(term).replace(/\\?[\s-]+/g, '[\\s-]*');
+    const regex = new RegExp(`(^|\\W)${escaped}(\\W|$)`, 'gi');
     if (regex.test(text)) {
       matches.push(term);
     }

@@ -90,6 +90,16 @@ describe('trademarkFilter', () => {
       expect(checkTrademark('celeste-style platformer').matched).toBe(true);
     });
 
+    it('should match custom multi-word terms in slugs (hyphenated)', () => {
+      process.env.TRADEMARK_BLOCK_LIST = 'Hollow Knight';
+      expect(checkTrademark('hollow-knight-adventure').matched).toBe(true);
+    });
+
+    it('should detect Pokemon with accented é', () => {
+      expect(checkTrademark('Pokémon adventure').matched).toBe(true);
+      expect(checkTrademark('pokémon-fan-game').matched).toBe(true);
+    });
+
     it('should handle empty string', () => {
       const result = checkTrademark('');
       expect(result.matched).toBe(false);
