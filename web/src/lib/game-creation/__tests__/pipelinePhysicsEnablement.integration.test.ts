@@ -215,6 +215,46 @@ function crystalRun3d(): OrchestratorGDD {
   };
 }
 
+/**
+ * The same game with NO `world` system.
+ *
+ * `worldBuildExecutor` is what mints the Ground, so without that system the
+ * scene reaches `verify_all_scenes` with nothing named ground/floor/plane and
+ * check 5 raises `no_ground_plane` — which is the ONLY way to reach the
+ * `auto_polish` repair branch end-to-end. The GDD generator produces this shape
+ * routinely: `world` is a category the model may simply not emit.
+ *
+ * Everything else is `crystalRun3d`, so a difference between the two runs can
+ * only come from the repair path.
+ */
+function crystalRunNoWorld3d(): OrchestratorGDD {
+  const gdd = crystalRun3d();
+  return {
+    ...gdd,
+    id: 'gdd-crystal-run-no-world',
+    // Indexed rebuild rather than `.filter`: a callback form skips an array
+    // hole, and a hole here would silently leave the `world` system in place and
+    // make every assertion below pass for the wrong reason.
+    systems: (() => {
+      const kept: OrchestratorGDD['systems'] = [];
+      for (let i = 0; i < gdd.systems.length; i += 1) {
+        if (gdd.systems[i].category !== 'world') kept.push(gdd.systems[i]);
+      }
+      return kept;
+    })(),
+    scenes: gdd.scenes.map(scene => ({
+      ...scene,
+      systems: (() => {
+        const kept: typeof scene.systems = [];
+        for (let i = 0; i < scene.systems.length; i += 1) {
+          if (scene.systems[i] !== 'world') kept.push(scene.systems[i]);
+        }
+        return kept;
+      })(),
+    })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Assertion helpers — all indexed loops. A callback form skips an array hole
 // outright, which would make a "nothing was dispatched" assertion pass for the
@@ -514,5 +554,85 @@ describe('pipeline enables physics on every gameplay entity (PF-1213)', () => {
     const ids = output['entityIds'];
     expect(Array.isArray(ids)).toBe(true);
     expect((ids as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // The auto_polish repair path (PF-1213 round 2)
+  //
+  // `auto_polish` is the LAST step in the plan — it runs AFTER `physics_enable`,
+  // so anything it spawns is past the point where every other entity got its
+  // body. A repair that adds a ground plane and stops there hands the player a
+  // floor with no Rapier collider to stand on, and nothing downstream can cover
+  // for it.
+  // -------------------------------------------------------------------------
+
+  it('reaches the ground repair when the GDD has no world system', async () => {
+    const plan = await build(crystalRunNoWorld3d());
+
+    const verify = plan.steps.find(s => s.executor === 'verify_all_scenes');
+    expect(verify, 'the plan carries no verify step to raise the issue').toBeDefined();
+    const issues = ((verify!.output ?? {})['issues'] ?? []) as string[];
+    expect(issues).toContain('no_ground_plane');
+
+    const polish = plan.steps.find(s => s.executor === 'auto_polish');
+    expect(polish, 'the plan carries no auto_polish step to run the repair').toBeDefined();
+    expect(polish!.status).toBe('completed');
+    const fixes = ((polish!.output ?? {})['fixesApplied'] ?? []) as string[];
+    expect(fixes).toContain('Added ground plane');
+
+    // Exactly one — the repair's. `world_build` did not run, so a second Ground
+    // would mean this fixture is not exercising the branch it was built for.
+    let grounds = 0;
+    const names = spawnedNames(recorded);
+    for (let i = 0; i < names.length; i += 1) {
+      if (names[i] === 'Ground') grounds += 1;
+    }
+    expect(grounds).toBe(1);
+  });
+
+  it('gives the repaired ground plane a real collider, not just a mesh', async () => {
+    await build(crystalRunNoWorld3d());
+
+    const id = spawnedIdByName(recorded, 'Ground');
+    expect(
+      id,
+      'the repair spawned a ground with no id, so no later command can name it',
+    ).toBeTruthy();
+
+    // FULL payloads, both halves. `TogglePhysicsPayload` is exactly
+    // `{ entityId, enabled }`, and the patch is what `PHYSICS_ROLE_PROFILES.geometry`
+    // describes: solid, immovable, cuboid — the same body `world_build`'s ground
+    // gets when the GDD does ask for a world.
+    expect(payloadsOfCommandFor(recorded, 'toggle_physics', id!)).toEqual([
+      { entityId: id, enabled: true },
+    ]);
+    expect(payloadsOfCommandFor(recorded, 'update_physics', id!)).toEqual([
+      { entityId: id, bodyType: 'fixed', colliderShape: 'cuboid', isSensor: false },
+    ]);
+
+    const toggleIdx = indexOfCommandFor(recorded, 'toggle_physics', id!);
+    const updateIdx = indexOfCommandFor(recorded, 'update_physics', id!);
+    expect(updateIdx).toBeGreaterThan(toggleIdx);
+  });
+
+  it('waits for the repaired ground to flush before enabling physics on it', async () => {
+    await build(crystalRunNoWorld3d());
+
+    const id = spawnedIdByName(recorded, 'Ground');
+    expect(id).toBeTruthy();
+
+    // The repair spawns and enables inside ONE executor, so it is the tightest
+    // instance of the deferred-flush gap in the whole pipeline: without the
+    // `waitForEngineFrame()` between the two, `apply_physics_toggles` drains a
+    // toggle for an entity `apply_spawn_requests` has not created yet and the
+    // ground stays collider-less while the step reports success.
+    for (const command of ['toggle_physics', 'update_physics']) {
+      const idx = indexOfCommandFor(recorded, command, id!);
+      expect(idx, `no ${command} for the repaired ground`).toBeGreaterThanOrEqual(0);
+      expect(
+        recorded[idx].targetVisible,
+        `${command} for the repaired ground was dispatched before the engine flushed the spawn`,
+      ).toBe(true);
+    }
   });
 });
