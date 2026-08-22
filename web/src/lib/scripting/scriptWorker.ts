@@ -164,9 +164,6 @@ function clearPendingAsyncRequests(reason: string) {
   nextRequestId = 0;
 }
 
-// Synced domain state (from main thread)
-let tilemapStates: Record<string, TilemapState> = {};
-
 /**
  * Containers a `fill_tiles` payload costs on top of its per-cell entries: the
  * payload object itself and the `tiles` array.
@@ -208,6 +205,9 @@ function tileInt(api: string, name: string, value: number): number {
   }
   return floored;
 }
+
+// Synced domain state (from main thread)
+let tilemapStates: Record<string, TilemapState> = {};
 let skeletonStates: Record<string, SkeletonState> = {};
 let physics2dVelocities: Record<string, Physics2dVelocityState> = {};
 // Kinematic ground contact, mirrored from the engine (PF-1214). Rapier decides
