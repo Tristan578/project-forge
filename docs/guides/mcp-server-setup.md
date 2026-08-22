@@ -142,8 +142,8 @@ These tools require an active editor connection. Commands are organised into 41 
 |------|-------------|
 | `update_material` | Set PBR properties: color, metallic, roughness, emissive, textures |
 | `update_light` | Configure point/directional/spot light properties |
-| `set_ambient_light` | Set scene ambient light color and intensity |
-| `set_environment` | Configure fog, clear color |
+| `update_ambient_light` | Set scene ambient light color and intensity |
+| `update_environment` | Configure fog, clear color |
 | `set_skybox` | Apply a skybox preset |
 
 **Physics**
@@ -158,7 +158,7 @@ These tools require an active editor connection. Commands are organised into 41 
 
 | Tool | Description |
 |------|-------------|
-| `update_audio` | Attach an audio clip to an entity with volume, loop, and spatial settings |
+| `set_audio` | Attach an audio clip to an entity with volume, loop, and spatial settings |
 | `create_audio_bus` | Set up an audio routing bus |
 
 **Animation**
@@ -173,7 +173,7 @@ These tools require an active editor connection. Commands are organised into 41 
 
 | Tool | Description |
 |------|-------------|
-| `update_script` | Attach a TypeScript script to an entity |
+| `set_script` | Set or update the TypeScript source on an entity |
 | `remove_script` | Remove a script from an entity |
 
 **2D / Tilemap**
@@ -181,24 +181,31 @@ These tools require an active editor connection. Commands are organised into 41 
 | Tool | Description |
 |------|-------------|
 | `set_project_type` | Switch between 2D and 3D project modes |
-| `update_sprite` | Configure sprite data and sorting layer |
-| `update_tilemap` | Edit tilemap layer data |
+| `create_sprite` | Create a 2D sprite entity with an optional texture and position |
+| `set_sprite_texture` | Assign or change a sprite's texture |
+| `set_sprite_sorting` | Set a sprite's sorting layer and order |
+| `create_tilemap` | Create a tilemap entity backed by an imported tileset |
+| `set_tile` | Set a single tile on one tilemap layer |
+| `fill_tiles` | Fill an inclusive rectangular range of one layer with a single tile |
+| `clear_tiles` | Erase tiles from one layer; omit the bounds to clear the whole layer |
 
 **Compound Actions**
 
-Eight high-level tools that chain multiple commands in sequence:
+Nine high-level tools that chain multiple commands in sequence:
 
 | Tool | Description |
 |------|-------------|
-| `create_scene` | Build a complete scene from a description |
+| `create_scene_from_description` | Build a complete scene from a description |
 | `setup_character` | Configure a character entity with physics and input |
-| `configure_mechanics` | Set up game mechanics (health, collectibles, etc.) |
+| `configure_game_mechanics` | Set up game mechanics (health, collectibles, etc.) |
 | `arrange_entities` | Place and organise multiple entities |
 | `apply_style` | Apply a visual style to the whole scene |
 | `describe_scene` | Return a natural-language description of the current scene |
 | `analyze_gameplay` | Evaluate gameplay balance and configuration |
+| `create_level_layout` | Generate a level layout with ground, walls, obstacles and spawn points |
+| `setup_game_from_description` | Scaffold a complete, playable game from a plain-text description |
 
-Use `list_doc_topics` or `search_docs` to discover the full set of 322 commands by category.
+Use `list_doc_topics` or `search_docs` to discover the full set of 351 commands by category.
 
 ## Available Resources
 
