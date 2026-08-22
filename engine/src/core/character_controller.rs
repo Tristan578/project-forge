@@ -25,6 +25,7 @@ use bevy_rapier3d::prelude::*;
 use std::collections::HashMap;
 
 use super::engine_mode::EngineMode;
+use super::entity_id::EntityId;
 use super::game_components::{GameComponentData, GameComponents};
 use super::project_type::ProjectType;
 
@@ -290,6 +291,46 @@ type CharacterAttachTargets<'w, 's> = Query<
     (With<Collider>, Without<KinematicCharacterController>),
 >;
 
+/// The entities that WANTED a controller and did not get one: a character with
+/// no collider.
+///
+/// Colliders only ever arrive from `manage_physics_lifecycle`, whose query is
+/// filtered `With<PhysicsEnabled>`, so this is exactly the set whose physics was
+/// never enabled.
+type CharacterMissingColliderTargets<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, Option<&'static EntityId>, &'static GameComponents),
+    (Without<Collider>, Without<KinematicCharacterController>),
+>;
+
+/// Characters that entered Play with no collider and therefore kept the legacy
+/// raw-translation path.
+///
+/// Skipping them is correct — Rapier's controller ignores an entity with no
+/// collider handle, so attaching one would freeze the player rather than move
+/// it. Skipping them in SILENCE is not: such an entity never matches
+/// [`CharacterAttachTargets`] at all, so it is not rejected, it is never
+/// considered, and there is no log, no event and no
+/// `CHARACTER_GROUNDED_CHANGED` to distinguish it from a working character. That
+/// is the PF-1214 golden-path failure exactly — the generation pipeline did not
+/// enable physics on the player, and the player walked through walls in a scene
+/// that looked healthy from every angle.
+///
+/// Written on every 3D Edit→Play transition even when empty, so "nothing was
+/// skipped" is distinguishable from "the lifecycle never ran". 2D projects use
+/// the legacy path by design and are never recorded. This is the programmatic
+/// half of the `tracing::warn!` beside it: the warning is what a developer sees,
+/// this is what a test — or a future editor diagnostic — can read.
+#[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
+pub struct CharacterControllerDiagnostics {
+    /// Identifiers of the skipped characters, sorted. Sorted because ECS query
+    /// iteration order is unspecified, and a diagnostic that reshuffles between
+    /// runs can be neither asserted on nor matched against a bug report — the
+    /// same reason [`diff_grounded`] sorts.
+    pub skipped_without_collider: Vec<String>,
+}
+
 /// Attaches the Rapier character controller on Edit→Play and removes it on
 /// Play→Edit.
 ///
@@ -309,6 +350,7 @@ pub fn manage_character_controller_lifecycle(
     mut commands: Commands,
     project_type: Option<Res<ProjectType>>,
     to_attach: CharacterAttachTargets,
+    missing_collider: CharacterMissingColliderTargets,
     to_detach: Query<Entity, With<KinematicCharacterController>>,
     mut prev_mode: Local<Option<EngineMode>>,
 ) {
@@ -338,6 +380,32 @@ pub fn manage_character_controller_lifecycle(
         if attached > 0 {
             tracing::info!("Character controllers attached: {} entities", attached);
         }
+
+        // The negative case. An entity with no collider never reaches the loop
+        // above at all, so without this it keeps the legacy raw-translation path
+        // in complete silence (see [`CharacterControllerDiagnostics`]).
+        let mut skipped: Vec<String> = missing_collider
+            .iter()
+            .filter(|(_, _, components)| has_character_controller(components))
+            // `EntityId` is read as an Option so a character that is missing one
+            // is still reported, under its Bevy entity. Requiring the component
+            // would filter it out of the query and reintroduce the very silence
+            // this closes, one entity at a time.
+            .map(|(entity, id, _)| id.map_or_else(|| format!("{entity}"), |id| id.0.clone()))
+            .collect();
+        skipped.sort();
+        if !skipped.is_empty() {
+            tracing::warn!(
+                "Character controller NOT attached to {} entities ({}): they have no collider, \
+                 so physics is not enabled on them. They keep the legacy raw-translation path - \
+                 no gravity, no ground contact and no collision response.",
+                skipped.len(),
+                skipped.join(", ")
+            );
+        }
+        commands.insert_resource(CharacterControllerDiagnostics {
+            skipped_without_collider: skipped,
+        });
     }
 
     let entering_edit = current == EngineMode::Edit && prev.is_some_and(|p| p != EngineMode::Edit);
@@ -954,6 +1022,105 @@ mod tests {
         assert!(world.get::<KinematicCharacterController>(entity).is_none());
     }
 
+    /// ...and the skip must be REPORTED. Skipping is correct; skipping in
+    /// SILENCE is the PF-1214 golden-path break itself — the generation
+    /// pipeline never enabled physics on the player, so the player kept the raw
+    /// translation path and walked through every wall, with nothing anywhere
+    /// saying so.
+    #[test]
+    fn a_collider_less_character_is_reported_not_silently_dropped() {
+        let mut world = World::new();
+        world.spawn((EntityId::new("player"), character(), Transform::default()));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(manage_character_controller_lifecycle);
+        run_lifecycle(&mut world, &mut schedule, EngineMode::Play);
+
+        assert_eq!(
+            world.resource::<CharacterControllerDiagnostics>().skipped_without_collider,
+            vec!["player".to_string()],
+        );
+    }
+
+    /// Non-vacuity in the other direction: a character that DID get a controller
+    /// must not be named. The record is still written, so a reader can tell
+    /// "nothing was skipped" from "the lifecycle never ran".
+    #[test]
+    fn a_character_that_got_a_controller_is_not_reported() {
+        let mut world = World::new();
+        world.spawn((
+            EntityId::new("player"),
+            character(),
+            Collider::cuboid(0.5, 0.5, 0.5),
+            Transform::default(),
+        ));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(manage_character_controller_lifecycle);
+        run_lifecycle(&mut world, &mut schedule, EngineMode::Play);
+
+        assert_eq!(
+            world.resource::<CharacterControllerDiagnostics>().skipped_without_collider,
+            Vec::<String>::new(),
+        );
+    }
+
+    /// A prop with no collider is not a character. A warning that names every
+    /// static decoration in the scene is one nobody reads, which would put us
+    /// back where we started.
+    #[test]
+    fn a_non_character_without_a_collider_is_not_reported() {
+        let mut world = World::new();
+        world.spawn((EntityId::new("crate"), GameComponents::default(), Transform::default()));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(manage_character_controller_lifecycle);
+        run_lifecycle(&mut world, &mut schedule, EngineMode::Play);
+
+        assert_eq!(
+            world.resource::<CharacterControllerDiagnostics>().skipped_without_collider,
+            Vec::<String>::new(),
+        );
+    }
+
+    /// A character missing its `EntityId` must still be reported, under its Bevy
+    /// entity as a label. Requiring the component would filter it out of the
+    /// query and reintroduce the silence one entity at a time.
+    #[test]
+    fn a_character_without_an_entity_id_is_still_reported() {
+        let mut world = World::new();
+        world.spawn((character(), Transform::default()));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(manage_character_controller_lifecycle);
+        run_lifecycle(&mut world, &mut schedule, EngineMode::Play);
+
+        assert_eq!(
+            world.resource::<CharacterControllerDiagnostics>().skipped_without_collider.len(),
+            1,
+        );
+    }
+
+    /// Deterministic order: ECS query iteration order is unspecified, and a
+    /// warning whose entity list reshuffles between runs cannot be matched
+    /// against a bug report or asserted on.
+    #[test]
+    fn the_reported_characters_are_sorted() {
+        let mut world = World::new();
+        for id in ["c", "a", "b"] {
+            world.spawn((EntityId::new(id), character(), Transform::default()));
+        }
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(manage_character_controller_lifecycle);
+        run_lifecycle(&mut world, &mut schedule, EngineMode::Play);
+
+        assert_eq!(
+            world.resource::<CharacterControllerDiagnostics>().skipped_without_collider,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        );
+    }
+
     #[test]
     fn a_non_character_entity_is_skipped() {
         let mut world = World::new();
@@ -982,6 +1149,9 @@ mod tests {
 
         assert!(world.get::<KinematicCharacterController>(entity).is_none());
         assert!(world.get::<CharacterMotionState>(entity).is_none());
+        // 2D uses the legacy path by design, so nothing is skipped and nothing
+        // is recorded - a warning on every 2D character would be pure noise.
+        assert!(world.get_resource::<CharacterControllerDiagnostics>().is_none());
     }
 
     #[test]
