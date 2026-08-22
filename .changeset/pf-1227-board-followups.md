@@ -11,13 +11,15 @@ layer, x and y of every paint, erase and fill were read by casting a 64-bit
 value straight to a pointer-sized one, which drops the high bits on the 32-bit
 WebAssembly target the engine ships on: an x of 4,294,967,299 arrived as 3,
 looked like an ordinary in-range cell, and painted a tile the caller never
-asked for. That one was invisible to the test suite by construction -- the
-tests run on a 64-bit host, where the same cast keeps every bit and the bug
-does not reproduce. The tile index was cast to a fixed 32-bit integer instead,
-so it wrapped everywhere, the test host included; nothing had simply ever
-asked it to. All four values are now rejected above the 32-bit maximum, and
-the new native tests cover both -- the tile index goes red on the host the
-moment the old cast is put back.
+asked for. The tile index was cast to a fixed 32-bit integer instead, so it
+wrapped everywhere, the 64-bit test host included; the pointer-sized cast is
+the one that reproduces only on wasm32, since the host keeps the high bits.
+All four values are now rejected above the 32-bit maximum. The new native
+tests cover all four, and all four go red on the host the moment any of the
+old casts is put back: they demand that one-past-the-maximum be refused, and
+the old code accepts it on a host where nothing was truncated. What a host
+test could never have shown is the wrap itself -- the coordinate that came
+back as 3 and painted a cell.
 
 A script that passes such a coordinate gets an error naming the field, the
 value and the limit, rather than a command that disappears.

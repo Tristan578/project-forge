@@ -1077,8 +1077,15 @@ describe('scriptWorker', () => {
     expect(documented).toBe(TILEMAP_FILL_MAX_CELLS);
 
     // The sentence must keep naming the test that pins it, or the pointer rots
-    // while the number happens to stay right.
-    expect(src).toContain('__tests__/scriptWorker.test.ts');
+    // while the number happens to stay right. Name THIS test, not just the
+    // file: two comments in forgeTypes.ts point here, so a bare
+    // '__tests__/scriptWorker.test.ts' is satisfied by the other one and
+    // deleting this pointer would stay green. Flatten first -- the sentence
+    // wraps across comment lines.
+    const flatSrc = src.replace(/^\s*\*\s?/gm, ' ').replace(/\s+/g, ' ');
+    expect(flatSrc).toContain(
+      'the "forgeTypes fillRect cap prose" test in __tests__/scriptWorker.test.ts',
+    );
   });
 
   it('forgeTypes tile field bound prose matches the exported constant', async () => {
@@ -1125,8 +1132,13 @@ describe('scriptWorker', () => {
 
     // The sentence must keep naming the constant it mirrors and the test that
     // pins it, or the pointer rots while the number happens to stay right.
+    // Name THIS test, not just the file: the fillRect cap comment further down
+    // points here too, so a bare '__tests__/scriptWorker.test.ts' would be
+    // satisfied by that one and deleting this pointer would stay green.
     expect(src).toContain('TILE_FIELD_MAX');
-    expect(src).toContain('__tests__/scriptWorker.test.ts');
+    expect(flat).toContain(
+      'the "forgeTypes tile field bound prose" test in __tests__/scriptWorker.test.ts',
+    );
   });
 
   it('script-api.md tile field bound prose matches the exported constant', async () => {
@@ -1166,6 +1178,13 @@ describe('scriptWorker', () => {
     // of the contract a reader cannot infer from the bound itself.
     expect(flat).toContain('`getTile` floors nothing and throws nothing');
     expect(flat).toContain('`x + w - 1` and `y + h - 1` must each stay within the');
+
+    // And the pointer back here, named by test rather than by file for the
+    // same reason as the two forgeTypes pins.
+    expect(flat).toContain(
+      '"script-api.md tile field bound prose matches the exported constant" in ' +
+      'web/src/lib/scripting/__tests__/scriptWorker.test.ts',
+    );
   });
 
   it('forge.tilemap.resize throws and pushes nothing', async () => {
