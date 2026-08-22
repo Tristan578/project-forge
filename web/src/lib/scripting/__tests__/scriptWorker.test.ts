@@ -1241,7 +1241,13 @@ describe('scriptWorker', () => {
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'error',
-        message: expect.stringContaining(`${param} must be <= ${TILE_FIELD_MAX}`),
+        // The value as well as the field and the limit: the changeset and both
+        // doc comments claim the error names all three, and asserting only the
+        // first two leaves that claim held by prose. Deleting the `, got ...`
+        // half of tileInt's message used to keep every test green.
+        message: expect.stringContaining(
+          `${param} must be <= ${TILE_FIELD_MAX}, got ${TILE_FIELD_MAX + 1}`,
+        ),
       })
     );
   });
