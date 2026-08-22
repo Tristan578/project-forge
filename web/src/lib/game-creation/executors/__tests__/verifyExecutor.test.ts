@@ -44,10 +44,17 @@ function makeNode(entityId: string, name: string, components: string[] = []) {
   return { entityId, name, components, children: [] };
 }
 
-/** A cosmetically complete 3D scene: camera, light, ground, player, goal. */
+/**
+ * A cosmetically complete 3D scene: camera, light, ground, player, goal.
+ *
+ * The player carries `PhysicsEnabled` because check 4 is a real check now: a
+ * character without it never receives a collider, so the engine never even
+ * considers it for a kinematic controller (PF-1214). A fixture missing it is not
+ * a complete scene — it is the golden-path bug.
+ */
 function completeNodes() {
   return {
-    e1: makeNode('e1', 'Player'),
+    e1: makeNode('e1', 'Player', ['PhysicsEnabled']),
     e2: makeNode('e2', 'MainCamera'),
     e3: makeNode('e3', 'DirectionalLight'),
     e4: makeNode('e4', 'Ground'),
@@ -410,6 +417,142 @@ describe('verifyExecutor', () => {
 
       const result = await verifyExecutor.execute({}, ctx);
       expect(outputOf(result).entityCount).toBe(6);
+    });
+  });
+
+  /**
+   * PF-1214, review finding #2. `manage_character_controller_lifecycle` only
+   * attaches Rapier's controller to entities that already carry a `Collider`,
+   * and colliders come from `manage_physics_lifecycle`, which queries
+   * `With<PhysicsEnabled>`. A character without it is never CONSIDERED — no
+   * error, no rejected command, no CHARACTER_GROUNDED_CHANGED — and keeps the
+   * raw-translation path, walking through walls in a scene that verified clean.
+   */
+  describe('check 4: a character that will never get a controller', () => {
+    function strandedStore() {
+      const nodes = completeNodes();
+      // The one difference from a winnable scene: no PhysicsEnabled on the player.
+      nodes.e1 = makeNode('e1', 'Player');
+      return {
+        sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+        allGameComponents: {
+          e1: [player],
+          goal: [winCondition('reachGoal', null, 'goal')],
+        },
+      };
+    }
+
+    it('warns, by name, about a character with physics off', async () => {
+      const result = await verifyExecutor.execute({}, makeCtx({ store: strandedStore() }));
+
+      const output = outputOf(result);
+      expect(output.issues).toContain('character_without_collider');
+      // On `warnings`, not `issues` alone: `collectStepWarnings` reads warnings,
+      // so a finding recorded only as an issue is one the user never sees
+      // (PF-1125). Checks 3 and 5 have that shape; this one must not.
+      expect(output.warnings).toHaveLength(1);
+      expect(output.warnings[0]).toContain('Physics is off for Player');
+      expect(output.warnings[0]).toContain('walks through walls');
+      expect(output.passed).toBe(false);
+      // Still a winnable scene, so the step itself succeeds — this is a warning
+      // about how the game will FEEL, not a reason to refuse the build.
+      expect(result.success).toBe(true);
+    });
+
+    it('surfaces that warning through collectStepWarnings', async () => {
+      const result = await verifyExecutor.execute({}, makeCtx({ store: strandedStore() }));
+
+      expect(collectStepWarnings(result.output)).toEqual([
+        expect.stringContaining('Physics is off for Player'),
+      ]);
+    });
+
+    it('stays quiet when the character has physics enabled', async () => {
+      const result = await verifyExecutor.execute({}, makeCtx({ store: winnableStore() }));
+
+      expect(outputOf(result).issues).not.toContain('character_without_collider');
+      expect(outputOf(result).warnings).toEqual([]);
+    });
+
+    it('ignores an entity with no character controller', async () => {
+      // A crate with physics off is just a crate: nothing tries to drive it.
+      const nodes = completeNodes();
+      nodes.e4 = makeNode('e4', 'Ground');
+      const result = await verifyExecutor.execute(
+        {},
+        makeCtx({
+          store: {
+            sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+            allGameComponents: {
+              e1: [player],
+              e4: [collectible],
+              goal: [winCondition('reachGoal', null, 'goal')],
+            },
+          },
+        }),
+      );
+
+      expect(outputOf(result).issues).not.toContain('character_without_collider');
+    });
+
+    it('says nothing for a 2D project', async () => {
+      // 2D keeps the legacy path by design; the engine never records a 2D
+      // character as skipped, so neither may verification.
+      const result = await verifyExecutor.execute(
+        {},
+        makeCtx({ store: strandedStore(), projectType: '2d' }),
+      );
+
+      expect(outputOf(result).issues).not.toContain('character_without_collider');
+    });
+
+    it('names every stranded character and agrees with itself in the plural', async () => {
+      const nodes = {
+        ...completeNodes(),
+        e1: makeNode('e1', 'Player'),
+        e5: makeNode('e5', 'Rival'),
+      };
+      const result = await verifyExecutor.execute(
+        {},
+        makeCtx({
+          store: {
+            sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+            allGameComponents: {
+              e1: [player],
+              e5: [player],
+              goal: [winCondition('reachGoal', null, 'goal')],
+            },
+          },
+        }),
+      );
+
+      expect(outputOf(result).warnings[0]).toContain('Physics is off for Player, Rival');
+      expect(outputOf(result).warnings[0]).toContain('they walk through walls and fall');
+    });
+
+    it('does not read a component list off the prototype chain', async () => {
+      // `allGameComponents` is keyed by ids that arrive straight off the engine
+      // wire, so a bare read for an entity named `constructor` resolves an
+      // inherited function, and `.some` on a function throws inside
+      // verification. Measured: this pins the PAIR of guards (`Object.hasOwn`
+      // plus the `Array.isArray` line) — removing either one alone still passes,
+      // removing both turns this red.
+      const nodes = { constructor: makeNode('constructor', 'Odd'), ...completeNodes() };
+      const result = await verifyExecutor.execute(
+        {},
+        makeCtx({
+          store: {
+            sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+            allGameComponents: {
+              e1: [player],
+              goal: [winCondition('reachGoal', null, 'goal')],
+            },
+          },
+        }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(outputOf(result).issues).not.toContain('character_without_collider');
     });
   });
 

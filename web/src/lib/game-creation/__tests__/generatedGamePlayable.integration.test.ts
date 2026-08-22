@@ -63,17 +63,42 @@ interface Recorded {
  * `verify_all_scenes` counts entities, and the winnability gate resolves a
  * `reachGoal` target through `sceneGraph.nodes`), so a test that skipped this
  * would be measuring a scene that never got built.
+ *
+ * `toggle_physics` is played back for the same reason. `SceneNode.components` is
+ * the engine's own `detect_components` output, and `'PhysicsEnabled'` appears
+ * there exactly when the entity carries the marker that `toggle_physics` inserts.
+ * `verify_all_scenes` reads that string to find a character the engine will never
+ * hand a collider — and so never a kinematic controller (PF-1214). A fake that
+ * left `components` permanently empty would report every generated character as
+ * broken, which is a fact about the fake, not about the pipeline.
  */
 function attachFakeEngine(harness: TestHarness): Recorded[] {
   const recorded: Recorded[] = [];
 
   harness.dispatch.mockImplementation((command: string, payload: unknown) => {
     recorded.push({ command, payload });
-    if (command !== 'spawn_entity') return;
 
     // Read key by key behind `Object.hasOwn` — the payload crossed a plan
     // boundary and a bare index would walk the prototype chain.
     const bag = (payload ?? {}) as Record<string, unknown>;
+
+    if (command === 'toggle_physics') {
+      const rawTarget = Object.hasOwn(bag, 'entityId') ? bag['entityId'] : undefined;
+      const enabled = Object.hasOwn(bag, 'enabled') ? bag['enabled'] === true : false;
+      if (typeof rawTarget !== 'string' || rawTarget === '') return;
+      const existing = harness.getState().sceneGraph.nodes[rawTarget];
+      if (existing === undefined) return;
+      const has = existing.components.includes('PhysicsEnabled');
+      if (enabled === has) return;
+      const components = enabled
+        ? [...existing.components, 'PhysicsEnabled']
+        : existing.components.filter(name => name !== 'PhysicsEnabled');
+      harness.getState().updateNode(rawTarget, { components });
+      return;
+    }
+
+    if (command !== 'spawn_entity') return;
+
     const rawId = Object.hasOwn(bag, 'id') ? bag['id'] : undefined;
     const rawName = Object.hasOwn(bag, 'name') ? bag['name'] : undefined;
 
@@ -363,7 +388,12 @@ describe('generated game is playable (end to end)', () => {
     const controllers = wireComponentsOfType(recorded, 'character_controller');
     expect(controllers).toHaveLength(1);
     const playerId = controllers[0]['entityId'];
-    expect(typeof playerId).toBe('string');
+    // A throw rather than an `expect`: it asserts the same thing and also
+    // NARROWS, so the scene-graph lookup further down indexes with a `string`
+    // instead of an `unknown`.
+    if (typeof playerId !== 'string' || playerId === '') {
+      throw new Error('the character controller was wired with no entityId');
+    }
 
     // One collectible per interactable, at the value the GDD asked for.
     const collectibles = wireComponentsOfType(recorded, 'collectible');
@@ -377,6 +407,23 @@ describe('generated game is playable (end to end)', () => {
     expect(winConditions).toHaveLength(1);
     expect(winConditions[0]['entityId']).toBe(playerId);
     expect((winConditions[0]['properties'] as Record<string, unknown>)['conditionType']).toBe('collectAll');
+
+    // Physics was switched ON for the character. This is the golden path, not a
+    // detail: `manage_character_controller_lifecycle` only attaches Rapier's
+    // kinematic controller to an entity that already carries a `Collider`, and a
+    // collider only ever arrives from `manage_physics_lifecycle`, which queries
+    // `With<PhysicsEnabled>`. Skip this and the character is never CONSIDERED for
+    // a controller — no error, no rejected command — and walks through walls
+    // (PF-1214).
+    expect(
+      recorded.some(
+        r =>
+          r.command === 'toggle_physics' &&
+          (r.payload as Record<string, unknown>)['entityId'] === playerId &&
+          (r.payload as Record<string, unknown>)['enabled'] === true,
+      ),
+    ).toBe(true);
+    expect(harness.getState().sceneGraph.nodes[playerId].components).toContain('PhysicsEnabled');
 
     // The camera was configured AND made active — configuring one the engine is
     // not rendering through is a no-op the player would never see.

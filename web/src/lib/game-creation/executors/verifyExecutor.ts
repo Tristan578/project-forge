@@ -100,9 +100,55 @@ export const verifyExecutor: ExecutorDefinition = {
       issues.push('no_ambient_light');
     }
 
-    // Check 4: Physics without collider — requires per-entity iteration
-    // which is not available from the flat store snapshot. This check is
-    // deferred to Phase 2D when the orchestrator has entity-level queries.
+    // Check 4: a character the engine will silently refuse to drive.
+    //
+    // `manage_character_controller_lifecycle` attaches Rapier's kinematic
+    // controller only to entities that already carry a `Collider`, and colliders
+    // arrive from `manage_physics_lifecycle`, which queries `With<PhysicsEnabled>`
+    // on the Edit->Play transition. A character with no `PhysicsEnabled` is
+    // therefore never CONSIDERED for a controller — not rejected, never seen —
+    // and keeps the legacy raw-translation path: no gravity, no ground contact,
+    // no collision response. That is the PF-1214 golden-path failure exactly.
+    //
+    // The engine reports the same fact at runtime through
+    // `CharacterControllerDiagnostics`, but that resource exists only during Play
+    // and this step runs in edit mode, so a live read here would be vacuous. The
+    // static precondition is the same fact one step earlier — and it is the half
+    // that can still be repaired before the player presses Play.
+    //
+    // 3D only, mirroring the engine: 2D projects keep the legacy path by design
+    // and are never recorded as skipped.
+    if (ctx.projectType === '3d') {
+      const gameComponents = allGameComponents ?? {};
+      const strandedCharacters = nodes
+        .filter(node => {
+          // `Object.hasOwn`, not a bare read: this record is keyed by ids that
+          // come straight off the engine wire, so `gameComponents['constructor']`
+          // would resolve an inherited function rather than this entity's
+          // components. The `Array.isArray` line below is what stops that value
+          // reaching `.some` and throwing — the two together, not either alone,
+          // are what the prototype-chain test pins.
+          const components = Object.hasOwn(gameComponents, node.entityId)
+            ? gameComponents[node.entityId]
+            : [];
+          if (!Array.isArray(components)) return false;
+          return (
+            components.some(component => component.type === 'characterController') &&
+            !node.components.includes('PhysicsEnabled')
+          );
+        })
+        .map(node => node.name);
+
+      if (strandedCharacters.length > 0) {
+        const one = strandedCharacters.length === 1;
+        warnings.push(
+          `Physics is off for ${strandedCharacters.join(', ')}, so ` +
+            `${one ? 'it walks through walls and falls' : 'they walk through walls and fall'} ` +
+            `through the floor. Turn on Physics for ${one ? 'it' : 'them'}, then build again.`,
+        );
+        issues.push('character_without_collider');
+      }
+    }
 
     // Check 5: No ground plane heuristic for 3D
     if (ctx.projectType === '3d' && nodes.length > 0) {

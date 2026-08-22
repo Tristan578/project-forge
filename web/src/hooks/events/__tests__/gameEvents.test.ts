@@ -19,6 +19,16 @@ vi.mock('@/lib/scripting/useScriptRunner', () => ({
   getScriptGameEventCallback: () => mockScriptGameEventCallback,
 }));
 
+// The diagnostics arm's only observable effect is the toast, so that is what is
+// mocked: the sentence the player reads IS the deliverable of review finding #2,
+// and asserting on it here is what keeps the copy under test.
+const mockShowError = vi.fn();
+vi.mock('@/lib/toast', () => ({
+  showError: (message: string) => mockShowError(message),
+  showSuccess: vi.fn(),
+  showInfo: vi.fn(),
+}));
+
 import { useEditorStore, firePlayTick } from '@/stores/editorStore';
 import { handleGameEvent } from '../gameEvents';
 import { isCharacterGrounded, getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
@@ -570,6 +580,111 @@ describe('handleGameEvent', () => {
         mockSetGet.get
       );
       expect(isCharacterGrounded('player-1')).toBe(false);
+    });
+  });
+
+  /**
+   * PF-1214, review finding #2. A character that entered Play with no collider
+   * is never CONSIDERED by the attach query — it is not rejected, so there is no
+   * error, no failed command and no CHARACTER_GROUNDED_CHANGED to tell it apart
+   * from a working character. Before this arm the only trace was a
+   * `tracing::warn!` in the WASM console, which no player reads.
+   */
+  describe('CHARACTER_CONTROLLER_DIAGNOSTICS', () => {
+    const withScene = (nodes: Record<string, { entityId: string; name: string }>) => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        primaryId: null,
+        primaryGameComponents: [],
+        allGameComponents: {},
+        sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+      } as unknown as StoreState);
+    };
+
+    it('names the skipped characters by their scene-graph names', () => {
+      withScene({ 'e-1': { entityId: 'e-1', name: 'Player' } });
+
+      const result = handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skippedWithoutCollider: ['e-1'] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(mockShowError).toHaveBeenCalledTimes(1);
+      const message = mockShowError.mock.calls[0][0] as string;
+      expect(message).toContain('Player has no physics');
+      expect(message).toContain('Physics > Enabled');
+      // The raw engine id is not what the player calls the entity.
+      expect(message).not.toContain('e-1');
+    });
+
+    it('says nothing when every character got its controller', () => {
+      // The engine writes the resource on EVERY 3D Edit->Play transition, so an
+      // empty list is the emission that says a broken scene was repaired. A
+      // toast for it would fire on every play of every healthy game.
+      withScene({});
+
+      const result = handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skippedWithoutCollider: [] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(mockShowError).not.toHaveBeenCalled();
+    });
+
+    it('handles the event but warns when the payload cannot be read', () => {
+      withScene({});
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const result = handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skipped: ['e-1'] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      // Still `true`: the name IS this handler's, so returning false would make
+      // the hub report an unknown event and hide the real problem.
+      expect(result).toBe(true);
+      expect(mockShowError).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('CHARACTER_CONTROLLER_DIAGNOSTICS'));
+      warn.mockRestore();
+    });
+
+    it('falls back to the engine id for an entity the scene graph has lost', () => {
+      withScene({ 'e-1': { entityId: 'e-1', name: 'Player' } });
+
+      handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skippedWithoutCollider: ['e-2'] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(mockShowError.mock.calls[0][0]).toContain('e-2 has no physics');
+    });
+
+    it('does not take a name off the scene graph prototype', () => {
+      // `nodes` is a plain object keyed by an id straight off the engine wire,
+      // so a bare read of `nodes['constructor']` resolves an inherited function
+      // and `.name` on it is a real string — the entity would be reported under
+      // the name of a JS builtin.
+      withScene({});
+
+      handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skippedWithoutCollider: ['constructor'] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(mockShowError.mock.calls[0][0]).toContain('constructor has no physics');
+      expect(mockShowError.mock.calls[0][0]).not.toContain('Object');
     });
   });
 });

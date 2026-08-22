@@ -24,3 +24,11 @@ script immediately instead of only after its next landing.
 The kinematic controller gained a coyote window and a jump buffer, carries a
 player standing on a moving platform, bounds upward velocity as well as
 downward, and reports characters it had to skip for having no collider.
+
+A character the engine cannot drive is now something you are told about instead
+of something you discover by walking through a wall. Without physics an entity
+never receives a collider, so the engine never even considers it for a character
+controller — it simply keeps sliding, with no gravity and no collisions, and
+nothing anywhere said so. Pressing Play on such a scene now raises a message
+naming the characters and how to fix them, and building a game reports the same
+thing one step earlier, while it can still be repaired.
