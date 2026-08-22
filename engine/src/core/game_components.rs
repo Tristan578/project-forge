@@ -78,7 +78,7 @@ impl GameComponentData {
 /// Converging the two means giving the legacy path a real gravity integrator,
 /// which changes 2D jump behaviour and belongs with the 2D character controller
 /// work rather than here. Until then the tooltip in
-/// `web/src/lib/ai/tooltipDictionary.ts` carries the same caveat, so the
+/// `web/src/lib/workspace/tooltipDictionary.ts` carries the same caveat, so the
 /// divergence is visible to the person typing the number and not only to the
 /// person reading the engine.
 #[derive(Clone, Debug, Serialize, Deserialize)]

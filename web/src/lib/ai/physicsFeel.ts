@@ -187,7 +187,7 @@ export const GRAVITY_ACCEL_MPS2 = 9.81;
  * mean "a small hop" or "a big leap" relative to the other presets. It was
  * never a height and never a speed. This constant is the one place it is given
  * a physical meaning, chosen so the presets land in the 0.5-1.5s airtime band
- * that platformers actually use (pinned by `physicsFeel.jump.test.ts`).
+ * that platformers actually use (pinned by `web/src/lib/ai/__tests__/physicsFeelJump.test.ts`).
  */
 export const JUMP_FORCE_TO_LAUNCH_SPEED = 0.45;
 
