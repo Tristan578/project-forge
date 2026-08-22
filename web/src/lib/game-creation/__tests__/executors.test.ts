@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ExecutorContext } from '../types';
 import type { EditorState } from '@/stores/editorStore';
 import { EXECUTOR_REGISTRY } from '../executors/index';
+import { buildDefaultGroundDescriptor } from '../worldGeometry';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -921,22 +922,43 @@ describe('auto_polish executor', () => {
     // runs after `physics_enable`, so nothing downstream covers for it.
     const calls = vi.mocked(ctx.dispatchCommand).mock.calls;
     expect(calls.map(([command]) => command)).toEqual([
-      'spawn_entity', 'toggle_physics', 'update_physics',
+      'spawn_entity', 'update_transform', 'toggle_physics', 'update_physics',
     ]);
 
     // FULL payloads. The id is minted by the executor rather than left to the
     // engine — `spawn_entity` invents a UUID the caller never learns, which
-    // would leave the two commands below with no entity to name.
+    // would leave the three commands below with no entity to name.
+    //
+    // Checked against the descriptor `world_build` would have used rather than
+    // a second hand-written one: the repair and the builder must not disagree
+    // about what "the ground" is, and a literal here is how they drift.
+    const expected = buildDefaultGroundDescriptor('3d');
     const spawn = calls[0][1] as Record<string, unknown>;
     expect(spawn).toEqual({
       id: expect.any(String),
-      entityType: 'plane',
-      name: 'Ground',
-      position: [0, 0, 0],
+      // A `cube`, not a `plane`: the engine has no plane collider, so a
+      // zero-thickness quad would be a mesh describing something the physics
+      // does not.
+      entityType: expected.entityType,
+      name: expected.name,
+      // Half a thickness below the origin, which is what puts the collider's
+      // top face flush with y=0 instead of floating 0.5 above it.
+      position: expected.position,
     });
+    expect(expected.position).toEqual([0, -0.5, 0]);
     const groundId = spawn['id'];
-    expect(calls[1][1]).toEqual({ entityId: groundId, enabled: true });
-    expect(calls[2][1]).toEqual({
+
+    // THE ASSERTION THIS TEST EXISTS FOR: the collider matches the mesh.
+    // `make_collider` takes its half-extents from `transform.scale` and
+    // `spawn_entity` has no scale field, so without this command the "floor" is
+    // a 1x1x1 box at the origin — the player is supported within half a metre
+    // and falls through everywhere else, while the fix list says "Added ground
+    // plane".
+    expect(calls[1][1]).toEqual({ entityId: groundId, scale: expected.scale });
+    expect(expected.scale).toEqual([40, 1, 40]);
+
+    expect(calls[2][1]).toEqual({ entityId: groundId, enabled: true });
+    expect(calls[3][1]).toEqual({
       entityId: groundId,
       bodyType: 'fixed',
       colliderShape: 'cuboid',
@@ -1002,18 +1024,24 @@ describe('auto_polish executor', () => {
     const batches = batchFn.mock.calls;
     expect(batches.length).toBe(3);
 
+    const expected = buildDefaultGroundDescriptor('3d');
     const first = batches[0][0] as Array<{ command: string; payload: Record<string, unknown> }>;
     expect(first.map(entry => entry.command)).toEqual(['update_ambient_light', 'spawn_entity']);
     expect(first[0].payload).toEqual({ color: [1, 1, 1], brightness: 0.3 });
     expect(first[1].payload).toEqual({
       id: expect.any(String),
-      entityType: 'plane',
-      name: 'Ground',
-      position: [0, 0, 0],
+      entityType: expected.entityType,
+      name: expected.name,
+      position: expected.position,
     });
 
     const groundId = first[1].payload['id'];
+    // Sizing rides the toggle's batch: the two are independent of each other
+    // and both need only that the spawn has been flushed. The scale must land
+    // before Play, because the collider is built from `transform.scale` at the
+    // Edit→Play transition and is never resized after.
     expect(batches[1][0]).toEqual([
+      { command: 'update_transform', payload: { entityId: groundId, scale: expected.scale } },
       { command: 'toggle_physics', payload: { entityId: groundId, enabled: true } },
     ]);
     expect(batches[2][0]).toEqual([
@@ -1049,10 +1077,10 @@ describe('auto_polish executor', () => {
 
     expect(result.success).toBe(true);
 
-    // Four, not two: the repaired ground carries its own toggle and patch.
+    // Five, not two: the repaired ground carries its own sizing, toggle and patch.
     const calls = vi.mocked(ctx.dispatchCommand).mock.calls;
     expect(calls.map(([command]) => command)).toEqual([
-      'update_ambient_light', 'spawn_entity', 'toggle_physics', 'update_physics',
+      'update_ambient_light', 'spawn_entity', 'update_transform', 'toggle_physics', 'update_physics',
     ]);
   });
 });
