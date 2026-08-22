@@ -55,16 +55,59 @@ import type { SceneNode } from '@/stores/slices/types';
 interface Recorded {
   command: string;
   payload: unknown;
+  /**
+   * Was the entity this command names ALREADY flushed into the store when the
+   * command was dispatched? `false` for a command that names no entity, which
+   * is why every assertion on this field filters by command name first.
+   */
+  targetVisible: boolean;
 }
 
+/**
+ * The spawn flush is DEFERRED, and that is the whole point of this fake.
+ *
+ * `apply_spawn_requests` creates entities through Bevy's deferred `Commands`,
+ * so an entity spawned in one engine frame does not exist for any other system
+ * until the schedule has flushed. A fake that calls `addNode` inside the
+ * dispatch call models an engine that has never existed — and it is precisely
+ * the shape that let PF-1213's real defect through review: with a synchronous
+ * fake, a `toggle_physics` dispatched in the same JS task as its `spawn_entity`
+ * still finds the entity, so a step that toggles too early looks perfect.
+ *
+ * Spawns are therefore queued and drained on an animation frame - the same
+ * clock `waitForEngineFrame` yields to, and one tick ahead of it, since that
+ * helper nests TWO - and each recorded command carries
+ * the one fact the ordering contract rests on: whether its target was visible
+ * yet. `apply_physics_toggles` `drain(..)`s its queue whether or not the id
+ * matched anything, so a toggle for an unflushed entity is consumed and lost
+ * with nothing to show for it — `targetVisible: false` is that silent drop.
+ */
 function attachFakeEngine(harness: TestHarness): Recorded[] {
   const recorded: Recorded[] = [];
+  const pending: SceneNode[] = [];
+  let flushScheduled = false;
+
+  const flush = () => {
+    flushScheduled = false;
+    // Indexed drain rather than `forEach`: a callback form skips an array hole,
+    // which would leave an entity permanently unflushed and turn this fake into
+    // a source of failures that say nothing about the code under test.
+    for (let i = 0; i < pending.length; i += 1) {
+      harness.getState().addNode(pending[i]);
+    }
+    pending.length = 0;
+  };
 
   harness.dispatch.mockImplementation((command: string, payload: unknown) => {
-    recorded.push({ command, payload });
+    const bag = (payload ?? {}) as Record<string, unknown>;
+    const rawTarget = Object.hasOwn(bag, 'entityId') ? bag['entityId'] : undefined;
+    const targetVisible =
+      typeof rawTarget === 'string'
+        && Object.hasOwn(harness.getState().sceneGraph.nodes, rawTarget);
+
+    recorded.push({ command, payload, targetVisible });
     if (command !== 'spawn_entity') return;
 
-    const bag = (payload ?? {}) as Record<string, unknown>;
     const rawId = Object.hasOwn(bag, 'id') ? bag['id'] : undefined;
     const rawName = Object.hasOwn(bag, 'name') ? bag['name'] : undefined;
 
@@ -74,15 +117,22 @@ function attachFakeEngine(harness: TestHarness): Recorded[] {
         : `engine-assigned-${recorded.length}`;
     const name = typeof rawName === 'string' && rawName.length > 0 ? rawName : 'Entity';
 
-    const node: SceneNode = {
+    pending.push({
       entityId,
       name,
       parentId: null,
       children: [],
       components: [],
       visible: true,
-    };
-    harness.getState().addNode(node);
+    });
+
+    if (!flushScheduled) {
+      flushScheduled = true;
+      // One frame, not a microtask: `runPipeline` awaits every executor, so a
+      // microtask-scheduled flush would land between two steps on its own and
+      // this fake would stop modelling the deferred-`Commands` gap at all.
+      requestAnimationFrame(flush);
+    }
   });
 
   return recorded;
@@ -403,6 +453,56 @@ describe('pipeline enables physics on every gameplay entity (PF-1213)', () => {
         expect(updateIdx, `${names[i]}: update_physics before toggle_physics`).toBeGreaterThan(toggleIdx);
       }
     }
+  });
+
+  it('dispatches every toggle_physics only after the engine has flushed that entity', async () => {
+    await build(crystalRun3d());
+
+    // The regression this pins: `physics_enable` used to run in the same JS task
+    // as the spawns that precede it (`entitySetupExecutor` returns without
+    // yielding and `runPipeline` awaits each executor on a microtask), so every
+    // toggle named an entity the engine had not created yet. `dispatchCommand`
+    // returns `void` and `apply_physics_toggles` drains unconditionally, so the
+    // whole step "succeeded" while enabling nothing.
+    let checked = 0;
+    for (let i = 0; i < recorded.length; i += 1) {
+      const entry = recorded[i];
+      if (entry.command !== 'toggle_physics') continue;
+      checked += 1;
+      expect(
+        entry.targetVisible,
+        `toggle_physics for ${String(payloadOf(entry)['entityId'])} was dispatched `
+        + 'before the engine flushed the spawn, so the engine would drop it',
+      ).toBe(true);
+    }
+
+    // Verified by mutation: delete the `await waitForEngineFrame()` that
+    // `physicsEnableExecutor` performs before its toggle batch and this test
+    // goes red, while every other test in the file stays green.
+    //
+    // A floor, so a change that stops dispatching toggles altogether fails here
+    // instead of passing vacuously: player + 2 crystals + the world geometry.
+    expect(checked).toBeGreaterThan(4);
+  });
+
+  it('dispatches every update_physics only after the engine has flushed that entity', async () => {
+    await build(crystalRun3d());
+
+    // Same contract on the patch half, and a stricter one: `apply_physics_updates`
+    // needs the entity to exist AND to already carry `PhysicsData`, so an update
+    // for an unflushed entity is doubly lost.
+    let checked = 0;
+    for (let i = 0; i < recorded.length; i += 1) {
+      const entry = recorded[i];
+      if (entry.command !== 'update_physics') continue;
+      checked += 1;
+      expect(
+        entry.targetVisible,
+        `update_physics for ${String(payloadOf(entry)['entityId'])} was dispatched `
+        + 'before the engine flushed the spawn',
+      ).toBe(true);
+    }
+    expect(checked).toBeGreaterThan(4);
   });
 
   it('reports the enabled entities on the step output so later steps can bind to them', async () => {
