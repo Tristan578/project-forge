@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import type { OrchestratorGDD, GameSystem, AssetNeed } from '@/lib/game-creation/types';
 import { buildPlan } from '@/lib/game-creation/planBuilder';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1060,5 +1061,208 @@ describe('buildPlan — the win-condition guarantee', () => {
 
     expect(winConditionSteps(plan)).toHaveLength(0);
     expect(warningsOf(plan).join(' ')).toMatch(/no goal yet/i);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Phase 2.5 — physics enablement (PF-1213)
+// ---------------------------------------------------------------------------
+
+/**
+ * `planBuilder` decides, at plan time, which spawned entities get a physical
+ * body. Nothing downstream can cover for a wrong decision here: the engine
+ * attaches a Rapier collider only to an entity carrying `PhysicsEnabled`, so an
+ * entity this phase drops is one the player walks straight through for the rest
+ * of the game's life — no error, no warning, no failed step.
+ *
+ * The step's shape is load-bearing in both directions. Too FEW entities and the
+ * game silently loses collisions; too many and a `decoration` (the GDD files the
+ * camera rig and the key light under that role) gets an invisible one-metre wall
+ * at the origin. An EMPTY list is worse than either: the executor's schema is
+ * `min(1)`, so a step planned with no entities fails `INVALID_INPUT` and takes
+ * the run with it.
+ *
+ * These assert on the full step input with `toEqual` rather than
+ * `objectContaining`, because the invented-or-missing key IS the defect class
+ * here (PF-1213): `objectContaining` is blind to a field sitting alongside the
+ * ones it names.
+ */
+describe('buildPlan — physics enablement step (PF-1213)', () => {
+  /** The single `physics_enable` step, or `undefined` when none was planned. */
+  function physicsEnableStep(plan: { steps: Array<{ executor: string }> }) {
+    const found = plan.steps.filter(s => s.executor === 'physics_enable');
+    // More than one would mean a second producer appeared (systems/world.ts
+    // plans its own for ground/platforms), which would make every assertion
+    // below ambiguous about which step it is grading.
+    expect(found.length, 'expected at most one physics_enable step in this plan').toBeLessThan(2);
+    return found[0] as
+      | { id: string; executor: string; input: Record<string, unknown>; dependsOn: string[] }
+      | undefined;
+  }
+
+  it('names every bodied entity — and only those — with its spawned shape', () => {
+    const gdd = makeGdd({
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'Main gameplay scene',
+          systems: [],
+          entities: [
+            { name: 'Player', role: 'player', systems: [], appearance: 'primitive:sphere' },
+            { name: 'Crystal', role: 'interactable', systems: [], appearance: 'a glowing shard' },
+            // Bodyless on purpose: a collider here is an invisible wall.
+            { name: 'KeyLight', role: 'decoration', systems: [], appearance: 'primitive:cube' },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const playerId = (findEntitySetup(plan, 'Player').input as { entityId: string }).entityId;
+    const crystalId = (findEntitySetup(plan, 'Crystal').input as { entityId: string }).entityId;
+    const step = physicsEnableStep(plan);
+
+    expect(step).toBeDefined();
+    // Full-payload equality: an extra key the executor's schema does not know,
+    // or a shape that disagrees with what `entity_setup` spawns, is exactly the
+    // failure `objectContaining` would wave through.
+    expect(step?.input).toEqual({
+      entities: [
+        // `primitive:sphere` is honoured, so the collider matches the mesh.
+        { entityId: playerId, name: 'Player', role: 'player', shape: 'sphere' },
+        // Prose appearance is not a primitive directive, so the role default
+        // (`interactable` -> cube) stands.
+        { entityId: crystalId, name: 'Crystal', role: 'interactable', shape: 'cube' },
+      ],
+    });
+  });
+
+  it('waits for every entity in the plan, not just the ones it names', () => {
+    const gdd = makeGdd({
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'Main gameplay scene',
+          systems: [],
+          entities: [
+            { name: 'Player', role: 'player', systems: [], appearance: 'capsule' },
+            { name: 'KeyLight', role: 'decoration', systems: [], appearance: 'primitive:cube' },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const entityStepIds = plan.steps
+      .filter(s => s.executor === 'entity_setup')
+      .map(s => s.id);
+    const step = physicsEnableStep(plan);
+
+    expect(entityStepIds).toHaveLength(2);
+    // The bodyless decoration's step is a dependency too. `toggle_physics`
+    // against an entity the engine has not spawned yet is a silent no-op, and
+    // the spawns run in one batch — so the gate is "all entities exist", not
+    // "the ones this step names exist".
+    expect(step?.dependsOn).toEqual(entityStepIds);
+  });
+
+  it('plans no step at all when every entity is bodyless', () => {
+    const gdd = makeGdd({
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'Set dressing only',
+          systems: [],
+          entities: [
+            { name: 'KeyLight', role: 'decoration', systems: [], appearance: 'primitive:cube' },
+            { name: 'CameraRig', role: 'decoration', systems: [], appearance: 'primitive:cube' },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    // An empty `entities` list fails the executor's `min(1)` schema with
+    // INVALID_INPUT, and a non-optional step failing fails the whole run — so
+    // "nothing to enable" must plan nothing, not an empty step.
+    expect(physicsEnableStep(plan)).toBeUndefined();
+  });
+
+  it('makes system steps wait for the bodies they tune', () => {
+    const gdd = makeGdd({ systems: [makeSystem('movement', 'platformer')] });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const step = physicsEnableStep(plan);
+    const systemSteps = plan.steps.filter(s => s.executor === 'character_setup');
+
+    expect(step).toBeDefined();
+    expect(systemSteps.length).toBeGreaterThan(0);
+    // `character_setup` rigs a controller onto a body, and `physics_profile`
+    // tunes mass and friction on one. Either running first patches a component
+    // that does not exist yet, which `apply_physics_updates` drops in silence.
+    for (let i = 0; i < systemSteps.length; i += 1) {
+      expect(
+        systemSteps[i].dependsOn,
+        `${systemSteps[i].executor} does not wait for physics_enable`,
+      ).toContain(step?.id);
+    }
+  });
+
+  it('costs the user nothing — it is pure engine dispatch', () => {
+    const gdd = makeGdd({
+      scenes: [
+        {
+          name: 'Main',
+          purpose: 'Main gameplay scene',
+          systems: [],
+          entities: [
+            { name: 'Player', role: 'player', systems: [], appearance: 'capsule' },
+            { name: 'Crystal', role: 'interactable', systems: [], appearance: 'primitive:sphere' },
+          ],
+          transitions: [],
+        },
+      ],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+    const engineOps = plan.tokenEstimate.breakdown.find(b => b.category === 'Engine operations');
+
+    expect(physicsEnableStep(plan)).toBeDefined();
+    // Exactly the priced steps this plan contains — two `entity_setup`s and the
+    // closing `auto_polish` — and not a token more. The estimate is quoted to
+    // the user before they approve the plan, so a step that secretly carried a
+    // price would overstate the build. Derived from the pricing table rather
+    // than a literal, so a price change moves the expectation with it.
+    expect(engineOps?.estimatedTokens).toBe(
+      TOKEN_COSTS.plan_entity_setup * 2 + TOKEN_COSTS.plan_auto_polish,
+    );
+  });
+
+  /**
+   * The behavioural test above cannot tell a registered zero-cost entry from a
+   * MISSING one — `PLAN_COST_ESTIMATES[step.executor] ?? { base: 0, variance: 0 }`
+   * makes the two indistinguishable at runtime, and the map is module-private so
+   * there is nothing to import. Reading the source is the only way to pin that
+   * the executor was priced deliberately rather than defaulted by accident; an
+   * unpriced executor is how a later non-zero price gets quoted as free.
+   */
+  it('prices physics_enable explicitly rather than falling through to the default', () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '../planBuilder.ts'),
+      'utf-8',
+    );
+
+    // Fail closed: an unreadable or truncated file must not pass vacuously.
+    expect(source.length).toBeGreaterThan(1000);
+    expect(source).toContain('const PLAN_COST_ESTIMATES');
+
+    const table = source.slice(source.indexOf('const PLAN_COST_ESTIMATES'));
+    const end = table.indexOf('\n};');
+    expect(end).toBeGreaterThan(0);
+
+    expect(table.slice(0, end)).toMatch(/^\s*physics_enable:\s*\{/m);
   });
 });
