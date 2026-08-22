@@ -1,10 +1,9 @@
 ---
 name: dx-guardian
 description: Developer experience guardian. Audits documentation freshness, cross-IDE consistency, and quality standards.
-model: claude-haiku-4-5-20251001
+model: haiku
 effort: medium
 memory: project
-background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills:
   [

@@ -1,7 +1,7 @@
 ---
 name: validator
 description: Strict QA agent for security and testing.
-model: claude-sonnet-4-6
+model: sonnet
 effort: high
 memory: project
 mcpServers:

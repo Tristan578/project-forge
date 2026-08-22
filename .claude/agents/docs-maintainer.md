@@ -1,7 +1,7 @@
 ---
 name: docs-maintainer
 description: Documentation specialist. Maintains README, docs/, ADRs, CLAUDE.md, TESTING.md, and keeps all documentation in sync with the codebase.
-model: claude-sonnet-4-6
+model: sonnet
 effort: medium
 memory: project
 skills: [docs, developer-experience]

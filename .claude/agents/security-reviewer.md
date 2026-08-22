@@ -1,10 +1,9 @@
 ---
 name: security-reviewer
 description: Security and compliance specialist. Reviews code for prompt injection, auth gaps, secret exposure, input validation, and dependency vulnerabilities.
-model: claude-sonnet-4-6
+model: sonnet
 effort: high
 memory: project
-background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills: [testing]
 hooks:
