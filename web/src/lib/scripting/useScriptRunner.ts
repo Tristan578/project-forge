@@ -44,8 +44,10 @@ const SCRIPT_ALLOWED_COMMANDS = new Set([
   'set_particle_preset', 'toggle_particle', 'burst_particle',
   // Camera
   'camera_follow', 'camera_stop_follow', 'camera_set_position', 'camera_look_at',
-  // Tilemap
-  'set_tile', 'fill_tiles', 'clear_tiles', 'resize_tilemap',
+  // Tilemap — the engine's own names. `set_tile`/`clear_tiles`/`resize_tilemap`
+  // used to sit here and none of the three has ever been an engine command
+  // (PF-1181).
+  'paint_tile', 'erase_tile', 'fill_tiles',
   // Skeletal 2D
   'create_skeleton2d', 'add_bone2d', 'remove_bone2d', 'update_bone2d',
   'set_skeleton2d_skin', 'play_skeletal_animation2d', 'stop_skeletal_animation2d',

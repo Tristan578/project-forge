@@ -165,6 +165,14 @@ function clearPendingAsyncRequests(reason: string) {
 
 // Synced domain state (from main thread)
 let tilemapStates: Record<string, TilemapState> = {};
+
+/**
+ * Upper bound on cells a single `forge.tilemap.fillRect` may expand into.
+ * `fill_tiles` needs one entry per cell, so an unbounded rect would build a
+ * multi-megabyte payload inside the worker and then be refused by the engine's
+ * container-count guard anyway.
+ */
+const TILEMAP_FILL_MAX_CELLS = 65536;
 let skeletonStates: Record<string, SkeletonState> = {};
 let physics2dVelocities: Record<string, Physics2dVelocityState> = {};
 // Kinematic ground contact, mirrored from the engine (PF-1214). Rapier decides
@@ -507,14 +515,49 @@ function buildForgeApi(scriptEntityId: string) {
         const idx = y * mapW + x;
         return layerData.tiles[idx] ?? null;
       },
+      // The engine's tilemap vocabulary is `paint_tile` / `erase_tile` /
+      // `fill_tiles`, all keyed by `entityId` — and `tilemapId` IS the entity id
+      // (`tilemapStates` is built from `store.tilemaps`, which is keyed by eid).
+      // These three used to push `set_tile` / `clear_tiles` and a rect-shaped
+      // `fill_tiles`; the first two names were never engine commands and the
+      // third had the wrong payload, so every tilemap write a script made was
+      // dropped in silence (PF-1181).
       setTile: (tilemapId: string, x: number, y: number, tileId: number | null, layer = 0) => {
-        pendingCommands.push({ cmd: 'set_tile', tilemapId, x, y, tileId, layer });
+        pendingCommands.push(
+          tileId === null
+            ? { cmd: 'erase_tile', entityId: tilemapId, layer, x, y }
+            : { cmd: 'paint_tile', entityId: tilemapId, layer, x, y, tileIndex: tileId },
+        );
       },
       fillRect: (tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer = 0) => {
-        pendingCommands.push({ cmd: 'fill_tiles', tilemapId, x, y, width: w, height: h, tileId, layer });
+        // `fill_tiles` takes an explicit `[{x, y, tileIndex}]` list and rejects a
+        // null index, so a null fill has to expand into per-cell erases.
+        const width = Math.max(0, Math.floor(w));
+        const height = Math.max(0, Math.floor(h));
+        if (width === 0 || height === 0) return;
+        if (width * height > TILEMAP_FILL_MAX_CELLS) {
+          throw new Error(
+            `forge.tilemap.fillRect: ${width}x${height} exceeds the ${TILEMAP_FILL_MAX_CELLS}-cell limit`,
+          );
+        }
+        if (tileId === null) {
+          for (let ty = y; ty < y + height; ty++) {
+            for (let tx = x; tx < x + width; tx++) {
+              pendingCommands.push({ cmd: 'erase_tile', entityId: tilemapId, layer, x: tx, y: ty });
+            }
+          }
+          return;
+        }
+        const tiles: Array<{ x: number; y: number; tileIndex: number }> = [];
+        for (let ty = y; ty < y + height; ty++) {
+          for (let tx = x; tx < x + width; tx++) {
+            tiles.push({ x: tx, y: ty, tileIndex: tileId });
+          }
+        }
+        pendingCommands.push({ cmd: 'fill_tiles', entityId: tilemapId, layer, tiles });
       },
       clearTile: (tilemapId: string, x: number, y: number, layer = 0) => {
-        pendingCommands.push({ cmd: 'clear_tiles', tilemapId, x, y, width: 1, height: 1, layer });
+        pendingCommands.push({ cmd: 'erase_tile', entityId: tilemapId, layer, x, y });
       },
       worldToTile: (tilemapId: string, worldX: number, worldY: number): [number, number] => {
         const tilemap = tilemapStates[tilemapId];
@@ -547,8 +590,16 @@ function buildForgeApi(scriptEntityId: string) {
         const tilemap = tilemapStates[tilemapId];
         return tilemap?.mapSize ?? [0, 0];
       },
-      resize: (tilemapId: string, width: number, height: number, anchor = 'top-left') => {
-        pendingCommands.push({ cmd: 'resize_tilemap', tilemapId, width, height, anchor });
+      resize: (_tilemapId: string, _width: number, _height: number, _anchor = 'top-left') => {
+        // The engine has no resize command — `resize_tilemap` was never in
+        // `route_domain`, so this pushed a name `commands::dispatch` answers
+        // `Unknown command` to, and `dispatchCommand` returns void, so nothing
+        // ever said so. Throwing is the honest behaviour until the engine grows
+        // a real arm: a script author sees the failure instead of a tilemap that
+        // quietly never resizes (PF-1181).
+        throw new Error(
+          'forge.tilemap.resize is not supported: the engine has no tilemap resize command',
+        );
       },
     },
     audio: {

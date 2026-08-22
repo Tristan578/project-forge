@@ -107,17 +107,47 @@ interface EngineArms {
   dispatchBodyCount: number;
 }
 
+/**
+ * Body of a TOP-LEVEL `fn <name>(...)`, i.e. one whose `fn` starts at column 0.
+ *
+ * `fnBodies` matches the signature anywhere in the file, which is right for
+ * scanning handlers but wrong for a named singleton: `mod.rs` mentions
+ * `fn route_domain(` twice more inside indented string literals in its own
+ * `route_domain_parity` tests, and a whole-file match counts those as real
+ * definitions. Anchoring on the newline is exactly what the Rust-side scanner
+ * does, and it fails closed — a definition this cannot find reports as absent,
+ * never as empty-but-present.
+ */
+function topLevelFnBody(source: string, name: string): string | undefined {
+  const at = source.indexOf(`\nfn ${name}(`);
+  if (at === -1) return undefined;
+  const open = source.indexOf('{', at);
+  return open === -1 ? undefined : blockAt(source, open);
+}
+
 /** Every command name listed in `fn route_domain`, whatever domain it maps to. */
 function readRoutedNames(): Set<string> {
   const source = readFileSync(join(ENGINE_COMMANDS_DIR, 'mod.rs'), 'utf8');
-  // `route_domain` is private, so match on `fn` alone rather than `pub fn`.
-  const bodies = fnBodies(source, 'route_domain');
-  if (bodies.length !== 1) {
-    throw new Error(`expected exactly one route_domain, found ${bodies.length}`);
+  // `route_domain` is private, so match on `fn` alone rather than `pub fn`. An
+  // anchor written `pub fn route_domain` matches nothing and reads exactly like
+  // "the router names no commands" — a scanner failure that looks like a pass.
+  const body = topLevelFnBody(source, 'route_domain');
+  if (body === undefined) {
+    throw new Error('mod.rs has no top-level `fn route_domain(` — the scanner is broken');
   }
-  // The body is nothing but match arms and comments, so every quoted
-  // lower-snake token in it is a command name.
-  return new Set([...bodies[0][1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]));
+  // Comments are stripped first: PF-1181 left explanatory comments in
+  // `route_domain` naming the twenty command names it deleted, and a raw scan
+  // would read those back as still routed.
+  const arms = body
+    .split('\n')
+    .map((line) => {
+      const at = line.indexOf('//');
+      return at === -1 ? line : line.slice(0, at);
+    })
+    .join('\n');
+  // What is left is nothing but match arms, so every quoted lower-snake token
+  // in it is a command name.
+  return new Set([...arms.matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]));
 }
 
 function readEngineArms(): EngineArms {
@@ -281,6 +311,28 @@ describe('store command names have engine dispatch arms', () => {
         expect(arms.implemented.has(name)).toBe(false);
       },
     );
+
+    it.each([
+      'get_all_reverb_zones',
+      'list_particle_presets',
+      'extrude_faces',
+      'create_tileset',
+      'delete_tileset',
+      'create_tilemap',
+      'delete_tilemap',
+      'clear_tilemap',
+      'set_tile',
+      'solve_ik2d',
+      'set_skeleton_skin2d',
+      'add_skeletal_keyframe2d',
+    ])('does not route the deleted name %s', (name) => {
+      // PF-1181 deleted twenty names the router advertised with no arm behind
+      // them. Their deletion left explanatory comments in `route_domain` that
+      // still spell the names, so this doubles as the pin on the comment strip
+      // in `readRoutedNames`: without it every one of these reads as routed.
+      expect(arms.routed.has(name)).toBe(false);
+      expect(arms.implemented.has(name)).toBe(false);
+    });
 
     it.each(['mask', 'blend', 'value', 'high', 'add', 'toggle', 'step'])(
       'does not mistake the payload value %s for a command name',

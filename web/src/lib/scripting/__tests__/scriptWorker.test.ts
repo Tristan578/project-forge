@@ -921,18 +921,53 @@ describe('scriptWorker', () => {
     );
   });
 
-  it('forge.tilemap.setTile and fillRect push commands', async () => {
+  it('forge.tilemap.setTile and fillRect push real engine commands', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {
       forge.tilemap.setTile("tm1", 0, 0, 5);
-      forge.tilemap.fillRect("tm1", 0, 0, 3, 3, 1);
+      forge.tilemap.setTile("tm1", 1, 0, null);
+      forge.tilemap.fillRect("tm1", 0, 0, 2, 2, 1);
+      forge.tilemap.clearTile("tm1", 4, 4);
     }`;
 
     await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
 
     const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
-    expect(cmdMsg![0].commands).toContainEqual(expect.objectContaining({ cmd: 'set_tile', tilemapId: 'tm1', x: 0, y: 0, tileId: 5 }));
-    expect(cmdMsg![0].commands).toContainEqual(expect.objectContaining({ cmd: 'fill_tiles', tilemapId: 'tm1', x: 0, y: 0, width: 3, height: 3, tileId: 1 }));
+    // Asserted whole, not with objectContaining: for a dispatch the payload IS
+    // the behaviour, and `set_tile`/`tilemapId`/`tileId` type-checked and looked
+    // right for the engine's whole life while being silently dropped (PF-1181).
+    expect(cmdMsg![0].commands).toEqual([
+      { cmd: 'paint_tile', entityId: 'tm1', layer: 0, x: 0, y: 0, tileIndex: 5 },
+      { cmd: 'erase_tile', entityId: 'tm1', layer: 0, x: 1, y: 0 },
+      {
+        cmd: 'fill_tiles',
+        entityId: 'tm1',
+        layer: 0,
+        tiles: [
+          { x: 0, y: 0, tileIndex: 1 },
+          { x: 1, y: 0, tileIndex: 1 },
+          { x: 0, y: 1, tileIndex: 1 },
+          { x: 1, y: 1, tileIndex: 1 },
+        ],
+      },
+      { cmd: 'erase_tile', entityId: 'tm1', layer: 0, x: 4, y: 4 },
+    ]);
+  });
+
+  it('forge.tilemap.fillRect erases per cell when the tile is null', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", 2, 3, 2, 1, null, 1);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
+    // `fill_tiles` rejects a null `tileIndex`, so a null fill cannot ride it.
+    expect(cmdMsg![0].commands).toEqual([
+      { cmd: 'erase_tile', entityId: 'tm1', layer: 1, x: 2, y: 3 },
+      { cmd: 'erase_tile', entityId: 'tm1', layer: 1, x: 3, y: 3 },
+    ]);
   });
 
   // ─── Forge Sprite API ──────────────────────────────────────────

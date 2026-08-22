@@ -132,7 +132,11 @@ declare namespace forge {
     function getTile(tilemapId: string, x: number, y: number, layer?: number): number | null;
     /** Set a single tile at position (use null to clear) */
     function setTile(tilemapId: string, x: number, y: number, tileId: number | null, layer?: number): void;
-    /** Fill a rectangular region with a tile */
+    /**
+     * Fill a rectangular region with a tile. tilemapId is the tilemap ENTITY
+     * id. A null tile erases the region. Capped at 65536 cells, because the
+     * engine's fill_tiles command takes one entry per cell.
+     */
     function fillRect(tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer?: number): void;
     /** Clear a single tile */
     function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
@@ -142,7 +146,11 @@ declare namespace forge {
     function tileToWorld(tilemapId: string, tileX: number, tileY: number): [number, number];
     /** Get map dimensions in tiles [width, height] */
     function getMapSize(tilemapId: string): [number, number];
-    /** Resize the tilemap (clears tiles outside new bounds) */
+    /**
+     * NOT SUPPORTED - throws. The engine has no tilemap resize command; this
+     * pushed a resize_tilemap that commands::dispatch has never known, and
+     * dispatchCommand returns void so nothing ever reported it (PF-1181).
+     */
     function resize(tilemapId: string, width: number, height: number, anchor?: 'top-left' | 'center'): void;
   }
 

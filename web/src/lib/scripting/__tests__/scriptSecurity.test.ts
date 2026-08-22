@@ -111,7 +111,7 @@ const SCRIPT_ALLOWED_COMMANDS = new Set<string>([
   // Camera
   'camera_follow', 'camera_stop_follow', 'camera_set_position', 'camera_look_at',
   // Tilemap
-  'set_tile', 'fill_tiles', 'clear_tiles', 'resize_tilemap',
+  'paint_tile', 'erase_tile', 'fill_tiles',
   // Skeleton 2D
   'create_skeleton2d', 'add_bone2d', 'remove_bone2d', 'update_bone2d',
   'set_skeleton2d_skin', 'play_skeletal_animation2d', 'stop_skeletal_animation2d',
@@ -691,10 +691,13 @@ describe('Script Sandbox Security: Command Whitelist', () => {
   it('allows camera_set_position', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_set_position')).toBe(true));
   it('allows camera_look_at', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_look_at')).toBe(true));
 
-  it('allows set_tile', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_tile')).toBe(true));
+  it('allows paint_tile', () => expect(SCRIPT_ALLOWED_COMMANDS.has('paint_tile')).toBe(true));
+  it('allows erase_tile', () => expect(SCRIPT_ALLOWED_COMMANDS.has('erase_tile')).toBe(true));
   it('allows fill_tiles', () => expect(SCRIPT_ALLOWED_COMMANDS.has('fill_tiles')).toBe(true));
-  it('allows clear_tiles', () => expect(SCRIPT_ALLOWED_COMMANDS.has('clear_tiles')).toBe(true));
-  it('allows resize_tilemap', () => expect(SCRIPT_ALLOWED_COMMANDS.has('resize_tilemap')).toBe(true));
+  // PF-1181: these three were allowlisted and are not engine commands at all.
+  it('does not allow set_tile', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_tile')).toBe(false));
+  it('does not allow clear_tiles', () => expect(SCRIPT_ALLOWED_COMMANDS.has('clear_tiles')).toBe(false));
+  it('does not allow resize_tilemap', () => expect(SCRIPT_ALLOWED_COMMANDS.has('resize_tilemap')).toBe(false));
 
   it('allows create_skeleton2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('create_skeleton2d')).toBe(true));
   it('allows play_skeletal_animation2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('play_skeletal_animation2d')).toBe(true));
@@ -724,8 +727,8 @@ describe('Script Sandbox Security: Command Whitelist', () => {
   it('blocks update_terrain', () => expect(SCRIPT_ALLOWED_COMMANDS.has('update_terrain')).toBe(false));
   it('blocks load_scene', () => expect(SCRIPT_ALLOWED_COMMANDS.has('load_scene')).toBe(false));
 
-  it('whitelist has exactly 60 commands', () => {
-    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(60);
+  it('whitelist has exactly 59 commands', () => {
+    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(59);
   });
 });
 

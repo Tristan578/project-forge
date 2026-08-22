@@ -20,10 +20,12 @@
  *
  * KNOWN LIMITATION (2D). 2D worlds are built from the same `cube` primitives as
  * 3D ones, laid out in the XY plane at z = 0 for the side view a 2D game gets.
- * The tilemap route is not available: `create_tilemap`, `set_tile` and
- * `create_tileset` are named by `route_domain` with no handler behind them, and
- * the tilemap commands that DO work need a real tileset asset id that no step
- * in this pipeline can produce. `spawn_sprite` has no `id` field at all, so a
+ * The tilemap route is not available: the engine's real vocabulary is
+ * `set_tilemap_data` / `paint_tile` / `erase_tile` / `fill_tiles`, and all of it
+ * needs a real tileset asset id that no step in this pipeline can produce. The
+ * names this comment used to cite — `create_tilemap`, `set_tile`,
+ * `create_tileset` — were routed with no handler behind them and were deleted
+ * from `route_domain` outright in PF-1181. `spawn_sprite` has no `id` field at all, so a
  * sprite cannot carry a planned UUID and nothing downstream could bind to it.
  * Primitives are the only geometry that is both reachable and bindable today.
  */

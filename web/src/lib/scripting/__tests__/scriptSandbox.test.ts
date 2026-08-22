@@ -51,7 +51,7 @@ const SCRIPT_ALLOWED_COMMANDS = new Set([
   'set_sprite_anim_speed', 'set_sprite_anim_param',
   'set_particle_preset', 'toggle_particle', 'burst_particle',
   'camera_follow', 'camera_stop_follow', 'camera_set_position', 'camera_look_at',
-  'set_tile', 'fill_tiles', 'clear_tiles', 'resize_tilemap',
+  'paint_tile', 'erase_tile', 'fill_tiles',
   'create_skeleton2d', 'add_bone2d', 'remove_bone2d', 'update_bone2d',
   'set_skeleton2d_skin', 'play_skeletal_animation2d', 'stop_skeletal_animation2d',
   'set_ik_target2d',
@@ -350,9 +350,18 @@ describe('Script Sandbox Security', () => {
     });
 
     it('should allow tilemap commands', () => {
-      expect(SCRIPT_ALLOWED_COMMANDS.has('set_tile')).toBe(true);
+      expect(SCRIPT_ALLOWED_COMMANDS.has('paint_tile')).toBe(true);
+      expect(SCRIPT_ALLOWED_COMMANDS.has('erase_tile')).toBe(true);
       expect(SCRIPT_ALLOWED_COMMANDS.has('fill_tiles')).toBe(true);
-      expect(SCRIPT_ALLOWED_COMMANDS.has('clear_tiles')).toBe(true);
+    });
+
+    it('does not allow tilemap names the engine has never had', () => {
+      // PF-1181: `set_tile`, `clear_tiles` and `resize_tilemap` were allowlisted
+      // for their whole life and none of them is an engine command, so every
+      // tilemap write a script made was dropped without a word.
+      for (const name of ['set_tile', 'clear_tiles', 'resize_tilemap']) {
+        expect(SCRIPT_ALLOWED_COMMANDS.has(name)).toBe(false);
+      }
     });
 
     it('should allow skeleton 2D commands', () => {
@@ -749,7 +758,7 @@ describe('Script Sandbox Security', () => {
 
     it('should have expected total command count in whitelist', () => {
       // Keeps whitelist size visible — any additions should update this count
-      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(60);
+      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(59);
     });
   });
 });
