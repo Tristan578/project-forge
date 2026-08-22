@@ -1081,6 +1081,35 @@ describe('scriptWorker', () => {
     expect(src).toContain('__tests__/scriptWorker.test.ts');
   });
 
+  it('forgeTypes tile field bound prose matches the exported constant', async () => {
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    // Fail closed on an unreadable file, same as the cap pin above.
+    const src = readFileSync(join(__dirname, '..', 'forgeTypes.ts'), 'utf8');
+
+    // The tilemap namespace comment states the u32 ceiling as a literal, so it
+    // is a second copy of TILE_FIELD_MAX. Monaco shows that comment to script
+    // authors, and it is the only place the bound is written in prose.
+    const matches = [...src.matchAll(/must not exceed ([\d,]+)/g)];
+    if (matches.length !== 1) {
+      throw new Error(
+        `forgeTypes.ts must carry exactly one "must not exceed N" sentence, found ${matches.length}. ` +
+        'Zero means the pin has nothing to check; more than one means a second copy appeared unpinned.'
+      );
+    }
+
+    const documented = Number(matches[0][1].replace(/,/g, ''));
+    expect(Number.isInteger(documented)).toBe(true);
+    expect(documented).toBe(TILE_FIELD_MAX);
+
+    // The sentence must keep naming the constant it mirrors and the test that
+    // pins it, or the pointer rots while the number happens to stay right.
+    expect(src).toContain('TILE_FIELD_MAX');
+    expect(src).toContain('__tests__/scriptWorker.test.ts');
+  });
+
   it('forge.tilemap.resize throws and pushes nothing', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {

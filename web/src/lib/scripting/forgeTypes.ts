@@ -134,13 +134,26 @@ declare namespace forge {
     function onCollisionExit(callback: (event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void): () => void;
   }
 
+  /**
+   * Tile coordinates are unsigned 32-bit on the engine side. Every x, y, w, h
+   * and layer below is floored, must be >= 0, and must not exceed 4,294,967,295
+   * -- exported as TILE_FIELD_MAX from scriptWorker.ts, mirroring the u32 the
+   * engine reads each field into. A value outside that range throws here,
+   * naming the field, the value and the limit, instead of being truncated into
+   * a real cell by the engine and silently painting a tile nobody asked for.
+   * The number in this sentence is a second copy of the constant; it is parsed
+   * out of this file and compared against the export by the "forgeTypes tile
+   * field bound prose" test in __tests__/scriptWorker.test.ts, which fails
+   * closed if the sentence is missing or appears more than once.
+   */
   namespace tilemap {
     /** Get tile ID at position (returns null if empty or out of bounds) */
     function getTile(tilemapId: string, x: number, y: number, layer?: number): number | null;
     /**
      * Set a single tile at position (use null to clear). Coordinates are
-     * floored; negative or non-finite arguments throw rather than being dropped
-     * by the engine in silence.
+     * floored; a negative, non-finite or out-of-range argument throws rather
+     * than being dropped by the engine in silence. See the namespace comment
+     * for the shared upper bound.
      */
     function setTile(tilemapId: string, x: number, y: number, tileId: number | null, layer?: number): void;
     /**
@@ -150,6 +163,11 @@ declare namespace forge {
      * Coordinates are floored; a negative or non-finite x/y/w/h/layer/tileId
      * throws, because the engine reads each with as_u64() and a rejection
      * there discards the whole command silently.
+     *
+     * The rectangle's FAR edge is bounded too, not just its origin and size:
+     * x + w - 1 and y + h - 1 must each stay within the shared upper bound,
+     * because those derived cells are what the engine actually reads. The
+     * error names which axis ran off the end and the value it reached.
      *
      * Capped at 49,998 cells - fill_tiles carries one entry per cell, and the
      * payload guard (MAX_COMMAND_PAYLOAD_CONTAINERS) allows 50,000 containers
@@ -161,7 +179,10 @@ declare namespace forge {
      * closed if the sentence is missing or appears more than once.
      */
     function fillRect(tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer?: number): void;
-    /** Clear a single tile. Coordinates are floored; negatives throw. */
+    /**
+     * Clear a single tile. Coordinates are floored; negatives, non-finite
+     * values and anything above the shared upper bound throw.
+     */
     function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
     /** Convert world coordinates to tile coordinates */
     function worldToTile(tilemapId: string, worldX: number, worldY: number): [number, number];
