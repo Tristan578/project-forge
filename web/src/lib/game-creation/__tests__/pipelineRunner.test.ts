@@ -528,6 +528,111 @@ describe('runPipeline', () => {
     expect(resolvedAll).toEqual([{ entityIds: ['id-1'] }]);
   });
 
+  it('resolveStepOutputs walks an empty step slot instead of skipping past it', async () => {
+    // `.filter`/`.map` skip an array HOLE outright, so a rewrite to a callback
+    // form would report the list fully processed while a step vanished — and
+    // one JSON round trip turns that hole into a `null`, which the same
+    // callback form dereferences and throws on. Both slot shapes are fed here.
+    //
+    // The runner's own loop is walked over them too: it indexes `plan.steps`
+    // directly, so an unguarded slot would crash inside `dependenciesMet`
+    // before the resolver was ever consulted.
+    let resolvedAll: Record<string, unknown>[] | undefined;
+    let call = 0;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_enable', {
+        name: 'physics_enable',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => {
+          call += 1;
+          return { success: true, output: { entityIds: [`id-${call}`] } };
+        },
+        userFacingErrorMessage: '',
+      }],
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolvedAll = ctx.resolveStepOutputs('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    // The gap between the two commas is the input under test, not a typo, and
+    // the `null` beside it is what that gap becomes after a save/load cycle.
+    const steps = [
+      makeStep('step_0', 'physics_enable'),
+      ,
+      null as unknown as OrchestratorPlan['steps'][number],
+      makeStep('step_3', 'physics_enable'),
+      makeStep('step_4', 'physics_profile'),
+    ] as OrchestratorPlan['steps'];
+    expect(steps).toHaveLength(5);
+
+    const plan = makePlan({ steps });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    // `Array.from` materializes any hole as an explicit `undefined`, so this
+    // cannot pass on a sparse result the way `toHaveLength` would.
+    expect(Array.from(resolvedAll ?? [])).toEqual([
+      { entityIds: ['id-1'] },
+      { entityIds: ['id-2'] },
+    ]);
+    expect(plan.status).toBe('completed');
+  });
+
+  it('resolveStepOutputs omits a failed step that kept diagnostic output', async () => {
+    // `retainDiagnosticOutput` keeps the output of a step that returned
+    // `success: false`, so "has an output" is not "worked". An optional step is
+    // the case that matters: it is skipped and the plan runs ON, so a caller
+    // folding these together would silently take a half-finished step's ids for
+    // finished work.
+    let resolvedAll: Record<string, unknown>[] | undefined;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_enable', {
+        name: 'physics_enable',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => ({
+          success: false,
+          output: { entityIds: ['half-done'] },
+          error: {
+            code: 'COMMAND_FAILED',
+            message: 'Engine rejected a toggle_physics command',
+            userFacingMessage: 'Could not switch physics on.',
+            retryable: false,
+          },
+        }),
+        userFacingErrorMessage: '',
+      }],
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolvedAll = ctx.resolveStepOutputs('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    const plan = makePlan({
+      steps: [
+        makeStep('step_0', 'physics_enable', { optional: true }),
+        makeStep('step_1', 'physics_profile'),
+      ],
+    });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    // The output IS on the step — this is not a test that the runner dropped it.
+    expect(plan.steps[0].status).toBe('skipped');
+    expect(plan.steps[0].output).toEqual({ entityIds: ['half-done'] });
+    expect(resolvedAll).toEqual([]);
+  });
+
   it('resolveStepOutputs returns an empty list when no step matches', async () => {
     let resolvedAll: Record<string, unknown>[] | undefined;
 

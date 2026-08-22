@@ -289,7 +289,13 @@ export interface ExecutorContext {
    * pass lands on the player and the collectibles but not on the floor they
    * stand on. Nothing errors, because the ids simply never arrive.
    *
-   * Steps that have not run, or that produced no output, contribute nothing.
+   * COMPLETED steps only. A step that has not run, produced no output, was
+   * skipped, or FAILED contributes nothing — `pipelineRunner` deliberately keeps
+   * a failed step's diagnostic output on the step (`verify_all_scenes` reports
+   * why the game cannot be won and then returns `success: false`), so a truthy
+   * `output` is not evidence the step worked. A failed OPTIONAL step is skipped
+   * and the plan carries on, which is precisely when folding its half-finished
+   * ids in as finished work would go unnoticed.
    */
   resolveStepOutputs: (executorName: string) => Record<string, unknown>[];
 }
