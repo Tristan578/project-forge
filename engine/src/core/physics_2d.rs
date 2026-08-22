@@ -572,6 +572,104 @@ impl PhysicsJoint2d {
     }
 }
 
+/// The event name the 2D joint list is emitted on.
+///
+/// It is a constant rather than a literal at the emit site because the browser
+/// side has to spell it identically to hear the reply, and a renamed literal
+/// would drop every joint in every list with nothing to catch it (PF-1194).
+/// `web/src/hooks/events/__tests__/physicsEvents.test.ts` reads this line out
+/// of the Rust source and pins it against the TypeScript handler.
+pub const QUERY_JOINTS2D_LIST_EVENT: &str = "QUERY_JOINTS2D_LIST";
+
+/// Build one entry of the [`QUERY_JOINTS2D_LIST_EVENT`] payload: the joint's
+/// flat browser vocabulary plus the `entityId` that owns it.
+///
+/// The fold lives here, in `core/`, because the bridge is wasm32-only and
+/// cannot be reached by native `cargo test` — written inline in the bridge
+/// system, dropping the `entityId` insert made every entry unattributable and
+/// no test could see it.
+pub fn joint2d_list_entry(entity_id: &str, joint: &PhysicsJoint2d) -> serde_json::Value {
+    let mut flat = joint.to_flat();
+    if let Some(map) = flat.as_object_mut() {
+        map.insert(
+            "entityId".to_string(),
+            serde_json::Value::String(entity_id.to_string()),
+        );
+    }
+    flat
+}
+
+/// Build the whole [`QUERY_JOINTS2D_LIST_EVENT`] payload, preserving iteration
+/// order.
+pub fn joints2d_list_payload<'a>(
+    joints: impl IntoIterator<Item = (&'a str, &'a PhysicsJoint2d)>,
+) -> Vec<serde_json::Value> {
+    joints
+        .into_iter()
+        .map(|(entity_id, joint)| joint2d_list_entry(entity_id, joint))
+        .collect()
+}
+
+#[cfg(test)]
+mod joints2d_list_tests {
+    use super::*;
+
+    fn joint(target: &str) -> PhysicsJoint2d {
+        PhysicsJoint2d {
+            target_entity_id: target.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn entry_carries_the_owning_entity_id_alongside_the_flat_joint() {
+        let entry = joint2d_list_entry("platform-1", &joint("anchor-1"));
+        let map = entry.as_object().expect("entry is an object");
+
+        assert_eq!(map.get("entityId").and_then(|v| v.as_str()), Some("platform-1"));
+        // The owner must not shadow the joint's own target.
+        assert_eq!(
+            map.get("targetEntityId").and_then(|v| v.as_str()),
+            Some("anchor-1")
+        );
+        assert!(map.contains_key("jointType"));
+        assert!(map.contains_key("localAnchor1"));
+    }
+
+    #[test]
+    fn entry_keeps_every_key_to_flat_produced() {
+        let joint = joint("anchor-1");
+        let flat = joint.to_flat();
+        let entry = joint2d_list_entry("platform-1", &joint);
+
+        for key in flat.as_object().expect("flat is an object").keys() {
+            assert!(
+                entry.as_object().expect("entry is an object").contains_key(key),
+                "entry dropped `{key}` from to_flat()"
+            );
+        }
+    }
+
+    #[test]
+    fn list_payload_preserves_order_and_attributes_every_joint() {
+        let a = joint("anchor-a");
+        let b = joint("anchor-b");
+        let payload = joints2d_list_payload(vec![("first", &a), ("second", &b)]);
+
+        let ids: Vec<&str> = payload
+            .iter()
+            .map(|entry| entry.get("entityId").and_then(|v| v.as_str()).unwrap_or_default())
+            .collect();
+        assert_eq!(ids, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn list_payload_of_no_joints_is_empty() {
+        let payload = joints2d_list_payload(Vec::<(&str, &PhysicsJoint2d)>::new());
+        assert!(payload.is_empty());
+    }
+}
+
 #[cfg(test)]
 mod physics2d_patch_tests {
     use super::*;

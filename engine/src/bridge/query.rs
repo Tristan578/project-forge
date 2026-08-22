@@ -499,38 +499,25 @@ pub(super) fn process_joint2d_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    // Read, then retain — never `drain(..).filter(..)`, which discards every
+    // `take_queries` and never `drain(..).filter(..)`, which discards every
     // request this system does not own along with the ones it does.
-    let requests: Vec<QueryRequest> = pending
-        .query_requests
-        .iter()
-        .filter(|r| matches!(r, QueryRequest::ListJoints2d | QueryRequest::Joint2dState { .. }))
-        .cloned()
-        .collect();
-    if requests.is_empty() {
-        return;
-    }
-    pending.query_requests.retain(
-        |r| !matches!(r, QueryRequest::ListJoints2d | QueryRequest::Joint2dState { .. }),
-    );
+    let requests = pending
+        .take_queries(|r| matches!(r, QueryRequest::ListJoints2d | QueryRequest::Joint2dState { .. }));
 
     for request in requests {
         match request {
             QueryRequest::ListJoints2d => {
-                let joints: Vec<serde_json::Value> = joint_query
-                    .iter()
-                    .map(|(eid, joint)| {
-                        let mut flat = joint.to_flat();
-                        if let Some(map) = flat.as_object_mut() {
-                            map.insert(
-                                "entityId".to_string(),
-                                serde_json::Value::String(eid.0.clone()),
-                            );
-                        }
-                        flat
-                    })
-                    .collect();
-                events::emit_event("QUERY_JOINTS2D_LIST", &joints);
+                // Payload assembly lives in `core::physics_2d` so it is reachable
+                // by native `cargo test`; this bridge system is wasm32-only.
+                let owned: Vec<(String, &crate::core::physics_2d::PhysicsJoint2d)> =
+                    joint_query.iter().map(|(eid, joint)| (eid.0.clone(), joint)).collect();
+                let joints = crate::core::physics_2d::joints2d_list_payload(
+                    owned.iter().map(|(id, joint)| (id.as_str(), *joint)),
+                );
+                events::emit_event(
+                    crate::core::physics_2d::QUERY_JOINTS2D_LIST_EVENT,
+                    &joints,
+                );
             }
             QueryRequest::Joint2dState { entity_id } => {
                 if let Some((_, joint)) = joint_query.iter().find(|(eid, _)| eid.0 == entity_id) {
@@ -550,8 +537,7 @@ pub(super) fn process_joint_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let has_list_joints = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::ListJoints));
-    if has_list_joints {
+    if !pending.take_queries(|r| matches!(r, QueryRequest::ListJoints)).is_empty() {
         #[derive(serde::Serialize)]
         #[serde(rename_all = "camelCase")]
         struct JointInfo {
@@ -568,6 +554,5 @@ pub(super) fn process_joint_queries(
             .collect();
 
         events::emit_event("QUERY_JOINTS_LIST", &joints);
-        pending.query_requests.retain(|r| !matches!(r, QueryRequest::ListJoints));
     }
 }
