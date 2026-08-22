@@ -61,6 +61,12 @@ impl TransformSnapshot {
     }
 }
 
+
+/// Serde default for [`EntitySnapshot::audio_enabled`] — see that field.
+fn default_audio_enabled() -> bool {
+    true
+}
+
 /// Complete snapshot of an entity for perfect restoration.
 /// Stores the original entity_id so it can be reused on restore.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +101,12 @@ pub struct EntitySnapshot {
     /// Audio data (if entity has audio)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_data: Option<AudioData>,
+    /// Whether audio playback is enabled on this entity.
+    ///
+    /// Defaults to `true` when absent so snapshots serialized before this field
+    /// existed keep their old behaviour (audio data implied audio enabled).
+    #[serde(default = "default_audio_enabled")]
+    pub audio_enabled: bool,
     /// Reverb zone data (if entity has reverb zone)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reverb_zone_data: Option<super::reverb_zone::ReverbZoneData>,
@@ -191,6 +203,7 @@ impl EntitySnapshot {
             asset_ref: None,
             script_data: None,
             audio_data: None,
+            audio_enabled: true,
             reverb_zone_data: None,
             reverb_zone_enabled: false,
             particle_data: None,

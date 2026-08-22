@@ -8,7 +8,7 @@ use crate::core::{
     history::{EntitySnapshot as HistEntitySnapshot, HistoryStack, TransformSnapshot},
     lighting::LightData,
     material::MaterialData,
-    audio::AudioData,
+    audio::{AudioData, AudioEnabled},
     particles::{ParticleData, ParticleEnabled},
     pending_commands::{EntityType, PendingCommands},
     physics::{PhysicsData, PhysicsEnabled},
@@ -49,7 +49,7 @@ pub(super) fn apply_csg_requests(
     light_query: Query<(&EntityId, Option<&LightData>)>,
     physics_query: Query<(&EntityId, Option<&PhysicsData>, Option<&PhysicsEnabled>)>,
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
-    audio_query: Query<(&EntityId, Option<&AudioData>)>,
+    audio_query: Query<(&EntityId, Option<&AudioData>, Option<&AudioEnabled>)>,
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_data_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
@@ -177,9 +177,10 @@ pub(super) fn apply_csg_requests(
                 .find(|(sid, _)| sid.0 == eid.0)
                 .and_then(|(_, sd)| sd.cloned());
 
-            let audio_data = audio_query.iter()
-                .find(|(aid, _)| aid.0 == eid.0)
-                .and_then(|(_, ad)| ad.cloned());
+            let (audio_data, audio_enabled) = audio_query.iter()
+                .find(|(aid, _, _)| aid.0 == eid.0)
+                .map(|(_, ad, ae)| (ad.cloned(), ae.is_some()))
+                .unwrap_or((None, false));
 
             let (particle_data, particle_enabled) = particle_query.iter()
                 .find(|(pid, _, _)| pid.0 == eid.0)
@@ -210,6 +211,7 @@ pub(super) fn apply_csg_requests(
             snap.asset_ref = asset_ref;
             snap.script_data = script_data;
             snap.audio_data = audio_data;
+            snap.audio_enabled = audio_enabled;
             snap.particle_data = particle_data;
             snap.particle_enabled = particle_enabled;
             snap.shader_effect_data = shader_effect_data;

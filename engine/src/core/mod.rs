@@ -13,6 +13,7 @@ pub mod camera_2d;
 pub mod camera_presets;
 pub mod character_controller;
 pub mod commands;
+pub mod component_carry;
 pub mod csg;
 pub mod custom_wgsl;
 pub mod edit_mode;

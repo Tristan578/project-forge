@@ -8,12 +8,9 @@ use super::asset_manager::AssetRef;
 use super::audio::{AudioData, AudioEnabled};
 use super::csg;
 use super::entity_id::{EntityId, EntityName, EntityVisible};
-use super::game_camera::{GameCameraData, ActiveGameCamera};
+use super::game_camera::ActiveGameCamera;
 use super::terrain::{self, TerrainEnabled};
-use super::lod::LodData;
-use super::physics_2d::{Physics2dData, Physics2dEnabled};
-use super::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
-use super::tilemap::{TilemapData, TilemapEnabled};
+use super::tilemap::TilemapEnabled;
 // Re-export history types for backward compatibility (bridge/mod.rs accesses these via entity_factory::)
 pub use super::history::{EntitySnapshot, HistoryStack, TransformSnapshot, UndoableAction};
 use super::lighting::LightData;
@@ -24,6 +21,10 @@ use super::physics::{JointData, PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::{Selection, SelectionChangedEvent};
 use super::shader_effects::ShaderEffectData;
+use super::component_carry::{
+    build_aux_index, insert_aux_components, insert_base_components, snapshot_entity,
+    AuxComponentData, AuxQueries, BaseComponentData,
+};
 
 /// Marker component for entities that cannot be deleted by the user.
 #[derive(Component)]
@@ -510,274 +511,9 @@ pub fn apply_terrain_sculpts(
 }
 
 // ---------------------------------------------------------------------------
-// Shared helpers for delete & duplicate — pre-indexed O(1) lookups
+// Shared component-carry helpers live in core::component_carry (PF-1193) so the
+// wasm-only bridge systems (array, combine) drive the same single list.
 // ---------------------------------------------------------------------------
-
-/// Auxiliary component data collected from secondary queries, keyed by entity ID.
-/// Used by both delete and duplicate to avoid redundant O(n) scans.
-struct AuxComponentData {
-    script_data: Option<ScriptData>,
-    audio_data: Option<AudioData>,
-    reverb_zone_data: Option<super::reverb_zone::ReverbZoneData>,
-    reverb_zone_enabled: bool,
-    particle_data: Option<ParticleData>,
-    particle_enabled: bool,
-    shader_effect_data: Option<ShaderEffectData>,
-    csg_mesh_data: Option<csg::CsgMeshData>,
-    procedural_mesh_data: Option<super::procedural_mesh::ProceduralMeshData>,
-    joint_data: Option<JointData>,
-    game_components: Option<super::game_components::GameComponents>,
-    animation_clip_data: Option<AnimationClipData>,
-    game_camera_data: Option<GameCameraData>,
-    active_game_camera: bool,
-    sprite_data: Option<super::sprite::SpriteData>,
-    physics2d_data: Option<Physics2dData>,
-    physics2d_enabled: bool,
-    tilemap_data: Option<TilemapData>,
-    tilemap_enabled: bool,
-    skeleton2d_data: Option<SkeletonData2d>,
-    skeleton2d_enabled: bool,
-    lod_data: Option<LodData>,
-}
-
-impl Default for AuxComponentData {
-    fn default() -> Self {
-        Self {
-            script_data: None,
-            audio_data: None,
-            reverb_zone_data: None,
-            reverb_zone_enabled: false,
-            particle_data: None,
-            particle_enabled: false,
-            shader_effect_data: None,
-            csg_mesh_data: None,
-            procedural_mesh_data: None,
-            joint_data: None,
-            game_components: None,
-            animation_clip_data: None,
-            game_camera_data: None,
-            active_game_camera: false,
-            sprite_data: None,
-            physics2d_data: None,
-            physics2d_enabled: false,
-            tilemap_data: None,
-            tilemap_enabled: false,
-            skeleton2d_data: None,
-            skeleton2d_enabled: false,
-            lod_data: None,
-        }
-    }
-}
-
-/// Build a HashMap of auxiliary component data from the secondary queries.
-/// This converts 7 separate O(n) linear scans per entity into a single O(n) pass.
-fn build_aux_index(
-    script_audio_query: &Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
-    reverb_particle_query: &Query<(
-        &EntityId,
-        Option<&super::reverb_zone::ReverbZoneData>,
-        Option<&super::reverb_zone::ReverbZoneEnabled>,
-        Option<&ParticleData>,
-        Option<&ParticleEnabled>,
-    )>,
-    shader_csg_query: &Query<(&EntityId, Option<&ShaderEffectData>, Option<&csg::CsgMeshData>)>,
-    procedural_joint_query: &Query<(
-        &EntityId,
-        Option<&super::procedural_mesh::ProceduralMeshData>,
-        Option<&JointData>,
-    )>,
-    game_anim_query: &Query<(
-        &EntityId,
-        Option<&super::game_components::GameComponents>,
-        Option<&AnimationClipData>,
-        Option<&GameCameraData>,
-        Option<&ActiveGameCamera>,
-    )>,
-    sprite_query: &Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
-    physics2d_tilemap_skeleton_lod_query: &Query<(
-        &EntityId,
-        Option<&Physics2dData>,
-        Option<&Physics2dEnabled>,
-        Option<&TilemapData>,
-        Option<&TilemapEnabled>,
-        Option<&SkeletonData2d>,
-        Option<&SkeletonEnabled2d>,
-        Option<&LodData>,
-    )>,
-) -> HashMap<String, AuxComponentData> {
-    let mut index: HashMap<String, AuxComponentData> = HashMap::new();
-
-    for (eid, sd, ad) in script_audio_query.iter() {
-        let entry = index.entry(eid.0.clone()).or_default();
-        entry.script_data = sd.cloned();
-        entry.audio_data = ad.cloned();
-    }
-
-    for (eid, rzd, rze, pd, pe) in reverb_particle_query.iter() {
-        let entry = index.entry(eid.0.clone()).or_default();
-        entry.reverb_zone_data = rzd.cloned();
-        entry.reverb_zone_enabled = rze.is_some();
-        entry.particle_data = pd.cloned();
-        entry.particle_enabled = pe.is_some();
-    }
-
-    for (eid, sed, cmd) in shader_csg_query.iter() {
-        let entry = index.entry(eid.0.clone()).or_default();
-        entry.shader_effect_data = sed.cloned();
-        entry.csg_mesh_data = cmd.cloned();
-    }
-
-    for (eid, pmd, jd) in procedural_joint_query.iter() {
-        let entry = index.entry(eid.0.clone()).or_default();
-        entry.procedural_mesh_data = pmd.cloned();
-        entry.joint_data = jd.cloned();
-    }
-
-    for (eid, gc, acd, gcd, agc) in game_anim_query.iter() {
-        let entry = index.entry(eid.0.clone()).or_default();
-        entry.game_components = gc.cloned();
-        entry.animation_clip_data = acd.cloned();
-        entry.game_camera_data = gcd.cloned();
-        entry.active_game_camera = agc.is_some();
-    }
-
-    for (eid, sd) in sprite_query.iter() {
-        let entry = index.entry(eid.0.clone()).or_default();
-        entry.sprite_data = sd.cloned();
-    }
-
-    for (eid, p2d, p2de, tmd, tme, sk, ske, ld) in physics2d_tilemap_skeleton_lod_query.iter() {
-        let entry = index.entry(eid.0.clone()).or_default();
-        entry.physics2d_data = p2d.cloned();
-        entry.physics2d_enabled = p2de.is_some();
-        entry.tilemap_data = tmd.cloned();
-        entry.tilemap_enabled = tme.is_some();
-        entry.skeleton2d_data = sk.cloned();
-        entry.skeleton2d_enabled = ske.is_some();
-        entry.lod_data = ld.cloned();
-    }
-
-    index
-}
-
-/// Build a complete EntitySnapshot from base query data and pre-indexed auxiliary data.
-fn snapshot_entity(
-    entity_id: &str,
-    entity_type: EntityType,
-    name: &str,
-    transform: &Transform,
-    visible: bool,
-    mat_data: Option<&MaterialData>,
-    light_data: Option<&LightData>,
-    phys_data: Option<&PhysicsData>,
-    phys_enabled: bool,
-    asset_ref: Option<&AssetRef>,
-    aux: &AuxComponentData,
-) -> EntitySnapshot {
-    let mut snapshot = EntitySnapshot::new(
-        entity_id.to_string(),
-        entity_type,
-        name.to_string(),
-        TransformSnapshot::from(transform),
-    );
-    snapshot.visible = visible;
-    snapshot.material_data = mat_data.cloned();
-    snapshot.light_data = light_data.cloned();
-    snapshot.physics_data = phys_data.cloned();
-    snapshot.physics_enabled = phys_enabled;
-    snapshot.asset_ref = asset_ref.cloned();
-    snapshot.script_data = aux.script_data.clone();
-    snapshot.audio_data = aux.audio_data.clone();
-    snapshot.reverb_zone_data = aux.reverb_zone_data.clone();
-    snapshot.reverb_zone_enabled = aux.reverb_zone_enabled;
-    snapshot.particle_data = aux.particle_data.clone();
-    snapshot.particle_enabled = aux.particle_enabled;
-    snapshot.shader_effect_data = aux.shader_effect_data.clone();
-    snapshot.csg_mesh_data = aux.csg_mesh_data.clone();
-    snapshot.procedural_mesh_data = aux.procedural_mesh_data.clone();
-    snapshot.joint_data = aux.joint_data.clone();
-    snapshot.game_components = aux.game_components.clone();
-    snapshot.animation_clip_data = aux.animation_clip_data.clone();
-    snapshot.game_camera_data = aux.game_camera_data.clone();
-    snapshot.active_game_camera = aux.active_game_camera;
-    snapshot.sprite_data = aux.sprite_data.clone();
-    snapshot.physics2d_data = aux.physics2d_data.clone();
-    snapshot.physics2d_enabled = aux.physics2d_enabled;
-    snapshot.tilemap_data = aux.tilemap_data.clone();
-    snapshot.tilemap_enabled = aux.tilemap_enabled;
-    snapshot.skeleton2d_data = aux.skeleton2d_data.clone();
-    snapshot.skeleton2d_enabled = aux.skeleton2d_enabled;
-    snapshot.lod_data = aux.lod_data.clone();
-    snapshot
-}
-
-/// Insert auxiliary component data onto a spawned entity (used by duplicate).
-fn insert_aux_components(entity_commands: &mut bevy::ecs::system::EntityCommands, aux: &AuxComponentData) {
-    if let Some(ref sd) = aux.script_data {
-        entity_commands.insert(sd.clone());
-    }
-    if let Some(ref ad) = aux.audio_data {
-        entity_commands.insert(ad.clone());
-        entity_commands.insert(AudioEnabled);
-    }
-    if let Some(ref rzd) = aux.reverb_zone_data {
-        entity_commands.insert(rzd.clone());
-    }
-    if aux.reverb_zone_enabled {
-        entity_commands.insert(super::reverb_zone::ReverbZoneEnabled);
-    }
-    if let Some(ref pd) = aux.particle_data {
-        entity_commands.insert(pd.clone());
-    }
-    if aux.particle_enabled {
-        entity_commands.insert(ParticleEnabled);
-    }
-    if let Some(ref sed) = aux.shader_effect_data {
-        entity_commands.insert(sed.clone());
-    }
-    if let Some(ref cmd) = aux.csg_mesh_data {
-        entity_commands.insert(cmd.clone());
-    }
-    if let Some(ref pmd) = aux.procedural_mesh_data {
-        entity_commands.insert(pmd.clone());
-    }
-    if let Some(ref jd) = aux.joint_data {
-        entity_commands.insert(jd.clone());
-    }
-    if let Some(ref gc) = aux.game_components {
-        entity_commands.insert(gc.clone());
-    }
-    if let Some(ref acd) = aux.animation_clip_data {
-        entity_commands.insert(acd.clone());
-    }
-    if let Some(ref gcd) = aux.game_camera_data {
-        entity_commands.insert(gcd.clone());
-    }
-    if let Some(ref sd) = aux.sprite_data {
-        entity_commands.insert(sd.clone());
-    }
-    if let Some(ref p2d) = aux.physics2d_data {
-        entity_commands.insert(p2d.clone());
-    }
-    if aux.physics2d_enabled {
-        entity_commands.insert(Physics2dEnabled);
-    }
-    if let Some(ref tmd) = aux.tilemap_data {
-        entity_commands.insert(tmd.clone());
-    }
-    if aux.tilemap_enabled {
-        entity_commands.insert(TilemapEnabled);
-    }
-    if let Some(ref sk) = aux.skeleton2d_data {
-        entity_commands.insert(sk.clone());
-    }
-    if aux.skeleton2d_enabled {
-        entity_commands.insert(SkeletonEnabled2d);
-    }
-    if let Some(ref ld) = aux.lod_data {
-        entity_commands.insert(ld.clone());
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Delete system
@@ -789,13 +525,7 @@ pub fn apply_delete_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     query: Query<(Entity, &EntityId, &EntityName, &Transform, &EntityVisible, Option<&EntityType>, Option<&MaterialData>, Option<&LightData>, Option<&PhysicsData>, Option<&PhysicsEnabled>, Option<&AssetRef>), Without<Undeletable>>,
-    script_audio_query: Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
-    reverb_particle_query: Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    shader_csg_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&csg::CsgMeshData>)>,
-    procedural_joint_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>)>,
-    game_anim_query: Query<(&EntityId, Option<&super::game_components::GameComponents>, Option<&AnimationClipData>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
-    sprite_query: Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
-    physics2d_tilemap_skeleton_lod_query: Query<(&EntityId, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&SkeletonData2d>, Option<&SkeletonEnabled2d>, Option<&LodData>)>,
+    aux_queries: AuxQueries,
     mut selection: ResMut<Selection>,
     mut selection_events: MessageWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
@@ -809,15 +539,7 @@ pub fn apply_delete_requests(
         query.iter().map(|row| (row.1 .0.clone(), row)).collect();
 
     // Pre-index auxiliary component data (single O(n) pass over 7 queries)
-    let aux_index = build_aux_index(
-        &script_audio_query,
-        &reverb_particle_query,
-        &shader_csg_query,
-        &procedural_joint_query,
-        &game_anim_query,
-        &sprite_query,
-        &physics2d_tilemap_skeleton_lod_query,
-    );
+    let aux_index = build_aux_index(&aux_queries);
 
     let empty_aux = AuxComponentData::default();
     let mut deleted_any = false;
@@ -832,8 +554,19 @@ pub fn apply_delete_requests(
                 let aux = aux_index.get(&eid.0).unwrap_or(&empty_aux);
 
                 let snapshot = snapshot_entity(
-                    &eid.0, entity_type, &name.0, transform, visible.0,
-                    mat_data, light_data, phys_data, phys_enabled.is_some(), asset_ref, aux,
+                    &eid.0,
+                    entity_type,
+                    &name.0,
+                    transform,
+                    BaseComponentData {
+                        visible: visible.0,
+                        material_data: mat_data,
+                        light_data,
+                        physics_data: phys_data,
+                        physics_enabled: phys_enabled.is_some(),
+                        asset_ref,
+                    },
+                    aux,
                 );
                 history.push(UndoableAction::Delete { snapshot });
 
@@ -895,13 +628,7 @@ pub fn apply_duplicate_requests(
         Option<&PhysicsEnabled>,
     )>,
     asset_ref_query: Query<(&EntityId, Option<&AssetRef>)>,
-    script_audio_query: Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
-    reverb_particle_query: Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    shader_csg_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&csg::CsgMeshData>)>,
-    procedural_joint_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>)>,
-    game_anim_query: Query<(&EntityId, Option<&super::game_components::GameComponents>, Option<&AnimationClipData>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
-    sprite_query: Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
-    physics2d_tilemap_skeleton_lod_query: Query<(&EntityId, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&SkeletonData2d>, Option<&SkeletonEnabled2d>, Option<&LodData>)>,
+    aux_queries: AuxQueries,
     mut history: ResMut<HistoryStack>,
 ) {
     if pending.duplicate_requests.is_empty() {
@@ -927,15 +654,7 @@ pub fn apply_duplicate_requests(
         .collect();
 
     // Pre-index auxiliary component data (single O(n) pass over 7 queries)
-    let aux_index = build_aux_index(
-        &script_audio_query,
-        &reverb_particle_query,
-        &shader_csg_query,
-        &procedural_joint_query,
-        &game_anim_query,
-        &sprite_query,
-        &physics2d_tilemap_skeleton_lod_query,
-    );
+    let aux_index = build_aux_index(&aux_queries);
 
     let empty_aux = AuxComponentData::default();
 
@@ -1009,33 +728,21 @@ pub fn apply_duplicate_requests(
                 entity_commands.insert(md.clone());
             }
 
-            // Clone light data if present
-            if let Some(ld) = src_light_data {
-                entity_commands.insert(ld.clone());
-            }
-
-            // Clone physics data if present
-            if let Some(pd) = src_phys_data {
-                entity_commands.insert(pd.clone());
-            }
-            if src_phys_enabled.is_some() {
-                entity_commands.insert(PhysicsEnabled);
-            }
-
-            // Clone asset ref if present
-            if let Some(ar) = src_asset_ref {
-                entity_commands.insert(ar.clone());
-            }
-
-            // Clone auxiliary component data
+            // Clone the shared base + auxiliary component set (single list)
+            let base = BaseComponentData {
+                visible: visible.0,
+                material_data: src_mat_data,
+                light_data: src_light_data,
+                physics_data: src_phys_data,
+                physics_enabled: src_phys_enabled.is_some(),
+                asset_ref: src_asset_ref,
+            };
+            insert_base_components(&mut entity_commands, base);
             insert_aux_components(&mut entity_commands, aux);
 
             // Build snapshot using shared helper
-            let mut snapshot = snapshot_entity(
-                &source_eid.0, entity_type, &name.0, transform, visible.0,
-                src_mat_data, src_light_data, src_phys_data, src_phys_enabled.is_some(),
-                src_asset_ref, aux,
-            );
+            let mut snapshot =
+                snapshot_entity(&source_eid.0, entity_type, &name.0, transform, base, aux);
             // Override snapshot fields for the NEW duplicate entity
             snapshot.entity_id = new_entity_id_str;
             snapshot.entity_type = entity_type;
@@ -1721,6 +1428,10 @@ pub fn spawn_from_snapshot(
     // Restore audio data if present
     if let Some(ad) = &snapshot.audio_data {
         commands.entity(entity).insert(ad.clone());
+    }
+    // The enablement marker follows the snapshot's own flag — restoring audio the
+    // user had switched off must not bring it back playing (PF-1193).
+    if snapshot.audio_enabled {
         commands.entity(entity).insert(AudioEnabled);
     }
     // Restore reverb zone data if present
@@ -4893,208 +4604,6 @@ mod reverb_zone_history_tests {
     }
 }
 
-#[cfg(test)]
-mod duplicate_aux_component_tests {
-    //! `insert_aux_components` is the DUPLICATE restore path;
-    //! `spawn_from_snapshot` is the undo/redo one. A component wired into only
-    //! one of them survives one operation and vanishes on the other, with no
-    //! error anywhere — which is exactly how reverb zones came to be dropped by
-    //! Ctrl+D while surviving an undone delete (PF-1182).
-
-    use super::{insert_aux_components, AuxComponentData};
-    use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled};
-    use bevy::prelude::*;
-
-    /// Distinguishable from `ReverbZoneData::default()` (`"hall"` / `0.5`) in
-    /// both fields the assertion reads, so an `insert(default())` mutant fails.
-    fn cave() -> ReverbZoneData {
-        ReverbZoneData {
-            preset: "cave".to_string(),
-            wet_mix: 0.9,
-            ..Default::default()
-        }
-    }
-
-    fn restore(aux: &AuxComponentData) -> (World, Entity) {
-        let mut world = World::new();
-        let entity = world.spawn_empty().id();
-        {
-            let mut commands = world.commands();
-            let mut entity_commands = commands.entity(entity);
-            insert_aux_components(&mut entity_commands, aux);
-        }
-        world.flush();
-        (world, entity)
-    }
-
-    #[test]
-    fn duplicating_carries_an_enabled_reverb_zone() {
-        let (world, entity) = restore(&AuxComponentData {
-            reverb_zone_data: Some(cave()),
-            reverb_zone_enabled: true,
-            ..Default::default()
-        });
-
-        assert_eq!(world.get::<ReverbZoneData>(entity), Some(&cave()));
-        assert!(
-            world.get::<ReverbZoneEnabled>(entity).is_some(),
-            "the duplicate lost the enabled marker, so its zone is configured but silent"
-        );
-    }
-
-    /// The inverse: a zone the user deliberately turned off must not come back
-    /// switched on, the PF-1173 failure direction.
-    #[test]
-    fn duplicating_a_disabled_reverb_zone_leaves_it_disabled() {
-        let (world, entity) = restore(&AuxComponentData {
-            reverb_zone_data: Some(cave()),
-            reverb_zone_enabled: false,
-            ..Default::default()
-        });
-
-        assert_eq!(world.get::<ReverbZoneData>(entity), Some(&cave()));
-        assert!(world.get::<ReverbZoneEnabled>(entity).is_none());
-    }
-
-    #[test]
-    fn duplicating_an_entity_with_no_reverb_zone_adds_neither() {
-        let (world, entity) = restore(&AuxComponentData::default());
-
-        assert!(world.get::<ReverbZoneData>(entity).is_none());
-        assert!(world.get::<ReverbZoneEnabled>(entity).is_none());
-    }
-}
-
-#[cfg(test)]
-mod aux_component_parity {
-    //! The behavioural tests above prove reverb specifically is carried. They
-    //! say nothing about the NEXT field added to `AuxComponentData`, which is
-    //! the actual defect: the collector and `spawn_from_snapshot` get updated,
-    //! `insert_aux_components` is forgotten, and nothing anywhere reports it.
-    //!
-    //! So pin the divergence itself — every field of the struct must be read by
-    //! `insert_aux_components`, minus an explicitly reasoned exemption list.
-    //! Same source-parity idiom as `route_domain_parity` in `commands/mod.rs`,
-    //! and fail-closed for the same reason: a slice that silently returns empty
-    //! is what makes this class of test report green on a broken parser.
-
-    const SOURCE: &str = include_str!("entity_factory.rs");
-
-    /// Fields `insert_aux_components` must deliberately NOT restore.
-    const EXEMPT: &[(&str, &str)] = &[(
-        "active_game_camera",
-        "apply_duplicate_requests zeroes it on purpose — a duplicate must not \
-         steal the active-camera flag from the entity it was copied from",
-    )];
-
-    /// Every field of `AuxComponentData`. Both floors below exist because
-    /// `find` returning a short slice would otherwise pass vacuously.
-    const FIELD_FLOOR: usize = 22;
-    /// Fields actually read by `insert_aux_components` (= FIELD_FLOOR - EXEMPT).
-    const RESTORED_FLOOR: usize = 21;
-
-    /// Source text from `marker` up to the first line that closes its block.
-    fn block_after(marker: &str) -> &'static str {
-        let start = SOURCE.find(marker).unwrap_or_else(|| {
-            panic!("parser is stale: {marker:?} no longer appears in the source")
-        });
-        let rest = &SOURCE[start..];
-        let end = rest
-            .find("\n}")
-            .unwrap_or_else(|| panic!("parser is stale: no closing brace after {marker:?}"));
-        &rest[..end]
-    }
-
-    fn struct_fields() -> Vec<String> {
-        block_after("struct AuxComponentData {")
-            .lines()
-            .skip(1)
-            .filter_map(|line| {
-                let name = line.trim().split_once(':')?.0;
-                let looks_like_a_field = !name.is_empty()
-                    && name
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-                looks_like_a_field.then(|| name.to_string())
-            })
-            .collect()
-    }
-
-    fn restored_fields() -> Vec<String> {
-        let body = block_after("fn insert_aux_components");
-        let mut found: Vec<String> = Vec::new();
-        for (at, _) in body.match_indices("aux.") {
-            let name: String = body[at + "aux.".len()..]
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect();
-            if !name.is_empty() && !found.contains(&name) {
-                found.push(name);
-            }
-        }
-        found
-    }
-
-    #[test]
-    fn every_aux_field_is_restored_on_the_duplicate_path() {
-        let fields = struct_fields();
-        let restored = restored_fields();
-
-        assert!(
-            fields.len() >= FIELD_FLOOR,
-            "parsed only {} AuxComponentData fields (floor {FIELD_FLOOR}) — the parser broke, \
-             not the struct; fix it before trusting this test",
-            fields.len()
-        );
-        assert!(
-            restored.len() >= RESTORED_FLOOR,
-            "parsed only {} `aux.` reads in insert_aux_components (floor {RESTORED_FLOOR}) — \
-             the parser broke, not the function",
-            restored.len()
-        );
-
-        let missing: Vec<&String> = fields
-            .iter()
-            .filter(|f| {
-                !restored.contains(f) && !EXEMPT.iter().any(|(exempt, _)| *exempt == f.as_str())
-            })
-            .collect();
-        assert!(
-            missing.is_empty(),
-            "insert_aux_components (the duplicate path) never restores {missing:?}, but \
-             spawn_from_snapshot (the undo/redo path) does. Duplicating an entity would \
-             silently drop them. Add them to insert_aux_components, or to EXEMPT with a reason."
-        );
-
-        let unknown: Vec<&String> = restored.iter().filter(|r| !fields.contains(r)).collect();
-        assert!(
-            unknown.is_empty(),
-            "insert_aux_components reads {unknown:?}, which are not AuxComponentData fields — \
-             the parser is matching something it should not"
-        );
-    }
-
-    /// An exemption that stops being true in either direction is worse than no
-    /// exemption at all, because it reads as reviewed.
-    #[test]
-    fn exemptions_are_still_accurate() {
-        let fields = struct_fields();
-        let restored = restored_fields();
-
-        for (name, reason) in EXEMPT {
-            assert!(
-                fields.contains(&name.to_string()),
-                "EXEMPT lists {name:?} ({reason}), but AuxComponentData no longer has that \
-                 field — drop the entry"
-            );
-            assert!(
-                !restored.contains(&name.to_string()),
-                "EXEMPT lists {name:?} as deliberately not restored, but \
-                 insert_aux_components does restore it now — drop the entry"
-            );
-        }
-    }
-}
 
 #[cfg(test)]
 mod physics2d_history_tests {
