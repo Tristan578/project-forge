@@ -218,6 +218,9 @@ pub(super) fn apply_combine_requests(
         // order they made.
         let mut primary_aux: Option<AuxComponentData> = None;
         let mut primary_base: Option<BaseComponentData> = None;
+        // Sources to consume, applied only once the combine is known to produce
+        // something (see the deferral note below).
+        let mut pending_despawn: Vec<(Entity, String)> = Vec::new();
 
         for entity_id in &request.entity_ids {
             if let Some((entity, eid, ename, transform, visible, entity_type, mesh_handle, mat_data, light_data, phys_data, phys_enabled, asset_ref)) = query.iter().find(|(_, eid, ..)| &eid.0 == entity_id) {
@@ -270,9 +273,11 @@ pub(super) fn apply_combine_requests(
                 ));
 
                 if request.delete_sources {
-                    commands.entity(entity).despawn();
-                    selection.entities.remove(&entity);
-                    selection.entity_ids.remove(entity_id);
+                    // Deferred: the `mesh_list.is_empty()` bail below `continue`s
+                    // without ever pushing `source_snapshots` to history, so
+                    // despawning here would consume the sources of a combine
+                    // that never happened, with no undo entry to bring them back.
+                    pending_despawn.push((entity, entity_id.clone()));
                 }
             }
         }
@@ -280,6 +285,12 @@ pub(super) fn apply_combine_requests(
         if mesh_list.is_empty() {
             emit_procedural_mesh_error("No valid meshes to combine");
             continue;
+        }
+
+        for (entity, entity_id) in pending_despawn.drain(..) {
+            commands.entity(entity).despawn();
+            selection.entities.remove(&entity);
+            selection.entity_ids.remove(&entity_id);
         }
 
         let (combined_positions, combined_normals, combined_indices) = crate::core::procedural_mesh::combine_meshes_data(mesh_list);
