@@ -14,7 +14,7 @@
 - `particles.rs` — Particle apply/toggle/removal/preset, Hanabi GPU sync (webgpu)
 - `scene_io.rs` — Scene export/load, new scene, GLTF import, texture load, asset placement
 - `procedural.rs` — CSG boolean ops, extrude, lathe
-- `mesh_ops.rs` — Array entity, combine meshes, prefab instantiation
+- `mesh_ops.rs` — Array entity, combine meshes, prefab instantiation. All three build a new entity from an existing one, so all three go through `core/component_carry.rs` rather than hand-enumerating what to copy (PF-1193)
 - `scripts.rs` — Script updates/removals, input bindings, play tick
 - `game.rs` — Game component CRUD, game camera, camera shake
 - `skeleton2d.rs` — 2D skeletal animation: bones, skins, IK, keyframes, auto-weight
@@ -59,6 +59,8 @@
 | `terrain.rs` | Procedural terrain. `TerrainData`/`TerrainMeshData`/`TerrainEnabled` |
 | `procedural_mesh.rs` | Extrude, lathe, combine. `ProceduralMeshData`/`ProceduralOp` |
 | `entity_factory.rs` | Spawn/delete/duplicate with undo. `EntitySnapshot`, `spawn_from_snapshot` |
+| `component_carry.rs` | The ONE list of components that travel when an entity is rebuilt from another entity — `AuxComponentData`, `build_aux_index`, `snapshot_entity`, `insert_aux_components`, `insert_base_components`, the `AuxQueries` SystemParam, and `COMBINE_RESULT_EXEMPT` (what a combine RESULT deliberately does not inherit, with a reason each). All four rebuild paths call it: undo/redo, duplicate, array, combine. Lives in `core/` because `bridge/` is wasm32-only and cannot be unit-tested natively; `component_carry_tests.rs` holds the behavioural tests plus `component_carry_parity`, which fails if a field is added without wiring it into every path (PF-1193 — see `rules/gotchas.md` → Engine & Game Loop) |
+| `component_carry_tests.rs` | Test modules for `component_carry.rs`, split out only to keep that file under the 800-line ceiling. `include_str!` still resolves against this directory, so the parity module pins the real production source |
 | `json_guard.rs` | Depth + container-count bounds on every `Value` reaching the parser, checked iteratively. Counts containers only, so bulk scalar data (a full-size tilemap) passes. Applied at `commands::dispatch`, `dispatch_batch`, `build_game_component`. Mirrored in TS by `lib/engine/commandPayloadGuard.ts` (PF-1149) |
 | `history.rs` | `UndoableAction` (29 variants), `HistoryStack`, `EntitySnapshot` |
 | `entity_id.rs` | `EntityId`, `EntityName`, `EntityVisible` |
