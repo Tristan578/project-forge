@@ -300,14 +300,17 @@ export function buildPlan(
     });
   }
 
-  let physicsEnableStepId: string | null = null;
+  // EVERY enablement step, not just this one: `systems/world.ts` plans a second
+  // `physics_enable` for the ground, platforms and walls it mints, and the feel
+  // pass below has to come after ALL of them.
+  const physicsEnableStepIds: string[] = [];
   if (physicsEnableEntities.length > 0) {
     const physicsEnableStep = makeStep(
       'physics_enable',
       { entities: physicsEnableEntities },
       allEntityStepIds,
     );
-    physicsEnableStepId = physicsEnableStep.id;
+    physicsEnableStepIds.push(physicsEnableStep.id);
     steps.push(physicsEnableStep);
   }
 
@@ -324,13 +327,16 @@ export function buildPlan(
   };
   const orderedSystems = topoSortSystems(gdd.systems, PRIORITY_ORDER);
 
+  // The movement feel pass, held back until every system has been planned.
+  // See the deferral note inside the loop.
+  const deferredFeelSteps: Array<{ input: Record<string, unknown>; dependsOn: string[] }> = [];
+
   for (const system of orderedSystems) {
     const def = SYSTEM_REGISTRY.get(system.category);
     // Physics enablement is a baseline dependency alongside the entities
     // themselves: a system step that tunes or rigs a body must not run before
     // the body exists.
-    const systemDeps = [...allEntityStepIds];
-    if (physicsEnableStepId) systemDeps.push(physicsEnableStepId);
+    const systemDeps = [...allEntityStepIds, ...physicsEnableStepIds];
 
     // Add dependency on steps from categories this system depends on
     for (const depCat of system.dependsOn) {
@@ -347,16 +353,43 @@ export function buildPlan(
       });
       for (const stepInput of systemSteps) {
         // [S1] Hardcoded values injected by executor, not spread from config
-        const step = makeStep(
-          stepInput.executor,
-          {
-            ...stepInput.input,
-            projectType: gdd.projectType,    // [B5]
-            feelDirective: gdd.feelDirective, // [B3]
-          },
-          systemDeps,
-        );
+        const stepPayload: Record<string, unknown> = {
+          ...stepInput.input,
+          projectType: gdd.projectType,    // [B5]
+          feelDirective: gdd.feelDirective, // [B3]
+        };
+
+        // THE FEEL PASS IS DEFERRED TO THE END OF THIS PHASE.
+        //
+        // `physics_profile` tunes friction, restitution and gravity on every
+        // entity that has a body, and it finds them through
+        // `resolveStepOutputs('physics_enable')` — which can only report steps
+        // that have ALREADY run. `systems/world.ts` plans a SECOND
+        // `physics_enable` for the ground, platforms and walls, and nothing in
+        // `topoSortSystems` puts `world` before `movement`: both are `core`, so
+        // the order is whatever the GDD happened to list. With movement first
+        // the feel pass saw only the Phase 2.5 cast and the geometry the player
+        // stands on silently kept default friction and restitution (PF-1224).
+        //
+        // Construction is deferred rather than the step being built here and
+        // moved later, so ids stay monotonic with array position — and array
+        // position is the real ordering, since `runPipeline` executes in array
+        // order and `dependsOn` only GATES. (Adding a dependency on a step that
+        // sits later in the array does not reorder anything: the dependency is
+        // unmet when the step is reached, so it is marked `skipped` and, being
+        // non-optional, fails the whole plan.)
+        if (stepInput.executor === 'physics_profile') {
+          deferredFeelSteps.push({ input: stepPayload, dependsOn: [...systemDeps] });
+          continue;
+        }
+
+        const step = makeStep(stepInput.executor, stepPayload, systemDeps);
         steps.push(step);
+        // A system can plan enablement of its own (world geometry). Recording it
+        // here is what makes the deferred feel pass depend on it below.
+        if (stepInput.executor === 'physics_enable') {
+          physicsEnableStepIds.push(step.id);
+        }
         if (!systemCategoryStepIds[system.category]) {
           systemCategoryStepIds[system.category] = [];
         }
@@ -403,6 +436,27 @@ export function buildPlan(
       );
       steps.push(step);
     }
+  }
+
+  // --- Phase 3a: the deferred movement feel pass ---
+  //
+  // Planned last within Phase 3 so it runs after every `physics_enable`, and
+  // GATED on all of them so a failed enablement stops the feel pass instead of
+  // half-tuning the scene. The step id is deliberately NOT registered in
+  // `systemCategoryStepIds`: a later system declaring `dependsOn: ['movement']`
+  // means the character rig (`character_setup`, which stays in place above),
+  // not the feel pass that now runs after it.
+  //
+  // Indexed loops: a callback form skips an array hole, which would silently
+  // drop a feel step or one of the enablement ids it must wait for.
+  for (let i = 0; i < deferredFeelSteps.length; i += 1) {
+    const deferred = deferredFeelSteps[i];
+    const feelDeps = [...deferred.dependsOn];
+    for (let j = 0; j < physicsEnableStepIds.length; j += 1) {
+      const enableId = physicsEnableStepIds[j];
+      if (!feelDeps.includes(enableId)) feelDeps.push(enableId);
+    }
+    steps.push(makeStep('physics_profile', deferred.input, feelDeps));
   }
 
   // --- Phase 3b: The win-condition guarantee ---

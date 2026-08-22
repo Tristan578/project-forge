@@ -183,6 +183,16 @@ export interface OrchestratorPlan {
   status: 'planning' | 'awaiting_approval' | 'executing' | 'completed' | 'failed' | 'cancelled';
   currentStepIndex: number;
   createdAt: number;
+  /**
+   * Problems with the PLAN itself, as opposed to a step that ran and had
+   * something to report (`PlanStep.warnings`).
+   *
+   * `runPipeline` records an empty `steps` slot here. It tolerates one rather
+   * than crashing on it, and a tolerated gap with nothing written down is a
+   * plan that reports full success while a step it was supposed to run simply
+   * is not there — so the gap is recorded where the caller can see it.
+   */
+  warnings?: string[];
 }
 
 export interface OrchestratorStepError {
@@ -276,6 +286,20 @@ export interface ExecutorContext {
   projectType: '2d' | '3d';
   userTier: UserTier;
   signal: AbortSignal;
+  /**
+   * The output of the FIRST COMPLETED step matching a step id or executor name.
+   *
+   * Same "completed only" rule as `resolveStepOutputs` below, and for the same
+   * reason: a caller reaching for one output must not get a different answer
+   * about what counts as an output than a caller reaching for all of them. A
+   * step that has not run, produced no output, was skipped, or FAILED
+   * contributes nothing here either — see the note on `resolveStepOutputs` for
+   * why a truthy `output` is not evidence the step worked.
+   *
+   * Answers with the FIRST match, which is the right answer for a step that
+   * appears once and a silently wrong one for a step that does not. Reach for
+   * `resolveStepOutputs` whenever the executor can be planned more than once.
+   */
   resolveStepOutput: (stepIdOrExecutorName: string) => Record<string, unknown> | undefined;
   /**
    * The output of EVERY completed step run by `executorName`, in plan order.
@@ -289,7 +313,13 @@ export interface ExecutorContext {
    * pass lands on the player and the collectibles but not on the floor they
    * stand on. Nothing errors, because the ids simply never arrive.
    *
-   * Steps that have not run, or that produced no output, contribute nothing.
+   * COMPLETED steps only. A step that has not run, produced no output, was
+   * skipped, or FAILED contributes nothing — `pipelineRunner` deliberately keeps
+   * a failed step's diagnostic output on the step (`verify_all_scenes` reports
+   * why the game cannot be won and then returns `success: false`), so a truthy
+   * `output` is not evidence the step worked. A failed OPTIONAL step is skipped
+   * and the plan carries on, which is precisely when folding its half-finished
+   * ids in as finished work would go unnoticed.
    */
   resolveStepOutputs: (executorName: string) => Record<string, unknown>[];
 }

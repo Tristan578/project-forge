@@ -47,6 +47,12 @@ describe('2D joint reply channels match the engine', () => {
     const match = /pub const QUERY_JOINTS2D_LIST_EVENT: &str = "([A-Z0-9_]+)";/.exec(source);
     expect(match, 'QUERY_JOINTS2D_LIST_EVENT not found in core/physics_2d.rs').not.toBeNull();
     expect(match![1]).toBe('QUERY_JOINTS2D_LIST');
+
+    // The constant's doc comment names the test that pins it, and that pointer
+    // rots exactly as silently as the name would: it spent this branch's life
+    // pointing at physicsEvents.test.ts, which spells the event name but never
+    // reads the Rust source, so a reader chasing the pin found no pin.
+    expect(source).toContain('joint2dEventNameParity.test.ts');
   });
 
   it('emits the joint list through the constant, not a second literal', () => {
