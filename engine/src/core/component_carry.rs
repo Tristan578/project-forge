@@ -55,7 +55,7 @@ use super::tilemap::{TilemapData, TilemapEnabled};
 /// entity". Adding a field here without wiring it into [`build_aux_index`],
 /// [`insert_aux_components`], [`snapshot_entity`] and
 /// [`AuxComponentData::for_combine_result`] fails `component_carry_parity`.
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct AuxComponentData {
     pub script_data: Option<ScriptData>,
     pub audio_data: Option<AudioData>,
@@ -83,36 +83,6 @@ pub struct AuxComponentData {
     pub skeleton2d_data: Option<SkeletonData2d>,
     pub skeleton2d_enabled: bool,
     pub lod_data: Option<LodData>,
-}
-
-impl Default for AuxComponentData {
-    fn default() -> Self {
-        Self {
-            script_data: None,
-            audio_data: None,
-            audio_enabled: false,
-            reverb_zone_data: None,
-            reverb_zone_enabled: false,
-            particle_data: None,
-            particle_enabled: false,
-            shader_effect_data: None,
-            csg_mesh_data: None,
-            procedural_mesh_data: None,
-            joint_data: None,
-            game_components: None,
-            animation_clip_data: None,
-            game_camera_data: None,
-            active_game_camera: false,
-            sprite_data: None,
-            physics2d_data: None,
-            physics2d_enabled: false,
-            tilemap_data: None,
-            tilemap_enabled: false,
-            skeleton2d_data: None,
-            skeleton2d_enabled: false,
-            lod_data: None,
-        }
-    }
 }
 
 /// Fields of [`AuxComponentData`] that a combine RESULT entity deliberately
