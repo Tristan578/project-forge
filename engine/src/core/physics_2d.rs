@@ -577,8 +577,10 @@ impl PhysicsJoint2d {
 /// It is a constant rather than a literal at the emit site because the browser
 /// side has to spell it identically to hear the reply, and a renamed literal
 /// would drop every joint in every list with nothing to catch it (PF-1194).
-/// `web/src/hooks/events/__tests__/physicsEvents.test.ts` reads this line out
-/// of the Rust source and pins it against the TypeScript handler.
+/// `web/src/hooks/events/__tests__/joint2dEventNameParity.test.ts` reads this
+/// line out of the Rust source and pins it against the TypeScript handler, and
+/// pins this sentence too. (`physicsEvents.test.ts` spells the event name but
+/// never reads the engine, so it is not the cross-language pin.)
 pub const QUERY_JOINTS2D_LIST_EVENT: &str = "QUERY_JOINTS2D_LIST";
 
 /// Build one entry of the [`QUERY_JOINTS2D_LIST_EVENT`] payload: the joint's
