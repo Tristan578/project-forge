@@ -23,6 +23,7 @@ function makeCtx(
     userTier: 'pro',
     signal: new AbortController().signal,
     resolveStepOutput: () => undefined,
+    resolveStepOutputs: () => [],
     ...overrides,
   };
   return { ctx, dispatch };

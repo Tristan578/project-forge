@@ -106,6 +106,7 @@ function makeContext(harness: TestHarness, projectType: '2d' | '3d'): ExecutorCo
     signal: new AbortController().signal,
     // Replaced by `runPipeline` with a live resolver over the plan's steps.
     resolveStepOutput: () => undefined,
+    resolveStepOutputs: () => [],
   };
 }
 

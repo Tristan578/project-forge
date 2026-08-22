@@ -70,7 +70,7 @@ function makePlan(overrides: Partial<OrchestratorPlan> = {}): OrchestratorPlan {
 
 function makeStep(
   id: string,
-  executor: 'scene_create' | 'physics_profile' | 'verify_all_scenes' = 'scene_create',
+  executor: 'scene_create' | 'physics_profile' | 'verify_all_scenes' | 'physics_enable' = 'scene_create',
   overrides: Partial<OrchestratorPlan['steps'][number]> = {},
 ): OrchestratorPlan['steps'][number] {
   return {
@@ -97,7 +97,11 @@ function makeGate(id: string, afterStepId: string, overrides: Partial<ApprovalGa
   };
 }
 
-function makeContext(signal: AbortSignal, resolveStepOutput?: (id: string) => Record<string, unknown> | undefined): ExecutorContext {
+function makeContext(
+  signal: AbortSignal,
+  resolveStepOutput?: (id: string) => Record<string, unknown> | undefined,
+  resolveStepOutputs?: (executorName: string) => Record<string, unknown>[],
+): ExecutorContext {
   const store = {} as ReturnType<ExecutorContext['getStore']>;
   const ctx: ExecutorContext = {
     dispatchCommand: vi.fn(),
@@ -106,6 +110,7 @@ function makeContext(signal: AbortSignal, resolveStepOutput?: (id: string) => Re
     userTier: 'starter',
     signal,
     resolveStepOutput: resolveStepOutput ?? (() => undefined),
+    resolveStepOutputs: resolveStepOutputs ?? (() => []),
   };
   return ctx;
 }
@@ -446,6 +451,102 @@ describe('runPipeline', () => {
     const ctx = makeContext(controller.signal);
     await runPipeline(plan, probeRegistry, ctx);
     expect(resolvedByName).toEqual({ byName: true });
+  });
+
+  it('resolveStepOutputs returns EVERY matching step, in plan order (PF-1213)', async () => {
+    // `resolveStepOutput` answers with the first match, which silently dropped
+    // the second `physics_enable` step a plan now carries (blueprint cast, then
+    // world geometry). The geometry the player lands on was never tuned.
+    let resolvedAll: Record<string, unknown>[] | undefined;
+    let call = 0;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_enable', {
+        name: 'physics_enable',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => {
+          call += 1;
+          return { success: true, output: { entityIds: [`id-${call}`] } };
+        },
+        userFacingErrorMessage: '',
+      }],
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolvedAll = ctx.resolveStepOutputs('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    const plan = makePlan({
+      steps: [
+        makeStep('step_0', 'physics_enable'),
+        makeStep('step_1', 'physics_enable'),
+        makeStep('step_2', 'physics_profile'),
+      ],
+    });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    expect(resolvedAll).toEqual([{ entityIds: ['id-1'] }, { entityIds: ['id-2'] }]);
+  });
+
+  it('resolveStepOutputs omits steps that have not produced an output yet', async () => {
+    // A step further down the plan has no `output` until it runs. Including an
+    // `undefined` there would put a hole in the caller's fold.
+    let resolvedAll: Record<string, unknown>[] | undefined;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_enable', {
+        name: 'physics_enable',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => ({ success: true, output: { entityIds: ['id-1'] } }),
+        userFacingErrorMessage: '',
+      }],
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolvedAll = ctx.resolveStepOutputs('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    const plan = makePlan({
+      steps: [
+        makeStep('step_0', 'physics_enable'),
+        makeStep('step_1', 'physics_profile'),
+        makeStep('step_2', 'physics_enable'),
+      ],
+    });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    expect(resolvedAll).toEqual([{ entityIds: ['id-1'] }]);
+  });
+
+  it('resolveStepOutputs returns an empty list when no step matches', async () => {
+    let resolvedAll: Record<string, unknown>[] | undefined;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolvedAll = ctx.resolveStepOutputs('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    const plan = makePlan({ steps: [makeStep('step_0', 'physics_profile')] });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    expect(resolvedAll).toEqual([]);
   });
 
   it('respects abort signal: completes current step then skips remaining', async () => {
