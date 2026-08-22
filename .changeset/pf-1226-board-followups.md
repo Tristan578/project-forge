@@ -7,9 +7,14 @@ profiles, and a step that fails explains itself.
 
 Reading every `physics_enable` step is worthless if the feel pass runs first.
 The planner now orders `physics_profile` after every enable step, so the ground,
-platforms and walls the world system enables actually receive friction,
-restitution and mass rather than being profiled against a set that is still
+platforms and walls the world system enables actually receive gravity scale,
+friction and restitution rather than being profiled against a set that is still
 empty when the pass runs.
+
+Moving the pass also puts it after the player is rigged, so it now re-tunes the
+player's character controller — the same speed, jump height and gravity the rig
+step chose, merged onto the existing controller so nothing else about it is
+lost.
 
 A failed pipeline step showed as a red icon and nothing else: the message
 explaining what went wrong was recorded and never rendered. The orchestrator

@@ -43,6 +43,10 @@ import { buildPlan } from '../planBuilder';
 import { runPipeline } from '../pipelineRunner';
 import { EXECUTOR_REGISTRY } from '../executors';
 import { buildDefaultGroundDescriptor } from '../worldGeometry';
+import {
+  characterControllerFromProfile,
+  resolvePhysicsProfile,
+} from '../physicsProfileResolution';
 import type { ExecutorContext, OrchestratorGDD, OrchestratorPlan } from '../types';
 import { setWinnabilityStateReader } from '@/stores/slices';
 import { createTestHarness } from '@/__integration__/harness';
@@ -316,6 +320,18 @@ function payloadsOfCommandFor(
   return out;
 }
 
+/** The subset of game-component payloads naming one engine `componentType`. */
+function onlyComponentType(
+  payloads: Record<string, unknown>[],
+  componentType: string,
+): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (let i = 0; i < payloads.length; i += 1) {
+    if (payloads[i]?.['componentType'] === componentType) out.push(payloads[i]);
+  }
+  return out;
+}
+
 function firstStepIndex(plan: OrchestratorPlan, executor: string): number {
   for (let i = 0; i < plan.steps.length; i += 1) {
     if (plan.steps[i].executor === executor) return i;
@@ -519,6 +535,67 @@ describe('pipeline enables physics on every gameplay entity (PF-1213)', () => {
         expect(deps).toContain(plan.steps[enableIdxs[j]].id);
       }
     }
+  });
+
+  it('re-tunes the player controller `character_setup` wrote, and keeps `canDoubleJump`', async () => {
+    await build(crystalRun3d());
+
+    // The Phase 3a deferral inverted the movement system's step order, and this
+    // dispatch is what fell out of it. `physics_profile` now runs AFTER
+    // `character_setup`, so the live-store read finds the player's
+    // CharacterController and `applyPhysicsProfile` takes its merge branch —
+    // a branch that was dead on every generated plan before the deferral.
+    //
+    // Two things have to hold, and neither is visible anywhere else:
+    //   1. the merge re-sends the numbers `character_setup` already wrote, not
+    //      a second opinion — both sides go through `resolvePhysicsProfile`,
+    //      but nothing asserted they agree; and
+    //   2. `canDoubleJump`, which the profile does not own, SURVIVES.
+    //      `update_game_component` replaces the whole component engine-side
+    //      (`build_game_component` merges `properties` onto the type's
+    //      `Default`), so a merge that dropped it would silently reset the
+    //      field to the engine default — the PF-1118 data loss, and invisible
+    //      because `dispatchCommand` returns void.
+    const id = spawnedIdByName(recorded, 'Player');
+    expect(id, 'Player was spawned without a planned id').toBeTruthy();
+
+    const controller = characterControllerFromProfile(resolvePhysicsProfile(FEEL, {}));
+    const expectedPayload = {
+      entityId: id,
+      componentType: 'character_controller',
+      properties: {
+        speed: controller.speed,
+        jumpHeight: controller.jumpHeight,
+        gravityScale: controller.gravityScale,
+        canDoubleJump: false,
+      },
+    };
+
+    // The player carries more than one game component (`progression` adds its
+    // win condition), so narrow by type — but keep the FULL payload assertion
+    // on what is left, since an invented sibling key is the failure mode.
+    const controllerAdds = onlyComponentType(
+      payloadsOfCommandFor(recorded, 'add_game_component', id!),
+      'character_controller',
+    );
+    expect(controllerAdds, 'character_setup did not add the player controller')
+      .toEqual([expectedPayload]);
+
+    const controllerUpdates = onlyComponentType(
+      payloadsOfCommandFor(recorded, 'update_game_component', id!),
+      'character_controller',
+    );
+    expect(
+      controllerUpdates,
+      'the deferred feel pass did not re-tune the player controller — either the '
+      + 'profile step ran before character_setup again, or the merge was skipped',
+    ).toEqual([expectedPayload]);
+
+    // Order, not just presence: the merge is only meaningful after the add.
+    const addIdx = indexOfCommandFor(recorded, 'add_game_component', id!);
+    const updateIdx = indexOfCommandFor(recorded, 'update_game_component', id!);
+    expect(addIdx).toBeGreaterThanOrEqual(0);
+    expect(updateIdx).toBeGreaterThan(addIdx);
   });
 
   it('applies the movement feel to the world geometry, not only the blueprint cast', async () => {

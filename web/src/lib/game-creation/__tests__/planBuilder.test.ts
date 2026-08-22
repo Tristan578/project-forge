@@ -1202,8 +1202,9 @@ describe('buildPlan — physics enablement step (PF-1213)', () => {
     expect(step).toBeDefined();
     expect(systemSteps.length).toBeGreaterThan(0);
     // `character_setup` rigs a controller onto a body, and `physics_profile`
-    // tunes mass and friction on one. Either running first patches a component
-    // that does not exist yet, which `apply_physics_updates` drops in silence.
+    // tunes gravity scale, friction and restitution on one. Either running
+    // first patches a component that does not exist yet, which
+    // `apply_physics_updates` drops in silence.
     for (let i = 0; i < systemSteps.length; i += 1) {
       expect(
         systemSteps[i].dependsOn,

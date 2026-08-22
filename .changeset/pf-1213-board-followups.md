@@ -5,8 +5,8 @@
 Physics enablement in the generation pipeline now covers every shape it claims
 to.
 
-The feel pass (`physics_profile`) tunes friction, restitution and mass on
-entities that a `physics_enable` step has already given a body to. It read only
+The feel pass (`physics_profile`) tunes gravity scale, friction and restitution
+on entities that a `physics_enable` step has already given a body to. It read only
 the first such step, so anything enabled later — the ground, platforms and walls
 planned by the world system — kept a body but never received a profile. It now
 reads every one.
