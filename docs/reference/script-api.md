@@ -74,6 +74,7 @@ namespace set).
 | `forge.physics.applyForce(entityId, fx, fy, fz)` | `void` | Apply continuous force |
 | `forge.physics.applyImpulse(entityId, fx, fy, fz)` | `void` | Apply instant impulse |
 | `forge.physics.setVelocity(entityId, vx, vy, vz)` | `void` | Set linear velocity directly |
+| `forge.physics.isGrounded(entityId)` | `boolean` | Whether the kinematic character controller last reported ground contact. Synchronous — 3D ground contact falls out of the character sweep the engine already ran, so unlike the 2D version it needs no raycast. `false` for an entity with no character controller |
 | `forge.physics.getContacts(entityId, radius?)` | `string[]` | IDs currently in contact (radius overrides collider size) |
 | `forge.physics.distanceTo(a, b)` | `number` | Distance between two entities |
 | `forge.physics.onCollisionEnter(entityId, cb)` | `void` | Callback on collision start; `cb(otherEntityId)` |

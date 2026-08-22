@@ -312,7 +312,11 @@ type PhysicsAttachQuery<'w, 's> = Query<
 
 /// Unified system managing the physics simulation lifecycle.
 /// Handles Edit→Play (attach), Play→Edit (detach), and Paused states.
-fn manage_physics_lifecycle(
+///
+/// `pub(crate)` only so the ordering edge against
+/// `manage_character_controller_lifecycle` can be exercised by a test that
+/// registers BOTH systems — see `the_character_lifecycle_sees_the_collider_the_physics_lifecycle_inserts`.
+pub(crate) fn manage_physics_lifecycle(
     engine_mode: Res<EngineMode>,
     mut commands: Commands,
     to_attach: PhysicsAttachQuery,
@@ -518,6 +522,31 @@ fn manage_joint_lifecycle(
 /// Physics plugin that integrates bevy_rapier3d with the editor's mode system.
 pub struct PhysicsPlugin;
 
+/// Register the Edit->Play lifecycle pair.
+///
+/// Lives in its own function so a test can register the REAL configuration
+/// against a bare `App` instead of restating it. Restating it would pin a copy
+/// of the ordering rather than the ordering the engine actually runs, and the
+/// `.chain()` below could then be deleted with every test still green — which
+/// is the exact hole this exists to close (PF-1214).
+///
+/// `.chain()` is load-bearing, not cosmetic. It inserts an `ApplyDeferred`
+/// between the two, which is what lets the character lifecycle's
+/// `With<Collider>` filter see the collider `manage_physics_lifecycle` inserts
+/// on the same Edit->Play frame — and it makes the character lifecycle's
+/// `RigidBody`/`LockedAxes` inserts the ones that survive, which a kinematic
+/// character requires.
+pub(crate) fn add_lifecycle_systems(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            manage_physics_lifecycle,
+            super::character_controller::manage_character_controller_lifecycle,
+        )
+            .chain(),
+    );
+}
+
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         use super::engine_mode::PlaySystemSet;
@@ -525,11 +554,10 @@ impl Plugin for PhysicsPlugin {
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
             .add_plugins(RapierDebugRenderPlugin::default())
             .init_resource::<DebugPhysicsEnabled>()
-            .add_systems(Update, (
-                manage_physics_lifecycle,
-                sync_debug_physics,
-            ))
+            .add_systems(Update, sync_debug_physics)
             .add_systems(Update, manage_joint_lifecycle.in_set(PlaySystemSet));
+
+        add_lifecycle_systems(app);
     }
 }
 
@@ -540,6 +568,10 @@ impl Plugin for PhysicsPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::character_controller::CharacterMotionState;
+    use crate::core::game_components::{
+        CharacterControllerData, GameComponentData, GameComponents,
+    };
     use serde_json::json;
     use std::collections::BTreeSet;
 
@@ -956,5 +988,104 @@ mod tests {
         .apply_recording(&mut target);
         assert_eq!(old, new, "re-sending the current values must be reported as a no-op");
         assert_eq!(target, seeded());
+    }
+
+    // -----------------------------------------------------------------------
+    // Lifecycle ordering (PF-1214)
+    // -----------------------------------------------------------------------
+
+    /// A 3D character exactly as the pipeline builds one: physics enabled, but
+    /// no Rapier components yet — those are what the Edit->Play transition
+    /// attaches.
+    fn character_awaiting_physics(world: &mut World) -> Entity {
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::CharacterController(
+            CharacterControllerData::default(),
+        ));
+        world.insert_resource(EngineMode::Play);
+        world.spawn((gc, PhysicsData::default(), PhysicsEnabled, Transform::default())).id()
+    }
+
+    /// The `.chain()` in `PhysicsPlugin` is load-bearing, and nothing else
+    /// proves it: every lifecycle test in `character_controller.rs` runs that
+    /// system ALONE against a hand-spawned collider, so the dependency is never
+    /// exercised there.
+    ///
+    /// Two things ride on the edge, both asserted here:
+    ///
+    /// * `manage_character_controller_lifecycle` filters on `With<Collider>`,
+    ///   and the collider is a DEFERRED insert from this system. `.chain()` is
+    ///   what puts the `ApplyDeferred` between them; without it the character
+    ///   system sees an entity with no collider on the Edit->Play frame and the
+    ///   player never gains a controller at all.
+    /// * Both systems insert `RigidBody` and `LockedAxes`. A character must end
+    ///   up `KinematicPositionBased` and rotation-locked — a dynamic body would
+    ///   be simulated and fight the controller for the transform — so running
+    ///   second is what makes those values the ones that survive.
+    ///
+    /// Verify by mutation: replacing `.chain()` with a plain tuple, or
+    /// reversing the two entries, must turn this red.
+    #[test]
+    fn the_character_lifecycle_sees_the_collider_the_physics_lifecycle_inserts() {
+        let mut app = App::new();
+        let entity = character_awaiting_physics(app.world_mut());
+        // The REAL registration, not a restatement of it — deleting the
+        // `.chain()` in `add_lifecycle_systems` is what must turn this red.
+        add_lifecycle_systems(&mut app);
+        app.update();
+        let world = app.world();
+
+        assert!(
+            world.get::<Collider>(entity).is_some(),
+            "the physics lifecycle must have attached a collider"
+        );
+        assert!(
+            world.get::<KinematicCharacterController>(entity).is_some(),
+            "the character lifecycle must see that collider on the SAME frame"
+        );
+        assert!(
+            world.get::<CharacterMotionState>(entity).is_some(),
+            "motion state is attached alongside the controller"
+        );
+        assert!(
+            matches!(world.get::<RigidBody>(entity), Some(RigidBody::KinematicPositionBased)),
+            "the character's kinematic body must win over the physics default, got {:?}",
+            world.get::<RigidBody>(entity)
+        );
+        assert_eq!(
+            world.get::<LockedAxes>(entity).copied(),
+            Some(LockedAxes::ROTATION_LOCKED),
+            "the character's rotation lock must win over the physics default"
+        );
+    }
+
+    /// The control for the test above: with the edge removed the character
+    /// system runs against an entity whose collider insert has not been flushed
+    /// yet, so it attaches nothing. Written as an explicit assertion rather
+    /// than left to a mutation run, because "no ordering edge" is the state a
+    /// future refactor drifts back into by accident.
+    #[test]
+    fn without_the_ordering_edge_the_character_lifecycle_misses_the_collider() {
+        let mut app = App::new();
+        let entity = character_awaiting_physics(app.world_mut());
+        // Deliberately NOT `.chain()`ed — this is the shape the fix replaced.
+        app.add_systems(
+            Update,
+            (
+                manage_physics_lifecycle,
+                super::super::character_controller::manage_character_controller_lifecycle,
+            ),
+        );
+        app.update();
+        let world = app.world();
+
+        assert!(
+            world.get::<Collider>(entity).is_some(),
+            "the collider still lands, just too late to be seen this frame"
+        );
+        assert!(
+            world.get::<KinematicCharacterController>(entity).is_none(),
+            "unchained, the character lifecycle cannot have seen the collider"
+        );
     }
 }

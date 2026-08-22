@@ -9,6 +9,8 @@ use crate::core::{
     game_components::{GameComponentRuntime, GameComponents, build_game_component},
 };
 use crate::bridge::{events, log, Selection, SelectionChangedEvent};
+use crate::core::character_controller::{diff_grounded, CharacterMotionState};
+use std::collections::HashMap;
 
 // ---- Game Component Apply Systems ----
 
@@ -316,6 +318,62 @@ pub(super) fn emit_game_events_system(
     for event in runtime.take_pending_events() {
         events::emit_event("GAME_EVENT", &event);
     }
+}
+
+
+/// Mirror each character's ground contact to JS.
+///
+/// Rapier decides ground contact inside its character sweep and nothing on the
+/// JS side can see it: the play-tick wire carries transforms, not contact
+/// state. Without this a script cannot tell a jump from a fall, so
+/// `forge.physics.isGrounded()` had no 3D answer at all (PF-1214).
+///
+/// Reads [`CharacterMotionState`], NOT Rapier's raw
+/// `KinematicCharacterControllerOutput`, and the distinction is behavioural.
+/// Rapier writes its output in `PostUpdate`, so on the Update frame that
+/// consumes a jump the raw output still carries the PREVIOUS frame's
+/// `grounded == true` — a script polling `isGrounded()` right after takeoff
+/// would be told the character is still standing on the floor.
+/// `step_character` clears the flag on a successful jump, so the motion state
+/// is the jump-corrected value and the one a script should see. It is also the
+/// exact value the jump gating itself used, so script and engine cannot
+/// disagree about whether a character was airborne.
+///
+/// Ordered after `system_character_controller`, which owns that write: without
+/// an explicit edge the two systems conflict on `CharacterMotionState` and the
+/// resolution — this frame's value or last frame's — is unspecified.
+///
+/// Only CHANGES go out — one event per character per frame for a whole play
+/// session is not a wire, it is a leak. `diff_grounded` lives in `core/` and is
+/// native-tested there; the bridge cannot be.
+///
+/// Not gated by the `runtime` feature: an exported game runs the same scripts.
+pub(super) fn emit_character_grounded_system(
+    runtime: Option<Res<GameComponentRuntime>>,
+    characters: Query<(&EntityId, &CharacterMotionState)>,
+    mut prev: Local<HashMap<String, bool>>,
+) {
+    // Presence of the runtime IS the play gate, matching every other
+    // game-component system. Outside Play there are no controllers anyway, but
+    // the `prev` map must still be cleared or a stopped-then-restarted game
+    // starts with a stale mirror and emits nothing for an unchanged flag.
+    if runtime.is_none() {
+        if !prev.is_empty() {
+            prev.clear();
+        }
+        return;
+    }
+
+    let current: HashMap<String, bool> = characters
+        .iter()
+        .map(|(eid, state)| (eid.0.clone(), state.grounded))
+        .collect();
+
+    for (entity_id, grounded) in diff_grounded(&prev, &current) {
+        events::emit_character_grounded(&entity_id, grounded);
+    }
+
+    *prev = current;
 }
 
 /// Emit game camera data when selection changes.

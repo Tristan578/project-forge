@@ -160,6 +160,13 @@ vi.mock('@/lib/audio/audioManager', () => ({
 
 import { useScriptRunner, getScriptCollisionCallback, getScriptGameEventCallback } from '../useScriptRunner';
 import { audioManager } from '@/lib/audio/audioManager';
+// Deliberately NOT mocked: the module singleton IS the thing under test here,
+// and a stub would pin the test's own idea of the wire instead of the hook's.
+import {
+  setCharacterGrounded,
+  getGroundedStates,
+  clearGroundedStates,
+} from '@/lib/scripting/groundedRegistry';
 
 describe('useScriptRunner', () => {
   afterAll(() => vi.unstubAllGlobals());
@@ -178,6 +185,10 @@ describe('useScriptRunner', () => {
     workerTerminated = false;
     mockPlayTickCallback = null;
     mockDialogueTrees = {};
+    // The grounded registry is a module singleton shared by every test in this
+    // file; a leftover entry would make a later assertion pass for the wrong
+    // reason. Cleared through the hook's own export, not a private reset.
+    clearGroundedStates();
   });
 
   afterEach(() => {
@@ -874,5 +885,131 @@ describe('useScriptRunner', () => {
     mockEngineMode = 'play';
     renderHook(() => useScriptRunner({ wasmModule: null }));
     expect(latestWorker).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Kinematic ground contact -> script sandbox (PF-1214)
+  //
+  // The engine decides `grounded` inside Rapier's character sweep and emits
+  // CHANGES only; the browser accumulates them in `groundedRegistry` and the
+  // hook is the ONLY thing that carries them to the worker. Nothing else in
+  // this file touched that path, so every line of it could be deleted with all
+  // 171 tests in the five suites this PR touches still green while
+  // `forge.physics.isGrounded()` returned false forever.
+  //
+  // Each assertion below is written so deleting the line it covers turns it
+  // red — verified by mutation, not assumed.
+  // ---------------------------------------------------------------------------
+  const TICK = {
+    entities: {},
+    entityInfos: {},
+    inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+  };
+
+  const messagesOfType = (type: string) =>
+    workerPostMessages.filter((m) => (m as Record<string, unknown>).type === type);
+
+  it('carries accumulated ground contact to the worker on every tick', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    // The engine reported a landing between init and this tick.
+    act(() => {
+      setCharacterGrounded('player-1', true);
+      mockPlayTickCallback!(TICK);
+    });
+
+    const tick = messagesOfType('tick')[0] as Record<string, unknown>;
+    expect(tick).toBeDefined();
+    // toEqual, not objectContaining: the worker answers isGrounded() straight
+    // out of this object, so an extra or renamed entity id is a wrong answer,
+    // not a harmless extra.
+    expect(tick.groundedStates).toEqual({ 'player-1': true });
+  });
+
+  it('carries a later takeoff on the next tick, not a stale landing', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      setCharacterGrounded('player-1', true);
+      mockPlayTickCallback!(TICK);
+    });
+    act(() => {
+      // The engine emits changes only, so this is the single notification the
+      // script will ever get about leaving the ground.
+      setCharacterGrounded('player-1', false);
+      mockPlayTickCallback!(TICK);
+    });
+
+    const ticks = messagesOfType('tick') as Record<string, unknown>[];
+    expect(ticks).toHaveLength(2);
+    expect(ticks[0].groundedStates).toEqual({ 'player-1': true });
+    expect(ticks[1].groundedStates).toEqual({ 'player-1': false });
+  });
+
+  it('reports every character, not just the first', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      setCharacterGrounded('player-1', true);
+      setCharacterGrounded('enemy-3', false);
+      mockPlayTickCallback!(TICK);
+    });
+
+    const tick = messagesOfType('tick')[0] as Record<string, unknown>;
+    expect(tick.groundedStates).toEqual({ 'player-1': true, 'enemy-3': false });
+  });
+
+  it('starts play with an empty registry, not the previous session state', () => {
+    // A stale `true` from the last session would never be corrected: the
+    // engine only emits CHANGES, so a character that starts airborne this run
+    // sends nothing and the script would let it jump off thin air.
+    setCharacterGrounded('player-1', true);
+
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    const init = messagesOfType('init')[0] as Record<string, unknown>;
+    expect(init).toBeDefined();
+    // The key must be present (the worker seeds its own map from it) AND empty
+    // (the hook clears the registry immediately before sending).
+    expect(init).toHaveProperty('groundedStates');
+    expect(init.groundedStates).toEqual({});
+    expect(getGroundedStates()).toEqual({});
+  });
+
+  it('clears ground contact when play stops', () => {
+    const { rerender } = renderHook(
+      ({ mode }) => {
+        mockEngineMode = mode;
+        return useScriptRunner({ wasmModule: mockWasmModule });
+      },
+      { initialProps: { mode: 'play' as string } },
+    );
+
+    act(() => {
+      setCharacterGrounded('player-1', true);
+    });
+    expect(getGroundedStates()).toEqual({ 'player-1': true });
+
+    rerender({ mode: 'edit' });
+
+    expect(getGroundedStates()).toEqual({});
+  });
+
+  it('clears ground contact on unmount', () => {
+    mockEngineMode = 'play';
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      setCharacterGrounded('player-1', true);
+    });
+    expect(getGroundedStates()).toEqual({ 'player-1': true });
+
+    unmount();
+
+    expect(getGroundedStates()).toEqual({});
   });
 });

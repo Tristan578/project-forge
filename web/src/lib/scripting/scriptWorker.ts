@@ -167,6 +167,10 @@ function clearPendingAsyncRequests(reason: string) {
 let tilemapStates: Record<string, TilemapState> = {};
 let skeletonStates: Record<string, SkeletonState> = {};
 let physics2dVelocities: Record<string, Physics2dVelocityState> = {};
+// Kinematic ground contact, mirrored from the engine (PF-1214). Rapier decides
+// this inside the character sweep and the play-tick wire carries transforms
+// only, so without this a script cannot tell a jump from a fall.
+let groundedStates: Record<string, boolean> = {};
 
 // Previous frame positions for velocity estimation
 let prevEntityStates: Record<string, EntityState> = {};
@@ -345,6 +349,20 @@ function buildForgeApi(scriptEntityId: string) {
       setVelocity: (eid: string, vx: number, vy: number, vz: number) => {
         pendingCommands.push({ cmd: 'set_velocity', entityId: eid, velocity: [vx, vy, vz] });
       },
+      /**
+       * Whether the engine's kinematic character controller last reported this
+       * entity as standing on something (PF-1214).
+       *
+       * Synchronous, unlike `physics2d.isGrounded` — the 2D version raycasts on
+       * demand, whereas 3D ground contact is a by-product of the character
+       * sweep the engine already ran, so it is simply mirrored here.
+       *
+       * `Object.hasOwn` before the read: the id comes off the engine wire, and
+       * a bare `groundedStates['constructor']` would resolve to an inherited
+       * function and let a script stand on a prototype.
+       */
+      isGrounded: (eid: string): boolean =>
+        Object.hasOwn(groundedStates, eid) && groundedStates[eid] === true,
       getContacts: (eid: string, radius?: number) => {
         const state = entityStates[eid];
         if (!state) return [];
@@ -1091,6 +1109,7 @@ self.onmessage = (e: MessageEvent) => {
       tilemapStates = msg.tilemapStates || {};
       skeletonStates = msg.skeletonStates || {};
       physics2dVelocities = msg.physics2dVelocities || {};
+      groundedStates = msg.groundedStates || {};
       prevEntityStates = {};
       // Main thread passes touch capability so the worker doesn't need navigator access
       isTouchDeviceFlag = typeof msg.isTouchDevice === 'boolean' ? msg.isTouchDevice : false;
@@ -1228,6 +1247,7 @@ self.onmessage = (e: MessageEvent) => {
       // entityInfos already updated above (delta or full)
       currentInput = msg.inputState || currentInput;
       if (msg.tilemapStates) tilemapStates = msg.tilemapStates;
+      if (msg.groundedStates) groundedStates = msg.groundedStates;
       if (msg.skeletonStates) skeletonStates = msg.skeletonStates;
 
       // Sync audio playing state from main thread (authoritative source)

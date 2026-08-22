@@ -32,6 +32,24 @@ describe('FORGE_TYPE_DEFINITIONS', () => {
     });
   });
 
+  describe('physics namespace', () => {
+    it('declares the synchronous 3D ground check (PF-1214)', () => {
+      // The kinematic controller's grounded flag is the only way a script can
+      // tell a jump from a fall in 3D. Undeclared, it works at runtime but
+      // autocomplete never offers it, so nobody finds it.
+      expect(FORGE_TYPE_DEFINITIONS).toMatch(/function isGrounded\(entityId:\s*string\)\s*:\s*boolean/);
+    });
+
+    it('keeps the 2D ground check asynchronous and distinct', () => {
+      // 2D raycasts on demand and returns a Promise; 3D mirrors a flag the
+      // engine already computed. Collapsing them would break every existing
+      // 2D script that awaits the result.
+      expect(FORGE_TYPE_DEFINITIONS).toMatch(
+        /function isGrounded\(entityId:\s*string,\s*distance\?:\s*number\)\s*:\s*Promise<boolean>/
+      );
+    });
+  });
+
   it('still exposes sibling namespaces after the game namespace', () => {
     // Regression guard: the game namespace was added between leaderboard and
     // i18n. A missing closing brace previously swallowed these siblings.

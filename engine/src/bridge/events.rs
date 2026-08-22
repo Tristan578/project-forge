@@ -613,6 +613,24 @@ pub fn emit_game_component_changed(entity_id: &str, components: &[crate::core::g
     });
 }
 
+/// Emit a character's grounded state when it changes.
+///
+/// Only changes are emitted — see `core::character_controller::diff_grounded`.
+/// The web side mirrors these into the script sandbox so `forge.physics
+/// .isGrounded(id)` can answer synchronously; without it a script has no way to
+/// tell a jump from a fall, because the kinematic controller owns contact state
+/// and nothing else on the JS side sees it (PF-1214).
+pub fn emit_character_grounded(entity_id: &str, grounded: bool) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GroundedPayload<'a> {
+        entity_id: &'a str,
+        grounded: bool,
+    }
+
+    emit_event("CHARACTER_GROUNDED_CHANGED", &GroundedPayload { entity_id, grounded });
+}
+
 /// Emit a raycast result event.
 pub fn emit_raycast_result(request_id: &str, hit_entity: Option<&str>, point: [f32; 3], distance: f32) {
     #[derive(Serialize)]
