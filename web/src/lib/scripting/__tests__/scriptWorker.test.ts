@@ -1166,6 +1166,110 @@ describe('scriptWorker', () => {
     );
   });
 
+  it.each([
+    ['setTile', 'x', 'forge.tilemap.setTile("tm1", TOO_BIG, 0, 5)'],
+    ['setTile', 'y', 'forge.tilemap.setTile("tm1", 0, TOO_BIG, 5)'],
+    ['setTile', 'layer', 'forge.tilemap.setTile("tm1", 0, 0, 5, TOO_BIG)'],
+    ['setTile', 'tileId', 'forge.tilemap.setTile("tm1", 0, 0, TOO_BIG)'],
+    ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", TOO_BIG, 0)'],
+    ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", TOO_BIG, 0, 2, 2, 1)'],
+    ['fillRect', 'layer', 'forge.tilemap.fillRect("tm1", 0, 0, 2, 2, 1, TOO_BIG)'],
+  ])('forge.tilemap.%s rejects a %s past TILE_FIELD_MAX and pushes nothing', async (_api, param, call) => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      var TOO_BIG = ${TILE_FIELD_MAX} + 1;
+      ${call};
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The engine reads these with `as_u64()? as usize`, which TRUNCATES on
+    // wasm32: an x of TILE_FIELD_MAX + 4 arrived as 3 and was written as an
+    // ordinary in-range cell. The engine now refuses it (tile_field_u32), and
+    // refusing here too means the script author sees a named error instead of a
+    // command that vanishes.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(`${param} must be <= ${TILE_FIELD_MAX}`),
+      })
+    );
+  });
+
+  it('forge.tilemap.setTile accepts TILE_FIELD_MAX itself', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.setTile("tm1", ${TILE_FIELD_MAX}, ${TILE_FIELD_MAX}, ${TILE_FIELD_MAX});
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The bound is inclusive on both sides of the language boundary. A guard
+    // that refused TILE_FIELD_MAX would satisfy every rejection case above
+    // while breaking legitimate callers, so the boundary is pinned from both
+    // directions.
+    expect(pushedCommands()).toEqual([
+      {
+        cmd: 'paint_tile',
+        entityId: 'tm1',
+        layer: 0,
+        x: TILE_FIELD_MAX,
+        y: TILE_FIELD_MAX,
+        tileIndex: TILE_FIELD_MAX,
+      },
+    ]);
+  });
+
+  it('forge.tilemap.fillRect rejects a rect whose far edge passes TILE_FIELD_MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", ${TILE_FIELD_MAX} - 1, 0, 3, 1, 7);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // Origin and size are each inside the bound; the cells this emits are not.
+    // The engine reads the DERIVED coordinate, so bounding the two inputs
+    // separately would let the whole fill be refused with nothing said.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(`ends past ${TILE_FIELD_MAX}`),
+      })
+    );
+  });
+
+  it('scriptWorker TILE_FIELD_MAX matches the engine bound', async () => {
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    // This constant is a second copy of the engine's bound, and the two are in
+    // different languages, so nothing but a textual read can keep them in step.
+    // Fail closed: readFileSync throws on an unreadable path, and a missing
+    // match throws rather than passing vacuously.
+    const src = readFileSync(
+      join(__dirname, '..', '..', '..', '..', '..', 'engine', 'src', 'core', 'commands', 'sprites.rs'),
+      'utf8',
+    );
+    const helper = /fn tile_field_u32\([\s\S]*?\n}/.exec(src);
+    if (!helper) {
+      throw new Error('tile_field_u32 not found in engine/src/core/commands/sprites.rs');
+    }
+    // The bound is the integer type the helper converts into.
+    const target = /(u\d+)::try_from/.exec(helper[0]);
+    if (!target) {
+      throw new Error(`tile_field_u32 no longer bounds via try_from: ${helper[0]}`);
+    }
+    const bits = Number(target[1].slice(1));
+    expect(TILE_FIELD_MAX).toBe(2 ** bits - 1);
+  });
+
   // ─── Forge Sprite API ──────────────────────────────────────────
 
   it('forge.sprite pushes correct commands', async () => {
