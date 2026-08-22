@@ -1093,7 +1093,18 @@ pub(super) fn apply_fill_tiles_requests(
             if placement.x >= map_w || placement.y >= map_h {
                 continue;
             }
-            let tile_index = placement.y * map_w + placement.x;
+            // Checked, not bare `*`/`+`: `map_size` is authored data, so a
+            // tilemap declaring a map far larger than its own `tiles` vector can
+            // make `y * map_w` wrap on wasm32's 32-bit `usize`. A wrapped
+            // product lands back inside the vector and writes the WRONG cell,
+            // which the `< len()` check below cannot see. Overflow skips.
+            let Some(tile_index) = placement
+                .y
+                .checked_mul(map_w)
+                .and_then(|row| row.checked_add(placement.x))
+            else {
+                continue;
+            };
             if tile_index < tilemap_data.layers[request.layer].tiles.len() {
                 // `placement.tile_index` is already `Option<u32>`: `None` erases,
                 // so one `fill_tiles` covers a rectangular clear (PF-1181).
