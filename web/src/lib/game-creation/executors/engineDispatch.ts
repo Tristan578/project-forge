@@ -10,22 +10,39 @@ import type { ExecutorContext } from '../types';
  */
 
 /**
- * Mirrors the engine's `is_valid_override_id` (core/entity_factory.rs): trimmed,
- * non-empty, at most 64 BYTES, no control characters. An id the engine rejects
- * is not an error there — it silently falls back to a random UUID, which is
- * exactly the invisible failure a planned id exists to prevent. Reject it here
- * instead, where a step can report it.
+ * Mirrors the engine's `is_valid_override_id` (core/entity_factory.rs):
+ *
+ *     !id.is_empty() && id.len() <= 64 && !id.chars().any(|c| c.is_control())
+ *
+ * An id the engine rejects is not an error there — it silently falls back to a
+ * random UUID, which is exactly the invisible failure a planned id exists to
+ * prevent: every later command in the plan names an entity that does not exist,
+ * and `dispatchCommand` returns void, so nothing reports a word. Reject it here
+ * instead, where a step can say so.
+ *
+ * THE CHECK RUNS ON THE RAW STRING, NOT A TRIMMED COPY. It used to trim first,
+ * and that made this validator disagree with the engine in the one direction
+ * that matters — accepting ids the engine refuses. `"\tabc"` trims to a clean
+ * `abc` here while Rust's `is_control` sees the tab and refuses the whole id;
+ * 64 characters plus a trailing space is 65 bytes to the engine and 64 to a
+ * trimmed count. Both cases produced a step that reported success against an
+ * entity the engine had quietly renamed.
+ *
+ * The one place it is deliberately STRICTER than the engine is a whitespace-only
+ * id, which Rust accepts (a space is not a control character). That is a loud
+ * refusal rather than a silent divergence, and the safe direction to err in.
  */
 export const engineEntityId = z.string().refine((raw) => {
-  const id = raw.trim();
-  const hasControlChar = [...id].some((c) => {
+  const hasControlChar = [...raw].some((c) => {
     const code = c.codePointAt(0)!;
-    return code < 0x20 || code === 0x7f;
+    // C0, DEL, and C1 — the same set as Rust's `char::is_control` (Unicode Cc),
+    // not just the ASCII half of it.
+    return code < 0x20 || code === 0x7f || (code >= 0x80 && code <= 0x9f);
   });
-  return id.length > 0
+  return raw.trim().length > 0
     && !hasControlChar
-    && new TextEncoder().encode(id).length <= 64;
-}, 'entityId must be 1-64 bytes with no control characters');
+    && new TextEncoder().encode(raw).length <= 64;
+}, 'entityId must be 1-64 bytes with no control characters, counted as the engine counts them');
 
 export interface EngineCommand {
   command: string;
