@@ -1051,6 +1051,36 @@ describe('scriptWorker', () => {
     expect(TILEMAP_FILL_MAX_CELLS + 2).toBe(MAX_COMMAND_PAYLOAD_CONTAINERS);
   });
 
+  it('forgeTypes fillRect cap prose matches the exported constant', async () => {
+    const { TILEMAP_FILL_MAX_CELLS } = await import('../scriptWorker');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    // Fail closed on an unreadable file: readFileSync throws, which is a
+    // failure, never a vacuous pass. (__dirname, not import.meta.url — the
+    // jsdom environment does not give this module a file: URL.)
+    const src = readFileSync(join(__dirname, '..', 'forgeTypes.ts'), 'utf8');
+
+    // forge.tilemap.fillRect's doc comment states the cap as a literal, so it
+    // is a second copy of TILEMAP_FILL_MAX_CELLS. Monaco shows that comment to
+    // script authors; nothing else checks the number in it.
+    const matches = [...src.matchAll(/Capped at ([\d,]+) cells/g)];
+    if (matches.length !== 1) {
+      throw new Error(
+        `forgeTypes.ts must carry exactly one "Capped at N cells" sentence, found ${matches.length}. ` +
+        'Zero means the pin has nothing to check; more than one means a second copy appeared unpinned.'
+      );
+    }
+
+    const documented = Number(matches[0][1].replace(/,/g, ''));
+    expect(Number.isInteger(documented)).toBe(true);
+    expect(documented).toBe(TILEMAP_FILL_MAX_CELLS);
+
+    // The sentence must keep naming the test that pins it, or the pointer rots
+    // while the number happens to stay right.
+    expect(src).toContain('__tests__/scriptWorker.test.ts');
+  });
+
   it('forge.tilemap.resize throws and pushes nothing', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {

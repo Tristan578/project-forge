@@ -154,8 +154,11 @@ declare namespace forge {
      * Capped at 49,998 cells - fill_tiles carries one entry per cell, and the
      * payload guard (MAX_COMMAND_PAYLOAD_CONTAINERS) allows 50,000 containers
      * including the payload object and the tiles array. The cap is DERIVED from
-     * that constant in scriptWorker.ts, so this sentence is the copy that can
-     * rot: __tests__/scriptWorker.test.ts pins the real number.
+     * that constant as TILEMAP_FILL_MAX_CELLS in scriptWorker.ts, so the number
+     * in this sentence is a second copy that can rot. It is parsed out of this
+     * file and compared against the exported constant by the "forgeTypes
+     * fillRect cap prose" test in __tests__/scriptWorker.test.ts, which fails
+     * closed if the sentence is missing or appears more than once.
      */
     function fillRect(tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer?: number): void;
     /** Clear a single tile. Coordinates are floored; negatives throw. */
@@ -167,9 +170,13 @@ declare namespace forge {
     /** Get map dimensions in tiles [width, height] */
     function getMapSize(tilemapId: string): [number, number];
     /**
-     * NOT SUPPORTED - throws. The engine has no tilemap resize command; this
-     * pushed a resize_tilemap that commands::dispatch has never known, and
-     * dispatchCommand returns void so nothing ever reported it (PF-1181).
+     * NOT SUPPORTED - throws.
+     *
+     * @deprecated The engine has no tilemap resize command. This used to push a
+     * resize_tilemap that commands::dispatch has never known, and
+     * dispatchCommand returns void, so the call vanished without a word
+     * (PF-1181). The worker now throws rather than no-op silently. There is no
+     * replacement: recreate the tilemap at the size you need.
      */
     function resize(tilemapId: string, width: number, height: number, anchor?: 'top-left' | 'center'): void;
   }
