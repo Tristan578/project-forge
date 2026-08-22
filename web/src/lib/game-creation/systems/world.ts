@@ -24,9 +24,16 @@
  * `set_tilemap_data` / `paint_tile` / `erase_tile` / `fill_tiles`, and all of it
  * needs a real tileset asset id that no step in this pipeline can produce. The
  * names this comment used to cite — `create_tilemap`, `set_tile`,
- * `create_tileset` — were routed with no handler behind them and were deleted
- * from `route_domain` outright in PF-1181. `spawn_sprite` has no `id` field at all, so a
- * sprite cannot carry a planned UUID and nothing downstream could bind to it.
+ * `create_tileset` — are AI TOOL names, handled in
+ * `lib/chat/handlers/handlers2d.ts` against the Zustand store; they were never
+ * engine commands. `route_domain` listed them anyway, pointing at a domain with
+ * no matching arm, so dispatching one produced `Unknown sprites command`.
+ * PF-1181 deleted them from the router; the chat tools are untouched and keep
+ * working, because the chat executor dispatches through its own handler
+ * registry and never through `commands::dispatch`.
+ *
+ * `spawn_sprite` has no `id` field at all, so a sprite cannot carry a planned
+ * UUID and nothing downstream could bind to it.
  * Primitives are the only geometry that is both reachable and bindable today.
  */
 
