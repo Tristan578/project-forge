@@ -159,6 +159,7 @@ describe('orchestratorSlice', () => {
       expect(state.reservationId).toBeNull();
       expect(state.orchestratorError).toBeNull();
       expect(state.orchestratorWarnings).toEqual([]);
+      expect(Array.from(state.autoApproveGateIds)).toEqual([]);
     });
   });
 
@@ -424,6 +425,7 @@ describe('orchestratorSlice', () => {
       expect(state.reservationId).toBeNull();
       expect(state.orchestratorError).toBeNull();
       expect(state.orchestratorWarnings).toEqual([]);
+      expect(Array.from(state.autoApproveGateIds)).toEqual([]);
     });
   });
 
@@ -649,6 +651,187 @@ describe('orchestratorSlice', () => {
       await runWithStepResults([['step_2', { success: true, output: { warning: 'fresh note' } }]]);
 
       expect(store.getState().orchestratorWarnings.map((w) => w.message)).toEqual(['fresh note']);
+    });
+  });
+
+  /**
+   * The quick-start entry point ("Make me a game").
+   *
+   * Two manual confirmations used to sit between a prompt and a playable game:
+   * `startDecomposition` parks the run at 'awaiting_approval' waiting for the
+   * panel's "Start Building" button, and then `gate_plan` fires and parks it
+   * again. A user who clicked "Make me a game" and typed a prompt has already
+   * said yes to both, so the flow asked the same question twice and stranded
+   * anyone who did not know to look at the orchestrator panel (PF-1215).
+   */
+  describe('startQuickStart', () => {
+    /** Answers the decompose call and the token reservation that follows it. */
+    function mockDecomposeOk(): void {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ gdd: makeMockGdd() }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ reservationId: 'res-qs', remaining: { total: 9300 } }),
+      });
+      // `runPipelineFromPlan` releases the unused reservation in its `finally`;
+      // without a default the queue runs dry and the fire-and-forget `.catch`
+      // throws on `undefined`.
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    }
+
+    it('runs the pipeline without a "Start Building" click', async () => {
+      mockDecomposeOk();
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockClear();
+
+      await store.getState().startQuickStart('Platformer: a jungle level', '3d');
+
+      // The whole point: decomposition produced a plan AND the plan ran, with no
+      // second user action in between.
+      expect(store.getState().currentPlan).not.toBeNull();
+      expect(runPipeline).toHaveBeenCalledOnce();
+      expect(store.getState().orchestratorStatus).not.toBe('awaiting_approval');
+    });
+
+    it('opts the run into auto-approving gate_plan and nothing else', async () => {
+      mockDecomposeOk();
+
+      await store.getState().startQuickStart('Platformer: a jungle level', '3d');
+
+      expect(Array.from(store.getState().autoApproveGateIds)).toEqual(['gate_plan']);
+    });
+
+    it('does not run the pipeline when decomposition fails', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: 'Decomposition exploded' }),
+      });
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockClear();
+
+      await store.getState().startQuickStart('Platformer: a jungle level', '3d');
+
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(runPipeline).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('gate auto-approval', () => {
+    /**
+     * Drives the real `onGateReached` callback the slice hands to `runPipeline`,
+     * which is the only place the auto-approve decision is made.
+     */
+    async function reachGate(
+      gateId: string,
+    ): Promise<{ decision: Promise<'approved' | 'rejected'> }> {
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+
+      const gate: ApprovalGate = {
+        id: gateId,
+        label: 'Review',
+        description: '',
+        afterStepId: 'step_0',
+        status: 'pending',
+        displayData: {},
+      };
+
+      let decision!: Promise<'approved' | 'rejected'>;
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (
+          _plan: unknown,
+          _registry: unknown,
+          _ctx: unknown,
+          callbacks: PipelineCallbacks,
+        ) => {
+          decision = callbacks.onGateReached!(gate);
+          return plan;
+        },
+      );
+
+      await store.getState().runPipelineFromPlan();
+      return { decision };
+    }
+
+    it('approves a listed gate without ever setting a pendingGate', async () => {
+      store.setState({ autoApproveGateIds: ['gate_plan'] });
+
+      const { decision } = await reachGate('gate_plan');
+
+      await expect(decision).resolves.toBe('approved');
+      // No confirmation is rendered and the run never leaves 'executing', so
+      // there is nothing for the user to click and nothing to be stranded on.
+      expect(store.getState().pendingGate).toBeNull();
+      expect(store.getState().orchestratorStatus).toBe('executing');
+      // Nothing dangling for cancelPipeline to reject.
+      expect(_getGateResolver()).toBeNull();
+    });
+
+    it('still asks for gate_assets — it gates real token spend', async () => {
+      store.setState({ autoApproveGateIds: ['gate_plan'] });
+
+      await reachGate('gate_assets');
+
+      expect(store.getState().pendingGate?.id).toBe('gate_assets');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
+      expect(_getGateResolver()).not.toBeNull();
+
+      store.getState().resolveGate('approved');
+    });
+
+    it('still asks for gate_final — it gates the finished result', async () => {
+      store.setState({ autoApproveGateIds: ['gate_plan'] });
+
+      await reachGate('gate_final');
+
+      expect(store.getState().pendingGate?.id).toBe('gate_final');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
+
+      store.getState().resolveGate('approved');
+    });
+
+    it('asks for gate_plan on a run that did not opt in', async () => {
+      // The default. A chat-initiated run must still show the plan.
+      await reachGate('gate_plan');
+
+      expect(store.getState().pendingGate?.id).toBe('gate_plan');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
+
+      store.getState().resolveGate('approved');
+    });
+
+    it('clears the list on a chat-initiated run started after a quick-start', async () => {
+      store.setState({ autoApproveGateIds: ['gate_plan'] });
+
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ gdd: makeMockGdd() }) });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ reservationId: 'res-chat', remaining: { total: 9300 } }),
+      });
+
+      // No opts — chatStore calls startDecomposition with two arguments.
+      await store.getState().startDecomposition('make a shooter', '3d');
+
+      expect(Array.from(store.getState().autoApproveGateIds)).toEqual([]);
+    });
+
+    it('cancelPipeline clears the list', () => {
+      store.setState({ autoApproveGateIds: ['gate_plan'], orchestratorStatus: 'executing' });
+
+      store.getState().cancelPipeline();
+
+      expect(Array.from(store.getState().autoApproveGateIds)).toEqual([]);
+    });
+
+    it('resetOrchestrator clears the list', () => {
+      store.setState({ autoApproveGateIds: ['gate_plan'] });
+
+      store.getState().resetOrchestrator();
+
+      expect(Array.from(store.getState().autoApproveGateIds)).toEqual([]);
     });
   });
 });
