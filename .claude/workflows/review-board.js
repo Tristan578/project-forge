@@ -5,15 +5,17 @@ export const meta = {
   phases: [{ title: 'Review', detail: 'one agent per reviewer definition' }],
 }
 
-// Reviewer definitions live in .claude/agents/<name>.md — each agent Reads its own
-// definition so the prompt stays single-sourced. agentType is deliberately omitted
-// (custom agentTypes 529-fail in this harness; see memory reference_workflow_agenttype_529_and_resume).
+// Reviewer roles follow .claude/skills/review-protocol/SKILL.md exactly: architect is the
+// feature-dev:code-architect PLUGIN agent (no repo-local .md — its definition is resolved from the
+// installed plugin at run time), the other four are repo-local .claude/agents/<name>.md files.
+// Each agent Reads its own definition so the prompt stays single-sourced. agentType is deliberately
+// omitted (custom agentTypes 529-fail in this harness; see memory reference_workflow_agenttype_529_and_resume).
 const REVIEWERS = [
-  { key: 'architect', file: 'code-reviewer' },
-  { key: 'security', file: 'security-reviewer' },
-  { key: 'dx', file: 'dx-guardian' },
-  { key: 'ux', file: 'ux-reviewer' },
-  { key: 'test', file: 'validator' },
+  { key: 'architect', def: 'the feature-dev:code-architect plugin agent definition (locate it with: ls ~/.claude/plugins/marketplaces/*/plugins/feature-dev/agents/code-architect.md)' },
+  { key: 'security', def: '.claude/agents/security-reviewer.md' },
+  { key: 'dx', def: '.claude/agents/dx-guardian.md' },
+  { key: 'ux', def: '.claude/agents/ux-reviewer.md' },
+  { key: 'test', def: '.claude/agents/test-writer.md' },
 ]
 
 const VERDICT = {
@@ -44,7 +46,7 @@ phase('Review')
 const results = await parallel(REVIEWERS.map(r => () =>
   agent(
     `You are the ${r.key} reviewer on the SpawnForge review board.\n` +
-    `1. Read .claude/agents/${r.file}.md and adopt that role, rules and checklist exactly.\n` +
+    `1. Read ${r.def} and adopt that role, rules and checklist exactly. If that definition file does not exist, return verdict FAIL with a single finding naming the missing definition — never substitute a generic reviewer.\n` +
     `2. Review the diff of the current branch against ${base}: run \`git diff ${base}...HEAD\` and read every changed file in full.\n` +
     `3. Verdict is PASS or FAIL only — ANY finding at ANY severity is a FAIL (no "pass with issues").\n` +
     `4. Do NOT edit files, commit, push, or move taskboard tickets.${focus}\n` +
