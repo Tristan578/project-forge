@@ -5,6 +5,7 @@
 import { injectLoopGuards } from './loopGuards';
 import { SHADOWED_GLOBALS } from './sandboxGlobals';
 import { revokeNetworkGlobalsIfWorker } from './revokeNetworkGlobals';
+import { MAX_COMMAND_PAYLOAD_CONTAINERS } from '../engine/commandPayloadGuard';
 
 // Hard-revoke network/storage globals from this worker's scope BEFORE any user
 // script is compiled or run. Parameter shadowing (SHADOWED_GLOBALS) only hides
@@ -167,12 +168,46 @@ function clearPendingAsyncRequests(reason: string) {
 let tilemapStates: Record<string, TilemapState> = {};
 
 /**
- * Upper bound on cells a single `forge.tilemap.fillRect` may expand into.
- * `fill_tiles` needs one entry per cell, so an unbounded rect would build a
- * multi-megabyte payload inside the worker and then be refused by the engine's
- * container-count guard anyway.
+ * Containers a `fill_tiles` payload costs on top of its per-cell entries: the
+ * payload object itself and the `tiles` array.
  */
-const TILEMAP_FILL_MAX_CELLS = 65536;
+const TILEMAP_FILL_PAYLOAD_OVERHEAD = 2;
+
+/**
+ * Upper bound on cells a single `forge.tilemap.fillRect` may expand into.
+ *
+ * DERIVED from the dispatch guard rather than mirrored: a fill of N cells is
+ * N + TILEMAP_FILL_PAYLOAD_OVERHEAD containers, and `checkCommandPayload`
+ * refuses anything past MAX_COMMAND_PAYLOAD_CONTAINERS. A hand-written cap can
+ * drift out of step with that bound in either direction — too high and the
+ * worker builds a multi-megabyte payload the guard then discards, too low and
+ * it becomes a second, undocumented limit. Pinned by
+ * `__tests__/scriptWorker.test.ts`.
+ */
+export const TILEMAP_FILL_MAX_CELLS =
+  MAX_COMMAND_PAYLOAD_CONTAINERS - TILEMAP_FILL_PAYLOAD_OVERHEAD;
+
+/**
+ * Floor a tilemap integer argument, refusing anything the engine would drop.
+ *
+ * Every tilemap coordinate, layer and tile index is read on the Rust side with
+ * `serde_json::Value::as_u64()`, which returns `None` for a negative or
+ * fractional number — and a `None` there fails the WHOLE command, not just that
+ * field. `dispatchCommand` returns void, so such a rejection is invisible: the
+ * script "succeeded" and the tilemap never changed. Throwing puts the failure
+ * where the script author can see it, and flooring makes the common
+ * `worldToTile`-style fractional input work instead of vanishing.
+ */
+function tileInt(api: string, name: string, value: number): number {
+  if (!Number.isFinite(value)) {
+    throw new Error(`${api}: ${name} must be a finite number, got ${value}`);
+  }
+  const floored = Math.floor(value);
+  if (floored < 0) {
+    throw new Error(`${api}: ${name} must be >= 0, got ${value}`);
+  }
+  return floored;
+}
 let skeletonStates: Record<string, SkeletonState> = {};
 let physics2dVelocities: Record<string, Physics2dVelocityState> = {};
 // Kinematic ground contact, mirrored from the engine (PF-1214). Rapier decides
@@ -523,41 +558,58 @@ function buildForgeApi(scriptEntityId: string) {
       // third had the wrong payload, so every tilemap write a script made was
       // dropped in silence (PF-1181).
       setTile: (tilemapId: string, x: number, y: number, tileId: number | null, layer = 0) => {
+        const api = 'forge.tilemap.setTile';
+        const tileX = tileInt(api, 'x', x);
+        const tileY = tileInt(api, 'y', y);
+        const tileLayer = tileInt(api, 'layer', layer);
         pendingCommands.push(
           tileId === null
-            ? { cmd: 'erase_tile', entityId: tilemapId, layer, x, y }
-            : { cmd: 'paint_tile', entityId: tilemapId, layer, x, y, tileIndex: tileId },
+            ? { cmd: 'erase_tile', entityId: tilemapId, layer: tileLayer, x: tileX, y: tileY }
+            : {
+                cmd: 'paint_tile',
+                entityId: tilemapId,
+                layer: tileLayer,
+                x: tileX,
+                y: tileY,
+                tileIndex: tileInt(api, 'tileId', tileId),
+              },
         );
       },
       fillRect: (tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer = 0) => {
-        // `fill_tiles` takes an explicit `[{x, y, tileIndex}]` list and rejects a
-        // null index, so a null fill has to expand into per-cell erases.
-        const width = Math.max(0, Math.floor(w));
-        const height = Math.max(0, Math.floor(h));
+        const api = 'forge.tilemap.fillRect';
+        const originX = tileInt(api, 'x', x);
+        const originY = tileInt(api, 'y', y);
+        const width = tileInt(api, 'w', w);
+        const height = tileInt(api, 'h', h);
+        const tileLayer = tileInt(api, 'layer', layer);
+        // `fill_tiles` carries `tileIndex: null` as an erase, so a rectangular
+        // clear is ONE command. Expanding it into one `erase_tile` per cell was
+        // silently lossy: `flushCommands` caps a frame at MAX_COMMANDS_PER_FRAME
+        // and drops the rest, so any clear past 100 cells applied in part.
+        const tileIndex = tileId === null ? null : tileInt(api, 'tileId', tileId);
         if (width === 0 || height === 0) return;
         if (width * height > TILEMAP_FILL_MAX_CELLS) {
           throw new Error(
-            `forge.tilemap.fillRect: ${width}x${height} exceeds the ${TILEMAP_FILL_MAX_CELLS}-cell limit`,
+            `${api}: ${width}x${height} exceeds the ${TILEMAP_FILL_MAX_CELLS}-cell limit`,
           );
         }
-        if (tileId === null) {
-          for (let ty = y; ty < y + height; ty++) {
-            for (let tx = x; tx < x + width; tx++) {
-              pendingCommands.push({ cmd: 'erase_tile', entityId: tilemapId, layer, x: tx, y: ty });
-            }
-          }
-          return;
-        }
-        const tiles: Array<{ x: number; y: number; tileIndex: number }> = [];
-        for (let ty = y; ty < y + height; ty++) {
-          for (let tx = x; tx < x + width; tx++) {
-            tiles.push({ x: tx, y: ty, tileIndex: tileId });
+        const tiles: Array<{ x: number; y: number; tileIndex: number | null }> = [];
+        for (let ty = originY; ty < originY + height; ty++) {
+          for (let tx = originX; tx < originX + width; tx++) {
+            tiles.push({ x: tx, y: ty, tileIndex });
           }
         }
-        pendingCommands.push({ cmd: 'fill_tiles', entityId: tilemapId, layer, tiles });
+        pendingCommands.push({ cmd: 'fill_tiles', entityId: tilemapId, layer: tileLayer, tiles });
       },
       clearTile: (tilemapId: string, x: number, y: number, layer = 0) => {
-        pendingCommands.push({ cmd: 'erase_tile', entityId: tilemapId, layer, x, y });
+        const api = 'forge.tilemap.clearTile';
+        pendingCommands.push({
+          cmd: 'erase_tile',
+          entityId: tilemapId,
+          layer: tileInt(api, 'layer', layer),
+          x: tileInt(api, 'x', x),
+          y: tileInt(api, 'y', y),
+        });
       },
       worldToTile: (tilemapId: string, worldX: number, worldY: number): [number, number] => {
         const tilemap = tilemapStates[tilemapId];

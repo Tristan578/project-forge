@@ -26,6 +26,20 @@ function initMsg(scripts: { entityId: string; enabled: boolean; source: string }
   };
 }
 
+/**
+ * Every command the worker actually posted, flattened across frames.
+ *
+ * `flushCommands` posts no `commands` message at all when nothing was queued,
+ * so a `find(...)` returning `undefined` is indistinguishable from a message
+ * carrying an empty array. Flattening lets the "pushed nothing" cases assert a
+ * real `toEqual([])` instead of a nullish check.
+ */
+function pushedCommands(): Array<Record<string, unknown>> {
+  return mockPostMessage.mock.calls
+    .filter((c) => c[0]?.type === 'commands')
+    .flatMap((c) => c[0].commands as Array<Record<string, unknown>>);
+}
+
 describe('scriptWorker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -954,7 +968,7 @@ describe('scriptWorker', () => {
     ]);
   });
 
-  it('forge.tilemap.fillRect erases per cell when the tile is null', async () => {
+  it('forge.tilemap.fillRect erases in ONE fill_tiles when the tile is null', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {
       forge.tilemap.fillRect("tm1", 2, 3, 2, 1, null, 1);
@@ -962,12 +976,164 @@ describe('scriptWorker', () => {
 
     await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
 
-    const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
-    // `fill_tiles` rejects a null `tileIndex`, so a null fill cannot ride it.
-    expect(cmdMsg![0].commands).toEqual([
-      { cmd: 'erase_tile', entityId: 'tm1', layer: 1, x: 2, y: 3 },
-      { cmd: 'erase_tile', entityId: 'tm1', layer: 1, x: 3, y: 3 },
+    // `fill_tiles` carries `tileIndex: null` as an erase, so a null fill is one
+    // command. Expanding it into one `erase_tile` per cell was the bug: the
+    // worker caps a frame at MAX_COMMANDS_PER_FRAME (100) and DROPS the excess,
+    // so a clear of anything past a 10x10 rect silently applied in part.
+    expect(pushedCommands()).toEqual([
+      {
+        cmd: 'fill_tiles',
+        entityId: 'tm1',
+        layer: 1,
+        tiles: [
+          { x: 2, y: 3, tileIndex: null },
+          { x: 3, y: 3, tileIndex: null },
+        ],
+      },
     ]);
+  });
+
+  it('forge.tilemap.fillRect at exactly the cell cap emits one fill_tiles', async () => {
+    const handler = await setupWorker();
+    const { TILEMAP_FILL_MAX_CELLS } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", 0, 0, ${TILEMAP_FILL_MAX_CELLS}, 1, 3);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    const pushed = pushedCommands();
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0].cmd).toBe('fill_tiles');
+    const tiles = pushed[0].tiles as Array<Record<string, unknown>>;
+    // Materialized so a hole reads as an explicit `undefined` rather than being
+    // skipped by the comparison — a length check alone is satisfied by a sparse
+    // array just as readily as a dense one.
+    expect(Array.from(tiles)).toHaveLength(TILEMAP_FILL_MAX_CELLS);
+    expect(tiles[0]).toEqual({ x: 0, y: 0, tileIndex: 3 });
+    expect(tiles[TILEMAP_FILL_MAX_CELLS - 1]).toEqual({
+      x: TILEMAP_FILL_MAX_CELLS - 1,
+      y: 0,
+      tileIndex: 3,
+    });
+  });
+
+  it('forge.tilemap.fillRect one cell past the cap throws and pushes nothing', async () => {
+    const handler = await setupWorker();
+    const { TILEMAP_FILL_MAX_CELLS } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", 0, 0, ${TILEMAP_FILL_MAX_CELLS + 1}, 1, 3);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // Nothing partial: the throw happens before the first tile is built, so the
+    // script author sees an error instead of a fill that applied in part.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(`${TILEMAP_FILL_MAX_CELLS}-cell limit`),
+      })
+    );
+  });
+
+  it('forge.tilemap.fillRect cell cap leaves room for the payload guard', async () => {
+    const { TILEMAP_FILL_MAX_CELLS } = await import('../scriptWorker');
+    const { MAX_COMMAND_PAYLOAD_CONTAINERS } = await import('@/lib/engine/commandPayloadGuard');
+    // A fill of N cells is N + 2 containers: the payload object, the `tiles`
+    // array, and one object per cell. A cap that did not account for the two
+    // would build the largest allowed payload and then have the dispatch guard
+    // refuse it — work done to produce a silent no-op.
+    expect(TILEMAP_FILL_MAX_CELLS + 2).toBeLessThanOrEqual(MAX_COMMAND_PAYLOAD_CONTAINERS);
+    // And it must not be needlessly small either, or the cap becomes a second
+    // limit nobody knows about.
+    expect(TILEMAP_FILL_MAX_CELLS + 2).toBe(MAX_COMMAND_PAYLOAD_CONTAINERS);
+  });
+
+  it('forge.tilemap.resize throws and pushes nothing', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.tilemap.setTile("tm1", 0, 0, 5);
+      forge.tilemap.resize("tm1", 10, 10);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The setTile before it still rides; only the unsupported call fails.
+    expect(pushedCommands()).toEqual([
+      { cmd: 'paint_tile', entityId: 'tm1', layer: 0, x: 0, y: 0, tileIndex: 5 },
+    ]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(
+          'forge.tilemap.resize is not supported: the engine has no tilemap resize command'
+        ),
+      })
+    );
+  });
+
+  it('forge.tilemap floors fractional tile coordinates', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.tilemap.setTile("tm1", 1.9, 2.4, 5);
+      forge.tilemap.clearTile("tm1", 3.7, 0.2);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The engine reads x/y with serde's `as_u64()`, which returns `None` for a
+    // fractional number — and a `None` there fails the WHOLE command, so an
+    // un-floored 1.9 dropped the write entirely and reported nothing.
+    expect(pushedCommands()).toEqual([
+      { cmd: 'paint_tile', entityId: 'tm1', layer: 0, x: 1, y: 2, tileIndex: 5 },
+      { cmd: 'erase_tile', entityId: 'tm1', layer: 0, x: 3, y: 0 },
+    ]);
+  });
+
+  it.each([
+    ['setTile', 'x', 'forge.tilemap.setTile("tm1", -1, 0, 5)'],
+    ['setTile', 'y', 'forge.tilemap.setTile("tm1", 0, -2, 5)'],
+    ['setTile', 'layer', 'forge.tilemap.setTile("tm1", 0, 0, 5, -1)'],
+    ['setTile', 'tileId', 'forge.tilemap.setTile("tm1", 0, 0, -5)'],
+    ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", -1, 0)'],
+    ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", -1, 0, 2, 2, 1)'],
+    ['fillRect', 'w', 'forge.tilemap.fillRect("tm1", 0, 0, -2, 2, 1)'],
+  ])('forge.tilemap.%s rejects a negative %s and pushes nothing', async (_api, param, call) => {
+    const handler = await setupWorker();
+    const code = `function onStart() { ${call}; }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(`${param} must be >= 0`),
+      })
+    );
+  });
+
+  it.each([
+    ['NaN', 'forge.tilemap.setTile("tm1", 0/0, 0, 5)'],
+    ['Infinity', 'forge.tilemap.fillRect("tm1", 0, 0, 1/0, 1, 5)'],
+  ])('forge.tilemap rejects a non-finite coordinate (%s) and pushes nothing', async (_label, call) => {
+    const handler = await setupWorker();
+    const code = `function onStart() { ${call}; }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // `Math.floor(NaN)` is `NaN`, which compares false against every bound, so
+    // an unchecked NaN silently produced either no commands at all or a payload
+    // the engine refuses whole.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining('must be a finite number'),
+      })
+    );
   });
 
   // ─── Forge Sprite API ──────────────────────────────────────────

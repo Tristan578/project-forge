@@ -1,3 +1,10 @@
+/**
+ * The whole `.d.ts` body below is ONE template literal, so a backtick or a
+ * `${` inside it is NOT punctuation — the first ends the string and the second
+ * interpolates. Both fail as an opaque `Parsing error: ',' expected` pointing
+ * at a line of prose, so write these doc comments in plain text. `tsc` and
+ * `eslint` both catch it, but neither names the cause.
+ */
 export const FORGE_TYPE_DEFINITIONS = `
 declare namespace forge {
   /** Get transform of an entity */
@@ -130,15 +137,28 @@ declare namespace forge {
   namespace tilemap {
     /** Get tile ID at position (returns null if empty or out of bounds) */
     function getTile(tilemapId: string, x: number, y: number, layer?: number): number | null;
-    /** Set a single tile at position (use null to clear) */
+    /**
+     * Set a single tile at position (use null to clear). Coordinates are
+     * floored; negative or non-finite arguments throw rather than being dropped
+     * by the engine in silence.
+     */
     function setTile(tilemapId: string, x: number, y: number, tileId: number | null, layer?: number): void;
     /**
      * Fill a rectangular region with a tile. tilemapId is the tilemap ENTITY
-     * id. A null tile erases the region. Capped at 65536 cells, because the
-     * engine's fill_tiles command takes one entry per cell.
+     * id. A null tile erases the region, in the same single command.
+     *
+     * Coordinates are floored; a negative or non-finite x/y/w/h/layer/tileId
+     * throws, because the engine reads each with as_u64() and a rejection
+     * there discards the whole command silently.
+     *
+     * Capped at 49,998 cells - fill_tiles carries one entry per cell, and the
+     * payload guard (MAX_COMMAND_PAYLOAD_CONTAINERS) allows 50,000 containers
+     * including the payload object and the tiles array. The cap is DERIVED from
+     * that constant in scriptWorker.ts, so this sentence is the copy that can
+     * rot: __tests__/scriptWorker.test.ts pins the real number.
      */
     function fillRect(tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer?: number): void;
-    /** Clear a single tile */
+    /** Clear a single tile. Coordinates are floored; negatives throw. */
     function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
     /** Convert world coordinates to tile coordinates */
     function worldToTile(tilemapId: string, worldX: number, worldY: number): [number, number];

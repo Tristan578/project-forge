@@ -1134,9 +1134,18 @@ fn handle_erase_tile(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
-/// Handle fill_tiles command (batch tile placement).
-/// Payload: { entityId, layer, tiles: [{ x, y, tileIndex }] }
-fn handle_fill_tiles(payload: serde_json::Value) -> super::CommandResult {
+/// Parse a `fill_tiles` payload: `{ entityId, layer, tiles: [{ x, y, tileIndex }] }`.
+///
+/// `tileIndex` may be an explicit `null`, which erases that cell. An ABSENT
+/// `tileIndex` stays an error: `null` is a caller saying "erase", a missing key
+/// is a caller who spelled it wrong, and silently erasing on a typo is exactly
+/// the class of silent damage `dispatchCommand`'s void return already hides.
+///
+/// Extracted from `handle_fill_tiles` so it is testable natively — the handler
+/// itself needs the thread-local `PendingCommands`, which no unit test has.
+fn parse_fill_tiles(
+    payload: &serde_json::Value,
+) -> Result<(String, usize, Vec<TilePlacement>), String> {
     let entity_id = payload.get("entityId")
         .and_then(|v| v.as_str())
         .ok_or("Missing entityId")?
@@ -1155,10 +1164,25 @@ fn handle_fill_tiles(payload: serde_json::Value) -> super::CommandResult {
             .ok_or_else(|| format!("tiles[{}]: missing or invalid 'x'", i))? as usize;
         let y = item.get("y").and_then(|v| v.as_u64())
             .ok_or_else(|| format!("tiles[{}]: missing or invalid 'y'", i))? as usize;
-        let tile_index = item.get("tileIndex").and_then(|v| v.as_u64())
-            .ok_or_else(|| format!("tiles[{}]: missing or invalid 'tileIndex'", i))? as u32;
+        let raw_index = item.get("tileIndex")
+            .ok_or_else(|| format!("tiles[{}]: missing 'tileIndex'", i))?;
+        let tile_index = if raw_index.is_null() {
+            None
+        } else {
+            Some(
+                raw_index.as_u64()
+                    .ok_or_else(|| format!("tiles[{}]: invalid 'tileIndex'", i))? as u32,
+            )
+        };
         tiles.push(TilePlacement { x, y, tile_index });
     }
+
+    Ok((entity_id, layer, tiles))
+}
+
+/// Handle fill_tiles command (batch tile placement, `tileIndex: null` erases).
+fn handle_fill_tiles(payload: serde_json::Value) -> super::CommandResult {
+    let (entity_id, layer, tiles) = parse_fill_tiles(&payload)?;
 
     if queue_fill_tiles_from_bridge(FillTilesRequest { entity_id, layer, tiles }) {
         Ok(())
@@ -1338,5 +1362,100 @@ mod ik_chain2d_tests {
             let (_, ik) = parse_ik_chain2d(&payload).expect("mix");
             assert_eq!(ik.mix, expected, "mix {} ", given);
         }
+    }
+}
+
+#[cfg(test)]
+mod fill_tiles_tests {
+    use super::parse_fill_tiles;
+    use serde_json::json;
+
+    #[test]
+    fn parses_a_numeric_tile_index() {
+        let (entity_id, layer, tiles) = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": 2,
+            "tiles": [{ "x": 1, "y": 3, "tileIndex": 7 }],
+        }))
+        .expect("valid payload");
+        assert_eq!(entity_id, "tm-1");
+        assert_eq!(layer, 2);
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0].x, 1);
+        assert_eq!(tiles[0].y, 3);
+        assert_eq!(tiles[0].tile_index, Some(7));
+    }
+
+    #[test]
+    // The whole point of F1: a null fill is ONE command, not one erase per cell.
+    fn treats_an_explicit_null_tile_index_as_an_erase() {
+        let (_, _, tiles) = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": 0,
+            "tiles": [{ "x": 0, "y": 0, "tileIndex": null }],
+        }))
+        .expect("null tileIndex is an erase");
+        assert_eq!(tiles[0].tile_index, None);
+    }
+
+    #[test]
+    fn accepts_a_mixed_paint_and_erase_list_in_order() {
+        let (_, _, tiles) = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": 0,
+            "tiles": [
+                { "x": 0, "y": 0, "tileIndex": 4 },
+                { "x": 1, "y": 0, "tileIndex": null },
+                { "x": 2, "y": 0, "tileIndex": 0 },
+            ],
+        }))
+        .expect("mixed list");
+        assert_eq!(
+            tiles.iter().map(|t| t.tile_index).collect::<Vec<_>>(),
+            vec![Some(4), None, Some(0)],
+        );
+    }
+
+    #[test]
+    // A MISSING key stays an error. `null` means erase; absent means the caller
+    // spelled the key wrong, and silently erasing on a typo is the failure mode
+    // this whole ticket exists to remove.
+    fn refuses_a_missing_tile_index() {
+        let err = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": 0,
+            "tiles": [{ "x": 0, "y": 0, "tileIdx": 7 }],
+        }))
+        .expect_err("missing tileIndex");
+        assert!(err.contains("tileIndex"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_a_negative_tile_index() {
+        let err = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": 0,
+            "tiles": [{ "x": 0, "y": 0, "tileIndex": -1 }],
+        }))
+        .expect_err("negative tileIndex");
+        assert!(err.contains("tileIndex"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_a_negative_coordinate() {
+        let err = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": 0,
+            "tiles": [{ "x": -1, "y": 0, "tileIndex": 7 }],
+        }))
+        .expect_err("negative x");
+        assert!(err.contains('x'), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn refuses_a_missing_tiles_array() {
+        let err = parse_fill_tiles(&json!({ "entityId": "tm-1", "layer": 0 }))
+            .expect_err("missing tiles");
+        assert!(err.contains("tiles"), "unexpected error: {}", err);
     }
 }

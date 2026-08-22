@@ -142,7 +142,11 @@ pub struct EraseTileRequest {
 pub struct TilePlacement {
     pub x: usize,
     pub y: usize,
-    pub tile_index: u32,
+    /// `None` erases the cell. `fill_tiles` carries both directions so a
+    /// rectangular erase is one command rather than one `erase_tile` per cell
+    /// (PF-1181): a 256x256 clear used to be 65,536 separate commands, which the
+    /// script worker's `MAX_COMMANDS_PER_FRAME` cap then silently truncated.
+    pub tile_index: Option<u32>,
 }
 
 #[derive(Debug, Clone)]

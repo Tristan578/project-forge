@@ -1095,7 +1095,9 @@ pub(super) fn apply_fill_tiles_requests(
             }
             let tile_index = placement.y * map_w + placement.x;
             if tile_index < tilemap_data.layers[request.layer].tiles.len() {
-                tilemap_data.layers[request.layer].tiles[tile_index] = Some(placement.tile_index);
+                // `placement.tile_index` is already `Option<u32>`: `None` erases,
+                // so one `fill_tiles` covers a rectangular clear (PF-1181).
+                tilemap_data.layers[request.layer].tiles[tile_index] = placement.tile_index;
             }
         }
     }
