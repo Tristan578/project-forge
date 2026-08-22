@@ -117,10 +117,31 @@ export async function runPipeline(
     return byName?.output;
   };
 
-  // Compose the effective context with the live resolver
+  // Every output for an executor name, not just the first.
+  //
+  // `liveResolve` above answers with the first match, which is wrong the moment
+  // a plan runs the same executor twice — and this one does: `physics_enable`
+  // is planned once for the blueprint cast and again for the world geometry.
+  // A caller reading the singular resolver's `entityIds` silently gets half the
+  // scene (see `ExecutorContext.resolveStepOutputs`).
+  //
+  // Indexed loop: `.filter`/`.map` skip an array hole outright, and a dropped
+  // step here is invisible — the ids just never arrive.
+  const liveResolveAll = (executorName: string): Record<string, unknown>[] => {
+    const out: Record<string, unknown>[] = [];
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      const step = plan.steps[i];
+      if (step?.executor !== executorName) continue;
+      if (step.output) out.push(step.output);
+    }
+    return out;
+  };
+
+  // Compose the effective context with the live resolvers
   const effectiveContext: ExecutorContext = {
     ...context,
     resolveStepOutput: liveResolve,
+    resolveStepOutputs: liveResolveAll,
   };
 
   // Mark plan as executing

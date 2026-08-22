@@ -150,6 +150,48 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+// ---------------------------------------------------------------------------
+// Ground
+// ---------------------------------------------------------------------------
+
+/**
+ * The one place a ground descriptor is built.
+ *
+ * The y offset is the whole point. The engine derives collider half-extents
+ * from `transform.scale` (`make_collider`, engine/src/core/physics.rs — half
+ * extents are `scale * 0.5`), so a ground cube left at y=0 puts its walkable
+ * TOP face at `+thickness/2`, floating above the plane every other spawn treats
+ * as the floor. Sitting it at `-thickness/2` makes the collider's top flush
+ * with y=0.
+ */
+function makeGroundDescriptor(width: number, depth: number): WorldEntityDescriptor {
+  return {
+    role: 'ground',
+    name: 'Ground',
+    entityType: 'cube',
+    position: [0, round3(-GROUND_THICKNESS / 2), 0],
+    scale: [scaleAxis(width), scaleAxis(GROUND_THICKNESS), scaleAxis(depth)],
+  };
+}
+
+/**
+ * The ground a scene gets when nothing described one.
+ *
+ * Exported for the `auto_polish` `no_ground_plane` repair, which spawns a floor
+ * into a scene that reached the end of the pipeline without one. It has to be
+ * THIS descriptor and not a bare `spawn_entity`: an unscaled primitive gets a
+ * 1×1×1 collider centred on the origin, so the player is supported only within
+ * half a metre of it and drops through the floor the step reports having added
+ * (PF-1213).
+ */
+export function buildDefaultGroundDescriptor(projectType: '2d' | '3d'): WorldEntityDescriptor {
+  // A 2D game is seen from the side, so its ground is deep enough to be solid
+  // and no deeper — the same rule `buildWorldGeometry` applies below.
+  return projectType === '2d'
+    ? makeGroundDescriptor(DEFAULT_GROUND_2D, GROUND_THICKNESS)
+    : makeGroundDescriptor(DEFAULT_GROUND_3D, DEFAULT_GROUND_3D);
+}
+
 /**
  * Read a strictly positive finite number under any of `keys`.
  *
@@ -446,13 +488,7 @@ export function buildWorldGeometry(input: WorldGeometryInput): WorldGeometryResu
   }
 
   const descriptors: WorldEntityDescriptor[] = [
-    {
-      role: 'ground',
-      name: 'Ground',
-      entityType: 'cube',
-      position: [0, round3(-GROUND_THICKNESS / 2), 0],
-      scale: [scaleAxis(groundWidth), scaleAxis(GROUND_THICKNESS), scaleAxis(groundDepth)],
-    },
+    makeGroundDescriptor(groundWidth, groundDepth),
   ];
 
   // --- platforms ----------------------------------------------------------

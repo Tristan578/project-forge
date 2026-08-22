@@ -43,10 +43,21 @@ function collectTargetIds(
     if (out.length > 0) return out;
   }
 
-  const enableOutput = ctx.resolveStepOutput('physics_enable');
-  const enabledIds = enableOutput?.['entityIds'];
-  if (Array.isArray(enabledIds)) {
-    for (let i = 0; i < enabledIds.length; i += 1) push(enabledIds[i]);
+  // EVERY `physics_enable` step, not the first one.
+  //
+  // A plan runs that executor twice — planBuilder Phase 2.5 enables the
+  // blueprint cast, and `systems/world.ts` enables the ground, platforms and
+  // walls it minted. `resolveStepOutput` answers with the first match, so
+  // reading it here tuned the player and the collectibles and left the geometry
+  // they stand on with default friction and restitution, with nothing to show
+  // for it: the ids simply never arrived. The only other route to the geometry
+  // is the store scan below, which cannot be relied on this soon after dispatch
+  // (the engine has not necessarily echoed the spawns back yet).
+  const enableOutputs = ctx.resolveStepOutputs('physics_enable');
+  for (let i = 0; i < enableOutputs.length; i += 1) {
+    const enabledIds = enableOutputs[i]?.['entityIds'];
+    if (!Array.isArray(enabledIds)) continue;
+    for (let j = 0; j < enabledIds.length; j += 1) push(enabledIds[j]);
   }
 
   const storeNodes = Object.values(liveStore.sceneGraph.nodes);
@@ -139,11 +150,10 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     // therefore reports "no physics entities" on a scene that has just been made
     // entirely physical.
     //
-    // `resolveStepOutput` matches by executor name and returns the FIRST such
-    // step, which is the blueprint-entity enablement (the world-geometry one is
-    // planned later, by the world system). That is the right half to prefer:
-    // feel tuning is about how the player and the actors move, not about how
-    // heavy the floor is.
+    // EVERY `physics_enable` step is read, not the first: a plan runs that
+    // executor twice (blueprint cast, then world geometry), and the geometry the
+    // player lands on needs the design's friction and restitution just as much
+    // as the player does. See `collectTargetIds`.
     const ids = collectTargetIds(entityIds, ctx, liveStore);
 
     if (ids.length === 0) {
@@ -159,7 +169,9 @@ export const physicsProfileExecutor: ExecutorDefinition = {
         appliedGlobally: false,
         warning:
           'No entities had physics turned on, so the movement feel could not be applied. '
-          + 'Things may not move or collide the way the design describes.',
+          + 'Things may not move or collide the way the design describes. '
+          + 'Select the player in the scene hierarchy and turn on Physics in the Inspector, '
+          + 'then re-run the build to apply the feel settings.',
       });
     }
 

@@ -73,7 +73,17 @@ export function resolveEntityShape(
   projectType: '2d' | '3d',
 ): SpawnShape {
   if (projectType === '2d') return 'plane';
-  return shapeFromAppearance(appearance) ?? ROLE_TO_ENTITY_TYPE[role] ?? 'cube';
+  // `Object.hasOwn`, never a bare read: `ROLE_TO_ENTITY_TYPE` is a plain object,
+  // so a role named for an `Object.prototype` member resolves to something
+  // truthy that is not a shape at all — `'__proto__'` yields `{}` and
+  // `'constructor'` yields a function, either of which the `??` chain then
+  // accepts and hands to `spawn_entity` as an entityType. The GDD's `role` is
+  // LLM-authored free text, so those names are reachable input, and the engine
+  // drops an unrecognized entityType without a word (PF-1213).
+  const roleDefault = Object.hasOwn(ROLE_TO_ENTITY_TYPE, role)
+    ? ROLE_TO_ENTITY_TYPE[role]
+    : undefined;
+  return shapeFromAppearance(appearance) ?? roleDefault ?? 'cube';
 }
 
 /**

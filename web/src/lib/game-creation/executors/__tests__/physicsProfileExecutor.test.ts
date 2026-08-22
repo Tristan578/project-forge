@@ -50,6 +50,7 @@ function makeCtx(overrides: Partial<ExecutorContext> = {}): ExecutorContext {
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
+    resolveStepOutputs: vi.fn(() => []),
     ...overrides,
   };
 }
@@ -234,8 +235,15 @@ describe('physicsProfileExecutor', () => {
     expect(mockApplyPhysicsProfile).not.toHaveBeenCalled();
     const output = result.output as { entityCount: number; warning?: string };
     expect(output.entityCount).toBe(0);
-    expect(typeof output.warning).toBe('string');
-    expect(output.warning).toContain('physics');
+    // The exact sentence, not `toContain('physics')` — that matched the word in
+    // its own executor name and would have passed on any wording, including one
+    // that told the user nothing to do next.
+    expect(output.warning).toBe(
+      'No entities had physics turned on, so the movement feel could not be applied. '
+      + 'Things may not move or collide the way the design describes. '
+      + 'Select the player in the scene hierarchy and turn on Physics in the Inspector, '
+      + 'then re-run the build to apply the feel settings.',
+    );
   });
 
   it('tunes the entities the physics_enable step reported (PF-1213)', async () => {
@@ -244,8 +252,8 @@ describe('physicsProfileExecutor', () => {
     // it is still empty and the scan below finds nothing. The upstream step's
     // own output is the reliable source.
     const ctx = makeCtx({
-      resolveStepOutput: vi.fn((name: string) =>
-        name === 'physics_enable' ? { entityIds: ['id-player', 'id-crystal'] } : undefined),
+      resolveStepOutputs: vi.fn((name: string) =>
+        name === 'physics_enable' ? [{ entityIds: ['id-player', 'id-crystal'] }] : []),
     });
 
     const result = await physicsProfileExecutor.execute({
@@ -263,6 +271,106 @@ describe('physicsProfileExecutor', () => {
     const output = result.output as { entityCount: number; warning?: string };
     expect(output.entityCount).toBe(2);
     expect(output.warning).toBeUndefined();
+  });
+
+  it('folds in EVERY physics_enable step, not just the first (PF-1213)', async () => {
+    // A plan runs `physics_enable` twice: planBuilder Phase 2.5 for the
+    // blueprint cast, and `systems/world.ts` for the ground, platforms and
+    // walls. Reading only the first left the geometry the player lands on at
+    // default friction and restitution, with nothing to show for it.
+    const ctx = makeCtx({
+      resolveStepOutputs: vi.fn((name: string) =>
+        name === 'physics_enable'
+          ? [{ entityIds: ['id-player', 'id-crystal'] }, { entityIds: ['id-ground', 'id-platform'] }]
+          : []),
+    });
+
+    const result = await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(mockApplyPhysicsProfile.mock.calls[0][2]).toEqual([
+      'id-player', 'id-crystal', 'id-ground', 'id-platform',
+    ]);
+    expect((result.output as { entityCount: number }).entityCount).toBe(4);
+  });
+
+  it('skips a physics_enable step whose entityIds is not an array', async () => {
+    const ctx = makeCtx({
+      resolveStepOutputs: vi.fn(() => [
+        { enabled: 0 },
+        { entityIds: 'id-ground' },
+        { entityIds: ['id-platform'] },
+      ]),
+    });
+
+    await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+    }, ctx);
+
+    expect(mockApplyPhysicsProfile.mock.calls[0][2]).toEqual(['id-platform']);
+  });
+
+  it('dedupes ids reported by more than one physics_enable step', async () => {
+    const ctx = makeCtx({
+      resolveStepOutputs: vi.fn(() => [
+        { entityIds: ['id-ground', 'id-player'] },
+        { entityIds: ['id-player', 'id-ground', 'id-wall'] },
+      ]),
+    });
+
+    await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+    }, ctx);
+
+    expect(mockApplyPhysicsProfile.mock.calls[0][2]).toEqual(['id-ground', 'id-player', 'id-wall']);
+  });
+
+  it('prefers explicit entityIds over the physics_enable output', async () => {
+    const ctx = makeCtx({
+      resolveStepOutputs: vi.fn(() => [{ entityIds: ['id-ground'] }]),
+    });
+
+    await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+      entityIds: ['id-explicit'],
+    }, ctx);
+
+    expect(mockApplyPhysicsProfile.mock.calls[0][2]).toEqual(['id-explicit']);
+  });
+
+  it('trims and dedupes explicit entityIds', async () => {
+    const ctx = makeCtx();
+
+    await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+      entityIds: ['  id-a  ', 'id-a', 'id-b'],
+    }, ctx);
+
+    expect(mockApplyPhysicsProfile.mock.calls[0][2]).toEqual(['id-a', 'id-b']);
+  });
+
+  it('falls through to the physics_enable output when every explicit id is blank', async () => {
+    // An all-blank list is not a request to tune nothing — it is a caller that
+    // produced no usable ids, and the upstream step still knows which entities
+    // were given a body.
+    const ctx = makeCtx({
+      resolveStepOutputs: vi.fn(() => [{ entityIds: ['id-ground'] }]),
+    });
+
+    await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+      entityIds: ['   ', ''],
+    }, ctx);
+
+    expect(mockApplyPhysicsProfile.mock.calls[0][2]).toEqual(['id-ground']);
   });
 
   it('allows safe config overrides for moveSpeed and jumpForce', async () => {

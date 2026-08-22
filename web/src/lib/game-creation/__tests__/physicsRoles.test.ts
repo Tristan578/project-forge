@@ -30,6 +30,7 @@ import {
   PHYSICS_ROLES,
   PHYSICS_ROLE_PROFILES,
   physicsProfileForRole,
+  type PhysicsBodyProfile,
 } from '../physicsRoles';
 
 /**
@@ -104,20 +105,58 @@ describe('physics role vocabulary (PF-1213)', () => {
     }
   });
 
-  it('gives the player the only dynamic, rotation-locked body', () => {
-    // Rapier's default `ActiveCollisionTypes` is DYNAMIC_*, so every pair the
-    // player forms needs the player to be the dynamic side; a free-rotating
-    // capsule tips over on first contact and the player rolls on its side.
-    expect(PHYSICS_ROLE_PROFILES.player.bodyType).toBe('dynamic');
-    expect(PHYSICS_ROLE_PROFILES.player.lockRotation).toBe(true);
-    expect(PHYSICS_ROLE_PROFILES.player.isSensor).toBe(false);
+  /**
+   * Every profile, in full, one case per role.
+   *
+   * Spot-checking a field or two per role is what let `enemy`, `npc` and
+   * `projectile` go unasserted entirely: a `bodyType` flip on `enemy` turns a
+   * chaser into a solid dynamic body that shoves the player off the level, and
+   * nothing about that reads as a test failure anywhere else in the suite —
+   * the game still builds, still plays, and is simply unwinnable.
+   *
+   * `toEqual` on the whole object, not `objectContaining`: an INVENTED field is
+   * as dangerous as a wrong one here, because `buildPhysicsPatch` forwards only
+   * keys the engine knows and drops the rest without a word.
+   */
+  const EXPECTED_PROFILES: Record<string, PhysicsBodyProfile> = {
+    // Dynamic so every pair it forms carries the dynamic side Rapier's default
+    // `ActiveCollisionTypes` requires; rotation-locked so a capsule does not tip
+    // over on first contact and leave the player rolling on its side.
+    player: { bodyType: 'dynamic', isSensor: false, lockRotation: true },
 
-    // Anything the player walks into and must not shove is fixed, and anything
-    // it should pass through while still registering the touch is a sensor.
-    expect(PHYSICS_ROLE_PROFILES.geometry).toEqual({
-      bodyType: 'fixed', colliderShape: 'cuboid', isSensor: false, lockRotation: false,
-    });
-    expect(PHYSICS_ROLE_PROFILES.interactable.isSensor).toBe(true);
-    expect(PHYSICS_ROLE_PROFILES.trigger.isSensor).toBe(true);
+    // Moved by `system_follower`, which writes the transform directly — a
+    // dynamic body would fight that write and be shoved by every contact. Fixed
+    // still forms a DYNAMIC_FIXED pair with the player, so contact damage and
+    // dialogue triggers still fire.
+    enemy: { bodyType: 'fixed', isSensor: true, lockRotation: false },
+    npc: { bodyType: 'fixed', isSensor: true, lockRotation: false },
+
+    // Registers the touch without stopping the player dead or punting the
+    // pickup across the arena.
+    interactable: { bodyType: 'fixed', isSensor: true, lockRotation: false },
+    trigger: { bodyType: 'fixed', isSensor: true, lockRotation: false },
+
+    // Solid and free to tumble; `ball` matches the sphere mesh regardless of
+    // the shape the entity happened to be spawned as.
+    projectile: { bodyType: 'dynamic', colliderShape: 'ball', isSensor: false, lockRotation: false },
+
+    // The thing that stops the player falling through the void.
+    geometry: { bodyType: 'fixed', colliderShape: 'cuboid', isSensor: false, lockRotation: false },
+  };
+
+  it('expects a profile for every role the table defines', () => {
+    // Keeps the table above honest in both directions: a role added to
+    // `PHYSICS_ROLE_PROFILES` with no expectation here would otherwise be
+    // "covered" by a loop that never visits it.
+    expect(Object.keys(EXPECTED_PROFILES).sort()).toEqual([...PHYSICS_ROLES].sort());
+  });
+
+  it.each(Object.keys(EXPECTED_PROFILES))('pins the whole %s profile', role => {
+    expect(PHYSICS_ROLE_PROFILES[role as keyof typeof PHYSICS_ROLE_PROFILES])
+      .toEqual(EXPECTED_PROFILES[role]);
+    // The same object reached through the lookup the pipeline actually calls —
+    // a table that is right and a resolver that returns something else is a
+    // distinction the executors would feel and this file would not.
+    expect(physicsProfileForRole(role)).toEqual(EXPECTED_PROFILES[role]);
   });
 });

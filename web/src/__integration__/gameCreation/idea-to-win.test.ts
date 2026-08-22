@@ -335,6 +335,7 @@ async function runGame(h: TestHarness, gdd: OrchestratorGDD): Promise<RunResult>
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: () => undefined,
+    resolveStepOutputs: () => [],
   };
 
   await runPipeline(plan, EXECUTOR_REGISTRY, ctx, {

@@ -6,13 +6,8 @@ import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
 import { resolveCameraEntityId } from '../cameraResolution';
 import { waitForEngineFrame, sendCommands, type EngineCommand } from './engineDispatch';
 import { PHYSICS_ROLE_PROFILES } from '../physicsRoles';
-import { COLLIDER_FOR_SHAPE, type SpawnShape } from '../entityShape';
-
-/**
- * The mesh the ground repair spawns, in one place so the collider below cannot
- * describe a different shape from the entity it is attached to.
- */
-const GROUND_SHAPE: SpawnShape = 'plane';
+import { COLLIDER_FOR_SHAPE } from '../entityShape';
+import { buildDefaultGroundDescriptor } from '../worldGeometry';
 
 // [B4] diagnoseIssues() requires GameMetrics (avgPlayTime, completionRate, etc.)
 // which do not exist on a freshly-built game. auto_polish uses STRUCTURAL
@@ -136,15 +131,26 @@ export const autoPolishExecutor: ExecutorDefinition = {
     // this executor never learns, which would leave the two physics commands
     // below with no entity to name.
     let groundEntityId: string | null = null;
+    // The descriptor `world_build` would have used, not a bare primitive.
+    //
+    // A SPAWN WITH NO SCALE IS NOT A FLOOR. The engine derives collider
+    // half-extents from `transform.scale` (`make_collider`,
+    // engine/src/core/physics.rs — `scale * 0.5`), and `spawn_entity` carries a
+    // position but NO scale field, so an unscaled primitive gets a 1x1x1
+    // collider centred on the origin: the player is supported within half a
+    // metre of it, and everywhere else falls through the floor this step
+    // reports having added. Sizing therefore always costs the second
+    // `update_transform` below, exactly as `worldBuildExecutor` pays it.
+    const groundDescriptor = buildDefaultGroundDescriptor(parsed.data.projectType);
     if (issues.includes('no_ground_plane')) {
       groundEntityId = crypto.randomUUID();
       commands.push({
         command: 'spawn_entity',
         payload: {
           id: groundEntityId,
-          entityType: GROUND_SHAPE,
-          name: 'Ground',
-          position: [0, 0, 0],
+          entityType: groundDescriptor.entityType,
+          name: groundDescriptor.name,
+          position: groundDescriptor.position,
         },
       });
       fixes.push('Added ground plane');
@@ -193,14 +199,25 @@ export const autoPolishExecutor: ExecutorDefinition = {
         );
       }
 
-      if (!sendCommands(ctx, [{
-        command: 'toggle_physics',
-        payload: { entityId: groundEntityId, enabled: true },
-      }])) {
+      // Sized in the same batch as the toggle: the two are independent (one
+      // drains through `apply_pending_transforms`, the other through
+      // `apply_physics_toggles`) and both need only that the entity now exists.
+      // The scale has to land before Play, because the collider is built from
+      // `transform.scale` at the Edit→Play transition and never resized after.
+      if (!sendCommands(ctx, [
+        {
+          command: 'update_transform',
+          payload: { entityId: groundEntityId, scale: groundDescriptor.scale },
+        },
+        {
+          command: 'toggle_physics',
+          payload: { entityId: groundEntityId, enabled: true },
+        },
+      ])) {
         return failResult(
           makeStepError(
             'COMMAND_FAILED',
-            'Engine rejected toggle_physics for the repaired ground plane',
+            'Engine rejected the size or toggle_physics command for the repaired ground plane',
             this.userFacingErrorMessage,
           ),
         );
@@ -224,7 +241,7 @@ export const autoPolishExecutor: ExecutorDefinition = {
         command: 'update_physics',
         payload: buildPhysicsPatch(groundEntityId, {
           bodyType: profile.bodyType,
-          colliderShape: profile.colliderShape ?? COLLIDER_FOR_SHAPE[GROUND_SHAPE],
+          colliderShape: profile.colliderShape ?? COLLIDER_FOR_SHAPE[groundDescriptor.entityType],
           isSensor: profile.isSensor,
         }),
       }])) {
