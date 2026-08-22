@@ -167,11 +167,16 @@ export const physicsProfileExecutor: ExecutorDefinition = {
         presetUsed: presetKey,
         entityCount: 0,
         appliedGlobally: false,
+        // No "re-run the build" clause: a new build starts at `scene_create`,
+        // which calls `newScene()` and despawns everything, so it would discard
+        // the very fix the sentence had just asked for. The recovery described
+        // here is one that survives, and the last sentence says so outright.
         warning:
           'No entities had physics turned on, so the movement feel could not be applied. '
           + 'Things may not move or collide the way the design describes. '
-          + 'Select the player in the scene hierarchy and turn on Physics in the Inspector, '
-          + 'then re-run the build to apply the feel settings.',
+          + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
+          + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+          + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
       });
     }
 

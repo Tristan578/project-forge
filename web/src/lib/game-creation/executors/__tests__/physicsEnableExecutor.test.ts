@@ -67,7 +67,18 @@ function flatten(batch: ReturnType<typeof vi.fn>): Array<{ command: string; payl
 describe('physicsEnableExecutor', () => {
   it('has the expected name and a user-facing failure message', () => {
     expect(physicsEnableExecutor.name).toBe('physics_enable');
-    expect(physicsEnableExecutor.userFacingErrorMessage.length).toBeGreaterThan(0);
+    // The exact sentence, not `length > 0` — this is the only thing a user sees
+    // when the step fails, and the wording is load-bearing twice over: the
+    // engine's `PhysicsData::default()` is DYNAMIC (engine/src/core/physics.rs),
+    // so guidance that stops at "turn Physics on" turns the floor into a falling
+    // body, and every noun here has to be a label that is actually on screen.
+    expect(physicsEnableExecutor.userFacingErrorMessage).toBe(
+      'Could not switch physics on for the level, so nothing in the game will collide. '
+      + 'Please try again. '
+      + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
+      + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
+      + '(the default, Dynamic, makes them fall).',
+    );
   });
 
   /**
@@ -283,8 +294,9 @@ describe('physicsEnableExecutor', () => {
     expect(output.warning).toBe(
       'Nothing in this step could be given a physical body, so none of it will collide, '
       + 'land on the ground or be picked up. '
-      + 'Select each entity in the scene hierarchy and turn on Physics in the Inspector, '
-      + 'or build the game again.',
+      + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
+      + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
+      + '(the default, Dynamic, makes them fall) and tick Sensor for pickups.',
     );
   });
 

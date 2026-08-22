@@ -62,10 +62,20 @@ const inputSchema = z.object({
 export const physicsEnableExecutor: ExecutorDefinition = {
   name: 'physics_enable',
   inputSchema,
+  // Every noun here is a label that is actually on screen: the panel is
+  // "Hierarchy", the Inspector's section is "Physics" with an "Enabled"
+  // checkbox, and "Fixed" is the Body Type option (there is no "Static").
+  //
+  // Naming Body Type is not padding. `PhysicsData::default()` is DYNAMIC
+  // (engine/src/core/physics.rs), so a user who follows guidance that stops at
+  // "tick Enabled" turns the ground, the platforms and the walls into falling
+  // bodies — the advice would make the game worse than the failure did.
   userFacingErrorMessage:
-    'Could not switch physics on for the level. Nothing in the game will collide. '
-    + 'Try building the game again, or select each entity in the scene hierarchy and turn on '
-    + 'Physics in the Inspector.',
+    'Could not switch physics on for the level, so nothing in the game will collide. '
+    + 'Please try again. '
+    + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
+    + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
+    + '(the default, Dynamic, makes them fall).',
 
   async execute(
     input: Record<string, unknown>,
@@ -155,8 +165,9 @@ export const physicsEnableExecutor: ExecutorDefinition = {
         warning:
           'Nothing in this step could be given a physical body, so none of it will collide, '
           + 'land on the ground or be picked up. '
-          + 'Select each entity in the scene hierarchy and turn on Physics in the Inspector, '
-          + 'or build the game again.',
+          + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
+          + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
+          + '(the default, Dynamic, makes them fall) and tick Sensor for pickups.',
       });
     }
 
