@@ -172,7 +172,7 @@ fn route_domain(command: &str) -> u8 {
         | "get_game_camera" => 9,
 
         // --- sprites / 2D domain ---
-        "spawn_sprite" | "set_project_type" | "get_project_type"
+        "spawn_sprite" | "set_project_type"
         | "set_sprite_data" | "remove_sprite" | "get_sprite"
         | "update_camera_2d" | "get_camera_2d" | "set_sprite_sheet"
         | "remove_sprite_sheet" | "set_sprite_animator" | "remove_sprite_animator"

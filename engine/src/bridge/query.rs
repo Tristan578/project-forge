@@ -75,6 +75,8 @@ pub(super) fn process_query_requests(
             | QueryRequest::GameComponentState { .. }
             | QueryRequest::GameCameraState { .. }
             | QueryRequest::Skeleton2dState { .. }
+            | QueryRequest::SpriteState { .. }
+            | QueryRequest::Camera2dState
             | QueryRequest::PlayState => {
                 remaining.push(request);
             }
@@ -281,13 +283,10 @@ pub(super) fn process_query_requests(
                 // Handled by game::process_game_camera_queries; see `remaining` above.
             }
             QueryRequest::SpriteState { .. } => {
-                // Sprite state handled separately
+                // Handled by sprite::handle_sprite_and_camera2d_queries; see `remaining` above.
             }
             QueryRequest::Camera2dState => {
-                // 2D camera state handled separately
-            }
-            QueryRequest::ProjectType => {
-                // Project type handled separately
+                // Handled by sprite::handle_sprite_and_camera2d_queries; see `remaining` above.
             }
             QueryRequest::Skeleton2dState { .. } => {
                 // Handled by skeleton2d::handle_skeleton2d_query; see `remaining` above.
@@ -334,8 +333,7 @@ pub(super) fn process_play_state_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let has_play_state = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::PlayState));
-    if !has_play_state {
+    if pending.take_queries(|r| matches!(r, QueryRequest::PlayState)).is_empty() {
         return;
     }
 
@@ -344,7 +342,6 @@ pub(super) fn process_play_state_queries(
             "error": "query_play_state is only available in Play or Paused mode",
             "engineMode": engine_mode.as_str(),
         }));
-        pending.query_requests.retain(|r| !matches!(r, QueryRequest::PlayState));
         return;
     }
 
@@ -385,8 +382,6 @@ pub(super) fn process_play_state_queries(
         entity_count,
         engine_mode: engine_mode.as_str().to_string(),
     });
-
-    pending.query_requests.retain(|r| !matches!(r, QueryRequest::PlayState));
 }
 
 /// Process terrain query requests separately to stay under 16 system parameter limit.
@@ -396,13 +391,7 @@ pub(super) fn process_terrain_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
-        if matches!(req, QueryRequest::TerrainState { .. }) {
-            Some(req.clone())
-        } else {
-            None
-        }
-    }).collect();
+    let requests = pending.take_queries(|req| matches!(req, QueryRequest::TerrainState { .. }));
 
     for request in requests {
         if let QueryRequest::TerrainState { entity_id } = request {
@@ -414,8 +403,6 @@ pub(super) fn process_terrain_queries(
                     break;
                 }
             }
-            // Remove the processed request
-            pending.query_requests.retain(|r| !matches!(r, QueryRequest::TerrainState { entity_id: ref eid } if eid == &entity_id));
         }
     }
 }
@@ -427,10 +414,8 @@ pub(super) fn process_quality_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let has_quality = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::QualitySettings));
-    if has_quality {
+    if !pending.take_queries(|r| matches!(r, QueryRequest::QualitySettings)).is_empty() {
         events::emit_quality_changed(&quality_settings);
-        pending.query_requests.retain(|r| !matches!(r, QueryRequest::QualitySettings));
     }
 }
 
@@ -455,13 +440,7 @@ pub(super) fn process_reverb_zone_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
-        if matches!(req, QueryRequest::ReverbZoneState { .. }) {
-            Some(req.clone())
-        } else {
-            None
-        }
-    }).collect();
+    let requests = pending.take_queries(|req| matches!(req, QueryRequest::ReverbZoneState { .. }));
 
     for request in requests {
         if let QueryRequest::ReverbZoneState { entity_id } = request {
@@ -473,8 +452,6 @@ pub(super) fn process_reverb_zone_queries(
                     break;
                 }
             }
-            // Remove the processed request
-            pending.query_requests.retain(|r| !matches!(r, QueryRequest::ReverbZoneState { entity_id: ref eid } if eid == &entity_id));
         }
     }
 }

@@ -507,6 +507,7 @@ impl Plugin for SelectionPlugin {
             // Grid 2D config (always-active)
             .add_systems(Update, sprite::apply_set_grid_2d_requests)
             // Sprite sheet and animator state queries (always-active)
+            .add_systems(Update, sprite::handle_sprite_and_camera2d_queries)
             .add_systems(Update, sprite::handle_sprite_sheet_state_queries)
             .add_systems(Update, sprite::handle_sprite_animator_state_queries)
             // 2D camera systems (always-active): project type + Camera2d management

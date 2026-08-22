@@ -1187,6 +1187,48 @@ pub(super) fn render_2d_grid(
     }
 }
 
+/// System that answers `get_sprite` and `get_camera_2d` reads (editor-only).
+///
+/// Both names were routed AND armed, and then dropped on the floor:
+/// `process_query_requests` sorted them into its `handled` bucket behind empty
+/// arms commented "handled separately", and no separate system existed. A
+/// query that is never answered is indistinguishable from one whose entity has
+/// no data, so nothing surfaced it (PF-1181/PF-1194).
+///
+/// The replies go out on the existing `SPRITE_CHANGED` / `CAMERA_2D_CHANGED`
+/// channels, which `web/src/hooks/events/spriteEvents.ts` already handles,
+/// rather than inventing a second wire shape per read.
+pub(super) fn handle_sprite_and_camera2d_queries(
+    mut pending: ResMut<PendingCommands>,
+    sprite_query: Query<(&EntityId, Option<&SpriteData>)>,
+    camera_query: Query<&Camera2dData, With<Managed2dCamera>>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    let requests = pending
+        .take_queries(|r| matches!(r, QueryRequest::SpriteState { .. } | QueryRequest::Camera2dState));
+
+    for request in requests {
+        match request {
+            QueryRequest::SpriteState { entity_id } => {
+                // Only answer for an entity that exists. `sprite: None` is the
+                // engine saying "this entity has no sprite", and the browser
+                // handler clears its copy on it — emitting that for an unknown
+                // id would let a typo wipe a real sprite from the store.
+                if let Some((_, sprite)) = sprite_query.iter().find(|(eid, _)| eid.0 == entity_id) {
+                    events::emit_sprite_changed(&entity_id, sprite);
+                }
+            }
+            QueryRequest::Camera2dState => {
+                if let Ok(camera_data) = camera_query.single() {
+                    events::emit_camera_2d_changed(camera_data);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// System that handles sprite sheet state queries.
 pub(super) fn handle_sprite_sheet_state_queries(
     mut pending: ResMut<PendingCommands>,
@@ -1194,13 +1236,7 @@ pub(super) fn handle_sprite_sheet_state_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
-        if matches!(req, QueryRequest::SpriteSheetState { .. }) {
-            Some(req.clone())
-        } else {
-            None
-        }
-    }).collect();
+    let requests = pending.take_queries(|req| matches!(req, QueryRequest::SpriteSheetState { .. }));
 
     for request in requests {
         if let QueryRequest::SpriteSheetState { entity_id } = &request {
@@ -1257,8 +1293,6 @@ pub(super) fn handle_sprite_sheet_state_queries(
                 };
                 super::events::emit_event("QUERY_SPRITE_SHEET_STATE", &response);
             }
-
-            pending.query_requests.retain(|r| !matches!(r, QueryRequest::SpriteSheetState { entity_id: ref eid } if eid == entity_id));
         }
     }
 }
@@ -1270,13 +1304,7 @@ pub(super) fn handle_sprite_animator_state_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
-        if matches!(req, QueryRequest::SpriteAnimatorState { .. }) {
-            Some(req.clone())
-        } else {
-            None
-        }
-    }).collect();
+    let requests = pending.take_queries(|req| matches!(req, QueryRequest::SpriteAnimatorState { .. }));
 
     for request in requests {
         if let QueryRequest::SpriteAnimatorState { entity_id } = &request {
@@ -1347,8 +1375,6 @@ pub(super) fn handle_sprite_animator_state_queries(
                 };
                 super::events::emit_event("QUERY_SPRITE_ANIMATOR_STATE", &response);
             }
-
-            pending.query_requests.retain(|r| !matches!(r, QueryRequest::SpriteAnimatorState { entity_id: ref eid } if eid == entity_id));
         }
     }
 }

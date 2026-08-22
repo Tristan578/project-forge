@@ -973,7 +973,6 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
     match command {
         "spawn_sprite" => Some(handle_spawn_sprite(payload.clone())),
         "set_project_type" => Some(handle_set_project_type(payload.clone())),
-        "get_project_type" => Some(super::handle_query(QueryRequest::ProjectType)),
         "set_sprite_data" => Some(handle_set_sprite_data(payload.clone())),
         "remove_sprite" => Some(handle_remove_sprite(payload.clone())),
         "get_sprite" => {
