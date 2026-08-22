@@ -60,6 +60,18 @@ function getStepLabel(executor: string): string {
     : executor;
 }
 
+/**
+ * The one red this panel uses to say "this failed".
+ *
+ * There are two failure surfaces here — the plan-level banner and the per-step
+ * alert under a failed step — and they were drawn in two different reds
+ * (`red-800/950-50/300` against `red-900-60/950-40/200`), close enough to read
+ * as a rendering bug rather than a distinction. Geometry stays at each call
+ * site, since the banner is a block of body text and the step alert is a small
+ * annotation; only the colour is shared, because the colour is the meaning.
+ */
+const ERROR_SURFACE_CLASSES = 'border border-red-800 bg-red-950/50 text-red-300';
+
 // ---------------------------------------------------------------------------
 // Status helpers
 // ---------------------------------------------------------------------------
@@ -122,9 +134,11 @@ function StepStatusIcon({ status }: { status: PlanStep['status'] }) {
 function StepItem({
   step,
   status,
+  pipelineStatus,
 }: {
   step: PlanStep;
   status: PlanStep['status'];
+  pipelineStatus: OrchestratorStatus;
 }) {
   // Every executor composes a `userFacingErrorMessage` naming the next action a
   // user can take, and `runPipeline` records it on the step it failed. Until
@@ -134,7 +148,20 @@ function StepItem({
   //
   // The internal `error.message` is deliberately NOT rendered; it carries
   // engine/command detail written for a developer.
-  const failureMessage = step.error?.userFacingMessage;
+  //
+  // Presence of `step.error` is NOT the condition, because `runPipeline` writes
+  // one on a step whose retries a CANCEL cut short (`cancelledMidRetry`) — the
+  // step reads 'skipped', the plan reads 'cancelled', and rendering the message
+  // there tells a user who deliberately pressed Stop that something went wrong
+  // and to go fix it by hand. The three cases that DO deserve the alert are a
+  // real failure ('failed'), an optional step that exhausted its retries, and a
+  // required step skipped by `DEPENDENCY_FAILED` — the last two both read
+  // 'skipped', which is why the plan status is what separates them from a
+  // cancel rather than the step status alone.
+  const isCancelled = pipelineStatus === 'cancelled';
+  const failureMessage = !isCancelled && (status === 'failed' || status === 'skipped')
+    ? step.error?.userFacingMessage
+    : undefined;
 
   return (
     <div className="py-1.5 px-2 rounded text-sm">
@@ -150,7 +177,7 @@ function StepItem({
       {failureMessage && (
         <div
           role="alert"
-          className="mt-1 ml-6 rounded border border-red-900/60 bg-red-950/40 px-2 py-1 text-xs leading-snug text-red-200"
+          className={`mt-1 ml-6 rounded ${ERROR_SURFACE_CLASSES} px-2 py-1 text-xs leading-snug`}
         >
           {failureMessage}
         </div>
@@ -341,7 +368,7 @@ export function OrchestratorPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Error display */}
         {error && (
-          <div className="rounded-md border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300">
+          <div className={`rounded-md ${ERROR_SURFACE_CLASSES} px-3 py-2 text-sm`}>
             {error}
           </div>
         )}
@@ -398,6 +425,7 @@ export function OrchestratorPanel() {
                 key={step.id}
                 step={step}
                 status={stepStatuses[step.id] ?? step.status}
+                pipelineStatus={status}
               />
             ))}
           </div>
