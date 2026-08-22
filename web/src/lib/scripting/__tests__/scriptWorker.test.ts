@@ -1129,6 +1129,45 @@ describe('scriptWorker', () => {
     expect(src).toContain('__tests__/scriptWorker.test.ts');
   });
 
+  it('script-api.md tile field bound prose matches the exported constant', async () => {
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    // Third copy of the same number, and the one a script author is most
+    // likely to be reading: forgeTypes.ts only reaches someone typing in
+    // Monaco. Fail closed on an unreadable file, same as the two pins above.
+    const src = readFileSync(
+      join(__dirname, '..', '..', '..', '..', '..', 'docs', 'reference', 'script-api.md'),
+      'utf8',
+    );
+
+    // Same reason the forgeTypes pin covers the scope and not just the digits:
+    // this sentence used to say "Every coordinate, layer and tile index",
+    // which promised a throw from getTile, which returns null instead.
+    const flat = src.replace(/\s+/g, ' ');
+    const matches = [...flat.matchAll(
+      /`setTile`, `fillRect` and `clearTile` floor every `x`, `y`, `w`, `h`, `layer` and `tileId` before sending[^.]*\. The floored value must then be at least `0` and must not exceed `([\d,]+)`/g
+    )];
+    if (matches.length !== 1) {
+      throw new Error(
+        'docs/reference/script-api.md must carry exactly one sentence scoping the tile field bound ' +
+        `to setTile, fillRect and clearTile over x, y, w, h, layer and tileId, found ${matches.length}. ` +
+        'Zero means the pin has nothing to check (the wording drifted, or a call was added to or ' +
+        'dropped from the list); more than one means a second copy appeared unpinned.'
+      );
+    }
+
+    const documented = Number(matches[0][1].replace(/,/g, ''));
+    expect(Number.isInteger(documented)).toBe(true);
+    expect(documented).toBe(TILE_FIELD_MAX);
+
+    // The read-side counter-claim and the fillRect far edge are the two parts
+    // of the contract a reader cannot infer from the bound itself.
+    expect(flat).toContain('`getTile` floors nothing and throws nothing');
+    expect(flat).toContain('`x + w - 1` and `y + h - 1` must each stay within the');
+  });
+
   it('forge.tilemap.resize throws and pushes nothing', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {

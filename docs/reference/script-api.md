@@ -113,16 +113,41 @@ namespace set).
 `tilemapId` is the tilemap **entity** id. `tileId` is an index into the tilemap's
 tileset, and passing `null` erases rather than painting.
 
-Every coordinate, layer and tile index is floored before it is sent, so
-`worldToTile`-style fractional input works. A negative or non-finite argument
-**throws** instead of being sent: the engine reads each of these with
-`as_u64()`, and a rejection there discards the whole command silently, so the
-script would appear to succeed while the tilemap never changed.
+<!-- The 4,294,967,295 below is a second copy of TILE_FIELD_MAX, and the list of
+     calls it covers is a second copy of the code's own scope. Both are parsed out
+     of this file and checked by "script-api.md tile field bound prose matches the
+     exported constant" in web/src/lib/scripting/__tests__/scriptWorker.test.ts,
+     which fails closed if the sentence is missing or appears more than once. -->
+
+`setTile`, `fillRect` and `clearTile` floor every `x`, `y`, `w`, `h`, `layer`
+and `tileId` before sending, so `worldToTile`-style fractional input works. The
+floored value must then be at least `0` and must not exceed `4,294,967,295`
+(`TILE_FIELD_MAX` in `scriptWorker.ts` — the unsigned 32-bit field the engine
+reads each one into). Anything outside that range **throws**, naming the field,
+the value and the limit.
+
+Without that check both ends of the range fail silently, and they used to fail
+differently. A negative or non-finite value makes the engine's `as_u64()`
+return nothing, and a rejection there discards the whole command — the script
+appears to succeed while the tilemap never changes. A value above the ceiling
+was worse: the engine narrowed it into the 32-bit field instead of refusing it,
+so it wrapped around and painted a real cell nobody asked for. The engine now
+rejects it (`u32::try_from`), which puts it back in the first category — a
+whole command dropped with no signal — so the script layer throws first and
+says which field was out of range.
+
+The read side does **not** share that contract. `getTile` floors nothing and
+throws nothing — an out-of-range or fractional coordinate simply returns
+`null`, indistinguishable from an empty cell — and `worldToTile`, `tileToWorld`
+and `getMapSize` bound their arguments not at all.
 
 `fillRect` sends one command for the whole region and throws if the region
 exceeds `TILEMAP_FILL_MAX_CELLS` cells (derived in `scriptWorker.ts` from the
-dispatch payload guard, not a hand-written number). A zero-width or
-zero-height region is a no-op.
+dispatch payload guard, not a hand-written number). Its far edge is bounded as
+well as its origin: `x + w - 1` and `y + h - 1` must each stay within the
+ceiling, because those derived cells are what the engine actually reads. The
+error names which axis ran off the end and the value it reached. A zero-width
+or zero-height region is a no-op.
 
 ## forge.audio
 
