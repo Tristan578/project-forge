@@ -64,18 +64,44 @@ describe('POST /api/publish', () => {
   it('returns 403 if tier limit reached', async () => {
     const user = makeUser({ tier: 'starter' }); // max 1
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    
+
     const chainMock = {
       from: vi.fn().mockReturnThis(),
       where: vi.fn().mockResolvedValue([{ id: 'existing_1' }]), // Already has 1 published
     };
     vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(chainMock) } as unknown as ReturnType<typeof getDb>);
 
-    const req = new NextRequest('http://localhost/api/publish', { 
-      method: 'POST', 
-      body: JSON.stringify({ projectId: 'p1', title: 'Game', slug: 'my-game' }) 
+    const req = new NextRequest('http://localhost/api/publish', {
+      method: 'POST',
+      body: JSON.stringify({ projectId: 'p1', title: 'Game', slug: 'my-game' })
     });
     const res = await POST(req);
     expect(res.status).toBe(403);
+  });
+
+  it('returns 422 when title references a trademarked IP', async () => {
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
+
+    const req = new NextRequest('http://localhost/api/publish', {
+      method: 'POST',
+      body: JSON.stringify({ projectId: 'p1', title: 'Sonic 2 Ultimate', slug: 'original-slug' })
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error).toMatch(/trademark/i);
+  });
+
+  it('returns 422 when slug references a trademarked IP', async () => {
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
+
+    const req = new NextRequest('http://localhost/api/publish', {
+      method: 'POST',
+      body: JSON.stringify({ projectId: 'p1', title: 'Original Game', slug: 'sonic-2-ultimate' })
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error).toMatch(/trademark/i);
   });
 });
