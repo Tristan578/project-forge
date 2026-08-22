@@ -528,6 +528,111 @@ describe('runPipeline', () => {
     expect(resolvedAll).toEqual([{ entityIds: ['id-1'] }]);
   });
 
+  it('resolveStepOutputs walks an empty step slot instead of skipping past it', async () => {
+    // `.filter`/`.map` skip an array HOLE outright, so a rewrite to a callback
+    // form would report the list fully processed while a step vanished — and
+    // one JSON round trip turns that hole into a `null`, which the same
+    // callback form dereferences and throws on. Both slot shapes are fed here.
+    //
+    // The runner's own loop is walked over them too: it indexes `plan.steps`
+    // directly, so an unguarded slot would crash inside `dependenciesMet`
+    // before the resolver was ever consulted.
+    let resolvedAll: Record<string, unknown>[] | undefined;
+    let call = 0;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_enable', {
+        name: 'physics_enable',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => {
+          call += 1;
+          return { success: true, output: { entityIds: [`id-${call}`] } };
+        },
+        userFacingErrorMessage: '',
+      }],
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolvedAll = ctx.resolveStepOutputs('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    // The gap between the two commas is the input under test, not a typo, and
+    // the `null` beside it is what that gap becomes after a save/load cycle.
+    const steps = [
+      makeStep('step_0', 'physics_enable'),
+      ,
+      null as unknown as OrchestratorPlan['steps'][number],
+      makeStep('step_3', 'physics_enable'),
+      makeStep('step_4', 'physics_profile'),
+    ] as OrchestratorPlan['steps'];
+    expect(steps).toHaveLength(5);
+
+    const plan = makePlan({ steps });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    // `Array.from` materializes any hole as an explicit `undefined`, so this
+    // cannot pass on a sparse result the way `toHaveLength` would.
+    expect(Array.from(resolvedAll ?? [])).toEqual([
+      { entityIds: ['id-1'] },
+      { entityIds: ['id-2'] },
+    ]);
+    expect(plan.status).toBe('completed');
+  });
+
+  it('resolveStepOutputs omits a failed step that kept diagnostic output', async () => {
+    // `retainDiagnosticOutput` keeps the output of a step that returned
+    // `success: false`, so "has an output" is not "worked". An optional step is
+    // the case that matters: it is skipped and the plan runs ON, so a caller
+    // folding these together would silently take a half-finished step's ids for
+    // finished work.
+    let resolvedAll: Record<string, unknown>[] | undefined;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_enable', {
+        name: 'physics_enable',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => ({
+          success: false,
+          output: { entityIds: ['half-done'] },
+          error: {
+            code: 'COMMAND_FAILED',
+            message: 'Engine rejected a toggle_physics command',
+            userFacingMessage: 'Could not switch physics on.',
+            retryable: false,
+          },
+        }),
+        userFacingErrorMessage: '',
+      }],
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolvedAll = ctx.resolveStepOutputs('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    const plan = makePlan({
+      steps: [
+        makeStep('step_0', 'physics_enable', { optional: true }),
+        makeStep('step_1', 'physics_profile'),
+      ],
+    });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    // The output IS on the step — this is not a test that the runner dropped it.
+    expect(plan.steps[0].status).toBe('skipped');
+    expect(plan.steps[0].output).toEqual({ entityIds: ['half-done'] });
+    expect(resolvedAll).toEqual([]);
+  });
+
   it('resolveStepOutputs returns an empty list when no step matches', async () => {
     let resolvedAll: Record<string, unknown>[] | undefined;
 
@@ -547,6 +652,198 @@ describe('runPipeline', () => {
     await runPipeline(plan, probeRegistry, makeContext(controller.signal));
 
     expect(resolvedAll).toEqual([]);
+  });
+
+  it('resolveStepOutput walks an empty step slot instead of throwing on it', async () => {
+    // The SINGULAR resolver, which `auto_polish` calls on every real run.
+    // `.find` does NOT skip a hole — it visits it with `undefined` — and a
+    // `null` slot behaves the same way, so an unguarded lookup throws inside
+    // whichever executor happened to ask, blaming that step for a gap
+    // somewhere else in the plan.
+    let resolved: Record<string, unknown> | undefined;
+    let call = 0;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_enable', {
+        name: 'physics_enable',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => {
+          call += 1;
+          return { success: true, output: { entityIds: [`id-${call}`] } };
+        },
+        userFacingErrorMessage: '',
+      }],
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolved = ctx.resolveStepOutput('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    // The gap between the two commas is the input under test, not a typo.
+    const steps = [
+      makeStep('step_0', 'physics_enable'),
+      ,
+      null as unknown as OrchestratorPlan['steps'][number],
+      makeStep('step_3', 'physics_profile'),
+    ] as OrchestratorPlan['steps'];
+
+    const plan = makePlan({ steps });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    // A throw inside the executor is caught by the runner and reported as a
+    // step failure, so the status assertion is what catches an unguarded
+    // lookup — the resolved value alone would not.
+    expect(plan.steps[3].status).toBe('completed');
+    expect(resolved).toEqual({ entityIds: ['id-1'] });
+  });
+
+  it('resolveStepOutput omits a failed step that kept diagnostic output', async () => {
+    // Same rule as the plural resolver: `retainDiagnosticOutput` keeps a failed
+    // step's output, so "has an output" is not "worked". An optional step is
+    // the case that matters — the plan runs ON past it.
+    let resolved: Record<string, unknown> | undefined;
+
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['physics_enable', {
+        name: 'physics_enable',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => ({
+          success: false,
+          error: { code: 'ERR', message: 'half done', userFacingMessage: 'Half done', retryable: false },
+          output: { entityIds: ['half-done'] },
+        }),
+        userFacingErrorMessage: '',
+      }],
+      ['physics_profile', {
+        name: 'physics_profile',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          resolved = ctx.resolveStepOutput('physics_enable');
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+
+    const plan = makePlan({
+      steps: [
+        makeStep('step_0', 'physics_enable', { optional: true }),
+        makeStep('step_1', 'physics_profile'),
+      ],
+    });
+    await runPipeline(plan, probeRegistry, makeContext(controller.signal));
+
+    // The output IS on the step — this is not a test that the runner dropped it.
+    expect(plan.steps[0].status).toBe('skipped');
+    expect(plan.steps[0].output).toEqual({ entityIds: ['half-done'] });
+    expect(resolved).toBeUndefined();
+  });
+
+  it('skips the steps after a failure across an empty slot', async () => {
+    // The "skip everything after the failure" loop walks raw indices, so it is
+    // the one place an empty slot is guaranteed to be touched — and it runs on
+    // the FAILURE path, where an unguarded write turns a handled step failure
+    // into an unhandled TypeError out of `runPipeline` itself.
+    const steps = [
+      makeStep('step_0', 'physics_profile'),
+      ,
+      null as unknown as OrchestratorPlan['steps'][number],
+      makeStep('step_3', 'scene_create'),
+    ] as OrchestratorPlan['steps'];
+
+    const plan = makePlan({ steps });
+    const result = await runPipeline(
+      plan,
+      makeRegistry(failureExecutor, successExecutor),
+      makeContext(controller.signal),
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.steps[0].status).toBe('failed');
+    expect(result.steps[3].status).toBe('skipped');
+  });
+
+  it('skips the steps after a cancel across an empty slot', async () => {
+    // Same index walk on the cancel path. The empty slots sit after the first
+    // step the abort check reaches, which is what puts them inside the skip
+    // loop rather than the `continue` above it.
+    const localController = new AbortController();
+
+    const abortingExecutor: ExecutorDefinition = {
+      name: 'scene_create',
+      inputSchema: z.object({}),
+      execute: async (): Promise<ExecutorResult> => {
+        localController.abort();
+        return { success: true, output: {} };
+      },
+      userFacingErrorMessage: '',
+    };
+
+    const steps = [
+      makeStep('step_0', 'scene_create'),
+      makeStep('step_1', 'verify_all_scenes'),
+      ,
+      null as unknown as OrchestratorPlan['steps'][number],
+      makeStep('step_4', 'verify_all_scenes'),
+    ] as OrchestratorPlan['steps'];
+
+    const plan = makePlan({ steps });
+    const result = await runPipeline(
+      plan,
+      makeRegistry(abortingExecutor, verifyExecutor),
+      makeContext(localController.signal),
+    );
+
+    expect(result.status).toBe('cancelled');
+    expect(result.steps[1].status).toBe('skipped');
+    expect(result.steps[4].status).toBe('skipped');
+  });
+
+  it('records an empty step slot on the plan instead of quietly finishing without it', async () => {
+    // Tolerating a gap is only half an answer: a plan that runs every step it
+    // HAS and reports `completed` leaves nothing to say a step it called for
+    // never ran.
+    const steps = [
+      makeStep('step_0', 'scene_create'),
+      ,
+      null as unknown as OrchestratorPlan['steps'][number],
+    ] as OrchestratorPlan['steps'];
+
+    const plan = makePlan({ steps });
+    const result = await runPipeline(plan, makeRegistry(successExecutor), makeContext(controller.signal));
+
+    expect(result.status).toBe('completed');
+    expect(result.warnings).toEqual([
+      'Plan step slots 1, 2 are empty; those steps did not run.',
+    ]);
+
+    const single = makePlan({
+      steps: [
+        makeStep('step_0', 'scene_create'),
+        null as unknown as OrchestratorPlan['steps'][number],
+      ] as OrchestratorPlan['steps'],
+    });
+    const singleResult = await runPipeline(
+      single,
+      makeRegistry(successExecutor),
+      makeContext(controller.signal),
+    );
+    expect(singleResult.warnings).toEqual([
+      'Plan step slot 1 is empty; that step did not run.',
+    ]);
+  });
+
+  it('leaves warnings alone on a plan with no empty slot', async () => {
+    const plan = makePlan({ steps: [makeStep('step_0', 'scene_create')] });
+    const result = await runPipeline(plan, makeRegistry(successExecutor), makeContext(controller.signal));
+
+    expect(result.status).toBe('completed');
+    expect(result.warnings).toBeUndefined();
   });
 
   it('respects abort signal: completes current step then skips remaining', async () => {

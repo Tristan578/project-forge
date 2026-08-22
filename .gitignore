@@ -64,7 +64,8 @@ web/public/engine-pkg-webgl2-runtime/
 web/public/engine-pkg-webgpu-runtime/
 
 # ----- Node / npm -----
-node_modules/
+# Bare (no trailing slash) on purpose: worktrees symlink web/node_modules at the
+# main repo's tree, and a `node_modules/` pattern matches only real directories.
 node_modules
 web/package-lock.json
 npm-debug.log*

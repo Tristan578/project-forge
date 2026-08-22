@@ -42,6 +42,49 @@ function setStepStatus(step: PlanStep, status: PlanStep['status']): void {
 }
 
 /**
+ * Mark the step at `index` skipped, tolerating an empty slot.
+ *
+ * The "skip everything after the failure" loops walk raw indices, so they are
+ * the one place a hole or a `null` in `plan.steps` is guaranteed to be touched
+ * — and a bare `step.status =` there turns a handled step failure into an
+ * unhandled TypeError, i.e. the failure path is where the crash lands.
+ */
+function skipStepAt(plan: OrchestratorPlan, index: number): void {
+  const step = plan.steps[index];
+  if (step) setStepStatus(step, 'skipped');
+}
+
+/**
+ * Record every empty slot in `plan.steps` on the plan itself.
+ *
+ * The runner does not build the plan it is handed: `runPipeline` is exported
+ * from the package barrel and takes any `OrchestratorPlan`, and the store hands
+ * one straight through from its public `setPlan`. So `plan.steps` is
+ * caller-supplied data, not something `buildPlan` vouched for, and the readers
+ * below refuse to dereference it blind.
+ *
+ * Tolerating a gap is only half an answer, though. A plan with a missing step
+ * would otherwise run every step that IS there, report `completed`, and leave
+ * nothing anywhere to say that a step the plan called for never ran. The slots
+ * are recorded rather than compacted away so the indices the rest of the run
+ * reports — `currentStepIndex`, the panel's progress — keep meaning what they
+ * meant when the plan was handed over.
+ */
+function recordEmptyStepSlots(plan: OrchestratorPlan): void {
+  const empty: number[] = [];
+  for (let i = 0; i < plan.steps.length; i += 1) {
+    if (!plan.steps[i]) empty.push(i);
+  }
+  if (empty.length === 0) return;
+  const warnings = plan.warnings ?? [];
+  warnings.push(
+    `Plan step ${empty.length === 1 ? 'slot' : 'slots'} ${empty.join(', ')} `
+      + `${empty.length === 1 ? 'is' : 'are'} empty; ${empty.length === 1 ? 'that step' : 'those steps'} did not run.`,
+  );
+  plan.warnings = warnings;
+}
+
+/**
  * Check whether all steps listed in dependsOn have completed successfully.
  * Uses a precomputed Map for O(1) lookups instead of O(n) find() per dep.
  */
@@ -106,15 +149,30 @@ export async function runPipeline(
 ): Promise<OrchestratorPlan> {
   // Build a resolveStepOutput function that closes over the plan's steps.
   // The caller's context.resolveStepOutput is replaced with this live version.
+  //
+  // COMPLETED steps only, exactly as `liveResolveAll` below: the two resolvers
+  // answer the same question about the same plan, so a caller must not be able
+  // to reach a step's retained diagnostic output through one of them and not
+  // the other (see `ExecutorContext.resolveStepOutput`).
+  //
+  // Indexed loop with a null guard, also as below: `.find` does NOT skip an
+  // array hole — it yields `undefined` — and one JSON round trip turns that
+  // hole into a `null` whose first field read throws. This resolver is not a
+  // corner: `auto_polish` is non-optional and calls it on every real run, so a
+  // plan the main loop tolerates would still die here, and die blaming
+  // `auto_polish` for a gap somewhere else entirely.
   const liveResolve = (stepIdOrExecutorName: string): Record<string, unknown> | undefined => {
-    // 1. Try exact step ID match first (e.g. 'step_0')
-    const byId = plan.steps.find((s) => s.id === stepIdOrExecutorName);
-    if (byId) {
-      return byId.output;
+    let byName: Record<string, unknown> | undefined;
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      const step = plan.steps[i];
+      if (!step || step.status !== 'completed' || !step.output) continue;
+      // 1. An exact step ID match (e.g. 'step_0') wins outright.
+      if (step.id === stepIdOrExecutorName) return step.output;
+      // 2. Otherwise the FIRST executor-name match (e.g. 'scene_create') — and
+      //    only the first, which is the trap `resolveStepOutputs` exists for.
+      if (byName === undefined && step.executor === stepIdOrExecutorName) byName = step.output;
     }
-    // 2. Fall back to matching by executor name (e.g. 'scene_create')
-    const byName = plan.steps.find((s) => s.executor === stepIdOrExecutorName);
-    return byName?.output;
+    return byName;
   };
 
   // Every output for an executor name, not just the first.
@@ -125,13 +183,23 @@ export async function runPipeline(
   // A caller reading the singular resolver's `entityIds` silently gets half the
   // scene (see `ExecutorContext.resolveStepOutputs`).
   //
-  // Indexed loop: `.filter`/`.map` skip an array hole outright, and a dropped
-  // step here is invisible — the ids just never arrive.
+  // COMPLETED steps only. `retainDiagnosticOutput` deliberately keeps the output
+  // of a step that FAILED — `verify_all_scenes` reports why the game cannot be
+  // won and then returns `success: false` — so "has an output" and "worked" are
+  // different questions here. A failed optional step is skipped and the plan
+  // runs on, which is exactly when a caller folding these outputs together
+  // would otherwise take a half-finished step's ids for finished work.
+  //
+  // Indexed loop with a null guard: `.filter`/`.map` skip an array hole
+  // outright (a dropped step here is invisible — the ids just never arrive),
+  // and one JSON round trip turns a hole into a `null` that a callback form
+  // would dereference and throw on.
   const liveResolveAll = (executorName: string): Record<string, unknown>[] => {
     const out: Record<string, unknown>[] = [];
     for (let i = 0; i < plan.steps.length; i += 1) {
       const step = plan.steps[i];
-      if (step?.executor !== executorName) continue;
+      if (!step || step.executor !== executorName) continue;
+      if (step.status !== 'completed') continue;
       if (step.output) out.push(step.output);
     }
     return out;
@@ -144,6 +212,10 @@ export async function runPipeline(
     resolveStepOutputs: liveResolveAll,
   };
 
+  // Write down any empty slot before anything reads the array, so a plan that
+  // finishes still says a step was missing from it.
+  recordEmptyStepSlots(plan);
+
   // Mark plan as executing
   setPlanStatus(plan, 'executing', callbacks);
 
@@ -154,19 +226,29 @@ export async function runPipeline(
 
   // Precompute step lookup map for O(1) dependency checks
   const stepMap = new Map<string, PlanStep>();
+  // `for...of` does NOT skip a hole the way `.forEach` does — it yields
+  // `undefined` — so the guard is doing real work here, not restating the loop
+  // guard above.
   for (const s of plan.steps) {
-    stepMap.set(s.id, s);
+    if (s) stepMap.set(s.id, s);
   }
 
   for (let i = 0; i < plan.steps.length; i++) {
     const step = plan.steps[i];
     plan.currentStepIndex = i;
 
+    // An empty slot is a caller-supplied plan the runner did not build (see
+    // `recordEmptyStepSlots`, which has already written it down). Dereferencing
+    // one here throws inside `dependenciesMet` on the very first field read,
+    // which takes down the whole run — so it is stepped over rather than
+    // trusted.
+    if (!step) continue;
+
     // Check abort signal before starting each new step
     if (context.signal.aborted) {
       // Mark all remaining steps as skipped and set plan to cancelled
       for (let j = i; j < plan.steps.length; j++) {
-        setStepStatus(plan.steps[j], 'skipped');
+        skipStepAt(plan, j);
       }
       setPlanStatus(plan, 'cancelled', callbacks);
       return plan;
@@ -186,7 +268,7 @@ export async function runPipeline(
         };
         setPlanStatus(plan, 'failed', callbacks);
         for (let j = i + 1; j < plan.steps.length; j++) {
-          setStepStatus(plan.steps[j], 'skipped');
+          skipStepAt(plan, j);
         }
         return plan;
       }
@@ -208,7 +290,7 @@ export async function runPipeline(
         setPlanStatus(plan, 'failed', callbacks);
         // Skip remaining steps
         for (let j = i + 1; j < plan.steps.length; j++) {
-          setStepStatus(plan.steps[j], 'skipped');
+          skipStepAt(plan, j);
         }
         return plan;
       }
@@ -264,7 +346,7 @@ export async function runPipeline(
       step.error = lastResult?.error;
       retainDiagnosticOutput(step, lastResult);
       for (let j = i + 1; j < plan.steps.length; j++) {
-        setStepStatus(plan.steps[j], 'skipped');
+        skipStepAt(plan, j);
       }
       setPlanStatus(plan, 'cancelled', callbacks);
       return plan;
@@ -289,7 +371,7 @@ export async function runPipeline(
         setPlanStatus(plan, 'failed', callbacks);
         // Skip remaining steps
         for (let j = i + 1; j < plan.steps.length; j++) {
-          setStepStatus(plan.steps[j], 'skipped');
+          skipStepAt(plan, j);
         }
         return plan;
       }
@@ -309,7 +391,7 @@ export async function runPipeline(
           setPlanStatus(plan, 'cancelled', callbacks);
           // Skip all remaining steps
           for (let j = i + 1; j < plan.steps.length; j++) {
-            setStepStatus(plan.steps[j], 'skipped');
+            skipStepAt(plan, j);
           }
           return plan;
         }
