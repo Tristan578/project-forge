@@ -78,8 +78,17 @@ pub const CONTROLLER_OFFSET: f32 = 0.02;
 pub struct CharacterMotionState {
     /// Current vertical speed in units/s. Negative is falling.
     pub vertical_velocity: f32,
-    /// Whether the character was standing on something as of the last frame
-    /// Rapier reported. Read by the bridge and forwarded to scripts.
+    /// Whether the character is standing on something.
+    ///
+    /// Seeded each frame from the contact state Rapier reported for the
+    /// previous frame, then CORRECTED to `false` on the frame a jump is
+    /// accepted — Rapier writes its output in `PostUpdate`, so its raw value
+    /// still reads `true` while the character is already rising.
+    ///
+    /// This is the value the bridge emits as `CHARACTER_GROUNDED_CHANGED`
+    /// (`bridge::game::emit_character_grounded_system`), so a script's
+    /// `forge.physics.isGrounded()` and this module's own jump gating can never
+    /// disagree about whether a character is airborne.
     pub grounded: bool,
     /// Jumps consumed since the character last stood on the ground. Walking off
     /// a ledge spends the ground jump, so `canDoubleJump` grants exactly one
@@ -387,6 +396,58 @@ mod tests {
         assert_eq!(state.jumps_used, 1);
     }
 
+    /// The frame a jump is accepted must report NOT grounded, even though the
+    /// input said grounded — Rapier writes its contact output in `PostUpdate`,
+    /// so its raw flag still reads `true` while the character is already
+    /// rising. `bridge::game::emit_character_grounded_system` emits THIS field,
+    /// so without the correction `forge.physics.isGrounded()` answers `true`
+    /// for the first frame of every jump.
+    #[test]
+    fn an_accepted_jump_reports_not_grounded_on_the_same_frame() {
+        let mut state = CharacterMotionState::default();
+        step_character(
+            &mut state,
+            CharacterStepInput { grounded: true, jump_just_pressed: true, ..base_input() },
+        );
+        assert!(!state.grounded, "takeoff frame must not report grounded");
+    }
+
+    /// The mirror image: with no jump accepted, the reported contact state is
+    /// exactly what the engine reported, in BOTH directions. A one-way pin
+    /// would be satisfied by a field hardwired to `false`, which is precisely
+    /// the shape the bug would take.
+    #[test]
+    fn without_a_jump_the_reported_contact_follows_the_engine() {
+        let mut state = CharacterMotionState::default();
+
+        step_character(&mut state, CharacterStepInput { grounded: true, ..base_input() });
+        assert!(state.grounded, "standing on something must report grounded");
+
+        step_character(&mut state, base_input());
+        assert!(!state.grounded, "leaving the ground must stop reporting grounded");
+
+        step_character(&mut state, CharacterStepInput { grounded: true, ..base_input() });
+        assert!(state.grounded, "landing must report grounded again");
+    }
+
+    /// A jump the gating REFUSES must not fake a takeoff: the character is
+    /// still exactly where it was, so a script must not be told it left the
+    /// ground.
+    #[test]
+    fn a_refused_mid_air_jump_does_not_fake_a_takeoff() {
+        let mut state = CharacterMotionState::default();
+        // Airborne, ground jump spent, no double jump — the next jump is refused.
+        step_character(&mut state, base_input());
+        assert_eq!(state.jumps_used, 1);
+
+        step_character(
+            &mut state,
+            CharacterStepInput { jump_just_pressed: true, ..base_input() },
+        );
+        assert_eq!(state.jumps_used, 1, "the refused jump must not spend budget");
+        assert!(!state.grounded);
+    }
+
     #[test]
     fn jump_is_ignored_in_mid_air_without_double_jump() {
         let mut state = CharacterMotionState::default();
@@ -572,6 +633,102 @@ mod tests {
             Some(RigidBody::KinematicPositionBased)
         ));
         assert_eq!(world.get::<LockedAxes>(entity).copied(), Some(LockedAxes::ROTATION_LOCKED));
+    }
+
+    /// Every field of the attached controller, asserted individually.
+    ///
+    /// The slope, autostep and snap-to-ground configuration IS the ticket's
+    /// "slope/step" deliverable, and `snap_to_ground` is what makes the
+    /// `grounded` flag the whole JS-side feature reads correct at all — without
+    /// it the flag flickers on every seam in a ramp. None of it is observable
+    /// from the outside, so a representative field is not enough: deleting ANY
+    /// one of these must turn a test red.
+    #[test]
+    fn the_attached_controller_carries_the_full_slope_and_step_configuration() {
+        let mut world = World::new();
+        let entity = world
+            .spawn((character(), Collider::cuboid(0.5, 0.5, 0.5), Transform::default()))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(manage_character_controller_lifecycle);
+        run_lifecycle(&mut world, &mut schedule, EngineMode::Play);
+
+        let controller = world
+            .get::<KinematicCharacterController>(entity)
+            .expect("controller attached");
+
+        assert_eq!(controller.up, Vec3::Y, "up must be world up");
+        assert!(
+            matches!(controller.offset, CharacterLength::Absolute(v) if v == CONTROLLER_OFFSET),
+            "skin width must be {CONTROLLER_OFFSET}, got {:?}",
+            controller.offset
+        );
+        assert!(controller.slide, "a character must slide along walls, not stick to them");
+        assert_eq!(
+            controller.max_slope_climb_angle,
+            MAX_SLOPE_CLIMB_DEGREES.to_radians(),
+            "climb angle is configured in degrees and must reach Rapier as radians"
+        );
+        assert_eq!(
+            controller.min_slope_slide_angle,
+            MIN_SLOPE_SLIDE_DEGREES.to_radians(),
+            "slide angle is configured in degrees and must reach Rapier as radians"
+        );
+        assert!(
+            matches!(
+                controller.snap_to_ground,
+                Some(CharacterLength::Absolute(v)) if v == SNAP_TO_GROUND
+            ),
+            "snap-to-ground is what keeps `grounded` stable on a ramp, got {:?}",
+            controller.snap_to_ground
+        );
+        assert!(
+            matches!(
+                controller.autostep,
+                Some(CharacterAutostep {
+                    max_height: CharacterLength::Absolute(h),
+                    min_width: CharacterLength::Absolute(w),
+                    include_dynamic_bodies: true,
+                }) if h == STEP_HEIGHT && w == MIN_STEP_WIDTH
+            ),
+            "autostep must lift the character over a {STEP_HEIGHT} step, got {:?}",
+            controller.autostep
+        );
+        assert!(
+            controller.apply_impulse_to_dynamic_bodies,
+            "walking into a crate must push it"
+        );
+
+        // Non-vacuity, and its honest bound. Four of the fields above differ
+        // from `KinematicCharacterController::default()` (measured against
+        // bevy_rapier3d 0.34 / rapier3d 0.24), so deleting the line that sets
+        // one of them turns this test red — which is the whole point, since
+        // `make_controller` was previously unasserted in full.
+        //
+        // The other four (`up`, `slide`, `max_slope_climb_angle`,
+        // `apply_impulse_to_dynamic_bodies`) RESTATE Rapier's default, so
+        // deleting those lines cannot be caught here by any assertion. Stated
+        // rather than left for a reader to assume otherwise. These four
+        // `assert_ne!`s fail if a future Rapier bump moves a default onto one
+        // of our values, which is the signal that the bound has widened.
+        let stock = KinematicCharacterController::default();
+        assert_ne!(
+            controller.offset, stock.offset,
+            "skin width must be a deliberate value, not Rapier's default"
+        );
+        assert_ne!(
+            controller.autostep, stock.autostep,
+            "autostep is off by default in Rapier; this PR turns it on"
+        );
+        assert_ne!(
+            controller.min_slope_slide_angle, stock.min_slope_slide_angle,
+            "the slide angle must be our 30 degrees, not Rapier's 45"
+        );
+        assert_ne!(
+            controller.snap_to_ground, stock.snap_to_ground,
+            "snap must be absolute metres, not Rapier's relative default"
+        );
     }
 
     #[test]

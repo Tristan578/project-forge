@@ -374,7 +374,17 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, game::emit_game_events_system)
             // Mirror kinematic ground contact to the script sandbox (PF-1214).
             // Not runtime-gated: exported games run the same scripts.
-            .add_systems(Update, game::emit_character_grounded_system)
+            //
+            // `.after(...)` is load-bearing: the emitter reads
+            // `CharacterMotionState` and `system_character_controller` writes
+            // it (clearing `grounded` on the frame a jump is accepted). Without
+            // the edge the two conflict and whether the emitted flag is this
+            // frame's or last frame's is unspecified.
+            .add_systems(
+                Update,
+                game::emit_character_grounded_system
+                    .after(crate::core::game_components::system_character_controller),
+            )
             .add_systems(Update, core_systems::apply_mode_change_requests)
             .add_systems(Update, scripts::apply_input_binding_updates)
             .add_systems(Update, physics::apply_physics_updates)

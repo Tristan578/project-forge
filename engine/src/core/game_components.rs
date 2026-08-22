@@ -885,8 +885,13 @@ type CharacterMovementQuery<'w, 's> = Query<
     ),
 >;
 
-/// Character controller: apply WASD movement and jump
-fn system_character_controller(
+/// Character controller: apply WASD movement and jump.
+///
+/// `pub(crate)` so `bridge::game::emit_character_grounded_system` can order
+/// itself after this system: both touch `CharacterMotionState` (this one
+/// writes it, the emitter reads it) and without an explicit edge which value
+/// the emitter sees is unspecified.
+pub(crate) fn system_character_controller(
     time: Res<Time>,
     input: Option<Res<super::input::InputState>>,
     runtime: Option<Res<GameComponentRuntime>>,
