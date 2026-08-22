@@ -10,25 +10,25 @@ hooks:
   PreToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/check-db-transaction.sh"
-      timeout: 5000
+      timeout: 5
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-main-commits.sh"
-      timeout: 5000
+      timeout: 5
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/pre-push-quality-gate.sh"
-      timeout: 300000
+      timeout: 300
   PostToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/post-edit-lint.sh"
-      timeout: 15000
+      timeout: 15
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/worktree-safety-commit.sh"
-      timeout: 15000
+      timeout: 15
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/builder-quality-gate.sh"
-      timeout: 10000
+      timeout: 10
 ---
 # Identity: The Senior Engineer
 

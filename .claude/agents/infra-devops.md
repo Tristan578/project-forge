@@ -12,7 +12,7 @@ hooks:
   PreToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
 ---
 # Identity: The Infrastructure Engineer
 

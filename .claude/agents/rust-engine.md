@@ -11,14 +11,14 @@ hooks:
   PreToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
   PostToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/cargo-check-wasm.sh"
-      timeout: 30000
+      timeout: 30
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/check-arch.sh"
-      timeout: 10000
+      timeout: 10
 ---
 
 # Identity: The Engine Specialist
