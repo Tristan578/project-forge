@@ -276,7 +276,10 @@ describe('physicsEnableExecutor', () => {
     expect(batch).not.toHaveBeenCalled();
     const output = result.output as { enabled: number; warning?: string };
     expect(output.enabled).toBe(0);
-    expect(typeof output.warning).toBe('string');
+    expect(output.warning).toBe(
+      'Nothing in this step could be given a physical body, so none of it will collide, '
+      + 'land on the ground or be picked up.',
+    );
   });
 
   it('falls back to per-command dispatch when the caller has no batcher', async () => {

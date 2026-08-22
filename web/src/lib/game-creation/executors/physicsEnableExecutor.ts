@@ -52,7 +52,7 @@ const physicsEntity = z.object({
    * a role whose profile pins its own collider shape does not need it, and a
    * step planned before this field existed still runs.
    */
-  shape: z.enum(SPAWNABLE_SHAPES as unknown as [string, ...string[]]).optional(),
+  shape: z.enum(SPAWNABLE_SHAPES).optional(),
 });
 
 const inputSchema = z.object({
