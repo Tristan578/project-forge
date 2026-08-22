@@ -566,6 +566,87 @@ describe('scriptWorker', () => {
     );
   });
 
+
+  // ─── forge.physics.isGrounded (PF-1214) ─────────────────────────
+
+  it('forge.physics.isGrounded answers false for a character it has not been told about', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.log(forge.physics.isGrounded("e1") ? "grounded" : "airborne");
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // No entry means "not a kinematic character, or never reported" — guessing
+    // grounded would let a script jump off thin air on frame one.
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'airborne' })
+    );
+  });
+
+  it('forge.physics.isGrounded reads the ground contact synced at init', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.log(forge.physics.isGrounded("e1") ? "grounded" : "airborne");
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      { groundedStates: { e1: true } }
+    ));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'grounded' })
+    );
+  });
+
+  it('tick refreshes the grounded mirror so a script sees the character leave the floor', async () => {
+    const handler = await setupWorker();
+    const code = `function onUpdate(dt) {
+      forge.log(forge.physics.isGrounded("e1") ? "grounded" : "airborne");
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      { groundedStates: { e1: true } }
+    ));
+    await handler({ data: { type: 'tick', dt: 0.016, groundedStates: { e1: false } } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'airborne' })
+    );
+  });
+
+  it('a tick that carries no grounded map leaves the last known contact in place', async () => {
+    const handler = await setupWorker();
+    const code = `function onUpdate(dt) {
+      forge.log(forge.physics.isGrounded("e1") ? "grounded" : "airborne");
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      { groundedStates: { e1: true } }
+    ));
+    await handler({ data: { type: 'tick', dt: 0.016 } });
+
+    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log').map((c) => c[0].message);
+    expect(logs).toContain('grounded');
+    expect(logs).not.toContain('airborne');
+  });
+
+  it('forge.physics.isGrounded does not resolve prototype keys as ground', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.log(forge.physics.isGrounded("constructor") ? "grounded" : "airborne");
+      forge.log(forge.physics.isGrounded("toString") ? "grounded" : "airborne");
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log').map((c) => c[0].message);
+    expect(logs).toEqual(['airborne', 'airborne']);
+  });
+
   // ─── Forge Audio API ────────────────────────────────────────────
 
   it('forge.audio play/stop/pause push commands and track state', async () => {

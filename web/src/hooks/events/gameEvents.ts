@@ -9,6 +9,7 @@ import { useEditorStore, type GameComponentData, firePlayTick } from '@/stores/e
 import { parseGameCameraWire } from '@/lib/game/gameCameraPayload';
 import { parseEmittedGameComponent } from '@/lib/engine/gameComponentWire';
 import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
+import { setCharacterGrounded } from '@/lib/scripting/groundedRegistry';
 import { castPayload, type SetFn, type GetFn } from './types';
 
 /**
@@ -113,6 +114,22 @@ export function handleGameEvent(
         useEditorStore.getState().setGameWon(true);
       }
       getScriptGameEventCallback()?.(payload);
+      return true;
+    }
+
+    case 'CHARACTER_GROUNDED_CHANGED': {
+      // Rapier decides ground contact inside the character sweep (PF-1214) and
+      // the play-tick wire carries transforms only, so this event is the sole
+      // path by which a script can tell a jump from a fall. The engine emits
+      // CHANGES, never a per-frame flood, so the mirror has to be kept.
+      const payload = castPayload<{ entityId: string; grounded: boolean }>(data);
+      // `castPayload` is an unchecked assertion and this id becomes a KEY in
+      // the mirror: an absent one would file the contact under the string
+      // "undefined", where no script would ever find it.
+      if (typeof payload.entityId !== 'string' || payload.entityId === '') return true;
+      // Strict `=== true`: anything else means "not standing on something", so
+      // a mismatched engine build cannot make thin air walkable.
+      setCharacterGrounded(payload.entityId, payload.grounded === true);
       return true;
     }
 

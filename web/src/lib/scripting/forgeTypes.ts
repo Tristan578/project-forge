@@ -82,6 +82,8 @@ declare namespace forge {
     function applyImpulse(entityId: string, fx: number, fy: number, fz: number): void;
     /** Set linear velocity directly */
     function setVelocity(entityId: string, vx: number, vy: number, vz: number): void;
+    /** Whether the kinematic character controller last reported this entity standing on something. Synchronous, unlike the 2D raycast version; false for an entity with no character controller. */
+    function isGrounded(entityId: string): boolean;
     /** Get entity IDs currently in contact (proximity-based). Optional radius overrides collider size. */
     function getContacts(entityId: string, radius?: number): string[];
     /** Get distance between two entities */

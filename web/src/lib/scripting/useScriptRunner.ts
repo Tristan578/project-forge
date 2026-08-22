@@ -15,6 +15,7 @@ import type { AsyncRequest } from '@/lib/scripting/asyncTypes';
 import { showError } from '@/lib/toast';
 import { DeltaSerializer, type SceneSnapshot } from '@/lib/engine/deltaSerializer';
 import { checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
+import { getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
 
 // Commands allowed from user scripts (maps to forge.* API surface)
 const SCRIPT_ALLOWED_COMMANDS = new Set([
@@ -466,6 +467,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         };
       }
 
+      // A restarted game must not inherit the previous session's last-frame
+      // ground contact — the engine emits CHANGES, so a stale `true` would
+      // never be corrected (PF-1214).
+      clearGroundedStates();
+
       worker.postMessage({
         type: 'init',
         scripts,
@@ -475,6 +481,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         tilemapStates,
         skeletonStates,
         physics2dVelocities: {},
+        groundedStates: getGroundedStates(),
       });
 
       // Send scene info to worker
@@ -567,6 +574,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           inputState: tickData.inputState,
           audioPlayingStates: audioManager.getPlayingStates(),
           tilemapStates: tickTilemapStates,
+          // Kinematic ground contact, accumulated from CHARACTER_GROUNDED_CHANGED.
+          // Small by construction: one entry per character, not per entity.
+          groundedStates: getGroundedStates(),
           asyncResponses,
         });
 
@@ -647,6 +657,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         routerRef.current.reset();
         routerRef.current = null;
       }
+      clearGroundedStates();
       workerRef.current.postMessage({ type: 'stop' });
       workerRef.current.terminate();
       workerRef.current = null;
@@ -681,6 +692,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         workerRef.current.terminate();
         workerRef.current = null;
       }
+      clearGroundedStates();
       // Reset async channel router to abort in-flight operations and prevent leaks
       if (routerRef.current) {
         routerRef.current.reset();

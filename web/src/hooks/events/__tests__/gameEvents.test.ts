@@ -21,6 +21,7 @@ vi.mock('@/lib/scripting/useScriptRunner', () => ({
 
 import { useEditorStore, firePlayTick } from '@/stores/editorStore';
 import { handleGameEvent } from '../gameEvents';
+import { isCharacterGrounded, getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
 
 describe('handleGameEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -498,6 +499,74 @@ describe('handleGameEvent', () => {
       expect(result).toBe(true);
       expect(setGameWon).not.toHaveBeenCalled();
       expect(mockScriptGameEventCallback).toHaveBeenCalledWith(payload);
+    });
+  });
+
+  /**
+   * PF-1214. Rapier decides `grounded` inside the character sweep and nothing
+   * on this side can see it, so the bridge emits the changes and this handler
+   * is the only thing that writes them into the script-visible mirror.
+   */
+  describe('CHARACTER_GROUNDED_CHANGED', () => {
+    beforeEach(() => {
+      clearGroundedStates();
+    });
+
+    it('records a ground contact for the script sandbox', () => {
+      const result = handleGameEvent(
+        'CHARACTER_GROUNDED_CHANGED',
+        { entityId: 'player-1', grounded: true },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(isCharacterGrounded('player-1')).toBe(true);
+    });
+
+    it('records leaving the ground', () => {
+      handleGameEvent('CHARACTER_GROUNDED_CHANGED', { entityId: 'player-1', grounded: true }, mockSetGet.set, mockSetGet.get);
+      handleGameEvent('CHARACTER_GROUNDED_CHANGED', { entityId: 'player-1', grounded: false }, mockSetGet.set, mockSetGet.get);
+
+      expect(isCharacterGrounded('player-1')).toBe(false);
+    });
+
+    /**
+     * The id is a KEY in the mirror. `castPayload` is an unchecked assertion,
+     * so an absent id would file the contact under the string "undefined" and
+     * a script asking about the real player would never see it.
+     */
+    it('ignores a payload with no usable entity id', () => {
+      const result = handleGameEvent(
+        'CHARACTER_GROUNDED_CHANGED',
+        { grounded: true },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(isCharacterGrounded('undefined')).toBe(false);
+      expect(getGroundedStates()).toEqual({});
+    });
+
+    it('ignores an empty entity id', () => {
+      handleGameEvent('CHARACTER_GROUNDED_CHANGED', { entityId: '', grounded: true }, mockSetGet.set, mockSetGet.get);
+      expect(getGroundedStates()).toEqual({});
+    });
+
+    /**
+     * Anything that is not literally `true` means "not standing on something".
+     * A truthy-but-not-boolean value from a mismatched engine build must not
+     * read as ground.
+     */
+    it('treats a non-boolean grounded field as airborne', () => {
+      handleGameEvent(
+        'CHARACTER_GROUNDED_CHANGED',
+        { entityId: 'player-1', grounded: 'yes' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+      expect(isCharacterGrounded('player-1')).toBe(false);
     });
   });
 });
