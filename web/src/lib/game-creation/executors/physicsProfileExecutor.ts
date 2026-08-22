@@ -82,8 +82,22 @@ function collectTargetIds(
 export const physicsProfileExecutor: ExecutorDefinition = {
   name: 'physics_profile',
   inputSchema,
+  // `OrchestratorPanel`'s `StepItem` renders this under the failed step, so it
+  // is read by someone whose game is already mistuned and who has no other clue
+  // what to do next. "Your game will use default physics" describes the damage
+  // and stops there; the remediation below is the same one the zero-ids WARNING
+  // carries, for the same reason and in the same on-screen vocabulary
+  // (Hierarchy, Physics › Enabled, Friction/Restitution/Gravity) — one failure
+  // mode should not be followable and the other a dead end.
+  //
+  // No "re-run the build" clause here either: a new build starts at
+  // `scene_create`, which calls `newScene()` and despawns everything, so it
+  // would discard the very fix this sentence just asked for.
   userFacingErrorMessage:
-    'Could not configure physics. Your game will use default physics.',
+    'Could not tune how the game moves, so everything will use default physics. '
+    + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
+    + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+    + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
 
   async execute(
     input: Record<string, unknown>,

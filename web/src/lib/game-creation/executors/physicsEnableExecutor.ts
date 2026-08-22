@@ -70,12 +70,18 @@ export const physicsEnableExecutor: ExecutorDefinition = {
   // (engine/src/core/physics.rs), so a user who follows guidance that stops at
   // "tick Enabled" turns the ground, the platforms and the walls into falling
   // bodies — the advice would make the game worse than the failure did.
+  //
+  // No "please try again" either, for the same reason the profile step's copy
+  // does not say it: a new build starts at `scene_create`, which calls
+  // `newScene()` and despawns everything, so re-running is not a way to keep a
+  // hand fix — it is the way to lose one. The last sentence says so outright
+  // rather than leaving the reader to find out.
   userFacingErrorMessage:
     'Could not switch physics on for the level, so nothing in the game will collide. '
-    + 'Please try again. '
     + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
     + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
-    + '(the default, Dynamic, makes them fall).',
+    + '(the default, Dynamic, makes them fall). '
+    + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
 
   async execute(
     input: Record<string, unknown>,

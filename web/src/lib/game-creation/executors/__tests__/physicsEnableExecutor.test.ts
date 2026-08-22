@@ -68,17 +68,20 @@ describe('physicsEnableExecutor', () => {
   it('has the expected name and a user-facing failure message', () => {
     expect(physicsEnableExecutor.name).toBe('physics_enable');
     // The exact sentence, not `length > 0` — this is the only thing a user sees
-    // when the step fails, and the wording is load-bearing twice over: the
+    // when the step fails, and the wording is load-bearing three times over: the
     // engine's `PhysicsData::default()` is DYNAMIC (engine/src/core/physics.rs),
     // so guidance that stops at "turn Physics on" turns the floor into a falling
-    // body, and every noun here has to be a label that is actually on screen.
+    // body; every noun has to be a label that is actually on screen; and there is
+    // no "please try again", because a new build despawns the scene the user
+    // would have just fixed by hand.
     expect(physicsEnableExecutor.userFacingErrorMessage).toBe(
       'Could not switch physics on for the level, so nothing in the game will collide. '
-      + 'Please try again. '
       + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
       + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
-      + '(the default, Dynamic, makes them fall).',
+      + '(the default, Dynamic, makes them fall). '
+      + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
     );
+    expect(physicsEnableExecutor.userFacingErrorMessage).not.toMatch(/try again/i);
   });
 
   /**
