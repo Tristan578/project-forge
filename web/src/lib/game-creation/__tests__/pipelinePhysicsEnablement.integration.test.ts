@@ -476,6 +476,92 @@ describe('pipeline enables physics on every gameplay entity (PF-1213)', () => {
     });
   });
 
+  it('plans the movement feel pass after EVERY physics_enable step', async () => {
+    const plan = await build(crystalRun3d());
+
+    // A plan runs `physics_enable` TWICE: planBuilder Phase 2.5 enables the
+    // blueprint cast, and `systems/world.ts` enables the ground, platforms and
+    // walls it mints. `physics_profile` reads `resolveStepOutputs`, which can
+    // only see steps that have ALREADY produced output, so the feel pass has to
+    // come after the last enablement or the geometry is invisible to it.
+    //
+    // Nothing about the system order guarantees that on its own: `topoSortSystems`
+    // buckets by priority and both `movement` and `world` are `core`, so in this
+    // very fixture movement is listed first. planBuilder therefore defers the
+    // feel steps to the end of the system phase — position in `plan.steps` IS
+    // the ordering, since `runPipeline` executes in array order and `dependsOn`
+    // only gates.
+    const enableIdxs: number[] = [];
+    const profileIdxs: number[] = [];
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      if (plan.steps[i].executor === 'physics_enable') enableIdxs.push(i);
+      if (plan.steps[i].executor === 'physics_profile') profileIdxs.push(i);
+    }
+    // Floors: this fixture must really exercise the two-enablement shape.
+    expect(enableIdxs.length).toBeGreaterThan(1);
+    expect(profileIdxs.length).toBeGreaterThan(0);
+
+    const lastEnableIdx = enableIdxs[enableIdxs.length - 1];
+    for (let i = 0; i < profileIdxs.length; i += 1) {
+      expect(
+        profileIdxs[i],
+        'a physics_profile step is planned before the last physics_enable, so the '
+        + 'entities that step enables can never reach the feel pass',
+      ).toBeGreaterThan(lastEnableIdx);
+    }
+
+    // And the gate, not only the position: an unmet `dependsOn` marks a step
+    // `skipped`, so this edge is what makes a failed enablement stop the feel
+    // pass rather than silently mistune half the scene.
+    for (let i = 0; i < profileIdxs.length; i += 1) {
+      const deps = plan.steps[profileIdxs[i]].dependsOn;
+      for (let j = 0; j < enableIdxs.length; j += 1) {
+        expect(deps).toContain(plan.steps[enableIdxs[j]].id);
+      }
+    }
+  });
+
+  it('applies the movement feel to the world geometry, not only the blueprint cast', async () => {
+    await build(crystalRun3d());
+
+    // The regression: with the feel pass planned before the world system's
+    // `physics_enable`, `resolveStepOutputs('physics_enable')` returned only the
+    // Phase 2.5 output, so the ground, platforms and walls the player actually
+    // stands on kept default friction and restitution while the player got the
+    // design's. Nothing reported it — `dispatchCommand` returns void, and the
+    // step still counted its (smaller) entity set as a success.
+    const names = spawnedNames(recorded);
+    const geometryNames: string[] = [];
+    for (let i = 0; i < names.length; i += 1) {
+      const name = names[i];
+      if (name === 'Ground' || name.startsWith('Platform ') || name.startsWith('Wall ')) {
+        geometryNames.push(name);
+      }
+    }
+    expect(geometryNames.length).toBeGreaterThan(1);
+
+    for (let i = 0; i < geometryNames.length; i += 1) {
+      const name = geometryNames[i];
+      const id = spawnedIdByName(recorded, name);
+      expect(id, `${name} was spawned without a planned id`).toBeTruthy();
+
+      const updates = payloadsOfCommandFor(recorded, 'update_physics', id!);
+      expect(
+        updates.length,
+        `${name} received no feel-pass update_physics — the geometry never reached physics_profile`,
+      ).toBe(2);
+      // FULL payload: `applyPhysicsProfile` builds a PARTIAL `PhysicsPatch` on
+      // purpose (body type and collider shape must keep the values the
+      // enablement step wrote), so an extra key here is a body being reset.
+      expect(updates[1]).toEqual({
+        entityId: id,
+        gravityScale: expect.any(Number),
+        friction: expect.any(Number),
+        restitution: expect.any(Number),
+      });
+    }
+  });
+
   it('toggles physics on before patching it, for every entity', async () => {
     await build(crystalRun3d());
 
