@@ -1,9 +1,23 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+// Same seam the sibling suite uses: the handler reaches the store through
+// `useEditorStore.getState()`, so the mock is what lets this assert WHICH
+// action the reply routed to rather than only that the name was claimed.
+vi.mock('@/stores/editorStore', () => ({
+  useEditorStore: {
+    getState: vi.fn(),
+    setState: vi.fn(),
+    subscribe: vi.fn(),
+  },
+}));
+
+import { useEditorStore } from '@/stores/editorStore';
 import { handlePhysicsEvent } from '../physicsEvents';
-import { createMockSetGet, createMockActions } from './eventTestUtils';
+import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
+import type { EventPayload } from '../types';
 
 /**
  * Cross-language pin for the two 2D-joint reply channels (PF-1194).
@@ -54,15 +68,39 @@ describe('2D joint reply channels match the engine', () => {
     expect(query).toContain('emit_joint2d_changed(&entity_id, joint)');
   });
 
-  it.each(['QUERY_JOINTS2D_LIST', 'JOINT2D_CHANGED'])(
-    'physicsEvents handles %s',
-    (name) => {
-      const mock = createMockSetGet(createMockActions());
-      const payload =
-        name === 'QUERY_JOINTS2D_LIST'
-          ? [{ entityId: 'a', targetEntityId: 'b', jointType: 'fixed' }]
-          : { entityId: 'a', targetEntityId: 'b', jointType: 'fixed' };
+  describe('physicsEvents answers on both names', () => {
+    let actions: ReturnType<typeof createMockActions>;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      actions = createMockActions();
+      vi.mocked(useEditorStore.getState).mockReturnValue(actions as unknown as StoreState);
+    });
+
+    // `revolute` is one of the four types `JOINT2D_TYPES` admits. An invented
+    // spelling parses to `null`, which the handler swallows while still
+    // returning `true` — so an invalid fixture would score green against the
+    // weaker assertion this suite used to make.
+    const JOINT = { entityId: 'a', targetEntityId: 'b', jointType: 'revolute' };
+
+    it.each<[string, EventPayload]>([
+      ['QUERY_JOINTS2D_LIST', [JOINT]],
+      ['JOINT2D_CHANGED', JOINT],
+    ])('%s routes to applyJoint2dFromEngine', (name, payload) => {
+      const mock = createMockSetGet();
+
       expect(handlePhysicsEvent(name, payload, mock.set, mock.get)).toBe(true);
-    },
-  );
+      // `true` alone is not proof: the malformed-payload branch returns `true`
+      // too, so a wire shape the parser rejects would score identically. Assert
+      // the state-only mirror actually ran — and that the DISPATCHING sibling
+      // did not, since calling it would echo `set_joint_2d` straight back at
+      // the engine that just reported the joint.
+      expect(actions.applyJoint2dFromEngine).toHaveBeenCalledTimes(1);
+      expect(actions.applyJoint2dFromEngine).toHaveBeenCalledWith(
+        'a',
+        expect.objectContaining({ targetEntityId: 'b', jointType: 'revolute' }),
+      );
+      expect(actions.setJoint2d).not.toHaveBeenCalled();
+    });
+  });
 });
