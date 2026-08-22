@@ -80,7 +80,11 @@ describe('engineEntityId', () => {
     // refuses the id, minting a random UUID that no later command in the plan
     // knows about. That is the exact divergence the whole helper exists to
     // close, in the one direction that fails silently.
-    for (const code of [0x00, 0x09, 0x0b, 0x1f, 0x7f]) {
+    // 0x80/0x85/0x9f are the C1 range. Rust's `char::is_control` is Unicode
+    // Cc, which is C0 *and* C1 — a validator narrowed back to the ASCII half
+    // would accept U+0085 here and be silently overruled by the engine. The
+    // upper bound is probed from the other side below.
+    for (const code of [0x00, 0x09, 0x0b, 0x1f, 0x7f, 0x80, 0x85, 0x9f]) {
       const inner = 'ent' + String.fromCharCode(code) + 'ity';
       const leading = String.fromCharCode(code) + 'entity';
       const trailing = 'entity' + String.fromCharCode(code);
@@ -91,6 +95,42 @@ describe('engineEntityId', () => {
         ).toBe(false);
       }
     }
+  });
+
+  it('accepts the first code point above the C1 range', () => {
+    // U+00A0 is the byte after the C1 block and is NOT a control character to
+    // Rust. Without this, widening the refused range (0x9f -> 0xbf, say) would
+    // pass every test above while refusing ids the engine accepts — the
+    // opposite failure, and one that turns a valid plan into INVALID_INPUT.
+    expect(engineEntityId.safeParse('ent' + String.fromCharCode(0xa0) + 'ity').success).toBe(true);
+    expect(engineEntityId.safeParse('ent' + ACCENT + 'ity').success).toBe(true);
+  });
+
+  it('counts the RAW string, not a trimmed copy', () => {
+    // The contract the docstring names, with nothing pinning it until now: a
+    // trim-then-count regression passes every other case in this file.
+    //
+    // 64 characters plus a trailing space is 65 bytes to the engine and 64 to a
+    // trimmed count, so the refusal below is the only thing separating the two
+    // implementations at the ceiling.
+    expect(engineEntityId.safeParse('a'.repeat(64) + ' ').success).toBe(false);
+    expect(engineEntityId.safeParse(' ' + 'a'.repeat(64)).success).toBe(false);
+    // ...and a short id padded with spaces stays acceptable: the raw check is
+    // about the BYTE COUNT and the control scan, not about rejecting spaces.
+    expect(engineEntityId.safeParse(' entity ').success).toBe(true);
+  });
+
+  it('states the non-blank requirement in its own message', () => {
+    // A whitespace-only id is refused by `raw.trim().length > 0`, a rule the
+    // message did not mention — so the user was told the id must be "1-64 bytes
+    // with no control characters", which `'   '` satisfies by its own wording.
+    const result = engineEntityId.safeParse('   ');
+    expect(result.success).toBe(false);
+    const message = result.success ? '' : result.error.issues[0].message;
+    expect(message).toBe(
+      'entityId must be 1-64 bytes as the engine counts them, with no control '
+      + 'characters and at least one non-whitespace character',
+    );
   });
 });
 

@@ -42,7 +42,8 @@ export const engineEntityId = z.string().refine((raw) => {
   return raw.trim().length > 0
     && !hasControlChar
     && new TextEncoder().encode(raw).length <= 64;
-}, 'entityId must be 1-64 bytes with no control characters, counted as the engine counts them');
+}, 'entityId must be 1-64 bytes as the engine counts them, with no control '
+  + 'characters and at least one non-whitespace character');
 
 export interface EngineCommand {
   command: string;
