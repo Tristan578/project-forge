@@ -15,6 +15,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+// The real shipped allowlist, not a copy of it. A local literal here made
+// every allow/deny assertion below tautological (PF-1181).
+import { SCRIPT_ALLOWED_COMMANDS } from '../scriptAllowlist';
 
 // ---------------------------------------------------------------------------
 // Sandbox compilation helper — mirrors compileScript() in scriptWorker.ts
@@ -79,47 +82,6 @@ function getMessages(type: string) {
 function clearMessages() {
   postedMessages = [];
 }
-
-// ---------------------------------------------------------------------------
-// Whitelist: the set of commands that scripts are permitted to dispatch.
-// Derived from reading all forge API push sites in scriptWorker.ts.
-// ---------------------------------------------------------------------------
-
-const SCRIPT_ALLOWED_COMMANDS = new Set<string>([
-  // Transform
-  'update_transform', 'spawn_entity', 'delete_entities',
-  'set_visibility', 'update_material',
-  // Physics 3D
-  'apply_force', 'set_velocity', 'apply_impulse',
-  // Physics 2D
-  'apply_force2d', 'apply_impulse2d', 'set_velocity2d',
-  'set_angular_velocity2d', 'set_gravity2d',
-  // Audio
-  'play_audio', 'stop_audio', 'pause_audio', 'set_audio', 'update_audio_bus',
-  'audio_add_layer', 'audio_remove_layer', 'audio_remove_all_layers',
-  'audio_crossfade', 'audio_play_one_shot', 'audio_fade_in', 'audio_fade_out',
-  'set_music_intensity', 'set_music_stems',
-  // Animation 3D
-  'play_animation', 'pause_animation', 'resume_animation', 'stop_animation',
-  'set_animation_speed', 'set_animation_loop',
-  'set_animation_blend_weight', 'set_clip_speed',
-  // Sprite animation
-  'play_sprite_animation', 'stop_sprite_animation',
-  'set_sprite_anim_speed', 'set_sprite_anim_param',
-  // Particles
-  'set_particle_preset', 'toggle_particle', 'burst_particle',
-  // Camera
-  'camera_follow', 'camera_stop_follow', 'camera_set_position', 'camera_look_at',
-  // Tilemap
-  'paint_tile', 'erase_tile', 'fill_tiles',
-  // Skeleton 2D
-  'create_skeleton2d', 'add_bone2d', 'remove_bone2d', 'update_bone2d',
-  'set_skeleton2d_skin', 'play_skeletal_animation2d', 'stop_skeletal_animation2d',
-  'set_ik_target2d',
-  // Other
-  'vibrate',
-  'stop',
-]);
 
 const MAX_COMMANDS_PER_FRAME = 100;
 
@@ -727,8 +689,10 @@ describe('Script Sandbox Security: Command Whitelist', () => {
   it('blocks update_terrain', () => expect(SCRIPT_ALLOWED_COMMANDS.has('update_terrain')).toBe(false));
   it('blocks load_scene', () => expect(SCRIPT_ALLOWED_COMMANDS.has('load_scene')).toBe(false));
 
-  it('whitelist has exactly 59 commands', () => {
-    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(59);
+  it('whitelist has exactly 62 commands', () => {
+    // Pins the SHIPPED set: the former local copy had silently drifted three
+    // names behind it and still asserted 59.
+    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(62);
   });
 });
 
