@@ -37,7 +37,7 @@ export default defineConfig({
       // Ratcheted up per sprint — see docs/coverage-plan.md
       // Tier-3 target: 75/65/70/77 (actual coverage ~76/67/70/78, leaving ~1-2pp headroom)
       thresholds: {
-        statements: 82,
+        statements: 83,
         branches: 74,
         functions: 77,
         lines: 84,

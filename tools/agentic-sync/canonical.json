@@ -22,7 +22,7 @@
     },
     "versionsNote": "wasm-bindgen must match Cargo.lock exactly",
     "coverageThresholds": {
-      "statements": 82,
+      "statements": 83,
       "branches": 74,
       "functions": 77,
       "lines": 84
