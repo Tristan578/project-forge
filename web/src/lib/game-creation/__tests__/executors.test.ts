@@ -909,15 +909,39 @@ describe('auto_polish executor', () => {
     expect(fixes).toContain('Configured camera as sideScroller');
   });
 
-  it('dispatches spawn_entity ground plane for no_ground_plane', async () => {
+  it('dispatches a ground plane WITH a collider for no_ground_plane', async () => {
     const ctx = makeMockCtx();
     vi.mocked(ctx.resolveStepOutput).mockReturnValue({ issues: ['no_ground_plane'] });
     const result = await executor.execute(baseInput, ctx);
 
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({
+
+    // A mesh with no Rapier collider is not a floor: `manage_physics_lifecycle`
+    // only builds one for an entity carrying `PhysicsEnabled`, and `auto_polish`
+    // runs after `physics_enable`, so nothing downstream covers for it.
+    const calls = vi.mocked(ctx.dispatchCommand).mock.calls;
+    expect(calls.map(([command]) => command)).toEqual([
+      'spawn_entity', 'toggle_physics', 'update_physics',
+    ]);
+
+    // FULL payloads. The id is minted by the executor rather than left to the
+    // engine — `spawn_entity` invents a UUID the caller never learns, which
+    // would leave the two commands below with no entity to name.
+    const spawn = calls[0][1] as Record<string, unknown>;
+    expect(spawn).toEqual({
+      id: expect.any(String),
+      entityType: 'plane',
       name: 'Ground',
-    }));
+      position: [0, 0, 0],
+    });
+    const groundId = spawn['id'];
+    expect(calls[1][1]).toEqual({ entityId: groundId, enabled: true });
+    expect(calls[2][1]).toEqual({
+      entityId: groundId,
+      bodyType: 'fixed',
+      colliderShape: 'cuboid',
+      isSensor: false,
+    });
   });
 
   it('handles multiple issues, applies all fixes', async () => {
@@ -969,9 +993,34 @@ describe('auto_polish executor', () => {
     const result = await executor.execute(baseInput, ctx);
 
     expect(result.success).toBe(true);
-    expect(batchFn).toHaveBeenCalledWith([
-      { command: 'update_ambient_light', payload: { color: [1, 1, 1], brightness: 0.3 } },
-      { command: 'spawn_entity', payload: { entityType: 'plane', name: 'Ground', position: [0, 0, 0] } },
+
+    // Three batches, not one: the ground's toggle and patch are separated from
+    // the spawn (and from each other) by an engine frame, because Bevy's
+    // deferred `Commands` are flushed only at an ordering edge —
+    // `apply_physics_toggles` drains a toggle for an entity that does not exist
+    // yet and `apply_physics_updates` drops a patch with no `PhysicsData`.
+    const batches = batchFn.mock.calls;
+    expect(batches.length).toBe(3);
+
+    const first = batches[0][0] as Array<{ command: string; payload: Record<string, unknown> }>;
+    expect(first.map(entry => entry.command)).toEqual(['update_ambient_light', 'spawn_entity']);
+    expect(first[0].payload).toEqual({ color: [1, 1, 1], brightness: 0.3 });
+    expect(first[1].payload).toEqual({
+      id: expect.any(String),
+      entityType: 'plane',
+      name: 'Ground',
+      position: [0, 0, 0],
+    });
+
+    const groundId = first[1].payload['id'];
+    expect(batches[1][0]).toEqual([
+      { command: 'toggle_physics', payload: { entityId: groundId, enabled: true } },
+    ]);
+    expect(batches[2][0]).toEqual([
+      {
+        command: 'update_physics',
+        payload: { entityId: groundId, bodyType: 'fixed', colliderShape: 'cuboid', isSensor: false },
+      },
     ]);
     expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
@@ -999,6 +1048,11 @@ describe('auto_polish executor', () => {
     const result = await executor.execute(baseInput, ctx);
 
     expect(result.success).toBe(true);
-    expect(ctx.dispatchCommand).toHaveBeenCalledTimes(2);
+
+    // Four, not two: the repaired ground carries its own toggle and patch.
+    const calls = vi.mocked(ctx.dispatchCommand).mock.calls;
+    expect(calls.map(([command]) => command)).toEqual([
+      'update_ambient_light', 'spawn_entity', 'toggle_physics', 'update_physics',
+    ]);
   });
 });

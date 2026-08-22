@@ -2,7 +2,17 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
+import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
 import { resolveCameraEntityId } from '../cameraResolution';
+import { waitForEngineFrame, sendCommands, type EngineCommand } from './engineDispatch';
+import { PHYSICS_ROLE_PROFILES } from '../physicsRoles';
+import { COLLIDER_FOR_SHAPE, type SpawnShape } from '../entityShape';
+
+/**
+ * The mesh the ground repair spawns, in one place so the collider below cannot
+ * describe a different shape from the entity it is attached to.
+ */
+const GROUND_SHAPE: SpawnShape = 'plane';
 
 // [B4] diagnoseIssues() requires GameMetrics (avgPlayTime, completionRate, etc.)
 // which do not exist on a freshly-built game. auto_polish uses STRUCTURAL
@@ -45,7 +55,7 @@ export const autoPolishExecutor: ExecutorDefinition = {
     const issues = (verifyOutput?.['issues'] as string[]) ?? [];
 
     const fixes: string[] = [];
-    const commands: Array<{ command: string; payload?: unknown }> = [];
+    const commands: EngineCommand[] = [];
 
     // [B4] Structural heuristics only -- no telemetry data required
 
@@ -118,9 +128,25 @@ export const autoPolishExecutor: ExecutorDefinition = {
       }
     }
 
-    // spawn_entity — manifest: { entityType, name?, position?: [x,y,z] }
+    // spawn_entity — manifest: { entityType, name?, position?: [x,y,z], id? }
+    //
+    // The id is minted here rather than left to the engine. `spawn_entity`
+    // honours a caller-supplied id (`is_valid_override_id`,
+    // core/entity_factory.rs) and silently invents a random UUID otherwise — one
+    // this executor never learns, which would leave the two physics commands
+    // below with no entity to name.
+    let groundEntityId: string | null = null;
     if (issues.includes('no_ground_plane')) {
-      commands.push({ command: 'spawn_entity', payload: { entityType: 'plane', name: 'Ground', position: [0, 0, 0] } });
+      groundEntityId = crypto.randomUUID();
+      commands.push({
+        command: 'spawn_entity',
+        payload: {
+          id: groundEntityId,
+          entityType: GROUND_SHAPE,
+          name: 'Ground',
+          position: [0, 0, 0],
+        },
+      });
       fixes.push('Added ground plane');
     }
 
@@ -129,16 +155,86 @@ export const autoPolishExecutor: ExecutorDefinition = {
       fixes.push('Warning: entity has physics without collider — manual fix needed');
     }
 
-    if (commands.length > 0) {
-      if (ctx.dispatchCommandBatch) {
-        const result = ctx.dispatchCommandBatch(commands);
-        if (!result.success) {
-          return failResult(
-            makeStepError('COMMAND_FAILED', 'Engine command rejected', this.userFacingErrorMessage),
-          );
-        }
-      } else {
-        for (const cmd of commands) ctx.dispatchCommand(cmd.command, cmd.payload);
+    if (!sendCommands(ctx, commands)) {
+      return failResult(
+        makeStepError('COMMAND_FAILED', 'Engine command rejected', this.userFacingErrorMessage),
+      );
+    }
+
+    // A GROUND PLANE WITH NO COLLIDER IS NOT A REPAIR.
+    //
+    // Rapier attaches a collider only to an entity carrying `PhysicsEnabled`
+    // (`manage_physics_lifecycle`, engine/src/core/physics.rs), so a bare
+    // `spawn_entity` leaves the player falling through the very floor this step
+    // reports having added. `auto_polish` is the LAST step in the plan — it runs
+    // after `physics_enable`, which is what gives every other spawned entity its
+    // body — so nothing downstream can cover for it.
+    //
+    // Same three-phase sequence, and the same shared profile table, as
+    // `physicsEnableExecutor`: toggle inserts `PhysicsEnabled` +
+    // `PhysicsData::default()`, the patch then merges onto that default, and a
+    // frame separates each pair because Bevy's deferred `Commands` are flushed
+    // only at an explicit ordering edge — `apply_physics_toggles` drains its
+    // queue whether or not the entity exists yet, and `apply_physics_updates`
+    // drops a patch with no existing `PhysicsData`. See `waitForEngineFrame`.
+    if (groundEntityId) {
+      await waitForEngineFrame();
+
+      // The frame waits are this executor's only yields, so they are also the
+      // only points at which a cancelled run can be noticed. Dispatching into
+      // an aborted run keeps mutating a scene the user has walked away from.
+      if (ctx.signal.aborted) {
+        return failResult(
+          makeStepError(
+            'ABORTED',
+            'Executor was aborted while waiting for the engine to flush the ground spawn',
+            this.userFacingErrorMessage,
+          ),
+        );
+      }
+
+      if (!sendCommands(ctx, [{
+        command: 'toggle_physics',
+        payload: { entityId: groundEntityId, enabled: true },
+      }])) {
+        return failResult(
+          makeStepError(
+            'COMMAND_FAILED',
+            'Engine rejected toggle_physics for the repaired ground plane',
+            this.userFacingErrorMessage,
+          ),
+        );
+      }
+
+      await waitForEngineFrame();
+
+      if (ctx.signal.aborted) {
+        return failResult(
+          makeStepError('ABORTED', 'Executor was aborted mid-repair', this.userFacingErrorMessage),
+        );
+      }
+
+      // The `geometry` profile — the one `worldBuildExecutor`'s ground, walls
+      // and platforms use — read from the shared table rather than written out a
+      // fourth time, and built through `buildPhysicsPatch` because the engine's
+      // `PhysicsPatch` is all-`Option` under `#[serde(flatten)]`: a misspelled
+      // key there deserializes to `None` and no-ops with nothing to show for it.
+      const profile = PHYSICS_ROLE_PROFILES.geometry;
+      if (!sendCommands(ctx, [{
+        command: 'update_physics',
+        payload: buildPhysicsPatch(groundEntityId, {
+          bodyType: profile.bodyType,
+          colliderShape: profile.colliderShape ?? COLLIDER_FOR_SHAPE[GROUND_SHAPE],
+          isSensor: profile.isSensor,
+        }),
+      }])) {
+        return failResult(
+          makeStepError(
+            'COMMAND_FAILED',
+            'Engine rejected update_physics for the repaired ground plane',
+            this.userFacingErrorMessage,
+          ),
+        );
       }
     }
 

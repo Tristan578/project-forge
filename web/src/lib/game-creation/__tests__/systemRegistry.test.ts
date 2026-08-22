@@ -235,11 +235,14 @@ describe('SYSTEM_REGISTRY', () => {
   });
 
   describe('world system', () => {
-    it('returns exactly 1 step', () => {
+    it('returns the spawn step and the physics enablement that follows it', () => {
       const def = SYSTEM_REGISTRY.get('world')!;
       const system = makeSystem('world', 'open_world');
       const steps = def.setupSteps(system, makeGdd(), makeCtx());
-      expect(steps).toHaveLength(1);
+      // Order matters and is asserted: the engine gives a collider only to an
+      // entity that already carries `PhysicsEnabled`, so enablement after the
+      // spawn is the whole point (PF-1213).
+      expect(steps.map(s => s.executor)).toEqual(['world_build', 'physics_enable']);
     });
 
     it('uses world_build and never forwards the raw config (PF-1138)', () => {

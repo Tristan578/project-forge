@@ -61,14 +61,29 @@ registerSystem({
     // and `.map` keeps the hole positionally, so a gap would survive into the
     // step input and reach the executor as `undefined`.
     const entities: Array<Record<string, unknown>> = [];
+    // The same ids again, shaped for the physics step. Built in the same pass so
+    // the two lists cannot drift: geometry ids exist ONLY here (they are not in
+    // `plannedEntities`), so if this step misses one, that piece of the level is
+    // never made solid and the player falls through it.
+    const physicsEntities: Array<Record<string, unknown>> = [];
     for (let i = 0; i < descriptors.length; i += 1) {
       const descriptor = descriptors[i];
+      const entityId = crypto.randomUUID();
       entities.push({
-        entityId: crypto.randomUUID(),
+        entityId,
         name: descriptor.name,
         entityType: descriptor.entityType,
         position: descriptor.position,
         scale: descriptor.scale,
+      });
+      // Ground, platforms and walls are all static solids — the `geometry`
+      // physics role. Their shape comes from the descriptor rather than a role
+      // default, so the collider matches whatever mesh the builder chose.
+      physicsEntities.push({
+        entityId,
+        name: descriptor.name,
+        role: 'geometry',
+        shape: descriptor.entityType,
       });
     }
 
@@ -76,6 +91,14 @@ registerSystem({
       {
         executor: 'world_build',
         input: { worldType: system.type, entities },
+      },
+      // Immediately after the spawn, and before any later system step: the
+      // engine gives a collider only to an entity carrying `PhysicsEnabled`, so
+      // without this the ground the builder just laid down is scenery the player
+      // falls straight through (PF-1213).
+      {
+        executor: 'physics_enable',
+        input: { entities: physicsEntities },
       },
     ];
   },

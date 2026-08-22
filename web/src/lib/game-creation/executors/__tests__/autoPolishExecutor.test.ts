@@ -79,7 +79,7 @@ describe('autoPolishExecutor', () => {
     });
   });
 
-  it('adds ground plane when no_ground_plane issue present', async () => {
+  it('adds a ground plane WITH a collider when no_ground_plane issue present', async () => {
     const ctx = makeCtx({
       resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
     });
@@ -91,11 +91,134 @@ describe('autoPolishExecutor', () => {
 
     expect(result.success).toBe(true);
     expect(result.output?.fixesApplied).toContain('Added ground plane');
-    expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', {
+
+    // Asserted as an ORDERED call list, not three `toHaveBeenCalledWith`s: the
+    // latter is blind to a missing sibling, and a missing sibling IS the bug —
+    // a plane with no `toggle_physics` gets no Rapier collider at all
+    // (`manage_physics_lifecycle` is `With<PhysicsEnabled>`), so the player
+    // falls straight through the repair. `auto_polish` runs AFTER
+    // `physics_enable`, so no later step can cover for it.
+    const calls = vi.mocked(ctx.dispatchCommand).mock.calls;
+    expect(calls.map((c: unknown[]) => c[0])).toEqual([
+      'spawn_entity', 'toggle_physics', 'update_physics',
+    ]);
+
+    // Full payloads with `toEqual`, never `objectContaining`: `dispatchCommand`
+    // returns void, so an invented or misspelled key is dropped by `serde` with
+    // no exception, no event and no log — `objectContaining` asserts what is
+    // present and is blind to exactly that.
+    const spawn = calls[0][1] as Record<string, unknown>;
+    expect(spawn).toEqual({
+      // The engine honours a caller-supplied id (`is_valid_override_id`,
+      // core/entity_factory.rs). Without one it mints a random UUID this
+      // executor never learns, and the two follow-up commands would have no
+      // entity to name.
+      id: expect.any(String),
       entityType: 'plane',
       name: 'Ground',
       position: [0, 0, 0],
     });
+
+    const groundId = spawn['id'] as string;
+    expect(groundId.length).toBeGreaterThan(0);
+
+    expect(calls[1][1]).toEqual({ entityId: groundId, enabled: true });
+    // The `geometry` profile, shared with `physics_enable` rather than restated:
+    // solid, immovable, and the cuboid `make_collider` produces for a plane.
+    expect(calls[2][1]).toEqual({
+      entityId: groundId,
+      bodyType: 'fixed',
+      colliderShape: 'cuboid',
+      isSensor: false,
+    });
+  });
+
+  it('waits a frame between the ground spawn, its toggle and its patch', async () => {
+    // Two engine invariants stack here and neither reports a violation:
+    // `apply_physics_toggles` drains its queue whether or not the entity exists
+    // (so a toggle in the spawn's own frame is consumed and lost), and
+    // `apply_physics_updates` merges onto an EXISTING `PhysicsData`, dropping
+    // the patch when there is none. Recording the frame boundaries is the only
+    // way to assert the gaps — the payloads look identical either way.
+    const order: string[] = [];
+    // Stubbed rather than spied: these suites run under the node config too,
+    // where `requestAnimationFrame` does not exist and `vi.spyOn` would throw.
+    vi.stubGlobal('requestAnimationFrame', vi.fn((cb: FrameRequestCallback) => {
+      order.push('frame');
+      queueMicrotask(() => { cb(0); });
+      return 0;
+    }));
+
+    try {
+      const ctx = makeCtx({
+        resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+        dispatchCommand: vi.fn((command: string) => { order.push(command); }),
+      });
+
+      const result = await autoPolishExecutor.execute({
+        projectType: '3d',
+        feelDirective: FEEL_DIRECTIVE,
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      // `waitForEngineFrame` schedules two nested rAF ticks per wait, because a
+      // single tick can land inside the engine frame that queued the command.
+      expect(order).toEqual([
+        'spawn_entity',
+        'frame', 'frame',
+        'toggle_physics',
+        'frame', 'frame',
+        'update_physics',
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('reports COMMAND_FAILED when the engine rejects the ground collider', async () => {
+    // The batch dispatcher is the only path that can report a rejection at all
+    // (single `dispatchCommand` returns void), and swallowing one here ships a
+    // ground plane the player falls through while the step reports
+    // "Added ground plane".
+    const batch = vi.fn((commands: Array<{ command: string }>) => ({
+      success: commands[0].command !== 'toggle_physics',
+    }));
+    const ctx = makeCtx({
+      dispatchCommandBatch: batch as never,
+      resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+    });
+
+    const result = await autoPolishExecutor.execute({
+      projectType: '3d',
+      feelDirective: FEEL_DIRECTIVE,
+    }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('COMMAND_FAILED');
+  });
+
+  it('stops before touching the engine again when aborted mid-repair', async () => {
+    // The frame waits are the first points at which this executor yields, so
+    // they are also the first points at which a cancelled run can be noticed.
+    const controller = new AbortController();
+    const ctx = makeCtx({
+      resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+      dispatchCommand: vi.fn((command: string) => {
+        if (command === 'spawn_entity') controller.abort();
+      }),
+      signal: controller.signal,
+    });
+
+    const result = await autoPolishExecutor.execute({
+      projectType: '3d',
+      feelDirective: FEEL_DIRECTIVE,
+    }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('ABORTED');
+    expect(
+      vi.mocked(ctx.dispatchCommand).mock.calls.map((c: unknown[]) => c[0]),
+    ).toEqual(['spawn_entity']);
   });
 
   it('configures camera as thirdPersonFollow in 3D when no_camera_on_player', async () => {

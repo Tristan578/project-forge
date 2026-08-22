@@ -1,5 +1,6 @@
 import type { ExecutorName, ExecutorDefinition } from '../types';
 import { sceneCreateExecutor } from './sceneCreateExecutor';
+import { physicsEnableExecutor } from './physicsEnableExecutor';
 import { physicsProfileExecutor } from './physicsProfileExecutor';
 import { cameraSetupExecutor } from './cameraSetupExecutor';
 import { characterSetupExecutor } from './characterSetupExecutor';
@@ -15,6 +16,7 @@ import { planPresentExecutor } from './planPresentExecutor';
 export const EXECUTOR_REGISTRY = new Map<ExecutorName, ExecutorDefinition>([
   [planPresentExecutor.name, planPresentExecutor],
   [sceneCreateExecutor.name, sceneCreateExecutor],
+  [physicsEnableExecutor.name, physicsEnableExecutor],
   [physicsProfileExecutor.name, physicsProfileExecutor],
   [cameraSetupExecutor.name, cameraSetupExecutor],
   [characterSetupExecutor.name, characterSetupExecutor],

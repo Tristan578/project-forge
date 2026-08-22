@@ -238,8 +238,10 @@ describe('world system', () => {
 
     const steps = def.setupSteps(system, makeGDD(), makeCtx());
 
-    expect(steps).toHaveLength(1);
-    expect(steps[0].executor).toBe('world_build');
+    // Two steps: the spawn, then the physics enablement that makes what it
+    // spawned solid. Ground the player falls straight through is not a level
+    // (PF-1213), so the pair is asserted together rather than counted loosely.
+    expect(steps.map(s => s.executor)).toEqual(['world_build', 'physics_enable']);
 
     const input = steps[0].input as {
       worldType: string;

@@ -15,6 +15,59 @@ const inputSchema = z.object({
   entityIds: z.array(z.string()).optional(),
 });
 
+/**
+ * Every entity this step should tune, in preference order and de-duplicated.
+ *
+ * Indexed loops throughout: `.filter`/`.map` skip an array hole outright, and a
+ * hole in an id list would silently drop an entity from the tuning pass with no
+ * error anywhere — `dispatchCommand` returns void.
+ */
+function collectTargetIds(
+  explicit: string[] | undefined,
+  ctx: ExecutorContext,
+  liveStore: ReturnType<ExecutorContext['getStore']>,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  const push = (value: unknown): void => {
+    if (typeof value !== 'string') return;
+    const id = value.trim();
+    if (id.length === 0 || seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  };
+
+  if (explicit) {
+    for (let i = 0; i < explicit.length; i += 1) push(explicit[i]);
+    if (out.length > 0) return out;
+  }
+
+  const enableOutput = ctx.resolveStepOutput('physics_enable');
+  const enabledIds = enableOutput?.['entityIds'];
+  if (Array.isArray(enabledIds)) {
+    for (let i = 0; i < enabledIds.length; i += 1) push(enabledIds[i]);
+  }
+
+  const storeNodes = Object.values(liveStore.sceneGraph.nodes);
+  for (let i = 0; i < storeNodes.length; i += 1) {
+    const node = storeNodes[i];
+    const components = node?.components;
+    if (!Array.isArray(components)) continue;
+    let physical = false;
+    for (let j = 0; j < components.length; j += 1) {
+      const component = components[j];
+      if (component === 'PhysicsData' || component === 'RigidBody' || component === 'Collider') {
+        physical = true;
+        break;
+      }
+    }
+    if (physical) push(node.entityId);
+  }
+
+  return out;
+}
+
 export const physicsProfileExecutor: ExecutorDefinition = {
   name: 'physics_profile',
   inputSchema,
@@ -44,8 +97,6 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     // table staying in sync by luck.
     const presetKey = resolvePresetFromFeel(feelDirective);
     const finalProfile = resolvePhysicsProfile(feelDirective, config);
-
-    const ids = entityIds ?? [];
 
     // Read the store LIVE, never off `ctx.store`. The orchestrator builds the
     // executor context ONCE with `useEditorStore.getState()` (orchestratorSlice)
@@ -77,24 +128,39 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     const liveStore = ctx.getStore();
     const liveGameComponents = liveStore.allGameComponents;
 
-    // When called from movement system registry without entityIds, apply the
-    // physics profile globally via update_physics_config (scene-level settings).
-    // Per-entity physics is applied when entityIds are provided.
+    // Which entities to tune.
+    //
+    // Explicit `entityIds` win. Failing that, the `physics_enable` step that ran
+    // earlier in the plan reports exactly which entities were given a body, and
+    // that is a far better source than the store scan below: the store's
+    // `sceneGraph.nodes[].components` is populated ONLY by the engine's async
+    // SCENE_GRAPH_UPDATE event, so right after enablement it has usually not
+    // arrived yet — and under a non-browser caller it never does. Scanning alone
+    // therefore reports "no physics entities" on a scene that has just been made
+    // entirely physical.
+    //
+    // `resolveStepOutput` matches by executor name and returns the FIRST such
+    // step, which is the blueprint-entity enablement (the world-geometry one is
+    // planned later, by the world system). That is the right half to prefer:
+    // feel tuning is about how the player and the actors move, not about how
+    // heavy the floor is.
+    const ids = collectTargetIds(entityIds, ctx, liveStore);
+
     if (ids.length === 0) {
-      // No entityIds provided (common path from movement system registry).
-      // Look up physics-enabled entities from the store.
-      const storeNodes = Object.values(liveStore.sceneGraph.nodes);
-      const physicsNodes = storeNodes
-        .filter(n => n.components.some(c => ['PhysicsData', 'RigidBody', 'Collider'].includes(c)))
-        .map(n => n.entityId)
-        .filter(id => typeof id === 'string' && id.trim().length > 0);
-
-      if (physicsNodes.length === 0) {
-        return successResult({ presetUsed: presetKey, entityCount: 0, appliedGlobally: false });
-      }
-
-      applyPhysicsProfile(finalProfile, ctx.dispatchCommand, physicsNodes, liveGameComponents);
-      return successResult({ presetUsed: presetKey, entityCount: physicsNodes.length, appliedGlobally: false });
+      // Reporting plain success here was the defect (PF-1213). This step exists
+      // to make the game feel the way the design asked for; matching nothing
+      // means it changed nothing, and a green tick on that is a lie that hides
+      // the enablement failure upstream. It is a WARNING rather than a failure
+      // because the step is not optional — failing it would set the whole plan
+      // to `failed` and discard a game that is merely mistuned.
+      return successResult({
+        presetUsed: presetKey,
+        entityCount: 0,
+        appliedGlobally: false,
+        warning:
+          'No entities had physics turned on, so the movement feel could not be applied. '
+          + 'Things may not move or collide the way the design describes.',
+      });
     }
 
     applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids, liveGameComponents);

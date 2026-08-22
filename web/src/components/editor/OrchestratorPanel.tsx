@@ -41,6 +41,7 @@ import type { PlanStep, ApprovalGate, TokenEstimate, ExecutorName } from '@/lib/
 const STEP_LABELS: Record<ExecutorName, string> = {
   plan_present: 'Presenting plan',
   scene_create: 'Creating scene',
+  physics_enable: 'Making things solid',
   physics_profile: 'Setting up physics',
   camera_setup: 'Positioning camera',
   character_setup: 'Building characters',

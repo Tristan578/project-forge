@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { engineEntityId, waitForEngineFrame, sendCommands } from './engineDispatch';
 
 /**
  * PF-1138 — build the world the design asked for.
@@ -30,21 +31,6 @@ import { makeStepError, successResult, failResult } from './shared';
  * `dispatchCommand` returns void — a rejected command is invisible, so the last
  * chance to notice a bad number is before it is sent.
  */
-
-/**
- * Matches `is_valid_override_id` in the engine: trimmed, non-empty, at most 64
- * BYTES, no control characters. An id that fails there is silently replaced with
- * an engine-generated UUID, and every later step bound to the planned id then
- * resolves to nothing at all.
- */
-const engineEntityId = z.string().refine((raw) => {
-  const id = raw.trim();
-  const hasControlChar = [...id].some((c) => {
-    const code = c.codePointAt(0)!;
-    return code < 0x20 || code === 0x7f;
-  });
-  return id.length > 0 && !hasControlChar && new TextEncoder().encode(id).length <= 64;
-}, 'entityId must be 1-64 bytes with no control characters');
 
 /**
  * Only shapes `EntityType::from_str` maps to a mesh the renderer actually draws.
@@ -82,41 +68,6 @@ const inputSchema = z.object({
   worldType: z.string().max(120).optional(),
 });
 
-/**
- * Yield until the engine has stepped at least one frame.
- *
- * This is load-bearing, not defensive. `apply_spawn_requests`
- * (core/entity_factory.rs) creates entities through `Commands`, which are
- * deferred to the schedule's next sync point, while `apply_pending_transforms`
- * (bridge/core_systems.rs) resolves its queue against
- * `Query<(&EntityId, &mut Transform)>` and `drain(..)`s it — an update matching
- * no entity is dropped on the floor and never retried.
- *
- * The two systems are registered in separate `add_systems(Update, ...)` groups
- * (bridge/mod.rs) with no `.chain()`/`.after()` between them, and Bevy only
- * inserts `ApplyDeferred` at an explicit ordering edge. So within a single
- * frame the transform is lost in BOTH execution orders: run first, it precedes
- * the spawn; run second, the spawn is still unflushed and invisible to its
- * query. `dispatchCommand` returns void, so neither case reports anything —
- * the world would simply appear as a row of unit cubes.
- *
- * Two `requestAnimationFrame` ticks rather than one: the engine drives its own
- * loop, so a single tick can land inside the same engine frame that queued the
- * spawn. Under Node (unit tests, or any non-browser caller) there is no rAF and
- * a macrotask hop is the honest equivalent — nothing is racing there.
- */
-function waitForEngineFrame(): Promise<void> {
-  const raf =
-    typeof globalThis.requestAnimationFrame === 'function'
-      ? globalThis.requestAnimationFrame.bind(globalThis)
-      : null;
-
-  if (!raf) {
-    return new Promise((resolve) => { setTimeout(resolve, 0); });
-  }
-  return new Promise((resolve) => { raf(() => { raf(() => { resolve(); }); }); });
-}
-
 export const worldBuildExecutor: ExecutorDefinition = {
   name: 'world_build',
   inputSchema,
@@ -149,7 +100,7 @@ export const worldBuildExecutor: ExecutorDefinition = {
     // Two separate batches, deliberately. `spawn_entity` carries a position but
     // has no scale field, so sizing always costs a second command — and that
     // second command CANNOT ride in the same frame as the spawn it resizes.
-    // See `waitForEngineFrame` above for why.
+    // See `waitForEngineFrame` in ./engineDispatch for why.
     const spawnCommands: Array<{ command: string; payload: unknown }> = [];
     const sizeCommands: Array<{ command: string; payload: unknown }> = [];
     for (let i = 0; i < entities.length; i += 1) {
@@ -172,19 +123,7 @@ export const worldBuildExecutor: ExecutorDefinition = {
       });
     }
 
-    const send = (commands: Array<{ command: string; payload: unknown }>): boolean => {
-      if (ctx.dispatchCommandBatch) {
-        return ctx.dispatchCommandBatch(commands).success;
-      }
-      // Single dispatch returns void, so nothing here can observe a rejection.
-      // The batch path above is the only one that can.
-      for (let i = 0; i < commands.length; i += 1) {
-        ctx.dispatchCommand(commands[i].command, commands[i].payload);
-      }
-      return true;
-    };
-
-    if (!send(spawnCommands)) {
+    if (!sendCommands(ctx, spawnCommands)) {
       return failResult(
         makeStepError(
           'COMMAND_FAILED',
@@ -204,7 +143,7 @@ export const worldBuildExecutor: ExecutorDefinition = {
       );
     }
 
-    if (!send(sizeCommands)) {
+    if (!sendCommands(ctx, sizeCommands)) {
       return failResult(
         makeStepError(
           'COMMAND_FAILED',
