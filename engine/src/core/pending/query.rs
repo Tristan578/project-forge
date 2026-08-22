@@ -210,16 +210,92 @@ mod tests {
         variant_names(&body[start..end])
     }
 
-    /// The argument of every `take_queries(` call in `source`, concatenated.
+    /// The argument list of every `take_queries(` call in `source`, concatenated.
+    ///
+    /// The slice ends where the call's OWN parentheses balance, never at a
+    /// lexical `");"`. Three call sites are written
+    /// `pending.take_queries(|r| matches!(..)).is_empty()`, and that form
+    /// contains no `");"` at all — so a terminator-based cut ran forward to the
+    /// next `");"` anywhere in the file and swallowed unrelated code (measured
+    /// windows of 2, 9 and 15 lines). No foreign `QueryRequest::` mention falls
+    /// inside those windows today, but the direction of that failure is the
+    /// unsafe one: a mention landing there later would be scored as CLAIMED
+    /// with no system claiming it, silently satisfying the `unclaimed`
+    /// assertion. The two length floors below only catch undercounting.
+    ///
+    /// Panics on unbalanced parentheses rather than capturing to end-of-file:
+    /// an extractor that cannot delimit a call has to say so, not guess.
     fn take_queries_predicates(source: &str) -> String {
+        const CALL: &str = "take_queries(";
+        let bytes = source.as_bytes();
         let mut out = String::new();
-        for (idx, _) in source.match_indices("take_queries(") {
-            let tail = &source[idx..];
-            let end = tail.find(");").unwrap_or(tail.len().min(400));
-            out.push_str(&tail[..end]);
+        for (idx, _) in source.match_indices(CALL) {
+            // Index of the `(` that opens the argument list.
+            let open = idx + CALL.len() - 1;
+            let mut depth = 0i32;
+            let mut end = None;
+            for (offset, byte) in bytes[open..].iter().enumerate() {
+                match byte {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = Some(open + offset + 1);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let end = end.unwrap_or_else(|| {
+                panic!("unbalanced parentheses after a take_queries( call at byte {idx}")
+            });
+            out.push_str(&source[idx..end]);
             out.push('\n');
         }
         out
+    }
+
+    /// The extractor above is the one place this suite can report a FALSE PASS,
+    /// so it is asserted directly on a synthetic corpus rather than only through
+    /// the live sources — where an over-wide window is invisible in the output.
+    #[test]
+    fn take_queries_predicates_cuts_at_the_closing_parenthesis() {
+        // The `.is_empty()` call form carries no `");"` terminator, so the old
+        // cut ran to the `");"` on the `consume(&other);` line and scored
+        // `Other` as claimed. Only `Mine` is inside the call.
+        let is_empty_form = r#"
+    if !pending.take_queries(|r| matches!(r, QueryRequest::Mine)).is_empty() {
+        let other = QueryRequest::Other;
+        consume(&other);
+    }
+"#;
+        assert_eq!(
+            take_queries_predicates(is_empty_form)
+                .lines()
+                .count(),
+            1,
+            "one call site should yield exactly one captured slice"
+        );
+        assert_eq!(
+            variant_names(&take_queries_predicates(is_empty_form)),
+            vec!["Mine".to_string()],
+            "the capture ran past the closing parenthesis of the call"
+        );
+
+        // Nested parentheses inside the predicate must not end the slice early,
+        // and a multi-variant predicate claims every variant it names.
+        let nested = r#"
+    let requests = pending.take_queries(|req| matches!(req, QueryRequest::A { .. } | QueryRequest::B));
+    let unrelated = QueryRequest::C;
+"#;
+        assert_eq!(
+            variant_names(&take_queries_predicates(nested)),
+            vec!["A".to_string(), "B".to_string()],
+        );
+
+        // No call site at all is an empty capture, not a panic.
+        assert!(take_queries_predicates("let x = QueryRequest::A;").is_empty());
     }
 
     /// Every `QueryRequest::<Variant>` mention in `text`, de-duplicated.
@@ -269,6 +345,26 @@ mod tests {
         assert!(
             unclaimed.is_empty(),
             "QueryRequest variants deferred by process_query_requests with no system claiming them: {unclaimed:?}"
+        );
+
+        // The REVERSE direction, and the one PF-1194 actually shipped broken:
+        // a variant a dedicated system takes but `process_query_requests` does
+        // not name in `remaining` is drained and DROPPED by the default system
+        // before that system ever runs, however correct the handler is.
+        // `Physics2dState`, `GameComponentState`, `GameCameraState` and
+        // `Skeleton2dState` all sat in exactly that state. Asserting only
+        // `unclaimed` leaves re-introducing it green: deleting a variant from
+        // the `remaining` arm shrinks `deferred` without ever growing
+        // `unclaimed`, and the length floor above is far too loose to notice.
+        //
+        // The two sets are identical today with zero exemptions, so this is a
+        // pure ratchet: adding a system means adding its variant to `remaining`
+        // in the same commit.
+        let orphaned: Vec<&String> = claimed.iter().filter(|v| !deferred.contains(v)).collect();
+        assert!(
+            orphaned.is_empty(),
+            "bridge systems claim QueryRequest variants that process_query_requests drops before they run \
+             (add them to the `remaining` arm in bridge/query.rs): {orphaned:?}"
         );
     }
 
