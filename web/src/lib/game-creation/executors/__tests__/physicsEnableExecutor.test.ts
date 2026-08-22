@@ -28,6 +28,7 @@ function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
+    resolveStepOutputs: vi.fn(() => []),
     ...rest,
   };
 }
@@ -276,9 +277,14 @@ describe('physicsEnableExecutor', () => {
     expect(batch).not.toHaveBeenCalled();
     const output = result.output as { enabled: number; warning?: string };
     expect(output.enabled).toBe(0);
+    // Exact string, not a `toContain`: this sentence is the ONLY signal the user
+    // gets that a step reporting success changed nothing, and it has to tell
+    // them what to do about it.
     expect(output.warning).toBe(
       'Nothing in this step could be given a physical body, so none of it will collide, '
-      + 'land on the ground or be picked up.',
+      + 'land on the ground or be picked up. '
+      + 'Select each entity in the scene hierarchy and turn on Physics in the Inspector, '
+      + 'or build the game again.',
     );
   });
 
@@ -301,6 +307,98 @@ describe('physicsEnableExecutor', () => {
 
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('COMMAND_FAILED');
+  });
+
+  /**
+   * The SECOND rejection branch, which no test reached.
+   *
+   * A run that gets its toggles through and then loses the patch is the worst
+   * outcome this executor can produce and the hardest to see: every entity is
+   * physical, but with `PhysicsData::default()` — a DYNAMIC cuboid. The player
+   * becomes a box that tips over, and every collectible becomes a solid dynamic
+   * body that gets punted across the level on contact instead of being picked
+   * up. That is a playable-looking game that cannot be won, so the step must
+   * FAIL rather than report a partial success.
+   */
+  it('fails when the patch batch is rejected after the toggles were accepted', async () => {
+    const batch = vi.fn()
+      .mockReturnValueOnce({ success: true })   // toggle_physics
+      .mockReturnValueOnce({ success: false }); // update_physics
+    const result = await physicsEnableExecutor.execute(
+      { entities: [PLAYER] },
+      makeCtx({ dispatchCommandBatch: batch }),
+    );
+
+    expect(batch).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('COMMAND_FAILED');
+    // Exact string: the two rejection branches are told apart only by this
+    // message, and a run that failed at the patch is a materially different
+    // scene from one that failed at the toggle.
+    expect(result.error?.message).toBe('Engine rejected an update_physics command');
+  });
+
+  /**
+   * The collider fallback chain, `profile.colliderShape ?? COLLIDER_FOR_SHAPE[shape] ?? 'cuboid'`.
+   *
+   * Both ends of it were unexercised: every fixture supplied a shape, and no
+   * fixture used a role whose profile pins its own collider. The chain decides
+   * the geometry Rapier simulates, and a wrong collider is invisible — the mesh
+   * still draws correctly, so the only symptom is a player catching on nothing
+   * or falling through something solid.
+   */
+  it("gives an entity with no known shape the neutral 'cuboid' collider", async () => {
+    const batch = vi.fn().mockReturnValue({ success: true });
+    const ctx = makeCtx({ dispatchCommandBatch: batch });
+
+    // `shape` is optional — a step planned before that field existed still runs,
+    // and a cuboid is the one collider that is wrong in a bounded way rather
+    // than catastrophically (a `ball` under a crate rolls it off the level).
+    const result = await physicsEnableExecutor.execute(
+      { entities: [{ entityId: CRYSTAL.entityId, name: 'Relic', role: 'npc' }] },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(flatten(batch)).toEqual([
+      { command: 'toggle_physics', payload: { entityId: CRYSTAL.entityId, enabled: true } },
+      {
+        command: 'update_physics',
+        payload: {
+          entityId: CRYSTAL.entityId,
+          bodyType: 'fixed',
+          colliderShape: 'cuboid',
+          isSensor: true,
+        },
+      },
+    ]);
+  });
+
+  it("lets the role's own collider win over the shape it was spawned as", async () => {
+    const batch = vi.fn().mockReturnValue({ success: true });
+    const ctx = makeCtx({ dispatchCommandBatch: batch });
+
+    // A projectile pins `ball` regardless of mesh: the profile's collider is the
+    // deliberate override, and reading the shape first would give a projectile
+    // authored as a cube a cuboid that catches on every surface it grazes.
+    const result = await physicsEnableExecutor.execute(
+      { entities: [{ entityId: GROUND.entityId, name: 'Fireball', role: 'projectile', shape: 'cube' }] },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(flatten(batch)).toEqual([
+      { command: 'toggle_physics', payload: { entityId: GROUND.entityId, enabled: true } },
+      {
+        command: 'update_physics',
+        payload: {
+          entityId: GROUND.entityId,
+          bodyType: 'dynamic',
+          colliderShape: 'ball',
+          isSensor: false,
+        },
+      },
+    ]);
   });
 
   it('rejects an entityId the engine would silently replace with a random UUID', async () => {

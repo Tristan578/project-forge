@@ -42,6 +42,7 @@ import { fetchAI } from '@/lib/ai/client';
 import { buildPlan } from '../planBuilder';
 import { runPipeline } from '../pipelineRunner';
 import { EXECUTOR_REGISTRY } from '../executors';
+import { buildDefaultGroundDescriptor } from '../worldGeometry';
 import type { ExecutorContext, OrchestratorGDD, OrchestratorPlan } from '../types';
 import { setWinnabilityStateReader } from '@/stores/slices';
 import { createTestHarness } from '@/__integration__/harness';
@@ -146,6 +147,7 @@ function makeContext(harness: TestHarness, projectType: '2d' | '3d'): ExecutorCo
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: () => undefined,
+    resolveStepOutputs: () => [],
   };
 }
 
@@ -599,6 +601,36 @@ describe('pipeline enables physics on every gameplay entity (PF-1213)', () => {
       'the repair spawned a ground with no id, so no later command can name it',
     ).toBeTruthy();
 
+    // THE COLLIDER MUST MATCH THE MESH, which is a claim about the SIZE and not
+    // just about the three wire payloads below.
+    //
+    // `make_collider` (engine/src/core/physics.rs) derives its half-extents from
+    // `transform.scale`, and `spawn_entity` carries a position but no scale — so
+    // a spawn-and-toggle repair produces a 1x1x1 box centred on the origin whose
+    // walkable top face sits ABOVE the mesh the player can see. They would stand
+    // on an invisible pedestal and drop into the void one step later, while the
+    // fix list says "Added ground plane". Compared against the descriptor
+    // `world_build` uses, so the repaired floor and the built one cannot drift.
+    const expected = buildDefaultGroundDescriptor('3d');
+    const spawnIdx = recorded.findIndex(
+      entry => entry.command === 'spawn_entity' && payloadOf(entry)['id'] === id,
+    );
+    expect(spawnIdx).toBeGreaterThanOrEqual(0);
+    expect(payloadOf(recorded[spawnIdx])).toEqual({
+      id,
+      entityType: expected.entityType,
+      name: expected.name,
+      position: expected.position,
+    });
+    expect(payloadsOfCommandFor(recorded, 'update_transform', id!)).toEqual([
+      { entityId: id, scale: expected.scale },
+    ]);
+    // Pinned literally as well: a change that moves the descriptor and this
+    // assertion together is exactly what a purely self-referential comparison
+    // cannot notice.
+    expect(expected.position).toEqual([0, -0.5, 0]);
+    expect(expected.scale).toEqual([40, 1, 40]);
+
     // FULL payloads, both halves. `TogglePhysicsPayload` is exactly
     // `{ entityId, enabled }`, and the patch is what `PHYSICS_ROLE_PROFILES.geometry`
     // describes: solid, immovable, cuboid — the same body `world_build`'s ground
@@ -610,8 +642,12 @@ describe('pipeline enables physics on every gameplay entity (PF-1213)', () => {
       { entityId: id, bodyType: 'fixed', colliderShape: 'cuboid', isSensor: false },
     ]);
 
+    const sizeIdx = indexOfCommandFor(recorded, 'update_transform', id!);
     const toggleIdx = indexOfCommandFor(recorded, 'toggle_physics', id!);
     const updateIdx = indexOfCommandFor(recorded, 'update_physics', id!);
+    // The scale has to land before Play: the collider is built from
+    // `transform.scale` at the Edit→Play transition and never resized after.
+    expect(sizeIdx).toBeGreaterThan(spawnIdx);
     expect(updateIdx).toBeGreaterThan(toggleIdx);
   });
 
@@ -626,7 +662,7 @@ describe('pipeline enables physics on every gameplay entity (PF-1213)', () => {
     // `waitForEngineFrame()` between the two, `apply_physics_toggles` drains a
     // toggle for an entity `apply_spawn_requests` has not created yet and the
     // ground stays collider-less while the step reports success.
-    for (const command of ['toggle_physics', 'update_physics']) {
+    for (const command of ['update_transform', 'toggle_physics', 'update_physics']) {
       const idx = indexOfCommandFor(recorded, command, id!);
       expect(idx, `no ${command} for the repaired ground`).toBeGreaterThanOrEqual(0);
       expect(

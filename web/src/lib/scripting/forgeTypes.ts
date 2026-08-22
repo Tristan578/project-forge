@@ -1,3 +1,10 @@
+/**
+ * The whole `.d.ts` body below is ONE template literal, so a backtick or a
+ * `${` inside it is NOT punctuation — the first ends the string and the second
+ * interpolates. Both fail as an opaque `Parsing error: ',' expected` pointing
+ * at a line of prose, so write these doc comments in plain text. `tsc` and
+ * `eslint` both catch it, but neither names the cause.
+ */
 export const FORGE_TYPE_DEFINITIONS = `
 declare namespace forge {
   /** Get transform of an entity */
@@ -130,11 +137,31 @@ declare namespace forge {
   namespace tilemap {
     /** Get tile ID at position (returns null if empty or out of bounds) */
     function getTile(tilemapId: string, x: number, y: number, layer?: number): number | null;
-    /** Set a single tile at position (use null to clear) */
+    /**
+     * Set a single tile at position (use null to clear). Coordinates are
+     * floored; negative or non-finite arguments throw rather than being dropped
+     * by the engine in silence.
+     */
     function setTile(tilemapId: string, x: number, y: number, tileId: number | null, layer?: number): void;
-    /** Fill a rectangular region with a tile */
+    /**
+     * Fill a rectangular region with a tile. tilemapId is the tilemap ENTITY
+     * id. A null tile erases the region, in the same single command.
+     *
+     * Coordinates are floored; a negative or non-finite x/y/w/h/layer/tileId
+     * throws, because the engine reads each with as_u64() and a rejection
+     * there discards the whole command silently.
+     *
+     * Capped at 49,998 cells - fill_tiles carries one entry per cell, and the
+     * payload guard (MAX_COMMAND_PAYLOAD_CONTAINERS) allows 50,000 containers
+     * including the payload object and the tiles array. The cap is DERIVED from
+     * that constant as TILEMAP_FILL_MAX_CELLS in scriptWorker.ts, so the number
+     * in this sentence is a second copy that can rot. It is parsed out of this
+     * file and compared against the exported constant by the "forgeTypes
+     * fillRect cap prose" test in __tests__/scriptWorker.test.ts, which fails
+     * closed if the sentence is missing or appears more than once.
+     */
     function fillRect(tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer?: number): void;
-    /** Clear a single tile */
+    /** Clear a single tile. Coordinates are floored; negatives throw. */
     function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
     /** Convert world coordinates to tile coordinates */
     function worldToTile(tilemapId: string, worldX: number, worldY: number): [number, number];
@@ -142,7 +169,15 @@ declare namespace forge {
     function tileToWorld(tilemapId: string, tileX: number, tileY: number): [number, number];
     /** Get map dimensions in tiles [width, height] */
     function getMapSize(tilemapId: string): [number, number];
-    /** Resize the tilemap (clears tiles outside new bounds) */
+    /**
+     * NOT SUPPORTED - throws.
+     *
+     * @deprecated The engine has no tilemap resize command. This used to push a
+     * resize_tilemap that commands::dispatch has never known, and
+     * dispatchCommand returns void, so the call vanished without a word
+     * (PF-1181). The worker now throws rather than no-op silently. There is no
+     * replacement: recreate the tilemap at the size you need.
+     */
     function resize(tilemapId: string, width: number, height: number, anchor?: 'top-left' | 'center'): void;
   }
 

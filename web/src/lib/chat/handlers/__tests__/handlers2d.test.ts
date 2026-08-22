@@ -449,6 +449,25 @@ describe('handlers2d tilemap edge cases', () => {
     it('fails for missing tilemap', async () => {
       const { result } = await invoke('get_tilemap', { entityId: 'missing' });
       expect(result.success).toBe(false);
+      expect(result.error).toContain('missing');
+    });
+
+    // zEntityId is z.string().min(1), so '__proto__' is a legal id. A bare
+    // `store.tilemaps[entityId]` read walks the prototype chain and answers
+    // Object.prototype -- truthy, so the miss branch never fires and an
+    // internal object is returned as tilemap data. ownEntry() is what stops
+    // that, and asserting success===false alone would not notice if it were
+    // removed: the assertion has to reject the prototype specifically.
+    it('refuses a prototype-chain entity id instead of returning Object.prototype', async () => {
+      const { result } = await invoke(
+        'get_tilemap',
+        { entityId: '__proto__' },
+        { tilemaps: { e1: baseTilemap } },
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('__proto__');
+      expect(result.result).toBeUndefined();
+      expect(result.result).not.toBe(Object.prototype);
     });
   });
 

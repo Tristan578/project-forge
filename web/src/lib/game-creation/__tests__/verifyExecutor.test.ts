@@ -95,6 +95,7 @@ function makeMockCtx(
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
+    resolveStepOutputs: vi.fn(() => []),
   };
   return ctx;
 }

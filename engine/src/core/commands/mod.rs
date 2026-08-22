@@ -115,7 +115,11 @@ fn route_domain(command: &str) -> u8 {
         | "pause_audio" | "get_audio" | "update_audio_bus" | "create_audio_bus"
         | "delete_audio_bus" | "get_audio_buses" | "set_bus_effects"
         | "set_reverb_zone" | "toggle_reverb_zone" | "remove_reverb_zone"
-        | "get_reverb_zone" | "get_all_reverb_zones" => 3,
+        // `get_all_reverb_zones` was routed here with no arm to receive it, so it
+        // answered `Unknown audio command`. Deleted rather than aliased onto
+        // `get_reverb_zone`, which is per-entity and could not have served it
+        // anyway (PF-1181).
+        | "get_reverb_zone" => 3,
 
         // --- animation domain ---
         "play_animation" | "pause_animation" | "resume_animation"
@@ -134,7 +138,10 @@ fn route_domain(command: &str) -> u8 {
         // --- particles domain ---
         "set_particle" | "remove_particle" | "toggle_particle"
         | "set_particle_preset" | "play_particle" | "stop_particle"
-        | "burst_particle" | "get_particle" | "list_particle_presets" => 5,
+        // `list_particle_presets` was routed here with no arm (PF-1181). The preset
+        // names live in `core::particles`; nothing has ever served them over the
+        // command wire.
+        | "burst_particle" | "get_particle" => 5,
 
         // --- performance / LOD domain ---
         "set_lod" | "generate_lods" | "set_performance_budget"
@@ -165,18 +172,27 @@ fn route_domain(command: &str) -> u8 {
         | "get_game_camera" => 9,
 
         // --- sprites / 2D domain ---
-        "spawn_sprite" | "set_project_type" | "get_project_type"
+        "spawn_sprite" | "set_project_type"
         | "set_sprite_data" | "remove_sprite" | "get_sprite"
         | "update_camera_2d" | "get_camera_2d" | "set_sprite_sheet"
         | "remove_sprite_sheet" | "set_sprite_animator" | "remove_sprite_animator"
         | "create_skeleton2d" | "add_bone2d" | "remove_bone2d" | "update_bone2d"
-        | "create_skeletal_animation2d" | "remove_skeletal_animation2d"
-        | "add_skeletal_keyframe2d" | "set_skeleton_skin2d" | "solve_ik2d"
-        | "set_blend_tree2d" | "remove_blend_tree2d" | "list_tilesets"
-        | "create_tileset" | "update_tileset" | "delete_tileset"
-        | "create_tilemap" | "update_tilemap" | "delete_tilemap"
-        | "get_tilemap" | "set_tile" | "clear_tilemap" | "fill_tiles"
-        | "get_sorting_layers" | "set_sorting_layers"
+        | "create_skeletal_animation2d" | "fill_tiles" | "set_sorting_layers"
+        // DELETED (PF-1181): seventeen names were routed to this domain with no
+        // arm to receive them, so each answered `Unknown sprites command`. Most
+        // were near-misses of a real arm, which is how the vocabulary drifted —
+        // `add_skeletal_keyframe2d`/`add_keyframe2d`,
+        // `set_skeleton_skin2d`/`set_skeleton2d_skin`,
+        // `solve_ik2d`/`create_ik_chain2d`,
+        // `create_tileset`+`update_tileset`+`delete_tileset`/`set_tileset`,
+        // `create_tilemap`+`update_tilemap`+`delete_tilemap`+`clear_tilemap`/
+        // `set_tilemap_data`+`remove_tilemap_data`, `set_tile`/`paint_tile`.
+        // They are deleted, not aliased: an alias doubles the vocabulary that has
+        // to stay in step, which is the root cause of this whole class. The rest
+        // (`remove_skeletal_animation2d`, `set_blend_tree2d`,
+        // `remove_blend_tree2d`, `list_tilesets`, `get_tilemap`,
+        // `get_sorting_layers`) name features the engine does not have; adding one
+        // means adding its arm here at the same time.
         // The spellings `sprites::dispatch` actually implements. Absent from
         // this list they were unreachable: `route_domain` returns 255 for an
         // unlisted name and `dispatch` answers `Unknown command`, so the arm
@@ -200,8 +216,10 @@ fn route_domain(command: &str) -> u8 {
 
         // --- edit_mode domain ---
         "enter_edit_mode" | "exit_edit_mode" | "set_selection_mode"
-        | "select_elements" | "mesh_operation" | "recalc_normals"
-        | "extrude_faces" => 11,
+        // `extrude_faces` was routed here with no arm (PF-1181). Face extrusion is
+        // reached through `mesh_operation`, and `procedural::extrude_shape` is the
+        // separate whole-shape command.
+        | "select_elements" | "mesh_operation" | "recalc_normals" => 11,
 
         // --- engine-mode and query commands handled inline ---
         "play" | "stop" | "pause" | "resume" | "get_mode"
@@ -396,6 +414,24 @@ mod route_domain_parity {
         ("remove_tileset", "PF-1179 — entity-keyed arm vs asset-keyed caller"),
     ];
 
+    /// The index `route_domain` gives the engine-mode and query names that
+    /// `dispatch` matches inline rather than delegating to a module.
+    const INLINE_DOMAIN: u8 = 12;
+
+    /// Names `route_domain` claims that no arm implements, kept on purpose. Empty
+    /// today, and that is the correct steady state: PF-1181 deleted all twenty
+    /// entries this list would otherwise have held, because a routed name with no
+    /// arm is vocabulary the engine advertises and cannot answer.
+    ///
+    /// Domain 12 needs no entry. Its names are matched inline in `dispatch`, and
+    /// the check below reads THOSE arms out of this same file — strictly stronger
+    /// than exempting the index, since a name dropped from the inline match still
+    /// fails instead of being waved through.
+    ///
+    /// Both directions are checked, so this cannot rot into a blanket exemption:
+    /// an entry that stops being routed fails, and so does one that grows an arm.
+    const DELIBERATELY_ARMLESS: &[(&str, &str)] = &[];
+
     /// The `pub fn dispatch` body only. A whole-file scan would match quoted
     /// payload values inside the handlers as if they were command names.
     fn dispatch_body(source: &str) -> Option<&str> {
@@ -436,6 +472,76 @@ mod route_domain_parity {
             i = close + 1;
         }
         names
+    }
+
+    /// The `fn route_domain` body only.
+    ///
+    /// Note `fn`, not `pub fn`: `route_domain` is private, and an anchor written
+    /// `pub fn route_domain` matches nothing, returns `None`, and reads exactly
+    /// like "the router claims no names" — a scanner failure that looks like a
+    /// pass.
+    ///
+    /// Line comments are stripped. A name written in prose is not a routed name,
+    /// and dropping one can only ever REMOVE a name from the routed set, which is
+    /// the direction reality is already in — an unrouted name is unreachable
+    /// whether or not this scanner noticed it.
+    fn route_domain_body(router: &str) -> Option<String> {
+        let start = router.find("\nfn route_domain(")?;
+        let rest = &router[start + 1..];
+        let end = rest.find("\n}")? + 2;
+        Some(
+            rest[..end]
+                .lines()
+                .map(|line| match line.find("//") {
+                    Some(at) => &line[..at],
+                    None => line,
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+
+    /// `(command name, domain index)` for every name the router claims.
+    ///
+    /// Names accumulate across the `|` chain and are flushed when the arm's
+    /// `=> <digits>` is reached, so a group spanning ten lines is attributed
+    /// correctly. The trailing `_ => 255` flushes nothing: the wildcard arm
+    /// quotes no name.
+    fn routed_names(body: &str) -> Vec<(String, u8)> {
+        let bytes = body.as_bytes();
+        let mut out: Vec<(String, u8)> = Vec::new();
+        let mut pending: Vec<String> = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'"' {
+                let start = i + 1;
+                let Some(offset) = body[start..].find('"') else { break };
+                let close = start + offset;
+                pending.push(body[start..close].to_string());
+                i = close + 1;
+                continue;
+            }
+            if body[i..].starts_with("=>") {
+                let mut j = i + 2;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let digits = j;
+                while j < bytes.len() && bytes[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if let Ok(index) = body[digits..j].parse::<u8>() {
+                    for name in pending.drain(..) {
+                        out.push((name, index));
+                    }
+                }
+                pending.clear();
+                i = j.max(i + 2);
+                continue;
+            }
+            i += 1;
+        }
+        out
     }
 
     #[test]
@@ -513,6 +619,122 @@ mod route_domain_parity {
                 route_domain(name),
                 255,
                 "{name} is routed now — delete its DELIBERATELY_UNROUTED entry"
+            );
+        }
+    }
+
+    /// Self-test for `routed_names`: a scanner that silently returns nothing makes
+    /// the router->arm check below pass vacuously, and its own output looks the
+    /// same either way.
+    #[test]
+    fn routed_names_reads_groups_and_ignores_the_wildcard() {
+        let body = "fn route_domain(command: &str) -> u8 {\n    match command {\n        \
+                    \"a\" | \"b\"\n        | \"c\" => 3,\n        \
+                    \"d\" => 12,\n        _ => 255,\n    }\n}\n";
+        assert_eq!(
+            routed_names(body),
+            vec![
+                ("a".to_string(), 3),
+                ("b".to_string(), 3),
+                ("c".to_string(), 3),
+                ("d".to_string(), 12),
+            ]
+        );
+    }
+
+    /// The inverse of `every_implemented_arm_is_routed_to_its_own_domain`, and it
+    /// had never been checked: a name the router sends to a domain that has no arm
+    /// for it answers `Unknown <domain> command`. That is a real error rather than
+    /// a silent drop, but only a caller who believed the name existed ever sees
+    /// it — so twenty such names sat in the router advertising a vocabulary the
+    /// engine could not answer, several of them near-misses of real arms
+    /// (`create_tileset` vs `set_tileset`, `set_skeleton_skin2d` vs
+    /// `set_skeleton2d_skin`, `solve_ik2d` vs `create_ik_chain2d`). PF-1181.
+    #[test]
+    fn every_routed_name_has_an_arm_in_its_domain() {
+        let router = include_str!("mod.rs");
+        let body = route_domain_body(router).expect("mod.rs has an `fn route_domain`");
+        let routed = routed_names(&body);
+        assert!(
+            routed.len() > 200,
+            "parsed only {} routed names — the route_domain scanner has broken and \
+             would report every name as armed",
+            routed.len()
+        );
+
+        let inline_arms = arm_names(dispatch_body(router).expect("mod.rs has a `pub fn dispatch`"));
+        assert!(
+            inline_arms.len() > 3,
+            "parsed only {} inline arms from `dispatch` — domain 12 would report as \
+             fully armless",
+            inline_arms.len()
+        );
+        let exempt: Vec<&str> = DELIBERATELY_ARMLESS.iter().map(|(n, _)| *n).collect();
+
+        let mut armless = Vec::new();
+        for (name, index) in &routed {
+            if exempt.contains(&name.as_str()) {
+                continue;
+            }
+            let (label, arms) = if *index == INLINE_DOMAIN {
+                ("mod.rs, inline in `dispatch`", inline_arms.clone())
+            } else {
+                match DOMAIN_MODULES.iter().find(|(_, i, _)| i == index) {
+                    Some((file, _, source)) => (
+                        *file,
+                        arm_names(dispatch_body(source).expect("dispatch body")),
+                    ),
+                    None => {
+                        armless.push(format!(
+                            "{name}: routed to domain {index}, which no module implements"
+                        ));
+                        continue;
+                    }
+                }
+            };
+            if !arms.contains(&name.as_str()) {
+                armless.push(format!(
+                    "{name}: route_domain sends it to domain {index} ({label}), which has \
+                     no arm for it"
+                ));
+            }
+        }
+        assert!(
+            armless.is_empty(),
+            "These names are advertised by `route_domain` and answer `Unknown <domain> \
+             command`. Implement the arm, or delete the name from `route_domain` — do \
+             NOT alias it onto a neighbouring arm, which doubles the vocabulary that has \
+             to stay in step:\n  {}",
+            armless.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn deliberately_armless_entries_are_still_accurate() {
+        let router = include_str!("mod.rs");
+        let inline_arms = arm_names(dispatch_body(router).expect("mod.rs dispatch body"));
+        for (name, reason) in DELIBERATELY_ARMLESS {
+            assert!(
+                reason.len() > 20,
+                "{name}: an exemption without a real reason is not an exemption"
+            );
+            let index = route_domain(name);
+            assert_ne!(
+                index, 255,
+                "{name} is no longer routed — delete its DELIBERATELY_ARMLESS entry"
+            );
+            let arms = if index == INLINE_DOMAIN {
+                inline_arms.clone()
+            } else {
+                let (_, _, source) = DOMAIN_MODULES
+                    .iter()
+                    .find(|(_, i, _)| *i == index)
+                    .unwrap_or_else(|| panic!("{name} is routed to domain {index}, which no module implements"));
+                arm_names(dispatch_body(source).expect("dispatch body"))
+            };
+            assert!(
+                !arms.contains(name),
+                "{name} has an arm now — delete its DELIBERATELY_ARMLESS entry"
             );
         }
     }

@@ -365,6 +365,7 @@ export const createOrchestratorSlice: StateCreator<
       userTier: tier as UserTier,
       signal: _abortController.signal,
       resolveStepOutput: () => undefined, // overridden by runPipeline
+      resolveStepOutputs: () => [], // overridden by runPipeline
     };
 
     const { reservationId } = get();

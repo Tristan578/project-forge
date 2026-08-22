@@ -984,41 +984,6 @@ describe('get_physics2d', () => {
 });
 
 // ---------------------------------------------------------------------------
-// get_tilemap
-// ---------------------------------------------------------------------------
-
-describe('get_tilemap', () => {
-  it('returns error when entity has no tilemap data', async () => {
-    const { result } = await invokeHandler(
-      queryHandlers,
-      'get_tilemap',
-      { entityId: 'ent1' },
-      { tilemaps: {} }
-    );
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('ent1');
-  });
-
-  it('returns tilemap data when entity has it', async () => {
-    const tilemapData = {
-      tilesetAssetId: 'ts-1',
-      tileSize: [16, 16],
-      mapSize: [32, 32],
-      layers: [],
-      origin: 'TopLeft',
-    };
-    const { result } = await invokeHandler(
-      queryHandlers,
-      'get_tilemap',
-      { entityId: 'map1' },
-      { tilemaps: { map1: tilemapData } }
-    );
-    expect(result.success).toBe(true);
-    expect(result.result).toEqual(tilemapData);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // get_skeleton2d
 // ---------------------------------------------------------------------------
 

@@ -5,7 +5,7 @@ import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../typ
 import { makeStepError, successResult, failResult } from './shared';
 import { engineEntityId, waitForEngineFrame, sendCommands, type EngineCommand } from './engineDispatch';
 import { ENABLEABLE_ROLES, physicsProfileForRole } from '../physicsRoles';
-import { COLLIDER_FOR_SHAPE, SPAWNABLE_SHAPES, type SpawnShape } from '../entityShape';
+import { COLLIDER_FOR_SHAPE, SPAWNABLE_SHAPES } from '../entityShape';
 
 /**
  * Turn spawned entities into physical bodies (PF-1213).
@@ -63,7 +63,9 @@ export const physicsEnableExecutor: ExecutorDefinition = {
   name: 'physics_enable',
   inputSchema,
   userFacingErrorMessage:
-    'Could not switch physics on for the level. Nothing in the game will collide.',
+    'Could not switch physics on for the level. Nothing in the game will collide. '
+    + 'Try building the game again, or select each entity in the scene hierarchy and turn on '
+    + 'Physics in the Inspector.',
 
   async execute(
     input: Record<string, unknown>,
@@ -106,7 +108,7 @@ export const physicsEnableExecutor: ExecutorDefinition = {
 
       const colliderShape =
         profile.colliderShape
-        ?? (entity.shape ? COLLIDER_FOR_SHAPE[entity.shape as SpawnShape] : undefined)
+        ?? (entity.shape ? COLLIDER_FOR_SHAPE[entity.shape] : undefined)
         ?? 'cuboid';
 
       toggleCommands.push({
@@ -152,7 +154,9 @@ export const physicsEnableExecutor: ExecutorDefinition = {
         entityIds: [],
         warning:
           'Nothing in this step could be given a physical body, so none of it will collide, '
-          + 'land on the ground or be picked up.',
+          + 'land on the ground or be picked up. '
+          + 'Select each entity in the scene hierarchy and turn on Physics in the Inspector, '
+          + 'or build the game again.',
       });
     }
 
