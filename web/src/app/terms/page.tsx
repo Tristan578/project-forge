@@ -314,6 +314,67 @@ export default async function TermsOfServicePage() {
           command framework, and all proprietary tools and libraries within the Service
           remain the exclusive property of SpawnForge.
         </p>
+
+        <h3>8.1 Copyright &amp; DMCA Takedown</h3>
+        <p>
+          SpawnForge respects the intellectual property rights of others and expects
+          users to do the same. Users are prohibited from publishing games that infringe
+          the copyrights or trademarks of third parties, including games whose titles,
+          slugs, or content reference well-known protected gaming IPs.
+        </p>
+        <p>
+          If you believe that content on SpawnForge infringes your copyright, you may
+          submit a Digital Millennium Copyright Act (DMCA) takedown notice by emailing
+          <strong>dmca@spawnforge.ai</strong> with the following information:
+        </p>
+        <ul>
+          <li>
+            A physical or electronic signature of the copyright owner or a person
+            authorized to act on their behalf
+          </li>
+          <li>
+            Identification of the copyrighted work claimed to have been infringed
+          </li>
+          <li>
+            Identification of the infringing material on SpawnForge (including the game
+            title, slug, and URL)
+          </li>
+          <li>
+            Your contact information, including full name, address, telephone number, and
+            email address
+          </li>
+          <li>
+            A statement that you have a good faith belief that the use of the material in
+            the manner complained of is not authorized by the copyright owner, its agent,
+            or the law
+          </li>
+          <li>
+            A statement, made under penalty of perjury, that the information in the
+            notification is accurate and that you are authorized to act on behalf of the
+            copyright owner
+          </li>
+        </ul>
+        <p>
+          Upon receipt of a valid DMCA notice, SpawnForge will promptly remove or disable
+          access to the infringing material and will notify the user who posted it.
+        </p>
+        <p>
+          <strong>Counter-Notification:</strong> If you believe your content was removed
+          in error, you may submit a counter-notification to
+          <strong>dmca@spawnforge.ai</strong> including your signature, identification of
+          the removed material, a statement under penalty of perjury of a good faith
+          belief that the removal was a mistake, and your consent to the jurisdiction of
+          the federal courts in Delaware. Pursuant to 17 U.S.C. § 512(g)(3),
+          if we do not receive notice from the copyright owner within not less
+          than 10, nor more than 14, business days that they have filed an
+          action seeking a court order to restrain the alleged infringer, the
+          removed material shall be replaced or access to it shall be restored.
+        </p>
+        <p>
+          <strong>Repeat Infringer Policy:</strong> SpawnForge will terminate the accounts
+          of users who are determined to be repeat infringers of copyright in accordance
+          with the DMCA.
+        </p>
       </section>
 
       {/* 9. Third-Party Services */}
