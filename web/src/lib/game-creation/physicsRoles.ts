@@ -28,6 +28,7 @@
  * Server-safe: no `@/stores` or `@/hooks` VALUE import (see `entityShape.ts`).
  */
 
+import type { PhysicsData } from '@/stores/slices/types';
 import type { ColliderShapeName } from './entityShape';
 
 /**
@@ -60,7 +61,12 @@ export const PHYSICS_ROLES: readonly PhysicsRole[] = [
  * `physics_profile` step's business and it runs after this one.
  */
 export interface PhysicsBodyProfile {
-  bodyType: 'dynamic' | 'fixed' | 'kinematic_position' | 'kinematic_velocity';
+  /**
+   * Derived from `PhysicsData` rather than restated: the union is the mirror of
+   * `RigidBodyKind` in engine/src/core/physics.rs, and a hand-written second
+   * copy silently stops matching the engine the first time a variant moves.
+   */
+  bodyType: PhysicsData['bodyType'];
   /** Overrides the mesh-derived collider when the role demands a specific one. */
   colliderShape?: ColliderShapeName;
   isSensor: boolean;

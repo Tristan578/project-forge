@@ -32,6 +32,12 @@
  * that module needs `GameCameraData` from `@/stores/slices/types`, and the whole
  * boundary now rests on that import staying `import type`.
  *
+ * `lib/physics/` joined the same way (PF-1213): `physicsEnableExecutor`
+ * value-imports `buildPhysicsPatch` so the `update_physics` payload is picked
+ * from the allowlist that mirrors the engine's `PhysicsPatch` rather than being
+ * hand-assembled from string literals. Its `@/stores/slices/types` import has to
+ * stay `import type` for the same reason the two roots below do.
+ *
  * `lib/playMode/` joined the same way (PF-1199): `verifyExecutor` value-imports
  * `winnabilityValidator` so the verify step asks the REAL play gate whether the
  * generated game can be won instead of restating its rules. That put the whole
@@ -55,6 +61,7 @@ const GUARDED_ROOTS = [
   join(LIB, 'game-creation'),
   join(LIB, 'game'),
   join(LIB, 'playMode'),
+  join(LIB, 'physics'),
 ];
 
 /** Modules that pull client-only React state into whatever imports them. */

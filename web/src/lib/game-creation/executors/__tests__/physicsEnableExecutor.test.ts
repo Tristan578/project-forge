@@ -100,6 +100,78 @@ describe('physicsEnableExecutor', () => {
     expect(second.map(c => c.command)).toEqual(['update_physics', 'update_physics', 'update_physics']);
   });
 
+  /**
+   * The FIRST wait is against the SPAWN, not against the toggle/patch pair.
+   *
+   * `apply_spawn_requests` (engine/src/core/entity_factory.rs) creates entities
+   * through deferred `Commands` and is registered with no ordering edge to
+   * `apply_physics_toggles` (engine/src/bridge/mod.rs), which resolves its queue
+   * against `Query<(Entity, &EntityId, …)>` and `drain(..)`s it whether or not
+   * anything matched. Meanwhile `entitySetupExecutor` returns without yielding
+   * and `runPipeline` awaits it on a microtask, so every `spawn_entity` for the
+   * blueprint cast and every `toggle_physics` for it land inside ONE JS task,
+   * i.e. one engine frame. Without a frame between them the toggles match
+   * nothing, are dropped in silence, and this whole step is a no-op: no
+   * `PhysicsEnabled`, no collider, no collision, no score, no `game_win`.
+   */
+  it('waits for the engine to flush the spawns before the first toggle_physics', async () => {
+    const events: string[] = [];
+    const raf = vi.fn((cb: FrameRequestCallback) => {
+      events.push('frame');
+      queueMicrotask(() => { cb(0); });
+      return 0;
+    });
+    vi.stubGlobal('requestAnimationFrame', raf);
+
+    try {
+      const batch = vi.fn().mockImplementation((commands: Array<{ command: string }>) => {
+        events.push(`batch:${commands[0].command}`);
+        return { success: true };
+      });
+
+      const result = await physicsEnableExecutor.execute(
+        { entities: [PLAYER] },
+        makeCtx({ dispatchCommandBatch: batch }),
+      );
+
+      expect(result.success).toBe(true);
+      // Two frames per wait — `waitForEngineFrame` nests two rAF ticks because a
+      // single one can land inside the frame that queued the previous command.
+      expect(events).toEqual([
+        'frame', 'frame',
+        'batch:toggle_physics',
+        'frame', 'frame',
+        'batch:update_physics',
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('dispatches nothing when the run is aborted during the spawn-flush wait', async () => {
+    const controller = new AbortController();
+    const raf = vi.fn((cb: FrameRequestCallback) => {
+      controller.abort();
+      queueMicrotask(() => { cb(0); });
+      return 0;
+    });
+    vi.stubGlobal('requestAnimationFrame', raf);
+
+    try {
+      const batch = vi.fn().mockReturnValue({ success: true });
+      const result = await physicsEnableExecutor.execute(
+        { entities: [PLAYER] },
+        makeCtx({ dispatchCommandBatch: batch, signal: controller.signal }),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ABORTED');
+      expect(batch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('sends the exact toggle payload the engine deserializes', async () => {
     const batch = vi.fn().mockReturnValue({ success: true });
     await physicsEnableExecutor.execute({ entities: [PLAYER] }, makeCtx({ dispatchCommandBatch: batch }));

@@ -16,6 +16,8 @@
  * (`.claude/rules/gotchas.md` -> Build & CI).
  */
 
+import type { PhysicsData } from '@/stores/slices/types';
+
 /**
  * The mesh primitives `spawn_entity` accepts. Its enum also carries the three
  * light types, deliberately excluded here: every later step in the plan
@@ -79,8 +81,16 @@ export function resolveEntityShape(
  * has exactly five variants: `cuboid`, `ball`, `cylinder`, `capsule`, `auto`.
  * `make_collider` builds `Auto` as a cuboid, so `auto` is never chosen here —
  * naming the shape explicitly is what makes a wrong pairing visible in a diff.
+ *
+ * DERIVED, not restated. `PhysicsData` is the TypeScript mirror of the Rust
+ * enum, and a third hand-written copy of the variant list is a copy that goes
+ * stale the first time the engine gains or renames one — the drift class this
+ * repo has already paid for with `ENGINE_CAMERA_DEFAULTS`
+ * (`.claude/rules/gotchas.md` -> Engine & Game Loop). Deriving makes a rename
+ * upstream a compile error in `COLLIDER_FOR_SHAPE` below instead of a payload
+ * `serde` drops in silence.
  */
-export type ColliderShapeName = 'cuboid' | 'ball' | 'cylinder' | 'capsule' | 'auto';
+export type ColliderShapeName = PhysicsData['colliderShape'];
 
 /**
  * The collider that fits each spawnable mesh.

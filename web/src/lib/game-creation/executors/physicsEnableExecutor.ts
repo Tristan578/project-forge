@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type { PhysicsData } from '@/stores/slices/types';
+import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { engineEntityId, waitForEngineFrame, sendCommands, type EngineCommand } from './engineDispatch';
@@ -17,7 +19,13 @@ import { COLLIDER_FOR_SHAPE, SPAWNABLE_SHAPES, type SpawnShape } from '../entity
  * `active_collisions` stayed empty for the whole session, `system_collectible`
  * never fired, score never moved and `game_win` was unreachable.
  *
- * TWO COMMANDS PER ENTITY, IN TWO BATCHES, WITH A FRAME BETWEEN THEM.
+ * TWO COMMANDS PER ENTITY, IN TWO BATCHES, WITH A FRAME BEFORE AND BETWEEN.
+ *
+ * The FIRST wait is against the SPAWN. `entitySetupExecutor` returns without
+ * yielding and `runPipeline` awaits it on a microtask, so the blueprint spawns
+ * and these toggles would otherwise share one engine frame — and
+ * `apply_physics_toggles` drains its queue whether or not the entity exists
+ * yet, so every toggle would be dropped in silence.
  *
  * `toggle_physics { enabled: true }` inserts `PhysicsEnabled` AND
  * `PhysicsData::default()`; `update_physics` then patches that default with the
@@ -110,19 +118,27 @@ export const physicsEnableExecutor: ExecutorDefinition = {
       // own `PhysicsData::default()` — one copy of each number instead of two
       // that can drift — and mass/friction/restitution/gravity belong to the
       // `physics_profile` step, which runs after this one.
-      const patch: Record<string, unknown> = {
-        entityId: entity.entityId,
+      //
+      // Built through `buildPhysicsPatch` rather than by hand: the engine's
+      // `PhysicsPatch` is all-`Option` under `#[serde(flatten)]`, which makes
+      // `#[serde(deny_unknown_fields)]` impossible, so a misspelled key
+      // deserializes to `None` and no-ops with nothing to show for it. The
+      // builder picks from an allowlist carrying
+      // `satisfies Record<keyof PhysicsData, true>`, so a typo or a renamed
+      // field is a compile error here instead of a silent engine-side drop.
+      const patch: Partial<PhysicsData> = {
         bodyType: profile.bodyType,
         colliderShape,
+        isSensor: profile.isSensor,
+        ...(profile.lockRotation
+          ? { lockRotationX: true, lockRotationY: true, lockRotationZ: true }
+          : {}),
       };
-      if (profile.lockRotation) {
-        patch['lockRotationX'] = true;
-        patch['lockRotationY'] = true;
-        patch['lockRotationZ'] = true;
-      }
-      patch['isSensor'] = profile.isSensor;
 
-      patchCommands.push({ command: 'update_physics', payload: patch });
+      patchCommands.push({
+        command: 'update_physics',
+        payload: buildPhysicsPatch(entity.entityId, patch),
+      });
       enabledIds.push(entity.entityId);
     }
 
@@ -138,6 +154,30 @@ export const physicsEnableExecutor: ExecutorDefinition = {
           'Nothing in this step could be given a physical body, so none of it will collide, '
           + 'land on the ground or be picked up.',
       });
+    }
+
+    // WAIT ONE: against the SPAWN, not against the toggle/patch pair below.
+    //
+    // `entitySetupExecutor` dispatches its `spawn_entity` and returns without
+    // yielding, and `runPipeline` awaits each executor on a microtask, so every
+    // blueprint spawn and every toggle here would otherwise land inside one JS
+    // task — one engine frame. `apply_spawn_requests` creates entities through
+    // deferred `Commands` with no ordering edge to `apply_physics_toggles`
+    // (engine/src/bridge/mod.rs), and that system `drain(..)`s its queue whether
+    // or not the id matched anything. A toggle for a not-yet-flushed entity is
+    // therefore consumed and lost with no exception, no event and no log — the
+    // whole step silently enabling nothing. `worldBuildExecutor` escapes this
+    // only because it happens to await a frame of its own before returning.
+    await waitForEngineFrame();
+
+    if (ctx.signal.aborted) {
+      return failResult(
+        makeStepError(
+          'ABORTED',
+          'Executor was aborted while waiting for the engine to flush the spawns',
+          this.userFacingErrorMessage,
+        ),
+      );
     }
 
     if (!sendCommands(ctx, toggleCommands)) {
