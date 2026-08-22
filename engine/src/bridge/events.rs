@@ -631,6 +631,29 @@ pub fn emit_character_grounded(entity_id: &str, grounded: bool) {
     emit_event("CHARACTER_GROUNDED_CHANGED", &GroundedPayload { entity_id, grounded });
 }
 
+/// Emit the list of characters the controller could not drive.
+///
+/// `manage_character_controller_lifecycle` skips a character that has no
+/// collider — it cannot attach a kinematic controller without one — and records
+/// the entity instead of failing loudly. Before PF-1214 nothing read that list,
+/// so the creator pressed Play, the character stood still, and the one system
+/// that knew why said nothing.
+///
+/// Emitted on change only, empty list included: an empty payload is how the UI
+/// learns a previously-broken character was fixed and the warning can go away.
+pub fn emit_character_controller_diagnostics(skipped_without_collider: &[String]) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DiagnosticsPayload<'a> {
+        skipped_without_collider: &'a [String],
+    }
+
+    emit_event(
+        "CHARACTER_CONTROLLER_DIAGNOSTICS",
+        &DiagnosticsPayload { skipped_without_collider },
+    );
+}
+
 /// Emit a raycast result event.
 pub fn emit_raycast_result(request_id: &str, hit_entity: Option<&str>, point: [f32; 3], distance: f32) {
     #[derive(Serialize)]

@@ -55,11 +55,39 @@ impl GameComponentData {
 
 // ---- Per-component data structs ----
 
+/// # `jump_height` means two different things on the two movement paths
+///
+/// There are two character movement paths, and they read this one number
+/// differently. That divergence is REAL and currently unresolved; it is
+/// documented here rather than hidden because a creator tuning the number
+/// sees different behaviour depending on the project.
+///
+/// * **Kinematic path** (3D characters with a collider — the normal case).
+///   `jump_height` is an APEX HEIGHT in world units. `system_character_controller`
+///   converts it with [`crate::core::character_controller::jump_speed_for_height`]
+///   (`v = sqrt(2 * g * scale * h)`) and integrates against gravity, so the
+///   character peaks at about the authored height whatever the gravity scale.
+///
+/// * **Legacy direct-translation path** (2D projects, which are simulated by the
+///   separate `physics_2d_sim` pipeline, and any 3D character with no collider).
+///   That path has no gravity integrator and no vertical velocity at all — the
+///   jump is a single-frame nudge of `jump_height * 0.5 * dt`. Here the number
+///   behaves as an impulse magnitude, and no apex height is reachable because
+///   nothing ever pulls the character back down.
+///
+/// Converging the two means giving the legacy path a real gravity integrator,
+/// which changes 2D jump behaviour and belongs with the 2D character controller
+/// work rather than here. Until then the tooltip in
+/// `web/src/lib/ai/tooltipDictionary.ts` carries the same caveat, so the
+/// divergence is visible to the person typing the number and not only to the
+/// person reading the engine.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterControllerData {
     pub speed: f32,             // units/sec, default 5.0
-    pub jump_height: f32,       // apex height in units (converted to a launch speed), default 8.0
+    /// Apex height in units on the kinematic path; an impulse magnitude on the
+    /// legacy path. Default 8.0. See the struct doc comment above.
+    pub jump_height: f32,
     pub gravity_scale: f32,     // multiplier, default 1.0
     pub can_double_jump: bool,  // default false
 }
@@ -698,6 +726,19 @@ pub struct GameComponentRuntime {
     pub teleporter_cooldowns: std::collections::HashMap<String, f32>,
     /// Moving platform state: entity_id -> (current_waypoint_index, direction, pause_timer)
     pub platform_states: std::collections::HashMap<String, PlatformState>,
+    /// World-space translation each moving platform applied to itself THIS
+    /// frame, keyed by Bevy entity.
+    ///
+    /// Keyed by `Entity` rather than by the string id every other map here uses
+    /// because the only consumer is `system_character_controller`, which learns
+    /// which platform it is standing on from `KinematicCharacterControllerOutput`
+    /// — and Rapier reports a contact as an `Entity`. Resolving that back to an
+    /// `EntityId` would need a second lookup per contact per frame purely to
+    /// undo an id conversion.
+    ///
+    /// Rebuilt from scratch every frame by `system_moving_platform`, so a
+    /// platform that stopped moving leaves no stale delta behind.
+    pub platform_deltas: std::collections::HashMap<Entity, Vec3>,
     /// Spawner state: entity_id -> (timer, Vec<spawned_entity_ids>)
     pub spawner_states: std::collections::HashMap<String, SpawnerState>,
     /// Projectile state: entity_id -> (direction, remaining_lifetime)
@@ -778,7 +819,14 @@ impl Plugin for GameComponentsPlugin {
         // Game component systems (PlaySystemSet only) - split into groups of 4
         // These run after collision tracking
         app.add_systems(Update, (
-            system_character_controller,
+            // Explicitly after the platform system: the character reads
+            // `GameComponentRuntime::platform_deltas`, which that system rebuilds
+            // from scratch each frame. Without the edge Bevy is free to run them
+            // in either order, and running first would feed the character an
+            // already-cleared map — a rider that silently stops being carried,
+            // resolved stably-but-arbitrarily and liable to flip the day an
+            // unrelated system is added.
+            system_character_controller.after(system_moving_platform),
             system_health,
             system_collectible,
             system_damage_zone,
@@ -899,7 +947,7 @@ pub(crate) fn system_character_controller(
     mut entities: CharacterMovementQuery,
 ) {
     let Some(input) = input else { return; };
-    let Some(_runtime) = runtime else { return; };
+    let Some(runtime) = runtime else { return; };
     let dt = time.delta_secs();
 
     // The resource is absent until the first `set_project_type`, and the
@@ -1018,12 +1066,41 @@ pub(crate) fn system_character_controller(
                             can_double_jump: data.can_double_jump,
                         },
                     );
+                    // Carry: a `KinematicPositionBased` body moves ONLY by the
+                    // translation handed to Rapier, so a character standing on a
+                    // moving platform holds its world position while the platform
+                    // slides out from under it. Adding the platform's own frame
+                    // delta is what makes the character ride it instead of being
+                    // shoved off by the next collider sweep.
+                    //
+                    // The contacts are last frame's (Rapier writes its output in
+                    // PostUpdate) while the delta is this frame's; standing
+                    // contact persists across frames, so the pairing holds for
+                    // exactly the case that matters.
+                    let carry = kcc_output.map_or(Vec3::ZERO, |o| {
+                        let contacts: Vec<(Vec3, Vec3)> = o
+                            .collisions
+                            .iter()
+                            .filter_map(|c| {
+                                // `details` is `None` for a deeply-penetrating or
+                                // failed cast, i.e. exactly the hits whose contact
+                                // geometry Rapier could not compute. A contact with
+                                // no normal cannot be classified as ground, so it
+                                // carries nothing rather than guessing.
+                                let normal = c.hit.details.map(|d| d.normal1)?;
+                                let delta = runtime.platform_deltas.get(&c.entity)?;
+                                Some((normal, *delta))
+                            })
+                            .collect();
+                        super::character_controller::select_carry_delta(&contacts)
+                    });
+
                     // Accumulate rather than overwrite: a script may already have
                     // requested translation for this frame. Rapier consumes the
                     // field and resets it to `None` after each step, so this
                     // never carries across frames.
                     controller.translation =
-                        Some(controller.translation.unwrap_or(Vec3::ZERO) + step);
+                        Some(controller.translation.unwrap_or(Vec3::ZERO) + step + carry);
                     continue;
                 }
 
@@ -1038,6 +1115,10 @@ pub(crate) fn system_character_controller(
                 }
 
                 if jump_just_pressed {
+                    // NOT an apex height on this path: there is no gravity
+                    // integrator here, so this is a one-frame nudge whose size
+                    // scales with the authored number. See the divergence note
+                    // on `CharacterControllerData`.
                     transform.translation.y += data.jump_height * 0.5 * dt;
                 }
             }
@@ -1395,14 +1476,18 @@ fn system_teleporter(
 fn system_moving_platform(
     time: Res<Time>,
     runtime: Option<ResMut<GameComponentRuntime>>,
-    mut entities: Query<(&EntityId, &GameComponents, &mut Transform)>,
+    mut entities: Query<(Entity, &EntityId, &GameComponents, &mut Transform)>,
 ) {
-
-
     let Some(mut runtime) = runtime else { return; };
     let dt = time.delta_secs();
 
-    for (eid, gc, mut transform) in entities.iter_mut() {
+    // Cleared rather than updated in place: a platform that finished a `Once`
+    // route, or paused at a waypoint, must report NO delta this frame, and the
+    // branches below simply do not write one. Leaving last frame's value would
+    // carry a rider forever on a platform that has stopped.
+    runtime.platform_deltas.clear();
+
+    for (entity, eid, gc, mut transform) in entities.iter_mut() {
         if let Some(GameComponentData::MovingPlatform(data)) = gc.get("moving_platform") {
             if data.waypoints.len() < 2 {
                 continue;
@@ -1424,6 +1509,12 @@ fn system_moving_platform(
                 state.pause_timer -= dt;
                 continue;
             }
+
+            // Captured before either branch below writes `transform`, so the
+            // recorded delta is exactly what this platform moved this frame —
+            // including the snap onto a waypoint, which is the frame a rider is
+            // most likely to be left behind on.
+            let position_before = transform.translation;
 
             // Compute target position (waypoint + origin offset)
             let origin = Vec3::from(state.origin);
@@ -1466,6 +1557,11 @@ fn system_moving_platform(
             } else {
                 // Move toward target
                 transform.translation += direction * step;
+            }
+
+            let delta = transform.translation - position_before;
+            if delta != Vec3::ZERO {
+                runtime.platform_deltas.insert(entity, delta);
             }
         }
     }
@@ -3054,7 +3150,13 @@ mod character_controller_kinematic_tests {
     use std::time::Duration;
 
     const SPEED: f32 = 7.0;
-    const JUMP_SPEED: f32 = 8.0;
+    /// The AUTHORED `jumpHeight`, in metres — what a creator types into the
+    /// inspector. It is NOT a velocity: `jump_speed_for_height` converts it.
+    const JUMP_HEIGHT: f32 = 8.0;
+    /// A vertical VELOCITY in m/s, used to seed a fixture mid-rise. Deliberately
+    /// a separate constant from `JUMP_HEIGHT`: the two carry different units and
+    /// sharing one name made the height/speed conflation invisible.
+    const RISING_VELOCITY: f32 = 8.0;
     const DT_MS: u64 = 100;
 
     struct Frame {
@@ -3112,7 +3214,7 @@ mod character_controller_kinematic_tests {
         let mut gc = GameComponents::default();
         gc.components.push(GameComponentData::CharacterController(CharacterControllerData {
             speed: SPEED,
-            jump_height: JUMP_SPEED,
+            jump_height: JUMP_HEIGHT,
             can_double_jump,
             ..Default::default()
         }));
@@ -3208,9 +3310,10 @@ mod character_controller_kinematic_tests {
     #[test]
     fn a_rise_rapier_swallowed_cancels_the_jump_at_the_call_site() {
         let rising = CharacterMotionState {
-            vertical_velocity: JUMP_SPEED,
+            vertical_velocity: RISING_VELOCITY,
             grounded: false,
             jumps_used: 1,
+            ..Default::default()
         };
 
         let blocked = run_kinematic_frame_with(
@@ -3278,5 +3381,125 @@ mod character_controller_kinematic_tests {
 
         let moved = world.get::<Transform>(entity).unwrap().translation;
         assert!((moved.x - 0.7).abs() < 1e-4, "legacy strafe must still travel 0.7, got {}", moved.x);
+    }
+}
+
+#[cfg(test)]
+mod moving_platform_carry_tests {
+    use super::{
+        system_moving_platform, GameComponentData, GameComponentRuntime, GameComponents,
+        MovingPlatformData, PlatformLoopMode,
+    };
+    use crate::core::entity_id::EntityId;
+    use bevy::prelude::*;
+    use std::time::Duration;
+
+    fn platform(waypoints: Vec<[f32; 3]>, pause: f32) -> GameComponents {
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::MovingPlatform(MovingPlatformData {
+            speed: 2.0,
+            waypoints,
+            pause_duration: pause,
+            loop_mode: PlatformLoopMode::PingPong,
+        }));
+        gc
+    }
+
+    fn run(world: &mut World, schedule: &mut Schedule) {
+        world
+            .resource_mut::<Time<()>>()
+            .advance_by(Duration::from_millis(100));
+        schedule.run(world);
+    }
+
+    fn harness() -> (World, Schedule) {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(GameComponentRuntime::default());
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_moving_platform);
+        (world, schedule)
+    }
+
+    /// The delta is the ONLY channel the character controller has: a
+    /// `KinematicPositionBased` body moves solely by the translation handed to
+    /// Rapier, so a rider whose platform reports nothing simply stays put while
+    /// the platform slides out from under it.
+    #[test]
+    fn a_moving_platform_records_the_distance_it_travelled_this_frame() {
+        let (mut world, mut schedule) = harness();
+        let entity = world
+            .spawn((
+                EntityId::new("lift"),
+                // First waypoint far enough that one frame cannot reach it, so
+                // the platform is genuinely mid-travel when it is sampled.
+                platform(vec![[0.0, 10.0, 0.0], [0.0, 0.0, 0.0]], 0.0),
+                Transform::default(),
+            ))
+            .id();
+
+        run(&mut world, &mut schedule);
+
+        let moved = world.get::<Transform>(entity).unwrap().translation;
+        let delta = world
+            .resource::<GameComponentRuntime>()
+            .platform_deltas
+            .get(&entity)
+            .copied()
+            .expect("a platform that moved must report its delta");
+        assert_eq!(delta, moved, "the reported delta must be the distance actually travelled");
+        assert!(delta.y > 0.0, "the platform rose, got {delta:?}");
+    }
+
+    /// A stale delta would carry a rider forever on a platform that has
+    /// stopped, so the map is rebuilt from scratch rather than updated.
+    #[test]
+    fn a_paused_platform_reports_nothing() {
+        let (mut world, mut schedule) = harness();
+        let entity = world
+            .spawn((
+                EntityId::new("lift"),
+                // The first waypoint is within one frame's travel, so the
+                // platform snaps onto it and starts its pause immediately.
+                platform(vec![[0.0, 0.01, 0.0], [0.0, 10.0, 0.0]], 5.0),
+                Transform::default(),
+            ))
+            .id();
+
+        run(&mut world, &mut schedule);
+        assert!(
+            world.resource::<GameComponentRuntime>().platform_deltas.contains_key(&entity),
+            "the snap onto the waypoint is itself a move and must be reported"
+        );
+
+        run(&mut world, &mut schedule);
+        assert!(
+            !world.resource::<GameComponentRuntime>().platform_deltas.contains_key(&entity),
+            "a platform sitting out its pause must report no delta"
+        );
+    }
+
+    /// A single-waypoint platform never moves, and a non-platform entity is not
+    /// a platform at all — neither may appear in the map.
+    #[test]
+    fn entities_that_are_not_moving_platforms_report_nothing() {
+        let (mut world, mut schedule) = harness();
+        let degenerate = world
+            .spawn((
+                EntityId::new("stuck"),
+                platform(vec![[0.0, 1.0, 0.0]], 0.0),
+                Transform::default(),
+            ))
+            .id();
+        let plain = world
+            .spawn((EntityId::new("rock"), GameComponents::default(), Transform::default()))
+            .id();
+
+        run(&mut world, &mut schedule);
+
+        let deltas = &world.resource::<GameComponentRuntime>().platform_deltas;
+        assert!(!deltas.contains_key(&degenerate));
+        assert!(!deltas.contains_key(&plain));
+        assert!(deltas.is_empty());
     }
 }

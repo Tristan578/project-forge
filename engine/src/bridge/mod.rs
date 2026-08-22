@@ -385,6 +385,16 @@ impl Plugin for SelectionPlugin {
                 game::emit_character_grounded_system
                     .after(crate::core::game_components::system_character_controller),
             )
+            // Tell the creator when a character could not be driven at all
+            // (PF-1214). `.after(...)` is load-bearing for the same reason as
+            // above: the lifecycle writes the diagnostics resource on the
+            // Edit->Play frame and removes it on Play->Edit, so without the
+            // edge the first play could emit last frame's (absent) list.
+            .add_systems(
+                Update,
+                game::emit_character_controller_diagnostics_system
+                    .after(crate::core::character_controller::manage_character_controller_lifecycle),
+            )
             .add_systems(Update, core_systems::apply_mode_change_requests)
             .add_systems(Update, scripts::apply_input_binding_updates)
             .add_systems(Update, physics::apply_physics_updates)

@@ -1057,6 +1057,21 @@ mod tests {
             Some(LockedAxes::ROTATION_LOCKED),
             "the character's rotation lock must win over the physics default"
         );
+        // The physics lifecycle inserts `ActiveEvents::COLLISION_EVENTS`, but a
+        // kinematic body still reports nothing against static or kinematic
+        // geometry unless the collision PAIRS are widened too. Both halves have
+        // to survive the same frame, which is only observable here where both
+        // lifecycles actually run.
+        assert!(
+            world.get::<ActiveEvents>(entity).is_some(),
+            "the physics lifecycle must have enabled collision events"
+        );
+        let types = world
+            .get::<ActiveCollisionTypes>(entity)
+            .copied()
+            .expect("the character lifecycle must widen the collision pairs");
+        assert!(types.contains(ActiveCollisionTypes::KINEMATIC_STATIC));
+        assert!(types.contains(ActiveCollisionTypes::KINEMATIC_KINEMATIC));
     }
 
     /// The control for the test above: with the edge removed the character
