@@ -331,6 +331,7 @@ describe('cameraSetupExecutor', () => {
       userTier: 'pro',
       signal: new AbortController().signal,
       resolveStepOutput: () => undefined,
+      resolveStepOutputs: () => [],
     };
     nodes = { 'spawned-later': { entityId: 'spawned-later', name: 'PlayerCamera' } };
 
