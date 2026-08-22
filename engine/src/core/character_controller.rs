@@ -254,6 +254,23 @@ pub fn step_character(state: &mut CharacterMotionState, input: CharacterStepInpu
     )
 }
 
+/// Initial upward speed that carries a character to `height` units under
+/// `GRAVITY_ACCEL * gravity_scale`, from `v² = 2·g·h`.
+///
+/// `CharacterControllerData::jump_height` is authored as a HEIGHT — the
+/// inspector labels it one, the GDD pipeline writes one, and the runner
+/// template means one — so feeding it straight in as a velocity made the
+/// apex depend on the gravity scale and quietly turned an authored 2-unit hop
+/// into a 0.2-unit one. A non-finite or non-positive gravity scale falls back
+/// to 1.0 (zero gravity has no finite answer, and [`step_character`] treats an
+/// unusable scale the same way); a non-finite or negative height is a zero
+/// jump, matching the `max(0.0)` guard on the speed itself.
+pub fn jump_speed_for_height(height: f32, gravity_scale: f32) -> f32 {
+    let scale = if gravity_scale.is_finite() && gravity_scale > 0.0 { gravity_scale } else { 1.0 };
+    let h = if height.is_finite() { height.max(0.0) } else { 0.0 };
+    (2.0 * GRAVITY_ACCEL.abs() * scale * h).sqrt()
+}
+
 /// True when the entity carries a character-controller game component.
 pub fn has_character_controller(components: &GameComponents) -> bool {
     components
@@ -472,6 +489,57 @@ mod tests {
             can_double_jump: false,
             vertical_blocked: false,
         }
+    }
+
+    /// `jumpHeight` is a height. Integrating a jump from the ground with the
+    /// derived speed must peak at (about) that height — not at whatever
+    /// `v²/2g` happens to be for the raw number, and not at a different apex
+    /// when the gravity scale changes.
+    #[test]
+    fn jump_speed_for_height_reaches_the_authored_apex() {
+        for (height, gravity_scale) in [(2.0_f32, 1.0_f32), (0.5, 1.0), (3.0, 2.0), (1.0, 0.5)] {
+            let dt = 1.0 / 240.0;
+            let mut state = CharacterMotionState { vertical_velocity: 0.0, ..Default::default() };
+            let mut input = CharacterStepInput {
+                dt,
+                grounded: true,
+                jump_just_pressed: true,
+                jump_speed: jump_speed_for_height(height, gravity_scale),
+                gravity_scale,
+                ..base_input()
+            };
+            let mut y = 0.0_f32;
+            let mut apex = 0.0_f32;
+            for _ in 0..10_000 {
+                y += step_character(&mut state, input).y;
+                apex = apex.max(y);
+                input.grounded = false;
+                input.jump_just_pressed = false;
+                if state.vertical_velocity <= 0.0 {
+                    break;
+                }
+            }
+            // Semi-implicit Euler applies gravity before the displacement, so
+            // it undershoots the analytic apex by at most one frame of launch
+            // speed; a raw-velocity reading would miss by a factor of `2g`.
+            let tolerance = input.jump_speed * dt + 1e-3;
+            assert!(
+                (apex - height).abs() <= tolerance,
+                "height {height} at gravity {gravity_scale}: apex {apex} (tolerance {tolerance})"
+            );
+        }
+    }
+
+    #[test]
+    fn jump_speed_for_height_is_zero_for_unusable_heights_and_ignores_bad_gravity() {
+        assert_eq!(jump_speed_for_height(0.0, 1.0), 0.0);
+        assert_eq!(jump_speed_for_height(-3.0, 1.0), 0.0);
+        assert_eq!(jump_speed_for_height(f32::NAN, 1.0), 0.0);
+        let unit = jump_speed_for_height(2.0, 1.0);
+        assert_eq!(jump_speed_for_height(2.0, 0.0), unit, "zero gravity falls back to 1.0");
+        assert_eq!(jump_speed_for_height(2.0, -1.0), unit, "negative gravity falls back to 1.0");
+        assert_eq!(jump_speed_for_height(2.0, f32::INFINITY), unit, "non-finite gravity falls back to 1.0");
+        assert!(jump_speed_for_height(2.0, 2.0) > unit, "heavier gravity needs a faster launch");
     }
 
     /// The whole point of the ticket: an airborne character must accelerate

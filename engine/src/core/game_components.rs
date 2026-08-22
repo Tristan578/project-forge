@@ -59,7 +59,7 @@ impl GameComponentData {
 #[serde(rename_all = "camelCase")]
 pub struct CharacterControllerData {
     pub speed: f32,             // units/sec, default 5.0
-    pub jump_height: f32,       // impulse magnitude, default 8.0
+    pub jump_height: f32,       // apex height in units (converted to a launch speed), default 8.0
     pub gravity_scale: f32,     // multiplier, default 1.0
     pub can_double_jump: bool,  // default false
 }
@@ -1007,7 +1007,13 @@ pub(crate) fn system_character_controller(
                                 )
                             }),
                             speed: data.speed,
-                            jump_speed: data.jump_height,
+                            // `jumpHeight` is a height; the controller wants a
+                            // launch speed. Convert here so the apex is the
+                            // authored number under whatever gravity applies.
+                            jump_speed: super::character_controller::jump_speed_for_height(
+                                data.jump_height,
+                                data.gravity_scale,
+                            ),
                             gravity_scale: data.gravity_scale,
                             can_double_jump: data.can_double_jump,
                         },
