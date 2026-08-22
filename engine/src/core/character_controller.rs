@@ -69,6 +69,50 @@ pub const SNAP_TO_GROUND: f32 = 0.2;
 /// Skin width kept between the character shape and the geometry it touches.
 pub const CONTROLLER_OFFSET: f32 = 0.02;
 
+/// Fraction of a requested upward move that must actually happen before the
+/// frame counts as unobstructed.
+///
+/// Not `1.0`: the skin width, a grazing wall contact and the slide projection
+/// all shave a little off a legitimate rise, and cancelling a jump for that
+/// would make every jump taken next to a wall die on frame one. Half is far
+/// above that noise and far below anything a real ceiling leaves through.
+pub const VERTICAL_BLOCK_FRACTION: f32 = 0.5;
+
+/// Requested upward motion at or below this, in world units, is treated as no
+/// request at all.
+///
+/// A frame with `dt` near zero asks for a vertical move of the same order as
+/// float noise, and comparing noise against a fraction of itself decides
+/// nothing — without the floor a standing character could be reported as
+/// ceiling-blocked.
+pub const VERTICAL_BLOCK_EPSILON: f32 = 1e-4;
+
+/// Whether Rapier refused this frame's UPWARD motion, given the translation the
+/// controller asked for and the one it was actually allowed.
+///
+/// Rapier reports the clamp (`desired_translation` vs `effective_translation`
+/// on [`KinematicCharacterControllerOutput`]) but never writes it back into our
+/// velocity, and there is no "hit a ceiling" flag. Without this, a jump that
+/// meets an overhead surface keeps its whole upward speed: the controller
+/// re-requests `+v*dt` every frame, Rapier clamps every frame, and the
+/// character glides along the underside of the platform until gravity has eaten
+/// the velocity — roughly 0.8s and ~48 frames at the default `jumpHeight` of
+/// 8.0. Rapier still prevents penetration, so the symptom is a stuck-looking
+/// player rather than tunnelling.
+///
+/// Only upward is considered. A refused DOWNWARD move is the floor, which
+/// `grounded` already owns; treating it as a block would cancel
+/// [`GROUND_STICK_VELOCITY`] and make `snap_to_ground` release on ramp seams.
+pub fn vertical_motion_blocked(desired: Vec3, effective: Vec3) -> bool {
+    if !desired.y.is_finite() || !effective.y.is_finite() {
+        return false;
+    }
+    if desired.y <= VERTICAL_BLOCK_EPSILON {
+        return false;
+    }
+    effective.y < desired.y * VERTICAL_BLOCK_FRACTION
+}
+
 /// Per-entity motion state for a kinematic character.
 ///
 /// Inserted alongside the [`KinematicCharacterController`] on Edit→Play and
@@ -131,6 +175,10 @@ pub struct CharacterStepInput {
     pub gravity_scale: f32,
     /// Whether one extra mid-air jump is allowed.
     pub can_double_jump: bool,
+    /// Whether Rapier refused last frame's upward motion — see
+    /// [`vertical_motion_blocked`]. Carries the same one-frame latency as
+    /// `grounded`, because it is read from the same `PostUpdate` output.
+    pub vertical_blocked: bool,
 }
 
 /// Advances one frame of character motion and returns the translation to hand
@@ -157,6 +205,20 @@ pub fn step_character(state: &mut CharacterMotionState, input: CharacterStepInpu
         // spawned in the air. Either way the ground jump is gone, so
         // `canDoubleJump` means exactly one mid-air jump rather than two.
         state.jumps_used = 1;
+    }
+
+    // A rise Rapier refused loses its upward speed here. This is the only place
+    // it can happen: Rapier clamps the translation and reports the clamp, but it
+    // never touches our velocity, so an uncancelled jump keeps re-requesting the
+    // same blocked rise for its whole ~0.8s ascent (see
+    // [`vertical_motion_blocked`]).
+    //
+    // Deliberately BEFORE the jump gating: the report is last frame's, so a jump
+    // accepted THIS frame has to win over a stale block. And deliberately AFTER
+    // the grounded bookkeeping above, so zeroing the velocity here can never be
+    // mistaken for a landing and refill the jump budget.
+    if input.vertical_blocked && state.vertical_velocity > 0.0 {
+        state.vertical_velocity = 0.0;
     }
 
     if input.jump_just_pressed {
@@ -340,6 +402,7 @@ mod tests {
             jump_speed: 8.0,
             gravity_scale: 1.0,
             can_double_jump: false,
+            vertical_blocked: false,
         }
     }
 
@@ -599,6 +662,151 @@ mod tests {
             CharacterStepInput { dt: 0.0, move_dir: Vec3::X, ..base_input() },
         );
         assert_eq!(out, Vec3::ZERO);
+    }
+
+    // ---- Ceiling ----
+
+    /// Rapier refuses the motion but never writes the refusal back into our
+    /// velocity, so without this the character keeps requesting `+v*dt` for the
+    /// whole ascent and glides along the ceiling. At the default jump height
+    /// (8.0) that is ~0.8s and ~48 frames of the player stuck to the underside
+    /// of a platform.
+    #[test]
+    fn a_jump_into_a_ceiling_stops_rising_immediately() {
+        let mut state = CharacterMotionState::default();
+        step_character(
+            &mut state,
+            CharacterStepInput { grounded: true, jump_just_pressed: true, ..base_input() },
+        );
+        assert!(state.vertical_velocity > 0.0, "precondition: the character is rising");
+
+        let out = step_character(
+            &mut state,
+            CharacterStepInput { vertical_blocked: true, ..base_input() },
+        );
+        assert!(out.y < 0.0, "a blocked rise must turn into a fall, got {}", out.y);
+        assert!(state.vertical_velocity < 0.0);
+    }
+
+    /// The clamp must leave the character in EXACTLY the state of an
+    /// unobstructed fall from rest — no residue of the cancelled jump — so it
+    /// reaches the ground in the same number of frames as a character that
+    /// simply stepped off the ledge at that height.
+    #[test]
+    fn a_blocked_rise_falls_exactly_like_a_fall_from_rest() {
+        let mut blocked = CharacterMotionState::default();
+        step_character(
+            &mut blocked,
+            CharacterStepInput { grounded: true, jump_just_pressed: true, ..base_input() },
+        );
+        step_character(&mut blocked, CharacterStepInput { vertical_blocked: true, ..base_input() });
+
+        let mut from_rest = CharacterMotionState { vertical_velocity: 0.0, ..Default::default() };
+        step_character(&mut from_rest, base_input());
+
+        assert_eq!(
+            blocked.vertical_velocity, from_rest.vertical_velocity,
+            "a cancelled jump must fall exactly like a fall from rest"
+        );
+    }
+
+    /// The clamp is one-directional. A downward request Rapier refuses is the
+    /// floor, and the floor is `grounded`'s job — zeroing the fall here would
+    /// cancel `GROUND_STICK_VELOCITY` and make `snap_to_ground` let go on the
+    /// first ramp seam.
+    #[test]
+    fn a_blocked_fall_is_left_alone() {
+        let mut blocked = CharacterMotionState::default();
+        step_character(&mut blocked, CharacterStepInput { vertical_blocked: true, ..base_input() });
+
+        let mut free = CharacterMotionState::default();
+        step_character(&mut free, base_input());
+
+        assert_eq!(blocked.vertical_velocity, free.vertical_velocity);
+        assert!(blocked.vertical_velocity < 0.0);
+    }
+
+    /// The block report is last frame's — Rapier writes its output in
+    /// `PostUpdate`, exactly like `grounded`. A jump accepted THIS frame must
+    /// therefore win over it, or a character standing under a low ceiling that
+    /// blocked it a moment ago can never jump again.
+    #[test]
+    fn a_jump_accepted_this_frame_beats_a_stale_block() {
+        let mut state = CharacterMotionState::default();
+        let out = step_character(
+            &mut state,
+            CharacterStepInput {
+                grounded: true,
+                jump_just_pressed: true,
+                vertical_blocked: true,
+                ..base_input()
+            },
+        );
+        assert!(out.y > 0.0, "a fresh jump must still rise, got {}", out.y);
+        assert!(state.vertical_velocity > 0.0);
+    }
+
+    /// A clamped ascent must not refill the jump budget: the character is still
+    /// in the air, pressed against a ceiling, and `canDoubleJump` must still
+    /// grant exactly one air jump.
+    #[test]
+    fn a_blocked_rise_does_not_refill_the_jump_budget() {
+        let mut state = CharacterMotionState::default();
+        let input = CharacterStepInput { can_double_jump: true, ..base_input() };
+        step_character(
+            &mut state,
+            CharacterStepInput { grounded: true, jump_just_pressed: true, ..input },
+        );
+        assert_eq!(state.jumps_used, 1);
+
+        step_character(&mut state, CharacterStepInput { vertical_blocked: true, ..input });
+        assert_eq!(state.jumps_used, 1, "hitting a ceiling is not landing");
+    }
+
+    // ---- vertical_motion_blocked ----
+
+    #[test]
+    fn an_upward_request_rapier_swallowed_is_blocked() {
+        assert!(vertical_motion_blocked(Vec3::new(0.0, 0.8, 0.0), Vec3::new(0.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn an_upward_request_rapier_honoured_is_not_blocked() {
+        assert!(!vertical_motion_blocked(Vec3::new(0.0, 0.8, 0.0), Vec3::new(0.0, 0.8, 0.0)));
+    }
+
+    /// A rise partly eaten by the skin width or a grazing contact is still a
+    /// rise. Only a rise that mostly did not happen counts as a ceiling.
+    #[test]
+    fn a_mostly_honoured_rise_is_not_blocked() {
+        assert!(!vertical_motion_blocked(Vec3::new(0.0, 0.8, 0.0), Vec3::new(0.0, 0.79, 0.0)));
+    }
+
+    /// Downward is the floor, not a ceiling — `grounded` owns that case.
+    #[test]
+    fn a_swallowed_downward_request_is_not_blocked() {
+        assert!(!vertical_motion_blocked(Vec3::new(0.0, -0.8, 0.0), Vec3::ZERO));
+    }
+
+    /// A frame with no vertical request at all (standing still, dt 0) must not
+    /// be read as a ceiling: `0.0 < 0.0 * 0.5` is false, but a hair of float
+    /// noise on either side would flip it, so the epsilon is the real guard.
+    #[test]
+    fn a_frame_with_no_vertical_request_is_not_blocked() {
+        assert!(!vertical_motion_blocked(Vec3::ZERO, Vec3::ZERO));
+        assert!(!vertical_motion_blocked(
+            Vec3::new(0.0, VERTICAL_BLOCK_EPSILON * 0.5, 0.0),
+            Vec3::new(0.0, -1.0, 0.0)
+        ));
+    }
+
+    /// A NaN reaching the predicate must not be read as a ceiling — every
+    /// comparison against NaN is false, so the guard has to be explicit.
+    #[test]
+    fn a_non_finite_translation_is_not_blocked() {
+        assert!(!vertical_motion_blocked(Vec3::new(0.0, f32::NAN, 0.0), Vec3::ZERO));
+        assert!(!vertical_motion_blocked(Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, f32::NAN, 0.0)));
+        assert!(!vertical_motion_blocked(Vec3::new(0.0, f32::INFINITY, 0.0), Vec3::ZERO));
     }
 
     // ---- Lifecycle ----

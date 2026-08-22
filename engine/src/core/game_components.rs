@@ -996,6 +996,16 @@ pub(crate) fn system_character_controller(
                             // alternative is a same-frame shape-cast per
                             // character, every frame.
                             grounded: kcc_output.is_some_and(|o| o.grounded),
+                            // Same PostUpdate output, same one-frame latency:
+                            // Rapier clamps a blocked rise and reports the clamp
+                            // but never writes it back into our velocity, so
+                            // this is what cancels a jump that met a ceiling.
+                            vertical_blocked: kcc_output.is_some_and(|o| {
+                                super::character_controller::vertical_motion_blocked(
+                                    o.desired_translation,
+                                    o.effective_translation,
+                                )
+                            }),
                             speed: data.speed,
                             jump_speed: data.jump_height,
                             gravity_scale: data.gravity_scale,
@@ -3062,6 +3072,24 @@ mod character_controller_kinematic_tests {
     /// One frame with a Rapier controller attached. `grounded` seeds the
     /// `KinematicCharacterControllerOutput` Rapier would have written last frame.
     fn run_kinematic_frame(input: InputState, grounded: bool, can_double_jump: bool) -> Frame {
+        run_kinematic_frame_with(
+            input,
+            KinematicCharacterControllerOutput { grounded, ..Default::default() },
+            CharacterMotionState::default(),
+            can_double_jump,
+        )
+    }
+
+    /// The same frame, with the whole of last frame's Rapier output and the
+    /// character's incoming motion state supplied. Needed for anything that
+    /// depends on a field other than `grounded` — the clamped-translation pair
+    /// that reports a ceiling, in particular.
+    fn run_kinematic_frame_with(
+        input: InputState,
+        output: KinematicCharacterControllerOutput,
+        state: CharacterMotionState,
+        can_double_jump: bool,
+    ) -> Frame {
         let mut world = World::new();
         let mut time = Time::<()>::default();
         time.advance_by(Duration::from_millis(DT_MS));
@@ -3082,9 +3110,9 @@ mod character_controller_kinematic_tests {
                 EntityId::new("player"),
                 gc,
                 Transform::default(),
-                CharacterMotionState::default(),
+                state,
                 KinematicCharacterController::default(),
-                KinematicCharacterControllerOutput { grounded, ..Default::default() },
+                output,
             ))
             .id();
 
@@ -3155,6 +3183,62 @@ mod character_controller_kinematic_tests {
     fn the_grounded_flag_is_mirrored_onto_the_motion_state() {
         assert!(run_kinematic_frame(InputState::default(), true, false).state.grounded);
         assert!(!run_kinematic_frame(InputState::default(), false, false).state.grounded);
+    }
+
+    /// The call-site half of the ceiling clamp. `vertical_motion_blocked` can be
+    /// perfectly correct and never be consulted — `desired_translation` and
+    /// `effective_translation` were read by nothing in the engine before this —
+    /// so the wiring needs its own pin.
+    ///
+    /// Rapier swallowed the rise it was asked for, so the rising character must
+    /// be falling by the end of the frame instead of gliding along the ceiling
+    /// for the ~48 frames it takes gravity to eat a default-height jump.
+    #[test]
+    fn a_rise_rapier_swallowed_cancels_the_jump_at_the_call_site() {
+        let rising = CharacterMotionState {
+            vertical_velocity: JUMP_SPEED,
+            grounded: false,
+            jumps_used: 1,
+        };
+
+        let blocked = run_kinematic_frame_with(
+            InputState::default(),
+            KinematicCharacterControllerOutput {
+                grounded: false,
+                desired_translation: Vec3::new(0.0, 0.8, 0.0),
+                effective_translation: Vec3::ZERO,
+                ..Default::default()
+            },
+            rising.clone(),
+            false,
+        );
+        assert!(
+            blocked.state.vertical_velocity < 0.0,
+            "a blocked rise must be falling by the end of the frame, got {}",
+            blocked.state.vertical_velocity
+        );
+        assert!(blocked.translation.expect("the system must drive the controller").y < 0.0);
+
+        // Non-vacuity: the identical frame with the rise HONOURED keeps rising.
+        // Without this the assertion above is satisfied by hardwiring
+        // `vertical_blocked: true`, which would cancel every jump on frame two.
+        let free = run_kinematic_frame_with(
+            InputState::default(),
+            KinematicCharacterControllerOutput {
+                grounded: false,
+                desired_translation: Vec3::new(0.0, 0.8, 0.0),
+                effective_translation: Vec3::new(0.0, 0.8, 0.0),
+                ..Default::default()
+            },
+            rising,
+            false,
+        );
+        assert!(
+            free.state.vertical_velocity > 0.0,
+            "an unobstructed rise must keep rising, got {}",
+            free.state.vertical_velocity
+        );
+        assert!(free.translation.expect("the system must drive the controller").y > 0.0);
     }
 
     /// A character with no controller attached (2D project, or 3D with physics
