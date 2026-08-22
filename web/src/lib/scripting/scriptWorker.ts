@@ -617,10 +617,19 @@ function buildForgeApi(scriptEntityId: string) {
         // number the engine reads. An in-bounds origin near TILE_FIELD_MAX
         // would otherwise produce out-of-bounds cells and the engine would
         // refuse the whole fill.
-        if (originX + width - 1 > TILE_FIELD_MAX || originY + height - 1 > TILE_FIELD_MAX) {
-          throw new Error(
-            `${api}: the rect ends past ${TILE_FIELD_MAX}, so the engine would refuse it`,
-          );
+        //
+        // Each axis is checked on its own so the error can name the one that
+        // overflowed, the value it reached and the limit -- the same shape
+        // `tileInt` uses. The derived coordinate is the only number here the
+        // author never wrote down, so a message that omitted it ("the rect
+        // ends past ...") left them to compute it before they could act.
+        const farX = originX + width - 1;
+        const farY = originY + height - 1;
+        if (farX > TILE_FIELD_MAX) {
+          throw new Error(`${api}: x + w - 1 = ${farX} exceeds ${TILE_FIELD_MAX}`);
+        }
+        if (farY > TILE_FIELD_MAX) {
+          throw new Error(`${api}: y + h - 1 = ${farY} exceeds ${TILE_FIELD_MAX}`);
         }
         const tiles: Array<{ x: number; y: number; tileIndex: number | null }> = [];
         for (let ty = originY; ty < originY + height; ty++) {

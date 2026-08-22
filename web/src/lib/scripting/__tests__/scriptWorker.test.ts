@@ -1223,7 +1223,7 @@ describe('scriptWorker', () => {
     ]);
   });
 
-  it('forge.tilemap.fillRect rejects a rect whose far edge passes TILE_FIELD_MAX', async () => {
+  it('forge.tilemap.fillRect rejects a rect whose far x edge passes TILE_FIELD_MAX', async () => {
     const handler = await setupWorker();
     const { TILE_FIELD_MAX } = await import('../scriptWorker');
     const code = `function onStart() {
@@ -1235,13 +1235,70 @@ describe('scriptWorker', () => {
     // Origin and size are each inside the bound; the cells this emits are not.
     // The engine reads the DERIVED coordinate, so bounding the two inputs
     // separately would let the whole fill be refused with nothing said.
+    // The message names the derived expression, the value it reached and the
+    // limit, because the author never wrote that number down -- it is the one
+    // rejection here that cannot be read off the call.
     expect(pushedCommands()).toEqual([]);
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'error',
-        message: expect.stringContaining(`ends past ${TILE_FIELD_MAX}`),
+        message: expect.stringContaining(
+          `x + w - 1 = ${TILE_FIELD_MAX + 1} exceeds ${TILE_FIELD_MAX}`,
+        ),
       })
     );
+  });
+
+  it('forge.tilemap.fillRect rejects a rect whose far y edge passes TILE_FIELD_MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", 0, ${TILE_FIELD_MAX} - 1, 1, 3, 7);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The two axes are checked separately so the error names the one that
+    // actually overflowed. A single combined check could only say "the rect",
+    // which sends the author looking at both axes.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(
+          `y + h - 1 = ${TILE_FIELD_MAX + 1} exceeds ${TILE_FIELD_MAX}`,
+        ),
+      })
+    );
+  });
+
+  it('forge.tilemap.fillRect accepts a rect whose far edge lands exactly on TILE_FIELD_MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", ${TILE_FIELD_MAX} - 2, 0, 3, 1, 7);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // Mirror of the engine's `fill_accepts_u32_max_in_every_cell_field`: the
+    // far edge is INCLUSIVE, so a `>=` guard would refuse this legal fill while
+    // still passing both rejection cases above -- the rejecting side alone
+    // pins nothing. Asserting the whole payload rather than
+    // `expect.objectContaining` is what pins each emitted cell; the last one
+    // sits exactly on the bound.
+    expect(pushedCommands()).toEqual([
+      {
+        cmd: 'fill_tiles',
+        entityId: 'tm1',
+        layer: 0,
+        tiles: [
+          { x: TILE_FIELD_MAX - 2, y: 0, tileIndex: 7 },
+          { x: TILE_FIELD_MAX - 1, y: 0, tileIndex: 7 },
+          { x: TILE_FIELD_MAX, y: 0, tileIndex: 7 },
+        ],
+      },
+    ]);
   });
 
   it('scriptWorker TILE_FIELD_MAX matches the engine bound', async () => {
