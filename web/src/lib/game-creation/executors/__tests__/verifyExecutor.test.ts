@@ -451,8 +451,12 @@ describe('verifyExecutor', () => {
       // so a finding recorded only as an issue is one the user never sees
       // (PF-1125). Checks 3 and 5 have that shape; this one must not.
       expect(output.warnings).toHaveLength(1);
-      expect(output.warnings[0]).toContain('Physics is off for Player');
-      expect(output.warnings[0]).toContain('walks through walls');
+      // The same sentence the play-time toast raises, so the build-time and
+      // play-time descriptions of one condition cannot drift apart.
+      expect(output.warnings[0]).toBe(
+        'Player has no physics, so it falls through the floor and walks through walls. ' +
+          'Select it and tick Physics > Enabled in the Inspector, then press Play again.',
+      );
       expect(output.passed).toBe(false);
       // Still a winnable scene, so the step itself succeeds — this is a warning
       // about how the game will FEEL, not a reason to refuse the build.
@@ -463,7 +467,7 @@ describe('verifyExecutor', () => {
       const result = await verifyExecutor.execute({}, makeCtx({ store: strandedStore() }));
 
       expect(collectStepWarnings(result.output)).toEqual([
-        expect.stringContaining('Physics is off for Player'),
+        expect.stringContaining('Player has no physics'),
       ]);
     });
 
@@ -526,8 +530,10 @@ describe('verifyExecutor', () => {
         }),
       );
 
-      expect(outputOf(result).warnings[0]).toContain('Physics is off for Player, Rival');
-      expect(outputOf(result).warnings[0]).toContain('they walk through walls and fall');
+      expect(outputOf(result).warnings[0]).toContain('Player and Rival have no physics');
+      expect(outputOf(result).warnings[0]).toContain(
+        'Select each one and tick Physics > Enabled in the Inspector, then press Play again.',
+      );
     });
 
     it('does not read a component list off the prototype chain', async () => {

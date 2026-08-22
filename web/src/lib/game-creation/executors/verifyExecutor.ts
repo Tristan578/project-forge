@@ -10,6 +10,12 @@ import { looksLikeCameraName } from '../cameraResolution';
 // verdicts drift apart again. Value-import is RSC-safe: the validator's only
 // `@/stores/` reference is an `import type`.
 import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
+// The SAME sentence the runtime toast raises when the engine reports the same
+// entities on Edit->Play (`hooks/events/gameEvents.ts`). Build-time and
+// play-time are two chances to describe one condition, and describing it twice
+// is how the two descriptions end up prescribing different fixes. Pure module —
+// no `@/stores` or `@/hooks` edge, so it is RSC-safe from this barrel.
+import { describeSkippedCharacters } from '@/lib/engine/characterDiagnostics';
 import type { WinnabilityReport } from '@/lib/playMode/winnabilityValidator';
 
 // The verify executor takes no structured input — it reads the live store
@@ -140,12 +146,12 @@ export const verifyExecutor: ExecutorDefinition = {
         .map(node => node.name);
 
       if (strandedCharacters.length > 0) {
-        const one = strandedCharacters.length === 1;
-        warnings.push(
-          `Physics is off for ${strandedCharacters.join(', ')}, so ` +
-            `${one ? 'it walks through walls and falls' : 'they walk through walls and fall'} ` +
-            `through the floor. Turn on Physics for ${one ? 'it' : 'them'}, then build again.`,
-        );
+        // Identity resolver: verification reads the scene graph directly, so
+        // these are already names rather than engine ids. The remedy the shared
+        // sentence gives — tick Physics > Enabled in the Inspector, then press
+        // Play — is also the only one that survives, because "build again" runs
+        // `scene_create`, which calls `newScene()` and discards the fix.
+        warnings.push(describeSkippedCharacters(strandedCharacters, name => name));
         issues.push('character_without_collider');
       }
     }

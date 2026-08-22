@@ -57,14 +57,22 @@ describe('describeSkippedCharacters', () => {
 
   it('agrees with itself in the plural', () => {
     expect(describeSkippedCharacters(['e1', 'e2'], nameOf)).toBe(
-      'Player, Enemy have no physics, so they fall through the floor and walk through walls. ' +
+      'Player and Enemy have no physics, so they fall through the floor and walk through walls. ' +
         'Select each one and tick Physics > Enabled in the Inspector, then press Play again.',
+    );
+  });
+
+  it('joins the last name with a conjunction, not a comma', () => {
+    // "Player, Enemy, Guard have no physics" is a fragment, and this string is
+    // a sentence a player reads under time pressure, not a log line.
+    expect(describeSkippedCharacters(['e1', 'e2', 'e3'], nameOf)).toContain(
+      'Player, Enemy and Guard have no physics',
     );
   });
 
   it('collapses a long list rather than filling the toast with ids', () => {
     const message = describeSkippedCharacters(['e1', 'e2', 'e3', 'e4'], nameOf);
-    expect(message).toContain('Player, Enemy, Guard and 1 more');
+    expect(message).toContain('Player, Enemy, Guard and 1 more have no physics');
     expect(message).not.toContain('Slime');
   });
 

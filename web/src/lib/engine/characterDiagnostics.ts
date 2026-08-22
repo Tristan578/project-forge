@@ -72,9 +72,17 @@ export function describeSkippedCharacters(
     return name === undefined || name === '' ? id : name;
   });
 
-  const shown = labels.slice(0, MAX_NAMED).join(', ');
+  // A comma-joined list reads as an unfinished sentence the moment it meets a
+  // verb — "Player, Enemy have no physics" is a fragment, and this string is a
+  // sentence shown to a player, not a log line. The overflow count is just the
+  // last item in the list, so it gets the same conjunction as a name.
+  const parts = labels.slice(0, MAX_NAMED);
   const rest = labels.length - MAX_NAMED;
-  const who = rest > 0 ? `${shown} and ${rest} more` : shown;
+  if (rest > 0) parts.push(`${rest} more`);
+  const who =
+    parts.length === 1
+      ? parts[0]!
+      : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]!}`;
 
   // Two whole clauses rather than a per-word plural switch: mixing them is how a
   // message ends up reading "it falls through the floor and walk through walls".

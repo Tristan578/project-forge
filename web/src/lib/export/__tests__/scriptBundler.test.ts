@@ -252,9 +252,24 @@ ${ids
     expect(probe()['player']).toBe('boolean:false');
   });
 
-  it('returns a real boolean, not the raw stored value', () => {
+  it('refuses a value the engine did not write, rather than coercing it', () => {
     const { win, probe } = runBundle(['player']);
+    // The runtime mirrors booleans and nothing else, so a truthy non-boolean
+    // in the map did not come from a CHARACTER_GROUNDED_CHANGED event. The
+    // editor's worker answers such a value `false` (=== true), and the two
+    // shims answering the same question differently is the divergence class
+    // this API was added to close.
     win['__forgeGrounded'] = { player: 'yes' };
-    expect(probe()['player']).toBe('boolean:true');
+    expect(probe()['player']).toBe('boolean:false');
+  });
+
+  it('does not stand a script on an inherited property', () => {
+    const { win, probe } = runBundle(['constructor']);
+    // The map is a plain object, so `__forgeGrounded['constructor']` is a
+    // function — truthy — and a bare read would report an entity that does not
+    // exist as permanently grounded. Entity ids come off the engine wire, so
+    // this is reachable without a hostile script.
+    win['__forgeGrounded'] = { player: true };
+    expect(probe()['constructor']).toBe('boolean:false');
   });
 });
