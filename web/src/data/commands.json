@@ -9877,14 +9877,27 @@
     },
     {
       "name": "create_tilemap",
-      "description": "Create a new tilemap entity",
+      "description": "Create a new tilemap entity backed by an imported tileset",
       "category": "tilemap",
       "parameters": {
         "type": "object",
         "properties": {
-          "tilesetId": {
+          "name": {
             "type": "string",
-            "description": "Asset ID of the tileset texture"
+            "description": "Display name for the tilemap (default: \"Tilemap\")"
+          },
+          "tilesetAssetId": {
+            "type": "string",
+            "description": "Asset ID of a tileset previously registered with import_tileset"
+          },
+          "tileSize": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "Size of each tile in pixels [width, height] (default: [32, 32])"
           },
           "mapSize": {
             "type": "array",
@@ -9893,35 +9906,19 @@
             },
             "minItems": 2,
             "maxItems": 2,
-            "description": "Tilemap dimensions in tiles [width, height]"
+            "description": "Tilemap dimensions in tiles [width, height] (default: [20, 15])"
           },
-          "tileSize": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 2,
-            "maxItems": 2,
-            "description": "Size of each tile in pixels [width, height]"
-          },
-          "position": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 2,
-            "maxItems": 2,
-            "description": "World position [x, y]"
-          },
-          "name": {
+          "origin": {
             "type": "string",
-            "description": "Display name for the tilemap"
+            "enum": [
+              "TopLeft",
+              "Center"
+            ],
+            "description": "Grid origin (default: TopLeft)"
           }
         },
         "required": [
-          "tilesetId",
-          "mapSize",
-          "tileSize"
+          "tilesetAssetId"
         ]
       },
       "tokenCost": 0,
@@ -9930,7 +9927,7 @@
     },
     {
       "name": "import_tileset",
-      "description": "Import a tileset from image data",
+      "description": "Register a tileset atlas so tilemaps can reference it by asset ID",
       "category": "tilemap",
       "parameters": {
         "type": "object",
@@ -9938,6 +9935,10 @@
           "assetId": {
             "type": "string",
             "description": "Asset ID of the tileset image"
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name for the tileset"
           },
           "tileSize": {
             "type": "array",
@@ -9948,18 +9949,28 @@
             "maxItems": 2,
             "description": "Size of each tile in pixels [width, height]"
           },
+          "gridSize": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "Atlas dimensions in tiles [columns, rows]"
+          },
           "spacing": {
             "type": "number",
-            "description": "Spacing between tiles in pixels"
+            "description": "Spacing between tiles in pixels (default: 0)"
           },
           "margin": {
             "type": "number",
-            "description": "Margin around the tileset in pixels"
+            "description": "Margin around the atlas in pixels (default: 0)"
           }
         },
         "required": [
           "assetId",
-          "tileSize"
+          "tileSize",
+          "gridSize"
         ]
       },
       "tokenCost": 0,
@@ -9968,7 +9979,7 @@
     },
     {
       "name": "set_tile",
-      "description": "Set a single tile in the tilemap",
+      "description": "Set a single tile on one tilemap layer",
       "category": "tilemap",
       "parameters": {
         "type": "object",
@@ -9977,27 +9988,36 @@
             "type": "string",
             "description": "Tilemap entity ID"
           },
+          "layerIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Layer index"
+          },
           "x": {
-            "type": "number",
+            "type": "integer",
+            "minimum": 0,
             "description": "Tile X coordinate"
           },
           "y": {
-            "type": "number",
+            "type": "integer",
+            "minimum": 0,
             "description": "Tile Y coordinate"
           },
-          "tileId": {
-            "type": "number",
-            "description": "Tile index from tileset (null to clear)"
-          },
-          "layer": {
-            "type": "number",
-            "description": "Layer index (default: 0)"
+          "tileIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Tile index from the tileset, or null to erase the cell"
           }
         },
         "required": [
           "entityId",
+          "layerIndex",
           "x",
-          "y"
+          "y",
+          "tileIndex"
         ]
       },
       "tokenCost": 0,
@@ -10006,7 +10026,7 @@
     },
     {
       "name": "fill_tiles",
-      "description": "Fill a rectangular area with tiles",
+      "description": "Fill an inclusive rectangular range of one tilemap layer with a single tile",
       "category": "tilemap",
       "parameters": {
         "type": "object",
@@ -10015,37 +10035,48 @@
             "type": "string",
             "description": "Tilemap entity ID"
           },
-          "x": {
-            "type": "number",
-            "description": "Start X coordinate"
+          "layerIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Layer index"
           },
-          "y": {
-            "type": "number",
-            "description": "Start Y coordinate"
+          "fromX": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "First tile column (inclusive)"
           },
-          "width": {
-            "type": "number",
-            "description": "Width in tiles"
+          "fromY": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "First tile row (inclusive)"
           },
-          "height": {
-            "type": "number",
-            "description": "Height in tiles"
+          "toX": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Last tile column (inclusive)"
           },
-          "tileId": {
-            "type": "number",
-            "description": "Tile index from tileset"
+          "toY": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Last tile row (inclusive)"
           },
-          "layer": {
-            "type": "number",
-            "description": "Layer index (default: 0)"
+          "tileIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Tile index from the tileset, or null to erase the range"
           }
         },
         "required": [
           "entityId",
-          "x",
-          "y",
-          "width",
-          "height"
+          "layerIndex",
+          "fromX",
+          "fromY",
+          "toX",
+          "toY",
+          "tileIndex"
         ]
       },
       "tokenCost": 0,
@@ -10054,7 +10085,7 @@
     },
     {
       "name": "clear_tiles",
-      "description": "Clear tiles in a rectangular area",
+      "description": "Erase tiles from one tilemap layer; omit the bounds to clear the whole layer",
       "category": "tilemap",
       "parameters": {
         "type": "object",
@@ -10063,33 +10094,35 @@
             "type": "string",
             "description": "Tilemap entity ID"
           },
-          "x": {
-            "type": "number",
-            "description": "Start X coordinate"
+          "layerIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Layer index"
           },
-          "y": {
-            "type": "number",
-            "description": "Start Y coordinate"
+          "fromX": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "First tile column (inclusive, default: 0)"
           },
-          "width": {
-            "type": "number",
-            "description": "Width in tiles"
+          "fromY": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "First tile row (inclusive, default: 0)"
           },
-          "height": {
-            "type": "number",
-            "description": "Height in tiles"
+          "toX": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Last tile column (inclusive, default: last column)"
           },
-          "layer": {
-            "type": "number",
-            "description": "Layer index (default: 0)"
+          "toY": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Last tile row (inclusive, default: last row)"
           }
         },
         "required": [
           "entityId",
-          "x",
-          "y",
-          "width",
-          "height"
+          "layerIndex"
         ]
       },
       "tokenCost": 0,
@@ -10098,7 +10131,7 @@
     },
     {
       "name": "add_tilemap_layer",
-      "description": "Add a new layer to the tilemap",
+      "description": "Append a new layer to the tilemap",
       "category": "tilemap",
       "parameters": {
         "type": "object",
@@ -10110,10 +10143,15 @@
           "name": {
             "type": "string",
             "description": "Layer name"
+          },
+          "visible": {
+            "type": "boolean",
+            "description": "Layer visibility (default: true)"
           }
         },
         "required": [
-          "entityId"
+          "entityId",
+          "name"
         ]
       },
       "tokenCost": 0,
@@ -10122,7 +10160,7 @@
     },
     {
       "name": "remove_tilemap_layer",
-      "description": "Remove a layer from the tilemap",
+      "description": "Remove a layer from the tilemap; the last remaining layer cannot be removed",
       "category": "tilemap",
       "parameters": {
         "type": "object",
@@ -10131,14 +10169,15 @@
             "type": "string",
             "description": "Tilemap entity ID"
           },
-          "layer": {
-            "type": "number",
+          "layerIndex": {
+            "type": "integer",
+            "minimum": 0,
             "description": "Layer index to remove"
           }
         },
         "required": [
           "entityId",
-          "layer"
+          "layerIndex"
         ]
       },
       "tokenCost": 0,
@@ -10147,7 +10186,7 @@
     },
     {
       "name": "set_tilemap_layer",
-      "description": "Configure layer properties (visibility, opacity, collision)",
+      "description": "Configure layer properties (name, visibility, opacity)",
       "category": "tilemap",
       "parameters": {
         "type": "object",
@@ -10156,9 +10195,14 @@
             "type": "string",
             "description": "Tilemap entity ID"
           },
-          "layer": {
-            "type": "number",
+          "layerIndex": {
+            "type": "integer",
+            "minimum": 0,
             "description": "Layer index"
+          },
+          "name": {
+            "type": "string",
+            "description": "New layer name"
           },
           "visible": {
             "type": "boolean",
@@ -10167,15 +10211,11 @@
           "opacity": {
             "type": "number",
             "description": "Layer opacity (0.0-1.0)"
-          },
-          "isCollision": {
-            "type": "boolean",
-            "description": "Whether this layer is a collision layer"
           }
         },
         "required": [
           "entityId",
-          "layer"
+          "layerIndex"
         ]
       },
       "tokenCost": 0,
@@ -10184,7 +10224,7 @@
     },
     {
       "name": "resize_tilemap",
-      "description": "Resize the tilemap dimensions",
+      "description": "Resize the tilemap grid, anchored at the top-left; trimmed cells are discarded",
       "category": "tilemap",
       "parameters": {
         "type": "object",
@@ -10194,20 +10234,14 @@
             "description": "Tilemap entity ID"
           },
           "width": {
-            "type": "number",
+            "type": "integer",
+            "minimum": 1,
             "description": "New width in tiles"
           },
           "height": {
-            "type": "number",
+            "type": "integer",
+            "minimum": 1,
             "description": "New height in tiles"
-          },
-          "anchor": {
-            "type": "string",
-            "enum": [
-              "top-left",
-              "center"
-            ],
-            "description": "Anchor point for resize (default: top-left)"
           }
         },
         "required": [
