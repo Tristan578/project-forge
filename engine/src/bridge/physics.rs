@@ -95,8 +95,10 @@ pub(super) fn apply_physics_toggles(
     query: Query<(Entity, &EntityId, Option<&PhysicsData>, Option<&PhysicsEnabled>)>,
 ) {
     for toggle in pending.physics_toggles.drain(..) {
+        let mut matched = false;
         for (entity, entity_id, physics_data, phys_enabled) in query.iter() {
             if entity_id.0 == toggle.entity_id {
+                matched = true;
                 if toggle.enabled {
                     // Enable physics: add PhysicsEnabled marker and PhysicsData if missing
                     if phys_enabled.is_none() {
@@ -120,6 +122,22 @@ pub(super) fn apply_physics_toggles(
                 }
                 break;
             }
+        }
+
+        // The queue is drained whether or not anything matched, so a toggle for
+        // an entity that does not exist yet is consumed and lost. That is not
+        // hypothetical: entities are created through deferred `Commands`, so a
+        // toggle dispatched in the same frame as its `spawn_entity` sees
+        // nothing here (PF-1213). Without this branch the loss is completely
+        // silent - no event, no error, and `dispatch_command` has already
+        // answered success - and the symptom surfaces much later as a game
+        // whose entities never collide.
+        if !matched {
+            tracing::warn!(
+                "toggle_physics ignored: no entity with id '{}' \
+                 (it may not have been spawned yet)",
+                toggle.entity_id
+            );
         }
     }
 }
