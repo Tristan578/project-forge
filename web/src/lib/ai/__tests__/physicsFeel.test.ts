@@ -9,7 +9,6 @@ import {
   analyzePhysicsFeel,
   applyPhysicsProfile,
   generateCustomProfile,
-  jumpForceToApexHeight,
 } from '../physicsFeel';
 import type {
   PhysicsSceneContext,
@@ -399,10 +398,12 @@ describe('applyPhysicsProfile', () => {
       componentType: 'character_controller',
       properties: {
         speed: profile.moveSpeed,
-        // Converted, not passed through — `jumpForce` is a unitless dial and
-        // `jumpHeight` is metres (PF-1214). Exact numbers per preset are
-        // pinned in `physicsFeelJump.test.ts`.
-        jumpHeight: jumpForceToApexHeight(profile.jumpForce, profile.gravity / 10),
+        // Converted, not passed through — `jumpForce` is a unitless dial (12
+        // here) and `jumpHeight` is metres (PF-1214). The literal is what
+        // rpg_weighty's dial converts to; calling the conversion here would
+        // assert the function against itself and pass on any drift in it. The
+        // full per-preset table is pinned in `physicsFeelJump.test.ts`.
+        jumpHeight: expect.closeTo(0.743119, 5),
         gravityScale: profile.gravity / 10,
         canDoubleJump: false,
       },
@@ -422,10 +423,12 @@ describe('applyPhysicsProfile', () => {
       componentType: 'character_controller',
       properties: {
         speed: profile.moveSpeed,
-        // Converted, not passed through — `jumpForce` is a unitless dial and
-        // `jumpHeight` is metres (PF-1214). Exact numbers per preset are
-        // pinned in `physicsFeelJump.test.ts`.
-        jumpHeight: jumpForceToApexHeight(profile.jumpForce, profile.gravity / 10),
+        // Converted, not passed through — `jumpForce` is a unitless dial (12
+        // here) and `jumpHeight` is metres (PF-1214). The literal is what
+        // rpg_weighty's dial converts to; calling the conversion here would
+        // assert the function against itself and pass on any drift in it. The
+        // full per-preset table is pinned in `physicsFeelJump.test.ts`.
+        jumpHeight: expect.closeTo(0.743119, 5),
         gravityScale: profile.gravity / 10,
         canDoubleJump: true,
       },

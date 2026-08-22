@@ -14,6 +14,8 @@
  * any monotonic function, including the identity that shipped.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   GRAVITY_ACCEL_MPS2,
   JUMP_FORCE_TO_LAUNCH_SPEED,
@@ -146,5 +148,98 @@ describe('jumpAirtimeSeconds', () => {
     ['zero gravity', 2, 0],
   ])('returns 0 for %s', (_label, height, gravityScale) => {
     expect(jumpAirtimeSeconds(height, gravityScale)).toBe(0);
+  });
+});
+
+/**
+ * `GRAVITY_ACCEL_MPS2` is a hand-mirrored copy of a number that lives in Rust,
+ * and every figure in this file is derived from it. Nothing checked it, and the
+ * drift would be invisible from both sides: a native `cargo test` cannot see the
+ * TS constant, and this suite cannot call into the engine. Reading the Rust
+ * source is the only check available.
+ *
+ * Deliberately textual, and it fails closed — an unreadable file, a missing
+ * declaration, or a literal it cannot parse is a failure, never a skip.
+ */
+describe('GRAVITY_ACCEL_MPS2 mirrors the engine constant', () => {
+  const RUST = join(
+    __dirname, '..', '..', '..', '..', '..',
+    'engine', 'src', 'core', 'character_controller.rs',
+  );
+
+  /**
+   * A Rust `f32` literal as written in source.
+   *
+   * Wider than `-?\d+(\.\d+)?` on purpose: `-9.81_f32`, `-9.81f32` and `-9.81e0`
+   * are all the same value to rustc, so a narrower pattern would report a
+   * re-spelled constant as a MISSING one — a failure that points at the wrong
+   * problem entirely.
+   */
+  const RUST_F32 = String.raw`-?\d[\d_]*(?:\.(?:\d[\d_]*)?)?(?:[eE][+-]?\d+)?(?:_?f32)?`;
+
+  it('carries the same magnitude as GRAVITY_ACCEL', () => {
+    let source: string;
+    try {
+      source = readFileSync(RUST, 'utf8');
+    } catch (err) {
+      throw new Error(`cannot read ${RUST}: ${String(err)}`);
+    }
+
+    const match = source.match(
+      new RegExp(String.raw`const\s+GRAVITY_ACCEL\s*:\s*f32\s*=\s*(${RUST_F32})\s*;`),
+    );
+    if (match === null) {
+      throw new Error(`no \`const GRAVITY_ACCEL: f32 = …;\` declaration found in ${RUST}`);
+    }
+
+    const literal = match[1]!;
+    const parsed = Number(literal.replace(/_?f32$/, '').replace(/_/g, ''));
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`unparseable Rust f32 literal for GRAVITY_ACCEL: "${literal}"`);
+    }
+
+    // The engine's constant is signed — it is an acceleration, and it points
+    // down. Every formula on the TS side uses the magnitude, so the sign is
+    // dropped here and pinned separately: a constant that stopped being
+    // negative would leave the magnitude assertion green while the engine
+    // launched characters into the floor.
+    expect(Math.abs(parsed)).toBe(GRAVITY_ACCEL_MPS2);
+    expect(parsed).toBeLessThan(0);
+  });
+});
+
+/**
+ * The exact apex height, in metres, each preset ships today.
+ *
+ * Every other assertion in this file recomputes its expectation from the same
+ * constants the code under test uses, so a drift in
+ * `JUMP_FORCE_TO_LAUNCH_SPEED` (0.45 -> 0.5, say) moves the code and the
+ * expectation together and the whole suite stays green on a jump that got 23%
+ * higher. These literals were derived once, by hand, from
+ * `h = (k * jumpForce)^2 / (2 * g * s)` — capped presets from
+ * `h = t^2 * g * s / 8` — and are the only numbers in this file that do not
+ * move when the implementation does.
+ */
+const EXPECTED_APEX_METRES: Record<(typeof PRESET_KEYS)[number], number> = {
+  platformer_floaty: 1.321101,
+  platformer_snappy: 1.348624,
+  rpg_weighty: 0.743119,
+  arcade_classic: 1.032110,
+  space_zero_g: 0.137953, // airtime-capped
+  underwater: 0.827719, // airtime-capped
+  racing: 0, // jumpForce 0 — deliberately jumpless
+  puzzle_precise: 0.660550,
+};
+
+describe('per-preset apex heights', () => {
+  it('pins every preset, so a new one cannot ship unmeasured', () => {
+    expect(Object.keys(EXPECTED_APEX_METRES).sort()).toEqual([...PRESET_KEYS].sort());
+  });
+
+  it.each(PRESET_KEYS)('gives %s the height a creator was measured against', (key) => {
+    const profile = PHYSICS_PRESETS[key];
+    const height = jumpForceToApexHeight(profile.jumpForce, profile.gravity / 10);
+
+    expect(height).toBeCloseTo(EXPECTED_APEX_METRES[key], 5);
   });
 });
