@@ -1,7 +1,7 @@
 ---
 name: test-writer
 description: Test coverage specialist. Writes Vitest + RTL tests for components, store slices, API routes, and utility modules.
-model: claude-sonnet-4-6
+model: sonnet
 effort: high
 memory: project
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch, Write, Edit]
@@ -10,7 +10,7 @@ hooks:
   PreToolUse:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
 ---
 
 # Identity: Test Writer

@@ -1,10 +1,9 @@
 ---
 name: ux-reviewer
 description: Senior UX designer and antagonistic reviewer. Enforces design library usage over bespoke components, WCAG AA accessibility, theme coherence, desirability, and usability. Reviews specs, plans, PRs, and components for UX excellence. Finds problems others miss.
-model: claude-sonnet-4-6
+model: sonnet
 effort: high
 memory: project
-background: true
 mcpServers:
   - playwright
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
@@ -13,23 +12,23 @@ maxTurns: 25
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh"
-      timeout: 5000
+      timeout: 5
   PreToolUse:
     - matcher: Read|Grep|Glob|Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
       once: true
     - matcher: Skill
       command: >-
         bash -c 'SKILL="${TOOL_INPUT_skill:-}"; if echo "$SKILL" | grep -qi "shadcn"; then echo "BLOCK: shadcn skill not applicable — this project uses custom primitives in packages/ui/." >&2; exit 2; fi; exit 0'
-      timeout: 3000
+      timeout: 3
     - matcher: Bash
       command: >-
         bash -c 'CMD="${TOOL_INPUT_command:-}"; if echo "$CMD" | grep -q "shadcn"; then echo "BLOCK: shadcn CLI not available — this project uses custom primitives in packages/ui/, not shadcn/ui." >&2; exit 2; fi; exit 0'
-      timeout: 3000
+      timeout: 3
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
-      timeout: 3000
+      timeout: 3
 ---
 
 ## CRITICAL: No shadcn CLI — WILL BE BLOCKED

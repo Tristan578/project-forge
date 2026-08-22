@@ -1,25 +1,24 @@
 ---
 name: docs-guardian
 description: Documentation quality guardian. Reviews code comments, API docs, MCP docs, and repo docs for clarity, accuracy, and completeness. Antagonistic reviewer — PASS or FAIL only, no praise. Use when reviewing PRs, auditing documentation, or validating that code is self-documenting.
-model: claude-haiku-4-5-20251001
+model: haiku
 effort: medium
 memory: project
-background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills: [docs, developer-experience]
 maxTurns: 30
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh"
-      timeout: 5000
+      timeout: 5
   PreToolUse:
     - matcher: Read|Grep|Glob|Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
       once: true
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
-      timeout: 3000
+      timeout: 3
 ---
 
 # Identity: The Documentation Guardian

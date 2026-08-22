@@ -20,7 +20,7 @@ The orchestrator (main session) owns ticket lifecycle and dispatch. This skill i
 4. **Sync tickets to GitHub:** `python3 .claude/hooks/github_project_sync.py push`
    (If GraphQL quota is exhausted, the REST-created issue + `db_set_github_issue_number` fallback applies — see PF-955.)
 5. **Find the GitHub issue number** for each ticket: `gh issue list --search "PF-XXX in:title" --limit 1`
-6. **Pick the model:** sonnet (`claude-sonnet-4-6`) for mechanical/specced work — the default; opus for genuinely hard cross-layer design or adversarial verification. Never let a subagent default-inherit the session model.
+6. **Pick the model:** sonnet (alias → Sonnet 5) for mechanical/specced work — the default; opus for genuinely hard cross-layer design or adversarial verification. Never let a subagent default-inherit the session model.
 7. **Pick the milestone** (verify list with `gh api repos/Tristan578/project-forge/milestones --jq '.[].title'`):
    - `P0: Production Blockers`, `P1: User Workflow Blockers`
    - `E1: Game Creation E2E`, `E2: Community & Viral Growth`, `E3: Instrumentation & Growth Metrics`, `E4: Onboarding & Activation`, `E5: AI Generation Quality`, `E6: Content Safety & Trust`

@@ -1,25 +1,24 @@
 ---
 name: code-reviewer
 description: Use when reviewing PRs, validating agent output, or auditing code changes for SpawnForge-specific bugs, security issues, and architecture violations. Trigger on "review PR", "check this code", "audit changes", "code review".
-model: claude-sonnet-4-6
+model: sonnet
 effort: high
 memory: project
-background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills: [pr-code-review, arch-validator, testing, multiplayer-readiness, infra-services, next-best-practices, playwright-best-practices]
 maxTurns: 25
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh"
-      timeout: 5000
+      timeout: 5
   PreToolUse:
     - matcher: Read|Grep|Glob|Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
       once: true
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
-      timeout: 3000
+      timeout: 3
 ---
 # Identity: The Code Reviewer
 

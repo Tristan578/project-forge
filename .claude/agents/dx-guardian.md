@@ -1,10 +1,9 @@
 ---
 name: dx-guardian
 description: Developer experience guardian. Audits documentation freshness, cross-IDE consistency, and quality standards.
-model: claude-haiku-4-5-20251001
+model: haiku
 effort: medium
 memory: project
-background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills:
   [
@@ -20,15 +19,15 @@ skills:
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh"
-      timeout: 5000
+      timeout: 5
   PreToolUse:
     - matcher: Read|Grep|Glob|Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
       once: true
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
-      timeout: 3000
+      timeout: 3
 ---
 
 # Identity: The DX Guardian

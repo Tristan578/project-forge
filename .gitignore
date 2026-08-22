@@ -22,6 +22,7 @@ secrets.json
 !.claude/agents/
 !.claude/hooks/
 !.claude/tools/
+!.claude/workflows/
 !.claude/settings.json
 !.claude/TASKBOARD_SETUP.md
 !.claude/SANDBOX.md

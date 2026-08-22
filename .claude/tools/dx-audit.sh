@@ -143,9 +143,7 @@ AGENTS_DIR="$PROJECT_ROOT/.claude/agents"
 # drift instead of giving every agent a green pass on any unknown string.
 VALID_MODELS=(
   "opus" "sonnet" "haiku"
-  "claude-opus-4-7"
-  "claude-sonnet-4-6"
-  "claude-haiku-4-5-20251001"
+  "claude-opus-5" "claude-sonnet-5" "claude-haiku-4-5"
 )
 if [ -d "$AGENTS_DIR" ]; then
   for agent in "$AGENTS_DIR"/*.md; do

@@ -1,24 +1,23 @@
 ---
 name: security-reviewer
 description: Security and compliance specialist. Reviews code for prompt injection, auth gaps, secret exposure, input validation, and dependency vulnerabilities.
-model: claude-sonnet-4-6
+model: sonnet
 effort: high
 memory: project
-background: true
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
 skills: [testing]
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh"
-      timeout: 5000
+      timeout: 5
   PreToolUse:
     - matcher: Read|Grep|Glob|Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh"
-      timeout: 5000
+      timeout: 5
       once: true
     - matcher: Bash
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/block-writes.sh"
-      timeout: 3000
+      timeout: 3
 ---
 
 # Identity: Security Reviewer

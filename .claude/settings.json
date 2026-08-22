@@ -23,7 +23,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-session-start.sh\"",
-            "timeout": 10000
+            "timeout": 10
           }
         ]
       }
@@ -34,7 +34,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-prompt-submit.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -45,27 +45,27 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-stop.sh\"",
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/lessons-learned-reminder.sh\"",
-            "timeout": 3000
+            "timeout": 3
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/builder-quality-gate.sh\"",
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh\"",
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/worktree-safety-commit.sh\"",
-            "timeout": 10000
+            "timeout": 10
           }
         ]
       }
@@ -77,7 +77,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/inject-lessons-learned.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       },
@@ -87,7 +87,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-approve-safe-commands.sh\"",
-            "timeout": 5000,
+            "timeout": 5,
             "statusMessage": "Auto-approving known-safe read/build/test commands"
           }
         ]
@@ -99,7 +99,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/pre-push-quality-gate.sh\"",
-            "timeout": 120000
+            "timeout": 120
           }
         ]
       },
@@ -110,7 +110,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/block-main-commits.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       },
@@ -121,7 +121,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-pr-metadata.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       },
@@ -132,7 +132,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-docs-quality.sh\"",
-            "timeout": 10000
+            "timeout": 10
           }
         ]
       },
@@ -143,7 +143,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/block-deferred-fixes.sh\"",
-            "timeout": 5000,
+            "timeout": 5,
             "statusMessage": "Checking for Boy Scout Rule violations"
           }
         ]
@@ -154,7 +154,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/verify-branch.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       },
@@ -164,7 +164,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-db-transaction.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       },
@@ -174,7 +174,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-sanitization-patterns.sh\"",
-            "timeout": 3000,
+            "timeout": 3,
             "statusMessage": "Checking sanitization patterns"
           }
         ]
@@ -185,7 +185,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-vercel-json.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -197,7 +197,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-lockfile-sync.sh\"",
-            "timeout": 30000
+            "timeout": 30
           }
         ]
       },
@@ -207,22 +207,22 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/post-edit-lint.sh\"",
-            "timeout": 15000
+            "timeout": 15
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-arch.sh\"",
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-route-has-test.sh\"",
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/cargo-check-wasm.sh\"",
-            "timeout": 30000
+            "timeout": 30
           }
         ]
       },
@@ -232,12 +232,12 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/post-commit-clean.sh\"",
-            "timeout": 10000
+            "timeout": 10
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/post-merge-doc-check.sh\"",
-            "timeout": 10000
+            "timeout": 10
           }
         ]
       },
@@ -249,7 +249,7 @@
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/post-push-resolve-comments.sh\"",
             "async": true,
-            "timeout": 30000,
+            "timeout": 30,
             "statusMessage": "Checking for unreplied review comments"
           }
         ]
@@ -261,7 +261,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/log-agent-start.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -272,12 +272,12 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-agent-output.sh\"",
-            "timeout": 5000
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/reject-incomplete-review.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -288,7 +288,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-task-metadata.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -299,7 +299,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-task-completion.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -310,7 +310,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/save-critical-context.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -321,12 +321,12 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/restore-context-hints.sh\"",
-            "timeout": 3000
+            "timeout": 3
           },
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/inject-post-compact.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -337,7 +337,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/rate-limit-backoff.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -348,7 +348,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/detect-settings-drift.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -359,7 +359,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/inject-dynamic-context.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -371,7 +371,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/env-change-warning.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -382,7 +382,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/worktree-setup.sh\"",
-            "timeout": 10000
+            "timeout": 10
           }
         ]
       }
@@ -393,7 +393,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-stop.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -404,7 +404,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/inject-dynamic-context.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -416,7 +416,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/rate-limit-backoff.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
