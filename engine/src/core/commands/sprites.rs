@@ -1441,15 +1441,36 @@ mod fill_tiles_tests {
         assert!(err.contains("tileIndex"), "unexpected error: {}", err);
     }
 
+    // `assert!(err.contains('x'))` would be vacuous here: "tileIndex" contains
+    // an 'x', so the tileIndex error passes a bare 'x' containment check. Both
+    // cases assert the EXACT message, which pins the offending axis AND the
+    // element index — the two things a caller needs to find the bad cell.
     #[test]
-    fn refuses_a_negative_coordinate() {
+    fn refuses_a_negative_x_coordinate() {
         let err = parse_fill_tiles(&json!({
             "entityId": "tm-1",
             "layer": 0,
-            "tiles": [{ "x": -1, "y": 0, "tileIndex": 7 }],
+            "tiles": [
+                { "x": 0, "y": 0, "tileIndex": 7 },
+                { "x": -1, "y": 0, "tileIndex": 7 },
+            ],
         }))
         .expect_err("negative x");
-        assert!(err.contains('x'), "unexpected error: {}", err);
+        assert_eq!(err, "tiles[1]: missing or invalid 'x'");
+    }
+
+    #[test]
+    fn refuses_a_negative_y_coordinate() {
+        let err = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": 0,
+            "tiles": [
+                { "x": 0, "y": 0, "tileIndex": 7 },
+                { "x": 0, "y": -1, "tileIndex": 7 },
+            ],
+        }))
+        .expect_err("negative y");
+        assert_eq!(err, "tiles[1]: missing or invalid 'y'");
     }
 
     #[test]
