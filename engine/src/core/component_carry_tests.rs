@@ -344,6 +344,7 @@ mod component_carry_parity {
     const BASE_FIELD_FLOOR: usize = 6;
     const BASE_INSERTED_FLOOR: usize = 4;
     const BASE_COMBINE_FLOOR: usize = 4;
+    const BASE_SNAPSHOT_FLOOR: usize = 6;
     const ENTITY_SNAPSHOT_FIELD_FLOOR: usize = 38;
 
     /// Slice the brace-balanced block introduced by `marker`.
@@ -423,9 +424,14 @@ mod component_carry_parity {
             "{what}: parsed only {} declared fields (floor {field_floor}) — the parser is broken, not the code",
             fields.len()
         );
+        // Two causes, and where the floor equals the field count they collapse:
+        // a slice that silently returns nothing, or a field the code stopped
+        // handling. Name both, or the diagnostic sends the reader to the parser
+        // when the code is what changed.
         assert!(
             used.len() >= floor,
-            "{what}: parsed only {} field uses (floor {floor}) — the parser is broken, not the code",
+            "{what}: parsed only {} field uses (floor {floor}) — either the parser \
+             is broken or the code stopped handling a field; found {used:?}",
             used.len()
         );
         for name in used {
@@ -487,6 +493,24 @@ mod component_carry_parity {
             &fields_used("pub fn snapshot_entity", "aux."),
             &[],
             SNAPSHOT_FLOOR,
+        );
+    }
+
+    /// The base half of the same write. `snapshot_entity` takes TWO bundles and
+    /// only the `aux.` half was pinned, so deleting
+    /// `snapshot.light_data = base.light_data.cloned();` left every parity test
+    /// green while an undone delete restored an unlit entity.
+    #[test]
+    fn every_base_field_is_written_into_the_undo_snapshot() {
+        assert_covers_list(
+            "snapshot_entity (base)",
+            &base_fields(),
+            BASE_FIELD_FLOOR,
+            &names_used("pub fn snapshot_entity", "base.", &base_fields()),
+            // No exemptions: every base field survives a save, so one the
+            // snapshot drops is a field undo cannot bring back.
+            &[],
+            BASE_SNAPSHOT_FLOOR,
         );
     }
 
