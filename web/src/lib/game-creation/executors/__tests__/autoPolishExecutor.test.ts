@@ -39,6 +39,7 @@ function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn().mockReturnValue(undefined),
+    resolveStepOutputs: vi.fn(() => []),
     ...rest,
   };
 }

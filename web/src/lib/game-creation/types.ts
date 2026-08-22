@@ -277,6 +277,21 @@ export interface ExecutorContext {
   userTier: UserTier;
   signal: AbortSignal;
   resolveStepOutput: (stepIdOrExecutorName: string) => Record<string, unknown> | undefined;
+  /**
+   * The output of EVERY completed step run by `executorName`, in plan order.
+   *
+   * `resolveStepOutput` answers with the FIRST match, which is the right answer
+   * for a step that appears once and a silently wrong one for a step that does
+   * not. A plan carries two `physics_enable` steps — one for the blueprint cast
+   * (planBuilder Phase 2.5) and one for the world geometry (`systems/world.ts`)
+   * — so reading the singular resolver for its `entityIds` returns the cast and
+   * drops the ground, platforms and walls with nothing to show for it: the feel
+   * pass lands on the player and the collectibles but not on the floor they
+   * stand on. Nothing errors, because the ids simply never arrive.
+   *
+   * Steps that have not run, or that produced no output, contribute nothing.
+   */
+  resolveStepOutputs: (executorName: string) => Record<string, unknown>[];
 }
 
 export interface ExecutorDefinition {

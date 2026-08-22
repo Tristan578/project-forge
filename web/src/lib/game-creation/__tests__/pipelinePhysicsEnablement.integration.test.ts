@@ -147,6 +147,7 @@ function makeContext(harness: TestHarness, projectType: '2d' | '3d'): ExecutorCo
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: () => undefined,
+    resolveStepOutputs: () => [],
   };
 }
 

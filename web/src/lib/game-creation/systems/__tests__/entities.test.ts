@@ -102,6 +102,7 @@ async function applySteps(
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
+    resolveStepOutputs: vi.fn(() => []),
   } satisfies ExecutorContext;
 
   for (const step of steps) {

@@ -28,6 +28,7 @@ function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
     userTier: 'creator',
     signal: new AbortController().signal,
     resolveStepOutput: vi.fn(),
+    resolveStepOutputs: vi.fn(() => []),
     ...rest,
   };
 }
@@ -276,9 +277,14 @@ describe('physicsEnableExecutor', () => {
     expect(batch).not.toHaveBeenCalled();
     const output = result.output as { enabled: number; warning?: string };
     expect(output.enabled).toBe(0);
+    // Exact string, not a `toContain`: this sentence is the ONLY signal the user
+    // gets that a step reporting success changed nothing, and it has to tell
+    // them what to do about it.
     expect(output.warning).toBe(
       'Nothing in this step could be given a physical body, so none of it will collide, '
-      + 'land on the ground or be picked up.',
+      + 'land on the ground or be picked up. '
+      + 'Select each entity in the scene hierarchy and turn on Physics in the Inspector, '
+      + 'or build the game again.',
     );
   });
 
