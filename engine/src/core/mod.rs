@@ -11,6 +11,7 @@ pub mod blend_tree2d;
 pub mod camera;
 pub mod camera_2d;
 pub mod camera_presets;
+pub mod character_controller;
 pub mod commands;
 pub mod csg;
 pub mod custom_wgsl;

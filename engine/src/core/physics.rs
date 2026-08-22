@@ -526,7 +526,17 @@ impl Plugin for PhysicsPlugin {
             .add_plugins(RapierDebugRenderPlugin::default())
             .init_resource::<DebugPhysicsEnabled>()
             .add_systems(Update, (
-                manage_physics_lifecycle,
+                // `.chain()` is load-bearing, not cosmetic. It inserts an
+                // `ApplyDeferred` between the two, which is what lets the
+                // character lifecycle's `With<Collider>` filter see the collider
+                // this system inserts on the same Edit->Play frame — and it makes
+                // the character lifecycle's `RigidBody`/`LockedAxes` inserts the
+                // ones that survive, which a kinematic character requires.
+                (
+                    manage_physics_lifecycle,
+                    super::character_controller::manage_character_controller_lifecycle,
+                )
+                    .chain(),
                 sync_debug_physics,
             ))
             .add_systems(Update, manage_joint_lifecycle.in_set(PlaySystemSet));

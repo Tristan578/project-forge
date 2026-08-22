@@ -5,7 +5,9 @@
 //! to the script sandbox via `forge.components.*`.
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::CollisionEvent;
+use bevy_rapier3d::prelude::{
+    CollisionEvent, KinematicCharacterController, KinematicCharacterControllerOutput,
+};
 use serde::{Deserialize, Serialize};
 
 use super::engine_mode::RuntimeEntity;
@@ -867,13 +869,29 @@ fn cleanup_game_component_runtime(
 
 // ---- Game Component Systems ----
 
+/// Every character, with the Rapier controller pieces optional: a 2D project or
+/// a character with no collider has none of them and takes the legacy path.
+/// Aliased because the inline form trips `clippy::type_complexity`.
+type CharacterMovementQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static EntityId,
+        &'static GameComponents,
+        &'static mut Transform,
+        Option<&'static mut super::character_controller::CharacterMotionState>,
+        Option<&'static mut KinematicCharacterController>,
+        Option<&'static KinematicCharacterControllerOutput>,
+    ),
+>;
+
 /// Character controller: apply WASD movement and jump
 fn system_character_controller(
     time: Res<Time>,
     input: Option<Res<super::input::InputState>>,
     runtime: Option<Res<GameComponentRuntime>>,
     project_type: Option<Res<super::project_type::ProjectType>>,
-    mut entities: Query<(&EntityId, &GameComponents, &mut Transform)>,
+    mut entities: CharacterMovementQuery,
 ) {
     let Some(input) = input else { return; };
     let Some(_runtime) = runtime else { return; };
@@ -886,7 +904,7 @@ fn system_character_controller(
         Some(super::project_type::ProjectType::TwoD)
     );
 
-    for (_eid, gc, mut transform) in entities.iter_mut() {
+    for (_eid, gc, mut transform, mut motion, mut kcc, kcc_output) in entities.iter_mut() {
         for comp in &gc.components {
             if let GameComponentData::CharacterController(data) = comp {
                 // Movement
@@ -950,14 +968,55 @@ fn system_character_controller(
                     movement.z = -forward_amount; // Invert for forward = negative Z
                 }
 
+                let jump_just_pressed = input.is_action_just_pressed("jump");
+
+                // Kinematic path (PF-1214). The entity has a Rapier character
+                // controller attached, which happens for a 3D character whose
+                // collider exists — see `character_controller.rs`. Gravity,
+                // ground contact, slope/step handling and collision response
+                // all live there; this system only supplies the desired
+                // translation for the frame.
+                if let (Some(state), Some(controller)) =
+                    (motion.as_deref_mut(), kcc.as_deref_mut())
+                {
+                    let step = super::character_controller::step_character(
+                        state,
+                        super::character_controller::CharacterStepInput {
+                            dt,
+                            move_dir: movement,
+                            jump_just_pressed,
+                            // Rapier writes its output in PostUpdate, so this is
+                            // last frame's contact state. One frame of latency on
+                            // the grounded flag is the standard trade; the
+                            // alternative is a same-frame shape-cast per
+                            // character, every frame.
+                            grounded: kcc_output.is_some_and(|o| o.grounded),
+                            speed: data.speed,
+                            jump_speed: data.jump_height,
+                            gravity_scale: data.gravity_scale,
+                            can_double_jump: data.can_double_jump,
+                        },
+                    );
+                    // Accumulate rather than overwrite: a script may already have
+                    // requested translation for this frame. Rapier consumes the
+                    // field and resets it to `None` after each step, so this
+                    // never carries across frames.
+                    controller.translation =
+                        Some(controller.translation.unwrap_or(Vec3::ZERO) + step);
+                    continue;
+                }
+
+                // Legacy direct-translation fallback: 2D projects (authored in
+                // the XY plane and simulated by `physics_2d_sim`, a separate
+                // pipeline), and any 3D character with no collider for Rapier to
+                // sweep. It has no gravity and no collision response, but it
+                // beats freezing the player in place.
                 if movement.length_squared() > 0.0 {
                     movement = movement.normalize() * data.speed * dt;
                     transform.translation += movement;
                 }
 
-                // Jump
-                if input.is_action_just_pressed("jump") {
-                    // Simple jump: apply instant upward movement
+                if jump_just_pressed {
                     transform.translation.y += data.jump_height * 0.5 * dt;
                 }
             }
@@ -2944,5 +3003,179 @@ mod character_controller_axis_tests {
             (moved.x + EXPECTED_TRAVEL).abs() < 1e-5,
             "move_horizontal must win, got {moved:?}"
         );
+    }
+}
+
+/// PF-1214. `system_character_controller` used to be the whole movement model:
+/// it added straight onto `Transform.translation`, so there was no gravity, no
+/// ground contact and no collision response. These pin the other half of the
+/// fix — that when a Rapier controller IS attached, the system drives it rather
+/// than the transform, so Rapier's sweep gets a say in where the player ends up.
+#[cfg(test)]
+mod character_controller_kinematic_tests {
+    use super::{
+        system_character_controller, CharacterControllerData, GameComponentData,
+        GameComponentRuntime, GameComponents,
+    };
+    use crate::core::character_controller::CharacterMotionState;
+    use crate::core::entity_id::EntityId;
+    use crate::core::input::{ActionValue, InputState};
+    use bevy::prelude::*;
+    use bevy_rapier3d::prelude::{
+        KinematicCharacterController, KinematicCharacterControllerOutput,
+    };
+    use std::time::Duration;
+
+    const SPEED: f32 = 7.0;
+    const JUMP_SPEED: f32 = 8.0;
+    const DT_MS: u64 = 100;
+
+    struct Frame {
+        translation: Option<Vec3>,
+        transform: Vec3,
+        state: CharacterMotionState,
+    }
+
+    fn held(name: &str) -> InputState {
+        let mut input = InputState::default();
+        input.actions.insert(
+            name.to_string(),
+            ActionValue { pressed: true, just_pressed: false, just_released: false, axis_value: 0.0 },
+        );
+        input
+    }
+
+    fn jump_tapped() -> InputState {
+        let mut input = InputState::default();
+        input.actions.insert(
+            "jump".to_string(),
+            ActionValue { pressed: true, just_pressed: true, just_released: false, axis_value: 0.0 },
+        );
+        input
+    }
+
+    /// One frame with a Rapier controller attached. `grounded` seeds the
+    /// `KinematicCharacterControllerOutput` Rapier would have written last frame.
+    fn run_kinematic_frame(input: InputState, grounded: bool, can_double_jump: bool) -> Frame {
+        let mut world = World::new();
+        let mut time = Time::<()>::default();
+        time.advance_by(Duration::from_millis(DT_MS));
+        world.insert_resource(time);
+        world.insert_resource(GameComponentRuntime::default());
+        world.insert_resource(input);
+
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::CharacterController(CharacterControllerData {
+            speed: SPEED,
+            jump_height: JUMP_SPEED,
+            can_double_jump,
+            ..Default::default()
+        }));
+
+        let entity = world
+            .spawn((
+                EntityId::new("player"),
+                gc,
+                Transform::default(),
+                CharacterMotionState::default(),
+                KinematicCharacterController::default(),
+                KinematicCharacterControllerOutput { grounded, ..Default::default() },
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_character_controller);
+        schedule.run(&mut world);
+
+        Frame {
+            translation: world
+                .get::<KinematicCharacterController>(entity)
+                .expect("controller still attached")
+                .translation,
+            transform: world.get::<Transform>(entity).expect("player still exists").translation,
+            state: world.get::<CharacterMotionState>(entity).expect("state still attached").clone(),
+        }
+    }
+
+    /// The core of the ticket. Standing still with nothing under the character
+    /// must produce downward motion, and it must arrive as a request to Rapier —
+    /// writing the transform directly is what let the player walk through walls.
+    #[test]
+    fn an_airborne_character_falls_through_the_controller_not_the_transform() {
+        let frame = run_kinematic_frame(InputState::default(), false, false);
+        let translation = frame.translation.expect("the system must drive the controller");
+        assert!(translation.y < 0.0, "gravity must pull down, got {}", translation.y);
+        assert_eq!(
+            frame.transform,
+            Vec3::ZERO,
+            "the kinematic path must not move the transform itself"
+        );
+        assert!(frame.state.vertical_velocity < 0.0);
+    }
+
+    #[test]
+    fn horizontal_input_is_routed_through_the_controller() {
+        let frame = run_kinematic_frame(held("move_right"), true, false);
+        let translation = frame.translation.expect("the system must drive the controller");
+        assert!(
+            (translation.x - 0.7).abs() < 1e-4,
+            "one frame of full-throttle strafe must be speed*dt = 0.7, got {}",
+            translation.x
+        );
+        assert_eq!(frame.transform, Vec3::ZERO);
+    }
+
+    #[test]
+    fn a_grounded_jump_rises() {
+        let frame = run_kinematic_frame(jump_tapped(), true, false);
+        let translation = frame.translation.expect("the system must drive the controller");
+        assert!(translation.y > 0.0, "a grounded jump must rise, got {}", translation.y);
+        assert!(frame.state.vertical_velocity > 0.0);
+    }
+
+    /// The pre-fix jump was `transform.translation.y += jump_height * 0.5 * dt`
+    /// with no grounded check at all — hold jump and the player flew.
+    #[test]
+    fn a_mid_air_jump_is_refused() {
+        let frame = run_kinematic_frame(jump_tapped(), false, false);
+        let translation = frame.translation.expect("the system must drive the controller");
+        assert!(
+            translation.y < 0.0,
+            "jumping with nothing underfoot must keep falling, got {}",
+            translation.y
+        );
+    }
+
+    #[test]
+    fn the_grounded_flag_is_mirrored_onto_the_motion_state() {
+        assert!(run_kinematic_frame(InputState::default(), true, false).state.grounded);
+        assert!(!run_kinematic_frame(InputState::default(), false, false).state.grounded);
+    }
+
+    /// A character with no controller attached (2D project, or 3D with physics
+    /// disabled so no collider exists for Rapier to sweep) keeps the legacy
+    /// direct-translation path rather than freezing in place.
+    #[test]
+    fn without_a_controller_the_legacy_transform_path_still_moves_the_player() {
+        let mut world = World::new();
+        let mut time = Time::<()>::default();
+        time.advance_by(Duration::from_millis(DT_MS));
+        world.insert_resource(time);
+        world.insert_resource(GameComponentRuntime::default());
+        world.insert_resource(held("move_right"));
+
+        let mut gc = GameComponents::default();
+        gc.components.push(GameComponentData::CharacterController(CharacterControllerData {
+            speed: SPEED,
+            ..Default::default()
+        }));
+        let entity = world.spawn((EntityId::new("player"), gc, Transform::default())).id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_character_controller);
+        schedule.run(&mut world);
+
+        let moved = world.get::<Transform>(entity).unwrap().translation;
+        assert!((moved.x - 0.7).abs() < 1e-4, "legacy strafe must still travel 0.7, got {}", moved.x);
     }
 }
