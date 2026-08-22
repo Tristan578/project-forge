@@ -22,6 +22,9 @@ vi.mock('@/lib/scripting/useScriptRunner', () => ({
 import { useEditorStore, firePlayTick } from '@/stores/editorStore';
 import { handleGameEvent } from '../gameEvents';
 import { isCharacterGrounded, getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { emittedEventNames } from '@/test/utils/engineEmittedEvents';
 
 describe('handleGameEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -568,5 +571,32 @@ describe('handleGameEvent', () => {
       );
       expect(isCharacterGrounded('player-1')).toBe(false);
     });
+  });
+});
+
+/**
+ * Pins every event name this switch routes against the engine's actual emit sites.
+ *
+ * A `case 'X'` for a name the engine never emits is silently dead: the switch
+ * returns `false`, nothing logs, and a suite can pin the phantom and pass forever
+ * against a wire format that exists only in the suite. `physicsEvents.ts` shipped
+ * three such arms and ten such tests (PF-1167). `CHARACTER_GROUNDED_CHANGED` is the
+ * newest arm here and the whole reason a script can tell a jump from a fall, so it
+ * is pinned by name as well as by the sweep (PF-1214, review finding #17).
+ */
+describe('gameEvents routes only names the engine emits', () => {
+  const emitted = emittedEventNames();
+  const source = readFileSync(path.resolve(__dirname, '../gameEvents.ts'), 'utf8');
+  const routed = [...source.matchAll(/case '([A-Z0-9_]+)':/g)].map((m) => m[1]);
+
+  it('finds the case arms, so the sweep below is not vacuous', () => {
+    // A floor, not an exact count: adding an arm should not fail this. A parser
+    // that silently matched nothing would.
+    expect(routed.length).toBeGreaterThanOrEqual(6);
+    expect(routed).toContain('CHARACTER_GROUNDED_CHANGED');
+  });
+
+  it.each(routed)('%s is emitted somewhere in the engine', (name) => {
+    expect(emitted.has(name)).toBe(true);
   });
 });
