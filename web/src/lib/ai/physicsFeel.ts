@@ -167,6 +167,115 @@ export const PHYSICS_PRESETS: Record<string, PhysicsProfile> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Jump calibration
+// ---------------------------------------------------------------------------
+
+/**
+ * The engine's gravity constant, in m/s^2.
+ *
+ * Mirrors `GRAVITY_ACCEL` in `engine/src/core/character_controller.rs` (the
+ * sign is dropped here — every formula below uses the magnitude). The engine
+ * scales it by the controller's `gravityScale`.
+ */
+export const GRAVITY_ACCEL_MPS2 = 9.81;
+
+/**
+ * Metres per second of launch speed per unit of a preset's `jumpForce`.
+ *
+ * `jumpForce` is an authoring dial with no unit — a preset says 8 or 14 to
+ * mean "a small hop" or "a big leap" relative to the other presets. It was
+ * never a height and never a speed. This constant is the one place it is given
+ * a physical meaning, chosen so the presets land in the 0.5-1.5s airtime band
+ * that platformers actually use (pinned by `physicsFeel.jump.test.ts`).
+ */
+export const JUMP_FORCE_TO_LAUNCH_SPEED = 0.45;
+
+/**
+ * The longest airtime a jump may produce, in seconds.
+ *
+ * Two presets are deliberately near-weightless (`space_zero_g` at gravity 0.5,
+ * `underwater` at 3). Their launch speed against that gravity gives a 5.5s and
+ * a 1.5s hang time, which is not a jump so much as a slow ascent the player
+ * cannot cancel. Capping the airtime and deriving the height back from it
+ * keeps them floaty without making them unplayable.
+ */
+export const MAX_JUMP_AIRTIME_SECONDS = 1.5;
+
+/**
+ * Convert a preset's unitless `jumpForce` into the apex HEIGHT, in metres,
+ * that the engine's character controller expects as `jumpHeight`.
+ *
+ * The engine reads `CharacterControllerData::jump_height` as a real height and
+ * converts it to a launch speed with `v = sqrt(2 * g * s * h)`. Passing
+ * `jumpForce` straight through (what every call site used to do) therefore
+ * asked for a 14-METRE jump on the snappy platformer preset — roughly a
+ * four-storey building, with a 3.4s hang time. Nothing rejected it, because a
+ * large height is a perfectly valid height (PF-1214, finding #1).
+ *
+ * Returns 0 for a preset that does not jump (`racing`), for a non-positive or
+ * non-finite input, and for a non-positive `gravityScale` — with no gravity
+ * there is no apex to compute, and the engine's own conversion would produce a
+ * NaN the payload builder would then have to reject.
+ */
+export function jumpForceToApexHeight(jumpForce: number, gravityScale: number): number {
+  if (!Number.isFinite(jumpForce) || jumpForce <= 0) return 0;
+  if (!Number.isFinite(gravityScale) || gravityScale <= 0) return 0;
+
+  const g = GRAVITY_ACCEL_MPS2 * gravityScale;
+  const launchSpeed = JUMP_FORCE_TO_LAUNCH_SPEED * jumpForce;
+  const airtime = (2 * launchSpeed) / g;
+
+  if (airtime > MAX_JUMP_AIRTIME_SECONDS) {
+    // Re-derive the height from the capped airtime rather than clamping the
+    // height directly, so the number that ships is one the engine can actually
+    // reach in `MAX_JUMP_AIRTIME_SECONDS`: h = t^2 * g / 8.
+    return (MAX_JUMP_AIRTIME_SECONDS * MAX_JUMP_AIRTIME_SECONDS * g) / 8;
+  }
+
+  return (launchSpeed * launchSpeed) / (2 * g);
+}
+
+/**
+ * The inverse of {@link jumpForceToApexHeight}: recover the authoring dial from
+ * a height the engine is holding.
+ *
+ * `analyzePhysicsFeel` classifies a live scene by building a virtual
+ * `PhysicsProfile` from it and measuring the distance to each preset. The
+ * controller stores a height, the profile field is a dial, and comparing one
+ * against the other makes every scene look like whichever preset happens to
+ * have the largest numbers.
+ *
+ * Not an exact inverse above the airtime cap — a capped height maps back to a
+ * smaller dial than the one that produced it. That is the right direction for a
+ * classifier: it reports the jump the scene actually has, not the one that was
+ * asked for.
+ */
+export function apexHeightToJumpForce(apexHeight: number, gravityScale: number): number {
+  if (!Number.isFinite(apexHeight) || apexHeight <= 0) return 0;
+  if (!Number.isFinite(gravityScale) || gravityScale <= 0) return 0;
+
+  const g = GRAVITY_ACCEL_MPS2 * gravityScale;
+  const launchSpeed = Math.sqrt(2 * g * apexHeight);
+  return launchSpeed / JUMP_FORCE_TO_LAUNCH_SPEED;
+}
+
+/**
+ * The airtime, in seconds, of a jump to `apexHeight` under `gravityScale`.
+ *
+ * Exists so the calibration test can assert what a player FEELS (hang time)
+ * rather than re-deriving the physics next to the code under test, where a
+ * mistake in the formula would cancel itself out and the test would pass on a
+ * broken conversion.
+ */
+export function jumpAirtimeSeconds(apexHeight: number, gravityScale: number): number {
+  if (!Number.isFinite(apexHeight) || apexHeight <= 0) return 0;
+  if (!Number.isFinite(gravityScale) || gravityScale <= 0) return 0;
+
+  const g = GRAVITY_ACCEL_MPS2 * gravityScale;
+  return 2 * Math.sqrt((2 * apexHeight) / g);
+}
+
 export const PRESET_KEYS = Object.keys(PHYSICS_PRESETS) as Array<keyof typeof PHYSICS_PRESETS>;
 
 // ---------------------------------------------------------------------------
@@ -292,6 +401,9 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
   let jumpSum = 0;
   let gravityScaleSum = 0;
   let count = 0;
+  // Counted separately from `count`: that one counts entities with PHYSICS,
+  // and a scene has many of those but normally one character controller.
+  let controllerCount = 0;
 
   for (const entity of ctx.entities) {
     if (entity.physics) {
@@ -304,6 +416,7 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
         if (gc.type === 'characterController' && gc.characterController) {
           speedSum += gc.characterController.speed;
           jumpSum += gc.characterController.jumpHeight;
+          controllerCount++;
         }
       }
     }
@@ -312,9 +425,18 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
   // Build a virtual profile from scene data (fall back to arcade defaults)
   const avgGravityScale = count > 0 ? gravityScaleSum / count : 1;
   const avgFriction = count > 0 ? frictionSum / count : 0.4;
-  const avgSpeed = speedSum > 0 ? speedSum : 7;
-  const avgJump = jumpSum > 0 ? jumpSum : 10;
+  // These two really are averages now. They were bare sums, so a scene with two
+  // character controllers classified as twice as fast and twice as jumpy as it
+  // is — invisible in the single-controller case every test used.
+  const avgSpeed = controllerCount > 0 ? speedSum / controllerCount : 7;
+  const avgJumpHeight = controllerCount > 0 ? jumpSum / controllerCount : 0;
   const absGravity = avgGravityScale * 10; // Convert scale to absolute
+
+  // The controller stores a HEIGHT; `PhysicsProfile.jumpForce` is the unitless
+  // authoring dial. Comparing one against the other made every scene look like
+  // whichever preset carried the biggest numbers (PF-1214).
+  const avgJump =
+    avgJumpHeight > 0 ? apexHeightToJumpForce(avgJumpHeight, avgGravityScale) : 10;
 
   // Infer non-observable parameters from observable ones for better classification.
   // Low gravity -> high air control, low terminal velocity. High friction -> high deceleration.
@@ -443,7 +565,8 @@ export function applyPhysicsProfile(
     const merged = buildStoreComponent('character_controller', {
       ...existing.characterController,
       speed: profile.moveSpeed,
-      jumpHeight: profile.jumpForce,
+      // A HEIGHT, not the raw dial — see `jumpForceToApexHeight`.
+      jumpHeight: jumpForceToApexHeight(profile.jumpForce, gravityScale),
       gravityScale,
     });
     // `buildStoreComponent` only returns null for an unrecognized name, and
