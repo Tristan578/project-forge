@@ -9,6 +9,7 @@ import {
   analyzePhysicsFeel,
   applyPhysicsProfile,
   generateCustomProfile,
+  jumpForceToApexHeight,
 } from '../physicsFeel';
 import type {
   PhysicsSceneContext,
@@ -178,7 +179,11 @@ describe('analyzePhysicsFeel', () => {
           gameComponents: [
             {
               type: 'characterController',
-              characterController: { speed: 6, jumpHeight: 8, gravityScale: 0.5 },
+              // A HEIGHT in metres, which is what the controller stores. The floaty
+              // preset's dial of 8 under gravityScale 0.5 works out to a ~1.3m apex
+              // (PF-1214); the old fixture put the raw dial here and the analyzer
+              // read it back as a dial, so both sides were wrong together.
+              characterController: { speed: 6, jumpHeight: 1.32, gravityScale: 0.5 },
             },
           ],
         },
@@ -200,7 +205,8 @@ describe('analyzePhysicsFeel', () => {
           gameComponents: [
             {
               type: 'characterController',
-              characterController: { speed: 4, jumpHeight: 12, gravityScale: 2.0 },
+              // The weighty preset's dial of 12 under gravityScale 2.0, as a height.
+              characterController: { speed: 4, jumpHeight: 0.74, gravityScale: 2.0 },
             },
           ],
         },
@@ -208,6 +214,45 @@ describe('analyzePhysicsFeel', () => {
     };
     const analysis = analyzePhysicsFeel(ctx);
     expect(analysis.closestPreset).toBe('rpg_weighty');
+  });
+
+  /**
+   * `speedSum` and `jumpSum` were used as averages without ever being divided,
+   * so a second character controller doubled both and pushed the scene toward
+   * whichever preset had the largest numbers. Every existing fixture had one
+   * controller, which is why nothing caught it.
+   */
+  it('averages across character controllers instead of summing them', () => {
+    const oneController: PhysicsSceneContext = {
+      entities: [
+        {
+          entityId: 'e1',
+          physics: { gravityScale: 2.0, friction: 0.6 },
+          gameComponents: [
+            {
+              type: 'characterController',
+              characterController: { speed: 4, jumpHeight: 0.74, gravityScale: 2.0 },
+            },
+          ],
+        },
+      ],
+    };
+    const twoIdenticalControllers: PhysicsSceneContext = {
+      entities: [
+        oneController.entities[0],
+        { ...oneController.entities[0], entityId: 'e2' },
+      ],
+    };
+
+    // Two identical characters are the same feel as one of them. Asserting
+    // `similarity` rather than `closestPreset`: the preset label is a
+    // coarse bucket that a doubled speed and jump can easily stay inside, so
+    // an assertion on it passes just as happily against the summing version.
+    const one = analyzePhysicsFeel(oneController);
+    const two = analyzePhysicsFeel(twoIdenticalControllers);
+
+    expect(two.similarity).toBeCloseTo(one.similarity, 10);
+    expect(two.closestPreset).toBe(one.closestPreset);
   });
 
   it('should handle empty scene with suggestions', () => {
@@ -354,7 +399,10 @@ describe('applyPhysicsProfile', () => {
       componentType: 'character_controller',
       properties: {
         speed: profile.moveSpeed,
-        jumpHeight: profile.jumpForce,
+        // Converted, not passed through — `jumpForce` is a unitless dial and
+        // `jumpHeight` is metres (PF-1214). Exact numbers per preset are
+        // pinned in `physicsFeelJump.test.ts`.
+        jumpHeight: jumpForceToApexHeight(profile.jumpForce, profile.gravity / 10),
         gravityScale: profile.gravity / 10,
         canDoubleJump: false,
       },
@@ -374,7 +422,10 @@ describe('applyPhysicsProfile', () => {
       componentType: 'character_controller',
       properties: {
         speed: profile.moveSpeed,
-        jumpHeight: profile.jumpForce,
+        // Converted, not passed through — `jumpForce` is a unitless dial and
+        // `jumpHeight` is metres (PF-1214). Exact numbers per preset are
+        // pinned in `physicsFeelJump.test.ts`.
+        jumpHeight: jumpForceToApexHeight(profile.jumpForce, profile.gravity / 10),
         gravityScale: profile.gravity / 10,
         canDoubleJump: true,
       },

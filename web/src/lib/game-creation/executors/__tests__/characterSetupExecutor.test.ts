@@ -6,6 +6,7 @@ import {
   characterControllerFromProfile,
 } from '../../physicsProfileResolution';
 import { normalizeGameComponent, toWireComponent } from '@/lib/engine/gameComponentWire';
+import { jumpForceToApexHeight } from '@/lib/ai/physicsFeel';
 
 /**
  * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
@@ -78,10 +79,17 @@ function wireOf(store: TestStore, entityId: string): unknown {
  * engine's `CharacterControllerData::default()` (`jump_height: 8.0`) — so the
  * no-directive player and the unrecognized-feel player moved differently for no
  * designed reason.
+ *
+ * `jumpHeight` is the preset's `jumpForce` dial run through
+ * `jumpForceToApexHeight`, NOT the dial itself: the engine reads the field as a
+ * real height in metres, so shipping the raw 10 asked for a 10-metre jump
+ * (PF-1214, review finding #1). The conversion is pinned on its own in
+ * `lib/ai/__tests__/physicsFeelJump.test.ts`; what these expectations pin is
+ * that the executor picked the preset it should have and converted at all.
  */
 const DEFAULT_PROPS = {
   speed: 7,
-  jumpHeight: 10,
+  jumpHeight: jumpForceToApexHeight(10, 1),
   gravityScale: 1,
   canDoubleJump: false,
 };
@@ -285,7 +293,7 @@ describe('characterSetupExecutor', () => {
       expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('ent_2d_floaty', {
         type: 'characterController',
         characterController: {
-          speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false,
+          speed: 6, jumpHeight: jumpForceToApexHeight(8, 0.5), gravityScale: 0.5, canDoubleJump: false,
         },
       });
     });
@@ -309,7 +317,7 @@ describe('characterSetupExecutor', () => {
       expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('ent_2d_heavy', {
         type: 'characterController',
         characterController: {
-          speed: 4, jumpHeight: 12, gravityScale: 2, canDoubleJump: false,
+          speed: 4, jumpHeight: jumpForceToApexHeight(12, 2), gravityScale: 2, canDoubleJump: false,
         },
       });
     });
@@ -432,7 +440,7 @@ describe('characterSetupExecutor', () => {
       expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('ent_floaty', {
         type: 'characterController',
         characterController: {
-          speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false,
+          speed: 6, jumpHeight: jumpForceToApexHeight(8, 0.5), gravityScale: 0.5, canDoubleJump: false,
         },
       });
     });
@@ -456,7 +464,7 @@ describe('characterSetupExecutor', () => {
       expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('ent_heavy', {
         type: 'characterController',
         characterController: {
-          speed: 4, jumpHeight: 12, gravityScale: 2, canDoubleJump: false,
+          speed: 4, jumpHeight: jumpForceToApexHeight(12, 2), gravityScale: 2, canDoubleJump: false,
         },
       });
     });
@@ -483,7 +491,7 @@ describe('characterSetupExecutor', () => {
         type: 'characterController',
         // gravityScale still 0.5 from the preset — config cannot touch it.
         characterController: {
-          speed: 11, jumpHeight: 3, gravityScale: 0.5, canDoubleJump: false,
+          speed: 11, jumpHeight: jumpForceToApexHeight(3, 0.5), gravityScale: 0.5, canDoubleJump: false,
         },
       });
     });
@@ -513,7 +521,7 @@ describe('characterSetupExecutor', () => {
       expect(storeOf(ctx).addGameComponent).toHaveBeenCalledWith('ent_neg', {
         type: 'characterController',
         characterController: {
-          speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false,
+          speed: 6, jumpHeight: jumpForceToApexHeight(8, 0.5), gravityScale: 0.5, canDoubleJump: false,
         },
       });
     });
@@ -606,7 +614,7 @@ describe('characterSetupExecutor', () => {
       expect(wireOf(storeOf(ctx), 'ent_huge')).toEqual({
         entityId: 'ent_huge',
         componentType: 'character_controller',
-        properties: { speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false },
+        properties: { speed: 6, jumpHeight: jumpForceToApexHeight(8, 0.5), gravityScale: 0.5, canDoubleJump: false },
       });
     });
 
@@ -636,7 +644,7 @@ describe('characterSetupExecutor', () => {
         componentType: 'character_controller',
         // 6 is the preset's speed. 5 would be `CharacterControllerData::default()
         // .speed` — what the engine would fall back to had the value reached it.
-        properties: { speed: 6, jumpHeight: 8, gravityScale: 0.5, canDoubleJump: false },
+        properties: { speed: 6, jumpHeight: jumpForceToApexHeight(8, 0.5), gravityScale: 0.5, canDoubleJump: false },
       });
     });
   });

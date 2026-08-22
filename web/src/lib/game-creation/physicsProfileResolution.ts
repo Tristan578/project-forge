@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PHYSICS_PRESETS, type PhysicsProfile } from '@/lib/ai/physicsFeel';
+import { jumpForceToApexHeight, PHYSICS_PRESETS, type PhysicsProfile } from '@/lib/ai/physicsFeel';
 import type { FeelDirective } from './types';
 
 /**
@@ -151,9 +151,13 @@ export function characterControllerFromProfile(profile: PhysicsProfile): {
   jumpHeight: number;
   gravityScale: number;
 } {
+  const gravityScale = profile.gravity / 10;
   return {
     speed: profile.moveSpeed,
-    jumpHeight: profile.jumpForce,
-    gravityScale: profile.gravity / 10,
+    // The engine reads `jumpHeight` as a real height in metres and derives the
+    // launch speed itself, so the preset's unitless dial has to be converted —
+    // passing it through asked for a 14-metre jump (PF-1214, finding #1).
+    jumpHeight: jumpForceToApexHeight(profile.jumpForce, gravityScale),
+    gravityScale,
   };
 }
