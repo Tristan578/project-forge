@@ -193,11 +193,15 @@ Zustand store and pushes the result to the engine as a single `set_tilemap_data`
 `get_tilemap` — sending any of those to the engine returns `Unknown command`.
 
 Because the engine records one `UndoableAction::TilemapChange` per `set_tilemap_data`,
-every tool below that writes tilemap data is undoable as a single step.
+each tool below that only rewrites tilemap data is undoable as a single step.
+
+`create_tilemap` is the exception: it spawns the entity and then writes the data
+(`spawnEntity` + `setTilemapData` in `handlers2d.ts`), which is two history
+entries, so undoing it once leaves an empty plane behind.
 
 | Command | Description | Undo |
 |---------|-------------|------|
-| `create_tilemap` | Spawn a plane entity and give it `TilemapData` referencing `tilesetAssetId`. | Yes |
+| `create_tilemap` | Spawn a plane entity and give it `TilemapData` referencing `tilesetAssetId`. | Yes (two steps — see note above) |
 | `import_tileset` | Register a tileset atlas by asset ID. See the caveat below. | No |
 | `set_tile` | Set one cell of `layerIndex` to `tileIndex` (`null` erases it). | Yes |
 | `fill_tiles` | Fill the inclusive range `fromX,fromY`..`toX,toY` with one tile. | Yes |

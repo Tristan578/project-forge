@@ -86,12 +86,15 @@ export const characterSetupExecutor: ExecutorDefinition = {
     const { entity, entityId, projectType, systemConfig, movementType } = parsed.data;
 
     // The GDD's feel directive reaches every system step (planBuilder injects
-    // it), but it used to stop here: the plan runs `physics_profile` first and
-    // `character_setup` second, and `applyPhysicsProfile` only tunes a
-    // CharacterController that ALREADY exists — which the player does not, at
-    // that point. So the controller half of the profile was silently skipped
-    // and this step then built one from hardcoded numbers, making every
-    // generated 3D game move identically no matter what the GDD asked for.
+    // it), but it used to stop here, and this step built the controller from
+    // hardcoded numbers — so every generated 3D game moved identically no
+    // matter what the GDD asked for. Resolving it here is what fixed that, and
+    // it stays correct under the current plan order: `physics_profile` is
+    // deferred past every `physics_enable` (planBuilder Phase 3a), so it runs
+    // AFTER this step, finds the controller written below, and merges the same
+    // numbers onto it — both sides go through `resolvePhysicsProfile`, so they
+    // agree by construction rather than by two copies of a table staying in
+    // sync by luck.
     const feel = feelDirectiveSchema.safeParse(parsed.data.feelDirective);
     const controller = feel.success
       ? characterControllerFromProfile(resolvePhysicsProfile(feel.data, systemConfig))

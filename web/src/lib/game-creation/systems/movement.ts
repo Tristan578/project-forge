@@ -2,9 +2,17 @@
  * Movement system definition.
  *
  * Produces up to two steps:
- *  1. physics_profile — configure physics for the movement type
- *  2. character_setup — rig the player entity so it can be controlled
- *     (only when the GDD actually designed a player to rig)
+ *  - character_setup — rig the player entity so it can be controlled
+ *    (only when the GDD actually designed a player to rig)
+ *  - physics_profile — configure physics for the movement type
+ *
+ * They are NOT planned in that order. `planBuilder` lifts `physics_profile`
+ * out of this system's step list and re-plans it once, after every
+ * `physics_enable` step in the whole plan (Phase 3a), so the feel pass can see
+ * the world geometry the `world` system enabled. `character_setup` stays in
+ * place, which means the feel pass runs AFTER it and finds the player's
+ * CharacterController already in the store. Read the order off `planBuilder`,
+ * never off the array this function returns.
  */
 
 import { registerSystem } from './registry';

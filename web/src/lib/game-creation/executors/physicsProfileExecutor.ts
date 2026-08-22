@@ -82,8 +82,22 @@ function collectTargetIds(
 export const physicsProfileExecutor: ExecutorDefinition = {
   name: 'physics_profile',
   inputSchema,
+  // `OrchestratorPanel`'s `StepItem` renders this under the failed step, so it
+  // is read by someone whose game is already mistuned and who has no other clue
+  // what to do next. "Your game will use default physics" describes the damage
+  // and stops there; the remediation below is the same one the zero-ids WARNING
+  // carries, for the same reason and in the same on-screen vocabulary
+  // (Hierarchy, Physics › Enabled, Friction/Restitution/Gravity) — one failure
+  // mode should not be followable and the other a dead end.
+  //
+  // No "re-run the build" clause here either: a new build starts at
+  // `scene_create`, which calls `newScene()` and despawns everything, so it
+  // would discard the very fix this sentence just asked for.
   userFacingErrorMessage:
-    'Could not configure physics. Your game will use default physics.',
+    'Could not tune how the game moves, so everything will use default physics. '
+    + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
+    + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+    + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
 
   async execute(
     input: Record<string, unknown>,
@@ -118,15 +132,21 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     // observe a write made by an earlier step — it is frozen at pipeline start,
     // and every entity the pipeline itself spawned is missing from it.
     //
-    // On the movement pipeline `physics_profile` runs BEFORE `character_setup`
-    // (see systems/movement.ts), so the controller usually does not exist yet
-    // and the merge below is a no-op. It is still read live rather than
-    // defaulted: this executor is also invoked directly with explicit
-    // `entityIds` against an already-built scene, where the entity DOES have a
-    // controller, and merging against `{}` there would rebuild it from
-    // `Default` and reset every field the caller did not name — the PF-1118
-    // data loss. Reading live is correct in both orders; the snapshot is
-    // correct in neither.
+    // Reading live is what makes the merge below correct, and since the
+    // Phase 3a deferral (planBuilder) it is also what makes the merge REACH
+    // anything. `physics_profile` is re-planned after every `physics_enable`,
+    // which on a movement plan puts it AFTER `character_setup` — so the player
+    // DOES have a CharacterController by the time this runs, and
+    // `applyPhysicsProfile` dispatches `update_game_component` onto it on
+    // every generated run. The numbers agree by construction: both paths go
+    // through `resolvePhysicsProfile(feelDirective, config)`, so the merge
+    // re-sends the speed/jumpHeight/gravityScale `character_setup` already
+    // wrote and leaves the fields it does not name (`canDoubleJump`) alone.
+    // That last part is why the merge must read live rather than default:
+    // this executor is also invoked directly with explicit `entityIds`
+    // against an already-built scene, and merging against `{}` would rebuild
+    // the controller from `Default` and reset every field the caller did not
+    // name — the PF-1118 data loss. The snapshot is correct in neither order.
     //
     // Read through `ctx.getStore()` rather than importing the store here.
     // Importing it — statically OR dynamically — creates a real module edge
@@ -167,11 +187,16 @@ export const physicsProfileExecutor: ExecutorDefinition = {
         presetUsed: presetKey,
         entityCount: 0,
         appliedGlobally: false,
+        // No "re-run the build" clause: a new build starts at `scene_create`,
+        // which calls `newScene()` and despawns everything, so it would discard
+        // the very fix the sentence had just asked for. The recovery described
+        // here is one that survives, and the last sentence says so outright.
         warning:
           'No entities had physics turned on, so the movement feel could not be applied. '
           + 'Things may not move or collide the way the design describes. '
-          + 'Select the player in the scene hierarchy and turn on Physics in the Inspector, '
-          + 'then re-run the build to apply the feel settings.',
+          + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
+          + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+          + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
       });
     }
 

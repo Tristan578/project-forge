@@ -272,6 +272,173 @@ describe('OrchestratorPanel', () => {
     expect(mockResetOrchestrator).toHaveBeenCalled();
   });
 
+  describe('step failure copy', () => {
+    /**
+     * The executors compose a `userFacingErrorMessage` naming the next action a
+     * user can actually take. Until PF-1224 nothing rendered it: a failed step
+     * was a red icon and a label, and the remediation copy every executor
+     * carries reached no one. `orchestratorError` is a different thing — it is
+     * only set when `runPipeline` itself throws.
+     */
+    const FAILED_PLAN = {
+      ...MOCK_PLAN,
+      status: 'failed',
+      steps: [
+        MOCK_PLAN.steps[0],
+        {
+          ...MOCK_PLAN.steps[1],
+          status: 'failed',
+          error: {
+            code: 'EXCEPTION',
+            message: 'toggle_physics rejected',
+            userFacingMessage: 'Could not switch physics on for the level.',
+            retryable: true,
+          },
+        },
+        MOCK_PLAN.steps[2],
+      ],
+    };
+
+    it("renders a failed step's userFacingMessage", () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: FAILED_PLAN,
+        stepStatuses: { 'step-2': 'failed' },
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.getByText('Could not switch physics on for the level.')).toBeTruthy();
+    });
+
+    it('announces the failure copy to assistive tech', () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: FAILED_PLAN,
+        stepStatuses: { 'step-2': 'failed' },
+      });
+      render(<OrchestratorPanel />);
+
+      const alerts = screen.getAllByRole('alert');
+      const messages = alerts.map((el) => el.textContent);
+      expect(messages).toContain('Could not switch physics on for the level.');
+    });
+
+    it('renders the internal message nowhere — only the user-facing one', () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: FAILED_PLAN,
+        stepStatuses: { 'step-2': 'failed' },
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.queryByText('toggle_physics rejected')).toBeNull();
+    });
+
+    it('renders no alert for a plan whose steps carry no error', () => {
+      mockStore({
+        orchestratorStatus: 'executing',
+        currentPlan: MOCK_PLAN,
+        stepStatuses: {},
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.queryAllByRole('alert')).toHaveLength(0);
+    });
+
+    /**
+     * A step whose retries a CANCEL cut short keeps its last error.
+     *
+     * `runPipeline`'s `cancelledMidRetry` branch sets the step to 'skipped',
+     * writes `step.error` from the last attempt, and puts the PLAN in
+     * 'cancelled' — so the panel had a step reading "Cancelled" with a red
+     * `role="alert"` under it telling the user something failed and to go fix
+     * it in the Inspector, for something they stopped on purpose. Presence of
+     * `step.error` is therefore not the render condition; the plan status is
+     * what tells a cancel apart from the two skipped-with-error cases that DO
+     * deserve the alert.
+     */
+    const CANCELLED_PLAN = {
+      ...MOCK_PLAN,
+      status: 'cancelled',
+      steps: [
+        MOCK_PLAN.steps[0],
+        {
+          ...MOCK_PLAN.steps[1],
+          status: 'skipped',
+          error: {
+            code: 'EXCEPTION',
+            message: 'toggle_physics rejected',
+            userFacingMessage: 'Could not switch physics on for the level.',
+            retryable: true,
+          },
+        },
+        MOCK_PLAN.steps[2],
+      ],
+    };
+
+    it('says nothing failed when the user cancelled mid-retry', () => {
+      mockStore({
+        orchestratorStatus: 'cancelled',
+        currentPlan: CANCELLED_PLAN,
+        stepStatuses: { 'step-2': 'skipped' },
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.queryByText('Could not switch physics on for the level.')).toBeNull();
+      expect(screen.queryAllByRole('alert')).toHaveLength(0);
+      // The step is still listed as one the user stopped, not one that vanished.
+      expect(screen.getByText('Cancelled')).toBeTruthy();
+    });
+
+    /**
+     * The other half of the same discriminator: 'skipped' is ALSO how an
+     * optional step that exhausted its retries reads, and how a required step
+     * that `DEPENDENCY_FAILED` reads. Neither is a cancel, and both have
+     * remediation the user needs — so gating on `status === 'failed'` alone
+     * would have swapped one silent surface for another.
+     */
+    it('still renders the copy for a skipped step on a plan that was not cancelled', () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: { ...CANCELLED_PLAN, status: 'failed' },
+        stepStatuses: { 'step-2': 'skipped' },
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.getByText('Could not switch physics on for the level.')).toBeTruthy();
+    });
+
+    /**
+     * Both failure surfaces are on screen at once here — the plan-level banner
+     * and the per-step alert — and they were drawn in two different reds. Two
+     * shades of the same message a few pixels apart reads as a rendering bug,
+     * not a distinction, so the colour is asserted to be one colour. Geometry
+     * is deliberately NOT compared: the banner is a block of body text and the
+     * step alert a small annotation, and they should differ there.
+     */
+    it('draws the plan-level and per-step failures in the same red', () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: FAILED_PLAN,
+        orchestratorError: 'Something broke',
+        stepStatuses: { 'step-2': 'failed' },
+      });
+      const { container } = render(<OrchestratorPanel />);
+
+      const banner = screen.getByText('Something broke');
+      const stepAlert = screen.getByText('Could not switch physics on for the level.');
+      expect(container.contains(banner)).toBe(true);
+
+      const colourOf = (el: Element) => Array.from(el.classList)
+        .filter((c) => /(^|:)(border-|bg-|text-)red-/.test(c))
+        .sort();
+
+      expect(colourOf(stepAlert)).toEqual(colourOf(banner));
+      // And not vacuously equal because neither carries a red at all.
+      expect(colourOf(banner).length).toBeGreaterThan(0);
+    });
+  });
+
   describe('step warnings', () => {
     /**
      * A step that only partly applied still gets a green tick, because it did

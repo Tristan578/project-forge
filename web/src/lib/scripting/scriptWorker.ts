@@ -185,6 +185,19 @@ export const TILEMAP_FILL_MAX_CELLS =
   MAX_COMMAND_PAYLOAD_CONTAINERS - TILEMAP_FILL_PAYLOAD_OVERHEAD;
 
 /**
+ * The largest value any tilemap coordinate, layer or tile index may carry.
+ *
+ * Mirrors `tile_field_u32` in `engine/src/core/commands/sprites.rs`, which
+ * bounds every one of those fields at `u32::MAX` on EVERY target. The engine
+ * has to bound them because `as_u64()? as usize` TRUNCATES on wasm32, where
+ * `usize` is 32 bits: an `x` of `u32::MAX + 4` wrapped to `3` and was written
+ * as an ordinary in-range cell. This constant is the same bound stated one
+ * layer earlier, so a script author gets a named error instead of a command the
+ * engine silently refuses (PF-1181).
+ */
+export const TILE_FIELD_MAX = 0xffff_ffff;
+
+/**
  * Floor a tilemap integer argument, refusing anything the engine would drop.
  *
  * Every tilemap coordinate, layer and tile index is read on the Rust side with
@@ -194,6 +207,9 @@ export const TILEMAP_FILL_MAX_CELLS =
  * script "succeeded" and the tilemap never changed. Throwing puts the failure
  * where the script author can see it, and flooring makes the common
  * `worldToTile`-style fractional input work instead of vanishing.
+ *
+ * The upper bound is checked AFTER flooring, so a fractional value just past
+ * the bound is judged on the integer the engine would actually receive.
  */
 function tileInt(api: string, name: string, value: number): number {
   if (!Number.isFinite(value)) {
@@ -202,6 +218,9 @@ function tileInt(api: string, name: string, value: number): number {
   const floored = Math.floor(value);
   if (floored < 0) {
     throw new Error(`${api}: ${name} must be >= 0, got ${value}`);
+  }
+  if (floored > TILE_FIELD_MAX) {
+    throw new Error(`${api}: ${name} must be <= ${TILE_FIELD_MAX}, got ${value}`);
   }
   return floored;
 }
@@ -592,6 +611,25 @@ function buildForgeApi(scriptEntityId: string) {
           throw new Error(
             `${api}: ${width}x${height} exceeds the ${TILEMAP_FILL_MAX_CELLS}-cell limit`,
           );
+        }
+        // Bounding origin and size separately does NOT bound the cells this
+        // emits: the far edge is `origin + size - 1`, and it is that derived
+        // number the engine reads. An in-bounds origin near TILE_FIELD_MAX
+        // would otherwise produce out-of-bounds cells and the engine would
+        // refuse the whole fill.
+        //
+        // Each axis is checked on its own so the error can name the one that
+        // overflowed, the value it reached and the limit -- the same shape
+        // `tileInt` uses. The derived coordinate is the only number here the
+        // author never wrote down, so a message that omitted it ("the rect
+        // ends past ...") left them to compute it before they could act.
+        const farX = originX + width - 1;
+        const farY = originY + height - 1;
+        if (farX > TILE_FIELD_MAX) {
+          throw new Error(`${api}: x + w - 1 = ${farX} exceeds ${TILE_FIELD_MAX}`);
+        }
+        if (farY > TILE_FIELD_MAX) {
+          throw new Error(`${api}: y + h - 1 = ${farY} exceeds ${TILE_FIELD_MAX}`);
         }
         const tiles: Array<{ x: number; y: number; tileIndex: number | null }> = [];
         for (let ty = originY; ty < originY + height; ty++) {
