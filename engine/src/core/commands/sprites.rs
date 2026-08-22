@@ -1076,58 +1076,85 @@ fn handle_remove_tilemap_data(payload: serde_json::Value) -> super::CommandResul
     }
 }
 
-/// Handle paint_tile command.
-/// Payload: { entityId, layer, x, y, tileIndex }
-fn handle_paint_tile(payload: serde_json::Value) -> super::CommandResult {
+/// Read a tile coordinate, layer or index field, rejecting anything above
+/// `u32::MAX`.
+///
+/// `v.as_u64()? as usize` TRUNCATES on wasm32, where `usize` is 32 bits: an `x`
+/// of 4_294_967_299 wraps to 3, and `tile_flat_index` then accepts it as an
+/// ordinary in-range cell and writes a tile the caller never asked for. Nothing
+/// reports it — `dispatchCommand` returns void — so the overflow guard the rest
+/// of this module carries was reachable only by callers who had already been
+/// truncated into range.
+///
+/// The bound is `u32` on EVERY target rather than `usize::try_from`, so the
+/// native suite exercises the same rejection wasm32 gets. A `usize::try_from`
+/// guard would compile to a no-op under `cargo test --lib` on a 64-bit host and
+/// would pin nothing (PF-1181).
+fn tile_field_u32(value: Option<&serde_json::Value>) -> Option<u32> {
+    u32::try_from(value?.as_u64()?).ok()
+}
+
+/// Parse a `paint_tile` payload: `{ entityId, layer, x, y, tileIndex }`.
+///
+/// Extracted from `handle_paint_tile` for the same reason `parse_fill_tiles`
+/// was: the handler needs the thread-local `PendingCommands`, which no unit test
+/// has, so the bounds checking would otherwise be untestable natively.
+fn parse_paint_tile(payload: &serde_json::Value) -> Result<PaintTileRequest, String> {
     let entity_id = payload.get("entityId")
         .and_then(|v| v.as_str())
         .ok_or("Missing entityId")?
         .to_string();
 
-    let layer = payload.get("layer")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing layer")? as usize;
+    let layer = tile_field_u32(payload.get("layer"))
+        .ok_or("Missing or invalid layer")? as usize;
 
-    let x = payload.get("x")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing x")? as usize;
+    let x = tile_field_u32(payload.get("x"))
+        .ok_or("Missing or invalid x")? as usize;
 
-    let y = payload.get("y")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing y")? as usize;
+    let y = tile_field_u32(payload.get("y"))
+        .ok_or("Missing or invalid y")? as usize;
 
-    let tile_index = payload.get("tileIndex")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing tileIndex")? as u32;
+    let tile_index = tile_field_u32(payload.get("tileIndex"))
+        .ok_or("Missing or invalid tileIndex")?;
 
-    if queue_paint_tile_from_bridge(PaintTileRequest { entity_id, layer, x, y, tile_index }) {
+    Ok(PaintTileRequest { entity_id, layer, x, y, tile_index })
+}
+
+/// Handle paint_tile command.
+/// Payload: { entityId, layer, x, y, tileIndex }
+fn handle_paint_tile(payload: serde_json::Value) -> super::CommandResult {
+    if queue_paint_tile_from_bridge(parse_paint_tile(&payload)?) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
     }
 }
 
-/// Handle erase_tile command.
-/// Payload: { entityId, layer, x, y }
-fn handle_erase_tile(payload: serde_json::Value) -> super::CommandResult {
+/// Parse an `erase_tile` payload: `{ entityId, layer, x, y }`.
+///
+/// Extracted for the same testability reason as `parse_paint_tile`.
+fn parse_erase_tile(payload: &serde_json::Value) -> Result<EraseTileRequest, String> {
     let entity_id = payload.get("entityId")
         .and_then(|v| v.as_str())
         .ok_or("Missing entityId")?
         .to_string();
 
-    let layer = payload.get("layer")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing layer")? as usize;
+    let layer = tile_field_u32(payload.get("layer"))
+        .ok_or("Missing or invalid layer")? as usize;
 
-    let x = payload.get("x")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing x")? as usize;
+    let x = tile_field_u32(payload.get("x"))
+        .ok_or("Missing or invalid x")? as usize;
 
-    let y = payload.get("y")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing y")? as usize;
+    let y = tile_field_u32(payload.get("y"))
+        .ok_or("Missing or invalid y")? as usize;
 
-    if queue_erase_tile_from_bridge(EraseTileRequest { entity_id, layer, x, y }) {
+    Ok(EraseTileRequest { entity_id, layer, x, y })
+}
+
+/// Handle erase_tile command.
+/// Payload: { entityId, layer, x, y }
+fn handle_erase_tile(payload: serde_json::Value) -> super::CommandResult {
+    if queue_erase_tile_from_bridge(parse_erase_tile(&payload)?) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -1151,18 +1178,17 @@ fn parse_fill_tiles(
         .ok_or("Missing entityId")?
         .to_string();
 
-    let layer = payload.get("layer")
-        .and_then(|v| v.as_u64())
-        .ok_or("Missing layer")? as usize;
+    let layer = tile_field_u32(payload.get("layer"))
+        .ok_or("Missing or invalid layer")? as usize;
 
     let raw_tiles = payload.get("tiles")
         .and_then(|v| v.as_array())
         .ok_or("Missing tiles array")?;
     let mut tiles = Vec::with_capacity(raw_tiles.len());
     for (i, item) in raw_tiles.iter().enumerate() {
-        let x = item.get("x").and_then(|v| v.as_u64())
+        let x = tile_field_u32(item.get("x"))
             .ok_or_else(|| format!("tiles[{}]: missing or invalid 'x'", i))? as usize;
-        let y = item.get("y").and_then(|v| v.as_u64())
+        let y = tile_field_u32(item.get("y"))
             .ok_or_else(|| format!("tiles[{}]: missing or invalid 'y'", i))? as usize;
         let raw_index = item.get("tileIndex")
             .ok_or_else(|| format!("tiles[{}]: missing 'tileIndex'", i))?;
@@ -1170,8 +1196,8 @@ fn parse_fill_tiles(
             None
         } else {
             Some(
-                raw_index.as_u64()
-                    .ok_or_else(|| format!("tiles[{}]: invalid 'tileIndex'", i))? as u32,
+                tile_field_u32(Some(raw_index))
+                    .ok_or_else(|| format!("tiles[{}]: invalid 'tileIndex'", i))?,
             )
         };
         tiles.push(TilePlacement { x, y, tile_index });
@@ -1478,5 +1504,129 @@ mod fill_tiles_tests {
         let err = parse_fill_tiles(&json!({ "entityId": "tm-1", "layer": 0 }))
             .expect_err("missing tiles");
         assert!(err.contains("tiles"), "unexpected error: {}", err);
+    }
+}
+
+/// The three tilemap parsers all used to read coordinates as `as_u64()? as
+/// usize` / `as u32`, which TRUNCATES: on wasm32 `usize` is 32 bits, so
+/// `u32::MAX + 4` reached `tile_flat_index` as `3` and was written as an
+/// ordinary in-range cell. These pin the rejection at every numeric field of
+/// every parser, because a bound added to one parser and not its siblings is
+/// exactly the partial fix this class keeps producing (PF-1181).
+///
+/// `OVER` is `u32::MAX + 1` — one past the bound, so a passing test proves the
+/// boundary rather than merely that a huge number is refused. The paired
+/// `AT_MAX` cases prove the bound is not off by one in the other direction: a
+/// guard that refused `u32::MAX` too would satisfy every rejection test here
+/// while breaking legitimate callers.
+#[cfg(test)]
+mod tile_field_bounds_tests {
+    use super::{parse_erase_tile, parse_fill_tiles, parse_paint_tile};
+    use serde_json::json;
+
+    const OVER: u64 = u32::MAX as u64 + 1;
+    const AT_MAX: u64 = u32::MAX as u64;
+
+    #[test]
+    fn paint_refuses_every_numeric_field_above_u32_max() {
+        for (field, expected) in [
+            ("layer", "Missing or invalid layer"),
+            ("x", "Missing or invalid x"),
+            ("y", "Missing or invalid y"),
+            ("tileIndex", "Missing or invalid tileIndex"),
+        ] {
+            let mut payload = json!({
+                "entityId": "tm-1", "layer": 0, "x": 0, "y": 0, "tileIndex": 0,
+            });
+            payload[field] = json!(OVER);
+            let err = parse_paint_tile(&payload)
+                .expect_err("paint_tile must refuse an out-of-range field");
+            assert_eq!(err, expected, "wrong error for {}", field);
+        }
+    }
+
+    #[test]
+    fn paint_accepts_u32_max_itself() {
+        let req = parse_paint_tile(&json!({
+            "entityId": "tm-1", "layer": AT_MAX, "x": AT_MAX, "y": AT_MAX, "tileIndex": AT_MAX,
+        }))
+        .expect("u32::MAX is inside the bound");
+        assert_eq!(req.x, u32::MAX as usize);
+        assert_eq!(req.y, u32::MAX as usize);
+        assert_eq!(req.layer, u32::MAX as usize);
+        assert_eq!(req.tile_index, u32::MAX);
+    }
+
+    #[test]
+    fn erase_refuses_every_numeric_field_above_u32_max() {
+        for (field, expected) in [
+            ("layer", "Missing or invalid layer"),
+            ("x", "Missing or invalid x"),
+            ("y", "Missing or invalid y"),
+        ] {
+            let mut payload = json!({ "entityId": "tm-1", "layer": 0, "x": 0, "y": 0 });
+            payload[field] = json!(OVER);
+            let err = parse_erase_tile(&payload)
+                .expect_err("erase_tile must refuse an out-of-range field");
+            assert_eq!(err, expected, "wrong error for {}", field);
+        }
+    }
+
+    #[test]
+    fn erase_accepts_u32_max_itself() {
+        let req = parse_erase_tile(&json!({
+            "entityId": "tm-1", "layer": AT_MAX, "x": AT_MAX, "y": AT_MAX,
+        }))
+        .expect("u32::MAX is inside the bound");
+        assert_eq!(req.x, u32::MAX as usize);
+        assert_eq!(req.y, u32::MAX as usize);
+        assert_eq!(req.layer, u32::MAX as usize);
+    }
+
+    #[test]
+    fn fill_refuses_a_layer_above_u32_max() {
+        let err = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": OVER,
+            "tiles": [{ "x": 0, "y": 0, "tileIndex": 0 }],
+        }))
+        .expect_err("fill_tiles must refuse an out-of-range layer");
+        assert_eq!(err, "Missing or invalid layer");
+    }
+
+    #[test]
+    fn fill_refuses_a_cell_field_above_u32_max_and_names_the_cell() {
+        for (field, expected) in [
+            ("x", "tiles[1]: missing or invalid 'x'"),
+            ("y", "tiles[1]: missing or invalid 'y'"),
+            ("tileIndex", "tiles[1]: invalid 'tileIndex'"),
+        ] {
+            let mut payload = json!({
+                "entityId": "tm-1",
+                "layer": 0,
+                "tiles": [
+                    { "x": 0, "y": 0, "tileIndex": 7 },
+                    { "x": 0, "y": 0, "tileIndex": 7 },
+                ],
+            });
+            payload["tiles"][1][field] = json!(OVER);
+            let err = parse_fill_tiles(&payload)
+                .expect_err("fill_tiles must refuse an out-of-range cell field");
+            assert_eq!(err, expected, "wrong error for {}", field);
+        }
+    }
+
+    #[test]
+    fn fill_accepts_u32_max_in_every_cell_field() {
+        let (_, layer, tiles) = parse_fill_tiles(&json!({
+            "entityId": "tm-1",
+            "layer": AT_MAX,
+            "tiles": [{ "x": AT_MAX, "y": AT_MAX, "tileIndex": AT_MAX }],
+        }))
+        .expect("u32::MAX is inside the bound");
+        assert_eq!(layer, u32::MAX as usize);
+        assert_eq!(tiles[0].x, u32::MAX as usize);
+        assert_eq!(tiles[0].y, u32::MAX as usize);
+        assert_eq!(tiles[0].tile_index, Some(u32::MAX));
     }
 }
