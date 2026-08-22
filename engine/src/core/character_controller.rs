@@ -978,7 +978,7 @@ mod tests {
 
         // Non-vacuity, and its honest bound. Four of the fields above differ
         // from `KinematicCharacterController::default()` (measured against
-        // bevy_rapier3d 0.34 / rapier3d 0.24), so deleting the line that sets
+        // bevy_rapier3d 0.34 / rapier3d 0.32), so deleting the line that sets
         // one of them turns this test red — which is the whole point, since
         // `make_controller` was previously unasserted in full.
         //

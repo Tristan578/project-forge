@@ -2916,11 +2916,17 @@ mod character_controller_axis_tests {
     /// walk instead of replacing it, and a jump alone still leaves X and Z
     /// untouched.
     ///
-    /// This pins the CURRENT jump, which is a frame-rate-scaled instant nudge
-    /// with no velocity and no gravity — broken identically in 3D, tracked
-    /// separately. The assertion is deliberately written against
-    /// `jump_height * 0.5 * dt` so that giving jump a real arc fails here and
-    /// has to be looked at, rather than silently changing 2D walking.
+    /// This pins the LEGACY jump: a frame-rate-scaled instant nudge with no
+    /// velocity and no gravity. Since PF-1214 that path is no longer shared
+    /// with 3D — it is reached only by a 2D project, and by a 3D character with
+    /// no collider (i.e. physics never enabled on it, which the lifecycle now
+    /// warns about). A 3D character that got a kinematic controller takes the
+    /// `step_character` path instead, which has a real velocity-based arc gated
+    /// on ground contact.
+    ///
+    /// The assertion is still deliberately written against
+    /// `jump_height * 0.5 * dt`, so giving the 2D jump an arc of its own fails
+    /// here and has to be looked at, rather than silently changing 2D walking.
     #[test]
     fn in_2d_a_jump_adds_to_the_vertical_walk_on_the_same_axis() {
         let default_jump_height = CharacterControllerData::default().jump_height;
