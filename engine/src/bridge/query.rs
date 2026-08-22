@@ -69,6 +69,14 @@ pub(super) fn process_query_requests(
             | QueryRequest::QualitySettings
             | QueryRequest::ReverbZoneState { .. }
             | QueryRequest::ListJoints
+            | QueryRequest::ListJoints2d
+            | QueryRequest::Joint2dState { .. }
+            | QueryRequest::Physics2dState { .. }
+            | QueryRequest::GameComponentState { .. }
+            | QueryRequest::GameCameraState { .. }
+            | QueryRequest::Skeleton2dState { .. }
+            | QueryRequest::SpriteState { .. }
+            | QueryRequest::Camera2dState
             | QueryRequest::PlayState => {
                 remaining.push(request);
             }
@@ -258,6 +266,10 @@ pub(super) fn process_query_requests(
             QueryRequest::ListJoints => {
                 // Handled by process_joint_queries system to avoid system parameter limit
             }
+            QueryRequest::ListJoints2d | QueryRequest::Joint2dState { .. } => {
+                // Handled by process_joint2d_queries; left in `remaining` above, so
+                // this arm exists only for exhaustiveness.
+            }
             QueryRequest::GameComponentState { .. } => {
                 // Handled by process_game_component_queries system to avoid system parameter limit
             }
@@ -265,22 +277,19 @@ pub(super) fn process_query_requests(
                 // Animation clip state is emitted via selection events and other apply systems
             }
             QueryRequest::Physics2dState { .. } => {
-                // 2D physics state handled separately
+                // Handled by physics::handle_physics2d_query; see `remaining` above.
             }
             QueryRequest::GameCameraState { .. } => {
-                // Game camera state handled separately
+                // Handled by game::process_game_camera_queries; see `remaining` above.
             }
             QueryRequest::SpriteState { .. } => {
-                // Sprite state handled separately
+                // Handled by sprite::handle_sprite_and_camera2d_queries; see `remaining` above.
             }
             QueryRequest::Camera2dState => {
-                // 2D camera state handled separately
-            }
-            QueryRequest::ProjectType => {
-                // Project type handled separately
+                // Handled by sprite::handle_sprite_and_camera2d_queries; see `remaining` above.
             }
             QueryRequest::Skeleton2dState { .. } => {
-                // Skeleton 2D state handled separately
+                // Handled by skeleton2d::handle_skeleton2d_query; see `remaining` above.
             }
             QueryRequest::SpriteSheetState { .. } => {
                 // Handled by sprite::handle_sprite_sheet_state_queries
@@ -324,8 +333,7 @@ pub(super) fn process_play_state_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let has_play_state = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::PlayState));
-    if !has_play_state {
+    if pending.take_queries(|r| matches!(r, QueryRequest::PlayState)).is_empty() {
         return;
     }
 
@@ -334,7 +342,6 @@ pub(super) fn process_play_state_queries(
             "error": "query_play_state is only available in Play or Paused mode",
             "engineMode": engine_mode.as_str(),
         }));
-        pending.query_requests.retain(|r| !matches!(r, QueryRequest::PlayState));
         return;
     }
 
@@ -375,8 +382,6 @@ pub(super) fn process_play_state_queries(
         entity_count,
         engine_mode: engine_mode.as_str().to_string(),
     });
-
-    pending.query_requests.retain(|r| !matches!(r, QueryRequest::PlayState));
 }
 
 /// Process terrain query requests separately to stay under 16 system parameter limit.
@@ -386,13 +391,7 @@ pub(super) fn process_terrain_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
-        if matches!(req, QueryRequest::TerrainState { .. }) {
-            Some(req.clone())
-        } else {
-            None
-        }
-    }).collect();
+    let requests = pending.take_queries(|req| matches!(req, QueryRequest::TerrainState { .. }));
 
     for request in requests {
         if let QueryRequest::TerrainState { entity_id } = request {
@@ -404,8 +403,6 @@ pub(super) fn process_terrain_queries(
                     break;
                 }
             }
-            // Remove the processed request
-            pending.query_requests.retain(|r| !matches!(r, QueryRequest::TerrainState { entity_id: ref eid } if eid == &entity_id));
         }
     }
 }
@@ -417,10 +414,8 @@ pub(super) fn process_quality_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let has_quality = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::QualitySettings));
-    if has_quality {
+    if !pending.take_queries(|r| matches!(r, QueryRequest::QualitySettings)).is_empty() {
         events::emit_quality_changed(&quality_settings);
-        pending.query_requests.retain(|r| !matches!(r, QueryRequest::QualitySettings));
     }
 }
 
@@ -445,13 +440,7 @@ pub(super) fn process_reverb_zone_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
-        if matches!(req, QueryRequest::ReverbZoneState { .. }) {
-            Some(req.clone())
-        } else {
-            None
-        }
-    }).collect();
+    let requests = pending.take_queries(|req| matches!(req, QueryRequest::ReverbZoneState { .. }));
 
     for request in requests {
         if let QueryRequest::ReverbZoneState { entity_id } = request {
@@ -463,8 +452,56 @@ pub(super) fn process_reverb_zone_queries(
                     break;
                 }
             }
-            // Remove the processed request
-            pending.query_requests.retain(|r| !matches!(r, QueryRequest::ReverbZoneState { entity_id: ref eid } if eid == &entity_id));
+        }
+    }
+}
+
+/// Process 2D joint query requests (editor-only).
+///
+/// One system answers both names because they read the same component. The
+/// per-entity reply goes out on the existing `JOINT2D_CHANGED` channel, which
+/// `hooks/events/physicsEvents.ts` already parses into the store — a second wire
+/// shape for a single joint would be a third vocabulary for a surface that has
+/// had two too many for its whole life (PF-1167).
+///
+/// An entity with no `PhysicsJoint2d` emits nothing. That is deliberate: the
+/// alternative is a null payload the store would have to distinguish from a real
+/// joint, and every other per-entity query here answers the same way.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn process_joint2d_queries(
+    mut pending: ResMut<PendingCommands>,
+    // Named in full rather than imported: the import would be unused under the
+    // `runtime` feature, which gates this system out.
+    joint_query: Query<(&EntityId, &crate::core::physics_2d::PhysicsJoint2d)>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    // `take_queries` and never `drain(..).filter(..)`, which discards every
+    // request this system does not own along with the ones it does.
+    let requests = pending
+        .take_queries(|r| matches!(r, QueryRequest::ListJoints2d | QueryRequest::Joint2dState { .. }));
+
+    for request in requests {
+        match request {
+            QueryRequest::ListJoints2d => {
+                // Payload assembly lives in `core::physics_2d` so it is reachable
+                // by native `cargo test`; this bridge system is wasm32-only.
+                let owned: Vec<(String, &crate::core::physics_2d::PhysicsJoint2d)> =
+                    joint_query.iter().map(|(eid, joint)| (eid.0.clone(), joint)).collect();
+                let joints = crate::core::physics_2d::joints2d_list_payload(
+                    owned.iter().map(|(id, joint)| (id.as_str(), *joint)),
+                );
+                events::emit_event(
+                    crate::core::physics_2d::QUERY_JOINTS2D_LIST_EVENT,
+                    &joints,
+                );
+            }
+            QueryRequest::Joint2dState { entity_id } => {
+                if let Some((_, joint)) = joint_query.iter().find(|(eid, _)| eid.0 == entity_id) {
+                    events::emit_joint2d_changed(&entity_id, joint);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -477,8 +514,7 @@ pub(super) fn process_joint_queries(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let has_list_joints = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::ListJoints));
-    if has_list_joints {
+    if !pending.take_queries(|r| matches!(r, QueryRequest::ListJoints)).is_empty() {
         #[derive(serde::Serialize)]
         #[serde(rename_all = "camelCase")]
         struct JointInfo {
@@ -495,6 +531,5 @@ pub(super) fn process_joint_queries(
             .collect();
 
         events::emit_event("QUERY_JOINTS_LIST", &joints);
-        pending.query_requests.retain(|r| !matches!(r, QueryRequest::ListJoints));
     }
 }

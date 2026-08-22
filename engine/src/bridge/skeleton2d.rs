@@ -238,12 +238,7 @@ pub(super) fn handle_skeleton2d_query(
     mut pending: ResMut<PendingCommands>,
     skeleton_query: Query<(&EntityId, Option<&SkeletonData2d>, Option<&SkeletonEnabled2d>)>,
 ) {
-    let requests: Vec<_> = pending.query_requests.iter()
-        .filter(|r| matches!(r, QueryRequest::Skeleton2dState { .. }))
-        .cloned()
-        .collect();
-
-    pending.query_requests.retain(|r| !matches!(r, QueryRequest::Skeleton2dState { .. }));
+    let requests = pending.take_queries(|r| matches!(r, QueryRequest::Skeleton2dState { .. }));
 
     for request in requests {
         if let QueryRequest::Skeleton2dState { entity_id } = request {

@@ -89,8 +89,22 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         }
         "set_joint_2d" => Some(handle_create_2d_joint(payload.clone())),
         "remove_joint_2d" => Some(handle_remove_2d_joint(payload.clone())),
-        "get_joint_2d" => Some(Err("Not yet implemented: get_joint_2d".to_string())),
-        "list_joints_2d" => Some(Err("Not yet implemented: list_joints_2d".to_string())),
+        // Both answered `Not yet implemented` for their whole life, so 2D joint
+        // state had no read path at all while the 3D surface had two (PF-1194).
+        // `get_joint_2d` reads its `entityId` explicitly rather than through the
+        // `payload.get(..)?` idiom its neighbours use: that `?` returns `None`
+        // from `dispatch`, which the router reports as `Unknown physics command`,
+        // so a malformed payload would be indistinguishable from a name the
+        // engine has never had.
+        "get_joint_2d" => {
+            let Some(entity_id) = payload.get("entityId").and_then(|v| v.as_str()) else {
+                return Some(Err("get_joint_2d requires a string entityId".to_string()));
+            };
+            Some(super::handle_query(QueryRequest::Joint2dState {
+                entity_id: entity_id.to_string(),
+            }))
+        }
+        "list_joints_2d" => Some(super::handle_query(QueryRequest::ListJoints2d)),
         "apply_force_2d" => Some(handle_apply_force2d(payload.clone())),
         "apply_impulse_2d" => Some(handle_apply_impulse2d(payload.clone())),
         "set_linear_velocity_2d" => Some(Err("Not yet implemented: set_linear_velocity_2d".to_string())),
@@ -1423,6 +1437,55 @@ mod tests {
                 json!({"entityId": "e", "colliderShape": "circle", "bodyType": "static"}),
             );
         }
+    }
+
+    // === 2D joint reads (PF-1194) ===
+
+    /// Both names were routed AND armed, and the arm answered
+    /// `Not yet implemented` — so 2D joint state had no read path at all while
+    /// the 3D surface had two. Reaching the pending queue is the only outcome
+    /// that proves the arm now queues a real query instead of refusing.
+    #[test]
+    fn two_d_joint_reads_queue_a_query() {
+        assert_routed_and_reaches_handler("list_joints_2d", json!({}));
+        assert_routed_and_reaches_handler("get_joint_2d", json!({"entityId": "e1"}));
+    }
+
+    /// Neither name may go back to refusing. `assert_routed_and_reaches_handler`
+    /// would catch that too, but only by reporting the wrong reason — a stub and
+    /// an unrouted name both fail it, and the message matters when it fires.
+    #[test]
+    fn two_d_joint_reads_are_not_stubs() {
+        for command in ["get_joint_2d", "list_joints_2d"] {
+            let err = super::super::dispatch(command, json!({"entityId": "e1"}))
+                .expect_err("no pending queue under native test");
+            assert!(
+                !err.contains("Not yet implemented"),
+                "{command} is advertising a name it refuses to answer again: {err}"
+            );
+        }
+    }
+
+    /// `get_joint_2d` is per-entity, so a payload with no `entityId` has to say
+    /// so. The 3D `get_joint` arm is the counter-example this deliberately does
+    /// not copy: it ignores its `entityId` and answers `ListJoints`, i.e. every
+    /// joint in the scene, which no caller reading the name would expect.
+    ///
+    /// The `Unknown command` half is the load-bearing one. The neighbouring
+    /// `get_physics2d` arm extracts its id with `payload.get("entityId")?`, and
+    /// that `?` returns `None` from `dispatch` — which the router reads as "this
+    /// domain does not know the name" and reports as `Unknown physics command`.
+    /// A malformed payload then looks exactly like a name the engine has never
+    /// had, which is the diagnosis this whole ticket family exists to prevent.
+    #[test]
+    fn get_joint_2d_without_an_entity_id_is_a_named_error() {
+        let err = super::super::dispatch("get_joint_2d", json!({}))
+            .expect_err("a payload with no entityId must not queue a query");
+        assert!(err.contains("entityId"), "the error must name the missing field, got: {err}");
+        assert!(
+            !err.contains("Unknown"),
+            "a malformed payload must not read as an unknown command name, got: {err}"
+        );
     }
 
     /// The router's fallthrough, so the assertion above is not vacuously true for

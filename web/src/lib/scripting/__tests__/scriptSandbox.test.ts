@@ -12,6 +12,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { SHADOWED_GLOBALS } from '../sandboxGlobals';
+// The real shipped allowlist, not a copy of it. A local literal here made
+// every allow/deny assertion below tautological (PF-1181).
+import { SCRIPT_ALLOWED_COMMANDS, isScriptAllowedCommand } from '../scriptAllowlist';
 
 /**
  * Replicates the compileScript() Function constructor pattern.
@@ -33,31 +36,6 @@ function compileSandboxed(source: string, forgeApi: Record<string, unknown> = {}
   // Pass undefined for all shadowed globals (same as scriptWorker)
   return fn(forgeApi, 'test-entity', ...SHADOWED_GLOBALS.map(() => undefined));
 }
-
-const SCRIPT_ALLOWED_COMMANDS = new Set([
-  'update_transform', 'spawn_entity', 'delete_entities',
-  'set_visibility', 'update_material',
-  'apply_force', 'set_velocity', 'apply_impulse',
-  'apply_force2d', 'apply_impulse2d', 'set_velocity2d',
-  'set_angular_velocity2d', 'set_gravity2d',
-  'play_audio', 'stop_audio', 'pause_audio', 'set_audio', 'update_audio_bus',
-  'audio_add_layer', 'audio_remove_layer', 'audio_remove_all_layers',
-  'audio_crossfade', 'audio_play_one_shot', 'audio_fade_in', 'audio_fade_out',
-  'set_music_intensity', 'set_music_stems',
-  'play_animation', 'pause_animation', 'resume_animation', 'stop_animation',
-  'set_animation_speed', 'set_animation_loop',
-  'set_animation_blend_weight', 'set_clip_speed',
-  'play_sprite_animation', 'stop_sprite_animation',
-  'set_sprite_anim_speed', 'set_sprite_anim_param',
-  'set_particle_preset', 'toggle_particle', 'burst_particle',
-  'camera_follow', 'camera_stop_follow', 'camera_set_position', 'camera_look_at',
-  'set_tile', 'fill_tiles', 'clear_tiles', 'resize_tilemap',
-  'create_skeleton2d', 'add_bone2d', 'remove_bone2d', 'update_bone2d',
-  'set_skeleton2d_skin', 'play_skeletal_animation2d', 'stop_skeletal_animation2d',
-  'set_ik_target2d',
-  'vibrate',
-  'stop',
-]);
 
 const MAX_COMMANDS_PER_FRAME = 100;
 
@@ -350,9 +328,18 @@ describe('Script Sandbox Security', () => {
     });
 
     it('should allow tilemap commands', () => {
-      expect(SCRIPT_ALLOWED_COMMANDS.has('set_tile')).toBe(true);
+      expect(SCRIPT_ALLOWED_COMMANDS.has('paint_tile')).toBe(true);
+      expect(SCRIPT_ALLOWED_COMMANDS.has('erase_tile')).toBe(true);
       expect(SCRIPT_ALLOWED_COMMANDS.has('fill_tiles')).toBe(true);
-      expect(SCRIPT_ALLOWED_COMMANDS.has('clear_tiles')).toBe(true);
+    });
+
+    it('does not allow tilemap names the engine has never had', () => {
+      // PF-1181: `set_tile`, `clear_tiles` and `resize_tilemap` were allowlisted
+      // for their whole life and none of them is an engine command, so every
+      // tilemap write a script made was dropped without a word.
+      for (const name of ['set_tile', 'clear_tiles', 'resize_tilemap']) {
+        expect(SCRIPT_ALLOWED_COMMANDS.has(name)).toBe(false);
+      }
     });
 
     it('should allow skeleton 2D commands', () => {
@@ -748,8 +735,37 @@ describe('Script Sandbox Security', () => {
     });
 
     it('should have expected total command count in whitelist', () => {
-      // Keeps whitelist size visible — any additions should update this count
-      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(60);
+      // Keeps whitelist size visible — any additions should update this count.
+      // This now pins the SHIPPED set: the former local copy had silently
+      // drifted three names behind it and still asserted 59.
+      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(62);
+    });
+  });
+
+  // useScriptRunner gates on isScriptAllowedCommand(), not on the Set, so the
+  // predicate is what actually decides whether a script command reaches the
+  // engine. Pin that it agrees with the set it is derived from.
+  describe('isScriptAllowedCommand', () => {
+    it('agrees with the set for every allowed name', () => {
+      const disallowed = [...SCRIPT_ALLOWED_COMMANDS].filter(name => !isScriptAllowedCommand(name));
+      expect(disallowed).toEqual([]);
+    });
+
+    it('rejects names the engine never armed', () => {
+      // The three that shipped in the allowlist for their whole life and were
+      // never engine commands — dispatchCommand returns void, so they vanished
+      // in silence rather than erroring (PF-1181).
+      for (const name of ['set_tile', 'clear_tiles', 'resize_tilemap']) {
+        expect(isScriptAllowedCommand(name)).toBe(false);
+      }
+    });
+
+    it('rejects Object.prototype members rather than inheriting them', () => {
+      // A plain-object lookup table would answer truthy for these; a Set does
+      // not. Pinned because the table shape is the tempting refactor.
+      for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+        expect(isScriptAllowedCommand(name)).toBe(false);
+      }
     });
   });
 });

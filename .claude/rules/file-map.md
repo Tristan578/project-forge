@@ -9,7 +9,7 @@
 - `material.rs` — Material/light emit, environment, skybox, post-processing, shader apply/sync
 - `physics.rs` — 3D + 2D physics, collisions, raycasts, joints, forces, debug toggle
 - `audio.rs` — Audio updates/removals/playback, bus CRUD, reverb zones
-- `query.rs` — Query request processing (main, terrain, quality, reverb zone, joints)
+- `query.rs` — Query request processing (main, terrain, quality, reverb zone, 3D joints, 2D joints). `process_query_requests` is the DEFAULT drain: a `QueryRequest` variant missing from its `remaining` list is dropped before the dedicated system for it can run (PF-1194 — see `rules/gotchas.md` → Engine & Game Loop)
 - `animation.rs` — GLTF animation registration, playback, state polling
 - `particles.rs` — Particle apply/toggle/removal/preset, Hanabi GPU sync (webgpu)
 - `scene_io.rs` — Scene export/load, new scene, GLTF import, texture load, asset placement

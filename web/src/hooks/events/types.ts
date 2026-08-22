@@ -8,6 +8,17 @@ export type SetFn = (partial: Partial<EditorState> | ((state: EditorState) => Pa
 export type GetFn = () => EditorState;
 
 /**
+ * A bridge event payload as it actually arrives.
+ *
+ * Nearly every event carries an object, which is why the delegation hub casts
+ * to `Record<string, unknown>` — but a list query answers with a JSON array
+ * (`QUERY_JOINTS2D_LIST`), so that cast has always been a lie for those. A
+ * handler that can receive one declares this union instead of widening the
+ * cast, which would erase the object shape from every other case.
+ */
+export type EventPayload = Record<string, unknown> | unknown[];
+
+/**
  * Type-safe payload cast for bridge event data.
  *
  * Replaces the `data as unknown as T` double-cast pattern throughout event

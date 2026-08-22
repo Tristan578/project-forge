@@ -677,10 +677,14 @@ pub(super) fn handle_physics2d_query(
     mut pending: ResMut<PendingCommands>,
     physics_query: Query<(&EntityId, &Physics2dData, Option<&Physics2dEnabled>)>,
 ) {
-    let requests: Vec<pending_commands::QueryRequest> = pending.query_requests
-        .drain(..)
-        .filter(|req| matches!(req, pending_commands::QueryRequest::Physics2dState { .. }))
-        .collect();
+    // `take_queries` and never `drain(..).filter(..)`: the latter empties the
+    // WHOLE queue and keeps only this system's own requests, so whichever frame
+    // ran it first silently destroyed every OTHER pending query (game
+    // components, game camera, 2D skeleton, both joint reads). Nothing surfaced
+    // it — a query that is never answered is indistinguishable from one whose
+    // entity has no data (PF-1194).
+    let requests = pending
+        .take_queries(|req| matches!(req, pending_commands::QueryRequest::Physics2dState { .. }));
 
     for request in requests {
         if let pending_commands::QueryRequest::Physics2dState { entity_id } = request {

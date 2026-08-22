@@ -120,13 +120,7 @@ pub(super) fn process_game_component_queries(
     mut pending: ResMut<PendingCommands>,
     gc_query: Query<(&EntityId, Option<&GameComponents>)>,
 ) {
-    let requests: Vec<_> = pending.query_requests.iter()
-        .filter(|r| matches!(r, QueryRequest::GameComponentState { .. }))
-        .cloned()
-        .collect();
-
-    // Remove processed requests
-    pending.query_requests.retain(|r| !matches!(r, QueryRequest::GameComponentState { .. }));
+    let requests = pending.take_queries(|r| matches!(r, QueryRequest::GameComponentState { .. }));
 
     for request in requests {
         if let QueryRequest::GameComponentState { entity_id } = request {
@@ -261,12 +255,7 @@ pub(super) fn process_game_camera_queries(
     mut pending: ResMut<PendingCommands>,
     camera_query: Query<(&EntityId, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
 ) {
-    let requests: Vec<_> = pending.query_requests.iter()
-        .filter(|r| matches!(r, QueryRequest::GameCameraState { .. }))
-        .cloned()
-        .collect();
-
-    pending.query_requests.retain(|r| !matches!(r, QueryRequest::GameCameraState { .. }));
+    let requests = pending.take_queries(|r| matches!(r, QueryRequest::GameCameraState { .. }));
 
     for request in requests {
         if let QueryRequest::GameCameraState { entity_id } = request {

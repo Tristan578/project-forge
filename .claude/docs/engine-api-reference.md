@@ -184,20 +184,43 @@ Commands that are **not** undoable: scene export/load, play/stop/pause/resume, q
 
 ### Tilemap (tilemap category)
 
-**Rust-side:** `TilesetData` / `TilemapData` ECS, tile sprites as `TextureAtlas` children.
+**These are web-layer tool commands, not engine commands.** They are handled in
+`web/src/lib/chat/handlers/handlers2d.ts`, which edits the whole `TilemapData` in the
+Zustand store and pushes the result to the engine as a single `set_tilemap_data`
+(or `remove_tilemap_data`) command. `handle_command()` has no arm named
+`create_tilemap`, `set_tile`, `clear_tiles`, `add_tilemap_layer`,
+`remove_tilemap_layer`, `set_tilemap_layer`, `resize_tilemap`, `import_tileset` or
+`get_tilemap` — sending any of those to the engine returns `Unknown command`.
+
+Because the engine records one `UndoableAction::TilemapChange` per `set_tilemap_data`,
+every tool below that writes tilemap data is undoable as a single step.
 
 | Command | Description | Undo |
 |---------|-------------|------|
-| `create_tilemap` | Create a new tilemap with width/height and cell size. | Yes |
-| `import_tileset` | Load tileset texture and configure tile size. | No |
-| `set_tile` | Place a tile at `(col, row)` on a layer. | Yes |
-| `fill_tiles` | Flood-fill a region with a tile. | Yes |
-| `clear_tiles` | Erase tiles in a region. | Yes |
-| `add_tilemap_layer` | Add a new tile layer (background, foreground, collision). | No |
-| `remove_tilemap_layer` | Remove a layer. | No |
-| `set_tilemap_layer` | Configure layer properties (name, visible, z-offset). | No |
-| `resize_tilemap` | Resize the tilemap (may truncate tiles). | No |
-| `get_tilemap` | Query tilemap structure and layer data. | No |
+| `create_tilemap` | Spawn a plane entity and give it `TilemapData` referencing `tilesetAssetId`. | Yes |
+| `import_tileset` | Register a tileset atlas by asset ID. See the caveat below. | No |
+| `set_tile` | Set one cell of `layerIndex` to `tileIndex` (`null` erases it). | Yes |
+| `fill_tiles` | Fill the inclusive range `fromX,fromY`..`toX,toY` with one tile. | Yes |
+| `clear_tiles` | Erase a range of `layerIndex`; omit the bounds to clear the layer. | Yes |
+| `add_tilemap_layer` | Append a named tile layer. | Yes |
+| `remove_tilemap_layer` | Remove a layer; the last remaining layer cannot be removed. | Yes |
+| `set_tilemap_layer` | Configure layer name, visibility, opacity. | Yes |
+| `resize_tilemap` | Resize the grid anchored top-left (may truncate tiles). | Yes |
+| `get_tilemap` | Read tilemap structure and layer data from the store. | No |
+
+**Caveat — `import_tileset` does not reach the engine.** It dispatches `set_tileset`,
+which `fn route_domain` in `engine/src/core/commands/mod.rs` deliberately leaves
+unrouted: `sprites::dispatch` keys `TilesetData` by `entityId` while every caller keys
+tilesets by asset ID. The store copy is updated; the engine's is not. Tracked by
+PF-1179.
+
+**Engine-side tilemap commands.** The names `handle_command()` actually arms *and*
+routes are `set_tilemap_data`, `remove_tilemap_data`, `set_grid_2d`, `paint_tile`,
+`erase_tile` and `fill_tiles`. The last three are the runtime scripting API
+(`web/src/lib/scripting/scriptWorker.ts`), reached from user scripts, never from the
+MCP tool surface. Note that `fill_tiles` is one name with two unrelated payloads: the
+tool above takes a rectangle, while the engine arm takes a `tiles` array of
+`{x, y, tileIndex}` where `tileIndex: null` erases the cell.
 
 ### 2D Skeletal Animation (skeleton2d category)
 

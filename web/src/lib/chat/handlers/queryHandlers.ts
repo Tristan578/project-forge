@@ -192,16 +192,6 @@ export const queryHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { data } };
   },
 
-  get_tilemap: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityId: zEntityId }), args);
-    if (p.error) return p.error;
-    const tilemapData = store.tilemaps[p.data.entityId];
-    if (!tilemapData) {
-      return { success: false, error: `No tilemap data for entity ${p.data.entityId}` };
-    }
-    return { success: true, result: tilemapData };
-  },
-
   get_skeleton2d: async (args, { store }) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;

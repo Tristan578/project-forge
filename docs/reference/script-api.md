@@ -101,14 +101,28 @@ namespace set).
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `forge.tilemap.getTile(tilemapId, x, y, layer?)` | `number \| null` | Tile ID at position (null if empty/out of bounds) |
-| `forge.tilemap.setTile(tilemapId, x, y, tileId, layer?)` | `void` | Set a tile (`null` clears) |
-| `forge.tilemap.fillRect(tilemapId, x, y, w, h, tileId, layer?)` | `void` | Fill a rectangular region |
-| `forge.tilemap.clearTile(tilemapId, x, y, layer?)` | `void` | Clear a single tile |
+| `forge.tilemap.getTile(tilemapId, x, y, layer?)` | `number \| null` | Tile index at position (null if empty/out of bounds) |
+| `forge.tilemap.setTile(tilemapId, x, y, tileId, layer?)` | `void` | Paint one tile; `null` erases it instead |
+| `forge.tilemap.fillRect(tilemapId, x, y, w, h, tileId, layer?)` | `void` | Fill a `w`×`h` region in one command; `null` erases the region |
+| `forge.tilemap.clearTile(tilemapId, x, y, layer?)` | `void` | Erase a single tile |
 | `forge.tilemap.worldToTile(tilemapId, worldX, worldY)` | `[number, number]` | World → tile coordinates |
 | `forge.tilemap.tileToWorld(tilemapId, tileX, tileY)` | `[number, number]` | Tile → world coordinates |
 | `forge.tilemap.getMapSize(tilemapId)` | `[number, number]` | Map dimensions in tiles `[w, h]` |
-| `forge.tilemap.resize(tilemapId, width, height, anchor?)` | `void` | Resize (`anchor`: `'top-left'｜'center'`) |
+| `forge.tilemap.resize(tilemapId, width, height, anchor?)` | *throws* | **Not supported** — the engine has no tilemap resize command |
+
+`tilemapId` is the tilemap **entity** id. `tileId` is an index into the tilemap's
+tileset, and passing `null` erases rather than painting.
+
+Every coordinate, layer and tile index is floored before it is sent, so
+`worldToTile`-style fractional input works. A negative or non-finite argument
+**throws** instead of being sent: the engine reads each of these with
+`as_u64()`, and a rejection there discards the whole command silently, so the
+script would appear to succeed while the tilemap never changed.
+
+`fillRect` sends one command for the whole region and throws if the region
+exceeds `TILEMAP_FILL_MAX_CELLS` cells (derived in `scriptWorker.ts` from the
+dispatch payload guard, not a hand-written number). A zero-width or
+zero-height region is a no-op.
 
 ## forge.audio
 
