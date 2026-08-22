@@ -45,6 +45,7 @@ Generate a TypeScript game script that runs in a sandboxed Web Worker. The scrip
 - forge.physics.applyForce(entityId, x, y, z)
 - forge.physics.applyImpulse(entityId, x, y, z)
 - forge.physics.setVelocity(entityId, x, y, z)
+- forge.physics.isGrounded(entityId) -> boolean (synchronous; true while a character controller touches the ground — gate jumps on it)
 - forge.audio.play(entityId)
 - forge.audio.stop(entityId)
 - forge.scene.load(sceneName)
