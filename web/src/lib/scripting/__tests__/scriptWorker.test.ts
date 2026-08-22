@@ -1092,13 +1092,32 @@ describe('scriptWorker', () => {
     // The tilemap namespace comment states the u32 ceiling as a literal, so it
     // is a second copy of TILE_FIELD_MAX. Monaco shows that comment to script
     // authors, and it is the only place the bound is written in prose.
-    const matches = [...src.matchAll(/must not exceed ([\d,]+)/g)];
+    //
+    // Pin the SCOPE with the number, not the number alone. The bound holds for
+    // the three writing calls and for nothing else: getTile returns null for an
+    // out-of-range coordinate and the coordinate-conversion helpers bound
+    // nothing, so a sentence that said "every tilemap call" would be a promise
+    // of a named error that two thirds of the namespace does not keep. A pin on
+    // the digits alone cannot tell those two sentences apart.
+    //
+    // Flatten first: the claim wraps across comment lines, so matching the raw
+    // file would pin only where the line breaks happen to fall.
+    const flat = src.replace(/^\s*\*\s?/gm, ' ').replace(/\s+/g, ' ');
+    const matches = [...flat.matchAll(
+      /setTile, fillRect and clearTile floor every x, y, w, h, layer and tileId they are given; each must be >= 0 and must not exceed ([\d,]+)/g
+    )];
     if (matches.length !== 1) {
       throw new Error(
-        `forgeTypes.ts must carry exactly one "must not exceed N" sentence, found ${matches.length}. ` +
-        'Zero means the pin has nothing to check; more than one means a second copy appeared unpinned.'
+        'forgeTypes.ts must carry exactly one sentence scoping the tile field bound to setTile, ' +
+        `fillRect and clearTile over x, y, w, h, layer and tileId, found ${matches.length}. ` +
+        'Zero means the pin has nothing to check (the wording drifted, or a call was added to or ' +
+        'dropped from the list); more than one means a second copy appeared unpinned.'
       );
     }
+
+    // And the counter-claim: getTile is the call authors reach for first, and
+    // it is the one the bound does not cover.
+    expect(flat).toContain('getTile floors nothing and throws nothing');
 
     const documented = Number(matches[0][1].replace(/,/g, ''));
     expect(Number.isInteger(documented)).toBe(true);

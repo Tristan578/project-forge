@@ -135,16 +135,25 @@ declare namespace forge {
   }
 
   /**
-   * Tile coordinates are unsigned 32-bit on the engine side. Every x, y, w, h
-   * and layer below is floored, must be >= 0, and must not exceed 4,294,967,295
-   * -- exported as TILE_FIELD_MAX from scriptWorker.ts, mirroring the u32 the
-   * engine reads each field into. A value outside that range throws here,
-   * naming the field, the value and the limit, instead of being truncated into
-   * a real cell by the engine and silently painting a tile nobody asked for.
-   * The number in this sentence is a second copy of the constant; it is parsed
-   * out of this file and compared against the export by the "forgeTypes tile
-   * field bound prose" test in __tests__/scriptWorker.test.ts, which fails
-   * closed if the sentence is missing or appears more than once.
+   * Tile coordinates are unsigned 32-bit on the engine side, but only the
+   * WRITING calls enforce it: setTile, fillRect and clearTile floor every x,
+   * y, w, h, layer and tileId they are given; each must be >= 0 and must not
+   * exceed 4,294,967,295 -- exported as TILE_FIELD_MAX from scriptWorker.ts,
+   * mirroring the u32 the engine reads each field into. A value outside that
+   * range throws, naming the field, the value and the limit, instead of being
+   * truncated into a real cell by the engine and silently painting a tile
+   * nobody asked for.
+   *
+   * The reading calls do NOT share that contract. getTile floors nothing and
+   * throws nothing -- an out-of-range or fractional coordinate just returns
+   * null, indistinguishable from an empty cell -- and worldToTile, tileToWorld
+   * and getMapSize bound their arguments not at all.
+   *
+   * That first sentence is a second copy of the constant AND of the list of
+   * calls it covers. Both halves are parsed out of this file and checked by
+   * the "forgeTypes tile field bound prose" test in
+   * __tests__/scriptWorker.test.ts, which fails closed if the sentence is
+   * missing or appears more than once.
    */
   namespace tilemap {
     /** Get tile ID at position (returns null if empty or out of bounds) */
