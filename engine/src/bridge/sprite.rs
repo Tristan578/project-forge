@@ -30,7 +30,7 @@ use crate::core::{
         SpriteData, SpriteEnabled, SpriteSheetData, TransitionCondition,
         z_from_sorting, z_from_sorting_with_config,
     },
-    tilemap::{TilemapData, TilemapEnabled, TilemapOrigin, Grid2dConfig},
+    tilemap::{tile_flat_index, TilemapData, TilemapEnabled, TilemapOrigin, Grid2dConfig},
     tileset::TilesetData,
 };
 use super::{events, Selection, SelectionChangedEvent};
@@ -1035,14 +1035,12 @@ pub(super) fn apply_paint_tile_requests(
         if request.layer >= tilemap_data.layers.len() {
             continue;
         }
-        if request.x >= map_w || request.y >= map_h {
+        let tiles_len = tilemap_data.layers[request.layer].tiles.len();
+        let Some(tile_index) = tile_flat_index(request.x, request.y, map_w, map_h, tiles_len)
+        else {
             continue;
-        }
-
-        let tile_index = request.y * map_w + request.x;
-        if tile_index < tilemap_data.layers[request.layer].tiles.len() {
-            tilemap_data.layers[request.layer].tiles[tile_index] = Some(request.tile_index);
-        }
+        };
+        tilemap_data.layers[request.layer].tiles[tile_index] = Some(request.tile_index);
     }
 }
 
@@ -1061,14 +1059,12 @@ pub(super) fn apply_erase_tile_requests(
         if request.layer >= tilemap_data.layers.len() {
             continue;
         }
-        if request.x >= map_w || request.y >= map_h {
+        let tiles_len = tilemap_data.layers[request.layer].tiles.len();
+        let Some(tile_index) = tile_flat_index(request.x, request.y, map_w, map_h, tiles_len)
+        else {
             continue;
-        }
-
-        let tile_index = request.y * map_w + request.x;
-        if tile_index < tilemap_data.layers[request.layer].tiles.len() {
-            tilemap_data.layers[request.layer].tiles[tile_index] = None;
-        }
+        };
+        tilemap_data.layers[request.layer].tiles[tile_index] = None;
     }
 }
 
@@ -1089,27 +1085,18 @@ pub(super) fn apply_fill_tiles_requests(
             continue;
         }
 
+        let tiles_len = tilemap_data.layers[request.layer].tiles.len();
         for placement in &request.tiles {
-            if placement.x >= map_w || placement.y >= map_h {
-                continue;
-            }
-            // Checked, not bare `*`/`+`: `map_size` is authored data, so a
-            // tilemap declaring a map far larger than its own `tiles` vector can
-            // make `y * map_w` wrap on wasm32's 32-bit `usize`. A wrapped
-            // product lands back inside the vector and writes the WRONG cell,
-            // which the `< len()` check below cannot see. Overflow skips.
-            let Some(tile_index) = placement
-                .y
-                .checked_mul(map_w)
-                .and_then(|row| row.checked_add(placement.x))
+            // Bounds AND checked arithmetic live in `core::tilemap`; see
+            // `tile_flat_index` for why a bare `y * map_w + x` is unsafe here.
+            let Some(tile_index) =
+                tile_flat_index(placement.x, placement.y, map_w, map_h, tiles_len)
             else {
                 continue;
             };
-            if tile_index < tilemap_data.layers[request.layer].tiles.len() {
-                // `placement.tile_index` is already `Option<u32>`: `None` erases,
-                // so one `fill_tiles` covers a rectangular clear (PF-1181).
-                tilemap_data.layers[request.layer].tiles[tile_index] = placement.tile_index;
-            }
+            // `placement.tile_index` is already `Option<u32>`: `None` erases,
+            // so one `fill_tiles` covers a rectangular clear (PF-1181).
+            tilemap_data.layers[request.layer].tiles[tile_index] = placement.tile_index;
         }
     }
 }
