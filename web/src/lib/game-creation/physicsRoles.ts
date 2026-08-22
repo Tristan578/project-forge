@@ -114,3 +114,17 @@ export function physicsProfileForRole(role: string): PhysicsBodyProfile | undefi
   if (!PHYSICS_ROLE_SET.has(role)) return undefined;
   return PHYSICS_ROLE_PROFILES[role as PhysicsRole];
 }
+
+/**
+ * Roles a `physics_enable` step is allowed to name.
+ *
+ * Wider than `PHYSICS_ROLES` on purpose. It is every `EntityBlueprint` role plus
+ * `geometry`, so a step may name a `decoration` and have it SKIPPED — a plan
+ * that carries the whole cast and lets this module decide who gets a body is
+ * the honest shape. A role in neither list (a hallucinated `boss`, a typo) is
+ * refused outright rather than quietly given a cuboid it never asked for: a
+ * wrong body is a bug that ships, a refused step is one that reports.
+ */
+export const ENABLEABLE_ROLES: readonly string[] = [
+  'player', 'enemy', 'npc', 'decoration', 'trigger', 'interactable', 'projectile', 'geometry',
+];

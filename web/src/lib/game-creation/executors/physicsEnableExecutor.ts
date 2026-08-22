@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { engineEntityId, waitForEngineFrame, sendCommands, type EngineCommand } from './engineDispatch';
-import { PHYSICS_ROLES, physicsProfileForRole } from '../physicsRoles';
+import { ENABLEABLE_ROLES, physicsProfileForRole } from '../physicsRoles';
 import { COLLIDER_FOR_SHAPE, SPAWNABLE_SHAPES, type SpawnShape } from '../entityShape';
 
 /**
@@ -38,7 +38,7 @@ import { COLLIDER_FOR_SHAPE, SPAWNABLE_SHAPES, type SpawnShape } from '../entity
 const physicsEntity = z.object({
   entityId: engineEntityId,
   name: z.string().min(1).max(200).optional(),
-  role: z.enum(PHYSICS_ROLES as unknown as [string, ...string[]]),
+  role: z.enum(ENABLEABLE_ROLES as unknown as [string, ...string[]]),
   /**
    * The mesh the entity was spawned as, so the collider can match it. Optional:
    * a role whose profile pins its own collider shape does not need it, and a
