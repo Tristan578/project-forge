@@ -372,6 +372,9 @@ impl Plugin for SelectionPlugin {
             // Drain per-frame game events (win, collectible pickup, …) to JS during Play.
             // Not runtime-gated: exported games need win/score events too.
             .add_systems(Update, game::emit_game_events_system)
+            // Mirror kinematic ground contact to the script sandbox (PF-1214).
+            // Not runtime-gated: exported games run the same scripts.
+            .add_systems(Update, game::emit_character_grounded_system)
             .add_systems(Update, core_systems::apply_mode_change_requests)
             .add_systems(Update, scripts::apply_input_binding_updates)
             .add_systems(Update, physics::apply_physics_updates)

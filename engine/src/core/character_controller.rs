@@ -22,6 +22,7 @@
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
+use std::collections::HashMap;
 
 use super::engine_mode::EngineMode;
 use super::game_components::{GameComponentData, GameComponents};
@@ -278,6 +279,41 @@ pub fn manage_character_controller_lifecycle(
                 .remove::<CharacterMotionState>();
         }
     }
+}
+
+/// The grounded changes to emit this frame, given the state JS was last told
+/// about and the state now.
+///
+/// Emitting every character's flag every frame would be one event per character
+/// per frame for the whole play session, so only changes go out. Two properties
+/// make this safe to consume as a running mirror:
+///
+/// * A character that has DISAPPEARED from `current` (despawned, or Play->Edit
+///   stripped its controller) is reported as `false` rather than dropped. A
+///   consumer that only ever saw `true` would otherwise keep a stale "grounded"
+///   forever, and the caller's `prev` map would grow for the whole session.
+/// * Order is sorted by entity id, so the emission sequence is deterministic —
+///   `HashMap` iteration order is not, and a nondeterministic event stream is
+///   untestable and unreproducible from a bug report.
+pub fn diff_grounded(
+    prev: &HashMap<String, bool>,
+    current: &HashMap<String, bool>,
+) -> Vec<(String, bool)> {
+    let mut changes: Vec<(String, bool)> = Vec::new();
+
+    for (id, grounded) in current {
+        if prev.get(id) != Some(grounded) {
+            changes.push((id.clone(), *grounded));
+        }
+    }
+    for (id, was_grounded) in prev {
+        if !current.contains_key(id) && *was_grounded {
+            changes.push((id.clone(), false));
+        }
+    }
+
+    changes.sort_by(|a, b| a.0.cmp(&b.0));
+    changes
 }
 
 #[cfg(test)]
@@ -598,5 +634,64 @@ mod tests {
         run_lifecycle(&mut world, &mut schedule, EngineMode::Edit);
         assert!(world.get::<KinematicCharacterController>(entity).is_none());
         assert!(world.get::<CharacterMotionState>(entity).is_none());
+    }
+
+    fn grounded_map(entries: &[(&str, bool)]) -> HashMap<String, bool> {
+        entries.iter().map(|(id, g)| ((*id).to_string(), *g)).collect()
+    }
+
+    #[test]
+    fn an_unchanged_frame_emits_nothing() {
+        let prev = grounded_map(&[("player", true), ("enemy", false)]);
+        let current = grounded_map(&[("player", true), ("enemy", false)]);
+        assert!(diff_grounded(&prev, &current).is_empty());
+    }
+
+    #[test]
+    fn a_first_sighting_is_a_change_in_both_directions() {
+        assert_eq!(
+            diff_grounded(&HashMap::new(), &grounded_map(&[("player", true)])),
+            vec![("player".to_string(), true)]
+        );
+        // False matters as much as true: a script asking on frame one must not
+        // read "unknown" as "grounded".
+        assert_eq!(
+            diff_grounded(&HashMap::new(), &grounded_map(&[("player", false)])),
+            vec![("player".to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn only_the_character_that_moved_is_reported() {
+        let prev = grounded_map(&[("player", true), ("enemy", true)]);
+        let current = grounded_map(&[("player", false), ("enemy", true)]);
+        assert_eq!(diff_grounded(&prev, &current), vec![("player".to_string(), false)]);
+    }
+
+    /// A despawned character must not leave a stale `true` behind in the
+    /// consumer's mirror, and must not keep growing the caller's `prev` map.
+    #[test]
+    fn a_vanished_character_is_reported_as_not_grounded() {
+        let prev = grounded_map(&[("player", true)]);
+        assert_eq!(
+            diff_grounded(&prev, &HashMap::new()),
+            vec![("player".to_string(), false)]
+        );
+    }
+
+    /// It was already `false`, so the mirror is already right — re-announcing it
+    /// would emit an event per despawned character forever.
+    #[test]
+    fn a_vanished_character_that_was_already_airborne_emits_nothing() {
+        let prev = grounded_map(&[("player", false)]);
+        assert!(diff_grounded(&prev, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn changes_are_emitted_in_a_deterministic_order() {
+        let current = grounded_map(&[("c", true), ("a", true), ("b", true)]);
+        let changes = diff_grounded(&HashMap::new(), &current);
+        let ids: Vec<&str> = changes.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"]);
     }
 }
