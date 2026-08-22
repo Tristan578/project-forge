@@ -1277,6 +1277,53 @@ describe('scriptWorker', () => {
     ]);
   });
 
+  it('forge.tilemap.setTile floors BEFORE bounding, so MAX + 0.5 rides as MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.setTile("tm1", ${TILE_FIELD_MAX} + 0.5, 0, 5);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // tileInt's docstring states this order of operations: the bound is checked
+    // AFTER flooring, so a fractional value is judged on the integer the engine
+    // would actually receive. Checking the bound first would reject this call,
+    // and every other test in the file would still pass -- the two orders differ
+    // only in the half-open interval (MAX, MAX + 1), which nothing else visits.
+    //
+    // It is not a hypothetical interval. worldToTile-style arithmetic produces
+    // fractional coordinates as a matter of course, and flooring them is the
+    // whole reason tileInt floors rather than refusing non-integers outright.
+    expect(pushedCommands()).toEqual([
+      { cmd: 'paint_tile', entityId: 'tm1', layer: 0, x: TILE_FIELD_MAX, y: 0, tileIndex: 5 },
+    ]);
+  });
+
+  it('forge.tilemap.setTile still rejects a fractional value whose floor passes TILE_FIELD_MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.setTile("tm1", ${TILE_FIELD_MAX} + 1.5, 0, 5);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The other side of the same interval: flooring first must not become a way
+    // to smuggle an out-of-range value through. The message reports the value
+    // as WRITTEN, fraction included, rather than the floored one -- the author
+    // is looking for the expression they typed, not for what tileInt made of it.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(
+          `x must be <= ${TILE_FIELD_MAX}, got ${TILE_FIELD_MAX + 1.5}`,
+        ),
+      })
+    );
+  });
+
   it('forge.tilemap.fillRect rejects a rect whose far x edge passes TILE_FIELD_MAX', async () => {
     const handler = await setupWorker();
     const { TILE_FIELD_MAX } = await import('../scriptWorker');
