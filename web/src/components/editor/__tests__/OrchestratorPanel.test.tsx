@@ -272,6 +272,80 @@ describe('OrchestratorPanel', () => {
     expect(mockResetOrchestrator).toHaveBeenCalled();
   });
 
+  describe('step failure copy', () => {
+    /**
+     * The executors compose a `userFacingErrorMessage` naming the next action a
+     * user can actually take. Until PF-1224 nothing rendered it: a failed step
+     * was a red icon and a label, and the remediation copy every executor
+     * carries reached no one. `orchestratorError` is a different thing — it is
+     * only set when `runPipeline` itself throws.
+     */
+    const FAILED_PLAN = {
+      ...MOCK_PLAN,
+      status: 'failed',
+      steps: [
+        MOCK_PLAN.steps[0],
+        {
+          ...MOCK_PLAN.steps[1],
+          status: 'failed',
+          error: {
+            code: 'EXCEPTION',
+            message: 'toggle_physics rejected',
+            userFacingMessage: 'Could not switch physics on for the level.',
+            retryable: true,
+          },
+        },
+        MOCK_PLAN.steps[2],
+      ],
+    };
+
+    it("renders a failed step's userFacingMessage", () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: FAILED_PLAN,
+        stepStatuses: { 'step-2': 'failed' },
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.getByText('Could not switch physics on for the level.')).toBeTruthy();
+    });
+
+    it('announces the failure copy to assistive tech', () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: FAILED_PLAN,
+        stepStatuses: { 'step-2': 'failed' },
+      });
+      render(<OrchestratorPanel />);
+
+      const alerts = screen.getAllByRole('alert');
+      const messages = alerts.map((el) => el.textContent);
+      expect(messages).toContain('Could not switch physics on for the level.');
+    });
+
+    it('renders the internal message nowhere — only the user-facing one', () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: FAILED_PLAN,
+        stepStatuses: { 'step-2': 'failed' },
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.queryByText('toggle_physics rejected')).toBeNull();
+    });
+
+    it('renders no alert for a plan whose steps carry no error', () => {
+      mockStore({
+        orchestratorStatus: 'executing',
+        currentPlan: MOCK_PLAN,
+        stepStatuses: {},
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.queryAllByRole('alert')).toHaveLength(0);
+    });
+  });
+
   describe('step warnings', () => {
     /**
      * A step that only partly applied still gets a green tick, because it did

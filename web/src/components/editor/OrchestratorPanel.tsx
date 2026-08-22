@@ -126,14 +126,34 @@ function StepItem({
   step: PlanStep;
   status: PlanStep['status'];
 }) {
+  // Every executor composes a `userFacingErrorMessage` naming the next action a
+  // user can take, and `runPipeline` records it on the step it failed. Until
+  // PF-1224 nothing rendered it — a failed step was a red icon and a label, and
+  // the remediation copy reached no one. `orchestratorError` above is a
+  // different thing: it is only set when `runPipeline` itself throws.
+  //
+  // The internal `error.message` is deliberately NOT rendered; it carries
+  // engine/command detail written for a developer.
+  const failureMessage = step.error?.userFacingMessage;
+
   return (
-    <div className="flex items-center gap-2 py-1.5 px-2 rounded text-sm">
-      <StepStatusIcon status={status} />
-      <span className={status === 'pending' || status === 'skipped' ? 'text-zinc-500' : 'text-zinc-200'}>
-        {getStepLabel(step.executor)}
-      </span>
-      {step.optional && (
-        <span className="ml-auto text-[10px] text-zinc-500 uppercase">optional</span>
+    <div className="py-1.5 px-2 rounded text-sm">
+      <div className="flex items-center gap-2">
+        <StepStatusIcon status={status} />
+        <span className={status === 'pending' || status === 'skipped' ? 'text-zinc-500' : 'text-zinc-200'}>
+          {getStepLabel(step.executor)}
+        </span>
+        {step.optional && (
+          <span className="ml-auto text-[10px] text-zinc-500 uppercase">optional</span>
+        )}
+      </div>
+      {failureMessage && (
+        <div
+          role="alert"
+          className="mt-1 ml-6 rounded border border-red-900/60 bg-red-950/40 px-2 py-1 text-xs leading-snug text-red-200"
+        >
+          {failureMessage}
+        </div>
       )}
     </div>
   );
