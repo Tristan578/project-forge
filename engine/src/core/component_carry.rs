@@ -1,22 +1,41 @@
 //! Shared component-carry model: the ONE list of components a newly created
 //! entity inherits from an existing one.
 //!
-//! Four systems build an entity out of another entity — delete/undo restore,
-//! duplicate, array, and combine — and before PF-1193 three of them
-//! hand-enumerated their own list. A component wired into only one list
-//! silently vanished on the others, and `dispatchCommand` returns void, so
-//! nothing anywhere reported the loss (PF-1182 is the same class of defect, one
-//! path earlier). Everything here is driven off a single field list:
+//! Four systems build an entity out of another entity's components, and before
+//! PF-1193 three of them hand-enumerated their own list. A component wired into
+//! only one list silently vanished on the others, and `dispatchCommand` returns
+//! void, so nothing anywhere reported the loss (PF-1182 is the same class of
+//! defect, one path earlier).
+//!
+//! What each path shares is deliberately NOT uniform, so state it exactly:
+//!
+//! - `apply_duplicate_requests`, `apply_array_requests` and
+//!   `apply_combine_requests` COLLECT and RE-INSERT through this module
+//!   ([`AuxQueries`] + [`build_aux_index`] + [`insert_aux_components`]), so
+//!   [`AuxComponentData`] is literally the list they carry.
+//! - `entity_factory::spawn_from_snapshot` (the delete/undo restore path) does
+//!   NOT call [`insert_aux_components`]. It rebuilds from an [`EntitySnapshot`]
+//!   with its own per-`EntityType` arms, because a restored entity also needs
+//!   its mesh and material rebuilt, which no component carry can do. It is tied
+//!   to this list only at the WRITE end, by [`snapshot_entity`], and its read
+//!   end is pinned separately by `snapshot_restore_parity` in
+//!   `entity_factory.rs`.
+//! - `apply_instantiate_prefab` is not a fifth path: it delegates to
+//!   `spawn_from_snapshot` and enumerates nothing of its own.
+//!
+//! Everything here is driven off a single field list:
 //!
 //! - [`AuxComponentData`] IS that list.
 //! - [`AuxQueries`] + [`build_aux_index`] collect it from the world in one pass.
 //! - [`insert_aux_components`] puts it back onto a freshly spawned entity.
 //! - [`snapshot_entity`] writes it into an [`EntitySnapshot`] for undo.
-//! - [`AuxComponentData::for_combine_result`] narrows it for the one carry that
+//! - [`AuxComponentData::for_combine_result`] and
+//!   [`BaseComponentData::for_combine_result`] narrow it for the one carry that
 //!   is not 1:1 — combine, where N sources produce a single new entity.
 //!
-//! Two rules hold across every path and are pinned by `component_carry_parity`
-//! at the bottom of this file:
+//! Two rules hold across every path and are pinned by `component_carry_parity`,
+//! which lives in the sibling `component_carry_tests.rs` (pulled in by `#[path]`
+//! at the bottom of this file to stay under the 800-line ceiling):
 //!
 //! 1. An enablement marker (`AudioEnabled`, `ParticleEnabled`, `TilemapEnabled`,
 //!    …) is carried ONLY when the source entity actually had it. Inserting one
@@ -43,10 +62,12 @@ use super::material::MaterialData;
 use super::particles::{ParticleData, ParticleEnabled};
 use super::pending_commands::EntityType;
 use super::physics::{JointData, PhysicsData, PhysicsEnabled};
-use super::physics_2d::{Physics2dData, Physics2dEnabled};
+use super::physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d};
 use super::scripting::ScriptData;
 use super::shader_effects::ShaderEffectData;
+use super::skeletal_animation2d::SkeletalAnimation2d;
 use super::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
+use super::terrain::{TerrainData, TerrainEnabled, TerrainMeshData};
 use super::tilemap::{TilemapData, TilemapEnabled};
 
 /// Auxiliary component data collected from secondary queries, keyed by entity ID.
@@ -59,9 +80,17 @@ use super::tilemap::{TilemapData, TilemapEnabled};
 pub struct AuxComponentData {
     pub script_data: Option<ScriptData>,
     pub audio_data: Option<AudioData>,
-    /// Whether audio playback is enabled. Tracked separately from `audio_data`
-    /// because the audio bridge removes `AudioEnabled` while keeping
-    /// `AudioData` — an entity the user muted must not come back unmuted.
+    /// Whether `AudioEnabled` was present on the source entity.
+    ///
+    /// Carried as a bool rather than inferred from `audio_data.is_some()` for
+    /// the same reason as every other marker in this struct: the marker and its
+    /// data are separate components, so only the source's real marker state can
+    /// say whether the copy should play. `bridge/audio.rs` happens to insert and
+    /// remove the two together today, so no live command produces
+    /// data-without-marker — but `restore_scene` and `spawn_from_snapshot` both
+    /// write the pair from a snapshot, and a snapshot is only as truthful as the
+    /// field it carries. Inferring the marker would make this the one carried
+    /// component whose enablement cannot be turned off.
     pub audio_enabled: bool,
     pub reverb_zone_data: Option<super::reverb_zone::ReverbZoneData>,
     pub reverb_zone_enabled: bool,
@@ -69,6 +98,8 @@ pub struct AuxComponentData {
     pub particle_enabled: bool,
     pub shader_effect_data: Option<ShaderEffectData>,
     pub csg_mesh_data: Option<csg::CsgMeshData>,
+    pub terrain_data: Option<TerrainData>,
+    pub terrain_mesh_data: Option<TerrainMeshData>,
     pub procedural_mesh_data: Option<super::procedural_mesh::ProceduralMeshData>,
     pub joint_data: Option<JointData>,
     pub game_components: Option<super::game_components::GameComponents>,
@@ -78,10 +109,15 @@ pub struct AuxComponentData {
     pub sprite_data: Option<super::sprite::SpriteData>,
     pub physics2d_data: Option<Physics2dData>,
     pub physics2d_enabled: bool,
+    pub joint2d_data: Option<PhysicsJoint2d>,
     pub tilemap_data: Option<TilemapData>,
     pub tilemap_enabled: bool,
     pub skeleton2d_data: Option<SkeletonData2d>,
     pub skeleton2d_enabled: bool,
+    /// The source's `SkeletalAnimation2d`, if any. Stored as a `Vec` to match
+    /// the `EntitySnapshot` field it is written into; the ECS holds at most
+    /// one such component per entity, so the vector is never longer than 1.
+    pub skeletal_animations: Option<Vec<SkeletalAnimation2d>>,
     pub lod_data: Option<LodData>,
 }
 
@@ -112,6 +148,26 @@ pub const COMBINE_RESULT_EXEMPT: &[(&str, &str)] = &[
         "active_game_camera",
         "a newly created entity must never steal the active-camera flag from the \
          entity it was built from (same rule as duplicate)",
+    ),
+    (
+        "terrain_data",
+        "terrain generates its own heightmap mesh every time TerrainData changes, \
+         so a carried terrain would overwrite the merged geometry — same reason \
+         as csg_mesh_data",
+    ),
+    (
+        "terrain_mesh_data",
+        "follows terrain_data, which is exempt",
+    ),
+    (
+        "joint2d_data",
+        "a 2D joint anchors to a source 2D body that combine never merges and \
+         that delete_sources despawns — see joint_data and sprite_data",
+    ),
+    (
+        "skeletal_animations",
+        "a 2D skeletal animation deforms sprite geometry the merged 3D mesh does \
+         not have — see skeleton2d_data",
     ),
     (
         "sprite_data",
@@ -172,9 +228,10 @@ impl AuxComponentData {
 /// The seven read-only queries that between them see every component in
 /// [`AuxComponentData`], bundled into a single system parameter.
 ///
-/// Bundling matters: `apply_combine_requests` would otherwise sit at 15 of
-/// Bevy's 16 system parameters, and the next component added anywhere would
-/// break it with an error that names the limit rather than the cause.
+/// Bundling matters: taking these seven as separate parameters would put
+/// `apply_combine_requests` at exactly 16 — Bevy's cap — so the next component
+/// added anywhere would break it with an error that names the limit rather than
+/// the cause. Bundled, it sits at 10.
 #[derive(SystemParam)]
 pub struct AuxQueries<'w, 's> {
     pub script_audio: Query<
@@ -198,13 +255,15 @@ pub struct AuxQueries<'w, 's> {
             Option<&'static ParticleEnabled>,
         ),
     >,
-    pub shader_csg: Query<
+    pub shader_csg_terrain: Query<
         'w,
         's,
         (
             &'static EntityId,
             Option<&'static ShaderEffectData>,
             Option<&'static csg::CsgMeshData>,
+            Option<&'static TerrainData>,
+            Option<&'static TerrainMeshData>,
         ),
     >,
     pub procedural_joint: Query<
@@ -235,10 +294,12 @@ pub struct AuxQueries<'w, 's> {
             &'static EntityId,
             Option<&'static Physics2dData>,
             Option<&'static Physics2dEnabled>,
+            Option<&'static PhysicsJoint2d>,
             Option<&'static TilemapData>,
             Option<&'static TilemapEnabled>,
             Option<&'static SkeletonData2d>,
             Option<&'static SkeletonEnabled2d>,
+            Option<&'static SkeletalAnimation2d>,
             Option<&'static LodData>,
         ),
     >,
@@ -265,10 +326,12 @@ pub fn build_aux_index(queries: &AuxQueries) -> HashMap<String, AuxComponentData
         entry.particle_enabled = pe.is_some();
     }
 
-    for (eid, sed, cmd) in queries.shader_csg.iter() {
+    for (eid, sed, cmd, td, tmd) in queries.shader_csg_terrain.iter() {
         let entry = index.entry(eid.0.clone()).or_default();
         entry.shader_effect_data = sed.cloned();
         entry.csg_mesh_data = cmd.cloned();
+        entry.terrain_data = td.cloned();
+        entry.terrain_mesh_data = tmd.cloned();
     }
 
     for (eid, pmd, jd) in queries.procedural_joint.iter() {
@@ -290,14 +353,20 @@ pub fn build_aux_index(queries: &AuxQueries) -> HashMap<String, AuxComponentData
         entry.sprite_data = sd.cloned();
     }
 
-    for (eid, p2d, p2de, tmd, tme, sk, ske, ld) in queries.physics2d_tilemap_skeleton_lod.iter() {
+    for (eid, p2d, p2de, j2d, tmd, tme, sk, ske, sa, ld) in
+        queries.physics2d_tilemap_skeleton_lod.iter()
+    {
         let entry = index.entry(eid.0.clone()).or_default();
         entry.physics2d_data = p2d.cloned();
         entry.physics2d_enabled = p2de.is_some();
+        entry.joint2d_data = j2d.cloned();
         entry.tilemap_data = tmd.cloned();
         entry.tilemap_enabled = tme.is_some();
         entry.skeleton2d_data = sk.cloned();
         entry.skeleton2d_enabled = ske.is_some();
+        // The ECS holds at most one SkeletalAnimation2d per entity; EntitySnapshot
+        // stores a Vec, so wrap rather than widen the snapshot's vocabulary.
+        entry.skeletal_animations = sa.cloned().map(|a| vec![a]);
         entry.lod_data = ld.cloned();
     }
 
@@ -307,6 +376,16 @@ pub fn build_aux_index(queries: &AuxQueries) -> HashMap<String, AuxComponentData
 /// Base (non-auxiliary) components an entity carries. Bundled so the four carry
 /// call sites pass one value instead of seven positional arguments that are easy
 /// to transpose.
+///
+/// Two fields here are consumed by [`snapshot_entity`] but NOT by
+/// [`insert_base_components`], and both are pinned that way by
+/// `base_component_restore_parity`:
+///
+/// - `visible`: every carry path spawns `EntityVisible::default()` (true) as
+///   part of its spawn bundle, so there is nothing left for an insert to do.
+/// - `material_data`: the call site owns whether the copy shares the source's
+///   `MeshMaterial3d` handle (array, duplicate) or gets a fresh
+///   `StandardMaterial` seeded from the data (combine).
 #[derive(Default, Clone, Copy)]
 pub struct BaseComponentData<'a> {
     pub visible: bool,
@@ -315,6 +394,41 @@ pub struct BaseComponentData<'a> {
     pub physics_data: Option<&'a PhysicsData>,
     pub physics_enabled: bool,
     pub asset_ref: Option<&'a AssetRef>,
+}
+
+/// Fields of [`BaseComponentData`] a combine RESULT entity deliberately does NOT
+/// inherit from its primary source, each with the reason. Counterpart to
+/// [`COMBINE_RESULT_EXEMPT`] for the base components.
+pub const COMBINE_RESULT_BASE_EXEMPT: &[(&str, &str)] = &[
+    (
+        "asset_ref",
+        "an AssetRef names the imported asset that produced the SOURCE's mesh; the \
+         merged geometry belongs to no asset, and a carried ref would let an asset \
+         reload rebuild the source shape over it — same reason as csg_mesh_data",
+    ),
+    (
+        "visible",
+        "the result is spawned with EntityVisible::default() (true) whatever the \
+         primary source's state was: combining hidden sources must not produce an \
+         entity the user cannot see or find, and the snapshot has to record what \
+         was actually spawned or redo would restore it hidden",
+    ),
+];
+
+impl<'a> BaseComponentData<'a> {
+    /// Narrow this bundle to what the single entity produced by a combine may
+    /// inherit from its primary source. Everything dropped here is listed in
+    /// [`COMBINE_RESULT_BASE_EXEMPT`] with its reason.
+    pub fn for_combine_result(&self) -> BaseComponentData<'a> {
+        BaseComponentData {
+            visible: true,
+            material_data: self.material_data,
+            light_data: self.light_data,
+            physics_data: self.physics_data,
+            physics_enabled: self.physics_enabled,
+            asset_ref: None,
+        }
+    }
 }
 
 /// Build a complete [`EntitySnapshot`] from base query data and pre-indexed
@@ -351,6 +465,8 @@ pub fn snapshot_entity(
     snapshot.particle_enabled = aux.particle_enabled;
     snapshot.shader_effect_data = aux.shader_effect_data.clone();
     snapshot.csg_mesh_data = aux.csg_mesh_data.clone();
+    snapshot.terrain_data = aux.terrain_data.clone();
+    snapshot.terrain_mesh_data = aux.terrain_mesh_data.clone();
     snapshot.procedural_mesh_data = aux.procedural_mesh_data.clone();
     snapshot.joint_data = aux.joint_data.clone();
     snapshot.game_components = aux.game_components.clone();
@@ -360,10 +476,12 @@ pub fn snapshot_entity(
     snapshot.sprite_data = aux.sprite_data.clone();
     snapshot.physics2d_data = aux.physics2d_data.clone();
     snapshot.physics2d_enabled = aux.physics2d_enabled;
+    snapshot.joint2d_data = aux.joint2d_data.clone();
     snapshot.tilemap_data = aux.tilemap_data.clone();
     snapshot.tilemap_enabled = aux.tilemap_enabled;
     snapshot.skeleton2d_data = aux.skeleton2d_data.clone();
     snapshot.skeleton2d_enabled = aux.skeleton2d_enabled;
+    snapshot.skeletal_animations = aux.skeletal_animations.clone();
     snapshot.lod_data = aux.lod_data.clone();
     snapshot
 }
@@ -381,9 +499,14 @@ pub fn insert_aux_components(
     }
     if let Some(ref ad) = aux.audio_data {
         entity_commands.insert(ad.clone());
-    }
-    if aux.audio_enabled {
-        entity_commands.insert(AudioEnabled);
+        // Gated on the DATA as well as the flag: `AudioEnabled` alone marks an
+        // entity the audio bridge will look for `AudioData` on, and
+        // `EntitySnapshot`'s `audio_enabled` defaults to true for scenes saved
+        // before the field existed. Without the `audio_data` guard, every such
+        // entity — audio or not — would come back carrying a bare marker.
+        if aux.audio_enabled {
+            entity_commands.insert(AudioEnabled);
+        }
     }
     if let Some(ref rzd) = aux.reverb_zone_data {
         entity_commands.insert(rzd.clone());
@@ -402,6 +525,17 @@ pub fn insert_aux_components(
     }
     if let Some(ref cmd) = aux.csg_mesh_data {
         entity_commands.insert(cmd.clone());
+    }
+    if let Some(ref td) = aux.terrain_data {
+        entity_commands.insert(td.clone());
+        // TerrainEnabled is not a user-facing toggle: nothing in the engine ever
+        // removes it (grep-verified), and both terrain spawn paths insert it
+        // beside TerrainData. Presence of the data IS the marker's source of
+        // truth here, which is why there is no terrain_enabled field to carry.
+        entity_commands.insert(TerrainEnabled);
+    }
+    if let Some(ref tmd) = aux.terrain_mesh_data {
+        entity_commands.insert(tmd.clone());
     }
     if let Some(ref pmd) = aux.procedural_mesh_data {
         entity_commands.insert(pmd.clone());
@@ -427,6 +561,9 @@ pub fn insert_aux_components(
     if aux.physics2d_enabled {
         entity_commands.insert(Physics2dEnabled);
     }
+    if let Some(ref j2d) = aux.joint2d_data {
+        entity_commands.insert(j2d.clone());
+    }
     if let Some(ref tmd) = aux.tilemap_data {
         entity_commands.insert(tmd.clone());
     }
@@ -438,6 +575,12 @@ pub fn insert_aux_components(
     }
     if aux.skeleton2d_enabled {
         entity_commands.insert(SkeletonEnabled2d);
+    }
+    // The ECS holds at most one SkeletalAnimation2d, so only the first element
+    // can be restored; the Vec exists to match EntitySnapshot's field, not to
+    // describe a component the world can hold more than one of.
+    if let Some(anim) = aux.skeletal_animations.as_ref().and_then(|a| a.first()) {
+        entity_commands.insert(anim.clone());
     }
     if let Some(ref ld) = aux.lod_data {
         entity_commands.insert(ld.clone());

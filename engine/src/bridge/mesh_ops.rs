@@ -112,8 +112,11 @@ pub(super) fn apply_array_requests(
             }
         }
 
-        // Array copies are spawned visible, matching duplicate.
         let base = BaseComponentData {
+            // Array copies spawn EntityVisible::default() (= true) whatever the
+            // source's visibility was, matching duplicate. `base.visible` is only
+            // read by snapshot_entity, and it must match what was spawned or redo
+            // would restore the copies hidden.
             visible: true,
             material_data: mat_data,
             light_data,
@@ -198,6 +201,7 @@ pub(super) fn apply_combine_requests(
     mut selection_events: MessageWriter<SelectionChangedEvent>,
     // Single shared carry list — see core::component_carry (PF-1193).
     aux_queries: AuxQueries,
+    texture_handles: Res<crate::core::asset_manager::TextureHandleMap>,
     mut history: ResMut<HistoryStack>,
 ) {
     use crate::core::history::UndoableAction;
@@ -213,6 +217,7 @@ pub(super) fn apply_combine_requests(
         // geometry" is the only choice a user can predict from the selection
         // order they made.
         let mut primary_aux: Option<AuxComponentData> = None;
+        let mut primary_base: Option<BaseComponentData> = None;
 
         for entity_id in &request.entity_ids {
             if let Some((entity, eid, ename, transform, visible, entity_type, mesh_handle, mat_data, light_data, phys_data, phys_enabled, asset_ref)) = query.iter().find(|(_, eid, ..)| &eid.0 == entity_id) {
@@ -238,9 +243,18 @@ pub(super) fn apply_combine_requests(
                     }
                 }
 
+                let src_base = BaseComponentData {
+                    visible: visible.0,
+                    material_data: mat_data,
+                    light_data,
+                    physics_data: phys_data,
+                    physics_enabled: phys_enabled.is_some(),
+                    asset_ref,
+                };
                 let src_aux = aux_index.get(&eid.0).cloned().unwrap_or_default();
                 if contributed_geometry && primary_aux.is_none() {
                     primary_aux = Some(src_aux.clone());
+                    primary_base = Some(src_base);
                 }
 
                 // Source snapshots take the FULL carry set and the source's real
@@ -251,14 +265,7 @@ pub(super) fn apply_combine_requests(
                     entity_type.copied().unwrap_or(EntityType::Cube),
                     &ename.0,
                     transform,
-                    BaseComponentData {
-                        visible: visible.0,
-                        material_data: mat_data,
-                        light_data,
-                        physics_data: phys_data,
-                        physics_enabled: phys_enabled.is_some(),
-                        asset_ref,
-                    },
+                    src_base,
                     &src_aux,
                 ));
 
@@ -292,37 +299,52 @@ pub(super) fn apply_combine_requests(
         let entity_id = EntityId::default();
         let entity_id_str = entity_id.0.clone();
 
-        // What the primary source hands down, minus COMBINE_RESULT_EXEMPT.
+        // What the primary source hands down, minus the two EXEMPT lists.
         let result_aux = primary_aux.unwrap_or_default().for_combine_result();
+        let result_base = primary_base.unwrap_or_default().for_combine_result();
+
+        // The merged entity keeps the primary's look. Seed the fresh
+        // StandardMaterial from that MaterialData here rather than leaving the
+        // default gray for `sync_material_data` to fix: that system only runs on
+        // `Changed<MaterialData>`, and a value inserted at spawn is not a change
+        // it will ever see, so an unseeded result renders gray forever (PF-1225).
+        let result_mat_data = result_base.material_data.cloned().unwrap_or_default();
+        let mut result_std = StandardMaterial::default();
+        crate::core::material::apply_material_data_to_standard(
+            &mut result_std,
+            &result_mat_data,
+            &texture_handles,
+        );
 
         let mut result_commands = commands.spawn((
             EntityType::ProceduralMesh,
             entity_id,
             EntityName::new(&name),
+            // Always visible — see COMBINE_RESULT_BASE_EXEMPT's `visible` entry.
             EntityVisible::default(),
-            MaterialData::default(),
+            result_mat_data.clone(),
             mesh_data.clone(),
             Mesh3d(meshes.add(combined_mesh)),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.5, 0.5, 0.5),
-                ..default()
-            })),
+            MeshMaterial3d(materials.add(result_std)),
             Transform::default(),
         ));
+        insert_base_components(&mut result_commands, result_base);
         insert_aux_components(&mut result_commands, &result_aux);
         let entity = result_commands.id();
 
         {
             let result_transform = Transform::default();
+            // Snapshot the base the result was actually spawned with, not an
+            // empty stand-in: redo has to give back the same entity, physics
+            // body and material included.
             let mut result_snap = snapshot_entity(
                 &entity_id_str,
                 EntityType::ProceduralMesh,
                 &name,
                 &result_transform,
                 BaseComponentData {
-                    visible: true,
-                    material_data: Some(&MaterialData::default()),
-                    ..Default::default()
+                    material_data: Some(&result_mat_data),
+                    ..result_base
                 },
                 &result_aux,
             );

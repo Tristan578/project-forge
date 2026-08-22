@@ -661,7 +661,11 @@ pub fn apply_duplicate_requests(
     for request in pending.duplicate_requests.drain(..) {
         // O(1) lookup instead of O(n) linear scan
         if let Some(&(
-            _entity, source_eid, name, transform, visible,
+            // `_visible`: a duplicate is always spawned visible (see the
+            // BaseComponentData below), so the source's state is deliberately
+            // not read. The query still requires the component so that the set
+            // of duplicable entities is unchanged.
+            _entity, source_eid, name, transform, _visible,
             src_entity_type, mesh_handle, material_handle,
             point_light, dir_light, spot_light,
             src_mat_data, src_light_data, src_phys_data, src_phys_enabled,
@@ -730,7 +734,12 @@ pub fn apply_duplicate_requests(
 
             // Clone the shared base + auxiliary component set (single list)
             let base = BaseComponentData {
-                visible: visible.0,
+                // Duplicates spawn EntityVisible::default() (= true) regardless of
+                // the source's visibility, so a copy of a hidden entity is not
+                // itself invisible with no way to find it. `base.visible` is what
+                // the snapshot records, and it must match what was spawned or redo
+                // would restore a hidden duplicate.
+                visible: true,
                 material_data: src_mat_data,
                 light_data: src_light_data,
                 physics_data: src_phys_data,
@@ -755,10 +764,6 @@ pub fn apply_duplicate_requests(
                 ],
                 scale: [transform.scale.x, transform.scale.y, transform.scale.z],
             };
-            // Duplicates are always spawned visible (EntityVisible::default() = true)
-            // regardless of source visibility. The snapshot must match the spawned state
-            // so that redo correctly restores the duplicate as visible.
-            snapshot.visible = true;
             // Don't duplicate active game camera state
             snapshot.active_game_camera = false;
 
@@ -1430,8 +1435,11 @@ pub fn spawn_from_snapshot(
         commands.entity(entity).insert(ad.clone());
     }
     // The enablement marker follows the snapshot's own flag — restoring audio the
-    // user had switched off must not bring it back playing (PF-1193).
-    if snapshot.audio_enabled {
+    // user had switched off must not bring it back playing (PF-1193). Gated on
+    // the data too: `audio_enabled` defaults to true for scenes saved before the
+    // field existed, so an ungated insert would give every entity in every such
+    // scene a bare AudioEnabled marker with no AudioData under it.
+    if snapshot.audio_data.is_some() && snapshot.audio_enabled {
         commands.entity(entity).insert(AudioEnabled);
     }
     // Restore reverb zone data if present
@@ -1502,6 +1510,23 @@ pub fn spawn_from_snapshot(
     }
     if snapshot.tilemap_enabled {
         commands.entity(entity).insert(TilemapEnabled);
+    }
+
+    // Restore 2D skeleton data if present
+    if let Some(sd) = &snapshot.skeleton2d_data {
+        commands.entity(entity).insert(sd.clone());
+        if snapshot.skeleton2d_enabled {
+            commands
+                .entity(entity)
+                .insert(super::skeleton2d::SkeletonEnabled2d);
+        }
+    }
+
+    // The ECS holds at most one SkeletalAnimation2d per entity; the snapshot
+    // stores a Vec to match the file format, so only the first element can be
+    // restored.
+    if let Some(anim) = snapshot.skeletal_animations.as_ref().and_then(|a| a.first()) {
+        commands.entity(entity).insert(anim.clone());
     }
 
     // Restore LOD data if present
@@ -5208,3 +5233,9 @@ mod tilemap_skeleton2d_history_tests {
         );
     }
 }
+
+/// Source-parity gate for [`spawn_from_snapshot`] — see the module for why it
+/// lives in a sibling file rather than inline.
+#[cfg(test)]
+#[path = "entity_factory_parity_tests.rs"]
+mod entity_factory_parity_tests;
