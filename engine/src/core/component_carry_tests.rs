@@ -348,66 +348,23 @@ mod component_carry_parity {
 
     /// Slice the brace-balanced block introduced by `marker`.
     ///
-    /// The marker must be UNIQUE in the file: the previous version took the
-    /// first match and ran to the first column-0 `}`, which silently sliced the
-    /// module doc comment once a second `for_combine_result` existed. Both
-    /// halves matter — an ambiguous marker picks the wrong block, and a
-    /// line-based terminator overshoots a nested item.
-    fn block_after(marker: &str) -> &'static str {
+    /// Delegates to [`crate::core::parity_util::block_of`], which strips
+    /// comments before both the uniqueness check and the brace walk. A mention
+    /// inside a comment is not a read, and scoring one as a read fails in the
+    /// false-pass direction: a commented-out `// entry.lod_data = ld.cloned();`
+    /// kept every test in this module green while the field was not carried at
+    /// all.
+    fn block_after(marker: &str) -> String {
         block_of(SOURCE, marker)
     }
 
-    fn block_of(source: &'static str, marker: &str) -> &'static str {
-        let hits = source.matches(marker).count();
-        assert_eq!(
-            hits, 1,
-            "parity marker `{marker}` occurs {hits} times — a marker that is not \
-             unique cannot identify a block"
-        );
-        let start = source.find(marker).unwrap();
-        let rest = &source[start..];
-        let open = rest
-            .find('{')
-            .unwrap_or_else(|| panic!("stale parity marker: no opening brace after {marker}"));
-        let bytes = rest.as_bytes();
-        let mut depth = 0usize;
-        for (i, b) in bytes.iter().enumerate().skip(open) {
-            match b {
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return &rest[..=i];
-                    }
-                }
-                _ => {}
-            }
-        }
-        panic!("stale parity marker: unbalanced braces after {marker}");
+    fn block_of(source: &str, marker: &str) -> String {
+        crate::core::parity_util::block_of(source, marker)
     }
 
     /// Field names declared inside the brace-balanced block at `marker`.
-    fn fields_of(source: &'static str, marker: &str) -> Vec<String> {
-        block_of(source, marker)
-            .lines()
-            .skip(1)
-            .filter_map(|line| {
-                let trimmed = line.trim();
-                if trimmed.starts_with("//") {
-                    return None;
-                }
-                let (name, _) = trimmed.split_once(':')?;
-                let name = name.trim().strip_prefix("pub ")?.trim();
-                if name.is_empty()
-                    || !name
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                {
-                    return None;
-                }
-                Some(name.to_string())
-            })
-            .collect()
+    fn fields_of(source: &str, marker: &str) -> Vec<String> {
+        crate::core::parity_util::fields_of(source, marker)
     }
 
     /// Every field name declared on `AuxComponentData`.
@@ -428,19 +385,7 @@ mod component_carry_parity {
     /// Names from `fields` mentioned as `<prefix><name>` inside the block at
     /// `marker`.
     fn names_used(marker: &str, prefix: &str, fields: &[String]) -> Vec<String> {
-        let body = block_after(marker);
-        let mut used: Vec<String> = Vec::new();
-        for (idx, _) in body.match_indices(prefix) {
-            let tail = &body[idx + prefix.len()..];
-            let name: String = tail
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect();
-            if fields.contains(&name) && !used.contains(&name) {
-                used.push(name);
-            }
-        }
-        used
+        crate::core::parity_util::names_in(&block_after(marker), prefix, fields)
     }
 
     fn fields_used(marker: &str, prefix: &str) -> Vec<String> {

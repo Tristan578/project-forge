@@ -31,78 +31,25 @@ mod snapshot_restore_parity {
     const SNAPSHOT_FIELD_FLOOR: usize = 38;
     const READ_FLOOR: usize = 36;
 
-    /// Slice the brace-balanced block introduced by `marker`, which must be
-    /// unique in `source`.
-    fn block_of(source: &'static str, marker: &str) -> &'static str {
-        let hits = source.matches(marker).count();
-        assert_eq!(
-            hits, 1,
-            "parity marker `{marker}` occurs {hits} times — a marker that is not \
-             unique cannot identify a block"
-        );
-        let start = source.find(marker).unwrap();
-        let rest = &source[start..];
-        let open = rest
-            .find('{')
-            .unwrap_or_else(|| panic!("stale parity marker: no opening brace after {marker}"));
-        let bytes = rest.as_bytes();
-        let mut depth = 0usize;
-        for (i, b) in bytes.iter().enumerate().skip(open) {
-            match b {
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return &rest[..=i];
-                    }
-                }
-                _ => {}
-            }
-        }
-        panic!("stale parity marker: unbalanced braces after {marker}");
-    }
-
     /// Field names declared on `EntitySnapshot`, read from `history.rs`.
     fn snapshot_fields() -> Vec<String> {
-        block_of(SNAPSHOT_SOURCE, "pub struct EntitySnapshot {")
-            .lines()
-            .skip(1)
-            .filter_map(|line| {
-                let trimmed = line.trim();
-                if trimmed.starts_with("//") {
-                    return None;
-                }
-                let (name, _) = trimmed.split_once(':')?;
-                let name = name.trim().strip_prefix("pub ")?.trim();
-                if name.is_empty()
-                    || !name
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                {
-                    return None;
-                }
-                Some(name.to_string())
-            })
-            .collect()
+        crate::core::parity_util::fields_of(SNAPSHOT_SOURCE, "pub struct EntitySnapshot {")
     }
 
     /// Snapshot field names read as `snapshot.<field>` inside
     /// `spawn_from_snapshot`.
+    ///
+    /// Comments are stripped before the scan (see
+    /// [`crate::core::parity_util::strip_comments`]): a mention inside a
+    /// comment is not a read, so a commented-out
+    /// `// commands.entity(entity).insert(snapshot.lod_data)` must not satisfy
+    /// this gate. That failure is in the false-pass direction, which is the
+    /// only direction that matters for a gate whose job is to notice an
+    /// omission.
     fn fields_read() -> Vec<String> {
         let fields = snapshot_fields();
-        let body = block_of(FACTORY_SOURCE, "pub fn spawn_from_snapshot(");
-        let mut used: Vec<String> = Vec::new();
-        for (idx, _) in body.match_indices("snapshot.") {
-            let tail = &body[idx + "snapshot.".len()..];
-            let name: String = tail
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect();
-            if fields.contains(&name) && !used.contains(&name) {
-                used.push(name);
-            }
-        }
-        used
+        let body = crate::core::parity_util::block_of(FACTORY_SOURCE, "pub fn spawn_from_snapshot(");
+        crate::core::parity_util::names_in(&body, "snapshot.", &fields)
     }
 
     #[test]
