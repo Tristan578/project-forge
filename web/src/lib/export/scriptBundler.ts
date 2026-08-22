@@ -75,6 +75,13 @@ export function bundleScripts(
       applyForce: function(id, x, y, z) { pendingCommands.push({cmd: 'apply_force', entityId: id, force: [x,y,z]}); },
       applyImpulse: function(id, x, y, z) { pendingCommands.push({cmd: 'apply_impulse', entityId: id, impulse: [x,y,z]}); },
       applyTorque: function(id, x, y, z) { pendingCommands.push({cmd: 'apply_torque', entityId: id, torque: [x,y,z]}); },
+      // Synchronous, like the editor's forge.physics.isGrounded. The runtime
+      // mirrors CHARACTER_GROUNDED_CHANGED into window.__forgeGrounded (see
+      // gameTemplate.ts / zipExporter.ts); the engine emits that event on
+      // CHANGE only, so an entity absent from the map has simply never left
+      // or touched the ground since load — false is the right answer for a
+      // controller that has not reported, and for a non-character entity.
+      isGrounded: function(id) { return !!(window.__forgeGrounded && window.__forgeGrounded[id]); },
     },
     getTransform: function(id) { return window.__forgeTransforms?.[id] || {position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]}; },
     setPosition: function(id, x, y, z) { pendingCommands.push({cmd: 'update_transform', entityId: id, position: [x,y,z]}); },

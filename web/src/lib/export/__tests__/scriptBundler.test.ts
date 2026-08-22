@@ -159,3 +159,102 @@ describe('bundleScripts', () => {
     expect(undefinedArgs).toBeGreaterThanOrEqual(SHADOWED_GLOBALS.length);
   });
 });
+
+/**
+ * `forge.physics.isGrounded` in an EXPORTED game (PF-1214, review finding #7).
+ *
+ * The editor's script worker answers this from a grounded map the engine feeds
+ * it; the export bundle is a separate, hand-written shim, so an API that works
+ * in the editor and is simply absent from the export is invisible until a
+ * creator ships a jump that never lands. These cases RUN the generated bundle
+ * against a fake `window` rather than matching its text, because the thing
+ * under test is which global the shim reads.
+ */
+describe('forge.physics.isGrounded in the exported bundle', () => {
+  type FakeWindow = Record<string, unknown>;
+
+  /**
+   * Runs the bundle with a single script that reports what
+   * `forge.physics.isGrounded` answered for each id it was asked about.
+   *
+   * The answer travels out on the bundle's OWN command queue — the script
+   * encodes `typeof v + ':' + String(v)` as an entity id and
+   * `window.__forgeFlushCommands()` hands it back. That channel is used instead
+   * of a side global because `window` is a shadowed name inside the sandbox
+   * (see `sandboxGlobals.ts`), so a script cannot write one — and it pins the
+   * TYPE as well as the value, which a truthiness assertion would not.
+   *
+   * The bundle itself references a bare `window`, which is how it runs in the
+   * exported page; passing it as a parameter is what lets this suite stay in
+   * the node environment.
+   */
+  function runBundle(ids: string[]): {
+    win: FakeWindow;
+    probe: () => Record<string, string>;
+  } {
+    const { code } = bundleScripts({
+      'probe-entity': makeScript(
+        `function onUpdate(dt) {
+${ids
+  .map(
+    (id) =>
+      `           var v_${id} = forge.physics.isGrounded(${JSON.stringify(id)});\n` +
+      `           forge.physics.applyForce(${JSON.stringify(id)} + '=' + (typeof v_${id}) + ':' + String(v_${id}), 0, 0, 0);`,
+  )
+  .join('\n')}
+         }`,
+      ),
+    });
+
+    const win: FakeWindow = {};
+    new Function('window', code)(win);
+
+    return {
+      win,
+      probe: () => {
+        (win['__forgeScriptUpdate'] as (dt: number) => void)(0.016);
+        const cmds = (win['__forgeFlushCommands'] as () => Array<{ entityId: string }>)();
+        const out: Record<string, string> = {};
+        for (const c of cmds) {
+          const [id, answer] = c.entityId.split('=');
+          out[id!] = answer!;
+        }
+        return out;
+      },
+    };
+  }
+
+  it('reads the grounded state the runtime mirrored from the engine', () => {
+    const { win, probe } = runBundle(['player']);
+    win['__forgeGrounded'] = { player: true };
+    expect(probe()['player']).toBe('boolean:true');
+  });
+
+  it('answers false once the entity leaves the ground', () => {
+    const { win, probe } = runBundle(['player']);
+    win['__forgeGrounded'] = { player: true };
+    expect(probe()['player']).toBe('boolean:true');
+    win['__forgeGrounded'] = { player: false };
+    expect(probe()['player']).toBe('boolean:false');
+  });
+
+  it('answers false for an entity the engine has never reported', () => {
+    const { win, probe } = runBundle(['ghost']);
+    win['__forgeGrounded'] = { player: true };
+    expect(probe()['ghost']).toBe('boolean:false');
+  });
+
+  it('answers false before any event has arrived, rather than throwing', () => {
+    const { probe } = runBundle(['player']);
+    // `__forgeGrounded` is only created when the first
+    // CHARACTER_GROUNDED_CHANGED lands, so every script's first frame runs
+    // against an absent global.
+    expect(probe()['player']).toBe('boolean:false');
+  });
+
+  it('returns a real boolean, not the raw stored value', () => {
+    const { win, probe } = runBundle(['player']);
+    win['__forgeGrounded'] = { player: 'yes' };
+    expect(probe()['player']).toBe('boolean:true');
+  });
+});
