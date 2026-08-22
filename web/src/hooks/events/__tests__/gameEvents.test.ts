@@ -22,9 +22,19 @@ vi.mock('@/lib/scripting/useScriptRunner', () => ({
 // The diagnostics arm's only observable effect is the toast, so that is what is
 // mocked: the sentence the player reads IS the deliverable of review finding #2,
 // and asserting on it here is what keeps the copy under test.
+//
+// BOTH toast entry points are mocked, and WHICH one the arm reaches for is
+// itself pinned. `showError` inherits sonner's 4s default, which cannot hold a
+// message that names entities and asks for a two-step Inspector fix; and because
+// the engine emits this diagnostic only on an Edit->Play transition, a
+// self-dismissing copy cannot be recalled without stopping and playing again.
+// A regression to the transient call has to fail here rather than ship a
+// warning nobody can finish reading.
 const mockShowError = vi.fn();
+const mockShowPersistentError = vi.fn();
 vi.mock('@/lib/toast', () => ({
   showError: (message: string) => mockShowError(message),
+  showPersistentError: (message: string) => mockShowPersistentError(message),
   showSuccess: vi.fn(),
   showInfo: vi.fn(),
 }));
@@ -612,8 +622,10 @@ describe('handleGameEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(mockShowError).toHaveBeenCalledTimes(1);
-      const message = mockShowError.mock.calls[0][0] as string;
+      expect(mockShowPersistentError).toHaveBeenCalledTimes(1);
+      // The transient variant would put this sentence on a 4s timer.
+      expect(mockShowError).not.toHaveBeenCalled();
+      const message = mockShowPersistentError.mock.calls[0][0] as string;
       expect(message).toContain('Player has no physics');
       expect(message).toContain('Physics > Enabled');
       // The raw engine id is not what the player calls the entity.
@@ -634,7 +646,7 @@ describe('handleGameEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(mockShowError).not.toHaveBeenCalled();
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
     });
 
     it('handles the event but warns when the payload cannot be read', () => {
@@ -651,7 +663,7 @@ describe('handleGameEvent', () => {
       // Still `true`: the name IS this handler's, so returning false would make
       // the hub report an unknown event and hide the real problem.
       expect(result).toBe(true);
-      expect(mockShowError).not.toHaveBeenCalled();
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('CHARACTER_CONTROLLER_DIAGNOSTICS'));
       warn.mockRestore();
     });
@@ -666,7 +678,7 @@ describe('handleGameEvent', () => {
         mockSetGet.get
       );
 
-      expect(mockShowError.mock.calls[0][0]).toContain('e-2 has no physics');
+      expect(mockShowPersistentError.mock.calls[0][0]).toContain('e-2 has no physics');
     });
 
     it('does not take a name off the scene graph prototype', () => {
@@ -683,8 +695,8 @@ describe('handleGameEvent', () => {
         mockSetGet.get
       );
 
-      expect(mockShowError.mock.calls[0][0]).toContain('constructor has no physics');
-      expect(mockShowError.mock.calls[0][0]).not.toContain('Object');
+      expect(mockShowPersistentError.mock.calls[0][0]).toContain('constructor has no physics');
+      expect(mockShowPersistentError.mock.calls[0][0]).not.toContain('Object');
     });
   });
 });

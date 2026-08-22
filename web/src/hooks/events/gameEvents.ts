@@ -11,7 +11,7 @@ import { parseEmittedGameComponent } from '@/lib/engine/gameComponentWire';
 import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
 import { setCharacterGrounded } from '@/lib/scripting/groundedRegistry';
 import { parseSkippedCharacters, describeSkippedCharacters } from '@/lib/engine/characterDiagnostics';
-import { showError } from '@/lib/toast';
+import { showPersistentError } from '@/lib/toast';
 import { castPayload, type SetFn, type GetFn } from './types';
 
 /**
@@ -154,11 +154,16 @@ export function handleGameEvent(
         return true;
       }
       // Changes-only, and the change to an EMPTY list is how this learns a
-      // scene was repaired. There is nothing to show for it: the toast is
-      // transient, so "fixed" is simply the absence of the next one.
+      // scene was repaired. There is nothing to show for it: this toast is
+      // dismissed by hand, so "fixed" is simply the absence of the next one.
       if (skipped.length === 0) return true;
       const { nodes } = useEditorStore.getState().sceneGraph;
-      showError(
+      // Persistent, not the 4s default. The message names entities and asks for
+      // a two-step fix in the Inspector, and the engine emits this diagnostic
+      // only on an Edit->Play transition — so a toast that self-dismisses takes
+      // the only copy of the instructions with it and cannot be recalled without
+      // stopping and pressing Play again.
+      showPersistentError(
         describeSkippedCharacters(skipped, entityId =>
           Object.hasOwn(nodes, entityId) ? nodes[entityId].name : undefined
         )
