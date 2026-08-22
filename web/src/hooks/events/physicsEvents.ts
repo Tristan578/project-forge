@@ -57,6 +57,129 @@ function applyPrimaryPhysics(entityId: string, physData: PhysicsData, enabled: b
   });
 }
 
+const JOINT_TYPES: readonly JointData['jointType'][] = [
+  'fixed',
+  'revolute',
+  'spherical',
+  'prismatic',
+  'rope',
+  'spring',
+];
+
+function isJointType(value: unknown): value is JointData['jointType'] {
+  return (
+    typeof value === 'string' && (JOINT_TYPES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Read a `[f32; 3]` off the wire.
+ *
+ * Indexed, NOT `.every`: a callback form is never invoked for an array hole, so
+ * `[1, , 3].every(Number.isFinite)` is `true` and the guard would narrow to a
+ * tuple type promising a slot that is not there.
+ */
+function wireTriple(value: unknown): [number, number, number] | null {
+  if (!Array.isArray(value) || value.length !== 3) return null;
+  const out: number[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const n = value[i];
+    if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+    out.push(n);
+  }
+  return [out[0], out[1], out[2]];
+}
+
+/** `Option<JointLimits>` — absent, null and malformed all mean "no limits". */
+function wireLimits(value: unknown): JointData['limits'] {
+  if (typeof value !== 'object' || value === null) return null;
+  const { min, max } = value as Record<string, unknown>;
+  if (typeof min !== 'number' || !Number.isFinite(min)) return null;
+  if (typeof max !== 'number' || !Number.isFinite(max)) return null;
+  return { min, max };
+}
+
+/** `Option<JointMotor>` — absent, null and malformed all mean "no motor". */
+function wireMotor(value: unknown): JointData['motor'] {
+  if (typeof value !== 'object' || value === null) return null;
+  const { targetVelocity, maxForce } = value as Record<string, unknown>;
+  if (typeof targetVelocity !== 'number' || !Number.isFinite(targetVelocity)) return null;
+  if (typeof maxForce !== 'number' || !Number.isFinite(maxForce)) return null;
+  return { targetVelocity, maxForce };
+}
+
+/**
+ * Parse one entry of the 3D `QUERY_JOINTS_LIST` answer.
+ *
+ * `process_joint_queries` serializes a local `JointInfo` that FLATTENS
+ * `JointData` next to `entity_id`, and both carry `rename_all = "camelCase"`,
+ * so the wire is `{ entityId, jointType, connectedEntityId, anchorSelf,
+ * anchorOther, axis, limits, motor }`. Parsed rather than cast: a cast
+ * type-checks and is wrong at runtime, which is how the emitted game-component
+ * shape reached the inspector as `undefined` fields (PF-1141).
+ */
+function parseJointWire(payload: unknown): { entityId: string; data: JointData } | null {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;
+  const wire = payload as Record<string, unknown>;
+
+  const entityId = wire.entityId;
+  if (typeof entityId !== 'string' || entityId.length === 0) return null;
+
+  const connectedEntityId = wire.connectedEntityId;
+  if (typeof connectedEntityId !== 'string') return null;
+
+  const jointType = wire.jointType;
+  if (!isJointType(jointType)) return null;
+
+  const anchorSelf = wireTriple(wire.anchorSelf);
+  const anchorOther = wireTriple(wire.anchorOther);
+  const axis = wireTriple(wire.axis);
+  if (!anchorSelf || !anchorOther || !axis) return null;
+
+  return {
+    entityId,
+    data: {
+      jointType,
+      connectedEntityId,
+      anchorSelf,
+      anchorOther,
+      axis,
+      limits: wireLimits(wire.limits),
+      motor: wireMotor(wire.motor),
+    },
+  };
+}
+
+/**
+ * Route the 3D joint list into the one piece of 3D joint state the store has.
+ *
+ * `physicsSlice` keeps `primaryJoint` only — there is no per-entity 3D joint
+ * record — so the list is filtered down to the selected entity rather than
+ * mirrored wholesale into a map nothing reads.
+ *
+ * The list is the scene's complete set of jointed entities, so a selection that
+ * does NOT appear in it genuinely has no joint: writing `null` there is what
+ * stops a previously-shown joint from lingering in the inspector. With no
+ * selection there is no reader at all, and the answer is dropped.
+ *
+ * Routes to `setPrimaryJoint`, the state-only action `JOINT_CHANGED` already
+ * uses; the dispatching siblings would send a command straight back at the
+ * engine that just reported the joint.
+ */
+function applyJointList(entries: readonly unknown[]): void {
+  const primaryId = useEditorStore.getState().primaryId;
+  if (!primaryId) return;
+
+  let selected: JointData | null = null;
+  for (const entry of Array.from(entries)) {
+    const parsed = parseJointWire(entry);
+    if (!parsed || parsed.entityId !== primaryId) continue;
+    selected = parsed.data;
+    break;
+  }
+  useEditorStore.getState().setPrimaryJoint(selected);
+}
+
 /** Script-side raycast callback registered by the scripting runtime. */
 interface WindowWithScriptCallbacks {
   __scriptRaycastCallback?: (event: {
@@ -87,19 +210,31 @@ export function handlePhysicsEvent(
    * so both answers share one parser rather than growing a third joint wire
    * shape.
    *
+   * `QUERY_JOINTS_LIST` is the 3D counterpart. It was emitted by
+   * `process_joint_queries` with no browser listener at all for its whole life
+   * — the inbound half of the dead-vocabulary class, and the mirror image of
+   * the `PHYSICS2D_UPDATED` phantoms below: an emitted name nothing listens for
+   * looks identical to a scene that simply has no joints.
+   *
    * `Array.from` first: `JSON.stringify` writes a hole as `null` and
    * `for...of` yields `undefined` for one rather than skipping it, so an
    * unreadable slot has to be tolerated either way — materializing makes that
    * explicit instead of leaving it to the iteration form.
    */
   if (Array.isArray(data)) {
-    if (type !== 'QUERY_JOINTS2D_LIST') return false;
-    for (const entry of Array.from(data)) {
-      const parsed = parseJoint2dWire(entry);
-      if (!parsed) continue;
-      useEditorStore.getState().applyJoint2dFromEngine(parsed.entityId, parsed.data);
+    if (type === 'QUERY_JOINTS2D_LIST') {
+      for (const entry of Array.from(data)) {
+        const parsed = parseJoint2dWire(entry);
+        if (!parsed) continue;
+        useEditorStore.getState().applyJoint2dFromEngine(parsed.entityId, parsed.data);
+      }
+      return true;
     }
-    return true;
+    if (type === 'QUERY_JOINTS_LIST') {
+      applyJointList(data);
+      return true;
+    }
+    return false;
   }
 
   switch (type) {
@@ -170,6 +305,7 @@ export function handlePhysicsEvent(
      * hub log it as an unknown engine event.
      */
     case 'QUERY_JOINTS2D_LIST':
+    case 'QUERY_JOINTS_LIST':
       return true;
 
     case 'COLLISION_EVENT': {

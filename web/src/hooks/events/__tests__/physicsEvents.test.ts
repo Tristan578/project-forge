@@ -493,9 +493,9 @@ describe('handlePhysicsEvent', () => {
   /**
    * The reply channel for `list_joints_2d`, which answered `Not yet implemented`
    * until PF-1194 while the 3D surface had two read commands. The 3D
-   * `QUERY_JOINTS_LIST` still has no listener at all, so its answer goes nowhere
-   * — the same dead-vocabulary shape this ticket family exists to close, and the
-   * reason this one is wired the moment it starts being emitted.
+   * `QUERY_JOINTS_LIST` had been emitted with no listener at all for its whole
+   * life — the same dead-vocabulary shape in the inbound direction — and is
+   * wired alongside it; see the `QUERY_JOINTS_LIST` block below.
    */
   describe('QUERY_JOINTS2D_LIST', () => {
     it('applies every joint in the list', () => {
@@ -606,6 +606,162 @@ describe('handlePhysicsEvent', () => {
 
       expect(result).toBe(true);
       expect(actions.applyJoint2dFromEngine).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The 3D counterpart, emitted by `process_joint_queries` and — until this
+   * change — listened for by nothing at all, so `list_joints` answered into the
+   * void and `useEngineEvents` logged it as an unknown engine event.
+   *
+   * `physicsSlice` holds `primaryJoint` and nothing else for 3D joints, so the
+   * list is narrowed to the selection rather than mirrored into a record with
+   * no reader.
+   */
+  describe('QUERY_JOINTS_LIST', () => {
+    const REVOLUTE = {
+      entityId: 'crate-1',
+      jointType: 'revolute',
+      connectedEntityId: 'anchor-1',
+      anchorSelf: [0, 1, 0],
+      anchorOther: [0, -1, 0],
+      axis: [0, 0, 1],
+      limits: { min: -1.5, max: 1.5 },
+      motor: { targetVelocity: 2, maxForce: 40 },
+    };
+
+    it('writes the selected entity joint to primaryJoint', () => {
+      actions.primaryId = 'crate-1';
+
+      const result = handlePhysicsEvent(
+        'QUERY_JOINTS_LIST',
+        [{ ...REVOLUTE, entityId: 'crate-9', connectedEntityId: 'anchor-9' }, REVOLUTE],
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledTimes(1);
+      // Whole-object assertion: the shape IS the behaviour, and
+      // `objectContaining` is blind to a field the parser invented alongside.
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith({
+        jointType: 'revolute',
+        connectedEntityId: 'anchor-1',
+        anchorSelf: [0, 1, 0],
+        anchorOther: [0, -1, 0],
+        axis: [0, 0, 1],
+        limits: { min: -1.5, max: 1.5 },
+        motor: { targetVelocity: 2, maxForce: 40 },
+      });
+      // `entityId` is the routing key, not joint state — it must not survive
+      // into `JointData`, whose fields the inspector writes straight back.
+      expect(actions.setPrimaryJoint.mock.calls[0][0]).not.toHaveProperty('entityId');
+    });
+
+    it('clears primaryJoint when the selection is absent from the list', () => {
+      // The list is the scene's COMPLETE set of jointed entities, so a
+      // selection missing from it has no joint — leaving the previous one in
+      // place would show a joint the entity does not have.
+      actions.primaryId = 'crate-2';
+
+      expect(
+        handlePhysicsEvent('QUERY_JOINTS_LIST', [REVOLUTE], mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledTimes(1);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
+    });
+
+    it('drops the answer when nothing is selected', () => {
+      // `primaryJoint` has no reader without a selection, and writing through
+      // would hand the next entity the user picks a foreign joint as its
+      // inspector state.
+      actions.primaryId = null;
+
+      expect(
+        handlePhysicsEvent('QUERY_JOINTS_LIST', [REVOLUTE], mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+    });
+
+    it('reads Option fields that arrive absent or null as null', () => {
+      actions.primaryId = 'crate-1';
+      const { limits: _limits, motor: _motor, ...noOptions } = REVOLUTE;
+
+      handlePhysicsEvent(
+        'QUERY_JOINTS_LIST',
+        [{ ...noOptions, motor: null }],
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith({
+        jointType: 'revolute',
+        connectedEntityId: 'anchor-1',
+        anchorSelf: [0, 1, 0],
+        anchorOther: [0, -1, 0],
+        axis: [0, 0, 1],
+        limits: null,
+        motor: null,
+      });
+    });
+
+    it('skips entries it cannot read and still finds the selection', () => {
+      actions.primaryId = 'crate-1';
+      // A hole is the input under test: `JSON.stringify` writes one as `null`
+      // and `for...of` yields `undefined` for one rather than skipping it, so
+      // an indexed read has to tolerate both. An invented `jointType` and a
+      // two-element `axis` are the two shapes a cast would wave through.
+      const list = [
+        ,
+        null,
+        'not-an-object',
+        { ...REVOLUTE, entityId: 'crate-1', jointType: 'wobble' },
+        { ...REVOLUTE, entityId: 'crate-1', axis: [0, 0] },
+        { ...REVOLUTE, entityId: 'crate-1', anchorSelf: [0, , 1] },
+        REVOLUTE,
+      ];
+
+      expect(
+        handlePhysicsEvent('QUERY_JOINTS_LIST', list, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledTimes(1);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(
+        expect.objectContaining({ connectedEntityId: 'anchor-1', axis: [0, 0, 1] })
+      );
+    });
+
+    it('swallows a payload that is not a list rather than throwing', () => {
+      actions.primaryId = 'crate-1';
+
+      const result = handlePhysicsEvent(
+        'QUERY_JOINTS_LIST',
+        { entityId: 'crate-1' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      // Handled — the name is ours, so passing it on would make the hub log it
+      // as an unknown engine event — but nothing is written.
+      expect(result).toBe(true);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+    });
+
+    it('routes to the state-only action, never a dispatching one', () => {
+      actions.primaryId = 'crate-1';
+
+      handlePhysicsEvent('QUERY_JOINTS_LIST', [REVOLUTE], mockSetGet.set, mockSetGet.get);
+
+      expect(actions.setPrimaryJoint).toHaveBeenCalledTimes(1);
+      expect(actions.setJoint).not.toHaveBeenCalled();
+    });
+
+    it('reports an array on an unrelated name as unhandled', () => {
+      // The array branch runs before the switch, so a name it does not own must
+      // fall through to `false` rather than being swallowed by the narrowing.
+      expect(
+        handlePhysicsEvent('SOME_OTHER_LIST', [REVOLUTE], mockSetGet.set, mockSetGet.get)
+      ).toBe(false);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
     });
   });
 

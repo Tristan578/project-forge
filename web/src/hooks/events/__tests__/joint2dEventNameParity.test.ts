@@ -68,7 +68,7 @@ describe('2D joint reply channels match the engine', () => {
     expect(query).toContain('emit_joint2d_changed(&entity_id, joint)');
   });
 
-  describe('physicsEvents answers on both names', () => {
+  describe('physicsEvents answers on every emitted joint name', () => {
     let actions: ReturnType<typeof createMockActions>;
 
     beforeEach(() => {
@@ -101,6 +101,49 @@ describe('2D joint reply channels match the engine', () => {
         expect.objectContaining({ targetEntityId: 'b', jointType: 'revolute' }),
       );
       expect(actions.setJoint2d).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The 3D list channel gets its own case rather than a row in the table
+     * above: it routes to `setPrimaryJoint`, so folding it in would have to
+     * weaken the assertion the table exists to make.
+     *
+     * The literal is pinned the same way — `process_joint_queries` spells
+     * `QUERY_JOINTS_LIST` inline, and nothing else can see both sides of that
+     * name at once.
+     */
+    it('QUERY_JOINTS_LIST routes to setPrimaryJoint on the name the engine emits', () => {
+      const query = read(join('bridge', 'query.rs'));
+      const body = query.slice(query.indexOf('pub(super) fn process_joint_queries'));
+      expect(body.length, 'process_joint_queries missing from bridge/query.rs').toBeGreaterThan(0);
+      const emit = /emit_event\("([A-Z0-9_]+)"/.exec(body);
+      expect(emit, 'process_joint_queries does not emit').not.toBeNull();
+
+      const mock = createMockSetGet();
+      actions.primaryId = 'a';
+
+      expect(
+        handlePhysicsEvent(
+          emit![1],
+          [
+            {
+              entityId: 'a',
+              jointType: 'revolute',
+              connectedEntityId: 'b',
+              anchorSelf: [0, 0, 0],
+              anchorOther: [0, 0, 0],
+              axis: [0, 1, 0],
+            },
+          ],
+          mock.set,
+          mock.get,
+        ),
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledTimes(1);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(
+        expect.objectContaining({ connectedEntityId: 'b', jointType: 'revolute' }),
+      );
+      expect(actions.setJoint).not.toHaveBeenCalled();
     });
   });
 });
