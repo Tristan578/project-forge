@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
 import { engineEntityId, waitForEngineFrame, sendCommands } from './engineDispatch';
+import { SPAWNABLE_SHAPES } from '../entityShape';
 
 /**
  * PF-1138 — build the world the design asked for.
@@ -36,8 +37,15 @@ import { engineEntityId, waitForEngineFrame, sendCommands } from './engineDispat
  * Only shapes `EntityType::from_str` maps to a mesh the renderer actually draws.
  * `terrain`, `sprite`, `gltf_model` and friends deserialize and are then skipped
  * by the spawn system without a word.
+ *
+ * Built from the shared `SPAWNABLE_SHAPES` rather than restated, because
+ * `systems/world.ts` feeds each descriptor's `entityType` straight into the
+ * `physics_enable` step, whose schema validates `shape` against that same list.
+ * Two hand-written copies that must silently agree is how a shape added to one
+ * and not the other turns every piece of world geometry into an `INVALID_INPUT`
+ * — the whole level losing its colliders, with nothing naming the cause.
  */
-const spawnableShape = z.enum(['cube', 'sphere', 'plane', 'cylinder', 'cone', 'torus', 'capsule']);
+const spawnableShape = z.enum(SPAWNABLE_SHAPES);
 
 /** Finite, inside f32's usable range, and not a denormal masquerading as zero. */
 const coordinate = z.number().finite().min(-10_000).max(10_000);

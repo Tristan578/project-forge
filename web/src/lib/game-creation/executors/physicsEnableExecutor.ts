@@ -5,7 +5,7 @@ import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../typ
 import { makeStepError, successResult, failResult } from './shared';
 import { engineEntityId, waitForEngineFrame, sendCommands, type EngineCommand } from './engineDispatch';
 import { ENABLEABLE_ROLES, physicsProfileForRole } from '../physicsRoles';
-import { COLLIDER_FOR_SHAPE, SPAWNABLE_SHAPES, type SpawnShape } from '../entityShape';
+import { COLLIDER_FOR_SHAPE, SPAWNABLE_SHAPES } from '../entityShape';
 
 /**
  * Turn spawned entities into physical bodies (PF-1213).
@@ -106,7 +106,7 @@ export const physicsEnableExecutor: ExecutorDefinition = {
 
       const colliderShape =
         profile.colliderShape
-        ?? (entity.shape ? COLLIDER_FOR_SHAPE[entity.shape as SpawnShape] : undefined)
+        ?? (entity.shape ? COLLIDER_FOR_SHAPE[entity.shape] : undefined)
         ?? 'cuboid';
 
       toggleCommands.push({
