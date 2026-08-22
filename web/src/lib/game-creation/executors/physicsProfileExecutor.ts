@@ -118,15 +118,21 @@ export const physicsProfileExecutor: ExecutorDefinition = {
     // observe a write made by an earlier step — it is frozen at pipeline start,
     // and every entity the pipeline itself spawned is missing from it.
     //
-    // On the movement pipeline `physics_profile` runs BEFORE `character_setup`
-    // (see systems/movement.ts), so the controller usually does not exist yet
-    // and the merge below is a no-op. It is still read live rather than
-    // defaulted: this executor is also invoked directly with explicit
-    // `entityIds` against an already-built scene, where the entity DOES have a
-    // controller, and merging against `{}` there would rebuild it from
-    // `Default` and reset every field the caller did not name — the PF-1118
-    // data loss. Reading live is correct in both orders; the snapshot is
-    // correct in neither.
+    // Reading live is what makes the merge below correct, and since the
+    // Phase 3a deferral (planBuilder) it is also what makes the merge REACH
+    // anything. `physics_profile` is re-planned after every `physics_enable`,
+    // which on a movement plan puts it AFTER `character_setup` — so the player
+    // DOES have a CharacterController by the time this runs, and
+    // `applyPhysicsProfile` dispatches `update_game_component` onto it on
+    // every generated run. The numbers agree by construction: both paths go
+    // through `resolvePhysicsProfile(feelDirective, config)`, so the merge
+    // re-sends the speed/jumpHeight/gravityScale `character_setup` already
+    // wrote and leaves the fields it does not name (`canDoubleJump`) alone.
+    // That last part is why the merge must read live rather than default:
+    // this executor is also invoked directly with explicit `entityIds`
+    // against an already-built scene, and merging against `{}` would rebuild
+    // the controller from `Default` and reset every field the caller did not
+    // name — the PF-1118 data loss. The snapshot is correct in neither order.
     //
     // Read through `ctx.getStore()` rather than importing the store here.
     // Importing it — statically OR dynamically — creates a real module edge
