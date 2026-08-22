@@ -1080,11 +1080,14 @@ fn handle_remove_tilemap_data(payload: serde_json::Value) -> super::CommandResul
 /// `u32::MAX`.
 ///
 /// `v.as_u64()? as usize` TRUNCATES on wasm32, where `usize` is 32 bits: an `x`
-/// of 4_294_967_299 wraps to 3, and `tile_flat_index` then accepts it as an
-/// ordinary in-range cell and writes a tile the caller never asked for. Nothing
-/// reports it — `dispatchCommand` returns void — so the overflow guard the rest
-/// of this module carries was reachable only by callers who had already been
-/// truncated into range.
+/// of 4_294_967_299 wraps to 3. The only bounds check on this path is
+/// `crate::core::tilemap::tile_flat_index` — this module carries none of its
+/// own — and it is handed the already-wrapped value, so it accepts 3 as an
+/// ordinary in-range cell and a tile the caller never asked for is written.
+/// Nothing reports it: `dispatchCommand` returns void.
+///
+/// `tileIndex` was worse: it was cast `as u32`, so it wrapped on EVERY target,
+/// the 64-bit test host included.
 ///
 /// The bound is `u32` on EVERY target rather than `usize::try_from`, so the
 /// native suite exercises the same rejection wasm32 gets. A `usize::try_from`
