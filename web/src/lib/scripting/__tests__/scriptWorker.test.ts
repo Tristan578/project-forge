@@ -1077,8 +1077,114 @@ describe('scriptWorker', () => {
     expect(documented).toBe(TILEMAP_FILL_MAX_CELLS);
 
     // The sentence must keep naming the test that pins it, or the pointer rots
-    // while the number happens to stay right.
-    expect(src).toContain('__tests__/scriptWorker.test.ts');
+    // while the number happens to stay right. Name THIS test, not just the
+    // file: two comments in forgeTypes.ts point here, so a bare
+    // '__tests__/scriptWorker.test.ts' is satisfied by the other one and
+    // deleting this pointer would stay green. Flatten first -- the sentence
+    // wraps across comment lines.
+    const flatSrc = src.replace(/^\s*\*\s?/gm, ' ').replace(/\s+/g, ' ');
+    expect(flatSrc).toContain(
+      'the "forgeTypes fillRect cap prose" test in __tests__/scriptWorker.test.ts',
+    );
+  });
+
+  it('forgeTypes tile field bound prose matches the exported constant', async () => {
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    // Fail closed on an unreadable file, same as the cap pin above.
+    const src = readFileSync(join(__dirname, '..', 'forgeTypes.ts'), 'utf8');
+
+    // The tilemap namespace comment states the u32 ceiling as a literal, so it
+    // is a second copy of TILE_FIELD_MAX. Monaco shows that comment to script
+    // authors, and it is the only place the bound is written in prose.
+    //
+    // Pin the SCOPE with the number, not the number alone. The bound holds for
+    // the three writing calls and for nothing else: getTile returns null for an
+    // out-of-range coordinate and the coordinate-conversion helpers bound
+    // nothing, so a sentence that said "every tilemap call" would be a promise
+    // of a named error that two thirds of the namespace does not keep. A pin on
+    // the digits alone cannot tell those two sentences apart.
+    //
+    // Flatten first: the claim wraps across comment lines, so matching the raw
+    // file would pin only where the line breaks happen to fall.
+    const flat = src.replace(/^\s*\*\s?/gm, ' ').replace(/\s+/g, ' ');
+    const matches = [...flat.matchAll(
+      /setTile, fillRect and clearTile floor every x, y, w, h, layer and tileId they are given; each must be >= 0 and must not exceed ([\d,]+)/g
+    )];
+    if (matches.length !== 1) {
+      throw new Error(
+        'forgeTypes.ts must carry exactly one sentence scoping the tile field bound to setTile, ' +
+        `fillRect and clearTile over x, y, w, h, layer and tileId, found ${matches.length}. ` +
+        'Zero means the pin has nothing to check (the wording drifted, or a call was added to or ' +
+        'dropped from the list); more than one means a second copy appeared unpinned.'
+      );
+    }
+
+    // And the counter-claim: getTile is the call authors reach for first, and
+    // it is the one the bound does not cover.
+    expect(flat).toContain('getTile floors nothing and throws nothing');
+
+    const documented = Number(matches[0][1].replace(/,/g, ''));
+    expect(Number.isInteger(documented)).toBe(true);
+    expect(documented).toBe(TILE_FIELD_MAX);
+
+    // The sentence must keep naming the constant it mirrors and the test that
+    // pins it, or the pointer rots while the number happens to stay right.
+    // Name THIS test, not just the file: the fillRect cap comment further down
+    // points here too, so a bare '__tests__/scriptWorker.test.ts' would be
+    // satisfied by that one and deleting this pointer would stay green.
+    expect(src).toContain('TILE_FIELD_MAX');
+    expect(flat).toContain(
+      'the "forgeTypes tile field bound prose" test in __tests__/scriptWorker.test.ts',
+    );
+  });
+
+  it('script-api.md tile field bound prose matches the exported constant', async () => {
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    // Third copy of the same number, and the one a script author is most
+    // likely to be reading: forgeTypes.ts only reaches someone typing in
+    // Monaco. Fail closed on an unreadable file, same as the two pins above.
+    const src = readFileSync(
+      join(__dirname, '..', '..', '..', '..', '..', 'docs', 'reference', 'script-api.md'),
+      'utf8',
+    );
+
+    // Same reason the forgeTypes pin covers the scope and not just the digits:
+    // this sentence used to say "Every coordinate, layer and tile index",
+    // which promised a throw from getTile, which returns null instead.
+    const flat = src.replace(/\s+/g, ' ');
+    const matches = [...flat.matchAll(
+      /`setTile`, `fillRect` and `clearTile` floor every `x`, `y`, `w`, `h`, `layer` and `tileId` before sending[^.]*\. The floored value must then be at least `0` and must not exceed `([\d,]+)`/g
+    )];
+    if (matches.length !== 1) {
+      throw new Error(
+        'docs/reference/script-api.md must carry exactly one sentence scoping the tile field bound ' +
+        `to setTile, fillRect and clearTile over x, y, w, h, layer and tileId, found ${matches.length}. ` +
+        'Zero means the pin has nothing to check (the wording drifted, or a call was added to or ' +
+        'dropped from the list); more than one means a second copy appeared unpinned.'
+      );
+    }
+
+    const documented = Number(matches[0][1].replace(/,/g, ''));
+    expect(Number.isInteger(documented)).toBe(true);
+    expect(documented).toBe(TILE_FIELD_MAX);
+
+    // The read-side counter-claim and the fillRect far edge are the two parts
+    // of the contract a reader cannot infer from the bound itself.
+    expect(flat).toContain('`getTile` floors nothing and throws nothing');
+    expect(flat).toContain('`x + w - 1` and `y + h - 1` must each stay within the');
+
+    // And the pointer back here, named by test rather than by file for the
+    // same reason as the two forgeTypes pins.
+    expect(flat).toContain(
+      '"script-api.md tile field bound prose matches the exported constant" in ' +
+      'web/src/lib/scripting/__tests__/scriptWorker.test.ts',
+    );
   });
 
   it('forge.tilemap.resize throws and pushes nothing', async () => {
@@ -1164,6 +1270,220 @@ describe('scriptWorker', () => {
         message: expect.stringContaining('must be a finite number'),
       })
     );
+  });
+
+  it.each([
+    ['setTile', 'x', 'forge.tilemap.setTile("tm1", TOO_BIG, 0, 5)'],
+    ['setTile', 'y', 'forge.tilemap.setTile("tm1", 0, TOO_BIG, 5)'],
+    ['setTile', 'layer', 'forge.tilemap.setTile("tm1", 0, 0, 5, TOO_BIG)'],
+    ['setTile', 'tileId', 'forge.tilemap.setTile("tm1", 0, 0, TOO_BIG)'],
+    ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", TOO_BIG, 0)'],
+    ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", TOO_BIG, 0, 2, 2, 1)'],
+    ['fillRect', 'layer', 'forge.tilemap.fillRect("tm1", 0, 0, 2, 2, 1, TOO_BIG)'],
+  ])('forge.tilemap.%s rejects a %s past TILE_FIELD_MAX and pushes nothing', async (_api, param, call) => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      var TOO_BIG = ${TILE_FIELD_MAX} + 1;
+      ${call};
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The engine reads these with `as_u64()? as usize`, which TRUNCATES on
+    // wasm32: an x of TILE_FIELD_MAX + 4 arrived as 3 and was written as an
+    // ordinary in-range cell. The engine now refuses it (tile_field_u32), and
+    // refusing here too means the script author sees a named error instead of a
+    // command that vanishes.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        // The value as well as the field and the limit: the changeset and both
+        // doc comments claim the error names all three, and asserting only the
+        // first two leaves that claim held by prose. Deleting the `, got ...`
+        // half of tileInt's message used to keep every test green.
+        message: expect.stringContaining(
+          `${param} must be <= ${TILE_FIELD_MAX}, got ${TILE_FIELD_MAX + 1}`,
+        ),
+      })
+    );
+  });
+
+  it('forge.tilemap.setTile accepts TILE_FIELD_MAX itself', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.setTile("tm1", ${TILE_FIELD_MAX}, ${TILE_FIELD_MAX}, ${TILE_FIELD_MAX});
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The bound is inclusive on both sides of the language boundary. A guard
+    // that refused TILE_FIELD_MAX would satisfy every rejection case above
+    // while breaking legitimate callers, so the boundary is pinned from both
+    // directions.
+    expect(pushedCommands()).toEqual([
+      {
+        cmd: 'paint_tile',
+        entityId: 'tm1',
+        layer: 0,
+        x: TILE_FIELD_MAX,
+        y: TILE_FIELD_MAX,
+        tileIndex: TILE_FIELD_MAX,
+      },
+    ]);
+  });
+
+  it('forge.tilemap.setTile floors BEFORE bounding, so MAX + 0.5 rides as MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.setTile("tm1", ${TILE_FIELD_MAX} + 0.5, 0, 5);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // tileInt's docstring states this order of operations: the bound is checked
+    // AFTER flooring, so a fractional value is judged on the integer the engine
+    // would actually receive. Checking the bound first would reject this call,
+    // and every other test in the file would still pass -- the two orders differ
+    // only in the half-open interval (MAX, MAX + 1), which nothing else visits.
+    //
+    // It is not a hypothetical interval. worldToTile-style arithmetic produces
+    // fractional coordinates as a matter of course, and flooring them is the
+    // whole reason tileInt floors rather than refusing non-integers outright.
+    expect(pushedCommands()).toEqual([
+      { cmd: 'paint_tile', entityId: 'tm1', layer: 0, x: TILE_FIELD_MAX, y: 0, tileIndex: 5 },
+    ]);
+  });
+
+  it('forge.tilemap.setTile still rejects a fractional value whose floor passes TILE_FIELD_MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.setTile("tm1", ${TILE_FIELD_MAX} + 1.5, 0, 5);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The other side of the same interval: flooring first must not become a way
+    // to smuggle an out-of-range value through. The message reports the value
+    // as WRITTEN, fraction included, rather than the floored one -- the author
+    // is looking for the expression they typed, not for what tileInt made of it.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(
+          `x must be <= ${TILE_FIELD_MAX}, got ${TILE_FIELD_MAX + 1.5}`,
+        ),
+      })
+    );
+  });
+
+  it('forge.tilemap.fillRect rejects a rect whose far x edge passes TILE_FIELD_MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", ${TILE_FIELD_MAX} - 1, 0, 3, 1, 7);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // Origin and size are each inside the bound; the cells this emits are not.
+    // The engine reads the DERIVED coordinate, so bounding the two inputs
+    // separately would let the whole fill be refused with nothing said.
+    // The message names the derived expression, the value it reached and the
+    // limit, because the author never wrote that number down -- it is the one
+    // rejection here that cannot be read off the call.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(
+          `x + w - 1 = ${TILE_FIELD_MAX + 1} exceeds ${TILE_FIELD_MAX}`,
+        ),
+      })
+    );
+  });
+
+  it('forge.tilemap.fillRect rejects a rect whose far y edge passes TILE_FIELD_MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", 0, ${TILE_FIELD_MAX} - 1, 1, 3, 7);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // The two axes are checked separately so the error names the one that
+    // actually overflowed. A single combined check could only say "the rect",
+    // which sends the author looking at both axes.
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        message: expect.stringContaining(
+          `y + h - 1 = ${TILE_FIELD_MAX + 1} exceeds ${TILE_FIELD_MAX}`,
+        ),
+      })
+    );
+  });
+
+  it('forge.tilemap.fillRect accepts a rect whose far edge lands exactly on TILE_FIELD_MAX', async () => {
+    const handler = await setupWorker();
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const code = `function onStart() {
+      forge.tilemap.fillRect("tm1", ${TILE_FIELD_MAX} - 2, 0, 3, 1, 7);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // Mirror of the engine's `fill_accepts_u32_max_in_every_cell_field`: the
+    // far edge is INCLUSIVE, so a `>=` guard would refuse this legal fill while
+    // still passing both rejection cases above -- the rejecting side alone
+    // pins nothing. Asserting the whole payload rather than
+    // `expect.objectContaining` is what pins each emitted cell; the last one
+    // sits exactly on the bound.
+    expect(pushedCommands()).toEqual([
+      {
+        cmd: 'fill_tiles',
+        entityId: 'tm1',
+        layer: 0,
+        tiles: [
+          { x: TILE_FIELD_MAX - 2, y: 0, tileIndex: 7 },
+          { x: TILE_FIELD_MAX - 1, y: 0, tileIndex: 7 },
+          { x: TILE_FIELD_MAX, y: 0, tileIndex: 7 },
+        ],
+      },
+    ]);
+  });
+
+  it('scriptWorker TILE_FIELD_MAX matches the engine bound', async () => {
+    const { TILE_FIELD_MAX } = await import('../scriptWorker');
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    // This constant is a second copy of the engine's bound, and the two are in
+    // different languages, so nothing but a textual read can keep them in step.
+    // Fail closed: readFileSync throws on an unreadable path, and a missing
+    // match throws rather than passing vacuously.
+    const src = readFileSync(
+      join(__dirname, '..', '..', '..', '..', '..', 'engine', 'src', 'core', 'commands', 'sprites.rs'),
+      'utf8',
+    );
+    const helper = /fn tile_field_u32\([\s\S]*?\n}/.exec(src);
+    if (!helper) {
+      throw new Error('tile_field_u32 not found in engine/src/core/commands/sprites.rs');
+    }
+    // The bound is the integer type the helper converts into.
+    const target = /(u\d+)::try_from/.exec(helper[0]);
+    if (!target) {
+      throw new Error(`tile_field_u32 no longer bounds via try_from: ${helper[0]}`);
+    }
+    const bits = Number(target[1].slice(1));
+    expect(TILE_FIELD_MAX).toBe(2 ** bits - 1);
   });
 
   // ─── Forge Sprite API ──────────────────────────────────────────

@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  buildDefaultGroundDescriptor,
   buildWorldGeometry,
   MAX_PLATFORMS,
   MAX_WORLD_DESCRIPTORS,
@@ -358,5 +359,36 @@ describe('buildWorldGeometry — two usable spellings that disagree', () => {
 
     expect(descriptors.some(d => d.name.startsWith('Wall'))).toBe(true);
     expect(warnings.filter(w => w.includes('"walls"'))).toHaveLength(1);
+  });
+});
+
+describe('buildDefaultGroundDescriptor', () => {
+  // The module exists to stop `auto_polish`'s ground repair and `world_build`'s
+  // ground from drifting apart, and that contract is an EQUIVALENCE — the
+  // repair must lay the same slab the builder would have. Until now nothing
+  // asserted it directly: both sides were held by matching literals in two
+  // other suites, which is the coincidence the shared module was meant to
+  // replace, not a check on it.
+  for (const projectType of ['2d', '3d'] as const) {
+    it(`matches the ground buildWorldGeometry emits for a default ${projectType} world`, () => {
+      const { descriptors, warnings } = buildWorldGeometry({
+        worldType: 'flat',
+        worldConfig: {},
+        projectType,
+      });
+
+      // Guard the premise: if the builder ever stopped putting the ground
+      // first, the equivalence below would compare the repair against a
+      // platform and pass or fail for the wrong reason.
+      expect(descriptors[0]?.role).toBe('ground');
+      expect(warnings).toEqual([]);
+      expect(buildDefaultGroundDescriptor(projectType)).toEqual(descriptors[0]);
+    });
+  }
+
+  it('sizes 2D and 3D differently — a single shared slab would satisfy the pair above', () => {
+    // Both cases above would still pass if the function ignored its argument
+    // AND the builder did too. This is the probe that keeps them honest.
+    expect(buildDefaultGroundDescriptor('2d')).not.toEqual(buildDefaultGroundDescriptor('3d'));
   });
 });

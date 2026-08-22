@@ -86,7 +86,19 @@ beforeEach(() => {
 describe('physicsProfileExecutor', () => {
   it('has correct metadata', () => {
     expect(physicsProfileExecutor.name).toBe('physics_profile');
-    expect(physicsProfileExecutor.userFacingErrorMessage).toBeDefined();
+    // The exact sentence, not `toBeDefined()`. `OrchestratorPanel` renders this
+    // under the failed step, so it is the whole of what a user is told; a
+    // presence check would pass just as happily on the bare "Your game will use
+    // default physics" that said nothing about what to do next. Every noun is a
+    // label that is on screen, and the last sentence exists because re-running
+    // the build calls `newScene()` and would throw away the hand fix.
+    expect(physicsProfileExecutor.userFacingErrorMessage).toBe(
+      'Could not tune how the game moves, so everything will use default physics. '
+      + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
+      + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+      + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
+    );
+    expect(physicsProfileExecutor.userFacingErrorMessage).not.toMatch(/try again/i);
   });
 
   it('maps floaty+slow to space_zero_g', async () => {
@@ -245,8 +257,9 @@ describe('physicsProfileExecutor', () => {
     expect(output.warning).toBe(
       'No entities had physics turned on, so the movement feel could not be applied. '
       + 'Things may not move or collide the way the design describes. '
-      + 'Select the player in the scene hierarchy and turn on Physics in the Inspector, '
-      + 'then re-run the build to apply the feel settings.',
+      + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
+      + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+      + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
     );
   });
 

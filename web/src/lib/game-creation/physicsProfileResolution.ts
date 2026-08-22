@@ -22,14 +22,17 @@ export const feelDirectiveSchema = z.object({
  * The single source of the feel -> physics-preset mapping.
  *
  * This lives outside any one executor because TWO steps on the movement
- * pipeline need the same answer. `physics_profile` writes the profile onto the
- * world, and `character_setup` builds the player's CharacterController from it.
- * They run in that order (see `systems/movement.ts`), and `applyPhysicsProfile`
- * deliberately only tunes a controller that ALREADY exists — so at the moment
- * `physics_profile` runs, the player has none and the controller half of the
- * profile is a guaranteed no-op. If `character_setup` then resolved the profile
- * its own way (or, as it used to, hardcoded one), a floaty space game and a
- * weighty RPG would produce byte-identical player movement.
+ * pipeline need the same answer. `character_setup` builds the player's
+ * CharacterController from it, and `physics_profile` writes the profile onto
+ * the world. Since planBuilder's Phase 3a deferral they run in THAT order —
+ * `physics_profile` is re-planned after every `physics_enable`, which puts it
+ * after `character_setup` — so `applyPhysicsProfile`, which only tunes a
+ * controller that ALREADY exists, finds the player's and merges the same
+ * speed/jumpForce/gravity onto it. Agreement is therefore load-bearing, not
+ * cosmetic: if `character_setup` resolved the profile its own way (or, as it
+ * used to, hardcoded one), the two steps would fight over the player's
+ * controller and a floaty space game and a weighty RPG would still produce
+ * byte-identical player movement.
  *
  * Sharing the resolver is what makes the two steps agree by construction rather
  * than by two copies of a table staying in sync by luck.
