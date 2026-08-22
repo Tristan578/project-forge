@@ -1267,3 +1267,172 @@ describe('buildPlan — physics enablement step (PF-1213)', () => {
     expect(table.slice(0, end)).toMatch(/^\s*physics_enable:\s*\{/m);
   });
 });
+
+/**
+ * Phase 3a — the deferred movement feel pass.
+ *
+ * `physics_profile` finds the bodies it tunes through
+ * `resolveStepOutputs('physics_enable')`, which can only report steps that have
+ * ALREADY run. Two `physics_enable` steps exist on a full plan (the Phase 2.5
+ * cast, and the one `systems/world.ts` plans for the geometry it mints), and
+ * `topoSortSystems` imposes no order between `world` and `movement` — both are
+ * `core`, so the order is whatever the GDD happened to list.
+ *
+ * The integration test exercises exactly one of those shapes: the
+ * `crystalRun3d()` fixture, which lists movement first. That fixture passing
+ * says nothing about the other shapes, so a regression that re-inlined the feel
+ * pass into the systems loop would only be caught if the fixture's own GDD
+ * order happened to expose it. These cases pin the invariant directly, over the
+ * plan shapes the fixture does not have.
+ */
+describe('buildPlan — the deferred feel pass (PF-1226)', () => {
+  type PlanStep = { id: string; executor: string; dependsOn: string[] };
+
+  /** Array positions of every step with this executor. Position IS the run order. */
+  function indicesOf(plan: { steps: PlanStep[] }, executor: string): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      if (plan.steps[i].executor === executor) out.push(i);
+    }
+    return out;
+  }
+
+  function stepsOf(plan: { steps: PlanStep[] }, executor: string): PlanStep[] {
+    const out: PlanStep[] = [];
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      if (plan.steps[i].executor === executor) out.push(plan.steps[i]);
+    }
+    return out;
+  }
+
+  /**
+   * The whole invariant, in the two halves that each fail differently.
+   *
+   * ORDER is what makes the feel pass see the bodies at all — `runPipeline`
+   * executes in array order, so a profile step sitting before an enablement
+   * step resolves nothing for it and that geometry keeps default friction in
+   * silence. DEPENDSON is what makes a failed enablement stop the pass instead
+   * of half-tuning the scene; it only gates, it never reorders.
+   */
+  function expectFeelPassAfterEveryEnable(
+    plan: { steps: PlanStep[] },
+    expectedEnableCount: number,
+    expectedFeelCount: number,
+  ) {
+    const enableIndices = indicesOf(plan, 'physics_enable');
+    const feelIndices = indicesOf(plan, 'physics_profile');
+    const enableSteps = stepsOf(plan, 'physics_enable');
+
+    // Fail closed: a plan that stopped planning either step would satisfy
+    // "every profile is after every enable" vacuously.
+    expect(enableIndices).toHaveLength(expectedEnableCount);
+    expect(feelIndices).toHaveLength(expectedFeelCount);
+
+    for (let f = 0; f < feelIndices.length; f += 1) {
+      for (let e = 0; e < enableIndices.length; e += 1) {
+        expect(
+          feelIndices[f],
+          `physics_profile at ${feelIndices[f]} runs before physics_enable at ${enableIndices[e]}`,
+        ).toBeGreaterThan(enableIndices[e]);
+      }
+    }
+
+    const feelSteps = stepsOf(plan, 'physics_profile');
+    for (let f = 0; f < feelSteps.length; f += 1) {
+      for (let e = 0; e < enableSteps.length; e += 1) {
+        expect(
+          feelSteps[f].dependsOn,
+          'physics_profile is not gated on every physics_enable',
+        ).toContain(enableSteps[e].id);
+      }
+    }
+  }
+
+  it('holds when the GDD lists world BEFORE movement', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('world', 'platformer'), makeSystem('movement', 'platformer')],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    // Two enablement steps: the Phase 2.5 cast, and the geometry `world` mints.
+    expectFeelPassAfterEveryEnable(plan, 2, 1);
+  });
+
+  it('holds when the GDD lists movement BEFORE world', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('movement', 'platformer'), makeSystem('world', 'platformer')],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    // The shape the `crystalRun3d()` fixture happens to have, asserted here so
+    // the pair is visible: the invariant must not depend on GDD listing order.
+    expectFeelPassAfterEveryEnable(plan, 2, 1);
+  });
+
+  it('holds when there is no world system at all', () => {
+    const gdd = makeGdd({ systems: [makeSystem('movement', 'platformer')] });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    // Only the Phase 2.5 enablement exists. The deferral must still apply —
+    // an implementation that deferred only when a second enablement was
+    // present would pass every other case here.
+    expectFeelPassAfterEveryEnable(plan, 1, 1);
+  });
+
+  it('holds for every feel pass when the GDD declares several movement systems', () => {
+    const gdd = makeGdd({
+      systems: [
+        makeSystem('movement', 'platformer'),
+        makeSystem('world', 'platformer'),
+        makeSystem('movement', 'topdown'),
+      ],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    // An LLM-authored GDD can name the category twice, and each one plans its
+    // own feel pass. Deferring the first and inlining the rest would leave the
+    // second tuning geometry that has not been enabled yet.
+    expectFeelPassAfterEveryEnable(plan, 2, 2);
+  });
+
+  it('runs the feel pass after the character rig it now merges onto', () => {
+    const gdd = makeGdd({
+      systems: [makeSystem('world', 'platformer'), makeSystem('movement', 'platformer')],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const feelIndices = indicesOf(plan, 'physics_profile');
+    const rigIndices = indicesOf(plan, 'character_setup');
+
+    expect(feelIndices).toHaveLength(1);
+    expect(rigIndices).toHaveLength(1);
+    // The deferral reversed this pair, which is what makes `applyPhysicsProfile`
+    // find a live CharacterController and re-dispatch `update_game_component`
+    // onto it. The executor comments describe that order; this pins it.
+    expect(feelIndices[0]).toBeGreaterThan(rigIndices[0]);
+  });
+
+  it('does not register the feel pass as the movement category\'s step', () => {
+    const gdd = makeGdd({
+      systems: [
+        makeSystem('movement', 'platformer'),
+        makeSystem('camera', 'thirdPerson', 'core', ['movement']),
+      ],
+    });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const feelSteps = stepsOf(plan, 'physics_profile');
+    const cameraSteps = stepsOf(plan, 'camera_setup');
+
+    expect(feelSteps).toHaveLength(1);
+    expect(cameraSteps.length).toBeGreaterThan(0);
+    // A system declaring `dependsOn: ['movement']` means the character rig,
+    // which still sits in Phase 3. Gating it on the feel pass instead would
+    // push it after a step that now runs at the very end of the phase — and
+    // `dependsOn` does not reorder, so the camera step would be reached with
+    // an unmet dependency, marked `skipped`, and fail the whole plan.
+    for (let i = 0; i < cameraSteps.length; i += 1) {
+      expect(cameraSteps[i].dependsOn).not.toContain(feelSteps[0].id);
+    }
+  });
+});
