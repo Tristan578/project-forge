@@ -84,9 +84,35 @@ export interface SceneBlueprint {
   transitions: { to: string; trigger: string }[];
 }
 
+/**
+ * Every role the GDD generator may file an entity under.
+ *
+ * ONE exported copy, because three consumers have to agree on it and a
+ * hand-mirrored second copy is how they stop agreeing: the Zod schema the LLM
+ * output is validated against (`zEntityRole`, used by `decomposer.ts`), the
+ * `EntityBlueprint` type below, and `physicsRoles.ts`, which decides which of
+ * these roles gets a physical body.
+ *
+ * Drift there is silent AND load-bearing: a role this list gains but
+ * `PHYSICS_ROLE_PROFILES` does not is dropped from the `physics_enable` step by
+ * a bare `continue`, so entities with that role spawn with no `PhysicsEnabled`
+ * and no collider — nothing in the generated game collides with them, which is
+ * exactly the bug PF-1213 exists to fix. Deriving `PhysicsRole` from this tuple
+ * makes that a compile error instead.
+ *
+ * Same single-source-of-truth shape as `SYSTEM_CATEGORIES_ARRAY` above.
+ */
+export const ENTITY_ROLES = [
+  'player', 'enemy', 'npc', 'decoration', 'trigger', 'interactable', 'projectile',
+] as const;
+
+export type EntityRole = (typeof ENTITY_ROLES)[number];
+
+export const zEntityRole = z.enum(ENTITY_ROLES);
+
 export interface EntityBlueprint {
   name: string;
-  role: 'player' | 'enemy' | 'npc' | 'decoration' | 'trigger' | 'interactable' | 'projectile';
+  role: EntityRole;
   systems: SystemCategory[];
   /** Free text; `primitive:<shape>` selects the spawned mesh (see entitySetupExecutor). */
   appearance: string;

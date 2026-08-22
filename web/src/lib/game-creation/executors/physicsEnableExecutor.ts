@@ -46,7 +46,7 @@ import { COLLIDER_FOR_SHAPE, SPAWNABLE_SHAPES, type SpawnShape } from '../entity
 const physicsEntity = z.object({
   entityId: engineEntityId,
   name: z.string().min(1).max(200).optional(),
-  role: z.enum(ENABLEABLE_ROLES as unknown as [string, ...string[]]),
+  role: z.enum(ENABLEABLE_ROLES),
   /**
    * The mesh the entity was spawned as, so the collider can match it. Optional:
    * a role whose profile pins its own collider shape does not need it, and a

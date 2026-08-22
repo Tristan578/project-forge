@@ -25,32 +25,37 @@
  * `PhysicsData`'s fields are camelCase on the wire. Verified textually against
  * engine/src/core/physics.rs.
  *
+ * THE ROLE VOCABULARY IS DERIVED, NEVER RESTATED. `EntityRole` comes from
+ * `ENTITY_ROLES` in `./types`, the same tuple `zEntityRole` validates the GDD
+ * generator's output against. A hand-written copy here would drift the moment a
+ * role is added to the schema, and it would drift SILENTLY in the worst
+ * direction: `planBuilder` skips any role this table does not know with a bare
+ * `continue`, so those entities would spawn with no `PhysicsEnabled` and no
+ * collider — the exact defect this module exists to fix, reintroduced by the fix
+ * for it. Deriving makes it a compile error (`PHYSICS_ROLE_PROFILES` is a
+ * `Record` over the derived union, so an unhandled role fails to type-check),
+ * and `__tests__/physicsRoles.test.ts` pins it a second time at runtime against
+ * `zEntityRole.options` in case the union is ever re-widened to `string`.
+ *
  * Server-safe: no `@/stores` or `@/hooks` VALUE import (see `entityShape.ts`).
  */
 
 import type { PhysicsData } from '@/stores/slices/types';
+import { ENTITY_ROLES, type EntityRole } from './types';
 import type { ColliderShapeName } from './entityShape';
 
 /**
- * `decoration` is deliberately absent, not an oversight.
+ * The blueprint roles that get a physical body, plus `geometry` — the role
+ * `worldBuildExecutor`'s ground, platforms and walls are filed under, which the
+ * GDD schema never emits because the world builder mints them itself.
  *
+ * `decoration` is deliberately excluded, and that exclusion is not an oversight.
  * The GDD generator files the camera rig and the key light as `decoration`
  * entities, and those are spawned as real cubes. Giving them a static collider
  * would drop an invisible one-metre wall at the origin of every generated game.
  * A prop that genuinely needs to be solid is authored as world geometry.
  */
-export type PhysicsRole =
-  | 'player'
-  | 'enemy'
-  | 'npc'
-  | 'trigger'
-  | 'interactable'
-  | 'projectile'
-  | 'geometry';
-
-export const PHYSICS_ROLES: readonly PhysicsRole[] = [
-  'player', 'enemy', 'npc', 'trigger', 'interactable', 'projectile', 'geometry',
-];
+export type PhysicsRole = Exclude<EntityRole, 'decoration'> | 'geometry';
 
 /**
  * The subset of `PhysicsData` the enablement step sets.
@@ -78,6 +83,11 @@ export interface PhysicsBodyProfile {
   lockRotation?: boolean;
 }
 
+/**
+ * `Record<PhysicsRole, …>` is the completeness proof: add a role to
+ * `ENTITY_ROLES` and this object stops type-checking until it is handled here,
+ * so a new role can never reach `planBuilder` without a decision about its body.
+ */
 export const PHYSICS_ROLE_PROFILES: Readonly<Record<PhysicsRole, PhysicsBodyProfile>> = {
   // Dynamic so every pair it forms carries the dynamic side Rapier's default
   // `ActiveCollisionTypes` requires; rotation-locked so it stays upright.
@@ -107,6 +117,13 @@ export const PHYSICS_ROLE_PROFILES: Readonly<Record<PhysicsRole, PhysicsBodyProf
   geometry: { bodyType: 'fixed', colliderShape: 'cuboid', isSensor: false, lockRotation: false },
 };
 
+/**
+ * The roles that get a body, read off the table itself rather than listed a
+ * second time. `Object.keys` of a `Record<PhysicsRole, …>` IS the union.
+ */
+export const PHYSICS_ROLES: readonly PhysicsRole[] =
+  Object.keys(PHYSICS_ROLE_PROFILES) as PhysicsRole[];
+
 const PHYSICS_ROLE_SET: ReadonlySet<string> = new Set<string>(PHYSICS_ROLES);
 
 /**
@@ -124,13 +141,18 @@ export function physicsProfileForRole(role: string): PhysicsBodyProfile | undefi
 /**
  * Roles a `physics_enable` step is allowed to name.
  *
- * Wider than `PHYSICS_ROLES` on purpose. It is every `EntityBlueprint` role plus
- * `geometry`, so a step may name a `decoration` and have it SKIPPED — a plan
- * that carries the whole cast and lets this module decide who gets a body is
- * the honest shape. A role in neither list (a hallucinated `boss`, a typo) is
- * refused outright rather than quietly given a cuboid it never asked for: a
- * wrong body is a bug that ships, a refused step is one that reports.
+ * Wider than `PHYSICS_ROLES` on purpose, and derived rather than typed out: it
+ * is every `ENTITY_ROLES` entry plus `geometry`, so a step may name a
+ * `decoration` and have it SKIPPED — a plan that carries the whole cast and lets
+ * this module decide who gets a body is the honest shape. A role in neither list
+ * (a hallucinated `boss`, a typo) is refused outright by the executor's schema
+ * rather than quietly given a cuboid it never asked for: a wrong body is a bug
+ * that ships, a refused step is one that reports.
+ *
+ * A const tuple, so `z.enum(ENABLEABLE_ROLES)` infers the literal union with no
+ * cast — a cast through `[string, ...string[]]` would have accepted a widened
+ * `string[]` and silently stopped constraining anything.
  */
-export const ENABLEABLE_ROLES: readonly string[] = [
-  'player', 'enemy', 'npc', 'decoration', 'trigger', 'interactable', 'projectile', 'geometry',
-];
+export const ENABLEABLE_ROLES = [...ENTITY_ROLES, 'geometry'] as const;
+
+export type EnableableRole = (typeof ENABLEABLE_ROLES)[number];

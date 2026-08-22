@@ -14,7 +14,7 @@ import { fetchAI } from '@/lib/ai/client';
 import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 // [FIX: V4-4] Import zSystemCategory from types.ts (single source of truth)
-import { zSystemCategory } from './types';
+import { zSystemCategory, zEntityRole } from './types';
 import type { OrchestratorGDD, SystemCategory } from './types';
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,10 @@ const zFeelDirective = z.object({
 
 const zEntityBlueprint = z.object({
   name: z.string().min(1).max(100),
-  role: z.enum(['player', 'enemy', 'npc', 'decoration', 'trigger', 'interactable', 'projectile']),
+  // Shared with `EntityBlueprint['role']` and `physicsRoles.ts` rather than
+  // restated: a role this schema accepts but the physics table does not know
+  // spawns with no collider and nothing collides with it (PF-1213).
+  role: zEntityRole,
   systems: z.array(zSystemCategory),
   // Free text, but `primitive:<shape>` is the form `entity_setup` acts on — it
   // picks the spawned mesh from it. Anything else falls back to the role default.
