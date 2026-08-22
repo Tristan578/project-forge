@@ -7,7 +7,9 @@ export const meta = {
 
 // Reviewer roles follow .claude/skills/review-protocol/SKILL.md exactly: architect is the
 // feature-dev:code-architect PLUGIN agent (no repo-local .md — its definition is resolved from the
-// installed plugin at run time), the other four are repo-local .claude/agents/<name>.md files.
+// installed plugin at run time), the other four are repo-local .claude/agents/<name>.md files — every one a READ-ONLY definition
+// (no Write/Edit tools, block-writes.sh on Bash). The test seat is `test-reviewer`, not `test-writer`:
+// test-writer is a builder that writes and commits tests, so it must never sit on the board.
 // Each agent Reads its own definition so the prompt stays single-sourced. agentType is deliberately
 // omitted (custom agentTypes 529-fail in this harness; see memory reference_workflow_agenttype_529_and_resume).
 const REVIEWERS = [
@@ -17,7 +19,7 @@ const REVIEWERS = [
   { key: 'security', def: '.claude/agents/security-reviewer.md' },
   { key: 'dx', def: '.claude/agents/dx-guardian.md' },
   { key: 'ux', def: '.claude/agents/ux-reviewer.md' },
-  { key: 'test', def: '.claude/agents/test-writer.md' },
+  { key: 'test', def: '.claude/agents/test-reviewer.md' },
 ]
 
 const VERDICT = {

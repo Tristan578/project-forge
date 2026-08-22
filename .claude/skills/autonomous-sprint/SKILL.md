@@ -53,7 +53,7 @@ Reviewers (dispatch in parallel, max 3 concurrent on M2):
   2. security-reviewer — injection, auth, validation, data exposure
   3. dx-guardian — developer workflow, documentation, conventions
   4. ux-reviewer — WCAG AA, component UX, responsive (if UI touched)
-  5. test-writer — coverage gaps, test quality, CI gates (if tests touched)
+  5. test-reviewer — coverage gaps, test quality, CI gates (read-only; test-writer is the builder)
 ```
 
 - Skip reviewers whose domain wasn't touched (e.g. skip ux-reviewer for pure API fixes).

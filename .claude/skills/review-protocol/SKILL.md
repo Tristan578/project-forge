@@ -1,6 +1,6 @@
 ---
 name: review-protocol
-description: "Use when dispatching code reviews, spec reviews, or PR reviews. Defines the 5 mandatory specialized reviewers, their domains, dispatch rules, and the PASS/FAIL cycle. Also lists all 12 agents and their configurations."
+description: "Use when dispatching code reviews, spec reviews, or PR reviews. Defines the 5 mandatory specialized reviewers, their domains, dispatch rules, and the PASS/FAIL cycle. Also lists all 13 agents and their configurations."
 ---
 
 # Review Protocol — 5 Specialized Reviewers (Mandatory)
@@ -15,7 +15,7 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. R
 | **Security** | `security-reviewer` | Injection, auth, data exposure, validation, XSS, CSRF |
 | **DX** | `dx-guardian` | Developer workflow, onboarding, migration burden, documentation |
 | **UX/Frontend** | `ux-reviewer` | Accessibility (WCAG AA), component UX, Tailwind, responsive |
-| **Test** | `test-writer` | Coverage gaps, CI gates, parameterization, visual regression |
+| **Test** | `test-reviewer` | Coverage gaps, test weakening, CI gates, parameterization, visual regression (read-only — `test-writer` is the builder that WRITES tests and must never sit on the board) |
 
 ## Rules
 
@@ -25,7 +25,7 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. R
 - For CI/CD/infra changes: **6 reviewers** — add `infra-devops`
 - For documentation changes: add `docs-guardian` (PASS/FAIL only)
 
-## Agent Inventory (`.claude/agents/` — 12 agents)
+## Agent Inventory (`.claude/agents/` — 13 agents)
 
 All agents have: `memory`, `effort`, `model`, `tools`, `skills`, and agent-scoped `hooks` in frontmatter.
 
@@ -37,7 +37,8 @@ All agents have: `memory`, `effort`, `model`, `tools`, `skills`, and agent-scope
 | `docs-guardian` | `background: true`, read-only | Doc review (PASS/FAIL) |
 | `dx-guardian` | `background: true`, `model: haiku` | DX audits |
 | `security-reviewer` | `background: true`, read-only | Security audits |
-| `test-writer` | `memory: project` | Vitest + RTL tests |
+| `test-writer` | `memory: project`, writes + commits | Vitest + RTL tests (builder, NOT a reviewer) |
+| `test-reviewer` | read-only, `block-writes.sh` | Test seat on the review board (PASS/FAIL) |
 | `infra-devops` | `mcpServers: github` | Deploy, CI/CD |
 | `ux-reviewer` | `background: true`, `mcpServers: playwright` | UX/a11y |
 | `code-reviewer` | `background: true`, read-only | PR review |
