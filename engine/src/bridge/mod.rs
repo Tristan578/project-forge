@@ -366,6 +366,8 @@ impl Plugin for SelectionPlugin {
 
         #[cfg(not(feature = "runtime"))]
         app.add_systems(Update, query::process_joint_queries);
+        #[cfg(not(feature = "runtime"))]
+        app.add_systems(Update, query::process_joint2d_queries);
 
         app
             .add_systems(Update, scripts::emit_play_tick_system)

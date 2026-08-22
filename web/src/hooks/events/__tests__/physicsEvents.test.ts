@@ -490,6 +490,125 @@ describe('handlePhysicsEvent', () => {
     });
   });
 
+  /**
+   * The reply channel for `list_joints_2d`, which answered `Not yet implemented`
+   * until PF-1194 while the 3D surface had two read commands. The 3D
+   * `QUERY_JOINTS_LIST` still has no listener at all, so its answer goes nowhere
+   * — the same dead-vocabulary shape this ticket family exists to close, and the
+   * reason this one is wired the moment it starts being emitted.
+   */
+  describe('QUERY_JOINTS2D_LIST', () => {
+    it('applies every joint in the list', () => {
+      const result = handlePhysicsEvent(
+        'QUERY_JOINTS2D_LIST',
+        [
+          {
+            entityId: 'sprite-1',
+            targetEntityId: 'sprite-2',
+            jointType: 'revolute',
+            localAnchor1: [0, 0],
+            localAnchor2: [0, 0],
+          },
+          {
+            entityId: 'sprite-3',
+            targetEntityId: 'sprite-4',
+            jointType: 'rope',
+            localAnchor1: [1, 0],
+            localAnchor2: [0, 1],
+            maxDistance: 4,
+          },
+        ],
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.applyJoint2dFromEngine).toHaveBeenCalledTimes(2);
+      // Whole-object assertions: the shape IS the behaviour.
+      expect(actions.applyJoint2dFromEngine).toHaveBeenNthCalledWith(1, 'sprite-1', {
+        targetEntityId: 'sprite-2',
+        jointType: 'revolute',
+        localAnchor1: [0, 0],
+        localAnchor2: [0, 0],
+      });
+      expect(actions.applyJoint2dFromEngine).toHaveBeenNthCalledWith(2, 'sprite-3', {
+        targetEntityId: 'sprite-4',
+        jointType: 'rope',
+        localAnchor1: [1, 0],
+        localAnchor2: [0, 1],
+        maxDistance: 4,
+      });
+    });
+
+    it('routes to the state-only action, never the dispatching one', () => {
+      // `setJoint2d` dispatches `set_joint_2d` — one per joint, echoed straight
+      // back at the engine that was only asked to describe them.
+      handlePhysicsEvent(
+        'QUERY_JOINTS2D_LIST',
+        [
+          {
+            entityId: 'sprite-1',
+            targetEntityId: 'sprite-2',
+            jointType: 'revolute',
+            localAnchor1: [0, 0],
+            localAnchor2: [0, 0],
+          },
+        ],
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      // Both halves matter. Without the first, this passes against a handler that
+      // does not exist at all — the assertion it is here to make is only
+      // meaningful once something IS handling the event.
+      expect(actions.applyJoint2dFromEngine).toHaveBeenCalledTimes(1);
+      expect(actions.setJoint2d).not.toHaveBeenCalled();
+    });
+
+    it('skips the entries it cannot read and keeps the rest', () => {
+      const good = {
+        entityId: 'sprite-1',
+        targetEntityId: 'sprite-2',
+        jointType: 'revolute',
+        localAnchor1: [0, 0],
+        localAnchor2: [0, 0],
+      };
+      // A hole is the input under test. JSON.stringify writes a hole as null and
+      // JSON.parse can produce null but never a hole, so both reach this handler
+      // from a serialized wire — and `for...of` yields `undefined` for a hole
+      // rather than skipping it, unlike every callback form.
+      const list = [good, , null, 'not-an-object', { entityId: 'sprite-9' }];
+
+      const result = handlePhysicsEvent(
+        'QUERY_JOINTS2D_LIST',
+        list,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.applyJoint2dFromEngine).toHaveBeenCalledTimes(1);
+      expect(actions.applyJoint2dFromEngine).toHaveBeenCalledWith('sprite-1', {
+        targetEntityId: 'sprite-2',
+        jointType: 'revolute',
+        localAnchor1: [0, 0],
+        localAnchor2: [0, 0],
+      });
+    });
+
+    it('swallows a payload that is not a list rather than throwing', () => {
+      const result = handlePhysicsEvent(
+        'QUERY_JOINTS2D_LIST',
+        { entityId: 'sprite-1' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.applyJoint2dFromEngine).not.toHaveBeenCalled();
+    });
+  });
+
   describe('2D event names nothing emits', () => {
     /**
      * These four are the phantom names this handler used to listen for. Pinning

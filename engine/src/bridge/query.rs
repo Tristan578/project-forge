@@ -69,6 +69,12 @@ pub(super) fn process_query_requests(
             | QueryRequest::QualitySettings
             | QueryRequest::ReverbZoneState { .. }
             | QueryRequest::ListJoints
+            | QueryRequest::ListJoints2d
+            | QueryRequest::Joint2dState { .. }
+            | QueryRequest::Physics2dState { .. }
+            | QueryRequest::GameComponentState { .. }
+            | QueryRequest::GameCameraState { .. }
+            | QueryRequest::Skeleton2dState { .. }
             | QueryRequest::PlayState => {
                 remaining.push(request);
             }
@@ -258,6 +264,10 @@ pub(super) fn process_query_requests(
             QueryRequest::ListJoints => {
                 // Handled by process_joint_queries system to avoid system parameter limit
             }
+            QueryRequest::ListJoints2d | QueryRequest::Joint2dState { .. } => {
+                // Handled by process_joint2d_queries; left in `remaining` above, so
+                // this arm exists only for exhaustiveness.
+            }
             QueryRequest::GameComponentState { .. } => {
                 // Handled by process_game_component_queries system to avoid system parameter limit
             }
@@ -265,10 +275,10 @@ pub(super) fn process_query_requests(
                 // Animation clip state is emitted via selection events and other apply systems
             }
             QueryRequest::Physics2dState { .. } => {
-                // 2D physics state handled separately
+                // Handled by physics::handle_physics2d_query; see `remaining` above.
             }
             QueryRequest::GameCameraState { .. } => {
-                // Game camera state handled separately
+                // Handled by game::process_game_camera_queries; see `remaining` above.
             }
             QueryRequest::SpriteState { .. } => {
                 // Sprite state handled separately
@@ -280,7 +290,7 @@ pub(super) fn process_query_requests(
                 // Project type handled separately
             }
             QueryRequest::Skeleton2dState { .. } => {
-                // Skeleton 2D state handled separately
+                // Handled by skeleton2d::handle_skeleton2d_query; see `remaining` above.
             }
             QueryRequest::SpriteSheetState { .. } => {
                 // Handled by sprite::handle_sprite_sheet_state_queries
@@ -465,6 +475,69 @@ pub(super) fn process_reverb_zone_queries(
             }
             // Remove the processed request
             pending.query_requests.retain(|r| !matches!(r, QueryRequest::ReverbZoneState { entity_id: ref eid } if eid == &entity_id));
+        }
+    }
+}
+
+/// Process 2D joint query requests (editor-only).
+///
+/// One system answers both names because they read the same component. The
+/// per-entity reply goes out on the existing `JOINT2D_CHANGED` channel, which
+/// `hooks/events/physicsEvents.ts` already parses into the store — a second wire
+/// shape for a single joint would be a third vocabulary for a surface that has
+/// had two too many for its whole life (PF-1167).
+///
+/// An entity with no `PhysicsJoint2d` emits nothing. That is deliberate: the
+/// alternative is a null payload the store would have to distinguish from a real
+/// joint, and every other per-entity query here answers the same way.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn process_joint2d_queries(
+    mut pending: ResMut<PendingCommands>,
+    // Named in full rather than imported: the import would be unused under the
+    // `runtime` feature, which gates this system out.
+    joint_query: Query<(&EntityId, &crate::core::physics_2d::PhysicsJoint2d)>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    // Read, then retain — never `drain(..).filter(..)`, which discards every
+    // request this system does not own along with the ones it does.
+    let requests: Vec<QueryRequest> = pending
+        .query_requests
+        .iter()
+        .filter(|r| matches!(r, QueryRequest::ListJoints2d | QueryRequest::Joint2dState { .. }))
+        .cloned()
+        .collect();
+    if requests.is_empty() {
+        return;
+    }
+    pending.query_requests.retain(
+        |r| !matches!(r, QueryRequest::ListJoints2d | QueryRequest::Joint2dState { .. }),
+    );
+
+    for request in requests {
+        match request {
+            QueryRequest::ListJoints2d => {
+                let joints: Vec<serde_json::Value> = joint_query
+                    .iter()
+                    .map(|(eid, joint)| {
+                        let mut flat = joint.to_flat();
+                        if let Some(map) = flat.as_object_mut() {
+                            map.insert(
+                                "entityId".to_string(),
+                                serde_json::Value::String(eid.0.clone()),
+                            );
+                        }
+                        flat
+                    })
+                    .collect();
+                events::emit_event("QUERY_JOINTS2D_LIST", &joints);
+            }
+            QueryRequest::Joint2dState { entity_id } => {
+                if let Some((_, joint)) = joint_query.iter().find(|(eid, _)| eid.0 == entity_id) {
+                    events::emit_joint2d_changed(&entity_id, joint);
+                }
+            }
+            _ => {}
         }
     }
 }

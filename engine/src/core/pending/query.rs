@@ -28,6 +28,12 @@ pub enum QueryRequest {
     TerrainState { entity_id: String },
     QualitySettings,
     ListJoints,
+    /// Every 2D joint in the scene. Answered by `bridge::query::process_joint2d_queries`.
+    ListJoints2d,
+    /// One entity's 2D joint. Answered by the same system, which replies on the
+    /// existing `JOINT2D_CHANGED` channel rather than inventing a second wire
+    /// shape for a single joint (PF-1194).
+    Joint2dState { entity_id: String },
     GameComponentState { entity_id: String },
     GameCameraState { entity_id: String },
     AnimationClipState { entity_id: String },

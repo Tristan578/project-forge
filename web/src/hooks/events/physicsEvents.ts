@@ -6,7 +6,7 @@ import { useEditorStore, type PhysicsData, type JointData } from '@/stores/edito
 import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 import { audioManager } from '@/lib/audio/audioManager';
 import { parseJoint2dWire, parsePhysics2dWire } from '@/lib/physics/physics2dPayload';
-import { castPayload, type SetFn, type GetFn } from './types';
+import { castPayload, type SetFn, type GetFn, type EventPayload } from './types';
 
 /** Prefix used to identify audio occlusion raycast requests. */
 const OCCLUSION_RAYCAST_PREFIX = 'audio_occlusion:';
@@ -69,10 +69,39 @@ interface WindowWithScriptCallbacks {
 
 export function handlePhysicsEvent(
   type: string,
-  data: Record<string, unknown>,
+  data: EventPayload,
   _set: SetFn,
   _get: GetFn
 ): boolean {
+  /**
+   * The list-query answers are the only physics payloads that are JSON arrays,
+   * and they are handled before the switch so every case below reads a plain
+   * object. Narrowing here rather than inside a case is what keeps the
+   * `castPayload` calls honest: an array reaching one of them would be cast
+   * into a shape it cannot have, with no runtime complaint.
+   *
+   * `QUERY_JOINTS2D_LIST` is the reply channel for `list_joints_2d`, which
+   * answered `Not yet implemented` for its whole life — 2D joint state had no
+   * read path at all while the 3D surface had two (PF-1194). Each entry is the
+   * same flat vocabulary `JOINT2D_CHANGED` carries with `entityId` folded in,
+   * so both answers share one parser rather than growing a third joint wire
+   * shape.
+   *
+   * `Array.from` first: `JSON.stringify` writes a hole as `null` and
+   * `for...of` yields `undefined` for one rather than skipping it, so an
+   * unreadable slot has to be tolerated either way — materializing makes that
+   * explicit instead of leaving it to the iteration form.
+   */
+  if (Array.isArray(data)) {
+    if (type !== 'QUERY_JOINTS2D_LIST') return false;
+    for (const entry of Array.from(data)) {
+      const parsed = parseJoint2dWire(entry);
+      if (!parsed) continue;
+      useEditorStore.getState().applyJoint2dFromEngine(parsed.entityId, parsed.data);
+    }
+    return true;
+  }
+
   switch (type) {
     case 'PHYSICS_CHANGED': {
       const payload = castPayload<PhysicsData & { entityId: string; enabled: boolean }>(data);
@@ -133,6 +162,15 @@ export function handlePhysicsEvent(
       useEditorStore.getState().applyJoint2dFromEngine(parsed.entityId, parsed.data);
       return true;
     }
+
+    /**
+     * Reached only when the payload is NOT an array — the list itself is
+     * handled above. A malformed answer is swallowed rather than reported
+     * unhandled: the name is this handler's, so passing it on would make the
+     * hub log it as an unknown engine event.
+     */
+    case 'QUERY_JOINTS2D_LIST':
+      return true;
 
     case 'COLLISION_EVENT': {
       const payload = castPayload<{ entityA: string; entityB: string; started: boolean }>(data);
