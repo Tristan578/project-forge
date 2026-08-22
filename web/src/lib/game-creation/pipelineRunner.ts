@@ -55,6 +55,36 @@ function skipStepAt(plan: OrchestratorPlan, index: number): void {
 }
 
 /**
+ * Record every empty slot in `plan.steps` on the plan itself.
+ *
+ * The runner does not build the plan it is handed: `runPipeline` is exported
+ * from the package barrel and takes any `OrchestratorPlan`, and the store hands
+ * one straight through from its public `setPlan`. So `plan.steps` is
+ * caller-supplied data, not something `buildPlan` vouched for, and the readers
+ * below refuse to dereference it blind.
+ *
+ * Tolerating a gap is only half an answer, though. A plan with a missing step
+ * would otherwise run every step that IS there, report `completed`, and leave
+ * nothing anywhere to say that a step the plan called for never ran. The slots
+ * are recorded rather than compacted away so the indices the rest of the run
+ * reports — `currentStepIndex`, the panel's progress — keep meaning what they
+ * meant when the plan was handed over.
+ */
+function recordEmptyStepSlots(plan: OrchestratorPlan): void {
+  const empty: number[] = [];
+  for (let i = 0; i < plan.steps.length; i += 1) {
+    if (!plan.steps[i]) empty.push(i);
+  }
+  if (empty.length === 0) return;
+  const warnings = plan.warnings ?? [];
+  warnings.push(
+    `Plan step ${empty.length === 1 ? 'slot' : 'slots'} ${empty.join(', ')} `
+      + `${empty.length === 1 ? 'is' : 'are'} empty; ${empty.length === 1 ? 'that step' : 'those steps'} did not run.`,
+  );
+  plan.warnings = warnings;
+}
+
+/**
  * Check whether all steps listed in dependsOn have completed successfully.
  * Uses a precomputed Map for O(1) lookups instead of O(n) find() per dep.
  */
@@ -119,15 +149,30 @@ export async function runPipeline(
 ): Promise<OrchestratorPlan> {
   // Build a resolveStepOutput function that closes over the plan's steps.
   // The caller's context.resolveStepOutput is replaced with this live version.
+  //
+  // COMPLETED steps only, exactly as `liveResolveAll` below: the two resolvers
+  // answer the same question about the same plan, so a caller must not be able
+  // to reach a step's retained diagnostic output through one of them and not
+  // the other (see `ExecutorContext.resolveStepOutput`).
+  //
+  // Indexed loop with a null guard, also as below: `.find` does NOT skip an
+  // array hole — it yields `undefined` — and one JSON round trip turns that
+  // hole into a `null` whose first field read throws. This resolver is not a
+  // corner: `auto_polish` is non-optional and calls it on every real run, so a
+  // plan the main loop tolerates would still die here, and die blaming
+  // `auto_polish` for a gap somewhere else entirely.
   const liveResolve = (stepIdOrExecutorName: string): Record<string, unknown> | undefined => {
-    // 1. Try exact step ID match first (e.g. 'step_0')
-    const byId = plan.steps.find((s) => s.id === stepIdOrExecutorName);
-    if (byId) {
-      return byId.output;
+    let byName: Record<string, unknown> | undefined;
+    for (let i = 0; i < plan.steps.length; i += 1) {
+      const step = plan.steps[i];
+      if (!step || step.status !== 'completed' || !step.output) continue;
+      // 1. An exact step ID match (e.g. 'step_0') wins outright.
+      if (step.id === stepIdOrExecutorName) return step.output;
+      // 2. Otherwise the FIRST executor-name match (e.g. 'scene_create') — and
+      //    only the first, which is the trap `resolveStepOutputs` exists for.
+      if (byName === undefined && step.executor === stepIdOrExecutorName) byName = step.output;
     }
-    // 2. Fall back to matching by executor name (e.g. 'scene_create')
-    const byName = plan.steps.find((s) => s.executor === stepIdOrExecutorName);
-    return byName?.output;
+    return byName;
   };
 
   // Every output for an executor name, not just the first.
@@ -167,6 +212,10 @@ export async function runPipeline(
     resolveStepOutputs: liveResolveAll,
   };
 
+  // Write down any empty slot before anything reads the array, so a plan that
+  // finishes still says a step was missing from it.
+  recordEmptyStepSlots(plan);
+
   // Mark plan as executing
   setPlanStatus(plan, 'executing', callbacks);
 
@@ -188,10 +237,11 @@ export async function runPipeline(
     const step = plan.steps[i];
     plan.currentStepIndex = i;
 
-    // A plan is JSON that has been round-tripped, and `JSON.parse` can never
-    // produce a hole but readily produces `null`. Dereferencing one here throws
-    // inside `dependenciesMet` on the very first field read, which takes down
-    // the whole run — so an empty slot is skipped rather than trusted.
+    // An empty slot is a caller-supplied plan the runner did not build (see
+    // `recordEmptyStepSlots`, which has already written it down). Dereferencing
+    // one here throws inside `dependenciesMet` on the very first field read,
+    // which takes down the whole run — so it is stepped over rather than
+    // trusted.
     if (!step) continue;
 
     // Check abort signal before starting each new step
