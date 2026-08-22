@@ -22,6 +22,8 @@ import type {
 import { FALLBACK_SCHEMA } from './types';
 import { SYSTEM_REGISTRY, defaultWinConditionStep } from './systems';
 import type { PlannedEntity } from './systems';
+import { physicsProfileForRole } from './physicsRoles';
+import { resolveEntityShape } from './entityShape';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
 // --- Topological sort for system dependency ordering ---
@@ -113,6 +115,8 @@ import { TOKEN_COSTS as PRICING } from '@/lib/tokens/pricing';
 
 const PLAN_COST_ESTIMATES: Record<string, { base: number; variance: number }> = {
   scene_create: { base: 0, variance: 0 },
+  // Two engine commands per entity and no model call.
+  physics_enable: { base: 0, variance: 0 },
   physics_profile: { base: 0, variance: 0 },
   // Pure engine dispatch, no model call — same as the two above.
   camera_setup: { base: 0, variance: 0 },
@@ -257,6 +261,56 @@ export function buildPlan(
     }
   }
 
+  // All entity step IDs as a baseline dependency for later steps.
+  const allEntityStepIds = Object.values(entityStepIds);
+
+  // --- Phase 2.5: Physics enablement (depends on every entity existing) ---
+  // The engine attaches a Rapier collider only to an entity carrying
+  // `PhysicsEnabled`, and `runtime.active_collisions` is built purely from the
+  // `CollisionEvent`s those colliders emit. Without this step the pipeline
+  // spawned a player, a floor and a set of collectibles and then never made any
+  // of them solid: nothing collided, `system_collectible` never fired, score
+  // never moved and `game_win` was unreachable (PF-1213).
+  //
+  // It sits here, before Phase 3, because every later consumer needs the bodies
+  // to already exist: `physics_profile` tunes mass and friction on them,
+  // `character_setup` rigs the controller that walks one around, and
+  // `verify_all_scenes` decides whether the game is winnable. `runPipeline`
+  // executes steps in ARRAY ORDER (dependsOn only gates), so this placement is
+  // the ordering.
+  const physicsEnableEntities: Array<{
+    entityId: string;
+    name: string;
+    role: string;
+    shape: string;
+  }> = [];
+  for (let i = 0; i < plannedEntities.length; i += 1) {
+    const planned = plannedEntities[i];
+    // A role with no profile gets no body on purpose — the GDD files the camera
+    // rig and the key light as `decoration`, and a collider on those would drop
+    // an invisible wall at the origin of every generated game.
+    if (!physicsProfileForRole(planned.entity.role)) continue;
+    physicsEnableEntities.push({
+      entityId: planned.entityId,
+      name: planned.entity.name,
+      role: planned.entity.role,
+      // Resolved from the SAME function `entity_setup` spawns with, so the
+      // collider provably matches the mesh rather than approximating it.
+      shape: resolveEntityShape(planned.entity.role, planned.entity.appearance, gdd.projectType),
+    });
+  }
+
+  let physicsEnableStepId: string | null = null;
+  if (physicsEnableEntities.length > 0) {
+    const physicsEnableStep = makeStep(
+      'physics_enable',
+      { entities: physicsEnableEntities },
+      allEntityStepIds,
+    );
+    physicsEnableStepId = physicsEnableStep.id;
+    steps.push(physicsEnableStep);
+  }
+
   // --- Phase 3: System configuration (depends on entities) ---
   // [B2] Systems declare dependsOn categories. We resolve to step IDs.
   const systemCategoryStepIds: Record<string, string[]> = {};
@@ -270,12 +324,13 @@ export function buildPlan(
   };
   const orderedSystems = topoSortSystems(gdd.systems, PRIORITY_ORDER);
 
-  // All entity step IDs as a baseline dependency for system steps
-  const allEntityStepIds = Object.values(entityStepIds);
-
   for (const system of orderedSystems) {
     const def = SYSTEM_REGISTRY.get(system.category);
+    // Physics enablement is a baseline dependency alongside the entities
+    // themselves: a system step that tunes or rigs a body must not run before
+    // the body exists.
     const systemDeps = [...allEntityStepIds];
+    if (physicsEnableStepId) systemDeps.push(physicsEnableStepId);
 
     // Add dependency on steps from categories this system depends on
     for (const depCat of system.dependsOn) {

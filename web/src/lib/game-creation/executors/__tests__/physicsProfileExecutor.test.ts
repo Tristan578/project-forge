@@ -219,17 +219,50 @@ describe('physicsProfileExecutor', () => {
     expect(output.entityCount).toBe(2);
   });
 
-  it('returns entityCount 0 when no physics nodes and no entityIds', async () => {
+  it('warns instead of reporting a clean success when it matches nothing (PF-1213)', async () => {
     const ctx = makeCtx();
     const result = await physicsProfileExecutor.execute({
       feelDirective: makeFeelDirective(),
       projectType: '3d',
     }, ctx);
 
+    // Still a success — this step is not optional, and failing it would set the
+    // whole plan to `failed` and discard a game that is merely mistuned. But it
+    // applied nothing, and the bare green tick that used to be returned here is
+    // what hid the pipeline never enabling physics at all.
     expect(result.success).toBe(true);
     expect(mockApplyPhysicsProfile).not.toHaveBeenCalled();
-    const output = result.output as { entityCount: number };
+    const output = result.output as { entityCount: number; warning?: string };
     expect(output.entityCount).toBe(0);
+    expect(typeof output.warning).toBe('string');
+    expect(output.warning).toContain('physics');
+  });
+
+  it('tunes the entities the physics_enable step reported (PF-1213)', async () => {
+    // The store's `sceneGraph.nodes[].components` is filled in only by the
+    // engine's async SCENE_GRAPH_UPDATE event, so immediately after enablement
+    // it is still empty and the scan below finds nothing. The upstream step's
+    // own output is the reliable source.
+    const ctx = makeCtx({
+      resolveStepOutput: vi.fn((name: string) =>
+        name === 'physics_enable' ? { entityIds: ['id-player', 'id-crystal'] } : undefined),
+    });
+
+    const result = await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '3d',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(mockApplyPhysicsProfile).toHaveBeenCalledWith(
+      expect.anything(),
+      ctx.dispatchCommand,
+      ['id-player', 'id-crystal'],
+      expect.anything(),
+    );
+    const output = result.output as { entityCount: number; warning?: string };
+    expect(output.entityCount).toBe(2);
+    expect(output.warning).toBeUndefined();
   });
 
   it('allows safe config overrides for moveSpeed and jumpForce', async () => {
