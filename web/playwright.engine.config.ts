@@ -45,9 +45,14 @@ import {
 
 export default defineConfig({
   testDir: './e2e',
-  // Match ONLY the curated engine-smoke spec so a slow @engine spec elsewhere
-  // can't blow this job's budget. `grep` is a belt-and-suspenders tag filter.
-  testMatch: '**/engine-smoke.spec.ts',
+  // Match ONLY the curated engine specs so a slow @engine spec elsewhere can't
+  // blow this job's budget. `grep` is a belt-and-suspenders tag filter.
+  // pipeline-live-engine (PF-1202) is the second member: it runs the real
+  // game-creation pipeline through the real engine and clicks the real Play
+  // button, which is the only place a silently-rejected engine command shows up
+  // (`dispatchCommand` returns void, so the fake-bridge integration suite can
+  // never see one). It sets its own 180s per-test cap.
+  testMatch: '**/{engine-smoke,pipeline-live-engine}.spec.ts',
   grep: /@engine-smoke/,
   fullyParallel: true,
   forbidOnly: true,
