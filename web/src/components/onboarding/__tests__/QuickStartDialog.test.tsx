@@ -15,11 +15,25 @@ import { QuickStartDialog } from '../QuickStartDialog';
 import {
   QUICK_START_GAME_TYPES,
   QUICK_START_PROMPT_MAX,
+  findQuickStartGameType,
 } from '@/lib/game-creation/quickStart';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+
+// Wraps the real implementation so every existing test (which drives the UI
+// through the real card list) is unaffected, while one test below forces a
+// single call to miss and reproduce the defensive `!card` branch in
+// `handleSubmit` -- a state the real UI never lets the user reach, since
+// `selectedId` is only ever set from this same list via `handlePick`.
+vi.mock('@/lib/game-creation/quickStart', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/game-creation/quickStart')>();
+  return {
+    ...actual,
+    findQuickStartGameType: vi.fn(actual.findQuickStartGameType),
+  };
+});
 
 const hoisted = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
@@ -72,6 +86,21 @@ afterEach(() => {
 
 /** Walks the dialog from the type cards to the prompt step. */
 async function pickPlatformer() {
+  // `useDialogA11y`'s open effect defers the dialog's initial focus with a
+  // `requestAnimationFrame`, and re-queries the DOM for the first focusable
+  // element when that callback actually fires -- not at schedule time. Left
+  // undrained, the callback can still be pending once a fast synchronous test
+  // has already driven `phase` to 'running', at which point it re-focuses
+  // whatever is *now* first in the DOM (the Close button) instead of the
+  // platformer card it originally targeted, silently overriding
+  // QuickStartDialog's own `[phase]` focus effect a few lines later. Waiting
+  // for that first focus to land closes the race for every test that starts
+  // here, rather than papering over one assertion downstream.
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: /platformer/i }),
+    ),
+  );
   await userEvent.click(screen.getByRole('button', { name: /platformer/i }));
 }
 
@@ -236,8 +265,8 @@ describe('QuickStartDialog', () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
     await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
-
-    expect(document.activeElement).toBe(await screen.findByRole('status'));
+    const status = await screen.findByRole('status');
+    expect(document.activeElement).toBe(status);
   });
 
   it('caps the prompt so the composed prompt cannot exceed what the route accepts', async () => {
@@ -344,5 +373,25 @@ describe('QuickStartDialog', () => {
 
     await userEvent.click(cancel);
     expect(resolveGate).toHaveBeenCalledWith('rejected');
+  });
+
+  // The real UI can never leave `selectedId` pointing at a card that isn't in
+  // `QUICK_START_GAME_TYPES` -- `handlePick` only ever sets it from that same
+  // list. This forces the one lookup miss `handleSubmit` defends against.
+  it('refuses to submit and returns to pick when the selected card cannot be found', async () => {
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+
+    vi.mocked(findQuickStartGameType).mockReturnValueOnce(undefined);
+    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Pick a game type first.');
+    expect(startQuickStart).not.toHaveBeenCalled();
+    expect(hoisted.openPanel).not.toHaveBeenCalled();
+    // Back on the pick step, not stuck on a build view for a run that never started.
+    expect(
+      screen.getByRole('button', { name: new RegExp(QUICK_START_GAME_TYPES[0].label, 'i') }),
+    ).toBeTruthy();
   });
 });
