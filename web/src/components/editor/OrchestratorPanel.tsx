@@ -119,7 +119,7 @@ function StatusBadge({ status }: { status: OrchestratorStatus }) {
     awaiting_approval: 'bg-amber-900/50 text-amber-300',
     executing: 'bg-blue-900/50 text-blue-300',
     completed: 'bg-green-900/50 text-green-300',
-    failed: 'bg-red-900/50 text-red-300',
+    failed: 'bg-[var(--sf-destructive)]/10 text-[var(--sf-text)]',
     cancelled: 'bg-zinc-700 text-zinc-400',
   };
 
@@ -146,7 +146,7 @@ function StepStatusIcon({ status }: { status: PlanStep['status'] }) {
     case 'running':
       return <Loader2 className="h-4 w-4 animate-spin text-blue-400" />;
     case 'failed':
-      return <XCircle className="h-4 w-4 text-red-400" />;
+      return <XCircle className="h-4 w-4 text-[var(--sf-destructive)]" />;
     case 'skipped':
       return <Clock className="h-4 w-4 text-zinc-500" />;
     case 'pending':
@@ -230,7 +230,7 @@ function TokenCostBar({ estimate }: { estimate: TokenEstimate }) {
         ))}
       </div>
       {!estimate.sufficientBalance && (
-        <div className="mt-2 flex items-center gap-1.5 rounded bg-red-950/50 px-2 py-1 text-xs text-red-300">
+        <div className="mt-2 flex items-center gap-1.5 rounded bg-[var(--sf-destructive)]/10 px-2 py-1 text-xs text-[var(--sf-text)]">
           <AlertTriangle className="h-3 w-3" />
           Insufficient token balance
         </div>

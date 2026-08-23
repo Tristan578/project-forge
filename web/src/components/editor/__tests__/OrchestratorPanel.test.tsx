@@ -195,6 +195,29 @@ describe('OrchestratorPanel', () => {
     expect(screen.getByText('Insufficient token balance')).toBeTruthy();
   });
 
+  /**
+   * PF-1229 finding #9: the insufficient-balance row was hardcoded
+   * `bg-red-950/50 text-red-300` — dark-theme-only. The row's text is real
+   * body copy, so it must clear WCAG AA 4.5:1 and routes through
+   * `--sf-text`, same as `ERROR_SURFACE_CLASSES` above; the background
+   * reuses the same `--sf-destructive`/10 tint that test already pins.
+   */
+  it('draws the insufficient balance row with token-based colour, not hardcoded red', () => {
+    mockStore({
+      orchestratorStatus: 'awaiting_approval',
+      currentPlan: MOCK_PLAN,
+      tokenEstimate: { ...MOCK_PLAN.tokenEstimate, sufficientBalance: false },
+      stepStatuses: {},
+    });
+    render(<OrchestratorPanel />);
+
+    const row = screen.getByText('Insufficient token balance').closest('div');
+    const rowClasses = Array.from(row?.classList ?? []);
+    expect(rowClasses.some((c) => /^(bg|text)-red-/.test(c))).toBe(false);
+    expect(rowClasses).toContain('bg-[var(--sf-destructive)]/10');
+    expect(rowClasses).toContain('text-[var(--sf-text)]');
+  });
+
   it('renders approval gate dialog', () => {
     mockStore({
       orchestratorStatus: 'awaiting_approval',
@@ -474,6 +497,41 @@ describe('OrchestratorPanel', () => {
 
       expect(textColourOf(stepAlert)).toEqual(textColourOf(banner));
       expect(textColourOf(banner)).toEqual(['text-[var(--sf-text)]']);
+    });
+
+    /**
+     * PF-1229 finding #9: `StatusBadge`'s `failed` entry and `StepStatusIcon`'s
+     * `failed` case were hardcoded `red-900/50`/`text-red-300`/`text-red-400`
+     * — a dark-theme-only pairing this panel's other themes (rust, ember,
+     * ice, leaf, mech, light) never see. The badge's pill TEXT ("Failed")
+     * is real text, so it must clear WCAG AA 4.5:1 and therefore routes
+     * through `--sf-text`, same as `ERROR_SURFACE_CLASSES` above — the badge
+     * background stays `--sf-destructive` at the same 10%-alpha tint that
+     * test already pins. The step icon is a graphical glyph, not text
+     * characters, so it only needs WCAG 1.4.11's 3:1 non-text floor and can
+     * use `--sf-destructive` directly (pinned as "destructive indicator on
+     * surface" in `NONTEXT_PAIRS`, `packages/ui/src/tokens/__tests__/themes.test.ts`).
+     */
+    it('draws the failed status badge and step icon with token-based colour, not hardcoded red', () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        currentPlan: FAILED_PLAN,
+        stepStatuses: { 'step-2': 'failed' },
+      });
+      render(<OrchestratorPanel />);
+
+      const badge = screen.getByText('Failed');
+      const badgeClasses = Array.from(badge.classList);
+      expect(badgeClasses.some((c) => /^(bg|text)-red-/.test(c))).toBe(false);
+      expect(badgeClasses).toContain('bg-[var(--sf-destructive)]/10');
+      expect(badgeClasses).toContain('text-[var(--sf-text)]');
+
+      const stepRow = screen.getByText('Setting up entities').closest('div');
+      const icon = stepRow?.querySelector('svg');
+      expect(icon).toBeTruthy();
+      const iconClasses = Array.from(icon?.classList ?? []);
+      expect(iconClasses.some((c) => /^text-red-/.test(c))).toBe(false);
+      expect(iconClasses).toContain('text-[var(--sf-destructive)]');
     });
   });
 

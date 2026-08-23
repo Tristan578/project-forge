@@ -183,4 +183,30 @@ describe('Theme Definitions', () => {
       `${theme}: --sf-text ${textHex} on blended destructive/10 ${blendedBg} (over ${surfaceHex}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
     ).toBeGreaterThanOrEqual(4.5);
   });
+
+  // Regression for PF-1229 finding #9: OrchestratorPanel's warnings-list
+  // container (see web/src/components/editor/OrchestratorPanel.tsx) was
+  // migrated off hardcoded `border-amber-800 bg-amber-950/40 text-amber-200`
+  // onto `border-[var(--sf-warning)]/40 bg-[var(--sf-warning)]/10
+  // text-[var(--sf-text)]` — the same border/bg proportions as
+  // ERROR_SURFACE_CLASSES above, with --sf-warning substituted for
+  // --sf-destructive. --sf-warning is only pinned at the WCAG 1.4.11
+  // non-text floor (3:1, see NONTEXT_PAIRS above); there is no
+  // --sf-warning-foreground token and no existing pin proves --sf-text
+  // clears AA against a --sf-warning tint specifically (only against the
+  // solid --sf-destructive tint above), so this test proves that holds
+  // against the actual blended background a viewer sees before the
+  // component relies on it.
+  it.each(THEMES)('%s theme: warning surface text clears WCAG AA against the blended warning tint', (theme) => {
+    const tokens = THEME_DEFINITIONS[theme];
+    const warningHex = tokens['--sf-warning'] as string;
+    const surfaceHex = tokens['--sf-bg-surface'] as string;
+    const textHex = tokens['--sf-text'] as string;
+    const blendedBg = blendHex(warningHex, surfaceHex, 0.1);
+    const ratio = contrastRatio(textHex, blendedBg);
+    expect(
+      ratio,
+      `${theme}: --sf-text ${textHex} on blended warning/10 ${blendedBg} (over ${surfaceHex}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
+    ).toBeGreaterThanOrEqual(4.5);
+  });
 });
