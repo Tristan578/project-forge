@@ -27,22 +27,16 @@ export class EditorPage {
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
 
-      // Skip the WebGPU probe on every config. `loadWasm()` reads this key
-      // first (`useEngine.ts`) and only calls `probeWebGPU()` when it is not
-      // 'webgl2', so seeding it means no config spends GPU_INIT_TIMEOUT
-      // probing for an adapter before falling back.
-      //
-      // This is NOT load-bearing for reaching `__FORGE_ENGINE_READY`: that flag
-      // is set when `init_engine()` returns, which needs no GL context, so the
-      // `--disable-gpu` chromium projects and the firefox/webkit/mobile ones in
-      // playwright.config.ts complete `load()` with or without it (the @ui suite
-      // always has). Only the engine config actually has a GL context to render
-      // through. So the cost of the seed is real but narrow — a future
-      // WebGPU-capable firefox/webkit run would be silently forced onto WebGL2
-      // by inheriting it, and must clear the key rather than assume it is
-      // harmless. It lives here rather than in each engine spec so a third one
-      // cannot forget it. Same persisted key the in-app fallback button writes
-      // (`PREFERRED_BACKEND_KEY`, useEngine.ts).
+      // Seed the persisted backend choice so `loadWasm()` (useEngine.ts) takes
+      // the WebGL2 path directly: it reads this key before anything else and
+      // only calls `probeWebGPU()` when it is not 'webgl2', so no config spends
+      // GPU_INIT_TIMEOUT probing for an adapter before falling back. This is
+      // what playwright.engine.config.ts's header requires of the fixture —
+      // SwiftShader cannot drive WebGPU, so the engine-smoke job must never
+      // wait on that probe. It lives here rather than in each engine spec so a
+      // third one cannot forget it. Same persisted key the in-app fallback
+      // button writes (`PREFERRED_BACKEND_KEY`, useEngine.ts). A future
+      // WebGPU-capable project must clear the key rather than inherit it.
       localStorage.setItem('forge:preferred-backend', 'webgl2');
 
       // Inject CSS to hide blocking overlays
