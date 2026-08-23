@@ -25,6 +25,15 @@ export class EditorPage {
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
 
+      // Force the WebGL2 backend before the app boots. Every config that can
+      // actually complete this method runs Chromium on ANGLE/SwiftShader, which
+      // cannot drive WebGPU — without this, `loadWasm()` probes WebGPU first and
+      // burns GPU_INIT_TIMEOUT before falling back. It lives here rather than in
+      // each engine spec so a third one cannot forget it. Same persisted key the
+      // in-app fallback button writes (`PREFERRED_BACKEND_KEY`, useEngine.ts).
+      // A future WebGPU gate must clear this key rather than inherit it.
+      localStorage.setItem('forge:preferred-backend', 'webgl2');
+
       // Inject CSS to hide blocking overlays
       const style = document.createElement('style');
       style.setAttribute('data-e2e', 'suppress-overlays');

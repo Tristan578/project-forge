@@ -2,6 +2,7 @@ import { test, expect } from '../fixtures/editor.fixture';
 import {
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_INTERACTION_MS,
+  E2E_TIMEOUT_PIPELINE_LIVE_MS,
   E2E_TIMEOUT_TEST_MS,
 } from '../constants';
 import crystalRun3d from '../fixtures/gdd/crystal-run-3d.json';
@@ -19,9 +20,12 @@ import crystalRun3d from '../fixtures/gdd/crystal-run-3d.json';
  *
  * So this spec runs the REAL pipeline against the REAL WASM engine under
  * ANGLE/SwiftShader software WebGL2, and then clicks the REAL Play button. The
- * pass condition is a genuine round trip: `engineMode` is written ONLY by
- * `hooks/events/transformEvents.ts` on the engine's own `ENGINE_MODE_CHANGED`
- * event — `gameSlice.play()` never sets it — so observing `engineMode === 'play'`
+ * pass condition is a genuine round trip: nothing on the Play-button path writes
+ * `engineMode`. `gameSlice.play()` only dispatches, so the two writers that
+ * exist are `hooks/events/transformEvents.ts`, reacting to the engine's own
+ * `ENGINE_MODE_CHANGED` event, and `gameSlice.setEngineMode` — whose live
+ * callers (`QuickStartFlow.tsx`, `useScriptRunner.ts`) are not on this path and
+ * are not mounted by this flow. Observing `engineMode === 'play'` therefore
  * proves the engine accepted the scene the pipeline built and entered play mode.
  *
  * The GDD is loaded from the SAME fixture the integration suite imports
@@ -29,8 +33,18 @@ import crystalRun3d from '../fixtures/gdd/crystal-run-3d.json';
  * fast gate and the slow gate drift into testing different things.
  *
  * ASSERTIONS ARE ON OBSERVABLE ENGINE EFFECTS ONLY (scene-graph population,
- * engine-driven `engineMode`, the PlayControls status region), never on the
- * return value of a dispatch.
+ * engine-driven `engineMode`, the PlayControls status region, the chat surface),
+ * never on the return value of a dispatch.
+ *
+ * A HARD-REJECTED dispatch is observable in none of those. The pipeline's
+ * `ExecutorContext.dispatchCommand` is `=> void`, so a `camera_setup` /
+ * `character_setup` / `game_component` payload the engine refuses leaves the
+ * step reporting `completed` and surfaces only as the
+ * `Engine rejected command '<name>'` line that `editorStore`'s `tracked` wrapper
+ * writes to the console. Both tests therefore collect console errors and page
+ * errors for their whole lifetime and assert ZERO of each. That is what makes
+ * "every step completed" mean "the engine accepted every command the step sent"
+ * rather than merely "no executor threw".
  *
  * DEFERRED — `game_win` is deliberately NOT asserted here. Winning requires the
  * player to physically reach a collectible under a software rasteriser at an
@@ -65,6 +79,20 @@ type PipelineState = {
 
 type StoreHandle = { __EDITOR_STORE: { getState: () => PipelineState } };
 
+/** The chat surface the pre-play winnability gate writes its refusal into.
+ *  `forge-globals.d.ts` declares `__CHAT_STORE` as `unknown`, so the shape has
+ *  to be named here the same way `StoreHandle` names the editor store's. */
+type ChatHandle = {
+  __CHAT_STORE: {
+    getState: () => { messages: Array<{ role: string; content: string }> };
+  };
+};
+
+/** First line of `formatWinnabilityMessage` (`lib/playMode/winnabilityValidator.ts`),
+ *  which `gameSlice.play()` hands to `surfaceWinnabilityMessage` before returning.
+ *  NOT the `verifyExecutor` wording — that sentence is a different one. */
+const WINNABILITY_REFUSAL = "This game can't be won yet:";
+
 /**
  * The plan has at most three approval gates (`gate_plan`, `gate_assets`,
  * `gate_final` — planBuilder.ts). The cap is a real bound, not a guess: it stops
@@ -77,16 +105,24 @@ const TERMINAL = ['completed', 'failed', 'cancelled'];
 
 /**
  * Derived from the shared fixture rather than stored as a second file on
- * purpose: two hand-maintained copies of the same GDD drift, and the negative
- * case is only meaningful while it is the positive case MINUS one thing.
+ * purpose: two hand-maintained copies of the same GDD drift.
  *
- * That one thing is NOT the progression system. Since PF-1199 the plan-level
- * win-condition guarantee substitutes a `score` condition when a design names no
- * progression, so a no-progression GDD now legitimately COMPLETES and Play is
- * permitted (`generatedGamePlayable.integration.test.ts` asserts exactly that).
- * The shape the guarantee genuinely cannot rescue is a design that placed
- * nothing in the world: with no entities there is nothing to carry a condition,
- * `verify_all_scenes` reports NOT_WINNABLE, and the plan fails.
+ * TWO things are stripped below, and they do different jobs.
+ *
+ * `entities: []` is what makes the design unwinnable, and it is the only shape
+ * that still is. Since PF-1199 the plan-level win-condition guarantee
+ * substitutes a `score` condition whenever a design names no progression, so
+ * dropping progression ALONE now legitimately COMPLETES and Play is permitted
+ * (`generatedGamePlayable.integration.test.ts` asserts exactly that). With no
+ * entities there is nothing for a condition to hang on, so `verify_all_scenes`
+ * reports NOT_WINNABLE however the plan was assembled.
+ *
+ * Progression is stripped as well so the plan fails AT `verify_all_scenes`.
+ * Left in, its `game_component` step targets the collectible ids the design
+ * named — ids an empty world does not contain — so that step fails first and
+ * the verification step never runs at all. The assertion below (every
+ * `verify_all_scenes` step FAILED) would then be red for a different reason
+ * than the one this test exists to catch.
  */
 const emptyWorldGdd = {
   ...crystalRun3d,
@@ -197,23 +233,45 @@ function readOutcome(page: import('@playwright/test').Page) {
 }
 
 test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
+  // Declared for the whole describe rather than per test so that the cold WASM
+  // boot inside `beforeEach` is explicitly covered by the same budget: Playwright
+  // charges hook time to the test the hook ran for. `editor.load()` also seeds
+  // the WebGL2 backend preference (SwiftShader cannot drive WebGPU).
+  test.describe.configure({ timeout: E2E_TIMEOUT_PIPELINE_LIVE_MS });
+
+  let consoleErrors: string[] = [];
+  let pageErrors: string[] = [];
+
   test.beforeEach(async ({ page, editor }) => {
-    // Force WebGL2 BEFORE the app loads so loadWasm() never probes WebGPU
-    // (SwiftShader cannot drive it) and never burns GPU_INIT_TIMEOUT first.
-    // Same persisted key the in-app fallback button writes.
-    await page.addInitScript(() => {
-      localStorage.setItem('forge:preferred-backend', 'webgl2');
+    consoleErrors = [];
+    pageErrors = [];
+    // Registered before the first navigation, so these cover the whole test
+    // including engine boot — see `expectNoEngineRejections`.
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') consoleErrors.push(msg.text());
     });
+    page.on('pageerror', (err) => pageErrors.push(err.message));
     await editor.load();
   });
+
+  /**
+   * The one assertion that can see a hard-rejected dispatch.
+   *
+   * `ExecutorContext.dispatchCommand` is `=> void`, so an executor whose payload
+   * the engine refuses still reports its step `completed`. The only trace is the
+   * `Engine rejected command '<name>': <err>` line `editorStore`'s `tracked`
+   * wrapper writes (unthrottled — only the Sentry report is deduped). Page
+   * errors are asserted alongside it because an uncaught exception in the
+   * command path would likewise leave the step list looking healthy.
+   */
+  function expectNoEngineRejections(): void {
+    expect(consoleErrors.filter((line) => line.includes('Engine rejected command'))).toEqual([]);
+    expect(pageErrors).toEqual([]);
+  }
 
   test('generated game builds through the real engine and Play enters play mode', async ({
     page,
   }) => {
-    // Software rendering + WASM init + a whole pipeline of engine commands is
-    // far past the 90s config cap.
-    test.setTimeout(180_000);
-
     await stubPipelineRoutes(page, crystalRun3d);
 
     // The engine is live (editor.load() waited on __FORGE_ENGINE_READY), so
@@ -296,8 +354,9 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     await expect(playBtn).toBeEnabled();
     await playBtn.click();
 
-    // engineMode is set ONLY by the ENGINE_MODE_CHANGED handler, so this is a
-    // full JS -> WASM -> engine snapshot -> event -> store -> React round trip.
+    // Nothing on this path writes engineMode except the ENGINE_MODE_CHANGED
+    // handler, so this is a full JS -> WASM -> engine snapshot -> event ->
+    // store -> React round trip.
     await page.waitForFunction(
       () =>
         (window as unknown as StoreHandle).__EDITOR_STORE.getState()
@@ -307,13 +366,16 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     await expect(playStatus).toBeVisible({
       timeout: E2E_TIMEOUT_INTERACTION_MS,
     });
+
+    // Every step above reported `completed`, which on its own only means no
+    // executor threw. This is the assertion that makes it mean the engine
+    // accepted the commands those steps sent.
+    expectNoEngineRejections();
   });
 
   test('a game with nothing in the world fails verification and Play refuses', async ({
     page,
   }) => {
-    test.setTimeout(180_000);
-
     await stubPipelineRoutes(page, emptyWorldGdd);
 
     await page.evaluate(async () => {
@@ -349,11 +411,47 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     await expect(playBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await playBtn.click();
 
-    // Give the engine the same budget the positive test allows for a real
-    // transition, then assert it did NOT happen — a bare immediate check would
-    // pass even if the mode flipped a moment later.
-    await page.waitForTimeout(E2E_TIMEOUT_INTERACTION_MS);
+    // Wait on the POSITIVE signal the refusal produces, not on the absence of a
+    // transition. `play()` calls `surfaceWinnabilityMessage` before returning,
+    // which appends a `role: 'system'` message to the chat store through a
+    // DYNAMIC `import('@/stores/chatStore')` — hence a waitForFunction rather
+    // than a synchronous read. Sleeping and asserting nothing happened would
+    // pass just as readily against a dead engine or an unwired button.
+    await page.waitForFunction(
+      (needle) => {
+        const chat = (window as unknown as ChatHandle).__CHAT_STORE;
+        return (chat?.getState().messages ?? []).some(
+          (m) => m.role === 'system' && m.content.includes(needle)
+        );
+      },
+      WINNABILITY_REFUSAL,
+      { timeout: E2E_TIMEOUT_INTERACTION_MS }
+    );
+
+    // Only now is "still in edit" meaningful: the gate demonstrably ran.
     await expect(playStatus).toHaveCount(0);
     expect((await readOutcome(page)).engineMode).toBe('edit');
+
+    // ...and the refusal was a decision, not a casualty. A crashed WASM
+    // instance would satisfy everything above, so make the engine do real work:
+    // `spawn_entity` is queued in Rust and only reaches `sceneGraph.nodes` when
+    // the engine emits SCENE_GRAPH_UPDATE back. (`cube` is lowercase because
+    // `EntityType::from_str` is — a wrong spelling would be a hard reject, which
+    // `expectNoEngineRejections` below would then catch.)
+    const before = (await readOutcome(page)).nodeCount;
+    await page.evaluate(() => {
+      window.__FORGE_DISPATCH?.('spawn_entity', { entityType: 'cube' });
+    });
+    await page.waitForFunction(
+      (n) =>
+        Object.keys(
+          (window as unknown as StoreHandle).__EDITOR_STORE.getState().sceneGraph
+            ?.nodes ?? {}
+        ).length > n,
+      before,
+      { timeout: E2E_TIMEOUT_INTERACTION_MS }
+    );
+
+    expectNoEngineRejections();
   });
 });
