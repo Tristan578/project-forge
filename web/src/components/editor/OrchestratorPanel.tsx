@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  SkipForward,
   Play,
   Square,
   Sparkles,
@@ -105,9 +106,25 @@ function getStepLabel(executor: string): string {
  * `--sf-bg-surface` — and in the `light` theme `--sf-text` IS #18181b, i.e.
  * ~1.06:1, unreadable. Painting the surface here is what makes the rendered
  * contrast match the pinned contrast; do not remove it (PF-1229 finding #1).
+ *
+ * The border is painted at FULL opacity, not the `/40` it used to carry, and
+ * that is a contrast requirement rather than a style preference. A Tailwind
+ * `/N` modifier paints a COMPOSITED colour, so pinning the raw token pins a
+ * colour nobody sees. Measured across all seven themes, `--sf-destructive/40`
+ * against `--sf-bg-surface` lands between 1.44 (rust) and 1.94 (ice) -- far
+ * under the 3:1 WCAG 1.4.11 floor for a non-text boundary. At full opacity the
+ * same edge is 3.14 (rust) to 5.44 (ice), and the painted colour IS the token,
+ * so `NONTEXT_PAIRS` in `themes.test.ts` grades what is actually rendered.
+ *
+ * The graded adjacency is the OUTER edge, against `--sf-bg-surface`. The inner
+ * edge -- border against its own `/10` tint -- is unsatisfiable by any alpha in
+ * this palette (rust destructive tops out at 2.95 at full opacity), and it does
+ * not need to be: the callout's state is carried by its `AlertTriangle` icon
+ * and its `--sf-text` copy, so the border is decoration, not the sole state
+ * indicator that 1.4.11 governs.
  */
 const ERROR_SURFACE_CLASSES = cn(
-  'border border-[var(--sf-destructive)]/40',
+  'border border-[var(--sf-destructive)]',
   'bg-[var(--sf-destructive)]/10',
   'text-[var(--sf-text)]',
 );
@@ -124,12 +141,16 @@ const ERROR_SURFACE_CLASSES = cn(
  * that sit side by side now respond to a theme switch identically, because
  * they are the same construction over two different semantic tokens.
  *
- * `--sf-warning` is pinned >= 3:1 against the surfaces as a non-text colour,
- * and `--sf-text` is re-pinned >= 4.5:1 against the blended 10%-alpha warning
- * tint by `themes.test.ts`.
+ * The border is full-opacity for the same measured reason as the error
+ * surface above: `--sf-warning/40` against `--sf-bg-surface` runs 1.60 (light)
+ * to 2.74 (ember), and full opacity runs 3.63 (light) to 10.06 (ember).
+ *
+ * `--sf-warning` is pinned >= 3:1 against the surfaces as a non-text colour by
+ * `NONTEXT_PAIRS`, and `--sf-text` is re-pinned >= 4.5:1 against the blended
+ * 10%-alpha warning tint by `TINT_CASES` -- both in `themes.test.ts`.
  */
 const WARNING_SURFACE_CLASSES = cn(
-  'border border-[var(--sf-warning)]/40',
+  'border border-[var(--sf-warning)]',
   'bg-[var(--sf-warning)]/10',
   'text-[var(--sf-text)]',
 );
@@ -151,18 +172,23 @@ const STATUS_LABELS: Record<OrchestratorStatus, string> = {
 
 function StatusBadge({ status }: { status: OrchestratorStatus }) {
   const colorClasses: Record<OrchestratorStatus, string> = {
-    idle: 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text-secondary)]',
+    idle: 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text)]',
     decomposing: 'bg-[var(--sf-accent)]/10 text-[var(--sf-text)]',
     planning: 'bg-[var(--sf-accent)]/10 text-[var(--sf-text)]',
     awaiting_approval: 'bg-[var(--sf-warning)]/10 text-[var(--sf-text)]',
     executing: 'bg-[var(--sf-accent)]/10 text-[var(--sf-text)]',
     completed: 'bg-[var(--sf-success)]/10 text-[var(--sf-text)]',
     failed: 'bg-[var(--sf-destructive)]/10 text-[var(--sf-text)]',
-    cancelled: 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text-secondary)]',
+    cancelled: 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text)]',
   };
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${colorClasses[status]}`}>
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
+        colorClasses[status],
+      )}
+    >
       {(status === 'decomposing' || status === 'planning' || status === 'executing') && (
         <Loader2 className="h-3 w-3 animate-spin" />
       )}
@@ -177,19 +203,72 @@ function StatusBadge({ status }: { status: OrchestratorStatus }) {
 // StepItem
 // ---------------------------------------------------------------------------
 
+/**
+ * The ONLY thing that distinguishes one step's state from another's, so it owes
+ * two things it did not used to carry.
+ *
+ * An accessible name (WCAG 1.1.1): the row next to it renders
+ * `getStepLabel(step.executor)` and nothing else, so to a screen reader every
+ * step read identically whether it had completed, failed or never started.
+ * `role="img"` + `aria-label` is what puts the state into the accessibility
+ * tree; `getByRole('img', { name: ... })` is what pins it.
+ *
+ * A non-colour difference between `pending` and `skipped` (WCAG 1.4.1): both
+ * used the same `Clock` glyph at the same size, and their row labels share one
+ * colour, so hue was the entire signal. `skipped` gets `SkipForward`.
+ *
+ * The two muted foregrounds are gone as well. As a non-text graphic an icon
+ * needs 3:1 (WCAG 1.4.11), and against `--sf-bg-surface` `--sf-text-disabled`
+ * measured 1.48 (light) to 2.89 (leaf) -- failing all seven -- while
+ * `--sf-text-muted` measured 2.56 in light and sat under 3.2 in three more.
+ * `--sf-text-secondary` clears it everywhere: 5.32 (mech) to 9.90 (leaf) on
+ * `--sf-bg-surface`, 4.04 (ice) to 7.78 (leaf) on `--sf-bg-elevated`. The three
+ * semantic foregrounds already cleared 3:1 unaided (success 3.30 light,
+ * destructive 3.14 rust, accent 4.26 rust) and are unchanged.
+ */
 function StepStatusIcon({ status }: { status: PlanStep['status'] }) {
   switch (status) {
     case 'completed':
-      return <CheckCircle2 className="h-4 w-4 text-[var(--sf-success)]" />;
+      return (
+        <CheckCircle2
+          role="img"
+          aria-label="Completed"
+          className="h-4 w-4 text-[var(--sf-success)]"
+        />
+      );
     case 'running':
-      return <Loader2 className="h-4 w-4 animate-spin text-[var(--sf-accent)]" />;
+      return (
+        <Loader2
+          role="img"
+          aria-label="Running"
+          className="h-4 w-4 animate-spin text-[var(--sf-accent)]"
+        />
+      );
     case 'failed':
-      return <XCircle className="h-4 w-4 text-[var(--sf-destructive)]" />;
+      return (
+        <XCircle
+          role="img"
+          aria-label="Failed"
+          className="h-4 w-4 text-[var(--sf-destructive)]"
+        />
+      );
     case 'skipped':
-      return <Clock className="h-4 w-4 text-[var(--sf-text-muted)]" />;
+      return (
+        <SkipForward
+          role="img"
+          aria-label="Skipped"
+          className="h-4 w-4 text-[var(--sf-text-secondary)]"
+        />
+      );
     case 'pending':
     default:
-      return <Clock className="h-4 w-4 text-[var(--sf-text-disabled)]" />;
+      return (
+        <Clock
+          role="img"
+          aria-label="Pending"
+          className="h-4 w-4 text-[var(--sf-text-secondary)]"
+        />
+      );
   }
 }
 
@@ -258,12 +337,12 @@ function TokenCostBar({ estimate }: { estimate: TokenEstimate }) {
   return (
     <div className="rounded-md border border-[var(--sf-border)] bg-[var(--sf-bg-elevated)] p-3">
       <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="font-medium text-[var(--sf-text-secondary)]">Estimated token cost</span>
+        <span className="font-medium text-[var(--sf-text)]">Estimated token cost</span>
         <span className="font-mono text-[var(--sf-text)]">{estimate.totalEstimated}</span>
       </div>
       <div className="space-y-1">
         {estimate.breakdown.map((item) => (
-          <div key={item.category} className="flex items-center justify-between text-[11px] text-[var(--sf-text-secondary)]">
+          <div key={item.category} className="flex items-center justify-between text-[11px] text-[var(--sf-text)]">
             <span>{item.category}</span>
             <span className="font-mono">{item.estimatedTokens}</span>
           </div>
@@ -303,15 +382,17 @@ function ApprovalGateDialog({
   return (
     <div className={cn('rounded-md p-4', WARNING_SURFACE_CLASSES)}>
       <h4 className="mb-1 text-sm font-semibold text-[var(--sf-text)]">{gate.label}</h4>
-      <p className="mb-3 text-xs text-[var(--sf-text-secondary)]">{gate.description}</p>
+      <p className="mb-3 text-xs text-[var(--sf-text)]">{gate.description}</p>
 
       {/* Scene summaries */}
       {displayData.sceneSummaries && displayData.sceneSummaries.length > 0 && (
         <div className="mb-3 space-y-1">
-          <h5 className="text-xs font-medium text-[var(--sf-text-secondary)]">Scenes</h5>
+          <h5 className="text-xs font-medium text-[var(--sf-text)]">Scenes</h5>
           {displayData.sceneSummaries.map((scene) => (
-            <div key={scene.name} className="rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text-secondary)]">
-              <span className="text-[var(--sf-text)]">{scene.name}</span>
+            <div key={scene.name} className="rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text)]">
+              {/* The name led on colour alone before the row itself moved to
+                  `--sf-text`; weight carries the hierarchy now instead. */}
+              <span className="font-medium">{scene.name}</span>
               <span className="ml-2">({scene.entityCount} entities)</span>
             </div>
           ))}
@@ -321,9 +402,9 @@ function ApprovalGateDialog({
       {/* Asset list */}
       {displayData.assetList && displayData.assetList.length > 0 && (
         <div className="mb-3 space-y-1">
-          <h5 className="text-xs font-medium text-[var(--sf-text-secondary)]">Assets to generate</h5>
+          <h5 className="text-xs font-medium text-[var(--sf-text)]">Assets to generate</h5>
           {displayData.assetList.map((asset, i) => (
-            <div key={i} className="flex items-center justify-between rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text-secondary)]">
+            <div key={i} className="flex items-center justify-between rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text)]">
               <span>{asset.description}</span>
               <span className="font-mono">{asset.estimatedTokenCost} tokens</span>
             </div>
@@ -333,7 +414,7 @@ function ApprovalGateDialog({
 
       {/* Completion summary */}
       {displayData.completionSummary && (
-        <div className="mb-3 rounded bg-[var(--sf-bg-elevated)] px-2 py-1.5 text-xs text-[var(--sf-text-secondary)]">
+        <div className="mb-3 rounded bg-[var(--sf-bg-elevated)] px-2 py-1.5 text-xs text-[var(--sf-text)]">
           <span>{displayData.completionSummary.totalEntities} entities, </span>
           <span>{displayData.completionSummary.totalScenes} scenes, </span>
           <span>{displayData.completionSummary.totalScripts} scripts</span>
@@ -407,7 +488,7 @@ export function OrchestratorPanel() {
     return (
       <div className="flex h-full items-center justify-center bg-[var(--sf-bg-surface)] p-4 text-center text-sm text-[var(--sf-text-secondary)]">
         <div>
-          <Sparkles className="mx-auto mb-2 h-8 w-8 text-[var(--sf-text-muted)]" />
+          <Sparkles aria-hidden="true" className="mx-auto mb-2 h-8 w-8 text-[var(--sf-text-secondary)]" />
           <p>No game creation in progress</p>
           <p className="mt-1 text-xs">Use chat or QuickStart to create a game</p>
         </div>

@@ -93,9 +93,22 @@ describe('Theme Definitions', () => {
     return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
   }
 
+  // `--sf-bg-elevated` is a REAL text background, not only a hover state: the
+  // OrchestratorPanel's idle/cancelled StatusBadge, its whole TokenCostBar, and
+  // the scene/asset/summary tiles inside its approval gate all paint it opaque
+  // and put copy on it. It was absent from this list for that reason, and the
+  // absence is what let `--sf-text-secondary` ship on it at 4.07:1 (rust) and
+  // 4.04:1 (ice) -- both under AA.
+  //
+  // Only `--sf-text` is pinned on it at the 4.5 text floor. Pairing
+  // `--sf-text-secondary` with `--sf-bg-elevated` at 4.5 would FAIL rust and
+  // ice today, so the panel no longer uses that combination for text; it
+  // appears below at the 3:1 non-text floor instead, which is the only claim
+  // this palette can honestly support.
   const TEXT_BG_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string]> = [
     ['--sf-text', '--sf-bg-app', 'primary text on app background'],
     ['--sf-text', '--sf-bg-surface', 'primary text on surface'],
+    ['--sf-text', '--sf-bg-elevated', 'primary text on elevated surface'],
     ['--sf-text-secondary', '--sf-bg-app', 'secondary text on app background'],
     ['--sf-text-secondary', '--sf-bg-surface', 'secondary text on surface'],
   ];
@@ -111,9 +124,21 @@ describe('Theme Definitions', () => {
     }
   });
 
-  // WCAG 1.4.11 Non-text Contrast — interactive elements need >= 3:1 against their container background.
-  // --sf-bg-surface and --sf-bg-app are the primary containers for interactive elements.
-  // --sf-bg-elevated is for hover states / card interiors, not interactive element containers.
+  // WCAG 1.4.11 Non-text Contrast — a graphic that carries meaning needs
+  // >= 3:1 against whatever is painted behind it. `--sf-bg-surface` and
+  // `--sf-bg-app` are the primary containers for interactive elements;
+  // `--sf-bg-elevated` hosts them too (see TEXT_BG_PAIRS above), so the icon
+  // pairs below grade it as well.
+  //
+  // `--sf-text-secondary` appears here AND in TEXT_BG_PAIRS because the
+  // OrchestratorPanel gives it two different jobs: small copy (4.5 floor,
+  // pinned above) and the foreground of `StepStatusIcon`'s pending/skipped
+  // glyphs plus the empty-state `Sparkles` (3:1 floor, pinned here). The two
+  // muted tokens those icons used to carry were pinned at NEITHER floor and
+  // clear neither: `--sf-text-disabled` on `--sf-bg-surface` runs 1.48 (light)
+  // to 2.89 (leaf), failing all seven themes, and `--sf-text-muted` is 2.56 in
+  // light with three more themes under 3.2. Nothing caught it, because nothing
+  // graded an icon foreground at all.
   const NONTEXT_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string, number]> = [
     ['--sf-border-strong', '--sf-bg-surface', 'interactive border on surface', 3.0],
     ['--sf-border-strong', '--sf-bg-app', 'interactive border on app background', 3.0],
@@ -122,6 +147,8 @@ describe('Theme Definitions', () => {
     ['--sf-destructive', '--sf-bg-surface', 'destructive indicator on surface', 3.0],
     ['--sf-success', '--sf-bg-surface', 'success indicator on surface', 3.0],
     ['--sf-warning', '--sf-bg-surface', 'warning indicator on surface', 3.0],
+    ['--sf-text-secondary', '--sf-bg-surface', 'status icon glyph on surface', 3.0],
+    ['--sf-text-secondary', '--sf-bg-elevated', 'status icon glyph on elevated surface', 3.0],
   ];
 
   it.each(THEMES)('%s theme meets WCAG 1.4.11 non-text contrast for interactive elements', (theme) => {
@@ -168,6 +195,18 @@ describe('Theme Definitions', () => {
   // tokens below are the complete set it uses that way. Grep the component
   // for `]/10` to re-derive this list.
   //
+  // This matrix grades exactly ONE foreground (`--sf-text`) over exactly ONE
+  // base (a tint composited on `--sf-bg-surface`). An earlier revision of this
+  // comment claimed every semantic surface in the panel carried
+  // `text-[var(--sf-text)]`, and that was false: the approval gate's
+  // description and both of its `<h5>` headings sat on the warning tint in
+  // `--sf-text-secondary`, which measures 4.47:1 in `mech`. A matrix over one
+  // foreground can never see that. The panel was moved onto `--sf-text` at
+  // those sites rather than the comment being reworded, so the claim is now
+  // true by construction -- and the pins that make it ENFORCEABLE rather than
+  // merely asserted are the `--sf-bg-elevated` text pair and the icon
+  // foreground added above, plus TINT_OVER_ELEVATED_CASES below.
+  //
   // Why the pin is needed at all: each of these tokens is pinned only at the
   // WCAG 1.4.11 non-text floor (3:1, see NONTEXT_PAIRS above), and there is
   // no `--sf-destructive-foreground` / `--sf-warning-foreground` token to
@@ -187,9 +226,15 @@ describe('Theme Definitions', () => {
   // would composite over #18181b in all seven themes while this test graded
   // it against `--sf-bg-surface` — and in `light`, `--sf-text` IS #18181b,
   // i.e. ~1.06:1. The pin would then have passed on unreadable output.
+  // The insufficient-balance and token-warning rows are deliberately NOT named
+  // here: they are children of TokenCostBar's opaque
+  // `bg-[var(--sf-bg-elevated)]` container, so their tint composites over
+  // `--sf-bg-elevated`, not `--sf-bg-surface`. TINT_OVER_ELEVATED_CASES below
+  // grades them. Listing them here was a mis-attribution -- the ratio it
+  // reported was for a base those rows have never painted.
   const SEMANTIC_TINT_TOKENS = [
-    ['--sf-destructive', 'ERROR_SURFACE_CLASSES, the insufficient-balance row, the `failed` badge'],
-    ['--sf-warning', 'WARNING_SURFACE_CLASSES, the token-warning row, the `awaiting_approval` badge'],
+    ['--sf-destructive', 'ERROR_SURFACE_CLASSES, the `failed` badge'],
+    ['--sf-warning', 'WARNING_SURFACE_CLASSES, the `awaiting_approval` badge'],
     ['--sf-accent', 'the `decomposing` / `planning` / `executing` badges'],
     ['--sf-success', 'the `completed` badge'],
   ] as const;
@@ -211,6 +256,85 @@ describe('Theme Definitions', () => {
         ratio,
         `${theme}: --sf-text ${textHex} on blended ${tokenKey}/10 ${blendedBg} (over --sf-bg-surface ${surfaceHex}, used by ${usedBy}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
       ).toBeGreaterThanOrEqual(4.5);
+    }
+  );
+
+  // The second base the panel really paints a tint over. TokenCostBar's
+  // container is an opaque `bg-[var(--sf-bg-elevated)]`, and its two alert rows
+  // paint `bg-[var(--sf-destructive)]/10` and `bg-[var(--sf-warning)]/10`
+  // INSIDE it, so the composite is tint-over-elevated -- a different colour
+  // from the tint-over-surface graded above.
+  const TINT_OVER_ELEVATED_TOKENS = [
+    ['--sf-destructive', 'TokenCostBar insufficient-balance row'],
+    ['--sf-warning', 'TokenCostBar token-warning row'],
+  ] as const;
+
+  const TINT_OVER_ELEVATED_CASES = THEMES.flatMap((theme) =>
+    TINT_OVER_ELEVATED_TOKENS.map(([tokenKey, usedBy]) => [theme, tokenKey, usedBy] as const)
+  );
+
+  it.each(TINT_OVER_ELEVATED_CASES)(
+    '%s theme: %s/10 tint over --sf-bg-elevated keeps OrchestratorPanel alert rows at WCAG AA',
+    (theme, tokenKey, usedBy) => {
+      const tokens = THEME_DEFINITIONS[theme];
+      const tintHex = tokens[tokenKey] as string;
+      const elevatedHex = tokens['--sf-bg-elevated'] as string;
+      const textHex = tokens['--sf-text'] as string;
+      const blendedBg = blendHex(tintHex, elevatedHex, 0.1);
+      const ratio = contrastRatio(textHex, blendedBg);
+      expect(
+        ratio,
+        `${theme}: --sf-text ${textHex} on blended ${tokenKey}/10 ${blendedBg} (over --sf-bg-elevated ${elevatedHex}, used by ${usedBy}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  );
+
+  // The callout BORDER, graded as painted rather than as a raw token.
+  //
+  // NONTEXT_PAIRS above grades `--sf-destructive` / `--sf-warning` at full
+  // strength, which was not what `ERROR_SURFACE_CLASSES` and
+  // `WARNING_SURFACE_CLASSES` rendered -- they carried a `/40` modifier, and a
+  // Tailwind `/N` composites. The pinned ratio was therefore for a colour the
+  // component never drew: destructive/40 on `--sf-bg-surface` measures 1.44
+  // (rust) to 1.94 (ice), against the 3.14-to-5.44 the raw token was scoring.
+  //
+  // The component now paints these borders at full opacity, which is the only
+  // setting that satisfies 1.4.11 anywhere in this palette: no alpha from 0.4
+  // to 1.0 clears 3:1 against the tint INTERIOR (rust destructive peaks at 2.95
+  // at alpha 1.0; light warning at 3.26), so the graded adjacency is the OUTER
+  // edge against `--sf-bg-surface`. That is legitimate because the border is
+  // not the sole state indicator -- each callout also carries an
+  // `AlertTriangle` glyph and `--sf-text` copy -- so 1.4.11 does not hang on
+  // the interior edge.
+  //
+  // `CALLOUT_BORDER_ALPHA` must stay in lockstep with the component. The
+  // component-side half of that pin (that neither surface class carries a `/N`
+  // modifier on its border) lives in
+  // `web/src/components/editor/__tests__/OrchestratorPanel.test.tsx`, because
+  // this package cannot read across the workspace boundary.
+  const CALLOUT_BORDER_ALPHA = 1.0;
+
+  const CALLOUT_BORDER_TOKENS = [
+    ['--sf-destructive', 'ERROR_SURFACE_CLASSES border'],
+    ['--sf-warning', 'WARNING_SURFACE_CLASSES border'],
+  ] as const;
+
+  const CALLOUT_BORDER_CASES = THEMES.flatMap((theme) =>
+    CALLOUT_BORDER_TOKENS.map(([tokenKey, usedBy]) => [theme, tokenKey, usedBy] as const)
+  );
+
+  it.each(CALLOUT_BORDER_CASES)(
+    '%s theme: %s callout border meets WCAG 1.4.11 as composited',
+    (theme, tokenKey, usedBy) => {
+      const tokens = THEME_DEFINITIONS[theme];
+      const borderHex = tokens[tokenKey] as string;
+      const surfaceHex = tokens['--sf-bg-surface'] as string;
+      const paintedHex = blendHex(borderHex, surfaceHex, CALLOUT_BORDER_ALPHA);
+      const ratio = contrastRatio(paintedHex, surfaceHex);
+      expect(
+        ratio,
+        `${theme}: ${usedBy} -- ${tokenKey} ${borderHex} at alpha ${CALLOUT_BORDER_ALPHA} paints ${paintedHex} on --sf-bg-surface ${surfaceHex} = ${ratio.toFixed(2)}:1, need >= 3:1`
+      ).toBeGreaterThanOrEqual(3.0);
     }
   );
 });

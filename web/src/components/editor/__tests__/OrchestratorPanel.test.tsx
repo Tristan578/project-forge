@@ -788,9 +788,49 @@ describe('OrchestratorPanel', () => {
       // --sf-warning substituted for --sf-destructive, and the same AA-safe
       // foreground. A theme switch therefore moves both by the same amount.
       const classes = Array.from(screen.getByLabelText('Game creation warnings').classList);
-      expect(classes).toContain('border-[var(--sf-warning)]/40');
+      expect(classes).toContain('border-[var(--sf-warning)]');
       expect(classes).toContain('bg-[var(--sf-warning)]/10');
       expect(classes).toContain('text-[var(--sf-text)]');
+    });
+
+    // The component-side half of the border pin in
+    // `packages/ui/src/tokens/__tests__/themes.test.ts`. That suite grades the
+    // border colour at `CALLOUT_BORDER_ALPHA = 1.0` but cannot read this file,
+    // so a `/N` modifier reintroduced here would silently make its ratio
+    // describe a colour nobody paints -- which is exactly what `/40` did:
+    // destructive/40 on --sf-bg-surface measures 1.44:1 (rust) against a
+    // graded 3.14:1, so WCAG 1.4.11 was pinned on the wrong colour in all
+    // seven themes. Only the BORDER is asserted opaque; the `/10` background
+    // tint is deliberately still alpha-composited, and the tint suites over
+    // there grade it as such.
+    it('paints the error callout border at full opacity, never a /N modifier', () => {
+      mockStore({
+        orchestratorStatus: 'failed',
+        orchestratorError: 'Decomposition failed.',
+      });
+      render(<OrchestratorPanel />);
+
+      const classes = Array.from(screen.getByText('Decomposition failed.').classList);
+      expect(classes.filter((c) => c.startsWith('border-[var(--sf-destructive)]'))).toEqual([
+        'border-[var(--sf-destructive)]',
+      ]);
+    });
+
+    it('paints the warnings callout border at full opacity, never a /N modifier', () => {
+      mockStore({
+        orchestratorStatus: 'completed',
+        currentPlan: MOCK_PLAN,
+        stepStatuses: {},
+        orchestratorWarnings: [
+          { stepId: 'step-2', executor: 'physics_profile', message: 'Matched no entities.' },
+        ],
+      });
+      render(<OrchestratorPanel />);
+
+      const classes = Array.from(screen.getByLabelText('Game creation warnings').classList);
+      expect(classes.filter((c) => c.startsWith('border-[var(--sf-warning)]'))).toEqual([
+        'border-[var(--sf-warning)]',
+      ]);
     });
   });
 });
