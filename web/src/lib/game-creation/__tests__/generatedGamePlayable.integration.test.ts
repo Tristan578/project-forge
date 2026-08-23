@@ -37,12 +37,19 @@ import { fetchAI } from '@/lib/ai/client';
 import { buildPlan } from '../planBuilder';
 import { runPipeline } from '../pipelineRunner';
 import { EXECUTOR_REGISTRY } from '../executors';
-import type { ExecutorContext, OrchestratorGDD, OrchestratorPlan, PlanStep } from '../types';
+import type {
+  ExecutorContext,
+  FeelDirective,
+  OrchestratorGDD,
+  OrchestratorPlan,
+  PlanStep,
+} from '../types';
 import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
 import { setWinnabilityStateReader } from '@/stores/slices';
 import { createTestHarness } from '@/__integration__/harness';
 import type { TestHarness } from '@/__integration__/harness';
 import type { SceneNode } from '@/stores/slices/types';
+import crystalRun3dFixture from '../../../../e2e/fixtures/gdd/crystal-run-3d.json';
 
 // ---------------------------------------------------------------------------
 // Fake engine
@@ -114,66 +121,24 @@ function makeContext(harness: TestHarness, projectType: '2d' | '3d'): ExecutorCo
 // GDD fixtures — shaped the way the real GDD generator emits them
 // ---------------------------------------------------------------------------
 
-const FEEL = {
-  mood: 'bright and curious',
-  pacing: 'medium' as const,
-  weight: 'medium' as const,
-  referenceGames: ['Super Mario 64'],
-  oneLiner: 'Bouncy exploration with a goal you can see from the start.',
-};
+/**
+ * The 3D GDD is loaded from `web/e2e/fixtures/gdd/crystal-run-3d.json` rather
+ * than declared here, because TWO gates now assert on the same generated game:
+ * this suite (fast, fake bridge) and the live-engine Playwright gate
+ * `web/e2e/tests/pipeline-live-engine.spec.ts` (real WASM, real Play button).
+ * One fixture is what stops the two from silently testing different games.
+ *
+ * Both casts are load-bearing. A JSON import widens every literal (`'3d'`
+ * becomes `string`), so the shape has to be re-narrowed; and `structuredClone`
+ * is not defensive here — three call sites take this GDD and one of them
+ * (`crystalRunWithoutProgression`) rewrites it, so a shared reference would
+ * mutate another test's input.
+ */
+const FEEL = crystalRun3dFixture.feelDirective as FeelDirective;
 
 /** Collect-everything platformer in 3D. */
 function crystalRun3d(): OrchestratorGDD {
-  return {
-    id: 'gdd-crystal-run',
-    title: 'Crystal Run',
-    description: 'Bounce around a small arena and gather every crystal.',
-    projectType: '3d',
-    estimatedScope: 'small',
-    styleDirective: 'low-poly pastel',
-    feelDirective: FEEL,
-    constraints: [],
-    systems: [
-      { category: 'movement', type: 'platformer', config: {}, priority: 'core', dependsOn: [] },
-      {
-        category: 'world',
-        type: 'platformer arena',
-        config: { width: 40, depth: 40, platforms: 4, bounds: true },
-        priority: 'core',
-        dependsOn: [],
-      },
-      {
-        category: 'camera',
-        type: 'thirdPersonFollow',
-        config: {},
-        priority: 'core',
-        dependsOn: ['movement'],
-      },
-      {
-        category: 'progression',
-        type: 'collect-all',
-        config: { collectibleValue: 25 },
-        priority: 'core',
-        dependsOn: ['movement'],
-      },
-    ],
-    scenes: [
-      {
-        name: 'Crystal Arena',
-        purpose: 'The only level.',
-        systems: ['movement', 'world', 'camera', 'progression'],
-        entities: [
-          { name: 'Player', role: 'player', systems: ['movement'], appearance: 'primitive:capsule' },
-          { name: 'Crystal Alpha', role: 'interactable', systems: [], appearance: 'primitive:sphere' },
-          { name: 'Crystal Beta', role: 'interactable', systems: [], appearance: 'primitive:sphere' },
-          { name: 'Main Camera', role: 'decoration', systems: ['camera'], appearance: 'primitive:cube' },
-          { name: 'Sun Light', role: 'decoration', systems: [], appearance: 'primitive:cube' },
-        ],
-        transitions: [],
-      },
-    ],
-    assetManifest: [],
-  };
+  return structuredClone(crystalRun3dFixture) as OrchestratorGDD;
 }
 
 /** Reach-the-exit side-scroller in 2D. */
