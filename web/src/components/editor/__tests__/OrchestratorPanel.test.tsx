@@ -146,6 +146,29 @@ describe('OrchestratorPanel', () => {
     expect(screen.getByText('optional')).toBeTruthy();
   });
 
+  /**
+   * `plan.steps` can carry a hole or an explicit `null` slot — the planner's
+   * own tolerance, not something this panel invents. The step list must
+   * render the real steps around the gap without throwing
+   * (PF-1229 finding #7b).
+   */
+  it('renders the real steps around a sparse plan slot without throwing', () => {
+    const sparsePlan = {
+      ...MOCK_PLAN,
+      steps: [MOCK_PLAN.steps[0], null, MOCK_PLAN.steps[2]],
+    };
+    mockStore({
+      orchestratorStatus: 'executing',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      currentPlan: sparsePlan as any,
+      stepStatuses: { 'step-1': 'completed', 'step-3': 'pending' },
+    });
+
+    expect(() => render(<OrchestratorPanel />)).not.toThrow();
+    expect(screen.getByText('Creating scene')).toBeTruthy();
+    expect(screen.getByText('Polishing game')).toBeTruthy();
+  });
+
   it('renders token cost estimate', () => {
     mockStore({
       orchestratorStatus: 'awaiting_approval',
@@ -504,6 +527,32 @@ describe('OrchestratorPanel', () => {
       render(<OrchestratorPanel />);
 
       expect(screen.getByText('1 thing needs your attention')).toBeTruthy();
+    });
+
+    /**
+     * A plan-level warning (e.g. "no win condition detected") names no step —
+     * `orchestratorSlice` folds `currentPlan.warnings` in as bare `{ message }`
+     * with no `stepId`/`executor` (PF-1229 finding #6b). It must still be
+     * counted in the attention total and render without a step-label prefix
+     * (PF-1229 finding #7a).
+     */
+    it('renders a plan-level warning with no step label prefix, counted in the total', () => {
+      mockStore({
+        orchestratorStatus: 'completed',
+        currentPlan: MOCK_PLAN,
+        stepStatuses: { 'step-1': 'completed', 'step-2': 'completed', 'step-3': 'completed' },
+        orchestratorWarnings: [
+          { message: 'No win condition detected — the game cannot be completed.' },
+        ],
+      });
+      render(<OrchestratorPanel />);
+
+      expect(screen.getByText('1 thing needs your attention')).toBeTruthy();
+      expect(
+        screen.getByText('No win condition detected — the game cannot be completed.'),
+      ).toBeTruthy();
+      // No step label ever precedes a plan-level note.
+      expect(screen.queryByText(/^.+:$/)).toBeNull();
     });
 
     it('renders nothing when no step reported a problem', () => {
