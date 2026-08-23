@@ -570,13 +570,27 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
     const names = commands.map((c) => c.command);
 
     expect(names).toContain('play');
-    // The game was built through the engine, not written straight into the store.
+    // The game was built through the engine, not written straight into the
+    // store: a body for every spawned role, a camera the engine renders
+    // through, and the win condition the winnability gate above depends on.
     expect(names).toContain('spawn_entity');
     expect(names).toContain('toggle_physics');
+    expect(names).toContain('update_physics');
     expect(names).toContain('set_game_camera');
+    expect(names).toContain('set_active_game_camera');
+    expect(names).toContain('add_game_component');
 
-    // No command may name an entity the engine has not flushed yet — the
-    // silent-drop class `waitForEngineFrame` exists to prevent (PF-1213).
+    // A TRIPWIRE, NOT A REPRODUCTION — and measured as such.
+    //
+    // No command may name an entity the engine has not flushed yet (PF-1213).
+    // Deleting `physicsEnableExecutor`'s pre-toggle `waitForEngineFrame` was
+    // rebuilt and re-run against this spec and it still PASSED: `gate_assets`
+    // is anchored to the last entity step and is NOT auto-approved, so a human
+    // click separates every spawn from every later step and the scene graph is
+    // always flushed by then. So this line does not cover the ordering class
+    // today — it guards a future step that spawns after the last gate (only
+    // `auto_polish`'s ground repair can, and only in a scene with no floor).
+    // The live-engine gate (PF-1202) is what covers the real ordering.
     expect(commands.filter((c) => !c.targetFlushed).map((c) => c.command)).toEqual([]);
   });
 });
