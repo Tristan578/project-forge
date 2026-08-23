@@ -17,21 +17,32 @@ export class EditorPage {
 
   /** Navigate to /dev and wait for WASM engine to initialize */
   async load() {
-    // Suppress onboarding overlays and init overlay so they don't block interactions.
-    // The InitOverlay stays visible until the Rust renderer fully initializes, which
-    // requires GPU — in headless Chrome with --disable-gpu it never completes.
+    // Suppress onboarding overlays and the init overlay so they don't block
+    // interactions. `InitOverlay` returns null once `isReady` flips — the same
+    // `setIsReady(true)` that sets `__FORGE_ENGINE_READY` — so it clears on
+    // every config; the suppression covers the window before that, plus a boot
+    // that stalls, so a click never lands on an overlay instead of the editor.
     await this.page.addInitScript(() => {
       localStorage.setItem('forge-welcomed', '1');
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
 
-      // Force the WebGL2 backend before the app boots. Every config that can
-      // actually complete this method runs Chromium on ANGLE/SwiftShader, which
-      // cannot drive WebGPU — without this, `loadWasm()` probes WebGPU first and
-      // burns GPU_INIT_TIMEOUT before falling back. It lives here rather than in
-      // each engine spec so a third one cannot forget it. Same persisted key the
-      // in-app fallback button writes (`PREFERRED_BACKEND_KEY`, useEngine.ts).
-      // A future WebGPU gate must clear this key rather than inherit it.
+      // Skip the WebGPU probe on every config. `loadWasm()` reads this key
+      // first (`useEngine.ts`) and only calls `probeWebGPU()` when it is not
+      // 'webgl2', so seeding it means no config spends GPU_INIT_TIMEOUT
+      // probing for an adapter before falling back.
+      //
+      // This is NOT load-bearing for reaching `__FORGE_ENGINE_READY`: that flag
+      // is set when `init_engine()` returns, which needs no GL context, so the
+      // `--disable-gpu` chromium projects and the firefox/webkit/mobile ones in
+      // playwright.config.ts complete `load()` with or without it (the @ui suite
+      // always has). Only the engine config actually has a GL context to render
+      // through. So the cost of the seed is real but narrow — a future
+      // WebGPU-capable firefox/webkit run would be silently forced onto WebGL2
+      // by inheriting it, and must clear the key rather than assume it is
+      // harmless. It lives here rather than in each engine spec so a third one
+      // cannot forget it. Same persisted key the in-app fallback button writes
+      // (`PREFERRED_BACKEND_KEY`, useEngine.ts).
       localStorage.setItem('forge:preferred-backend', 'webgl2');
 
       // Inject CSS to hide blocking overlays
