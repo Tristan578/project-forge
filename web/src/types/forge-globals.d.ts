@@ -1,12 +1,12 @@
 /**
  * TypeScript declarations for SpawnForge window globals.
  *
- * The store-surface globals (`__EDITOR_STORE`, `__CHAT_STORE`, `__FORGE_DISPATCH`)
- * are injected by EditorLayout.tsx ONLY when E2E hooks are enabled (see
+ * The store-surface globals (`__EDITOR_STORE`, `__CHAT_STORE`, `__FORGE_DISPATCH`,
+ * `__FORGE_SET_DISPATCH`) are injected by EditorLayout.tsx ONLY when E2E hooks are enabled (see
  * `e2eHooksEnabled` in `@/lib/e2e/testHooks`): always in dev/test, and in a
  * production build ONLY when `NEXT_PUBLIC_E2E_HOOKS=true` is set at build time
  * (the strict interactive-journey CI gate). A normal production deploy never sets
- * that flag, so those three are never attached to window in shipped builds.
+ * that flag, so those four are never attached to window in shipped builds.
  *
  * `__REACT_HYDRATED`, `__FORGE_ENGINE_READY`, and `__SKIP_ENGINE` are NOT gated by
  * `e2eHooksEnabled()` — they carry no sensitive surface and are set unconditionally
@@ -56,6 +56,25 @@ declare global {
      *          `false` if the engine is not yet initialized.
      */
     __FORGE_DISPATCH?: (cmd: string, payload: Record<string, unknown>) => boolean;
+
+    /**
+     * Installs a caller-supplied command dispatcher via the production
+     * `setCommandDispatcher`. Available only when E2E hooks are enabled
+     * (`e2eHooksEnabled()`).
+     *
+     * Exists for the strict journey gate, which builds no WASM and runs Chromium
+     * with `--disable-gpu` (which hangs `init_engine`). Without a dispatcher,
+     * `runPipelineFromPlan` fails with 'Engine not loaded' before any step runs,
+     * so the generated-game pipeline could not be exercised there at all. The
+     * supplied function goes through the same `tracked` wrapper as the real
+     * engine dispatcher and is wired into every slice.
+     *
+     * @param dispatch - Stand-in dispatcher. Returning `{ success: false }`
+     *                   reports an engine rejection exactly as the real one does.
+     */
+    __FORGE_SET_DISPATCH?: (
+      dispatch: (cmd: string, payload: unknown) => { success: boolean; error?: string } | void,
+    ) => void;
 
     /**
      * When set to `true` before page load (via `addInitScript`), skips WASM

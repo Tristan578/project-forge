@@ -53,7 +53,8 @@ import { useCelebrations } from '@/hooks/useCelebrations';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
+import { useEditorStore, getCommandDispatcher, setCommandDispatcher } from '@/stores/editorStore';
+import type { CommandResponse } from '@/hooks/useEngine';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useUserStore } from '@/stores/userStore';
@@ -568,6 +569,32 @@ export function EditorLayout() {
           return true;
         }
         return false;
+      };
+      // Install a caller-supplied command dispatcher.
+      //
+      // WHY THIS EXISTS: `runPipelineFromPlan` (orchestratorSlice) refuses with
+      // 'Engine not loaded' and returns before a single step runs when
+      // `getCommandDispatcher()` is null. The strict journey gate builds no WASM
+      // and launches Chromium with `--disable-gpu`, which hangs `init_engine` —
+      // so a dispatcher can never be installed there by the real engine, and the
+      // whole generated-game pipeline would be untestable in that gate. This lets
+      // it install a recording stand-in and drive the REAL pipeline.
+      //
+      // The supplied function is handed to the production `setCommandDispatcher`,
+      // so it is wrapped in the same `tracked` wrapper every engine command goes
+      // through (payload-bounds guard, analytics, rejection reporting) and wired
+      // into all 20 slices — the gate exercises the real dispatch path, not a
+      // parallel one.
+      //
+      // SECURITY: same build-time gate as `__EDITOR_STORE` above — never attached
+      // in a normal production build, and the flag cannot be flipped at runtime.
+      // It grants no capability a caller holding `__EDITOR_STORE` lacks: that
+      // reference already exposes every store action, and those dispatch.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__FORGE_SET_DISPATCH = (
+        dispatch: (cmd: string, payload: unknown) => CommandResponse | void,
+      ) => {
+        setCommandDispatcher(dispatch);
       };
     }
   }, []);

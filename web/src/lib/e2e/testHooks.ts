@@ -2,8 +2,11 @@
  * E2E test-hook gating.
  *
  * The editor exposes its Zustand stores and a command dispatcher on `window`
- * (`__EDITOR_STORE`, `__CHAT_STORE`, `__FORGE_DISPATCH`) so Playwright specs can
- * drive and read editor state deterministically. That surface is a test/debug
+ * (`__EDITOR_STORE`, `__CHAT_STORE`, `__FORGE_DISPATCH`, `__FORGE_SET_DISPATCH`) so
+ * Playwright specs can drive and read editor state deterministically —
+ * `__FORGE_SET_DISPATCH` additionally lets the engine-less journey gate install a
+ * stand-in dispatcher, without which the game-creation pipeline refuses to run at
+ * all ('Engine not loaded'). That surface is a test/debug
  * affordance, never meant for end users, so it is OFF by default.
  *
  * It turns on in exactly two situations:
