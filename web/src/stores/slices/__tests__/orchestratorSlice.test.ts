@@ -801,5 +801,108 @@ describe('orchestratorSlice', () => {
 
       expect(store.getState().orchestratorWarnings.map((w) => w.message)).toEqual(['fresh note']);
     });
+
+    /**
+     * `plan.warnings` (plan-level, e.g. "no win condition detected") is a
+     * separate source from a step's own output.warning/output.warnings: the
+     * finally block folds `currentPlan.warnings` in as bare `{ message }`
+     * entries with no `stepId`/`executor`, because they are not about any one
+     * step (PF-1229 finding #6b). Asserted with `toEqual` on the full array,
+     * not a length check, so an entry accidentally carrying a stray stepId
+     * or executor field would fail this.
+     */
+    it('folds plan-level warnings as bare messages with no stepId or executor', async () => {
+      const plan = makeMockPlan();
+      plan.warnings = ['No win condition detected — the game cannot be completed.'];
+      store.getState().setPlan(plan);
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => plan);
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().orchestratorWarnings).toEqual([
+        { message: 'No win condition detected — the game cannot be completed.' },
+      ]);
+    });
+
+    /**
+     * Same clear-on-run-start mechanism that Finding #3 fixed for step-level
+     * warnings (`orchestratorWarnings: []` at the top of `runPipelineFromPlan`)
+     * also has to hold for plan-level `.warnings` specifically — a re-run of a
+     * plan whose own warnings array is unchanged must not accumulate a second
+     * copy (PF-1229 finding #6d).
+     */
+    it('does not duplicate plan-level warnings across a re-run of the same plan', async () => {
+      const plan = makeMockPlan();
+      plan.warnings = ['No win condition detected — the game cannot be completed.'];
+      store.getState().setPlan(plan);
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementation(async () => plan);
+
+      await store.getState().runPipelineFromPlan();
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().orchestratorWarnings).toEqual([
+        { message: 'No win condition detected — the game cannot be completed.' },
+      ]);
+    });
+  });
+
+  describe('skipped step status reaches the panel', () => {
+    /**
+     * The runner writes 'skipped' straight onto the plan's step objects with
+     * NO callback — a required step whose dependency failed, the cascade
+     * after a failure or cancel, or an optional step that exhausted its
+     * retries. `onStepComplete` never fires for it, so the finally block's
+     * re-read via `deriveStepStatuses(currentPlan)` is the ONLY path that can
+     * ever surface it; `updateStepStatus` alone would leave it stuck on
+     * whatever `setPlan` originally seeded (PF-1229 finding #6a).
+     */
+    it('reaches stepStatuses for a step the runner skipped with no callback', async () => {
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+      expect(store.getState().stepStatuses.step_2).toBe('pending');
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (
+          _plan: unknown,
+          _registry: unknown,
+          _ctx: unknown,
+          callbacks: PipelineCallbacks,
+        ) => {
+          const step0 = plan.steps.find((s) => s && s.id === 'step_0');
+          if (step0) step0.status = 'failed';
+          const step2 = plan.steps.find((s) => s && s.id === 'step_2');
+          if (step2) step2.status = 'skipped';
+          callbacks.onStepComplete?.('step_0', { success: false });
+          return plan;
+        },
+      );
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().stepStatuses.step_2).toBe('skipped');
+    });
+
+    it('reaches stepStatuses even when the run throws before settling normally', async () => {
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+        const step2 = plan.steps.find((s) => s && s.id === 'step_2');
+        if (step2) step2.status = 'skipped';
+        throw new Error('pipeline exploded');
+      });
+
+      await store.getState().runPipelineFromPlan();
+
+      // The finally block runs regardless of the catch above it.
+      expect(store.getState().stepStatuses.step_2).toBe('skipped');
+      expect(store.getState().orchestratorStatus).toBe('failed');
+    });
   });
 });
