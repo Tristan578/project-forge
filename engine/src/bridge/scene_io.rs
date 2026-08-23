@@ -12,7 +12,7 @@ pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
 use bevy::prelude::*;
 use crate::core::{
     asset_manager::{AssetRef, AssetRegistry},
-    audio::{AudioBusConfig, AudioData},
+    audio::{AudioBusConfig, AudioData, AudioEnabled},
     csg::CsgMeshData,
     custom_wgsl::CustomWgslSource,
     entity_factory,
@@ -65,7 +65,7 @@ pub(super) fn apply_scene_export(
         Option<&AssetRef>,
     ), Without<entity_factory::Undeletable>>,
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
-    audio_export_query: Query<(&EntityId, Option<&AudioData>)>,
+    audio_export_query: Query<(&EntityId, Option<&AudioData>, Option<&AudioEnabled>)>,
     particle_export_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_lod_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&LodData>)>,
     // Terrain rides on this existing tuple rather than a new query param: this
@@ -111,9 +111,10 @@ pub(super) fn apply_scene_export(
             .and_then(|(_, sd)| sd.cloned());
 
         // Look up audio data separately
-        let audio_data = audio_export_query.iter()
-            .find(|(audio_eid, _)| audio_eid.0 == eid.0)
-            .and_then(|(_, ad)| ad.cloned());
+        let (audio_data, audio_enabled) = audio_export_query.iter()
+            .find(|(audio_eid, _, _)| audio_eid.0 == eid.0)
+            .map(|(_, ad, ae)| (ad.cloned(), ae.is_some()))
+            .unwrap_or((None, false));
 
         // Look up particle data separately
         let (particle_data, particle_enabled) = particle_export_query.iter()
@@ -148,6 +149,7 @@ pub(super) fn apply_scene_export(
         snap.asset_ref = asset_ref.cloned();
         snap.script_data = script_data;
         snap.audio_data = audio_data;
+        snap.audio_enabled = audio_enabled;
         snap.particle_data = particle_data;
         snap.particle_enabled = particle_enabled;
         snap.shader_effect_data = shader_effect_data;

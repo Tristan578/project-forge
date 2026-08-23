@@ -14,7 +14,7 @@
 - `particles.rs` — Particle apply/toggle/removal/preset, Hanabi GPU sync (webgpu)
 - `scene_io.rs` — Scene export/load, new scene, GLTF import, texture load, asset placement
 - `procedural.rs` — CSG boolean ops, extrude, lathe
-- `mesh_ops.rs` — Array entity, combine meshes, prefab instantiation
+- `mesh_ops.rs` — Array entity, combine meshes, prefab instantiation. Array and combine build a new entity from a LIVE source, so both go through `core/component_carry.rs` rather than hand-enumerating what to copy; prefab instantiation deserializes an `EntitySnapshot` and hands it to `entity_factory::spawn_from_snapshot`, so it inherits that path's coverage instead (PF-1193)
 - `scripts.rs` — Script updates/removals, input bindings, play tick
 - `game.rs` — Game component CRUD, game camera, camera shake
 - `skeleton2d.rs` — 2D skeletal animation: bones, skins, IK, keyframes, auto-weight
@@ -59,6 +59,9 @@
 | `terrain.rs` | Procedural terrain. `TerrainData`/`TerrainMeshData`/`TerrainEnabled` |
 | `procedural_mesh.rs` | Extrude, lathe, combine. `ProceduralMeshData`/`ProceduralOp` |
 | `entity_factory.rs` | Spawn/delete/duplicate with undo. `EntitySnapshot`, `spawn_from_snapshot` |
+| `component_carry.rs` | The ONE list of components that travel when an entity is rebuilt from another entity — `AuxComponentData`, `build_aux_index`, `snapshot_entity`, `insert_aux_components`, `insert_base_components`, the `AuxQueries` SystemParam, and `COMBINE_RESULT_EXEMPT` (what a combine RESULT deliberately does not inherit, with a reason each). Three of the four rebuild paths call it: duplicate, array, combine. The fourth (`spawn_from_snapshot`, which serves undo/redo and prefab instantiation) reads the snapshot directly and is pinned by its own `entity_factory_parity_tests.rs` gate instead. Lives in `core/` because `bridge/` is wasm32-only and cannot be unit-tested natively; `component_carry_tests.rs` holds the behavioural tests plus `component_carry_parity`, which fails if a field is added without wiring it into every path — including a cross-check against `EntitySnapshot`, the independent list (PF-1193 — see `rules/gotchas.md` → Engine & Game Loop) |
+| `component_carry_tests.rs` | Test modules for `component_carry.rs`. Split out both to keep that file under the 800-line ceiling and because the parity module slices the source by marker strings — a marker written as a literal inside the file it scans is a second occurrence of itself. `include_str!` still resolves against this directory, so it pins the real production source |
+| `entity_factory_parity_tests.rs` | `mod snapshot_restore_parity` — the sibling gate for `spawn_from_snapshot`, the one rebuild path that does not go through `component_carry.rs`. Asserts every `EntitySnapshot` field is read back, minus `parent_id` (re-established by the caller's reparent pass). Same marker-collision reason for being a sibling file |
 | `json_guard.rs` | Depth + container-count bounds on every `Value` reaching the parser, checked iteratively. Counts containers only, so bulk scalar data (a full-size tilemap) passes. Applied at `commands::dispatch`, `dispatch_batch`, `build_game_component`. Mirrored in TS by `lib/engine/commandPayloadGuard.ts` (PF-1149) |
 | `history.rs` | `UndoableAction` (29 variants), `HistoryStack`, `EntitySnapshot` |
 | `entity_id.rs` | `EntityId`, `EntityName`, `EntityVisible` |

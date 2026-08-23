@@ -13,6 +13,7 @@ pub mod camera_2d;
 pub mod camera_presets;
 pub mod character_controller;
 pub mod commands;
+pub mod component_carry;
 pub mod csg;
 pub mod custom_wgsl;
 pub mod edit_mode;
@@ -32,6 +33,11 @@ pub mod material;
 pub mod mesh_simplify;
 pub mod observability;
 pub mod particles;
+/// Shared primitives for the source-parity gates. Test-only: it is never
+/// compiled into the wasm build, and nothing outside a `#[cfg(test)]` module
+/// may depend on it.
+#[cfg(test)]
+pub mod parity_util;
 pub mod pending;
 /// Backward-compatible alias for the split pending_commands module.
 pub mod pending_commands {

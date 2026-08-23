@@ -3,21 +3,20 @@
 use bevy::prelude::*;
 use bevy::mesh::Mesh;
 use crate::core::{
-    self,
     entity_factory,
     entity_id::{EntityId, EntityName, EntityVisible},
-    history::{EntitySnapshot as HistEntitySnapshot, HistoryStack, TransformSnapshot},
+    history::{EntitySnapshot as HistEntitySnapshot, HistoryStack},
     lighting::LightData,
     material::MaterialData,
-    particles::{ParticleData, ParticleEnabled},
     pending_commands::{EntityType, PendingCommands},
     physics::{PhysicsData, PhysicsEnabled},
     scene_graph::SceneGraphCache,
-    scripting::ScriptData,
     selection::{Selection, SelectionChangedEvent},
-    shader_effects::ShaderEffectData,
     asset_manager::AssetRef,
-    audio::{AudioData, AudioEnabled},
+    component_carry::{
+        build_aux_index, insert_aux_components, insert_base_components, snapshot_entity,
+        AuxComponentData, AuxQueries, BaseComponentData,
+    },
 };
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -31,7 +30,6 @@ pub(super) fn apply_array_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     query: Query<(
-        Entity,
         &EntityId,
         &EntityName,
         &Transform,
@@ -47,43 +45,28 @@ pub(super) fn apply_array_requests(
         Option<&PhysicsEnabled>,
         Option<&AssetRef>,
     )>,
-    script_query: Query<(&EntityId, Option<&ScriptData>)>,
-    // Reverb rides along with audio rather than taking its own param: this
-    // function is already over clippy's argument threshold, and a reverb zone
-    // is an audio component.
-    audio_query: Query<(
-        &EntityId,
-        Option<&AudioData>,
-        Option<&core::reverb_zone::ReverbZoneData>,
-        Option<&core::reverb_zone::ReverbZoneEnabled>,
-    )>,
-    particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
-    csg_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
-    procedural_mesh_query: Query<(&EntityId, Option<&core::procedural_mesh::ProceduralMeshData>)>,
+    // One bundled SystemParam rather than a query per component family: the
+    // carry list lives in core::component_carry so this system and the delete /
+    // duplicate systems cannot drift apart (PF-1193).
+    aux_queries: AuxQueries,
     mut history: ResMut<HistoryStack>,
 ) {
     use crate::core::history::UndoableAction;
     use super::events::{emit_array_completed, emit_procedural_mesh_error};
 
+    let aux_index = build_aux_index(&aux_queries);
+
     for request in pending.array_requests.drain(..) {
-        let Some((_src_entity, src_eid, src_name, src_transform, src_entity_type, mesh_h, mat_h, pl, dl, sl, mat_data, light_data, phys_data, phys_enabled, asset_ref)) = query.iter().find(|(_, eid, ..)| eid.0 == request.entity_id) else {
+        let Some((src_eid, src_name, src_transform, src_entity_type, mesh_h, mat_h, pl, dl, sl, mat_data, light_data, phys_data, phys_enabled, asset_ref)) = query.iter().find(|(eid, ..)| eid.0 == request.entity_id) else {
             emit_procedural_mesh_error(&format!("Source entity not found: {}", request.entity_id));
             continue;
         };
 
-        let src_script_data = script_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, sd)| sd.cloned());
-        // Array copies are a third restore path alongside spawn_from_snapshot and
-        // insert_aux_components, and reverb was missing from all three (PF-1182).
-        let (src_audio_data, src_reverb_zone_data, src_reverb_zone_enabled) = audio_query
-            .iter()
-            .find(|(eid, _, _, _)| eid.0 == src_eid.0)
-            .map(|(_, ad, rzd, rze)| (ad.cloned(), rzd.cloned(), rze.is_some()))
-            .unwrap_or((None, None, false));
-        let (src_particle_data, src_particle_enabled) = particle_query.iter().find(|(eid, _, _)| eid.0 == src_eid.0).map(|(_, pd, pe)| (pd.cloned(), pe.is_some())).unwrap_or((None, false));
-        let src_shader_data = shader_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, sed)| sed.cloned());
-        let src_csg_data = csg_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, cmd)| cmd.cloned());
-        let src_procedural_mesh_data = procedural_mesh_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, pmd)| pmd.cloned());
+        // Every auxiliary component the source carries, from the single shared
+        // list. `active_game_camera` is cleared so an array copy cannot steal
+        // the active-camera flag from its source (same rule as duplicate).
+        let mut src_aux = aux_index.get(&src_eid.0).cloned().unwrap_or_default();
+        src_aux.active_game_camera = false;
 
         let entity_type = src_entity_type.copied().unwrap_or(EntityType::Cube);
 
@@ -129,10 +112,28 @@ pub(super) fn apply_array_requests(
             }
         }
 
+        let base = BaseComponentData {
+            // Array copies spawn EntityVisible::default() (= true) whatever the
+            // source's visibility was, matching duplicate. `base.visible` is only
+            // read by snapshot_entity, and it must match what was spawned or redo
+            // would restore the copies hidden.
+            visible: true,
+            material_data: mat_data,
+            light_data,
+            physics_data: phys_data,
+            physics_enabled: phys_enabled.is_some(),
+            asset_ref,
+        };
+
         let mut created_snapshots = Vec::new();
         let mut created_ids = Vec::new();
         for offset in offsets {
             let new_pos = src_transform.translation + offset;
+            let new_transform = Transform {
+                translation: new_pos,
+                rotation: src_transform.rotation,
+                scale: src_transform.scale,
+            };
             let new_name = format!("{} (Array)", src_name.0);
             let new_entity_id = EntityId::default();
             let new_entity_id_str = new_entity_id.0.clone();
@@ -143,60 +144,28 @@ pub(super) fn apply_array_requests(
                 new_entity_id,
                 EntityName::new(&new_name),
                 EntityVisible::default(),
-                Transform {
-                    translation: new_pos,
-                    rotation: src_transform.rotation,
-                    scale: src_transform.scale,
-                },
+                new_transform,
             ));
 
+            // Render handles and material stay hand-written: they are Bevy asset
+            // handles the copy shares with its source, not carried component data.
             if let Some(m) = mesh_h { ec.insert(m.clone()); }
             if let Some(mat) = mat_h { ec.insert(mat.clone()); }
             if let Some(p) = pl { ec.insert(*p); }
             if let Some(d) = dl { ec.insert(*d); }
             if let Some(s) = sl { ec.insert(*s); }
             if let Some(md) = mat_data { ec.insert(md.clone()); }
-            if let Some(ld) = light_data { ec.insert(ld.clone()); }
-            if let Some(pd) = phys_data { ec.insert(pd.clone()); }
-            if phys_enabled.is_some() { ec.insert(PhysicsEnabled); }
-            if let Some(ar) = asset_ref { ec.insert(ar.clone()); }
-            if let Some(ref sd) = src_script_data { ec.insert(sd.clone()); }
-            if let Some(ref ad) = src_audio_data { ec.insert(ad.clone()); ec.insert(AudioEnabled); }
-            if let Some(ref rzd) = src_reverb_zone_data { ec.insert(rzd.clone()); }
-            if src_reverb_zone_enabled { ec.insert(core::reverb_zone::ReverbZoneEnabled); }
-            if let Some(ref pd) = src_particle_data { ec.insert(pd.clone()); }
-            if src_particle_enabled { ec.insert(ParticleEnabled); }
-            if let Some(ref sed) = src_shader_data { ec.insert(sed.clone()); }
-            if let Some(ref cmd) = src_csg_data { ec.insert(cmd.clone()); }
-            if let Some(ref pmd) = src_procedural_mesh_data { ec.insert(pmd.clone()); }
+            insert_base_components(&mut ec, base);
+            insert_aux_components(&mut ec, &src_aux);
 
-            {
-                let mut snap = HistEntitySnapshot::new(
-                    new_entity_id_str,
-                    entity_type,
-                    new_name,
-                    TransformSnapshot {
-                        position: [new_pos.x, new_pos.y, new_pos.z],
-                        rotation: [src_transform.rotation.x, src_transform.rotation.y, src_transform.rotation.z, src_transform.rotation.w],
-                        scale: [src_transform.scale.x, src_transform.scale.y, src_transform.scale.z],
-                    },
-                );
-                snap.material_data = mat_data.cloned();
-                snap.light_data = light_data.cloned();
-                snap.physics_data = phys_data.cloned();
-                snap.physics_enabled = phys_enabled.is_some();
-                snap.asset_ref = asset_ref.cloned();
-                snap.script_data = src_script_data.clone();
-                snap.audio_data = src_audio_data.clone();
-                snap.reverb_zone_data = src_reverb_zone_data.clone();
-                snap.reverb_zone_enabled = src_reverb_zone_enabled;
-                snap.particle_data = src_particle_data.clone();
-                snap.particle_enabled = src_particle_enabled;
-                snap.shader_effect_data = src_shader_data.clone();
-                snap.csg_mesh_data = src_csg_data.clone();
-                snap.procedural_mesh_data = src_procedural_mesh_data.clone();
-                created_snapshots.push(snap);
-            }
+            created_snapshots.push(snapshot_entity(
+                &new_entity_id_str,
+                entity_type,
+                &new_name,
+                &new_transform,
+                base,
+                &src_aux,
+            ));
         }
 
         history.push(UndoableAction::ArrayEntity {
@@ -219,28 +188,43 @@ pub(super) fn apply_combine_requests(
         &EntityId,
         &EntityName,
         &Transform,
+        &EntityVisible,
+        Option<&EntityType>,
         Option<&Mesh3d>,
         Option<&MaterialData>,
+        Option<&LightData>,
+        Option<&PhysicsData>,
+        Option<&PhysicsEnabled>,
+        Option<&AssetRef>,
     )>,
     mut selection: ResMut<Selection>,
     mut selection_events: MessageWriter<SelectionChangedEvent>,
-    script_query: Query<(&EntityId, Option<&ScriptData>)>,
-    audio_query: Query<(&EntityId, Option<&AudioData>)>,
-    particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
-    csg_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
-    procedural_mesh_query: Query<(&EntityId, Option<&core::procedural_mesh::ProceduralMeshData>)>,
+    // Single shared carry list — see core::component_carry (PF-1193).
+    aux_queries: AuxQueries,
+    texture_handles: Res<crate::core::asset_manager::TextureHandleMap>,
     mut history: ResMut<HistoryStack>,
 ) {
     use crate::core::history::UndoableAction;
     use super::events::{emit_procedural_mesh_created, emit_procedural_mesh_error};
 
+    let aux_index = build_aux_index(&aux_queries);
+
     for request in pending.combine_requests.drain(..) {
         let mut mesh_list: Vec<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>, Transform)> = Vec::new();
         let mut source_snapshots: Vec<HistEntitySnapshot> = Vec::new();
+        // The merged entity inherits from ONE source: the first that actually
+        // contributed geometry. N sources cannot all win, and "first with
+        // geometry" is the only choice a user can predict from the selection
+        // order they made.
+        let mut primary_aux: Option<AuxComponentData> = None;
+        let mut primary_base: Option<BaseComponentData> = None;
+        // Sources to consume, applied only once the combine is known to produce
+        // something (see the deferral note below).
+        let mut pending_despawn: Vec<(Entity, String)> = Vec::new();
 
         for entity_id in &request.entity_ids {
-            if let Some((entity, eid, ename, transform, mesh_handle, mat_data)) = query.iter().find(|(_, eid, ..)| &eid.0 == entity_id) {
+            if let Some((entity, eid, ename, transform, visible, entity_type, mesh_handle, mat_data, light_data, phys_data, phys_enabled, asset_ref)) = query.iter().find(|(_, eid, ..)| &eid.0 == entity_id) {
+                let mut contributed_geometry = false;
                 if let Some(mh) = mesh_handle {
                     if let Some(mesh) = meshes.get(&mh.0) {
                         use bevy::mesh::VertexAttributeValues;
@@ -258,38 +242,42 @@ pub(super) fn apply_combine_requests(
                             None => vec![],
                         };
                         mesh_list.push((positions, normals, indices, *transform));
+                        contributed_geometry = true;
                     }
                 }
 
-                let src_script_data = script_query.iter().find(|(sid, _)| sid.0 == eid.0).and_then(|(_, sd)| sd.cloned());
-                let src_audio_data = audio_query.iter().find(|(aid, _)| aid.0 == eid.0).and_then(|(_, ad)| ad.cloned());
-                let (src_particle_data, src_particle_enabled) = particle_query.iter().find(|(pid, _, _)| pid.0 == eid.0).map(|(_, pd, pe)| (pd.cloned(), pe.is_some())).unwrap_or((None, false));
-                let src_shader_data = shader_query.iter().find(|(sid, _)| sid.0 == eid.0).and_then(|(_, sed)| sed.cloned());
-                let src_csg_data = csg_query.iter().find(|(cid, _)| cid.0 == eid.0).and_then(|(_, cmd)| cmd.cloned());
-                let src_procedural_mesh_data = procedural_mesh_query.iter().find(|(pid, _)| pid.0 == eid.0).and_then(|(_, pmd)| pmd.cloned());
-
-                {
-                    let mut snap = HistEntitySnapshot::new(
-                        eid.0.clone(),
-                        EntityType::Cube,
-                        ename.0.clone(),
-                        TransformSnapshot::from(transform),
-                    );
-                    snap.material_data = mat_data.cloned();
-                    snap.script_data = src_script_data;
-                    snap.audio_data = src_audio_data;
-                    snap.particle_data = src_particle_data;
-                    snap.particle_enabled = src_particle_enabled;
-                    snap.shader_effect_data = src_shader_data;
-                    snap.csg_mesh_data = src_csg_data;
-                    snap.procedural_mesh_data = src_procedural_mesh_data;
-                    source_snapshots.push(snap);
+                let src_base = BaseComponentData {
+                    visible: visible.0,
+                    material_data: mat_data,
+                    light_data,
+                    physics_data: phys_data,
+                    physics_enabled: phys_enabled.is_some(),
+                    asset_ref,
+                };
+                let src_aux = aux_index.get(&eid.0).cloned().unwrap_or_default();
+                if contributed_geometry && primary_aux.is_none() {
+                    primary_aux = Some(src_aux.clone());
+                    primary_base = Some(src_base);
                 }
 
+                // Source snapshots take the FULL carry set and the source's real
+                // entity type: undoing a combine has to give back the entities
+                // that were consumed, not stripped stand-ins.
+                source_snapshots.push(snapshot_entity(
+                    &eid.0,
+                    entity_type.copied().unwrap_or(EntityType::Cube),
+                    &ename.0,
+                    transform,
+                    src_base,
+                    &src_aux,
+                ));
+
                 if request.delete_sources {
-                    commands.entity(entity).despawn();
-                    selection.entities.remove(&entity);
-                    selection.entity_ids.remove(entity_id);
+                    // Deferred: the `mesh_list.is_empty()` bail below `continue`s
+                    // without ever pushing `source_snapshots` to history, so
+                    // despawning here would consume the sources of a combine
+                    // that never happened, with no undo entry to bring them back.
+                    pending_despawn.push((entity, entity_id.clone()));
                 }
             }
         }
@@ -297,6 +285,12 @@ pub(super) fn apply_combine_requests(
         if mesh_list.is_empty() {
             emit_procedural_mesh_error("No valid meshes to combine");
             continue;
+        }
+
+        for (entity, entity_id) in pending_despawn.drain(..) {
+            commands.entity(entity).despawn();
+            selection.entities.remove(&entity);
+            selection.entity_ids.remove(&entity_id);
         }
 
         let (combined_positions, combined_normals, combined_indices) = crate::core::procedural_mesh::combine_meshes_data(mesh_list);
@@ -316,33 +310,57 @@ pub(super) fn apply_combine_requests(
         let entity_id = EntityId::default();
         let entity_id_str = entity_id.0.clone();
 
-        let entity = commands.spawn((
+        // What the primary source hands down, minus the two EXEMPT lists.
+        let result_aux = primary_aux.unwrap_or_default().for_combine_result();
+        let result_base = primary_base.unwrap_or_default().for_combine_result();
+
+        // The merged entity keeps the primary's look. Seed the fresh
+        // StandardMaterial from that MaterialData here rather than leaving the
+        // default gray for `sync_material_data` to fix: that system only runs on
+        // `Changed<MaterialData>`, and a value inserted at spawn is not a change
+        // it will ever see, so an unseeded result renders gray forever (PF-1225).
+        let result_mat_data = result_base.material_data.cloned().unwrap_or_default();
+        let mut result_std = StandardMaterial::default();
+        crate::core::material::apply_material_data_to_standard(
+            &mut result_std,
+            &result_mat_data,
+            &texture_handles,
+        );
+
+        let mut result_commands = commands.spawn((
             EntityType::ProceduralMesh,
             entity_id,
             EntityName::new(&name),
+            // Always visible — see COMBINE_RESULT_BASE_EXEMPT's `visible` entry.
             EntityVisible::default(),
-            MaterialData::default(),
+            result_mat_data.clone(),
             mesh_data.clone(),
             Mesh3d(meshes.add(combined_mesh)),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.5, 0.5, 0.5),
-                ..default()
-            })),
+            MeshMaterial3d(materials.add(result_std)),
             Transform::default(),
-        )).id();
+        ));
+        insert_base_components(&mut result_commands, result_base);
+        insert_aux_components(&mut result_commands, &result_aux);
+        let entity = result_commands.id();
 
         {
-            let mut result_snap = HistEntitySnapshot::new(
-                entity_id_str.clone(),
+            let result_transform = Transform::default();
+            // Snapshot the base the result was actually spawned with, not an
+            // empty stand-in: redo has to give back the same entity, physics
+            // body and material included.
+            let mut result_snap = snapshot_entity(
+                &entity_id_str,
                 EntityType::ProceduralMesh,
-                name.clone(),
-                TransformSnapshot {
-                    position: [0.0, 0.0, 0.0],
-                    rotation: [0.0, 0.0, 0.0, 1.0],
-                    scale: [1.0, 1.0, 1.0],
+                &name,
+                &result_transform,
+                BaseComponentData {
+                    material_data: Some(&result_mat_data),
+                    ..result_base
                 },
+                &result_aux,
             );
-            result_snap.material_data = Some(MaterialData::default());
+            // The merged geometry is the result's own, not carried from a source
+            // (procedural_mesh_data is in COMBINE_RESULT_EXEMPT for that reason).
             result_snap.procedural_mesh_data = Some(mesh_data);
             history.push(UndoableAction::CombineMeshes {
                 source_snapshots,

@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use serde::Serialize;
 
 use super::asset_manager::AssetRef;
-use super::audio::AudioData;
+use super::audio::{AudioData, AudioEnabled};
 use super::csg::CsgMeshData;
 use super::entity_factory::Undeletable;
 use super::entity_id::{EntityId, EntityName, EntityVisible};
@@ -125,7 +125,7 @@ pub fn snapshot_scene(
         Option<&SpotLight>,
         Option<&AssetRef>,
     )>,
-    script_audio_query: &Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
+    script_audio_query: &Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>, Option<&AudioEnabled>)>,
     reverb_particle_shader_query: &Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
     csg_sprite_physics2d_query: &Query<(&EntityId, Option<&CsgMeshData>, Option<&super::sprite::SpriteData>, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&PhysicsJoint2d>)>,
     procedural_joint_gc_camera_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>, Option<&super::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
@@ -136,9 +136,9 @@ pub fn snapshot_scene(
 
     // Materialize each secondary query into a HashMap keyed by entity-ID string.
     // This converts N×M inner-loop lookups (O(N²)) to O(N) total.
-    type ScriptAudioRow = (Option<ScriptData>, Option<AudioData>);
+    type ScriptAudioRow = (Option<ScriptData>, Option<AudioData>, bool);
     let script_audio_map: HashMap<&str, ScriptAudioRow> = script_audio_query.iter()
-        .map(|(eid, sd, ad)| (eid.0.as_str(), (sd.cloned(), ad.cloned())))
+        .map(|(eid, sd, ad, ae)| (eid.0.as_str(), (sd.cloned(), ad.cloned(), ae.is_some())))
         .collect();
 
     type ReverbParticleShaderRow = (Option<super::reverb_zone::ReverbZoneData>, bool, Option<ParticleData>, bool, Option<ShaderEffectData>);
@@ -180,9 +180,9 @@ pub fn snapshot_scene(
         };
 
         // O(1) lookups via pre-built HashMaps (was O(N) per entity)
-        let (script_data, audio_data) = script_audio_map.get(eid.0.as_str())
-            .map(|(sd, ad)| (sd.clone(), ad.clone()))
-            .unwrap_or((None, None));
+        let (script_data, audio_data, audio_enabled) = script_audio_map.get(eid.0.as_str())
+            .map(|(sd, ad, ae)| (sd.clone(), ad.clone(), *ae))
+            .unwrap_or((None, None, false));
 
         let (reverb_zone_data, reverb_zone_enabled, particle_data, particle_enabled, shader_effect_data) = reverb_particle_shader_map.get(eid.0.as_str())
             .map(|(rzd, rze, pd, pe, sed)| (rzd.clone(), *rze, pd.clone(), *pe, sed.clone()))
@@ -214,6 +214,11 @@ pub fn snapshot_scene(
         snap.asset_ref = asset_ref.cloned();
         snap.script_data = script_data;
         snap.audio_data = audio_data;
+        // EntitySnapshot::new defaults audio_enabled to true (serde back-compat
+        // for scenes saved before the field existed), so this assignment is
+        // load-bearing: without it a muted entity comes back playing on
+        // Play→Stop, the same enablement-marker trap PF-1193 fixed elsewhere.
+        snap.audio_enabled = audio_enabled;
         snap.reverb_zone_data = reverb_zone_data;
         snap.reverb_zone_enabled = reverb_zone_enabled;
         snap.particle_data = particle_data;
@@ -315,6 +320,15 @@ pub fn restore_scene(
             }
             if let Some(ref snap_audio) = snap.audio_data {
                 commands.entity(entity).insert(snap_audio.clone());
+            }
+            // The marker is a separate component from the data, so it needs the
+            // same insert/remove pair every other marker here uses — an entity
+            // muted during Play must stay muted after Stop, and one unmuted
+            // during Play must not be left with a stale marker.
+            if snap.audio_data.is_some() && snap.audio_enabled {
+                commands.entity(entity).insert(AudioEnabled);
+            } else {
+                commands.entity(entity).remove::<AudioEnabled>();
             }
             if let Some(ref snap_particle) = snap.particle_data {
                 commands.entity(entity).insert(snap_particle.clone());

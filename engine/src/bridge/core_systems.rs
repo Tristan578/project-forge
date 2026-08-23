@@ -17,7 +17,7 @@ use crate::core::material::MaterialData;
 use crate::core::lighting::LightData;
 use crate::core::physics::{PhysicsData, PhysicsEnabled};
 use crate::core::scripting::ScriptData;
-use crate::core::audio::AudioData;
+use crate::core::audio::{AudioData, AudioEnabled};
 use crate::core::engine_mode::{EngineMode, SceneSnapshot, ModeChangeRequest};
 use crate::core::snap::SnapSettings;
 use crate::core::pending_commands::PendingCommands;
@@ -86,7 +86,7 @@ pub(super) fn apply_mode_change_requests(
             Option<&mut PhysicsData>,
         ), Without<entity_factory::Undeletable>>,
     )>,
-    script_audio_query: Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
+    script_audio_query: Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>, Option<&AudioEnabled>)>,
     reverb_particle_shader_query: Query<(&EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
     csg_sprite_physics2d_query: Query<(&EntityId, Option<&crate::core::csg::CsgMeshData>, Option<&crate::core::sprite::SpriteData>, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&PhysicsJoint2d>)>,
     procedural_joint_game_query: Query<(&EntityId, Option<&crate::core::procedural_mesh::ProceduralMeshData>, Option<&crate::core::physics::JointData>, Option<&GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
