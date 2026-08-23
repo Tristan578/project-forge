@@ -112,6 +112,25 @@ function deriveStepStatuses(plan: OrchestratorPlan): Record<string, PlanStep['st
   return statuses;
 }
 
+/**
+ * Find a step's index by id, tolerating the same hole/`null` slots
+ * `deriveStepStatuses` tolerates.
+ *
+ * `Array.prototype.findIndex` does NOT skip holes (unlike forEach/map/filter/
+ * some/every) — it visits every index, invoking the predicate with `undefined`
+ * for a hole or an explicit null slot. `onStepComplete` used to call
+ * `plan.steps.findIndex(s => s.id === stepId)` directly, so `s.id` threw
+ * before `runPipeline`'s own tolerance of the same gap was ever reached
+ * (PF-1229 finding #2).
+ */
+function findStepIndex(plan: OrchestratorPlan, stepId: string): number {
+  for (let i = 0; i < plan.steps.length; i += 1) {
+    const step = plan.steps[i];
+    if (step && step.id === stepId) return i;
+  }
+  return -1;
+}
+
 // ---------------------------------------------------------------------------
 // Module-level state for AbortController and gate resolution
 // (not in Zustand — these are imperative handles, not reactive state)
@@ -398,7 +417,7 @@ export const createOrchestratorSlice: StateCreator<
 
         // Update currentStepIndex
         const plan = get().currentPlan;
-        const idx = plan ? plan.steps.findIndex(s => s.id === stepId) : -1;
+        const idx = plan ? findStepIndex(plan, stepId) : -1;
         if (idx >= 0) {
           set({ currentStepIndex: idx });
         }
@@ -473,13 +492,25 @@ export const createOrchestratorSlice: StateCreator<
       // which nothing else reads.
       //
       // In `finally` so a run that threw still shows how far it got.
-      set(s => ({
-        stepStatuses: { ...s.stepStatuses, ...deriveStepStatuses(currentPlan) },
-        orchestratorWarnings: [
-          ...s.orchestratorWarnings,
-          ...(currentPlan.warnings ?? []).map(message => ({ message })),
-        ],
-      }));
+      //
+      // `resetOrchestrator` nulls `_abortController` without calling
+      // `.abort()` — nothing actually stops this promise chain from settling.
+      // If the user has since reset and started a DIFFERENT plan, `currentPlan`
+      // here is a stale closure capture from function entry, and folding it
+      // unconditionally would resurrect the abandoned run's step statuses
+      // under the new plan's ids (`step_${n}` collides across plans by
+      // construction) after the user has already moved on
+      // (PF-1229 finding #4). Only fold if the store's live plan is still the
+      // one this run belongs to.
+      if (get().currentPlan === currentPlan) {
+        set(s => ({
+          stepStatuses: { ...s.stepStatuses, ...deriveStepStatuses(currentPlan) },
+          orchestratorWarnings: [
+            ...s.orchestratorWarnings,
+            ...(currentPlan.warnings ?? []).map(message => ({ message })),
+          ],
+        }));
+      }
 
       // Release unused tokens — prorate by completed steps (fire-and-forget)
       if (reservationId) {

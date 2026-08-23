@@ -543,6 +543,150 @@ describe('orchestratorSlice', () => {
     });
   });
 
+  /**
+   * `OrchestratorPlan.steps` is typed as a non-nullable `PlanStep[]`, but
+   * `setPlan` is public and a plan can legitimately arrive with a hole or an
+   * explicit `null` slot (a step the planner decided not to schedule).
+   * `deriveStepStatuses` already tolerates this (indexed loop, `if (!step)
+   * continue`), but `onStepComplete`'s `plan.steps.findIndex(s => s.id ===
+   * stepId)` did not: `findIndex` visits every index including holes,
+   * invoking its predicate with `undefined`, so `s.id` threw before
+   * `runPipeline`'s own tolerance of the gap was ever reached
+   * (PF-1229 finding #2).
+   */
+  describe('sparse plan tolerance in onStepComplete', () => {
+    function makeSparsePlan(): OrchestratorPlan {
+      const plan = makeMockPlan();
+      return {
+        ...plan,
+        steps: [
+          plan.steps[0],
+          null as unknown as PlanStep,
+          plan.steps[2],
+        ] as PlanStep[],
+      };
+    }
+
+    it('does not fail the run when a completed step is reported past a null slot', async () => {
+      const plan = makeSparsePlan();
+      store.getState().setPlan(plan);
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (
+          _plan: unknown,
+          _registry: unknown,
+          _ctx: unknown,
+          callbacks: PipelineCallbacks,
+        ) => {
+          // The real runner writes the step's status onto the plan BEFORE it
+          // fires the callback, and the finally block re-reads the plan once
+          // the run settles — so a fake runner that only fires the callback
+          // would leave the plan saying 'pending' and the re-read would
+          // rewind what the callback set (same convention as
+          // `runWithStepResults` above).
+          const step = plan.steps.find((s) => s && s.id === 'step_2');
+          if (step) step.status = 'completed';
+          callbacks.onStepComplete?.('step_2', { success: true });
+          return plan;
+        },
+      );
+
+      await store.getState().runPipelineFromPlan();
+
+      // A throw inside onStepComplete is swallowed by runPipelineFromPlan's
+      // outer try/catch and surfaces as a failed run with an unrelated-looking
+      // "Cannot read properties of undefined" message, not a hard crash — but
+      // exactly as wrong: the step DID complete and the UI must say so.
+      expect(store.getState().orchestratorStatus).not.toBe('failed');
+      expect(store.getState().orchestratorError).toBeNull();
+      expect(store.getState().stepStatuses['step_2']).toBe('completed');
+    });
+  });
+
+  /**
+   * `resetOrchestrator` nulls `_abortController` without calling `.abort()`
+   * — nothing actually stops an in-flight `runPipeline` promise from
+   * settling. Its `finally` block folds `stepStatuses`/`orchestratorWarnings`
+   * from a `currentPlan` snapshot captured at function entry; if the user has
+   * since reset and started a DIFFERENT plan, that stale fold can silently
+   * resurrect step statuses from the abandoned run under the new plan's ids
+   * (`step_${n}` collides across plans by construction) — a run the user
+   * moved on from visibly reporting progress after the fact
+   * (PF-1229 finding #4).
+   */
+  describe('stale-run guard on resetOrchestrator race', () => {
+    it("does not let an abandoned run's finally-block write clobber a newer plan", async () => {
+      const planA = makeMockPlan();
+      store.getState().setPlan(planA);
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      let resolveRun!: (plan: OrchestratorPlan) => void;
+      const pending = new Promise<OrchestratorPlan>((resolve) => {
+        resolveRun = resolve;
+      });
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(() => pending);
+
+      const runPromise = store.getState().runPipelineFromPlan();
+
+      // The user resets and starts a brand-new plan while planA's run is
+      // still in flight — no real cancellation happens, since
+      // resetOrchestrator does not abort.
+      store.getState().resetOrchestrator();
+      const planB = makeMockPlan();
+      store.getState().setPlan(planB);
+
+      // planA is only now reported complete, after planB is already on
+      // screen. The real runner writes step status onto the plan object
+      // before resolving, so mirror that here.
+      planA.steps[0] = { ...planA.steps[0], status: 'completed' };
+      resolveRun(planA);
+      await runPromise;
+
+      // planB never ran step_0 — its own freshly-derived 'pending' status
+      // must survive, not be overwritten by planA's stale fold.
+      expect(store.getState().currentPlan).toBe(planB);
+      expect(store.getState().stepStatuses['step_0']).toBe('pending');
+    });
+  });
+
+  /**
+   * `setPlan` (and `startDecomposition`'s eventual `setPlan` call) must
+   * tolerate the same sparse-array shapes `deriveStepStatuses` already
+   * handles internally — this is coverage for that tolerance, not a
+   * regression driver (PF-1229 finding #6c).
+   */
+  describe('setPlan with a sparse steps array', () => {
+    it('derives stepStatuses only for the real slots, tolerating an array hole', () => {
+      const plan = makeMockPlan();
+      const sparseSteps = Array.from({ length: 3 }) as PlanStep[];
+      sparseSteps[0] = plan.steps[0];
+      sparseSteps[2] = plan.steps[2];
+      // sparseSteps[1] stays an actual elided array hole, not a stored null.
+
+      expect(() => store.getState().setPlan({ ...plan, steps: sparseSteps })).not.toThrow();
+      expect(store.getState().stepStatuses).toEqual({
+        step_0: 'pending',
+        step_2: 'pending',
+      });
+    });
+
+    it('derives stepStatuses only for the real slots, tolerating an explicit null slot', () => {
+      const plan = makeMockPlan();
+      const sparseSteps: PlanStep[] = [
+        plan.steps[0],
+        null as unknown as PlanStep,
+        plan.steps[2],
+      ];
+
+      expect(() => store.getState().setPlan({ ...plan, steps: sparseSteps })).not.toThrow();
+      expect(store.getState().stepStatuses).toEqual({
+        step_0: 'pending',
+        step_2: 'pending',
+      });
+    });
+  });
+
   describe('step warnings', () => {
     /**
      * A step that could only do part of its job reports that on its OUTPUT and
