@@ -13,6 +13,7 @@ import type {
   TokenEstimate,
   ExecutorResult,
 } from '@/lib/game-creation/types';
+import { runPipeline } from '@/lib/game-creation/pipelineRunner';
 import type { PipelineCallbacks } from '@/lib/game-creation/pipelineRunner';
 
 // ---------------------------------------------------------------------------
@@ -140,6 +141,15 @@ describe('orchestratorSlice', () => {
   beforeEach(() => {
     store = createSliceStore(createOrchestratorSlice);
     mockFetch.mockReset();
+    // `runPipeline` is a bare `vi.fn()` from the module factory, and
+    // `vi.restoreAllMocks()` does NOT clear a `vi.fn()`'s implementation in
+    // vitest 4 — so a test that installs a persistent `mockImplementation`
+    // leaks it into every test that follows and the suite becomes
+    // order-dependent. Reset it here and re-establish the factory default the
+    // tests which install no implementation of their own rely on
+    // (PF-1229 round-2 finding #6).
+    vi.mocked(runPipeline).mockReset();
+    vi.mocked(runPipeline).mockResolvedValue(makeMockPlan());
     _setAbortController(null);
   });
 
@@ -605,47 +615,190 @@ describe('orchestratorSlice', () => {
   });
 
   /**
-   * `resetOrchestrator` nulls `_abortController` without calling `.abort()`
-   * — nothing actually stops an in-flight `runPipeline` promise from
-   * settling. Its `finally` block folds `stepStatuses`/`orchestratorWarnings`
-   * from a `currentPlan` snapshot captured at function entry; if the user has
-   * since reset and started a DIFFERENT plan, that stale fold can silently
-   * resurrect step statuses from the abandoned run under the new plan's ids
-   * (`step_${n}` collides across plans by construction) — a run the user
-   * moved on from visibly reporting progress after the fact
-   * (PF-1229 finding #4).
+   * An abandoned run keeps writing to the store.
+   *
+   * `resetOrchestrator` now calls `.abort()`, but an abort is COOPERATIVE:
+   * the runner checks `ctx.signal` between steps, so a step already in flight
+   * still settles and still fires its callbacks, and the promise chain still
+   * reaches the `catch`/`finally`. If the user has reset and started a
+   * DIFFERENT plan in the meantime, four separate writers would paint the
+   * abandoned run's progress onto the new plan — `onStepComplete`
+   * (`step_${n}` ids collide across plans by construction),
+   * `onPlanStatusChange` (reports the new run completed/failed
+   * mid-execution), the `catch` (fails it outright) and the `finally` fold.
+   * Every one of them is gated on run identity (PF-1229 finding #4).
+   *
+   * Each case here drives the callbacks LATE — after `setPlan(planB)` — which
+   * is the only way to exercise the three non-`finally` writers: a fake runner
+   * that fires no callbacks after the reset can only ever prove the `finally`
+   * guard.
    */
   describe('stale-run guard on resetOrchestrator race', () => {
-    it("does not let an abandoned run's finally-block write clobber a newer plan", async () => {
+    /**
+     * Start planA's run, hand back a promise that never settles on its own,
+     * and capture the callbacks + context the slice passed in so the test can
+     * drive them by hand after the reset.
+     */
+    async function startAbandonedRun(): Promise<{
+      planA: OrchestratorPlan;
+      planB: OrchestratorPlan;
+      callbacks: PipelineCallbacks;
+      ctx: { signal: AbortSignal };
+      settle: (plan: OrchestratorPlan) => void;
+      reject: (err: Error) => void;
+      runPromise: Promise<void>;
+    }> {
       const planA = makeMockPlan();
       store.getState().setPlan(planA);
 
       const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
-      let resolveRun!: (plan: OrchestratorPlan) => void;
-      const pending = new Promise<OrchestratorPlan>((resolve) => {
-        resolveRun = resolve;
+      let capturedCallbacks!: PipelineCallbacks;
+      let capturedCtx!: { signal: AbortSignal };
+      let settle!: (plan: OrchestratorPlan) => void;
+      let reject!: (err: Error) => void;
+      let markCalled!: () => void;
+      const called = new Promise<void>((resolve) => {
+        markCalled = resolve;
       });
-      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(() => pending);
+      const pending = new Promise<OrchestratorPlan>((resolve, rejectFn) => {
+        settle = resolve;
+        reject = rejectFn;
+      });
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        (
+          _plan: unknown,
+          _registry: unknown,
+          ctx: { signal: AbortSignal },
+          callbacks: PipelineCallbacks,
+        ) => {
+          capturedCtx = ctx;
+          capturedCallbacks = callbacks;
+          markCalled();
+          return pending;
+        },
+      );
 
       const runPromise = store.getState().runPipelineFromPlan();
+      // Wait for the runner to actually be CALLED rather than counting
+      // microtasks: `runPipelineFromPlan` awaits three dynamic imports first,
+      // and a fixed number of `await Promise.resolve()` hops is a guess that
+      // silently stops covering this the moment another await is added.
+      await called;
 
       // The user resets and starts a brand-new plan while planA's run is
-      // still in flight — no real cancellation happens, since
-      // resetOrchestrator does not abort.
+      // still in flight.
       store.getState().resetOrchestrator();
       const planB = makeMockPlan();
       store.getState().setPlan(planB);
+
+      return { planA, planB, callbacks: capturedCallbacks, ctx: capturedCtx, settle, reject, runPromise };
+    }
+
+    it('aborts the in-flight run rather than only dropping the handle', async () => {
+      const planA = makeMockPlan();
+      store.getState().setPlan(planA);
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      let capturedSignal!: AbortSignal;
+      let settle!: (plan: OrchestratorPlan) => void;
+      let markCalled!: () => void;
+      const called = new Promise<void>((resolve) => {
+        markCalled = resolve;
+      });
+      const pending = new Promise<OrchestratorPlan>((resolve) => {
+        settle = resolve;
+      });
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        (_plan: unknown, _registry: unknown, ctx: { signal: AbortSignal }) => {
+          capturedSignal = ctx.signal;
+          markCalled();
+          return pending;
+        },
+      );
+
+      const runPromise = store.getState().runPipelineFromPlan();
+      await called;
+
+      expect(capturedSignal.aborted).toBe(false);
+
+      store.getState().resetOrchestrator();
+
+      // The runner honours `ctx.signal`; nulling the handle without aborting
+      // left the abandoned run doing real engine work for the rest of its life.
+      expect(capturedSignal.aborted).toBe(true);
+
+      settle(planA);
+      await runPromise;
+    });
+
+    it("does not let an abandoned run's finally-block write clobber a newer plan", async () => {
+      const { planA, planB, settle, runPromise } = await startAbandonedRun();
 
       // planA is only now reported complete, after planB is already on
       // screen. The real runner writes step status onto the plan object
       // before resolving, so mirror that here.
       planA.steps[0] = { ...planA.steps[0], status: 'completed' };
-      resolveRun(planA);
+      settle(planA);
       await runPromise;
 
       // planB never ran step_0 — its own freshly-derived 'pending' status
       // must survive, not be overwritten by planA's stale fold.
       expect(store.getState().currentPlan).toBe(planB);
+      expect(store.getState().stepStatuses['step_0']).toBe('pending');
+    });
+
+    it('ignores a late onStepComplete from the abandoned run', async () => {
+      const { planA, callbacks, settle, runPromise } = await startAbandonedRun();
+
+      // planA's runner finally gets around to reporting step_0 — long after
+      // planB replaced it. `step_0` exists in BOTH plans, so an unguarded
+      // write lands squarely on planB's own step.
+      callbacks.onStepComplete?.('step_0', {
+        success: true,
+        output: { warning: 'stale note from the abandoned run' },
+      });
+
+      expect(store.getState().stepStatuses['step_0']).toBe('pending');
+      expect(store.getState().orchestratorWarnings).toEqual([]);
+      expect(store.getState().currentStepIndex).toBe(0);
+
+      settle(planA);
+      await runPromise;
+
+      expect(store.getState().stepStatuses['step_0']).toBe('pending');
+      expect(store.getState().orchestratorWarnings).toEqual([]);
+    });
+
+    it('ignores a late onPlanStatusChange from the abandoned run', async () => {
+      const { planA, callbacks, settle, runPromise } = await startAbandonedRun();
+
+      // `setPlan` leaves the status alone, so the store is still 'idle' from
+      // the reset — a fresh plan awaiting the user, not a finished run.
+      expect(store.getState().orchestratorStatus).toBe('idle');
+
+      callbacks.onPlanStatusChange?.('completed');
+      expect(store.getState().orchestratorStatus).toBe('idle');
+
+      callbacks.onPlanStatusChange?.('failed');
+      expect(store.getState().orchestratorStatus).toBe('idle');
+
+      settle(planA);
+      await runPromise;
+
+      expect(store.getState().orchestratorStatus).toBe('idle');
+      expect(store.getState().orchestratorError).toBeNull();
+    });
+
+    it('ignores a late throw from the abandoned run', async () => {
+      const { reject, runPromise } = await startAbandonedRun();
+
+      // The abort provoked by `resetOrchestrator` surfaces here as a rejected
+      // run. Reporting it would mark the plan the user just started as failed.
+      reject(new Error('pipeline aborted'));
+      await runPromise;
+
+      expect(store.getState().orchestratorStatus).toBe('idle');
+      expect(store.getState().orchestratorError).toBeNull();
       expect(store.getState().stepStatuses['step_0']).toBe('pending');
     });
   });
@@ -839,7 +992,11 @@ describe('orchestratorSlice', () => {
       store.getState().setPlan(plan);
 
       const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
-      (runPipeline as ReturnType<typeof vi.fn>).mockImplementation(async () => plan);
+      // One implementation per run — a persistent `mockImplementation` here
+      // would outlive this test (see the `beforeEach` note).
+      (runPipeline as ReturnType<typeof vi.fn>)
+        .mockImplementationOnce(async () => plan)
+        .mockImplementationOnce(async () => plan);
 
       await store.getState().runPipelineFromPlan();
       await store.getState().runPipelineFromPlan();

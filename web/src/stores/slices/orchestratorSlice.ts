@@ -341,6 +341,14 @@ export const createOrchestratorSlice: StateCreator<
   },
 
   resetOrchestrator: () => {
+    // Abort BEFORE dropping the handle. Nulling it alone leaves an in-flight
+    // `runPipeline` running to completion against an engine the user has
+    // already walked away from — the runner honours `ctx.signal`, so this is
+    // the only thing that actually stops the abandoned run doing more work
+    // (PF-1229 finding #4).
+    if (_abortController) {
+      _abortController.abort();
+    }
     _abortController = null;
     _gateResolver = null;
     set({
@@ -410,8 +418,28 @@ export const createOrchestratorSlice: StateCreator<
     let completedSteps = 0;
     const totalSteps = currentPlan.steps.length;
 
+    /**
+     * Run identity: is the store still showing the plan THIS run belongs to?
+     *
+     * `resetOrchestrator` aborts, but an abort is cooperative — the runner
+     * checks `ctx.signal` between steps, so a step already in flight still
+     * settles and still fires its callbacks. If the user has since reset and
+     * started a DIFFERENT plan, every writer below would be writing the
+     * abandoned run's progress onto the new plan: `step_${n}` ids collide
+     * across plans by construction, so a stale `onStepComplete` marks a step
+     * the new plan has not run, a stale `onPlanStatusChange` reports the new
+     * run completed/failed mid-execution, and a stale `catch` fails it
+     * outright. Identity on the captured plan object is the whole test —
+     * `setPlan` stores the reference, so it holds across a re-run of the same
+     * plan and breaks the moment a different one (or `null`) is live
+     * (PF-1229 finding #4).
+     */
+    const isCurrentRun = () => get().currentPlan === currentPlan;
+
     const callbacks: PipelineCallbacks = {
       onStepComplete: (stepId, result) => {
+        if (!isCurrentRun()) return;
+
         const status = result.success ? 'completed' : 'failed';
         get().updateStepStatus(stepId, status);
 
@@ -460,7 +488,7 @@ export const createOrchestratorSlice: StateCreator<
           cancelled: 'cancelled',
         };
         const mapped = statusMap[planStatus];
-        if (mapped) {
+        if (mapped && isCurrentRun()) {
           set({ orchestratorStatus: mapped });
         }
       },
@@ -471,17 +499,24 @@ export const createOrchestratorSlice: StateCreator<
 
       // Final status is set by onPlanStatusChange callback
     } catch (err) {
-      set({
-        orchestratorStatus: 'failed',
-        orchestratorError: err instanceof Error ? err.message : String(err),
-      });
+      // Same run-identity gate as the callbacks: an abandoned run that throws
+      // (including the AbortError `resetOrchestrator` now provokes) must not
+      // paint the plan the user moved on to as failed.
+      if (isCurrentRun()) {
+        set({
+          orchestratorStatus: 'failed',
+          orchestratorError: err instanceof Error ? err.message : String(err),
+        });
+      }
     } finally {
       _abortController = null;
 
       // Re-read the plan the runner mutated.
       //
-      // `onStepComplete` is the store's only other writer and it fires ONLY for
-      // a step that actually executed, mapping its result to 'completed' or
+      // `onStepComplete` is the only other writer of `stepStatuses` (the other
+      // callback writers touch `orchestratorStatus`/`orchestratorWarnings`,
+      // and the `catch` writes the error), and it fires ONLY for a step that
+      // actually executed, mapping its result to 'completed' or
       // 'failed'. Every 'skipped' the runner writes — a required step whose
       // dependency failed, the cascade after a failure or a cancel, an optional
       // step that exhausted its retries — is written straight onto the plan with
@@ -493,16 +528,15 @@ export const createOrchestratorSlice: StateCreator<
       //
       // In `finally` so a run that threw still shows how far it got.
       //
-      // `resetOrchestrator` nulls `_abortController` without calling
-      // `.abort()` — nothing actually stops this promise chain from settling.
-      // If the user has since reset and started a DIFFERENT plan, `currentPlan`
-      // here is a stale closure capture from function entry, and folding it
-      // unconditionally would resurrect the abandoned run's step statuses
-      // under the new plan's ids (`step_${n}` collides across plans by
-      // construction) after the user has already moved on
-      // (PF-1229 finding #4). Only fold if the store's live plan is still the
-      // one this run belongs to.
-      if (get().currentPlan === currentPlan) {
+      // `resetOrchestrator` aborts, but an abort is cooperative — a step
+      // already in flight still settles, so this promise chain still reaches
+      // here. `currentPlan` is a stale closure capture from function entry, so
+      // folding it unconditionally would resurrect the abandoned run's step
+      // statuses under the new plan's ids (`step_${n}` collides across plans
+      // by construction) after the user has already moved on. Same
+      // `isCurrentRun()` gate every other writer in this run uses
+      // (PF-1229 finding #4).
+      if (isCurrentRun()) {
         set(s => ({
           stepStatuses: { ...s.stepStatuses, ...deriveStepStatuses(currentPlan) },
           orchestratorWarnings: [
