@@ -24,6 +24,7 @@ import {
   PRESET_KEYS,
   jumpAirtimeSeconds,
   jumpForceToApexHeight,
+  maxApexHeightForAirtime,
 } from '../physicsFeel';
 
 /**
@@ -161,6 +162,46 @@ describe('jumpAirtimeSeconds', () => {
  * Deliberately textual, and it fails closed — an unreadable file, a missing
  * declaration, or a literal it cannot parse is a failure, never a skip.
  */
+describe('maxApexHeightForAirtime', () => {
+  /**
+   * The airtime cap expressed as a height. `jumpForceToApexHeight` has always
+   * enforced it on generated games; it is exported so the manual Jump Height
+   * slider can stop in the same place rather than carrying a second, hand-picked
+   * ceiling that drifts from it (PF-1228).
+   */
+  it('answers the height whose airtime is exactly the cap', () => {
+    for (const gravityScale of [0.5, 1, 2.5, 4]) {
+      const h = maxApexHeightForAirtime(gravityScale);
+      expect(jumpAirtimeSeconds(h, gravityScale)).toBeCloseTo(MAX_JUMP_AIRTIME_SECONDS, 6);
+    }
+  });
+
+  it('matches h = t^2 * g / 8', () => {
+    // Computed here rather than by calling the helper, so this is a pin.
+    expect(maxApexHeightForAirtime(1)).toBeCloseTo((1.5 * 1.5 * 9.81) / 8, 10);
+    expect(maxApexHeightForAirtime(2)).toBeCloseTo(2 * maxApexHeightForAirtime(1), 10);
+  });
+
+  it('is what the capped branch of jumpForceToApexHeight returns', () => {
+    // A jump force big enough to blow past the cap must land on exactly this
+    // number, or the slider ceiling and the generated game disagree about what
+    // counts as a jump.
+    const gravityScale = 1;
+    const height = jumpForceToApexHeight(400, gravityScale);
+    expect(height).toBeCloseTo(maxApexHeightForAirtime(gravityScale), 10);
+  });
+
+  it('answers a non-positive or non-finite gravity at scale 1', () => {
+    // Matching `jump_speed_for_height`'s own fallback
+    // (engine/src/core/character_controller.rs): with no gravity there is no
+    // apex to compute, and answering 0 would collapse the slider to a point.
+    const atOne = maxApexHeightForAirtime(1);
+    for (const bad of [0, -3, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(maxApexHeightForAirtime(bad)).toBeCloseTo(atOne, 10);
+    }
+  });
+});
+
 describe('GRAVITY_ACCEL_MPS2 mirrors the engine constant', () => {
   const RUST = join(
     __dirname, '..', '..', '..', '..', '..',

@@ -32,3 +32,13 @@ controller — it simply keeps sliding, with no gravity and no collisions, and
 nothing anywhere said so. Pressing Play on such a scene now raises a message
 naming the characters and how to fix them, and building a game reports the same
 thing one step earlier, while it can still be repaired.
+
+Adding a Character Controller by hand now starts from the same calibrated jump
+the generation pipeline uses, and the inspector's jump slider is labelled and
+bounded for the project type — a height in metres in 3D, a rise rate in 2D —
+instead of offering the same unitless range to both.
+
+The physics-feel analysis now converts each character's jump using that
+character's own gravity, rather than the average gravity of everything in the
+scene with a body, so a heavy prop can no longer make the player look like it
+jumps harder than it does.

@@ -203,6 +203,27 @@ export const JUMP_FORCE_TO_LAUNCH_SPEED = 0.45;
 export const MAX_JUMP_AIRTIME_SECONDS = 1.5;
 
 /**
+ * The tallest apex, in metres, a jump can have and still land inside
+ * {@link MAX_JUMP_AIRTIME_SECONDS} at this gravity: `h = t^2 * g / 8`.
+ *
+ * This is the ceiling {@link jumpForceToApexHeight} already enforces on every
+ * generated game, so it is also the honest upper bound for a creator typing the
+ * number by hand — above it the character is not jumping, it is ascending. The
+ * manual Jump Height slider stops here for that reason (see
+ * `lib/game/characterControllerDefaults.ts`).
+ *
+ * A non-positive or non-finite `gravityScale` is answered at scale 1, matching
+ * the engine's own fallback in `jump_speed_for_height`
+ * (`engine/src/core/character_controller.rs`): with no gravity there is no apex
+ * to compute, and answering 0 would collapse the slider to a single point.
+ */
+export function maxApexHeightForAirtime(gravityScale: number): number {
+  const scale = Number.isFinite(gravityScale) && gravityScale > 0 ? gravityScale : 1;
+  const g = GRAVITY_ACCEL_MPS2 * scale;
+  return (MAX_JUMP_AIRTIME_SECONDS * MAX_JUMP_AIRTIME_SECONDS * g) / 8;
+}
+
+/**
  * Convert a preset's unitless `jumpForce` into the apex HEIGHT, in metres,
  * that the engine's character controller expects as `jumpHeight`.
  *
@@ -229,8 +250,8 @@ export function jumpForceToApexHeight(jumpForce: number, gravityScale: number): 
   if (airtime > MAX_JUMP_AIRTIME_SECONDS) {
     // Re-derive the height from the capped airtime rather than clamping the
     // height directly, so the number that ships is one the engine can actually
-    // reach in `MAX_JUMP_AIRTIME_SECONDS`: h = t^2 * g / 8.
-    return (MAX_JUMP_AIRTIME_SECONDS * MAX_JUMP_AIRTIME_SECONDS * g) / 8;
+    // reach in `MAX_JUMP_AIRTIME_SECONDS`.
+    return maxApexHeightForAirtime(gravityScale);
   }
 
   return (launchSpeed * launchSpeed) / (2 * g);
@@ -398,7 +419,7 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
   // Extract an average "virtual profile" from the scene
   let frictionSum = 0;
   let speedSum = 0;
-  let jumpSum = 0;
+  let jumpForceSum = 0;
   let gravityScaleSum = 0;
   let count = 0;
   // Counted separately from `count`: that one counts entities with PHYSICS,
@@ -415,7 +436,17 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
       for (const gc of entity.gameComponents) {
         if (gc.type === 'characterController' && gc.characterController) {
           speedSum += gc.characterController.speed;
-          jumpSum += gc.characterController.jumpHeight;
+          // The controller stores a HEIGHT; `PhysicsProfile.jumpForce` is the
+          // unitless authoring dial. Convert per controller, against the
+          // gravity scale THAT controller integrates its jump under — the
+          // kinematic path reads `CharacterControllerData.gravity_scale`, not
+          // the rigid-body scale of whatever else is in the scene. Averaging
+          // the scene's body gravity first would let a heavy crate make every
+          // player look like it jumps harder than it does.
+          jumpForceSum += apexHeightToJumpForce(
+            gc.characterController.jumpHeight,
+            gc.characterController.gravityScale,
+          );
           controllerCount++;
         }
       }
@@ -429,14 +460,12 @@ export function analyzePhysicsFeel(ctx: PhysicsSceneContext): PhysicsAnalysis {
   // character controllers classified as twice as fast and twice as jumpy as it
   // is — invisible in the single-controller case every test used.
   const avgSpeed = controllerCount > 0 ? speedSum / controllerCount : 7;
-  const avgJumpHeight = controllerCount > 0 ? jumpSum / controllerCount : 0;
   const absGravity = avgGravityScale * 10; // Convert scale to absolute
 
-  // The controller stores a HEIGHT; `PhysicsProfile.jumpForce` is the unitless
-  // authoring dial. Comparing one against the other made every scene look like
-  // whichever preset carried the biggest numbers (PF-1214).
-  const avgJump =
-    avgJumpHeight > 0 ? apexHeightToJumpForce(avgJumpHeight, avgGravityScale) : 10;
+  // Comparing a stored height against the dial directly made every scene look
+  // like whichever preset carried the biggest numbers (PF-1214); the per-
+  // controller conversion above is what makes this an average of dials.
+  const avgJump = controllerCount > 0 && jumpForceSum > 0 ? jumpForceSum / controllerCount : 10;
 
   // Infer non-observable parameters from observable ones for better classification.
   // Low gravity -> high air control, low terminal velocity. High friction -> high deceleration.

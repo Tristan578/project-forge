@@ -254,6 +254,43 @@ describe('analyzePhysicsFeel', () => {
     expect(two.closestPreset).toBe(one.closestPreset);
   });
 
+  it('converts each controller\'s jump against ITS OWN gravity scale, not the scene average', () => {
+    // jumpForce ∝ sqrt(gravityScale * apexHeight), so a controller that jumps
+    // to h under gravityScale 4 has EXACTLY the dial of one that jumps to 4h
+    // under gravityScale 1. Both scenes carry the same rigid-body gravity
+    // (scale 1), so the only thing that differs is how the controller's own
+    // gravity enters the conversion — the kinematic path integrates the jump
+    // against `CharacterControllerData.gravity_scale`, not the scene average.
+    // Converting with the scene-average body gravity (1) instead would land
+    // these two scenes a factor of two apart.
+    const scene = (jumpHeight: number, controllerGravity: number): PhysicsSceneContext => ({
+      entities: [
+        {
+          entityId: 'player',
+          physics: { gravityScale: 1, friction: 0.4 },
+          gameComponents: [
+            {
+              type: 'characterController',
+              characterController: { speed: 7, jumpHeight, gravityScale: controllerGravity },
+            },
+          ],
+        },
+        { entityId: 'ground', physics: { gravityScale: 1, friction: 0.4 } },
+      ],
+    });
+
+    const heavyController = analyzePhysicsFeel(scene(0.5, 4));
+    const equivalent = analyzePhysicsFeel(scene(2, 1));
+    const sceneAverageWouldGive = analyzePhysicsFeel(scene(0.5, 1));
+
+    expect(heavyController.closestPreset).toBe(equivalent.closestPreset);
+    expect(heavyController.similarity).toBeCloseTo(equivalent.similarity, 10);
+    // Guard against the equality being vacuous: the dial the OLD code would
+    // have produced (height 0.5 under the scene's gravity 1) classifies
+    // measurably differently from the controller's real jump.
+    expect(heavyController.similarity).not.toBeCloseTo(sceneAverageWouldGive.similarity, 3);
+  });
+
   it('should handle empty scene with suggestions', () => {
     const ctx: PhysicsSceneContext = { entities: [] };
     const analysis = analyzePhysicsFeel(ctx);
