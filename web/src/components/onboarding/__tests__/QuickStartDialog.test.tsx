@@ -382,7 +382,7 @@ describe('QuickStartDialog', () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
 
-    vi.mocked(findQuickStartGameType).mockReturnValueOnce(undefined);
+    vi.mocked(findQuickStartGameType).mockReturnValueOnce(null);
     await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
 
     const alert = await screen.findByRole('alert');
