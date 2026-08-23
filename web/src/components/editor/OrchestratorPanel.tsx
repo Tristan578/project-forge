@@ -76,11 +76,24 @@ function getStepLabel(executor: string): string {
  * `ThemeName`s, not just the dark palette these `zinc-*` neighbours assume)
  * recolours the failure surface along with everything else instead of leaving
  * one hardcoded red behind.
+ *
+ * The border and background legitimately use `--sf-destructive` — a border
+ * only needs WCAG 1.4.11's 3:1 non-text floor (pinned by the `NONTEXT_PAIRS`
+ * test in `packages/ui/src/tokens/__tests__/themes.test.ts`), and the
+ * background is decorative, painted at 10% alpha. The BODY TEXT is different:
+ * it needs WCAG AA's 4.5:1 text floor, and `--sf-destructive` itself only
+ * clears 3:1 — pairing it with its own 10%-alpha tint failed AA in several
+ * themes (as low as ~2.9:1 in rust). There is no `--sf-destructive-foreground`
+ * token in the design system, so this uses `--sf-text` instead — the ordinary
+ * text-color token, already proven >= 4.5:1 against solid `--sf-bg-surface`,
+ * and re-pinned here against the actual blended 10%-alpha destructive tint by
+ * the `error surface text clears WCAG AA against the blended destructive
+ * tint` test in the same `themes.test.ts` file.
  */
 const ERROR_SURFACE_CLASSES = cn(
   'border border-[var(--sf-destructive)]/40',
   'bg-[var(--sf-destructive)]/10',
-  'text-[var(--sf-destructive)]',
+  'text-[var(--sf-text)]',
 );
 
 // ---------------------------------------------------------------------------

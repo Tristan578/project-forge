@@ -75,6 +75,24 @@ describe('Theme Definitions', () => {
     return (lighter + 0.05) / (darker + 0.05);
   }
 
+  // Alpha-composites `fgHex` over `bgHex` at `alpha` (0-1), per-channel linear
+  // blend in sRGB space — this is what a Tailwind `bg-[var(--x)]/N` opacity
+  // modifier actually paints, not the raw foreground color. A contrast check
+  // against the unblended hex would grade a color nobody sees.
+  function blendHex(fgHex: string, bgHex: string, alpha: number): string {
+    const fr = parseInt(fgHex.slice(1, 3), 16);
+    const fg = parseInt(fgHex.slice(3, 5), 16);
+    const fb = parseInt(fgHex.slice(5, 7), 16);
+    const br = parseInt(bgHex.slice(1, 3), 16);
+    const bg = parseInt(bgHex.slice(3, 5), 16);
+    const bb = parseInt(bgHex.slice(5, 7), 16);
+    const r = Math.round(alpha * fr + (1 - alpha) * br);
+    const g = Math.round(alpha * fg + (1 - alpha) * bg);
+    const b = Math.round(alpha * fb + (1 - alpha) * bb);
+    const toHex = (c: number) => c.toString(16).padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  }
+
   const TEXT_BG_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string]> = [
     ['--sf-text', '--sf-bg-app', 'primary text on app background'],
     ['--sf-text', '--sf-bg-surface', 'primary text on surface'],
@@ -143,5 +161,26 @@ describe('Theme Definitions', () => {
         `${theme}: ${description} — --sf-on-accent ${onAccent} on ${bgKey} ${bgHex} = ${ratio.toFixed(2)}:1, need >= 4.5:1`
       ).toBeGreaterThanOrEqual(4.5);
     }
+  });
+  // Regression for PF-1229 finding #1: OrchestratorPanel's ERROR_SURFACE_CLASSES
+  // paints `text-[var(--sf-destructive)]` over `bg-[var(--sf-destructive)]/10`
+  // (see web/src/components/editor/OrchestratorPanel.tsx). --sf-destructive is
+  // only pinned at the WCAG 1.4.11 non-text floor (3:1, see NONTEXT_PAIRS
+  // above) — using it as TEXT against its own 10%-alpha tint failed AA 4.5:1
+  // in several themes. There is no --sf-destructive-foreground token, so the
+  // fix pairs the surface with --sf-text (already proven >= 4.5:1 against
+  // solid --sf-bg-surface via TEXT_BG_PAIRS above) and this test proves that
+  // holds against the actual blended background a viewer sees.
+  it.each(THEMES)('%s theme: error surface text clears WCAG AA against the blended destructive tint', (theme) => {
+    const tokens = THEME_DEFINITIONS[theme];
+    const destructiveHex = tokens['--sf-destructive'] as string;
+    const surfaceHex = tokens['--sf-bg-surface'] as string;
+    const textHex = tokens['--sf-text'] as string;
+    const blendedBg = blendHex(destructiveHex, surfaceHex, 0.1);
+    const ratio = contrastRatio(textHex, blendedBg);
+    expect(
+      ratio,
+      `${theme}: --sf-text ${textHex} on blended destructive/10 ${blendedBg} (over ${surfaceHex}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
+    ).toBeGreaterThanOrEqual(4.5);
   });
 });

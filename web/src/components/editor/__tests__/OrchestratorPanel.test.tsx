@@ -415,8 +415,17 @@ describe('OrchestratorPanel', () => {
      * not a distinction, so the colour is asserted to be one colour. Geometry
      * is deliberately NOT compared: the banner is a block of body text and the
      * step alert a small annotation, and they should differ there.
+     *
+     * PF-1229 finding #1: the border/background legitimately use
+     * `--sf-destructive` (a non-text 3:1 floor), but the label TEXT was also
+     * `--sf-destructive`, which failed WCAG AA's 4.5:1 text floor against its
+     * own 10%-alpha tint in several themes. The fix repoints the text to
+     * `--sf-text` (see `packages/ui/src/tokens/__tests__/themes.test.ts` for
+     * the pinned contrast math), so this test now checks the surface colour
+     * (border/bg) and the text colour separately, and pins that the text is
+     * no longer `--sf-destructive`.
      */
-    it('draws the plan-level and per-step failures in the same red', () => {
+    it('draws the plan-level and per-step failures in the same red surface with AA-safe text', () => {
       mockStore({
         orchestratorStatus: 'failed',
         currentPlan: FAILED_PLAN,
@@ -429,13 +438,19 @@ describe('OrchestratorPanel', () => {
       const stepAlert = screen.getByText('Could not switch physics on for the level.');
       expect(container.contains(banner)).toBe(true);
 
-      const colourOf = (el: Element) => Array.from(el.classList)
-        .filter((c) => /(^|:)(border|bg|text)-\[var\(--sf-destructive\)\]/.test(c))
+      const surfaceColourOf = (el: Element) => Array.from(el.classList)
+        .filter((c) => /(^|:)(border|bg)-\[var\(--sf-destructive\)\]/.test(c))
+        .sort();
+      const textColourOf = (el: Element) => Array.from(el.classList)
+        .filter((c) => /(^|:)text-\[var\(--sf-(destructive|text)\)\]/.test(c))
         .sort();
 
-      expect(colourOf(stepAlert)).toEqual(colourOf(banner));
-      // And not vacuously equal because neither carries a red at all.
-      expect(colourOf(banner).length).toBeGreaterThan(0);
+      expect(surfaceColourOf(stepAlert)).toEqual(surfaceColourOf(banner));
+      // And not vacuously equal because neither carries a red surface at all.
+      expect(surfaceColourOf(banner).length).toBeGreaterThan(0);
+
+      expect(textColourOf(stepAlert)).toEqual(textColourOf(banner));
+      expect(textColourOf(banner)).toEqual(['text-[var(--sf-text)]']);
     });
   });
 
