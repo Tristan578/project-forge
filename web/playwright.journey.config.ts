@@ -28,10 +28,11 @@ const JOURNEY_EXPECT_TIMEOUT_MS = 10_000;
 
 export default defineConfig({
   testDir: './e2e',
-  // Match ONLY the journey spec so a parse error in an unrelated @ui spec can't
-  // break this gate's collection phase. `grep` stays as a belt-and-suspenders
-  // tag filter in case a non-@journey test is ever added to this file.
-  testMatch: '**/journey.spec.ts',
+  // Match ONLY the specs that carry a @journey block, so a parse error in an
+  // unrelated @ui spec can't break this gate's collection phase. `grep` is what
+  // keeps the non-journey tests in those files (pipeline-creation.spec.ts is
+  // mostly @ui @dev) out of this gate.
+  testMatch: '**/{journey,pipeline-creation}.spec.ts',
   grep: /@journey/,
   fullyParallel: true,
   forbidOnly: true,
