@@ -303,27 +303,53 @@ interface RunResult {
 }
 
 /**
+ * The component names the engine reports on a node once physics is enabled
+ * (`engine/src/core/scene_graph.rs` lists `PhysicsData` and `PhysicsEnabled`
+ * in `SceneNode.components`). `verify_all_scenes` reads `PhysicsEnabled` to
+ * decide whether a 3D character will actually collide, so a harness that never
+ * mirrored it would report every rigged player as falling through the floor.
+ */
+const PHYSICS_ENABLED_COMPONENTS = ['PhysicsData', 'PhysicsEnabled'] as const;
+
+/**
  * Drive the whole pipeline for one GDD.
  *
- * The fake dispatcher mirrors `spawn_entity` into the scene graph because that
- * is what the engine does: `camera_setup`, `auto_polish`, `verify_all_scenes`
- * and `game_component` all read the LIVE graph, and an engine that never
- * reported back would make every one of them a no-op.
+ * The fake dispatcher mirrors `spawn_entity` and `toggle_physics` into the
+ * scene graph because that is what the engine does: `camera_setup`,
+ * `auto_polish`, `verify_all_scenes` and `game_component` all read the LIVE
+ * graph, and an engine that never reported back would make every one of them a
+ * no-op — or, for the physics check, a false alarm on every character. The
+ * mirror is deliberately honest: if the pipeline stops enabling physics on the
+ * player, the stranded-character warning fires here exactly as it would in
+ * the product.
  */
 async function runGame(h: TestHarness, gdd: OrchestratorGDD): Promise<RunResult> {
   h.dispatch.mockImplementation((command: unknown, payload: unknown) => {
-    if (command !== 'spawn_entity') return;
     if (typeof payload !== 'object' || payload === null) return;
     const p = payload as Payload;
-    if (typeof p.id !== 'string' || typeof p.name !== 'string') return;
-    h.simulateEntitySpawned({
-      entityId: p.id,
-      name: p.name,
-      parentId: null,
-      children: [],
-      components: [],
-      visible: true,
-    });
+    if (command === 'spawn_entity') {
+      if (typeof p.id !== 'string' || typeof p.name !== 'string') return;
+      h.simulateEntitySpawned({
+        entityId: p.id,
+        name: p.name,
+        parentId: null,
+        children: [],
+        components: [],
+        visible: true,
+      });
+      return;
+    }
+    if (command === 'toggle_physics') {
+      if (typeof p.entityId !== 'string' || typeof p.enabled !== 'boolean') return;
+      const node = Object.hasOwn(h.getState().sceneGraph.nodes, p.entityId) ? h.getState().sceneGraph.nodes[p.entityId] : undefined;
+      if (!node) return;
+      const without = node.components.filter(
+        (c) => !(PHYSICS_ENABLED_COMPONENTS as readonly string[]).includes(c),
+      );
+      h.getState().updateNode(p.entityId, {
+        components: p.enabled ? [...without, ...PHYSICS_ENABLED_COMPONENTS] : without,
+      });
+    }
   });
 
   const plan = buildPlan(gdd, 'proj_integration', 'creator', 1_000_000);
@@ -451,6 +477,16 @@ describe('game creation: idea -> plan -> playable game', () => {
     // everything silently — and auto_polish must then actually fix it.
     expect(verify.output?.issues).toContain('no_ambient_light');
     expect(verify.output?.passed).toBe(false);
+    // The player was rigged with physics by the pipeline (mirrored into the
+    // graph by the fake engine above), so the stranded-character check — a
+    // 3D character with no collider falls through the floor — must be quiet.
+    // This is the assertion that goes red if physics_enable stops covering
+    // the player.
+    expect(verify.output?.issues).not.toContain('character_without_collider');
+    const playerNode = h.getState().sceneGraph.nodes[playerId];
+    expect(playerNode?.components).toEqual(
+      expect.arrayContaining(['PhysicsEnabled']),
+    );
 
     const polish = stepByExecutor(plan, 'auto_polish');
     expect(polish.status).toBe('completed');

@@ -49,6 +49,25 @@ describe('TOOLTIP_DICTIONARY', () => {
     expect(TOOLTIP_DICTIONARY['lightShadows']).toBeDefined();
   });
 
+  /**
+   * A tooltip is read in a hover, at the size of a hover. `gcJumpHeight` had
+   * grown to a 43-word two-sentence paragraph explaining the 2D/3D divergence —
+   * more text than the panel it annotates, which is where a reader stops reading
+   * tooltips at all (PF-1228). The ceiling is deliberately loose: it exists to
+   * catch the next paragraph, not to police wording. Longest entry today is 29
+   * words, so a regrowth past 30 is a real change, not drift.
+   */
+  it('should keep every tooltip short enough to read in a hover', () => {
+    const LIMIT = 30;
+    const tooLong = Object.entries(TOOLTIP_DICTIONARY)
+      .map(([key, value]) => [key, value.trim().split(/\s+/).length] as const)
+      .filter(([, words]) => words > LIMIT);
+    expect(
+      tooLong,
+      `tooltips over ${LIMIT} words — move the detail into the panel or the docs`,
+    ).toEqual([]);
+  });
+
   it('tooltip values should be user-friendly (no raw code)', () => {
     for (const [key, value] of Object.entries(TOOLTIP_DICTIONARY)) {
       // Tooltips should not contain code-like constructs

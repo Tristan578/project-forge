@@ -427,11 +427,6 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         };
       }
 
-      // A restarted game must not inherit the previous session's last-frame
-      // ground contact — the engine emits CHANGES, so a stale `true` would
-      // never be corrected (PF-1214).
-      clearGroundedStates();
-
       worker.postMessage({
         type: 'init',
         scripts,
@@ -441,6 +436,13 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         tilemapStates,
         skeletonStates,
         physics2dVelocities: {},
+        // Whatever the engine has already reported. `play` enters the engine on
+        // the rAF loop and this is a React effect, so a character standing on
+        // the floor at play start has usually already emitted its one and only
+        // (id, true) by now — and the engine emits CHANGES, so clearing here
+        // would lose it until the character next left the ground and returned.
+        // The stale-previous-session case this used to guard is closed by the
+        // stop and unmount clears below (PF-1214, review finding #8).
         groundedStates: getGroundedStates(),
       });
 

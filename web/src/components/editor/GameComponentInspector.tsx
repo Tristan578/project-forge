@@ -6,6 +6,12 @@ import { useDialogueStore, listTrees } from '@/stores/dialogueStore';
 import { ChevronDown, ChevronRight, Trash2, Plus } from 'lucide-react';
 import { Vec3Input } from './Vec3Input';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
+import {
+  defaultCharacterController,
+  jumpHeightSliderMax,
+  jumpHeightUnit,
+  type ControllerProjectType,
+} from '@/lib/game/characterControllerDefaults';
 
 // Shared UI components
 interface SliderRowProps {
@@ -17,9 +23,15 @@ interface SliderRowProps {
   precision?: number;
   onChange: (v: number) => void;
   tooltipTerm?: string;
+  /**
+   * Shown after the readout. A slider whose number is a physical quantity has
+   * to say which one — "8.0" alone gave no way to tell a metre from a rate,
+   * which is the ambiguity that let a 26-foot default jump ship unnoticed.
+   */
+  unit?: string | null;
 }
 
-function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, tooltipTerm }: SliderRowProps) {
+function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, tooltipTerm, unit }: SliderRowProps) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
@@ -38,8 +50,10 @@ function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2,
           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
           [&::-webkit-slider-thumb]:bg-zinc-300"
       />
-      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
-        {value.toFixed(precision)}
+      <span
+        className={`${unit ? 'w-16' : 'w-12'} text-right text-xs tabular-nums text-zinc-400`}
+      >
+        {unit ? `${value.toFixed(precision)} ${unit}` : value.toFixed(precision)}
       </span>
     </div>
   );
@@ -225,10 +239,25 @@ interface CharacterControllerSectionProps {
 }
 
 function CharacterControllerSection({ data, onChange, onRemove }: CharacterControllerSectionProps) {
+  // Jump Height is the one control here whose number changes meaning with the
+  // project type: an apex height in metres on the 3D kinematic path, a rise rate
+  // on the 2D legacy path. Both the range and the unit follow from that, so
+  // both come from the same module the Add Component default does.
+  const projectType: ControllerProjectType = useEditorStore((s) => s.projectType);
   return (
     <ComponentSection title="Character Controller" onRemove={onRemove}>
       <SliderRow label="Speed" value={data.speed} min={0} max={20} step={0.1} precision={1} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcSpeed" />
-      <SliderRow label="Jump Height" value={data.jumpHeight} min={0} max={20} step={0.1} precision={1} onChange={(v) => onChange({ ...data, jumpHeight: v })} tooltipTerm="gcJumpHeight" />
+      <SliderRow
+        label="Jump Height"
+        value={data.jumpHeight}
+        min={0}
+        max={jumpHeightSliderMax(projectType, data.gravityScale, data.jumpHeight)}
+        step={0.1}
+        precision={1}
+        onChange={(v) => onChange({ ...data, jumpHeight: v })}
+        tooltipTerm="gcJumpHeight"
+        unit={jumpHeightUnit(projectType)}
+      />
       <SliderRow label="Gravity Scale" value={data.gravityScale} min={0} max={5} step={0.1} precision={1} onChange={(v) => onChange({ ...data, gravityScale: v })} tooltipTerm="gcGravityScale" />
       <CheckboxRow label="Double Jump" checked={data.canDoubleJump} onChange={(v) => onChange({ ...data, canDoubleJump: v })} tooltipTerm="gcDoubleJump" />
     </ComponentSection>
@@ -545,6 +574,7 @@ function DialogueTriggerSection({ data, onChange, onRemove }: DialogueTriggerSec
 // Main inspector
 export function GameComponentInspector() {
   const primaryId = useEditorStore((s) => s.primaryId);
+  const projectType: ControllerProjectType = useEditorStore((s) => s.projectType);
   const primaryGameComponents = useEditorStore((s) => s.primaryGameComponents);
   const addGameComponent = useEditorStore((s) => s.addGameComponent);
   const updateGameComponent = useEditorStore((s) => s.updateGameComponent);
@@ -578,7 +608,14 @@ export function GameComponentInspector() {
     let component: GameComponentData;
     switch (typeName) {
       case 'character_controller':
-        component = { type: 'characterController', characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: false } };
+        // Project-type aware: the engine's own `Default` (jumpHeight 8) is the
+        // value the 2D legacy path's rise-rate arithmetic was tuned against, and
+        // shipping it into a 3D project asked the kinematic path for an
+        // eight-metre apex — a 2.6-second hang time (PF-1228).
+        component = {
+          type: 'characterController',
+          characterController: defaultCharacterController(projectType),
+        };
         break;
       case 'health':
         component = { type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } };
@@ -622,7 +659,7 @@ export function GameComponentInspector() {
 
     addGameComponent(primaryId, component);
     setAddMenuOpen(false);
-  }, [primaryId, addGameComponent]);
+  }, [primaryId, addGameComponent, projectType]);
 
   const handleUpdate = useCallback((component: GameComponentData) => {
     if (primaryId) {

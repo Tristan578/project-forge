@@ -75,6 +75,26 @@ export function bundleScripts(
       applyForce: function(id, x, y, z) { pendingCommands.push({cmd: 'apply_force', entityId: id, force: [x,y,z]}); },
       applyImpulse: function(id, x, y, z) { pendingCommands.push({cmd: 'apply_impulse', entityId: id, impulse: [x,y,z]}); },
       applyTorque: function(id, x, y, z) { pendingCommands.push({cmd: 'apply_torque', entityId: id, torque: [x,y,z]}); },
+      // Synchronous, like the editor's forge.physics.isGrounded. The runtime
+      // mirrors CHARACTER_GROUNDED_CHANGED into window.__forgeGrounded (the
+      // single writer is eventCallbackFragment.ts, which both gameTemplate.ts
+      // and zipExporter.ts embed); the engine emits that event on
+      // CHANGE only, so an entity absent from the map has simply never left
+      // or touched the ground since load — false is the right answer for a
+      // controller that has not reported, and for a non-character entity.
+      //
+      // Own-property check before the read, and === true after it, so this
+      // answers exactly what scriptWorker.ts's isGrounded answers. The map is a
+      // plain object, so a bare read of an id like 'constructor' resolves to an
+      // inherited function and would let a script stand on the prototype chain;
+      // and the only values the writer ever stores are booleans, so anything
+      // else in there did not come from the engine. hasOwnProperty.call rather
+      // than Object.hasOwn: this string is shipped as a standalone page, so it
+      // keeps the wider browser floor the rest of the shim assumes.
+      isGrounded: function(id) {
+        var m = window.__forgeGrounded;
+        return !!m && Object.prototype.hasOwnProperty.call(m, id) && m[id] === true;
+      },
     },
     getTransform: function(id) { return window.__forgeTransforms?.[id] || {position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]}; },
     setPosition: function(id, x, y, z) { pendingCommands.push({cmd: 'update_transform', entityId: id, position: [x,y,z]}); },

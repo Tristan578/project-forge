@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PHYSICS_PRESETS } from '@/lib/ai/physicsFeel';
+import { jumpForceToApexHeight, PHYSICS_PRESETS } from '@/lib/ai/physicsFeel';
 import {
   resolvePhysicsProfile,
   resolvePresetFromFeel,
@@ -222,7 +222,9 @@ describe('characterControllerFromProfile', () => {
   it('divides gravity by ten to reach the engine gravityScale', () => {
     expect(characterControllerFromProfile(PHYSICS_PRESETS.arcade_classic)).toEqual({
       speed: 7,
-      jumpHeight: 10,
+      // Not the preset's `jumpForce` of 10 — that is a unitless dial, and
+      // `jumpHeight` is a height in metres (PF-1214, finding #1).
+      jumpHeight: jumpForceToApexHeight(10, 1),
       gravityScale: 1,
     });
   });
@@ -237,7 +239,7 @@ describe('characterControllerFromProfile', () => {
     const profile = resolvePhysicsProfile(feel(), { moveSpeed: 11, jumpForce: 22 });
     expect(characterControllerFromProfile(profile)).toEqual({
       speed: 11,
-      jumpHeight: 22,
+      jumpHeight: jumpForceToApexHeight(22, BASE.gravity / 10),
       gravityScale: BASE.gravity / 10,
     });
   });

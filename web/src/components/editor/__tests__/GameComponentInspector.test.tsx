@@ -11,6 +11,10 @@ import { GameComponentInspector } from '../GameComponentInspector';
 import { useEditorStore } from '@/stores/editorStore';
 import { useDialogueStore } from '@/stores/dialogueStore';
 import type { GameComponentData } from '@/stores/editorStore';
+import {
+  defaultCharacterController,
+  jumpHeightSliderMax,
+} from '@/lib/game/characterControllerDefaults';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -51,6 +55,13 @@ function setupStore(overrides: {
   primaryId?: string | null;
   primaryGameComponents?: GameComponentData[] | null;
   dialogueTrees?: Record<string, unknown>;
+  /**
+   * `jumpHeight` does not mean the same thing in the two project types — an apex
+   * height in metres on the 3D kinematic path, a rise rate on the 2D legacy one —
+   * so the Add Component default, the slider range and the unit all follow from
+   * it (PF-1228). Defaults to '3d', matching `spriteSlice`.
+   */
+  projectType?: '2d' | '3d';
 } = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
@@ -60,6 +71,7 @@ function setupStore(overrides: {
       addGameComponent: mockAddGameComponent,
       updateGameComponent: mockUpdateGameComponent,
       removeGameComponent: mockRemoveGameComponent,
+      projectType: overrides.projectType ?? '3d',
     };
     return selector(state);
   });
@@ -143,16 +155,47 @@ describe('GameComponentInspector', () => {
     );
   });
 
-  it('adds character_controller with correct defaults', () => {
-    setupStore({ primaryGameComponents: [] });
+  /**
+   * The manual Add Component path used to hand every project the engine's own
+   * `CharacterControllerData::default()` — `jumpHeight: 8`. On the 2D legacy path
+   * that number is a rise rate and 8 is what it was tuned against; on the 3D
+   * kinematic path it is an apex height in metres, so the same literal asked for
+   * an eight-metre jump with 2.6 seconds of hang time. Nothing could report it:
+   * `dispatchCommand` returns void and a tall jump is a valid jump (PF-1228).
+   *
+   * Asserted as a full shape rather than `objectContaining`, because the failure
+   * mode here is a field carrying the wrong number while the asserted ones look
+   * right.
+   */
+  it('adds character_controller with a landable jump in a 3D project', () => {
+    setupStore({ primaryGameComponents: [], projectType: '3d' });
     render(<GameComponentInspector />);
     fireEvent.click(screen.getByText('Add'));
     fireEvent.click(screen.getByText('Character Controller'));
 
-    expect(mockAddGameComponent).toHaveBeenCalledWith('ent-1', expect.objectContaining({
+    expect(mockAddGameComponent).toHaveBeenCalledWith('ent-1', {
       type: 'characterController',
-      characterController: expect.objectContaining({ speed: 5, jumpHeight: 8 }),
-    }));
+      characterController: defaultCharacterController('3d'),
+    });
+    const added = mockAddGameComponent.mock.calls[0]![1] as {
+      characterController: { jumpHeight: number };
+    };
+    expect(added.characterController.jumpHeight).not.toBe(8);
+    expect(added.characterController.jumpHeight).toBeCloseTo(1.03, 2);
+  });
+
+  it('adds character_controller with the engine default in a 2D project', () => {
+    setupStore({ primaryGameComponents: [], projectType: '2d' });
+    render(<GameComponentInspector />);
+    fireEvent.click(screen.getByText('Add'));
+    fireEvent.click(screen.getByText('Character Controller'));
+
+    // 8 is correct here: the legacy path nudges the transform by
+    // `jump_height * 0.5 * dt` with no gravity integrator, so it is a speed.
+    expect(mockAddGameComponent).toHaveBeenCalledWith('ent-1', {
+      type: 'characterController',
+      characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: false },
+    });
   });
 
   it('adds collectible with correct defaults', () => {
@@ -299,6 +342,81 @@ describe('GameComponentInspector', () => {
     expect(screen.getByText('Character Controller').textContent).toBe('Character Controller');
     expect(screen.getByText('Speed').textContent).toBe('Speed');
     expect(screen.getByText('Jump Height').textContent).toBe('Jump Height');
+  });
+
+  /**
+   * The readout used to print a bare "8.0" for a number that is metres in one
+   * project type and a rise rate in the other, and the slider ran to a fixed 20
+   * in both. That ambiguity is what let a 26-foot default jump ship unnoticed,
+   * so the unit and the range are asserted here rather than left to the eye
+   * (PF-1228).
+   */
+  function jumpHeightRow(): HTMLElement {
+    const row = screen.getByText('Jump Height').parentElement?.parentElement;
+    expect(row).toBeTruthy();
+    return row as HTMLElement;
+  }
+
+  it('labels Jump Height in metres and bounds it by the airtime cap in 3D', () => {
+    setupStore({
+      projectType: '3d',
+      primaryGameComponents: [
+        { type: 'characterController', characterController: { speed: 7, jumpHeight: 1, gravityScale: 1, canDoubleJump: false } },
+      ],
+    });
+    render(<GameComponentInspector />);
+    const row = jumpHeightRow();
+    expect(row.textContent).toContain('1.0 m');
+    const slider = row.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(Number(slider.max)).toBeCloseTo(jumpHeightSliderMax('3d', 1, 1), 10);
+    // The ceiling is derived, not a round authoring number.
+    expect(Number(slider.max)).toBeCloseTo(2.76, 2);
+  });
+
+  it('tracks the controller gravity rather than pinning one 3D ceiling', () => {
+    setupStore({
+      projectType: '3d',
+      primaryGameComponents: [
+        { type: 'characterController', characterController: { speed: 7, jumpHeight: 1, gravityScale: 4, canDoubleJump: false } },
+      ],
+    });
+    render(<GameComponentInspector />);
+    const slider = jumpHeightRow().querySelector('input[type="range"]') as HTMLInputElement;
+    expect(Number(slider.max)).toBeCloseTo(jumpHeightSliderMax('3d', 4, 1), 10);
+    expect(Number(slider.max)).toBeGreaterThan(jumpHeightSliderMax('3d', 1, 1));
+  });
+
+  it('shows Jump Height unitless with the authoring range in 2D', () => {
+    setupStore({
+      projectType: '2d',
+      primaryGameComponents: [
+        { type: 'characterController', characterController: { speed: 5, jumpHeight: 8, gravityScale: 1, canDoubleJump: false } },
+      ],
+    });
+    render(<GameComponentInspector />);
+    const row = jumpHeightRow();
+    // No unit: the legacy path's number is a rise rate whose unit is an artifact
+    // of the missing integrator, not something to tell a creator to reason in.
+    expect(row.textContent).toContain('8.0');
+    expect(row.textContent).not.toContain(' m');
+    const slider = row.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(Number(slider.max)).toBe(20);
+  });
+
+  it('raises the Jump Height ceiling for a value already above it', () => {
+    setupStore({
+      projectType: '3d',
+      primaryGameComponents: [
+        { type: 'characterController', characterController: { speed: 7, jumpHeight: 40, gravityScale: 1, canDoubleJump: false } },
+      ],
+    });
+    render(<GameComponentInspector />);
+    // An imported scene, or a value typed before this bound existed. Pinning the
+    // thumb at the end of the track while the readout shows something larger
+    // reads as a broken slider and invites a drag that discards the value.
+    const slider = jumpHeightRow().querySelector('input[type="range"]') as HTMLInputElement;
+    expect(Number(slider.max)).toBe(40);
+    expect(slider.value).toBe('40');
   });
 
   it('renders Health section', () => {

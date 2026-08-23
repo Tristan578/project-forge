@@ -962,10 +962,16 @@ describe('useScriptRunner', () => {
     expect(tick.groundedStates).toEqual({ 'player-1': true, 'enemy-3': false });
   });
 
-  it('starts play with an empty registry, not the previous session state', () => {
-    // A stale `true` from the last session would never be corrected: the
-    // engine only emits CHANGES, so a character that starts airborne this run
-    // sends nothing and the script would let it jump off thin air.
+  /**
+   * The engine and this hook do not start on the same task. `play` enters the
+   * engine on the rAF loop; the effect that spawns the worker is a React
+   * effect. So the very first (id, true) for a character standing on the floor
+   * at play start is routinely already in the registry by the time this effect
+   * runs — and because the engine emits CHANGES only, discarding it means
+   * `forge.physics.isGrounded()` answers false until the character next leaves
+   * the ground and comes back (review finding #8).
+   */
+  it('carries ground contact that arrived before the worker started', () => {
     setCharacterGrounded('player-1', true);
 
     mockEngineMode = 'play';
@@ -973,10 +979,39 @@ describe('useScriptRunner', () => {
 
     const init = messagesOfType('init')[0] as Record<string, unknown>;
     expect(init).toBeDefined();
-    // The key must be present (the worker seeds its own map from it) AND empty
-    // (the hook clears the registry immediately before sending).
+    // The key must be present (the worker seeds its own map from it) and must
+    // carry the pre-init landing rather than an empty object.
     expect(init).toHaveProperty('groundedStates');
-    expect(init.groundedStates).toEqual({});
+    expect(init.groundedStates).toEqual({ 'player-1': true });
+  });
+
+  /**
+   * The stale-`true`-from-last-session hazard the removed init-time clear was
+   * written for. It is really closed by the stop clear, so prove it across a
+   * real play -> edit -> play cycle rather than by clearing at init and
+   * throwing away the pre-init landing above along with it.
+   */
+  it('does not inherit the previous session ground contact across a restart', () => {
+    const { rerender } = renderHook(
+      ({ mode }) => {
+        mockEngineMode = mode;
+        return useScriptRunner({ wasmModule: mockWasmModule });
+      },
+      { initialProps: { mode: 'play' as string } },
+    );
+
+    act(() => {
+      setCharacterGrounded('player-1', true);
+    });
+
+    rerender({ mode: 'edit' });
+    rerender({ mode: 'play' });
+
+    // MockWorker resets the captured message list in its constructor, so this
+    // is the SECOND session's init, not the first one replayed.
+    const inits = messagesOfType('init') as Record<string, unknown>[];
+    expect(inits).toHaveLength(1);
+    expect(inits[0].groundedStates).toEqual({});
     expect(getGroundedStates()).toEqual({});
   });
 

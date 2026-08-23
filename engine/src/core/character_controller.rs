@@ -41,6 +41,48 @@ pub const GRAVITY_ACCEL: f32 = -9.81;
 /// per-frame translation to tunnel straight through the floor collider.
 pub const TERMINAL_VELOCITY: f32 = -50.0;
 
+/// Upward speed cap, in units/s — the mirror of [`TERMINAL_VELOCITY`].
+///
+/// The downward cap alone is a bound on the SIGNED velocity, not on its
+/// magnitude, and that is not the same thing here. `gravityScale` is authored
+/// and `prop_f32` clamps it to `[-10, 10]`, so a NEGATIVE scale makes
+/// `GRAVITY_ACCEL * scale` point UP: the vertical velocity then integrates
+/// toward `+inf` with nothing in its way, the per-frame translation grows
+/// without limit, and the character tunnels through every ceiling collider
+/// before its coordinates saturate. Rapier is handed a translation it cannot
+/// resolve, so the symptom is a player that has silently vanished rather than
+/// one that is merely moving fast.
+pub const MAX_RISE_VELOCITY: f32 = -TERMINAL_VELOCITY;
+
+/// How long after leaving the ground a ground jump is still accepted, in
+/// seconds — "coyote time".
+///
+/// Without it the jump input has to land inside the single frame the character
+/// is still touching the ledge. At 60fps that is a ~16ms window, and a player
+/// who presses one frame late gets no jump, no feedback, and no way to tell a
+/// mistimed input from a broken one. 0.1s is the genre convention: long enough
+/// to absorb human timing, short enough that it never reads as a free mid-air
+/// jump.
+pub const COYOTE_TIME_SECONDS: f32 = 0.1;
+
+/// How long a jump press is remembered while it cannot yet be spent, in
+/// seconds — the mirror of [`COYOTE_TIME_SECONDS`].
+///
+/// A player who presses jump just BEFORE landing would otherwise have the press
+/// swallowed by the airborne frames and have to press again. Buffering re-tries
+/// it on each subsequent frame until it is spendable or the window expires.
+pub const JUMP_BUFFER_SECONDS: f32 = 0.1;
+
+/// Minimum upward component of a contact normal for the surface to count as
+/// something the character is standing ON, for carry purposes.
+///
+/// `cos(45°) ≈ 0.707`, i.e. exactly the [`MAX_SLOPE_CLIMB_DEGREES`] the
+/// controller will walk up — a surface too steep to climb is a wall, and a wall
+/// must never drag the character sideways. Not written as `cos()` because
+/// `f32::cos` is not a `const fn`; the `ground_normal_threshold_tracks_the_climb_angle`
+/// test pins the literal against the angle so the two cannot drift.
+pub const GROUND_NORMAL_MIN_Y: f32 = 0.707;
+
 /// Vertical speed held while grounded, in units/s.
 ///
 /// A hard zero lets a character walk off a ledge with no downward component at
@@ -136,9 +178,24 @@ pub struct CharacterMotionState {
     /// disagree about whether a character is airborne.
     pub grounded: bool,
     /// Jumps consumed since the character last stood on the ground. Walking off
-    /// a ledge spends the ground jump, so `canDoubleJump` grants exactly one
-    /// air jump either way.
+    /// a ledge spends the ground jump ONCE [`coyote_timer`] has run out, so
+    /// `canDoubleJump` grants exactly one air jump either way.
+    ///
+    /// [`coyote_timer`]: CharacterMotionState::coyote_timer
     pub jumps_used: u32,
+    /// Seconds of [`COYOTE_TIME_SECONDS`] left, counted down while airborne.
+    ///
+    /// While this is above zero the ground jump has not been spent yet, which
+    /// is the entire mechanism: nothing special-cases "just walked off a
+    /// ledge", the ground jump simply stays available a moment longer.
+    pub coyote_timer: f32,
+    /// Seconds of [`JUMP_BUFFER_SECONDS`] left on a press that has not been
+    /// spent yet.
+    ///
+    /// Zeroed the frame a jump is accepted, so one press can never be spent
+    /// twice — with `canDoubleJump` a single press would otherwise be re-tried
+    /// on the next frame and consume the air jump too.
+    pub jump_buffer_timer: f32,
 }
 
 impl Default for CharacterMotionState {
@@ -151,6 +208,12 @@ impl Default for CharacterMotionState {
             // hand out a free mid-air jump to a character spawned in the air.
             grounded: false,
             jumps_used: 0,
+            // No coyote grace on the first frame: the character has not been on
+            // the ground yet, so there is nothing to be lenient about. A
+            // non-zero value here would hand a spawned-in-air character a free
+            // ground jump.
+            coyote_timer: 0.0,
+            jump_buffer_timer: 0.0,
         }
     }
 }
@@ -201,11 +264,20 @@ pub fn step_character(state: &mut CharacterMotionState, input: CharacterStepInpu
     if input.grounded && state.vertical_velocity <= 0.0 {
         state.jumps_used = 0;
         state.vertical_velocity = GROUND_STICK_VELOCITY;
-    } else if state.jumps_used == 0 {
-        // Airborne with the ground jump unspent — either walked off a ledge or
-        // spawned in the air. Either way the ground jump is gone, so
-        // `canDoubleJump` means exactly one mid-air jump rather than two.
-        state.jumps_used = 1;
+        // Refilled on every grounded frame rather than only on the landing
+        // frame, so the window always measures time since the character LEFT
+        // the ground, whatever it did while standing there.
+        state.coyote_timer = COYOTE_TIME_SECONDS;
+    } else {
+        // Airborne (or rising through a stale `grounded` report). The coyote
+        // window is what keeps the ground jump spendable for a moment after
+        // walking off a ledge; only once it expires is the ground jump
+        // considered spent, so `canDoubleJump` still means exactly one mid-air
+        // jump rather than two.
+        state.coyote_timer = (state.coyote_timer - dt).max(0.0);
+        if state.jumps_used == 0 && state.coyote_timer <= 0.0 {
+            state.jumps_used = 1;
+        }
     }
 
     // A rise Rapier refused loses its upward speed here. This is the only place
@@ -222,7 +294,17 @@ pub fn step_character(state: &mut CharacterMotionState, input: CharacterStepInpu
         state.vertical_velocity = 0.0;
     }
 
+    // A press is REMEMBERED rather than consumed on the spot. Without this a
+    // press one frame before touching down is spent against a `jumps_used` that
+    // has not been refilled yet, and is silently lost; the player experiences it
+    // as the game dropping inputs.
     if input.jump_just_pressed {
+        state.jump_buffer_timer = JUMP_BUFFER_SECONDS;
+    } else {
+        state.jump_buffer_timer = (state.jump_buffer_timer - dt).max(0.0);
+    }
+
+    if state.jump_buffer_timer > 0.0 {
         let max_jumps = if input.can_double_jump { 2 } else { 1 };
         if state.jumps_used < max_jumps {
             state.jumps_used += 1;
@@ -230,13 +312,28 @@ pub fn step_character(state: &mut CharacterMotionState, input: CharacterStepInpu
             // downward, and the clamp range allows a negative to be sent.
             state.vertical_velocity = input.jump_speed.max(0.0);
             state.grounded = false;
+            // Both windows close on a spent jump. The buffer so one press
+            // cannot also be re-tried next frame against a `canDoubleJump`
+            // budget; the coyote timer so the ledge grace cannot outlive the
+            // jump it was granted for.
+            state.jump_buffer_timer = 0.0;
+            state.coyote_timer = 0.0;
         }
     }
 
     let gravity_scale = if input.gravity_scale.is_finite() { input.gravity_scale } else { 1.0 };
     state.vertical_velocity += GRAVITY_ACCEL * gravity_scale * dt;
+    // Bound the MAGNITUDE, not just the fall. A negative `gravityScale` is
+    // authorable and accelerates the character upward instead, so a one-sided
+    // floor leaves the rise unbounded — see [`MAX_RISE_VELOCITY`]. Written as
+    // explicit branches rather than `f32::clamp` deliberately: `clamp` panics on
+    // a NaN bound and would also rewrite a NaN velocity into a finite one,
+    // hiding a non-finite state this function is careful to pass through
+    // untouched everywhere else.
     if state.vertical_velocity < TERMINAL_VELOCITY {
         state.vertical_velocity = TERMINAL_VELOCITY;
+    } else if state.vertical_velocity > MAX_RISE_VELOCITY {
+        state.vertical_velocity = MAX_RISE_VELOCITY;
     }
 
     let mut horizontal = input.move_dir;
@@ -391,7 +488,25 @@ pub fn manage_character_controller_lifecycle(
                 .insert(make_controller())
                 .insert(CharacterMotionState::default())
                 .insert(RigidBody::KinematicPositionBased)
-                .insert(LockedAxes::ROTATION_LOCKED);
+                .insert(LockedAxes::ROTATION_LOCKED)
+                // Rapier's narrow phase only generates contacts for the body
+                // pairs named here, and the DEFAULT set is dynamic-vs-anything
+                // only. A `KinematicPositionBased` character therefore produces
+                // no `CollisionEvent::Started` against the FIXED bodies and
+                // sensors that every gameplay component is built on: with the
+                // controller attached and nothing else, collectibles are never
+                // picked up, ReachGoal never wins, checkpoints never arm, damage
+                // zones never hurt and `forge.physics.onCollisionEnter` never
+                // fires. The kinematic pairs have to be opted into explicitly.
+                //
+                // `default() | ...` rather than a bare pair: dynamic props still
+                // need their own contacts, and dropping the defaults here would
+                // trade one silent break for another.
+                .insert(
+                    ActiveCollisionTypes::default()
+                        | ActiveCollisionTypes::KINEMATIC_STATIC
+                        | ActiveCollisionTypes::KINEMATIC_KINEMATIC,
+                );
             attached += 1;
         }
         if attached > 0 {
@@ -432,7 +547,12 @@ pub fn manage_character_controller_lifecycle(
                 .entity(entity)
                 .remove::<KinematicCharacterController>()
                 .remove::<KinematicCharacterControllerOutput>()
-                .remove::<CharacterMotionState>();
+                .remove::<CharacterMotionState>()
+                // Removed with the rest of the play-only kit. Left behind it
+                // would widen the contact set of an entity that is no longer a
+                // character for the whole editing session, and survive into the
+                // next Play as state the attach path never wrote.
+                .remove::<ActiveCollisionTypes>();
         }
     }
 }
@@ -470,6 +590,113 @@ pub fn diff_grounded(
 
     changes.sort_by(|a, b| a.0.cmp(&b.0));
     changes
+}
+
+/// The platform motion to carry the character by this frame, given every
+/// contact it had, as `(contact normal, that entity's movement this frame)`.
+///
+/// A `KinematicPositionBased` character is moved only by the translation we
+/// hand Rapier, so standing on a moving platform means standing STILL in world
+/// space while the platform slides out from under it. The platform's collider
+/// then shoves the capsule on the next step and the player skates, jitters, or
+/// falls off something they are visibly standing on.
+///
+/// Only a SUPPORTING contact carries. A wall the character is pressed against
+/// is also a contact, and a moving wall must push, not carry — hence the
+/// [`GROUND_NORMAL_MIN_Y`] gate, which is the same 45° the controller will walk
+/// up. Where several supporting contacts qualify (a seam between two
+/// platforms), the most upward-facing one wins: it is the surface bearing the
+/// character's weight, and picking deterministically matters because contact
+/// order is unspecified.
+///
+/// Non-finite input is skipped rather than propagated: one NaN normal would
+/// otherwise poison the character's translation for the rest of the session.
+pub fn select_carry_delta(contacts: &[(Vec3, Vec3)]) -> Vec3 {
+    let mut best: Option<(f32, Vec3)> = None;
+
+    for (normal, delta) in contacts {
+        if !normal.is_finite() || !delta.is_finite() {
+            continue;
+        }
+        if normal.y < GROUND_NORMAL_MIN_Y {
+            continue;
+        }
+        if *delta == Vec3::ZERO {
+            continue;
+        }
+        if best.is_none_or(|(best_y, _)| normal.y > best_y) {
+            best = Some((normal.y, *delta));
+        }
+    }
+
+    best.map_or(Vec3::ZERO, |(_, delta)| delta)
+}
+
+/// The JS-side mirror of every character's grounded flag.
+///
+/// Exists in `core/` rather than as a `Local<HashMap<..>>` inside the bridge
+/// system because the bridge is `#[cfg(target_arch = "wasm32")]` and is never
+/// compiled by `cargo test` — a state machine living there cannot be asserted
+/// on at all, and this one has a behaviour worth asserting: it must FORGET
+/// everything when play stops, so a stop-then-restart re-emits the initial
+/// state instead of silently agreeing with a mirror the JS side has already
+/// discarded.
+#[derive(Debug, Default)]
+pub struct GroundedMirror {
+    prev: HashMap<String, bool>,
+}
+
+impl GroundedMirror {
+    /// Folds this frame's grounded map in and returns the changes to emit.
+    ///
+    /// `play_active` false clears the mirror and emits nothing: the runtime is
+    /// gone, so there are no characters to report on, and any `true` still held
+    /// here would be re-emitted as a spurious `false` the moment play resumed.
+    pub fn observe(
+        &mut self,
+        play_active: bool,
+        current: HashMap<String, bool>,
+    ) -> Vec<(String, bool)> {
+        if !play_active {
+            self.prev.clear();
+            return Vec::new();
+        }
+
+        let changes = diff_grounded(&self.prev, &current);
+        self.prev = current;
+        changes
+    }
+}
+
+/// The JS-side mirror of [`CharacterControllerDiagnostics`].
+///
+/// Same reasoning as [`GroundedMirror`]: the emit lives in the bridge, so the
+/// "only when it changed" logic has to live here to be testable. Change-gated
+/// because the resource is read every frame while the warning it carries is
+/// authored once per play session — emitting it per frame would bury the
+/// editor's toast under thousands of duplicates.
+#[derive(Debug, Default)]
+pub struct DiagnosticsMirror {
+    prev: Option<Vec<String>>,
+}
+
+impl DiagnosticsMirror {
+    /// Returns the skipped-entity list to emit, or `None` when nothing changed.
+    ///
+    /// The EMPTY list is a real value that must be emitted once: "this play
+    /// session skipped nobody" is what clears a warning left over from the
+    /// previous one. `None` means only "no news".
+    pub fn observe(&mut self, play_active: bool, current: &[String]) -> Option<Vec<String>> {
+        if !play_active {
+            self.prev = None;
+            return None;
+        }
+        if self.prev.as_deref() == Some(current) {
+            return None;
+        }
+        self.prev = Some(current.to_vec());
+        Some(current.to_vec())
+    }
 }
 
 #[cfg(test)]
@@ -977,6 +1204,10 @@ mod tests {
             Some(RigidBody::KinematicPositionBased)
         ));
         assert_eq!(world.get::<LockedAxes>(entity).copied(), Some(LockedAxes::ROTATION_LOCKED));
+        assert!(
+            world.get::<ActiveCollisionTypes>(entity).is_some(),
+            "a kinematic body needs widened collision pairs to generate events at all"
+        );
     }
 
     /// Every field of the attached controller, asserted individually.
@@ -1157,15 +1388,19 @@ mod tests {
     #[test]
     fn a_character_without_an_entity_id_is_still_reported() {
         let mut world = World::new();
-        world.spawn((character(), Transform::default()));
+        let entity = world.spawn((character(), Transform::default())).id();
 
         let mut schedule = Schedule::default();
         schedule.add_systems(manage_character_controller_lifecycle);
         run_lifecycle(&mut world, &mut schedule, EngineMode::Play);
 
+        // Assert the CONTENT, not just the count: the fallback label is the
+        // only thing that lets a creator find an unnamed entity in the
+        // hierarchy, and a length check passes just as happily on an empty
+        // string or on the debug form of the wrong entity.
         assert_eq!(
-            world.resource::<CharacterControllerDiagnostics>().skipped_without_collider.len(),
-            1,
+            world.resource::<CharacterControllerDiagnostics>().skipped_without_collider,
+            vec![format!("{entity}")],
         );
     }
 
@@ -1220,6 +1455,50 @@ mod tests {
         // 2D uses the legacy path by design, so nothing is skipped and nothing
         // is recorded - a warning on every 2D character would be pure noise.
         assert!(world.get_resource::<CharacterControllerDiagnostics>().is_none());
+    }
+
+    /// A `KinematicPositionBased` body is NOT a dynamic body, and Rapier's
+    /// DEFAULT `ActiveCollisionTypes` covers dynamic-vs-anything only. Without
+    /// the two kinematic pairs the character generates no collision events
+    /// against static level geometry or against other kinematic bodies (moving
+    /// platforms, hazards, pickups) — so every `on_collision` script, every
+    /// damage zone and every collectible silently stops firing the moment the
+    /// character controller is attached. Nothing else in the engine reports it.
+    #[test]
+    fn the_kinematic_body_can_collide_with_static_and_kinematic_geometry() {
+        let mut world = World::new();
+        let entity = world
+            .spawn((character(), Collider::cuboid(0.5, 0.5, 0.5), Transform::default()))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(manage_character_controller_lifecycle);
+        run_lifecycle(&mut world, &mut schedule, EngineMode::Play);
+
+        let types = world
+            .get::<ActiveCollisionTypes>(entity)
+            .copied()
+            .expect("a kinematic character must declare its collision pairs");
+        assert!(
+            types.contains(ActiveCollisionTypes::KINEMATIC_STATIC),
+            "the character must collide with static level geometry"
+        );
+        assert!(
+            types.contains(ActiveCollisionTypes::KINEMATIC_KINEMATIC),
+            "the character must collide with moving platforms and other kinematic bodies"
+        );
+        assert!(
+            types.contains(ActiveCollisionTypes::default()),
+            "widening must not drop the dynamic pairs the default already covered"
+        );
+
+        // Play -> Edit must hand the entity back exactly as it was found, or the
+        // widened pairs leak into the editor and outlive the play session.
+        run_lifecycle(&mut world, &mut schedule, EngineMode::Edit);
+        assert!(
+            world.get::<ActiveCollisionTypes>(entity).is_none(),
+            "the widened collision pairs must be removed on Play -> Edit"
+        );
     }
 
     #[test]
@@ -1296,5 +1575,338 @@ mod tests {
         let changes = diff_grounded(&HashMap::new(), &current);
         let ids: Vec<&str> = changes.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["a", "b", "c"]);
+    }
+
+    // ---- Coyote time (finding #4) ---------------------------------------
+
+    /// The shared fixture runs at `dt = 0.1`, which is exactly the length of
+    /// both grace windows — one frame wide, so neither can be observed. These
+    /// tests run at 60Hz, where a 0.1s window is the ~6 frames a player
+    /// actually gets.
+    fn frame_60hz() -> CharacterStepInput {
+        CharacterStepInput { dt: 1.0 / 60.0, ..base_input() }
+    }
+
+    /// The window measures time since LEAVING ground, so it must be refilled on
+    /// every grounded frame, not only the frame the character first lands.
+    #[test]
+    fn a_jump_lands_just_after_walking_off_a_ledge() {
+        let mut state = CharacterMotionState::default();
+        // Stand for a while, then walk off.
+        for _ in 0..5 {
+            step_character(&mut state, CharacterStepInput { grounded: true, ..frame_60hz() });
+        }
+        // Three airborne frames at 60Hz is 0.05s — half the window.
+        for _ in 0..3 {
+            step_character(&mut state, frame_60hz());
+        }
+        assert_eq!(state.jumps_used, 0, "coyote time must not have spent the ground jump yet");
+
+        let out = step_character(
+            &mut state,
+            CharacterStepInput { jump_just_pressed: true, ..frame_60hz() },
+        );
+        assert!(out.y > 0.0, "a jump inside the coyote window must rise, got {}", out.y);
+        assert_eq!(state.jumps_used, 1);
+    }
+
+    #[test]
+    fn a_jump_after_the_coyote_window_is_refused() {
+        let mut state = CharacterMotionState::default();
+        step_character(&mut state, CharacterStepInput { grounded: true, ..frame_60hz() });
+        // Ten airborne frames at 60Hz is 0.167s — well past the 0.1s window.
+        for _ in 0..10 {
+            step_character(&mut state, frame_60hz());
+        }
+        assert_eq!(state.jumps_used, 1, "the ground jump must be spent once the window lapses");
+
+        let before = state.vertical_velocity;
+        step_character(
+            &mut state,
+            CharacterStepInput { jump_just_pressed: true, ..frame_60hz() },
+        );
+        assert!(
+            state.vertical_velocity < before,
+            "a late jump must be refused and gravity keep pulling, got {} from {}",
+            state.vertical_velocity,
+            before
+        );
+    }
+
+    /// Coyote time must not hand out a free extra jump: after a real ground
+    /// jump the character is airborne with the budget already spent, and the
+    /// stale `grounded == true` frame Rapier reports must not refill it.
+    #[test]
+    fn coyote_time_does_not_add_a_jump_after_a_real_jump() {
+        let mut state = CharacterMotionState::default();
+        step_character(
+            &mut state,
+            CharacterStepInput { grounded: true, jump_just_pressed: true, ..base_input() },
+        );
+        assert_eq!(state.jumps_used, 1);
+        // Rapier's contact flag lags a frame: still says grounded while rising.
+        step_character(&mut state, CharacterStepInput { grounded: true, ..base_input() });
+        step_character(
+            &mut state,
+            CharacterStepInput { grounded: true, jump_just_pressed: true, ..base_input() },
+        );
+        assert_eq!(
+            state.jumps_used, 1,
+            "a single-jump character must never reach two jumps from one launch"
+        );
+    }
+
+    // ---- Jump buffer (finding #4) ---------------------------------------
+
+    /// A press a fraction of a second before landing is the single most common
+    /// platformer input; without a buffer it is swallowed entirely.
+    #[test]
+    fn a_jump_pressed_just_before_landing_still_fires() {
+        let mut state = CharacterMotionState::default();
+        // Airborne long enough that the coyote window is definitively gone.
+        for _ in 0..10 {
+            step_character(&mut state, frame_60hz());
+        }
+        // Press while still falling: refused this frame, but buffered.
+        step_character(
+            &mut state,
+            CharacterStepInput { jump_just_pressed: true, ..frame_60hz() },
+        );
+        assert!(state.jump_buffer_timer > 0.0, "the press must be buffered");
+
+        // Two more falling frames, then land — still inside the 0.1s buffer,
+        // and with no second press.
+        for _ in 0..2 {
+            step_character(&mut state, frame_60hz());
+        }
+        let out = step_character(&mut state, CharacterStepInput { grounded: true, ..frame_60hz() });
+        assert!(out.y > 0.0, "the buffered press must fire on landing, got {}", out.y);
+        assert_eq!(state.jumps_used, 1);
+    }
+
+    #[test]
+    fn a_buffered_press_expires_rather_than_firing_forever() {
+        let mut state = CharacterMotionState::default();
+        for _ in 0..10 {
+            step_character(&mut state, frame_60hz());
+        }
+        step_character(
+            &mut state,
+            CharacterStepInput { jump_just_pressed: true, ..frame_60hz() },
+        );
+        // Ten more airborne frames at 60Hz drains the 0.1s buffer.
+        for _ in 0..10 {
+            step_character(&mut state, frame_60hz());
+        }
+        assert_eq!(state.jump_buffer_timer, 0.0, "the buffer must decay to zero");
+
+        let out = step_character(&mut state, CharacterStepInput { grounded: true, ..frame_60hz() });
+        assert!(
+            out.y <= 0.0,
+            "a stale press must not launch the character on landing, got {out:?}"
+        );
+    }
+
+    /// One press must buy exactly one jump. Without zeroing the buffer on
+    /// acceptance, the same press would still be live on the next frame and
+    /// would immediately spend the double jump too.
+    #[test]
+    fn one_press_cannot_spend_both_jumps() {
+        let mut state = CharacterMotionState::default();
+        step_character(
+            &mut state,
+            CharacterStepInput {
+                grounded: true,
+                jump_just_pressed: true,
+                can_double_jump: true,
+                ..base_input()
+            },
+        );
+        assert_eq!(state.jumps_used, 1);
+        for _ in 0..3 {
+            step_character(
+                &mut state,
+                CharacterStepInput { can_double_jump: true, ..base_input() },
+            );
+        }
+        assert_eq!(
+            state.jumps_used, 1,
+            "the double jump must wait for a SECOND press, got {}",
+            state.jumps_used
+        );
+    }
+
+    // ---- Symmetric velocity clamp (finding #6) ---------------------------
+
+    /// A negative `gravityScale` (an authored "anti-gravity" feel, or a typo)
+    /// accelerates the character UPWARD without bound. The one-sided clamp
+    /// caught only the downward runaway, so the upward one reached infinity in
+    /// a couple of seconds and every derived translation became non-finite.
+    #[test]
+    fn a_negative_gravity_scale_stays_bounded() {
+        let mut state = CharacterMotionState::default();
+        let anti = CharacterStepInput { gravity_scale: -1.0, ..base_input() };
+        for _ in 0..1000 {
+            let out = step_character(&mut state, anti);
+            assert!(out.is_finite(), "translation must stay finite, got {out:?}");
+        }
+        assert_eq!(state.vertical_velocity, MAX_RISE_VELOCITY);
+    }
+
+    #[test]
+    fn the_rise_and_fall_caps_are_mirror_images() {
+        assert_eq!(MAX_RISE_VELOCITY, -TERMINAL_VELOCITY);
+        assert!(MAX_RISE_VELOCITY > 0.0);
+    }
+
+    /// The clamp is written as two explicit comparisons rather than
+    /// `f32::clamp` so that a NaN velocity passes through instead of being
+    /// silently pinned to a bound — a NaN must stay visible, not be laundered
+    /// into a plausible-looking number.
+    #[test]
+    fn a_nan_velocity_is_not_laundered_into_a_bound() {
+        let mut state = CharacterMotionState { vertical_velocity: f32::NAN, ..Default::default() };
+        step_character(&mut state, base_input());
+        assert!(state.vertical_velocity.is_nan());
+    }
+
+    // ---- Ground-normal threshold (finding #3) ----------------------------
+
+    /// Rapier's own controller classifies a contact by the angle between the up
+    /// axis and `normal1`, so a supporting surface has `normal1.y` near +1 and
+    /// the walkable cut-off is the cosine of the climb angle.
+    #[test]
+    fn ground_normal_threshold_tracks_the_climb_angle() {
+        let expected = MAX_SLOPE_CLIMB_DEGREES.to_radians().cos();
+        assert!(
+            (GROUND_NORMAL_MIN_Y - expected).abs() < 1e-3,
+            "threshold {GROUND_NORMAL_MIN_Y} must be cos({MAX_SLOPE_CLIMB_DEGREES}deg) = {expected}"
+        );
+    }
+
+    // ---- Moving-platform carry (finding #3) ------------------------------
+
+    #[test]
+    fn no_contacts_carry_nothing() {
+        assert_eq!(select_carry_delta(&[]), Vec3::ZERO);
+    }
+
+    #[test]
+    fn a_platform_underfoot_is_carried() {
+        let delta = Vec3::new(0.5, 0.0, -0.25);
+        assert_eq!(select_carry_delta(&[(Vec3::Y, delta)]), delta);
+    }
+
+    /// A wall or a ceiling is not a floor. Carrying from a side contact would
+    /// shove the character along any moving surface it merely brushed.
+    #[test]
+    fn a_wall_or_ceiling_contact_carries_nothing() {
+        let delta = Vec3::new(1.0, 0.0, 0.0);
+        assert_eq!(select_carry_delta(&[(Vec3::X, delta)]), Vec3::ZERO, "wall");
+        assert_eq!(select_carry_delta(&[(Vec3::NEG_Y, delta)]), Vec3::ZERO, "ceiling");
+        // Exactly at the climb limit is still ground; just past it is not.
+        let steep = Vec3::new(0.0, GROUND_NORMAL_MIN_Y - 0.01, 0.9);
+        assert_eq!(select_carry_delta(&[(steep, delta)]), Vec3::ZERO, "too steep");
+    }
+
+    /// Standing in a corner where two platforms touch: the flattest contact is
+    /// the one actually holding the character up.
+    #[test]
+    fn the_flattest_supporting_contact_wins() {
+        let floor = Vec3::new(2.0, 0.0, 0.0);
+        let ramp = Vec3::new(0.0, 0.0, 3.0);
+        let contacts = [
+            (Vec3::new(0.0, 0.8, 0.6).normalize(), ramp),
+            (Vec3::Y, floor),
+        ];
+        assert_eq!(select_carry_delta(&contacts), floor);
+    }
+
+    /// A stationary platform contributes nothing, and must not shadow a moving
+    /// one the character is also touching.
+    #[test]
+    fn a_still_platform_does_not_shadow_a_moving_one() {
+        let moving = Vec3::new(0.0, 0.0, 0.4);
+        let contacts = [
+            (Vec3::Y, Vec3::ZERO),
+            (Vec3::new(0.0, 0.9, 0.4).normalize(), moving),
+        ];
+        assert_eq!(select_carry_delta(&contacts), moving);
+    }
+
+    #[test]
+    fn a_non_finite_contact_is_ignored() {
+        let good = Vec3::new(0.0, 0.0, 0.3);
+        let contacts = [
+            (Vec3::new(f32::NAN, 1.0, 0.0), Vec3::splat(9.0)),
+            (Vec3::Y, Vec3::new(f32::INFINITY, 0.0, 0.0)),
+            (Vec3::new(0.0, 0.9, 0.1).normalize(), good),
+        ];
+        assert_eq!(select_carry_delta(&contacts), good);
+    }
+
+    // ---- GroundedMirror (finding #16) ------------------------------------
+
+    #[test]
+    fn the_mirror_reports_a_first_sighting_in_both_directions() {
+        let mut mirror = GroundedMirror::default();
+        let mut out = mirror.observe(true, grounded_map(&[("a", true), ("b", false)]));
+        out.sort();
+        assert_eq!(out, vec![("a".to_string(), true), ("b".to_string(), false)]);
+    }
+
+    #[test]
+    fn the_mirror_is_silent_when_nothing_changed() {
+        let mut mirror = GroundedMirror::default();
+        mirror.observe(true, grounded_map(&[("a", true)]));
+        assert!(mirror.observe(true, grounded_map(&[("a", true)])).is_empty());
+    }
+
+    /// Leaving Play must forget everything, so that a restarted game re-emits
+    /// the full grounded state instead of silently agreeing with a stale
+    /// mirror from the previous session — the browser's own map was cleared on
+    /// stop, so agreement means it never learns the truth.
+    #[test]
+    fn stopping_then_restarting_re_emits_the_state() {
+        let mut mirror = GroundedMirror::default();
+        mirror.observe(true, grounded_map(&[("a", true)]));
+        assert!(mirror.observe(false, grounded_map(&[("a", true)])).is_empty(), "stop emits nothing");
+        assert_eq!(
+            mirror.observe(true, grounded_map(&[("a", true)])),
+            vec![("a".to_string(), true)],
+            "a restart must re-emit even an unchanged value"
+        );
+    }
+
+    // ---- DiagnosticsMirror (finding #2) ----------------------------------
+
+    #[test]
+    fn diagnostics_are_emitted_once_then_stay_quiet() {
+        let mut mirror = DiagnosticsMirror::default();
+        let first = mirror.observe(true, &["player".to_string()]);
+        assert_eq!(first, Some(vec!["player".to_string()]));
+        assert_eq!(mirror.observe(true, &["player".to_string()]), None);
+    }
+
+    /// An empty list is a real value, not "nothing to say": it is how the UI
+    /// learns that a previously-skipped character now has a collider.
+    #[test]
+    fn a_list_that_becomes_empty_is_reported() {
+        let mut mirror = DiagnosticsMirror::default();
+        mirror.observe(true, &["player".to_string()]);
+        assert_eq!(mirror.observe(true, &[]), Some(Vec::new()));
+        assert_eq!(mirror.observe(true, &[]), None);
+    }
+
+    #[test]
+    fn diagnostics_reset_on_stop_so_a_restart_re_reports() {
+        let mut mirror = DiagnosticsMirror::default();
+        mirror.observe(true, &["player".to_string()]);
+        assert_eq!(mirror.observe(false, &["player".to_string()]), None, "stop emits nothing");
+        assert_eq!(
+            mirror.observe(true, &["player".to_string()]),
+            Some(vec!["player".to_string()]),
+            "a restart must re-report the same skipped character"
+        );
     }
 }

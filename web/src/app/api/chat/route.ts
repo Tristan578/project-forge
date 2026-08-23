@@ -177,6 +177,7 @@ Scripts run in a sandboxed TypeScript environment with these APIs:
 - \`forge.physics.setVelocity(entityId, vx, vy, vz)\`
 - \`forge.physics.getContacts(entityId, radius?)\` → overlapping entity IDs
 - \`forge.physics.distanceTo(entityIdA, entityIdB)\`
+- \`forge.physics.isGrounded(entityId)\` → boolean, synchronous. True while a kinematic character controller is touching the ground. Gate every jump on it — an ungated jump lets the player climb the sky by holding the key. (2D projects use \`forge.physics2d.isGrounded(entityId, distance?)\`, which returns a Promise and must be awaited.)
 
 ### UI/HUD
 - \`forge.ui.showText(id, text, x%, y%, { fontSize, color })\`
@@ -221,7 +222,7 @@ function onUpdate(dt) {
     forge.translate(entityId, (dx / len) * SPEED * dt, 0, (dz / len) * SPEED * dt);
   }
 
-  if (forge.input.justPressed("jump")) {
+  if (forge.input.justPressed("jump") && forge.physics.isGrounded(entityId)) {
     forge.physics.applyImpulse(entityId, 0, JUMP_FORCE, 0);
   }
 }

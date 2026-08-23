@@ -14,83 +14,14 @@
  * quietly stops checking when its input moves is worse than no suite, because it
  * still reports green.
  *
- * Scope and its limit: this proves each throttled name is emitted SOMEWHERE in the
- * engine as a string literal. Emit sites are spread across `bridge/` and `core/`
- * (`TRANSFORM_CHANGED` is emitted from `core/gizmo.rs` and
- * `bridge/core_systems.rs`, not from `bridge/events.rs`), so the whole tree is
- * scanned. Every emit in the tree today passes a literal; a future dynamically-named
- * emit would fail this pin rather than slip past it, which is the safe direction.
+ * The scan itself is `@/test/utils/engineEmittedEvents`, shared with
+ * `gameEvents.test.ts`; its scope and limits are documented there.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
-import path from 'node:path';
+
 import { THROTTLED_EVENTS } from '../throttledEvents';
-
-const ENGINE_SRC = path.resolve(__dirname, '../../../../../engine/src');
-
-/**
- * The directory entries of `dir`, or a thrown explanation.
- *
- * The return type is inferred rather than annotated: `readdirSync` is overloaded
- * on its encoding option, and writing `ReturnType<typeof readdirSync>` selects the
- * Buffer-named overload, which then rejects every string operation on `entry.name`.
- */
-function readEntries(dir: string) {
-  try {
-    return readdirSync(dir, { withFileTypes: true });
-  } catch (err) {
-    throw new Error(
-      `Could not read ${dir}: ${err instanceof Error ? err.message : String(err)}. ` +
-        'This suite pins the throttle set against the engine source — if the tree ' +
-        'moved, repoint ENGINE_SRC rather than deleting the assertions.',
-    );
-  }
-}
-
-/** Every `.rs` file under `engine/src`, recursively. */
-function rustFiles(dir: string): string[] {
-  const files: string[] = [];
-  for (const entry of readEntries(dir)) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...rustFiles(full));
-    } else if (entry.isFile() && entry.name.endsWith('.rs')) {
-      files.push(full);
-    }
-  }
-  return files;
-}
-
-/**
- * The set of event names the engine emits.
- *
- * Matched on `emit_event("NAME"` so the three call spellings in the tree
- * (`emit_event`, `events::emit_event`, `crate::bridge::events::emit_event`) are all
- * covered by one pattern.
- */
-function emittedEventNames(): Set<string> {
-  const files = rustFiles(ENGINE_SRC);
-  if (files.length === 0) {
-    throw new Error(`No .rs files found under ${ENGINE_SRC} — refusing to pass vacuously.`);
-  }
-
-  const names = new Set<string>();
-  for (const file of files) {
-    const source = readFileSync(file, 'utf8');
-    for (const match of source.matchAll(/emit_event\(\s*"([A-Z0-9_]+)"/g)) {
-      names.add(match[1]);
-    }
-  }
-
-  if (names.size === 0) {
-    throw new Error(
-      `Found no emit_event("NAME") sites under ${ENGINE_SRC}. Either the call spelling ` +
-        'changed or the scan is broken — refusing to pass vacuously.',
-    );
-  }
-  return names;
-}
+import { emittedEventNames } from '@/test/utils/engineEmittedEvents';
 
 describe('THROTTLED_EVENTS', () => {
   const emitted = emittedEventNames();
@@ -109,6 +40,19 @@ describe('THROTTLED_EVENTS', () => {
     // knows the entry was wrong once and why.
     expect(THROTTLED_EVENTS.has('PHYSICS2D_UPDATED')).toBe(false);
     expect(THROTTLED_EVENTS.has('PHYSICS2D_CHANGED')).toBe(true);
+  });
+
+  it('does not throttle CHARACTER_GROUNDED_CHANGED', () => {
+    // THROTTLED_EVENTS DROPS, it does not delay: a name in the set has every
+    // occurrence past the 10fps budget discarded. That is right for a per-frame
+    // flood like TRANSFORM_CHANGED, where the next frame carries the same truth,
+    // and wrong for a CHANGES-ONLY event — the engine emits ground contact only
+    // when it flips, so a dropped landing is not resent and
+    // forge.physics.isGrounded answers false until the character next leaves the
+    // ground and comes back. An ungated jump then reads as a broken jump
+    // (PF-1214, review finding #17).
+    expect(emitted.has('CHARACTER_GROUNDED_CHANGED')).toBe(true);
+    expect(THROTTLED_EVENTS.has('CHARACTER_GROUNDED_CHANGED')).toBe(false);
   });
 
   it('finds the emit sites this scan depends on, in the files they live in', () => {

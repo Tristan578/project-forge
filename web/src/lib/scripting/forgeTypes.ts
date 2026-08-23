@@ -89,7 +89,18 @@ declare namespace forge {
     function applyImpulse(entityId: string, fx: number, fy: number, fz: number): void;
     /** Set linear velocity directly */
     function setVelocity(entityId: string, vx: number, vy: number, vz: number): void;
-    /** Whether the kinematic character controller last reported this entity standing on something. Synchronous, unlike the 2D raycast version; false for an entity with no character controller. */
+    /**
+     * Whether the kinematic character controller last reported this entity
+     * standing on something. False for an entity with no character controller.
+     *
+     * SYNCHRONOUS, and deliberately unlike its 2D namesake: the engine already
+     * computes ground contact inside the character sweep each frame and pushes
+     * the changes here, so there is nothing to wait for. The 2D
+     * forge.physics2d.isGrounded(entityId, distance?) returns a
+     * Promise<boolean> because it fires a fresh downward raycast, and an
+     * un-awaited call to THAT one is always truthy, which lets the character
+     * jump in mid-air forever. Check the project type, not the familiar name.
+     */
     function isGrounded(entityId: string): boolean;
     /** Get entity IDs currently in contact (proximity-based). Optional radius overrides collider size. */
     function getContacts(entityId: string, radius?: number): string[];
@@ -124,7 +135,14 @@ declare namespace forge {
       normal: { x: number; y: number };
       distance: number;
     } | null>;
-    /** Check if entity is on the ground (downward raycast) */
+    /**
+     * Check if entity is on the ground (downward raycast).
+     *
+     * ASYNCHRONOUS: the raycast round-trips to the engine, so await it. The
+     * bare Promise is always truthy, which makes
+     * if (forge.physics2d.isGrounded(id)) a jump gate that never closes. The
+     * 3D forge.physics.isGrounded of the same name returns a plain boolean.
+     */
     function isGrounded(entityId: string, distance?: number): Promise<boolean>;
     /** Set global gravity (default: [0, -9.81]) */
     function setGravity(x: number, y: number): void;

@@ -90,7 +90,13 @@ forge.input.getAxis(action)        // -1 to 1 value
 forge.physics.applyForce(entityId, fx, fy, fz)
 forge.physics.applyImpulse(entityId, fx, fy, fz)
 forge.physics.setVelocity(entityId, vx, vy, vz)
+forge.physics.isGrounded(entityId)  // boolean, synchronous — gate jumps on it
 ```
+
+`isGrounded` answers for entities with a character controller, from the ground
+contact the engine reports each frame. It is **synchronous** in 3D; the 2D
+counterpart `forge.physics2d.isGrounded(entityId, distance?)` returns a Promise
+and has to be awaited.
 
 ### Audio
 ```typescript

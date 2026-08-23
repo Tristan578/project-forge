@@ -13,7 +13,11 @@ const mockApplyPhysicsProfile = vi.fn();
 // The stub used to omit `jumpForce` entirely, which made any assertion about a
 // rejected `jumpForce` override vacuous — `undefined` equalled `undefined`
 // whether the guard fired or not.
-vi.mock('@/lib/ai/physicsFeel', () => ({
+// Partial mock: the preset TABLE is stubbed so these tests can pin exact
+// numbers, but `jumpForceToApexHeight` is the real one — stubbing it would
+// let the module's own unit conversion rot without anything noticing.
+vi.mock('@/lib/ai/physicsFeel', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ai/physicsFeel')>()),
   PHYSICS_PRESETS: {
     space_zero_g: { gravity: 0, moveSpeed: 2, jumpForce: 21 },
     platformer_floaty: { gravity: 5, moveSpeed: 6, jumpForce: 26 },

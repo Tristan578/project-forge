@@ -92,10 +92,24 @@ namespace set).
 | `forge.physics2d.setAngularVelocity(entityId, omega)` | `void` | Set angular velocity (rad/s) |
 | `forge.physics2d.getAngularVelocity(entityId)` | `number \| null` | Current angular velocity (rad/s) |
 | `forge.physics2d.raycast(ox, oy, dx, dy, maxDistance?)` | `Promise<hit \| null>` | First hit `{entityId, entityName, point, normal, distance}` |
-| `forge.physics2d.isGrounded(entityId, distance?)` | `Promise<boolean>` | Downward-raycast ground check |
+| `forge.physics2d.isGrounded(entityId, distance?)` | `Promise<boolean>` | Downward-raycast ground check. **Returns a Promise** — `await` it. The 3D `forge.physics.isGrounded(entityId)` of the same name is synchronous; see the note below |
 | `forge.physics2d.setGravity(x, y)` | `void` | Set global gravity (default `[0, −9.81]`) |
 | `forge.physics2d.onCollisionEnter(cb)` | `() => void` | Collision-start callback; returns an unsubscribe fn |
 | `forge.physics2d.onCollisionExit(cb)` | `() => void` | Collision-end callback; returns an unsubscribe fn |
+
+> **`isGrounded` has two different contracts.** `forge.physics.isGrounded(entityId)`
+> (3D) is **synchronous** and returns a `boolean`; `forge.physics2d.isGrounded(entityId, distance?)`
+> (2D) is **asynchronous** and returns a `Promise<boolean>`. They differ because
+> the answers come from different places: in 3D the engine already computes
+> ground contact inside the character sweep each frame and pushes the changes to
+> the script sandbox, while in 2D the answer requires a fresh downward raycast
+> that has to round-trip to the engine.
+>
+> The failure is silent in both directions. Calling the 2D version without
+> `await` yields a Promise, which is always truthy — the character can jump in
+> mid-air forever. Writing `await` in front of the 3D version is harmless but
+> reads as though it could ever be pending. Check which project type your script
+> is running in, not which name looks familiar.
 
 ## forge.tilemap
 

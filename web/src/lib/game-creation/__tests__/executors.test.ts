@@ -8,6 +8,7 @@ import type { ExecutorContext } from '../types';
 import type { EditorState } from '@/stores/editorStore';
 import { EXECUTOR_REGISTRY } from '../executors/index';
 import { buildDefaultGroundDescriptor } from '../worldGeometry';
+import { jumpForceToApexHeight } from '@/lib/ai/physicsFeel';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -17,7 +18,11 @@ vi.mock('@/lib/ai/client', () => ({
   fetchAI: vi.fn(),
 }));
 
-vi.mock('@/lib/ai/physicsFeel', () => ({
+// Partial mock: the preset TABLE is stubbed so these tests can pin exact
+// numbers, but `jumpForceToApexHeight` is the real one — stubbing it would
+// let the module's own unit conversion rot without anything noticing.
+vi.mock('@/lib/ai/physicsFeel', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ai/physicsFeel')>()),
   PHYSICS_PRESETS: {
     arcade_classic: {
       name: 'Arcade Classic',
@@ -354,9 +359,15 @@ describe('character_setup executor', () => {
   // `CharacterControllerData::default()`, so a dropped or misspelled field
   // silently keeps an engine default and nothing anywhere reports it (see
   // `rules/gotchas.md` → the `dispatchCommand` class).
+  //
+  // `jumpHeight` is the preset's `jumpForce` dial converted by
+  // `jumpForceToApexHeight` — the engine reads the field as a real height in
+  // metres, so the raw dial asked for an 8-metre jump (PF-1214, finding #1).
+  // The conversion itself is pinned in `lib/ai/__tests__/physicsFeelJump.test.ts`;
+  // spelling it as a call here keeps this expectation about the preset choice.
   const DEFAULT_CONTROLLER = {
     speed: 6,
-    jumpHeight: 8,
+    jumpHeight: jumpForceToApexHeight(8, 9.81 / 10),
     gravityScale: 9.81 / 10,
     canDoubleJump: false,
   };

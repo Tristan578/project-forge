@@ -19,9 +19,32 @@ vi.mock('@/lib/scripting/useScriptRunner', () => ({
   getScriptGameEventCallback: () => mockScriptGameEventCallback,
 }));
 
+// The diagnostics arm's only observable effect is the toast, so that is what is
+// mocked: the sentence the player reads IS the deliverable of review finding #2,
+// and asserting on it here is what keeps the copy under test.
+//
+// BOTH toast entry points are mocked, and WHICH one the arm reaches for is
+// itself pinned. `showError` inherits sonner's 4s default, which cannot hold a
+// message that names entities and asks for a two-step Inspector fix; and because
+// the engine emits this diagnostic only on an Edit->Play transition, a
+// self-dismissing copy cannot be recalled without stopping and playing again.
+// A regression to the transient call has to fail here rather than ship a
+// warning nobody can finish reading.
+const mockShowError = vi.fn();
+const mockShowPersistentError = vi.fn();
+vi.mock('@/lib/toast', () => ({
+  showError: (message: string) => mockShowError(message),
+  showPersistentError: (message: string) => mockShowPersistentError(message),
+  showSuccess: vi.fn(),
+  showInfo: vi.fn(),
+}));
+
 import { useEditorStore, firePlayTick } from '@/stores/editorStore';
 import { handleGameEvent } from '../gameEvents';
 import { isCharacterGrounded, getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { emittedEventNames } from '@/test/utils/engineEmittedEvents';
 
 describe('handleGameEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -568,5 +591,139 @@ describe('handleGameEvent', () => {
       );
       expect(isCharacterGrounded('player-1')).toBe(false);
     });
+  });
+
+  /**
+   * PF-1214, review finding #2. A character that entered Play with no collider
+   * is never CONSIDERED by the attach query — it is not rejected, so there is no
+   * error, no failed command and no CHARACTER_GROUNDED_CHANGED to tell it apart
+   * from a working character. Before this arm the only trace was a
+   * `tracing::warn!` in the WASM console, which no player reads.
+   */
+  describe('CHARACTER_CONTROLLER_DIAGNOSTICS', () => {
+    const withScene = (nodes: Record<string, { entityId: string; name: string }>) => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        primaryId: null,
+        primaryGameComponents: [],
+        allGameComponents: {},
+        sceneGraph: { nodes, rootIds: Object.keys(nodes) },
+      } as unknown as StoreState);
+    };
+
+    it('names the skipped characters by their scene-graph names', () => {
+      withScene({ 'e-1': { entityId: 'e-1', name: 'Player' } });
+
+      const result = handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skippedWithoutCollider: ['e-1'] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(mockShowPersistentError).toHaveBeenCalledTimes(1);
+      // The transient variant would put this sentence on a 4s timer.
+      expect(mockShowError).not.toHaveBeenCalled();
+      const message = mockShowPersistentError.mock.calls[0][0] as string;
+      expect(message).toContain('Player has no physics');
+      expect(message).toContain('Physics > Enabled');
+      // The raw engine id is not what the player calls the entity.
+      expect(message).not.toContain('e-1');
+    });
+
+    it('says nothing when every character got its controller', () => {
+      // The engine writes the resource on EVERY 3D Edit->Play transition, so an
+      // empty list is the emission that says a broken scene was repaired. A
+      // toast for it would fire on every play of every healthy game.
+      withScene({});
+
+      const result = handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skippedWithoutCollider: [] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
+    });
+
+    it('handles the event but warns when the payload cannot be read', () => {
+      withScene({});
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const result = handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skipped: ['e-1'] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      // Still `true`: the name IS this handler's, so returning false would make
+      // the hub report an unknown event and hide the real problem.
+      expect(result).toBe(true);
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('CHARACTER_CONTROLLER_DIAGNOSTICS'));
+      warn.mockRestore();
+    });
+
+    it('falls back to the engine id for an entity the scene graph has lost', () => {
+      withScene({ 'e-1': { entityId: 'e-1', name: 'Player' } });
+
+      handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skippedWithoutCollider: ['e-2'] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(mockShowPersistentError.mock.calls[0][0]).toContain('e-2 has no physics');
+    });
+
+    it('does not take a name off the scene graph prototype', () => {
+      // `nodes` is a plain object keyed by an id straight off the engine wire,
+      // so a bare read of `nodes['constructor']` resolves an inherited function
+      // and `.name` on it is a real string — the entity would be reported under
+      // the name of a JS builtin.
+      withScene({});
+
+      handleGameEvent(
+        'CHARACTER_CONTROLLER_DIAGNOSTICS',
+        { skippedWithoutCollider: ['constructor'] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(mockShowPersistentError.mock.calls[0][0]).toContain('constructor has no physics');
+      expect(mockShowPersistentError.mock.calls[0][0]).not.toContain('Object');
+    });
+  });
+});
+
+/**
+ * Pins every event name this switch routes against the engine's actual emit sites.
+ *
+ * A `case 'X'` for a name the engine never emits is silently dead: the switch
+ * returns `false`, nothing logs, and a suite can pin the phantom and pass forever
+ * against a wire format that exists only in the suite. `physicsEvents.ts` shipped
+ * three such arms and ten such tests (PF-1167). `CHARACTER_GROUNDED_CHANGED` is the
+ * newest arm here and the whole reason a script can tell a jump from a fall, so it
+ * is pinned by name as well as by the sweep (PF-1214, review finding #17).
+ */
+describe('gameEvents routes only names the engine emits', () => {
+  const emitted = emittedEventNames();
+  const source = readFileSync(path.resolve(__dirname, '../gameEvents.ts'), 'utf8');
+  const routed = [...source.matchAll(/case '([A-Z0-9_]+)':/g)].map((m) => m[1]);
+
+  it('finds the case arms, so the sweep below is not vacuous', () => {
+    // A floor, not an exact count: adding an arm should not fail this. A parser
+    // that silently matched nothing would.
+    expect(routed.length).toBeGreaterThanOrEqual(6);
+    expect(routed).toContain('CHARACTER_GROUNDED_CHANGED');
+  });
+
+  it.each(routed)('%s is emitted somewhere in the engine', (name) => {
+    expect(emitted.has(name)).toBe(true);
   });
 });

@@ -16,7 +16,7 @@
 - `procedural.rs` — CSG boolean ops, extrude, lathe
 - `mesh_ops.rs` — Array entity, combine meshes, prefab instantiation. Array and combine build a new entity from a LIVE source, so both go through `core/component_carry.rs` rather than hand-enumerating what to copy; prefab instantiation deserializes an `EntitySnapshot` and hands it to `entity_factory::spawn_from_snapshot`, so it inherits that path's coverage instead (PF-1193)
 - `scripts.rs` — Script updates/removals, input bindings, play tick
-- `game.rs` — Game component CRUD, game camera, camera shake
+- `game.rs` — Game component CRUD, game camera, camera shake, character ground contact (`CHARACTER_GROUNDED_CHANGED`, emitted as transitions only) and character-controller diagnostics. Both emitters are thin wrappers over state machines in `core::character_controller` (`GroundedMirror`, `DiagnosticsMirror`) so they can be tested natively
 - `skeleton2d.rs` — 2D skeletal animation: bones, skins, IK, keyframes, auto-weight
 
 ### `core/` — Pure Rust, Platform-Agnostic (NO browser deps)

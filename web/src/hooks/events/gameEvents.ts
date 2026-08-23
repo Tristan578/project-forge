@@ -10,6 +10,8 @@ import { parseGameCameraWire } from '@/lib/game/gameCameraPayload';
 import { parseEmittedGameComponent } from '@/lib/engine/gameComponentWire';
 import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
 import { setCharacterGrounded } from '@/lib/scripting/groundedRegistry';
+import { parseSkippedCharacters, describeSkippedCharacters } from '@/lib/engine/characterDiagnostics';
+import { showPersistentError } from '@/lib/toast';
 import { castPayload, type SetFn, type GetFn } from './types';
 
 /**
@@ -130,6 +132,42 @@ export function handleGameEvent(
       // Strict `=== true`: anything else means "not standing on something", so
       // a mismatched engine build cannot make thin air walkable.
       setCharacterGrounded(payload.entityId, payload.grounded === true);
+      return true;
+    }
+
+    case 'CHARACTER_CONTROLLER_DIAGNOSTICS': {
+      // A character with no collider is never CONSIDERED by the attach query,
+      // so it produces no error, no rejected command and no
+      // CHARACTER_GROUNDED_CHANGED — nothing on this wire tells it apart from a
+      // working character. This event is the entire in-product signal, and the
+      // engine writes it on every 3D Edit->Play transition, so this arm fires at
+      // play start (PF-1214, review finding #2).
+      const skipped = parseSkippedCharacters(data);
+      if (skipped === null) {
+        // Handled — the name is ours — but say so, because a payload shape we
+        // cannot read means the engine binary is ahead of this bundle and the
+        // player is getting silence where a warning was due.
+        console.warn(
+          '[gameEvents] CHARACTER_CONTROLLER_DIAGNOSTICS payload was unreadable; ' +
+            'characters skipped for want of a collider will not be reported.'
+        );
+        return true;
+      }
+      // Changes-only, and the change to an EMPTY list is how this learns a
+      // scene was repaired. There is nothing to show for it: this toast is
+      // dismissed by hand, so "fixed" is simply the absence of the next one.
+      if (skipped.length === 0) return true;
+      const { nodes } = useEditorStore.getState().sceneGraph;
+      // Persistent, not the 4s default. The message names entities and asks for
+      // a two-step fix in the Inspector, and the engine emits this diagnostic
+      // only on an Edit->Play transition — so a toast that self-dismisses takes
+      // the only copy of the instructions with it and cannot be recalled without
+      // stopping and pressing Play again.
+      showPersistentError(
+        describeSkippedCharacters(skipped, entityId =>
+          Object.hasOwn(nodes, entityId) ? nodes[entityId].name : undefined
+        )
+      );
       return true;
     }
 

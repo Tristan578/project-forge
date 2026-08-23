@@ -9,7 +9,9 @@ use crate::core::{
     game_components::{GameComponentRuntime, GameComponents, build_game_component},
 };
 use crate::bridge::{events, log, Selection, SelectionChangedEvent};
-use crate::core::character_controller::{diff_grounded, CharacterMotionState};
+use crate::core::character_controller::{
+    CharacterControllerDiagnostics, CharacterMotionState, DiagnosticsMirror, GroundedMirror,
+};
 use std::collections::HashMap;
 
 // ---- Game Component Apply Systems ----
@@ -333,36 +335,55 @@ pub(super) fn emit_game_events_system(
 /// resolution — this frame's value or last frame's — is unspecified.
 ///
 /// Only CHANGES go out — one event per character per frame for a whole play
-/// session is not a wire, it is a leak. `diff_grounded` lives in `core/` and is
-/// native-tested there; the bridge cannot be.
+/// session is not a wire, it is a leak.
+///
+/// The whole state machine — the previous-frame map, the diff, and the reset
+/// that makes a stopped-then-restarted game re-emit rather than silently agree
+/// with a stale mirror — lives in [`GroundedMirror`] in `core/`, where it is
+/// natively testable. The bridge is a thin wrapper around it: it collects the
+/// query into a map, hands it over, and emits whatever comes back. Presence of
+/// the runtime IS the play gate, matching every other game-component system.
 ///
 /// Not gated by the `runtime` feature: an exported game runs the same scripts.
 pub(super) fn emit_character_grounded_system(
     runtime: Option<Res<GameComponentRuntime>>,
     characters: Query<(&EntityId, &CharacterMotionState)>,
-    mut prev: Local<HashMap<String, bool>>,
+    mut mirror: Local<GroundedMirror>,
 ) {
-    // Presence of the runtime IS the play gate, matching every other
-    // game-component system. Outside Play there are no controllers anyway, but
-    // the `prev` map must still be cleared or a stopped-then-restarted game
-    // starts with a stale mirror and emits nothing for an unchanged flag.
-    if runtime.is_none() {
-        if !prev.is_empty() {
-            prev.clear();
-        }
-        return;
-    }
-
     let current: HashMap<String, bool> = characters
         .iter()
         .map(|(eid, state)| (eid.0.clone(), state.grounded))
         .collect();
 
-    for (entity_id, grounded) in diff_grounded(&prev, &current) {
+    for (entity_id, grounded) in mirror.observe(runtime.is_some(), current) {
         events::emit_character_grounded(&entity_id, grounded);
     }
+}
 
-    *prev = current;
+/// Warn the creator about characters the controller had to skip.
+///
+/// `manage_character_controller_lifecycle` cannot attach a kinematic controller
+/// to a character with no collider, so it records those entities instead of
+/// dropping them silently. Before this the list was written and read by
+/// nothing: the creator pressed Play, the player did not move, and the engine
+/// knew exactly why but never said so (PF-1214, finding #2).
+///
+/// Emitted on CHANGE only, including the change to an empty list — that is how
+/// the UI learns a previously-skipped character has been fixed and the warning
+/// can be dismissed. [`DiagnosticsMirror`] owns that state machine in `core/`
+/// so it can be tested natively; leaving Play resets it, so a restarted game
+/// re-reports rather than staying quiet about a problem that is still there.
+pub(super) fn emit_character_controller_diagnostics_system(
+    diagnostics: Option<Res<CharacterControllerDiagnostics>>,
+    mut mirror: Local<DiagnosticsMirror>,
+) {
+    let skipped: &[String] = diagnostics
+        .as_ref()
+        .map_or(&[], |d| d.skipped_without_collider.as_slice());
+
+    if let Some(changed) = mirror.observe(diagnostics.is_some(), skipped) {
+        events::emit_character_controller_diagnostics(&changed);
+    }
 }
 
 /// Emit game camera data when selection changes.
