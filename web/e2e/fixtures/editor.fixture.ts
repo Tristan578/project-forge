@@ -18,13 +18,17 @@ export class EditorPage {
   /** Navigate to /dev and wait for WASM engine to initialize */
   async load() {
     // Suppress onboarding overlays and the init overlay so they don't block
-    // interactions. `InitOverlay` returns null only once `isReady` flips (the
-    // same `setIsReady(true)` that sets `__FORGE_ENGINE_READY`), and that needs
-    // the Rust renderer to initialize — in headless Chrome with --disable-gpu
-    // (every CI config except playwright.engine.config.ts) `init_engine()`
-    // never completes, so the overlay never clears on its own. The CSS
-    // suppression below is what keeps a click from landing on it there; on the
-    // engine config it only covers the window before the flag flips.
+    // interactions. `InitOverlay` returns null only once `useEngineStatus`
+    // reports the `'ready'` phase, which is emitted by the Rust first-frame
+    // system (`detect_first_frame`, engine/src/core/observability.rs) — NOT
+    // by `__FORGE_ENGINE_READY`, which useEngine.ts sets synchronously when
+    // `init_engine()` returns, before the renderer has drawn anything. So the
+    // overlay clears strictly LATER than the flag this fixture waits on. In
+    // headless Chrome with --disable-gpu (every CI config except
+    // playwright.engine.config.ts) `init_engine()` never completes, so the
+    // overlay never clears on its own; on the engine config there is still a
+    // window between the flag flipping and the first rendered frame. The CSS
+    // suppression below is what keeps a click from landing on it in both cases.
     await this.page.addInitScript(() => {
       localStorage.setItem('forge-welcomed', '1');
       localStorage.setItem('forge-mobile-dismissed', '1');
