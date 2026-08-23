@@ -588,8 +588,14 @@ export function EditorLayout() {
       //
       // SECURITY: same build-time gate as `__EDITOR_STORE` above — never attached
       // in a normal production build, and the flag cannot be flipped at runtime.
-      // It grants no capability a caller holding `__EDITOR_STORE` lacks: that
-      // reference already exposes every store action, and those dispatch.
+      // `__EDITOR_STORE` already lets a caller invoke every store action, and
+      // those dispatch through whatever dispatcher is currently installed — so
+      // this adds no new way to ISSUE a command. What it does add is the
+      // ability to REPLACE that dispatcher: once called, every command any
+      // slice dispatches (not just ones the caller triggers) routes through
+      // the supplied function, so a caller could intercept or rewrite commands
+      // issued by the rest of the app. That capability is scoped by the same
+      // build-time gate as everything else here.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__FORGE_SET_DISPATCH = (
         dispatch: (cmd: string, payload: unknown) => CommandResponse | void,
