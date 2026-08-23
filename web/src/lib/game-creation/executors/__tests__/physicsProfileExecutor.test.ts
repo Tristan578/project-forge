@@ -293,6 +293,35 @@ describe('physicsProfileExecutor', () => {
     expect(output.warning).not.toMatch(/Restitution/);
   });
 
+  /**
+   * `physicsEnableExecutor` reads `ctx.projectType` for this same kind of
+   * dynamic label (see its `bodyTypeLabel`); this executor used to read a
+   * SEPARATE copy off its own Zod-validated input instead. Both are authored
+   * from `gdd.projectType` by `planBuilder`, so they agree in the normal
+   * orchestrator flow — but `ctx.projectType` is the one the orchestrator
+   * actually dispatches to the engine via `setProjectType` before the run
+   * (`orchestratorSlice.runPipelineFromPlan`), and this executor is also
+   * invoked directly against an already-built scene (see the "read the store
+   * LIVE" comment above `collectTargetIds`'s call site), where a caller could
+   * pass a stale or mismatched `input.projectType`. Aligning on `ctx`
+   * (PF-1229 finding #8) means a caller cannot make the label lie about which
+   * project this actually is. The two are set to DIFFERENT values here
+   * specifically to prove the label follows `ctx`, not `input`.
+   */
+  it('uses ctx.projectType for the warning label, not a mismatched input.projectType', async () => {
+    const ctx = makeCtx({ projectType: '2d' });
+    const result = await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      // Deliberately the opposite of ctx.projectType.
+      projectType: '3d',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    const output = result.output as { warning?: string };
+    expect(output.warning).toContain('Bounciness');
+    expect(output.warning).not.toMatch(/Restitution/);
+  });
+
   it('tunes the entities the physics_enable step reported (PF-1213)', async () => {
     // The store's `sceneGraph.nodes[].components` is filled in only by the
     // engine's async SCENE_GRAPH_UPDATE event, so immediately after enablement
@@ -484,14 +513,19 @@ describe('physicsProfileExecutor', () => {
     expect(result.error?.code).toBe('INVALID_INPUT');
   });
 
-  it('rejects missing projectType', async () => {
+  /**
+   * `projectType` is no longer part of this executor's own input schema
+   * (PF-1229 finding #8) — it reads `ctx.projectType` instead, which is
+   * always present on `ExecutorContext`. A caller omitting it from the
+   * step input must succeed, not fail validation.
+   */
+  it('does not require projectType on input', async () => {
     const ctx = makeCtx();
     const result = await physicsProfileExecutor.execute({
       feelDirective: makeFeelDirective(),
     }, ctx);
 
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('INVALID_INPUT');
+    expect(result.success).toBe(true);
   });
 
   it('rejects invalid pacing enum', async () => {

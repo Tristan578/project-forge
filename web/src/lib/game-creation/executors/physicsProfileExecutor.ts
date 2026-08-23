@@ -11,7 +11,6 @@ import {
 const inputSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
   feelDirective: feelDirectiveSchema,
-  projectType: z.enum(['2d', '3d']),
   entityIds: z.array(z.string()).optional(),
 });
 
@@ -123,7 +122,7 @@ export const physicsProfileExecutor: ExecutorDefinition = {
       );
     }
 
-    const { feelDirective, config, entityIds, projectType } = parsed.data;
+    const { feelDirective, config, entityIds } = parsed.data;
 
     // [B3] + [S1] both live in the shared resolver — `character_setup` builds
     // the player's CharacterController from the very same answer, and the two
@@ -192,11 +191,19 @@ export const physicsProfileExecutor: ExecutorDefinition = {
       // the enablement failure upstream. It is a WARNING rather than a failure
       // because the step is not optional — failing it would set the whole plan
       // to `failed` and discard a game that is merely mistuned.
-      // Unlike the static `userFacingErrorMessage` above, `projectType` is
-      // known here (parsed from this step's own input), so the warning names
-      // only the label that is actually on this project's screen — "Bounciness"
-      // for 2D, "Restitution" for 3D — instead of both.
-      const restitutionLabel = projectType === '2d' ? 'Bounciness' : 'Restitution';
+      // Unlike the static `userFacingErrorMessage` above, `ctx.projectType` is
+      // known here, so the warning names only the label that is actually on
+      // this project's screen — "Bounciness" for 2D, "Restitution" for 3D —
+      // instead of both. Read off `ctx`, not a copy on this step's own input:
+      // `ctx.projectType` is what the orchestrator dispatches to the engine
+      // via `setProjectType` before the run (`orchestratorSlice`), so it is
+      // the value provably in sync with the live scene. This executor is also
+      // invoked directly against an already-built scene (see the "read the
+      // store LIVE" comment above), where a caller could otherwise pass a
+      // stale or mismatched value on the input (PF-1229 finding #8) —
+      // matching the `ctx.projectType` idiom `physicsEnableExecutor` already
+      // uses for its own `bodyTypeLabel`.
+      const restitutionLabel = ctx.projectType === '2d' ? 'Bounciness' : 'Restitution';
       return successResult({
         presetUsed: presetKey,
         entityCount: 0,
