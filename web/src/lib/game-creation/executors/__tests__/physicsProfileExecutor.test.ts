@@ -92,10 +92,14 @@ describe('physicsProfileExecutor', () => {
     // default physics" that said nothing about what to do next. Every noun is a
     // label that is on screen, and the last sentence exists because re-running
     // the build calls `newScene()` and would throw away the hand fix.
+    // Names the restitution field both ways — "Restitution" in the 3D
+    // Inspector, "Bounciness" in the 2D one (PF-1229) — because this is a
+    // plain string with no `projectType` to branch on at module-load time.
     expect(physicsProfileExecutor.userFacingErrorMessage).toBe(
       'Could not tune how the game moves, so everything will use default physics. '
       + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
-      + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+      + 'in the Inspector, then set Friction, Restitution (called Bounciness in 2D) and '
+      + 'Gravity there. '
       + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
     );
     expect(physicsProfileExecutor.userFacingErrorMessage).not.toMatch(/try again/i);
@@ -253,7 +257,9 @@ describe('physicsProfileExecutor', () => {
     expect(output.entityCount).toBe(0);
     // The exact sentence, not `toContain('physics')` — that matched the word in
     // its own executor name and would have passed on any wording, including one
-    // that told the user nothing to do next.
+    // that told the user nothing to do next. "Restitution" is the 3D
+    // `PhysicsInspector` label, correct for this `projectType: '3d'` case
+    // (PF-1229 — see the 2D counterpart below for "Bounciness").
     expect(output.warning).toBe(
       'No entities had physics turned on, so the movement feel could not be applied. '
       + 'Things may not move or collide the way the design describes. '
@@ -261,6 +267,30 @@ describe('physicsProfileExecutor', () => {
       + 'in the Inspector, then set Friction, Restitution and Gravity there. '
       + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
     );
+  });
+
+  it('warns with the 2D field label (Bounciness, not Restitution) when it matches nothing on a 2D project (PF-1229)', async () => {
+    const ctx = makeCtx({ projectType: '2d' });
+    const result = await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '2d',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(mockApplyPhysicsProfile).not.toHaveBeenCalled();
+    const output = result.output as { entityCount: number; warning?: string };
+    expect(output.entityCount).toBe(0);
+    // The 2D `Physics2dInspector` labels this field "Bounciness", not
+    // "Restitution" — a 2D reader following the 3D wording would look for a
+    // field that is not on their screen.
+    expect(output.warning).toBe(
+      'No entities had physics turned on, so the movement feel could not be applied. '
+      + 'Things may not move or collide the way the design describes. '
+      + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
+      + 'in the Inspector, then set Friction, Bounciness and Gravity there. '
+      + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
+    );
+    expect(output.warning).not.toMatch(/Restitution/);
   });
 
   it('tunes the entities the physics_enable step reported (PF-1213)', async () => {

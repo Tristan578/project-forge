@@ -87,8 +87,16 @@ export const physicsProfileExecutor: ExecutorDefinition = {
   // what to do next. "Your game will use default physics" describes the damage
   // and stops there; the remediation below is the same one the zero-ids WARNING
   // carries, for the same reason and in the same on-screen vocabulary
-  // (Hierarchy, Physics › Enabled, Friction/Restitution/Gravity) — one failure
-  // mode should not be followable and the other a dead end.
+  // (Hierarchy, Physics › Enabled, Friction/Gravity) — one failure mode should
+  // not be followable and the other a dead end.
+  //
+  // The third field is named twice on purpose: the 3D `PhysicsInspector` labels
+  // it "Restitution", but the 2D `Physics2dInspector` labels the same value
+  // "Bounciness" — there is no field literally called "Restitution" on a 2D
+  // project's screen. This string is a plain object property evaluated once at
+  // module load, not a function of `ctx`, so — unlike the zero-ids `warning`
+  // below, which knows `projectType` at call time and names only the matching
+  // label — it cannot branch and names both.
   //
   // No "re-run the build" clause here either: a new build starts at
   // `scene_create`, which calls `newScene()` and despawns everything, so it
@@ -96,7 +104,8 @@ export const physicsProfileExecutor: ExecutorDefinition = {
   userFacingErrorMessage:
     'Could not tune how the game moves, so everything will use default physics. '
     + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
-    + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+    + 'in the Inspector, then set Friction, Restitution (called Bounciness in 2D) and '
+    + 'Gravity there. '
     + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
 
   async execute(
@@ -114,7 +123,7 @@ export const physicsProfileExecutor: ExecutorDefinition = {
       );
     }
 
-    const { feelDirective, config, entityIds } = parsed.data;
+    const { feelDirective, config, entityIds, projectType } = parsed.data;
 
     // [B3] + [S1] both live in the shared resolver — `character_setup` builds
     // the player's CharacterController from the very same answer, and the two
@@ -183,6 +192,11 @@ export const physicsProfileExecutor: ExecutorDefinition = {
       // the enablement failure upstream. It is a WARNING rather than a failure
       // because the step is not optional — failing it would set the whole plan
       // to `failed` and discard a game that is merely mistuned.
+      // Unlike the static `userFacingErrorMessage` above, `projectType` is
+      // known here (parsed from this step's own input), so the warning names
+      // only the label that is actually on this project's screen — "Bounciness"
+      // for 2D, "Restitution" for 3D — instead of both.
+      const restitutionLabel = projectType === '2d' ? 'Bounciness' : 'Restitution';
       return successResult({
         presetUsed: presetKey,
         entityCount: 0,
@@ -195,7 +209,7 @@ export const physicsProfileExecutor: ExecutorDefinition = {
           'No entities had physics turned on, so the movement feel could not be applied. '
           + 'Things may not move or collide the way the design describes. '
           + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
-          + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+          + `in the Inspector, then set Friction, ${restitutionLabel} and Gravity there. `
           + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
       });
     }
