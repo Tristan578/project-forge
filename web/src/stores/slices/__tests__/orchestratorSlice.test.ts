@@ -801,6 +801,169 @@ describe('orchestratorSlice', () => {
       expect(store.getState().orchestratorError).toBeNull();
       expect(store.getState().stepStatuses['step_0']).toBe('pending');
     });
+
+    /**
+     * Start a run for whatever plan is CURRENTLY live, capturing its context
+     * and callbacks the same way `startAbandonedRun` does.
+     *
+     * The two guards below are about what a superseded run must not damage,
+     * and neither is observable without a real second run to damage: a stale
+     * `finally` can only clobber an abort handle some live run owns, and a
+     * stale `onGateReached` can only clobber a `_gateResolver` some live run
+     * is parked on. A fixture with only the abandoned run in it passes either
+     * way.
+     */
+    async function startLiveRun(): Promise<{
+      callbacks: PipelineCallbacks;
+      ctx: { signal: AbortSignal };
+      settle: (plan: OrchestratorPlan) => void;
+      runPromise: Promise<void>;
+    }> {
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      let capturedCallbacks!: PipelineCallbacks;
+      let capturedCtx!: { signal: AbortSignal };
+      let settle!: (plan: OrchestratorPlan) => void;
+      let markCalled!: () => void;
+      const called = new Promise<void>((resolve) => {
+        markCalled = resolve;
+      });
+      const pending = new Promise<OrchestratorPlan>((resolve) => {
+        settle = resolve;
+      });
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        (
+          _plan: unknown,
+          _registry: unknown,
+          ctx: { signal: AbortSignal },
+          callbacks: PipelineCallbacks,
+        ) => {
+          capturedCtx = ctx;
+          capturedCallbacks = callbacks;
+          markCalled();
+          return pending;
+        },
+      );
+
+      const runPromise = store.getState().runPipelineFromPlan();
+      await called;
+
+      return { callbacks: capturedCallbacks, ctx: capturedCtx, settle, runPromise };
+    }
+
+    it('unparks a superseded onGateReached without repainting the live gate', async () => {
+      const {
+        planA,
+        planB,
+        callbacks: staleCallbacks,
+        settle: settleStale,
+        runPromise: stalePromise,
+      } = await startAbandonedRun();
+
+      // planB is the live run now, and it parks at its OWN gate.
+      const live = await startLiveRun();
+      const liveGate = planB.approvalGates[0];
+      const liveGatePromise = live.callbacks.onGateReached?.(liveGate);
+      expect(store.getState().pendingGate).toBe(liveGate);
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
+      const liveResolver = _getGateResolver();
+      expect(liveResolver).not.toBeNull();
+
+      // planA's runner only NOW reaches its gate. `pipelineRunner` checks
+      // `ctx.signal` at the top of each step iteration, so a step that settled
+      // just before the reset still arrives here with no abort check in
+      // between. It must be answered — an unresolved gate parks the abandoned
+      // run forever, so its `finally` never runs and the token reservation
+      // leaks for the rest of the session — but answering it must not touch
+      // the live run's gate state.
+      await expect(staleCallbacks.onGateReached?.(planA.approvalGates[0])).resolves.toBe(
+        'rejected',
+      );
+
+      expect(store.getState().pendingGate).toBe(liveGate);
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
+      // Identity, not merely non-null: an unguarded stale gate overwrites
+      // `_gateResolver` with its own, and the user's Approve then unparks the
+      // ABANDONED run while the live one stays stuck.
+      expect(_getGateResolver()).toBe(liveResolver);
+
+      // Unwind both runs so neither leaks into the next test.
+      store.getState().resolveGate('approved');
+      await expect(liveGatePromise).resolves.toBe('approved');
+      settleStale(planA);
+      live.settle(planB);
+      await Promise.all([stalePromise, live.runPromise]);
+    });
+
+    it("does not let an abandoned run's finally-block drop the live run's abort handle", async () => {
+      const { planA, planB, settle: settleStale, runPromise: stalePromise } =
+        await startAbandonedRun();
+
+      const live = await startLiveRun();
+      expect(live.ctx.signal.aborted).toBe(false);
+
+      // planA settles LAST — after `runPipelineFromPlan` handed the shared
+      // module-level handle to planB's run.
+      settleStale(planA);
+      await stalePromise;
+
+      // The live run must still be cancellable. An unguarded `finally` nulls
+      // `_abortController` here, and both `cancelPipeline` and
+      // `resetOrchestrator` no-op silently on a null handle — so the defect
+      // presents as a Cancel button that changes the status and stops nothing.
+      store.getState().cancelPipeline();
+      expect(live.ctx.signal.aborted).toBe(true);
+
+      live.settle(planB);
+      await live.runPromise;
+    });
+
+    it('lets a run parked at a gate unwind when the user resets', async () => {
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      let decision: 'approved' | 'rejected' | undefined;
+      let markCalled!: () => void;
+      const called = new Promise<void>((resolve) => {
+        markCalled = resolve;
+      });
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (
+          _plan: unknown,
+          _registry: unknown,
+          _ctx: unknown,
+          callbacks: PipelineCallbacks,
+        ) => {
+          // `pipelineRunner` awaits this gate BARE, so the entire run is parked
+          // on it until something resolves the promise.
+          const onGateReached = callbacks.onGateReached;
+          if (!onGateReached) {
+            throw new Error('runPipeline was given no onGateReached callback');
+          }
+          const gatePromise = onGateReached(plan.approvalGates[0]);
+          markCalled();
+          decision = await gatePromise;
+          return plan;
+        },
+      );
+
+      const runPromise = store.getState().runPipelineFromPlan();
+      await called;
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
+      expect(_getGateResolver()).not.toBeNull();
+
+      store.getState().resetOrchestrator();
+
+      // An `AbortSignal` does not settle a promise. If `resetOrchestrator` only
+      // DROPPED the resolver, this await would never return: the run would sit
+      // at the gate for the rest of the session, its `finally` would never run
+      // and the token reservation would never be released. A regression here
+      // therefore reads as a test timeout, which is the accurate symptom.
+      await runPromise;
+      expect(decision).toBe('rejected');
+      expect(_getGateResolver()).toBeNull();
+      expect(store.getState().pendingGate).toBeNull();
+    });
   });
 
   /**

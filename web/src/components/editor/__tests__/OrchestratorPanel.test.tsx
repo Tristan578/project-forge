@@ -544,6 +544,88 @@ describe('OrchestratorPanel', () => {
     });
   });
 
+  /**
+   * PF-1229 finding B4. `StepStatusIcon` renders the ONLY per-step state
+   * indicator in the panel — the label beside it is the executor name, which
+   * does not change with status — and none of its branches carried an
+   * accessible name, so a screen-reader user got no step state at all (WCAG
+   * 1.1.1). Two of the branches were additionally distinguished from each
+   * other by hue alone (1.4.1).
+   */
+  describe('step status icons', () => {
+    const FIVE_STATE_PLAN = {
+      ...MOCK_PLAN,
+      steps: [
+        { id: 'step-1', executor: 'scene_create', input: {}, dependsOn: [], maxRetries: 1, optional: false, status: 'pending' },
+        { id: 'step-2', executor: 'entity_setup', input: {}, dependsOn: [], maxRetries: 1, optional: false, status: 'pending' },
+        { id: 'step-3', executor: 'auto_polish', input: {}, dependsOn: [], maxRetries: 1, optional: true, status: 'pending' },
+        { id: 'step-4', executor: 'camera_setup', input: {}, dependsOn: [], maxRetries: 1, optional: false, status: 'pending' },
+        { id: 'step-5', executor: 'verify_all_scenes', input: {}, dependsOn: [], maxRetries: 1, optional: false, status: 'pending' },
+      ],
+    } as unknown as OrchestratorPlan;
+
+    const FIVE_STATE_STATUSES = {
+      'step-1': 'completed',
+      'step-2': 'running',
+      'step-3': 'failed',
+      'step-4': 'skipped',
+      'step-5': 'pending',
+    };
+
+    it('gives every step state an accessible name', () => {
+      mockStore({
+        orchestratorStatus: 'executing',
+        currentPlan: FIVE_STATE_PLAN,
+        stepStatuses: FIVE_STATE_STATUSES,
+      });
+      const { container } = render(<OrchestratorPanel />);
+
+      for (const name of ['Completed', 'Running', 'Failed', 'Skipped', 'Pending']) {
+        expect(screen.getByRole('img', { name })).toBeTruthy();
+      }
+      // Exactly five — a sixth would mean some decorative glyph is being
+      // announced, which is the other half of the same defect. The header
+      // sparkle is the one that would: it sits beside the plan title, which
+      // already names the panel.
+      expect(screen.getAllByRole('img').length).toBe(5);
+      expect(container.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    });
+
+    it('distinguishes pending from skipped by glyph, not by colour alone', () => {
+      mockStore({
+        orchestratorStatus: 'executing',
+        currentPlan: FIVE_STATE_PLAN,
+        stepStatuses: FIVE_STATE_STATUSES,
+      });
+      render(<OrchestratorPanel />);
+
+      const pending = screen.getByRole('img', { name: 'Pending' });
+      const skipped = screen.getByRole('img', { name: 'Skipped' });
+
+      // Both now sit on the same AA-safe foreground, so colour carries NOTHING
+      // here by construction — asserting the two foregrounds match is what
+      // makes the glyph assertion below load-bearing rather than incidental.
+      const foreground = (el: Element) =>
+        Array.from(el.classList).filter((c) => c.startsWith('text-'));
+      expect(foreground(skipped)).toEqual(foreground(pending));
+      expect(foreground(pending)).toEqual(['text-[var(--sf-text-secondary)]']);
+      // ...and the glyphs themselves differ, which is the distinction WCAG
+      // 1.4.1 requires once colour is out of the running.
+      expect(skipped.innerHTML).not.toBe(pending.innerHTML);
+    });
+
+    it('hides the decorative idle-state icon from assistive tech', () => {
+      mockStore({ orchestratorStatus: 'idle', currentPlan: null });
+      const { container } = render(<OrchestratorPanel />);
+
+      // The placeholder sparkle carries no information the adjacent copy does
+      // not already give, so it must not be announced at all.
+      expect(screen.queryAllByRole('img')).toEqual([]);
+      const icon = container.querySelector('svg');
+      expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    });
+  });
+
   describe('step warnings', () => {
     /**
      * A step that only partly applied still gets a green tick, because it did

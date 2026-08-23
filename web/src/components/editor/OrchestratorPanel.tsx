@@ -501,7 +501,7 @@ export function OrchestratorPanel() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--sf-border)] px-3 py-2">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-[var(--sf-accent)]" />
+          <Sparkles aria-hidden="true" className="h-4 w-4 text-[var(--sf-accent)]" />
           <span className="text-sm font-medium text-[var(--sf-text)]">
             {plan?.gdd.title ?? 'Game Creation'}
           </span>
