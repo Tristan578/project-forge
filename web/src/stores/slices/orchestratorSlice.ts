@@ -55,6 +55,35 @@ export type OrchestratorStatus =
   | 'failed'
   | 'cancelled';
 
+/**
+ * Statuses in which NO pipeline run holds the slice, so a new run may start.
+ *
+ * The complement is what `isOrchestratorRunLive` reports. Kept as data (not an
+ * inline disjunction) because three call sites have to agree: the slice guard
+ * below, the quick-start dialog's reopen behaviour, and `EditorLayout`'s
+ * trigger.
+ */
+const RESTARTABLE_STATUSES: readonly OrchestratorStatus[] = [
+  'idle',
+  'completed',
+  'failed',
+  'cancelled',
+];
+
+/**
+ * Is a pipeline run currently holding the orchestrator slice?
+ *
+ * Starting a second run over a live one is destructive, and silently so:
+ * `startDecomposition`'s opening `set()` clears `currentPlan`, `stepStatuses`,
+ * `pendingGate` and `autoApproveGateIds`, and replaces `_abortController` — so
+ * the first run keeps executing against a store that no longer describes it,
+ * its gate resolver is stranded, and `cancelPipeline` can only ever reach the
+ * second controller.
+ */
+export function isOrchestratorRunLive(status: OrchestratorStatus): boolean {
+  return !RESTARTABLE_STATUSES.includes(status);
+}
+
 export interface OrchestratorSlice {
   // Pipeline state
   orchestratorStatus: OrchestratorStatus;
@@ -90,7 +119,15 @@ export interface OrchestratorSlice {
     projectType: ProjectType,
     opts?: { autoApproveGateIds?: readonly string[] },
   ) => Promise<void>;
-  startQuickStart: (prompt: string, projectType: ProjectType) => Promise<void>;
+  /**
+   * Quick-start entry point: decompose, then run, with no "Start Building" click.
+   *
+   * Resolves `false` — having changed nothing at all — when a run is already
+   * live (`isOrchestratorRunLive`). `true` means this call owned the run and
+   * drove it to completion; it is NOT a claim the run succeeded, which callers
+   * read off `orchestratorStatus` / `orchestratorError` as before.
+   */
+  startQuickStart: (prompt: string, projectType: ProjectType) => Promise<boolean>;
   setPlan: (plan: OrchestratorPlan) => void;
   setOrchestratorStatus: (status: OrchestratorStatus) => void;
   updateStepStatus: (stepId: string, status: PlanStep['status']) => void;
@@ -260,6 +297,12 @@ export const createOrchestratorSlice: StateCreator<
   },
 
   startQuickStart: async (prompt, projectType) => {
+    // Refuse rather than clobber. `startDecomposition` is unconditionally
+    // destructive on entry, so a second "Build it" over a live run orphans the
+    // first one — see `isOrchestratorRunLive`. The dialog keeps its own guard
+    // too; this one is what makes the invariant hold for every caller.
+    if (isOrchestratorRunLive(get().orchestratorStatus)) return false;
+
     // The quick-start entry point: decompose, then run, with no "Start Building"
     // click in between. `gate_plan` exists so a chat user can review the plan
     // before spending tokens — a user who clicked "Make me a game" and typed a
@@ -272,9 +315,10 @@ export const createOrchestratorSlice: StateCreator<
     // Read status fresh: `startDecomposition` swallows its own errors into
     // 'failed'/'cancelled', so the only way to know it produced a plan is to
     // look at the state it left behind.
-    if (get().orchestratorStatus !== 'awaiting_approval') return;
+    if (get().orchestratorStatus !== 'awaiting_approval') return true;
 
     await get().runPipelineFromPlan();
+    return true;
   },
 
   setPlan: (plan) => {

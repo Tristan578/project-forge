@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createSliceStore } from './sliceTestTemplate';
 import {
   createOrchestratorSlice,
+  isOrchestratorRunLive,
   _setAbortController,
   _getGateResolver,
 } from '../orchestratorSlice';
@@ -716,6 +717,100 @@ describe('orchestratorSlice', () => {
       expect(store.getState().orchestratorStatus).toBe('failed');
       expect(runPipeline).not.toHaveBeenCalled();
     });
+
+    it('reports it owned the run when it started one', async () => {
+      mockDecomposeOk();
+
+      await expect(
+        store.getState().startQuickStart('Platformer: a jungle level', '3d'),
+      ).resolves.toBe(true);
+    });
+
+    /**
+     * The dialog can be closed mid-run and reopened, so "Build it" is reachable
+     * while a run is live. `startDecomposition` clears `currentPlan`,
+     * `stepStatuses`, `pendingGate` and `autoApproveGateIds` on entry and
+     * replaces the abort controller, so a second start does not race the first —
+     * it orphans it, and `cancelPipeline` can then only reach the second run.
+     */
+    describe.each([
+      ['decomposing'],
+      ['planning'],
+      ['awaiting_approval'],
+      ['executing'],
+    ] as const)('while a run is %s', (liveStatus) => {
+      it('refuses to start a second run and leaves the first run untouched', async () => {
+        const plan = makeMockPlan();
+        const gate: ApprovalGate = {
+          id: 'gate_assets',
+          label: 'Generate assets?',
+          description: 'These cost tokens.',
+          afterStepId: 'step_0',
+          status: 'pending',
+          displayData: {},
+        };
+        store.setState({
+          orchestratorStatus: liveStatus,
+          currentPlan: plan,
+          stepStatuses: { step_0: 'completed' },
+          pendingGate: gate,
+          autoApproveGateIds: ['gate_plan'],
+          reservationId: 'res-first',
+        });
+
+        const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+        (runPipeline as ReturnType<typeof vi.fn>).mockClear();
+        mockFetch.mockClear();
+
+        const started = await store
+          .getState()
+          .startQuickStart('Shooter: a second run', '3d');
+
+        expect(started).toBe(false);
+        expect(mockFetch).not.toHaveBeenCalled();
+        expect(runPipeline).not.toHaveBeenCalled();
+
+        // Every field `startDecomposition`'s opening set() would have cleared.
+        const after = store.getState();
+        expect(after.orchestratorStatus).toBe(liveStatus);
+        expect(after.currentPlan).toBe(plan);
+        expect(after.stepStatuses).toEqual({ step_0: 'completed' });
+        expect(after.pendingGate).toBe(gate);
+        expect(Array.from(after.autoApproveGateIds)).toEqual(['gate_plan']);
+        expect(after.reservationId).toBe('res-first');
+      });
+    });
+
+    it.each([['completed'], ['failed'], ['cancelled']] as const)(
+      'starts a fresh run after a previous one finished (%s)',
+      async (finishedStatus) => {
+        mockDecomposeOk();
+        store.setState({ orchestratorStatus: finishedStatus });
+
+        const started = await store
+          .getState()
+          .startQuickStart('Platformer: a jungle level', '3d');
+
+        expect(started).toBe(true);
+        expect(store.getState().currentPlan).not.toBeNull();
+      },
+    );
+  });
+
+  describe('isOrchestratorRunLive', () => {
+    it.each([['decomposing'], ['planning'], ['awaiting_approval'], ['executing']] as const)(
+      'reports %s as live',
+      (status) => {
+        expect(isOrchestratorRunLive(status)).toBe(true);
+      },
+    );
+
+    it.each([['idle'], ['completed'], ['failed'], ['cancelled']] as const)(
+      'reports %s as restartable',
+      (status) => {
+        expect(isOrchestratorRunLive(status)).toBe(false);
+      },
+    );
   });
 
   describe('gate auto-approval', () => {
