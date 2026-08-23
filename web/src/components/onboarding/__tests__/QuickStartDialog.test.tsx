@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
+import { renderHook } from '@testing-library/react';
 import {
   render,
   cleanup,
@@ -17,6 +18,10 @@ import {
   QUICK_START_PROMPT_MAX,
   findQuickStartGameType,
 } from '@/lib/game-creation/quickStart';
+import {
+  useQuickStartOwnsGate,
+  _resetQuickStartGateOwner,
+} from '@/components/editor/quickStartGateOwner';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -82,6 +87,11 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // The gate-ownership store is module-level, shared with OrchestratorPanel,
+  // and QuickStartDialog claims it for real (unmocked) on every mount below
+  // -- reset so a leaked claim from one test can never change what the next
+  // test's `useQuickStartOwnsGate()` reports.
+  _resetQuickStartGateOwner();
 });
 
 /** Walks the dialog from the type cards to the prompt step. */
@@ -311,8 +321,16 @@ describe('QuickStartDialog', () => {
 
     // `buildQuickStartPrompt` sends "<label>: <body>", and the route validates
     // that whole string — so the body's budget is the cap minus the prefix.
-    expect(field.maxLength).toBe(QUICK_START_PROMPT_MAX - card.label.length - 2);
-    expect(screen.getByText(`0 / ${field.maxLength}`)).toBeTruthy();
+    const expectedMax = QUICK_START_PROMPT_MAX - card.label.length - 2;
+    expect(field.maxLength).toBe(expectedMax);
+    // Built from `expectedMax` (computed independently above), not from
+    // `field.maxLength` -- the textarea's `maxLength` prop and this count
+    // paragraph both read the SAME `promptMax` local in QuickStartDialog, so
+    // deriving the search text from the DOM value it is meant to help verify
+    // would make this assertion pass even if `promptMax`'s own computation
+    // were wrong, as long as both usages stayed in lockstep with each other
+    // (PF-1215 round 2, 4/5).
+    expect(screen.getByText(`0 / ${expectedMax}`)).toBeTruthy();
   });
 
   it('says why nothing started when the slice refuses a second run', async () => {
@@ -338,6 +356,32 @@ describe('QuickStartDialog', () => {
     // run the slice would refuse.
     expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
     expect(screen.getByRole('status').textContent).toContain('Building your game');
+  });
+
+  // PF-1215 round 2 (4/5): the `useEffect` that claims the shared gate store
+  // while this dialog is open (so ApprovalGateDialog is never rendered twice
+  // -- once here, once in OrchestratorPanel) had no test anywhere pointed at
+  // it; `claimQuickStartGate()` ran unmocked on every mount above but nothing
+  // ever read the store back. Reads it through the real, unmocked hook (not
+  // a spy on the claim/release functions) so this proves the actual shared
+  // state transitions, not just that a function got called.
+  it('claims the shared gate-ownership store while open and releases it on close and unmount', () => {
+    const owner = renderHook(() => useQuickStartOwnsGate());
+    expect(owner.result.current).toBe(false);
+
+    const { rerender, unmount } = render(<QuickStartDialog open onClose={vi.fn()} />);
+    expect(owner.result.current).toBe(true);
+
+    rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+    expect(owner.result.current).toBe(false);
+
+    rerender(<QuickStartDialog open onClose={vi.fn()} />);
+    expect(owner.result.current).toBe(true);
+
+    unmount();
+    expect(owner.result.current).toBe(false);
+
+    owner.unmount();
   });
 
   it('stops the live run and closes when Stop is pressed', async () => {

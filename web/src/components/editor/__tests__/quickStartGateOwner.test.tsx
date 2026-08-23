@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import {
   claimQuickStartGate,
   useQuickStartOwnsGate,
@@ -13,6 +14,19 @@ afterEach(() => {
   cleanup();
   _resetQuickStartGateOwner();
 });
+
+// PF-1215 round 2 (4/5): `getServerSnapshot` had no test anywhere -- it is a
+// private, unexported function only reachable via `useQuickStartOwnsGate`'s
+// third `useSyncExternalStore` argument. `useSyncExternalStore`'s dispatcher
+// selection is determined by which React RENDERER performs the render, not
+// by `typeof document` -- calling `react-dom/server`'s `renderToString`
+// invokes React's server dispatcher (and therefore `getServerSnapshot`)
+// regardless of the jsdom globals this file's environment provides, so no
+// separate `@vitest-environment node` file is needed for this case.
+function GateOwnerProbe() {
+  const owns = useQuickStartOwnsGate();
+  return <div data-testid="owns">{String(owns)}</div>;
+}
 
 describe('quickStartGateOwner', () => {
   it('reports no owner until something claims the gate', () => {
@@ -71,5 +85,20 @@ describe('quickStartGateOwner', () => {
 
     act(() => second());
     expect(result.current).toBe(false);
+  });
+
+  it('reports unclaimed during a server render even when something has claimed the gate', () => {
+    // Claim BEFORE the server render -- if the hook's dispatcher ever read
+    // the live `getSnapshot` during `renderToString` instead of
+    // `getServerSnapshot`, this claim would flip the output to "true" and
+    // prove it.
+    const release = claimQuickStartGate();
+    try {
+      const html = renderToString(<GateOwnerProbe />);
+      expect(html).toContain('false');
+      expect(html).not.toContain('>true<');
+    } finally {
+      release();
+    }
   });
 });
