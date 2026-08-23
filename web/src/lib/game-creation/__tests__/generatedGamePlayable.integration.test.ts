@@ -302,9 +302,16 @@ function crystalRunWithoutProgression(): OrchestratorGDD {
  * empty id would be rejected by the engine — which fails the whole plan instead
  * of reporting the real problem. So the plan says so and the game stays
  * unwinnable, on purpose.
+ *
+ * Progression is deliberately RETAINED — only `entities` is emptied. Stripping
+ * it too would make this the easy case (no progression, so nothing even tries
+ * to plan a goal) and would leave the harder one untested. It also keeps this
+ * byte-identical to `emptyWorldGdd` in `e2e/tests/pipeline-live-engine.spec.ts`,
+ * whose comment cites the plan shape asserted below; two negative fixtures that
+ * differ are two gates quietly testing different games.
  */
 function designWithNothingInIt(): OrchestratorGDD {
-  const gdd = crystalRunWithoutProgression();
+  const gdd = crystalRun3d();
   return {
     ...gdd,
     id: 'gdd-empty-world',
@@ -568,6 +575,27 @@ describe('generated game is playable (end to end)', () => {
     // was planned bound to an empty id, which the engine would reject and which
     // would fail the plan for the wrong reason.
     expect(wireComponentsOfType(recorded, 'win_condition')).toEqual([]);
+
+    // The failure has to land ON `verify_all_scenes`, not upstream of it: a
+    // plan that died earlier would satisfy every assertion below about the
+    // plan being failed while proving nothing about verification. Progression
+    // is present here and still plans no `game_component` step at all, because
+    // it has no entity to bind a collectible to — which is exactly why nothing
+    // upstream can pre-empt the check. This is the shape
+    // `e2e/tests/pipeline-live-engine.spec.ts` documents for `emptyWorldGdd`.
+    expect(stepsFor(plan, 'game_component')).toEqual([]);
+    for (const executor of [
+      'plan_present',
+      'scene_create',
+      'world_build',
+      'physics_enable',
+      'camera_setup',
+      'physics_profile',
+    ]) {
+      const steps = stepsFor(plan, executor);
+      expect(steps.length).toBeGreaterThan(0);
+      expect(steps.map(step => step.status)).toEqual(steps.map(() => 'completed'));
+    }
 
     // verify reports honestly on the failing side.
     const verify = stepsFor(plan, 'verify_all_scenes')[0];
