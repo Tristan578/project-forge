@@ -350,7 +350,16 @@ export const createOrchestratorSlice: StateCreator<
       _abortController.abort();
     }
     _abortController = null;
-    _gateResolver = null;
+    // Resolve BEFORE dropping the handle, exactly as `cancelPipeline` does.
+    // An `AbortSignal` does not settle a promise, and `pipelineRunner` awaits
+    // this gate bare — so nulling the resolver alone parks the abandoned run
+    // at `await callbacks.onGateReached(gate)` forever: `runPipeline` never
+    // returns, its `finally` never runs, and the token reservation is never
+    // released (PF-1229 finding #3).
+    if (_gateResolver) {
+      _gateResolver('rejected');
+      _gateResolver = null;
+    }
     set({
       orchestratorStatus: 'idle',
       currentPlan: null,
@@ -426,10 +435,16 @@ export const createOrchestratorSlice: StateCreator<
      * settles and still fires its callbacks. If the user has since reset and
      * started a DIFFERENT plan, every writer below would be writing the
      * abandoned run's progress onto the new plan: `step_${n}` ids collide
-     * across plans by construction, so a stale `onStepComplete` marks a step
-     * the new plan has not run, a stale `onPlanStatusChange` reports the new
-     * run completed/failed mid-execution, and a stale `catch` fails it
-     * outright. Identity on the captured plan object is the whole test —
+     * across plans by construction. Every writer below is gated on it, and
+     * the list here is exhaustive on purpose — an unguarded one is invisible
+     * until it ships: a stale `onStepComplete` marks a step the new plan has
+     * not run, a stale `onGateReached` repaints an approval gate over an idle
+     * store and hijacks `approveGate`/`cancelPipeline`, a stale
+     * `onPlanStatusChange` reports the new run completed/failed
+     * mid-execution, a stale `catch` fails it outright, and the `finally`
+     * both drops the LIVE run's abort handle and folds the abandoned run's
+     * step statuses onto the new plan.
+     * Identity on the captured plan object is the whole test —
      * `setPlan` stores the reference, so it holds across a re-run of the same
      * plan and breaks the moment a different one (or `null`) is live
      * (PF-1229 finding #4).
@@ -470,6 +485,21 @@ export const createOrchestratorSlice: StateCreator<
       },
 
       onGateReached: (gate) => {
+        // A superseded run must not repaint an approval gate over the live
+        // store — but it still has to be UNPARKED, or its `await` never
+        // returns, `runPipeline` never reaches its `finally`, and the token
+        // reservation leaks for the rest of the session. `pipelineRunner`
+        // checks `ctx.signal` only at the top of each step iteration, so a
+        // step that settles just before a reset still reaches this gate with
+        // no abort check in between, and `planBuilder` gives every plan
+        // gates. Resolve with the VALUE 'rejected' rather than rejecting the
+        // promise: the runner reads that as a decision, cancels the abandoned
+        // plan, skips its remaining steps and returns normally
+        // (PF-1229 finding #1).
+        if (!isCurrentRun()) {
+          return Promise.resolve<'approved' | 'rejected'>('rejected');
+        }
+
         return new Promise<'approved' | 'rejected'>((resolve) => {
           _gateResolver = resolve;
           set({
@@ -509,7 +539,16 @@ export const createOrchestratorSlice: StateCreator<
         });
       }
     } finally {
-      _abortController = null;
+      // Only the CURRENT run may drop the shared abort handle. A superseded
+      // run settling after `startPipeline` assigned a fresh
+      // `_abortController` would otherwise null out the LIVE run's handle,
+      // leaving `cancelPipeline` and `resetOrchestrator` with nothing to
+      // abort — silently, since both no-op on a null handle. That is the
+      // Round-2 defect this gate exists to close, one scope out
+      // (PF-1229 finding #2).
+      if (isCurrentRun()) {
+        _abortController = null;
+      }
 
       // Re-read the plan the runner mutated.
       //
