@@ -121,6 +121,22 @@ describe('OnboardingWizard', () => {
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
+  // PF-1215: before this, "Build with AI" only switched the right panel to chat
+  // and left the user to guess a phrase the intent classifier would recognise.
+  it('clicking "Build with AI" opens the quick-start dialog', () => {
+    const onStartAi = vi.fn();
+    render(<OnboardingWizard onComplete={onComplete} onStartAi={onStartAi} />);
+    fireEvent.click(screen.getByTestId('path-card-ai'));
+    expect(onStartAi).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not open the quick-start dialog for the non-AI paths', () => {
+    const onStartAi = vi.fn();
+    render(<OnboardingWizard onComplete={onComplete} onStartAi={onStartAi} />);
+    fireEvent.click(screen.getByTestId('path-card-blank'));
+    expect(onStartAi).not.toHaveBeenCalled();
+  });
+
   it('clicking "Take a Tour" starts the first-scene tutorial and calls onComplete', () => {
     render(<OnboardingWizard onComplete={onComplete} />);
     fireEvent.click(screen.getByTestId('path-card-tour'));

@@ -108,6 +108,11 @@ describe('OrchestratorPanel', () => {
     render(<OrchestratorPanel />);
 
     expect(screen.getByText('No game creation in progress')).toBeTruthy();
+    // The idle copy must name a control that exists in the editor (PF-1215) —
+    // it used to say "QuickStart", which was not a label on anything.
+    expect(
+      screen.getByText(/Click \u201cMake me a game\u201d in the toolbar, or describe one in AI chat/)
+    ).toBeTruthy();
   });
 
   it('renders game title when plan is set', () => {

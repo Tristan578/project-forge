@@ -14,6 +14,7 @@ import { PanelsMenu } from './PanelsMenu';
 import { TokenBalance } from '../settings/TokenBalance';
 import { DrawerPanel } from './DrawerPanel';
 import { MobileToolbar } from './MobileToolbar';
+import { Button } from '@spawnforge/ui';
 
 // ThemeAmbient: SSR must be disabled — reads data-sf-theme from DOM at runtime
 const ThemeAmbient = dynamic(
@@ -34,6 +35,7 @@ const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => (
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
 const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
 const OnboardingWizard = lazy(() => import('../onboarding/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })));
+const QuickStartDialog = lazy(() => import('../onboarding/QuickStartDialog').then(m => ({ default: m.QuickStartDialog })));
 
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
@@ -347,7 +349,7 @@ const ONBOARDING_COMPLETED_KEY = 'forge-onboarding-completed';
  * Users with any legacy key (forge-quickstart-completed, forge-welcomed) are treated as
  * returning users and never shown the new wizard.
  */
-function OnboardingGate() {
+function OnboardingGate({ onRequestQuickStart }: { onRequestQuickStart: () => void }) {
   const onboardingCompleted = useOnboardingStore((s) => s.onboardingCompleted);
   const isNewUser = useOnboardingStore((s) => s.isNewUser);
   const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
@@ -390,7 +392,7 @@ function OnboardingGate() {
 
   // True first-time users (isNewUser=true in persisted Zustand store) → wizard
   if (isNewUser) {
-    return <OnboardingWizard onComplete={handleWizardComplete} />;
+    return <OnboardingWizard onComplete={handleWizardComplete} onStartAi={onRequestQuickStart} />;
   }
 
   // Returning users who don't have any legacy key (cleared storage after the wizard
@@ -432,6 +434,13 @@ export function EditorLayout() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // The one visible entry into the game-creation pipeline. Before PF-1215 the
+  // only way to reach `startDecomposition` was to type something the chat
+  // intent classifier happened to recognise, so the product's headline
+  // capability had no control anywhere in the editor.
+  const [quickStartOpen, setQuickStartOpen] = useState(false);
+  const openQuickStart = useCallback(() => setQuickStartOpen(true), []);
+  const closeQuickStart = useCallback(() => setQuickStartOpen(false), []);
 
   // Close drawers when switching away from compact mode (prev-value pattern)
   const [prevMode, setPrevMode] = useState(layout.mode);
@@ -618,6 +627,7 @@ export function EditorLayout() {
         <MobileToolbar
           onToggleLeft={() => setLeftDrawerOpen((o) => !o)}
           onToggleRight={() => setRightDrawerOpen((o) => !o)}
+          onQuickStart={openQuickStart}
         />
 
         {/* Drawers */}
@@ -639,7 +649,8 @@ export function EditorLayout() {
         <OnboardingChecklist />
         <TokenDepletedModal />
         <Suspense fallback={null}>
-          <OnboardingGate />
+          <OnboardingGate onRequestQuickStart={openQuickStart} />
+          <QuickStartDialog open={quickStartOpen} onClose={closeQuickStart} />
           <ShaderEditorPanel />
           <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
           <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
@@ -667,6 +678,10 @@ export function EditorLayout() {
           <div className="h-3 w-px bg-zinc-700" />
           <SceneNameDisplay sceneName={sceneName} />
           <SceneToolbar />
+          {/* PF-1215: the only visible entry into the game-creation pipeline. */}
+          <Button size="sm" data-testid="quick-start-trigger" onClick={openQuickStart}>
+            Make me a game
+          </Button>
         </div>
         <div className="flex items-center gap-2">
           <PlayControls />
@@ -702,7 +717,8 @@ export function EditorLayout() {
       <OnboardingChecklist />
       <TokenDepletedModal />
       <Suspense fallback={null}>
-        <OnboardingGate />
+        <OnboardingGate onRequestQuickStart={openQuickStart} />
+        <QuickStartDialog open={quickStartOpen} onClose={closeQuickStart} />
         <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />

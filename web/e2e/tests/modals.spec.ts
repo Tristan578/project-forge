@@ -83,7 +83,7 @@ test.describe('Modals @ui @dev', () => {
       { timeout: E2E_TIMEOUT_AUTH_MS }
     );
 
-    // QuickStartFlow or WelcomeModal should be visible (fixed overlay)
+    // The welcome modal (or another onboarding overlay) should be visible (fixed overlay)
     const onboardingOverlay = page.locator('.fixed').filter({ hasText: /what kind of game|welcome|getting started/i }).first();
     await expect(onboardingOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });

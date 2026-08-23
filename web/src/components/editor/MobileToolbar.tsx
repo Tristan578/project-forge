@@ -6,6 +6,7 @@ import {
   Maximize2,
   PanelLeft,
   PanelRight,
+  Sparkles,
 } from 'lucide-react';
 import { useEditorStore, type GizmoMode } from '@/stores/editorStore';
 import { AddEntityMenu } from './AddEntityMenu';
@@ -14,9 +15,16 @@ import { spawnEntityWithFeedback } from './spawnFeedback';
 interface MobileToolbarProps {
   onToggleLeft: () => void;
   onToggleRight: () => void;
+  /**
+   * Opens the quick-start dialog (PF-1215). Required, not optional: this is the
+   * only visible entry into the game-creation pipeline on a compact viewport, so
+   * a caller that forgets to wire it should be a compile error rather than a
+   * silently missing button.
+   */
+  onQuickStart: () => void;
 }
 
-export function MobileToolbar({ onToggleLeft, onToggleRight }: MobileToolbarProps) {
+export function MobileToolbar({ onToggleLeft, onToggleRight, onQuickStart }: MobileToolbarProps) {
   const gizmoMode = useEditorStore((s) => s.gizmoMode);
   const setGizmoMode = useEditorStore((s) => s.setGizmoMode);
   const spawnEntity = useEditorStore((s) => s.spawnEntity);
@@ -59,6 +67,16 @@ export function MobileToolbar({ onToggleLeft, onToggleRight }: MobileToolbarProp
         ))}
         <div className="mx-1 h-6 w-px bg-zinc-700" />
         <AddEntityMenu onSpawn={(type) => spawnEntityWithFeedback(spawnEntity, type)} />
+        <div className="mx-1 h-6 w-px bg-zinc-700" />
+        <button
+          onClick={onQuickStart}
+          aria-label="Make me a game"
+          data-testid="quick-start-trigger"
+          className="flex h-11 w-11 items-center justify-center rounded bg-[var(--sf-accent-hover)] text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)] active:scale-[0.97]"
+          title="Make me a game"
+        >
+          <Sparkles size={18} />
+        </button>
       </div>
 
       {/* Right: inspector toggle */}

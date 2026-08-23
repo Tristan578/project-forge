@@ -266,7 +266,11 @@ export function OrchestratorPanel() {
         <div>
           <Sparkles className="mx-auto mb-2 h-8 w-8 text-zinc-600" />
           <p>No game creation in progress</p>
-          <p className="mt-1 text-xs">Use chat or QuickStart to create a game</p>
+          {/* PF-1215: name the control that actually exists. "QuickStart" was
+              not a label on anything in the editor. */}
+          <p className="mt-1 text-xs">
+            Click &ldquo;Make me a game&rdquo; in the toolbar, or describe one in AI chat
+          </p>
         </div>
       </div>
     );

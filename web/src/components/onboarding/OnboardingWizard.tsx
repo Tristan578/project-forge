@@ -8,6 +8,13 @@ import { useChatStore } from '@/stores/chatStore';
 
 export interface OnboardingWizardProps {
   onComplete: () => void;
+  /**
+   * Opens the quick-start dialog (PF-1215). The "Build with AI" path used to do
+   * nothing but switch the right panel to chat and hope the user typed something
+   * the intent classifier recognised; it now hands the user the real control.
+   * Optional so the wizard still renders standalone in tests and stories.
+   */
+  onStartAi?: () => void;
 }
 
 interface PathCard {
@@ -56,7 +63,7 @@ const PATH_CARDS: PathCard[] = [
   },
 ];
 
-export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
+export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProps) {
   const selectPath = useOnboardingStore((s) => s.selectPath);
   const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
@@ -101,6 +108,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
         completeOnboarding();
         setRightPanelTab('chat');
         onComplete();
+        onStartAi?.();
         return;
       }
 
@@ -122,7 +130,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
         return;
       }
     },
-    [selectPath, completeOnboarding, setRightPanelTab, startTutorial, onComplete]
+    [selectPath, completeOnboarding, setRightPanelTab, startTutorial, onComplete, onStartAi]
   );
 
   const handleTemplateChosen = useCallback(
