@@ -8,6 +8,7 @@ import {
   PanelRight,
   Sparkles,
 } from 'lucide-react';
+import { Button } from '@spawnforge/ui';
 import { useEditorStore, type GizmoMode } from '@/stores/editorStore';
 import { AddEntityMenu } from './AddEntityMenu';
 import { spawnEntityWithFeedback } from './spawnFeedback';
@@ -36,7 +37,7 @@ export function MobileToolbar({ onToggleLeft, onToggleRight, onQuickStart }: Mob
   ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-30 flex h-12 items-center justify-between border-t border-zinc-700 bg-zinc-900 px-2">
+    <div className="fixed bottom-0 left-0 right-0 z-30 flex h-12 items-center justify-between border-t border-zinc-700 bg-zinc-900 px-1">
       {/* Left: panel toggle */}
       <button
         onClick={onToggleLeft}
@@ -48,7 +49,7 @@ export function MobileToolbar({ onToggleLeft, onToggleRight, onQuickStart }: Mob
       </button>
 
       {/* Center: gizmo modes + spawn */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5">
         {gizmoButtons.map(({ mode, icon: Icon, label }) => (
           <button
             key={mode}
@@ -65,18 +66,19 @@ export function MobileToolbar({ onToggleLeft, onToggleRight, onQuickStart }: Mob
             <Icon size={18} />
           </button>
         ))}
-        <div className="mx-1 h-6 w-px bg-zinc-700" />
+        <div className="mx-0.5 h-6 w-px bg-zinc-700" />
         <AddEntityMenu onSpawn={(type) => spawnEntityWithFeedback(spawnEntity, type)} />
-        <div className="mx-1 h-6 w-px bg-zinc-700" />
-        <button
+        <div className="mx-0.5 h-6 w-px bg-zinc-700" />
+        <Button
+          size="sm"
           onClick={onQuickStart}
           aria-label="Make me a game"
           data-testid="quick-start-trigger"
-          className="flex h-11 w-11 items-center justify-center rounded bg-[var(--sf-accent-hover)] text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)] active:scale-[0.97]"
           title="Make me a game"
+          className="h-11 w-11 p-0"
         >
           <Sparkles size={18} />
-        </button>
+        </Button>
       </div>
 
       {/* Right: inspector toggle */}
