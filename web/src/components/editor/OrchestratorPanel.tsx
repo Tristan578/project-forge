@@ -14,6 +14,7 @@
  */
 
 import { useCallback } from 'react';
+import { cn } from '@spawnforge/ui';
 import {
   Loader2,
   CheckCircle2,
@@ -69,8 +70,18 @@ function getStepLabel(executor: string): string {
  * as a rendering bug rather than a distinction. Geometry stays at each call
  * site, since the banner is a block of body text and the step alert is a small
  * annotation; only the colour is shared, because the colour is the meaning.
+ *
+ * Built off `--sf-destructive` (`packages/ui/src/tokens/colors.ts`) rather than
+ * a raw `red-*` Tailwind shade, so a theme swap (this panel supports all
+ * `ThemeName`s, not just the dark palette these `zinc-*` neighbours assume)
+ * recolours the failure surface along with everything else instead of leaving
+ * one hardcoded red behind.
  */
-const ERROR_SURFACE_CLASSES = 'border border-red-800 bg-red-950/50 text-red-300';
+const ERROR_SURFACE_CLASSES = cn(
+  'border border-[var(--sf-destructive)]/40',
+  'bg-[var(--sf-destructive)]/10',
+  'text-[var(--sf-destructive)]',
+);
 
 // ---------------------------------------------------------------------------
 // Status helpers
@@ -177,7 +188,7 @@ function StepItem({
       {failureMessage && (
         <div
           role="alert"
-          className={`mt-1 ml-6 rounded ${ERROR_SURFACE_CLASSES} px-2 py-1 text-xs leading-snug`}
+          className={cn('mt-1 ml-6 rounded px-2 py-1 text-xs leading-snug', ERROR_SURFACE_CLASSES)}
         >
           {failureMessage}
         </div>
@@ -368,7 +379,7 @@ export function OrchestratorPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Error display */}
         {error && (
-          <div className={`rounded-md ${ERROR_SURFACE_CLASSES} px-3 py-2 text-sm`}>
+          <div className={cn('rounded-md px-3 py-2 text-sm', ERROR_SURFACE_CLASSES)}>
             {error}
           </div>
         )}

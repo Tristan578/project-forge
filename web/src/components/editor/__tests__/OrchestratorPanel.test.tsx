@@ -430,7 +430,7 @@ describe('OrchestratorPanel', () => {
       expect(container.contains(banner)).toBe(true);
 
       const colourOf = (el: Element) => Array.from(el.classList)
-        .filter((c) => /(^|:)(border-|bg-|text-)red-/.test(c))
+        .filter((c) => /(^|:)(border|bg|text)-\[var\(--sf-destructive\)\]/.test(c))
         .sort();
 
       expect(colourOf(stepAlert)).toEqual(colourOf(banner));
