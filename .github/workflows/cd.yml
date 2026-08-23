@@ -392,13 +392,28 @@ jobs:
           retention-days: 7
 
   e2e:
-    name: E2E (UI)
+    name: E2E (UI ${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: [build-wasm]
-    if: ${{ needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped' }}
-    timeout-minutes: 15
+    # `!cancelled()` is load-bearing. An `if:` with no status-check function
+    # gets an implicit `success()` prepended, and success() is FALSE when a
+    # needed job was skipped -- so the `result == 'skipped'` clause below was
+    # dead for this job's whole life: build-wasm is skipped on every web-only
+    # push, this gate was skipped with it, and the deploy jobs (which accept
+    # needs.e2e.result == 'skipped') shipped the web with zero E2E coverage.
+    # On engine pushes it DID run -- against the default next-dev config, all
+    # 505 specs, 2 workers, 15-minute budget -- and was cancelled by its own
+    # timeout on every run, which cancelled the deploy with it (PF-1230 / #9364).
+    # This job now mirrors ci.yml's test-e2e-ui (next build + next start via
+    # playwright.ci.config.ts, @ui only, 3 shards, ~2.5 min each).
+    if: ${{ !cancelled() && (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') }}
+    timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/3, 2/3, 3/3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -410,6 +425,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # npm can drop the platform-native @next/swc optional dep while exiting 0
+      # (npm/cli#4828 class) -- fail loudly here, not as an opaque next-build
+      # error two steps later (PF-947). Same guard as ci.yml's next-build jobs.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
@@ -423,17 +444,28 @@ jobs:
           restore-keys: |
             playwright-${{ runner.os }}-
 
-      - name: Install Playwright chromium
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: web
         run: npx playwright install --with-deps chromium
 
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
+
+      # The @ui specs do not load the engine, so a missing WASM artifact must
+      # not fail the gate on a web-only push -- but when build-wasm DID run,
+      # serve its output so the app under test matches what deploys.
       - name: Download WASM artifacts
+        if: needs.build-wasm.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: wasm-binaries
           path: engine/
 
       - name: Copy WASM to web/public
+        if: needs.build-wasm.result == 'success'
         run: |
           mkdir -p web/public/engine-pkg-webgl2
           mkdir -p web/public/engine-pkg-webgpu
@@ -444,17 +476,26 @@ jobs:
           cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
           cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
 
-      - name: Run Playwright tests (UI-only, skip @engine)
+      - name: Build for E2E
         working-directory: web
-        run: npx playwright test --project=chromium --grep-invert @engine
         env:
-          CI: true
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx next build
+
+      - name: Run UI-only E2E tests (shard ${{ matrix.shard }})
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+        # Same selection as ci.yml test-e2e-ui: @journey needs the exposed
+        # store surface (NEXT_PUBLIC_E2E_HOOKS + E2E_STRICT_STORES) this
+        # store-less build does not set, and @engine needs WASM + GPU.
+        run: npx playwright test --grep '@ui' --grep-invert '@dev|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ strategy.job-index }}
           path: web/playwright-report/
           retention-days: 14
 
@@ -462,7 +503,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: playwright-results
+          name: playwright-results-${{ strategy.job-index }}
           path: web/test-results/
           retention-days: 14
 
