@@ -15,7 +15,8 @@ transition. Because `dispatchCommand` returns `void`, a payload the engine HARD
 rejects leaves its pipeline step reporting `completed` and surfaces only as the
 `Engine rejected command '<name>'` line `editorStore`'s `tracked` wrapper writes
 to the console — so both tests collect console errors and page errors for their
-whole lifetime and assert zero of each. A payload the engine accepts but whose
+whole lifetime, and assert that none of those console lines names an engine
+rejection and that no page error occurred. A payload the engine accepts but whose
 keys deserialize to `None` still logs nothing and is still not caught here; that
 remains the job of the pick-based payload builders and their unit pins.
 

@@ -23,10 +23,14 @@ import crystalRun3d from '../fixtures/gdd/crystal-run-3d.json';
  * pass condition is a genuine round trip: nothing on the Play-button path writes
  * `engineMode`. `gameSlice.play()` only dispatches, so the two writers that
  * exist are `hooks/events/transformEvents.ts`, reacting to the engine's own
- * `ENGINE_MODE_CHANGED` event, and `gameSlice.setEngineMode` — whose live
- * callers (`QuickStartFlow.tsx`, `useScriptRunner.ts`) are not on this path and
- * are not mounted by this flow. Observing `engineMode === 'play'` therefore
- * proves the engine accepted the scene the pipeline built and entered play mode.
+ * `ENGINE_MODE_CHANGED` event, and `gameSlice.setEngineMode` — whose two live
+ * callers cannot forge a `'play'`. `useScriptRunner.ts` IS mounted by this flow
+ * (`CanvasArea.tsx` calls it, `EditorLayout` renders `CanvasArea`), but the one
+ * write it makes is `setEngineMode('edit')` from its infinite-loop watchdog
+ * (`useScriptRunner.ts:493`). `QuickStartFlow.tsx` does write `'play'`, but only
+ * from its own completion handler, and it is rendered on no route this flow
+ * visits. Observing `engineMode === 'play'` therefore proves the engine accepted
+ * the scene the pipeline built and entered play mode.
  *
  * The GDD is loaded from the SAME fixture the integration suite imports
  * (`e2e/fixtures/gdd/crystal-run-3d.json`). Two gates, one game — otherwise the
@@ -42,9 +46,12 @@ import crystalRun3d from '../fixtures/gdd/crystal-run-3d.json';
  * step reporting `completed` and surfaces only as the
  * `Engine rejected command '<name>'` line that `editorStore`'s `tracked` wrapper
  * writes to the console. Both tests therefore collect console errors and page
- * errors for their whole lifetime and assert ZERO of each. That is what makes
- * "every step completed" mean "the engine accepted every command the step sent"
- * rather than merely "no executor threw".
+ * errors for their whole lifetime, and assert that ZERO of those console lines
+ * name an engine rejection and that ZERO page errors occurred. (Console errors
+ * that do NOT name a rejection are tolerated on purpose — an unrelated
+ * third-party or React warning must not redden a gate about engine payloads.)
+ * That is what makes "every step completed" mean "the engine accepted every
+ * command the step sent" rather than merely "no executor threw".
  *
  * That covers HARD rejections only, and the distinction matters when reading a
  * green run. A payload whose keys deserialize to `None` (the wrong-wire-shape
@@ -451,9 +458,15 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     // `EntityType::from_str` is — a wrong spelling would be a hard reject, which
     // `expectNoEngineRejections` below would then catch.)
     const before = (await readOutcome(page)).nodeCount;
-    await page.evaluate(() => {
-      window.__FORGE_DISPATCH?.('spawn_entity', { entityType: 'cube' });
-    });
+    // The return value is load-bearing: `false` means the hook is wired but
+    // `getCommandDispatcher()` handed back nothing (no live engine), and
+    // `undefined` means the hook itself is absent (`NEXT_PUBLIC_E2E_HOOKS` off).
+    // Both would otherwise reach the reader as an opaque waitForFunction
+    // timeout on `nodeCount` rather than as a named cause.
+    const dispatched = await page.evaluate(() =>
+      window.__FORGE_DISPATCH?.('spawn_entity', { entityType: 'cube' })
+    );
+    expect(dispatched).toBe(true);
     await page.waitForFunction(
       (n) =>
         Object.keys(
