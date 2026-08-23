@@ -16,20 +16,25 @@
  * PF-1215 (#9338), golden-path item 4.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Compass, Crosshair, Gamepad2, Loader2, Puzzle, type LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Dialog, Label, Textarea } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { OrchestratorStatus } from '@/stores/slices/orchestratorSlice';
+import {
+  isOrchestratorRunLive,
+  type OrchestratorStatus,
+} from '@/stores/slices/orchestratorSlice';
 import {
   QUICK_START_GAME_TYPES,
   buildQuickStartPrompt,
   findQuickStartGameType,
+  quickStartPromptMaxLength,
   type QuickStartGameType,
 } from '@/lib/game-creation/quickStart';
 import { ApprovalGateDialog } from '@/components/editor/ApprovalGateDialog';
+import { claimQuickStartGate } from '@/components/editor/quickStartGateOwner';
 
 /**
  * Icons live here, not in `lib/game-creation/quickStart.ts`: that module is
@@ -56,6 +61,13 @@ const STATUS_MESSAGES: Record<OrchestratorStatus, string> = {
 
 const GENERIC_FAILURE = 'Could not start building your game. Please try again.';
 
+/**
+ * Shown when "Build it" is pressed while a run is already live. The slice
+ * refuses (it would clear the live run's plan, gates and abort controller), so
+ * the user has to be told why nothing new started.
+ */
+const ALREADY_RUNNING = 'A build is already running. Wait for it to finish, or stop it first.';
+
 type Phase = 'pick' | 'describe' | 'running';
 
 export interface QuickStartDialogProps {
@@ -70,23 +82,59 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const statusRef = useRef<HTMLDivElement>(null);
+  const firstCardRef = useRef<HTMLButtonElement>(null);
+  const prevPhaseRef = useRef<Phase | null>(null);
+
   const status = useEditorStore((s) => s.orchestratorStatus);
   const pendingGate = useEditorStore((s) => s.pendingGate);
   const resolveGate = useEditorStore((s) => s.resolveGate);
   const cancelPipeline = useEditorStore((s) => s.cancelPipeline);
 
+  const runIsLive = isOrchestratorRunLive(status);
+
+  // While this dialog is open it is the only place the user can reach a gate
+  // (it is modal and covers the orchestrator panel), so it owns the gate UI.
+  useEffect(() => {
+    if (!open) return undefined;
+    return claimQuickStartGate();
+  }, [open]);
+
   // Reopening starts a fresh run; leaving the previous prompt and error on
   // screen would read as state belonging to whatever is happening now.
+  //
+  // Unless a run is still live: this dialog can be closed mid-run, and resetting
+  // to 'pick' put "Build it" back in front of the user, whose second run the
+  // slice now refuses. Resume the running view instead, which is also where the
+  // pending gate is rendered.
   useEffect(() => {
     if (!open) return;
+    setError(null);
+    setStarting(false);
+    if (isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)) {
+      setPhase('running');
+      return;
+    }
     setPhase('pick');
     setSelectedId(null);
     setPrompt('');
-    setError(null);
-    setStarting(false);
   }, [open]);
 
+  // Every phase change unmounts the element that was focused (the card on
+  // pick->describe, "Build it" on describe->running), which drops focus to
+  // document.body inside an aria-modal region. Move it explicitly.
+  useEffect(() => {
+    const previous = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (previous === null || previous === phase) return;
+    if (phase === 'describe') promptRef.current?.focus();
+    else if (phase === 'running') statusRef.current?.focus();
+    else firstCardRef.current?.focus();
+  }, [phase]);
+
   const selected = findQuickStartGameType(selectedId);
+  const promptMax = selected ? quickStartPromptMaxLength(selected) : 0;
 
   const handlePick = useCallback((id: QuickStartGameType) => {
     setSelectedId(id);
@@ -111,7 +159,19 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       // on screen before the run starts (mirrors chatStore's game-creation path).
       useWorkspaceStore.getState().openPanel('orchestrator');
       const editor = useEditorStore.getState();
-      await editor.startQuickStart(buildQuickStartPrompt(card, prompt), editor.projectType);
+      const started = await editor.startQuickStart(
+        buildQuickStartPrompt(card, prompt),
+        editor.projectType
+      );
+
+      // Refused: a run was already live and starting a second one would have
+      // orphaned it. Nothing changed, so say so rather than showing a build view.
+      if (!started) {
+        setPhase('describe');
+        setError(ALREADY_RUNNING);
+        toast.error(ALREADY_RUNNING);
+        return;
+      }
 
       // `startDecomposition` records its failures on the store rather than
       // throwing, so without this read a failed run would show as a silent stall.
@@ -147,7 +207,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         <Button variant="ghost" size="sm" onClick={() => setPhase('pick')}>
           Back
         </Button>
-        <Button size="sm" onClick={handleSubmit} disabled={starting}>
+        <Button size="sm" onClick={handleSubmit} disabled={starting || runIsLive}>
           Build it
         </Button>
       </>
@@ -158,9 +218,14 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             Try again
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={handleCancelRun}>
-          Stop
-        </Button>
+        {/* Only while there is something to stop: cancelPipeline after a run
+            has completed or failed flips the status to 'cancelled' and re-POSTs
+            the token release. Mirrors OrchestratorPanel's footer guard. */}
+        {runIsLive && (
+          <Button variant="ghost" size="sm" onClick={handleCancelRun}>
+            Stop
+          </Button>
+        )}
         <Button size="sm" onClick={onClose}>
           Close
         </Button>
@@ -188,18 +253,22 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     >
       {phase === 'pick' && (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {QUICK_START_GAME_TYPES.map((card) => {
+          {QUICK_START_GAME_TYPES.map((card, index) => {
             const Icon = GAME_TYPE_ICONS[card.id];
             return (
               <button
                 key={card.id}
+                ref={index === 0 ? firstCardRef : undefined}
                 type="button"
                 onClick={() => handlePick(card.id)}
                 className="flex items-start gap-3 rounded-[var(--sf-radius-md)] border border-[var(--sf-border)] bg-[var(--sf-bg-app)] p-3 text-left transition-colors hover:border-[var(--sf-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
               >
+                {/* The accent is a theme token handed in as a CSS variable, so
+                    the icon follows all seven themes; `color` is never set to a
+                    literal here (see `accentToken`). */}
                 <Icon
-                  className="mt-0.5 h-5 w-5 shrink-0"
-                  style={{ color: card.accentColor }}
+                  className="mt-0.5 h-5 w-5 shrink-0 text-[var(--qs-accent)]"
+                  style={{ '--qs-accent': card.accentToken } as CSSProperties}
                   aria-hidden="true"
                 />
                 <span>
@@ -222,30 +291,55 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             What happens in your {selected.label.toLowerCase()}?
           </Label>
           <Textarea
+            ref={promptRef}
             id="quick-start-prompt"
             rows={4}
             value={prompt}
+            maxLength={promptMax}
+            aria-describedby="quick-start-prompt-count"
             placeholder={selected.placeholder}
             onChange={(e) => setPrompt(e.target.value)}
           />
+          {/* /api/game/decompose rejects a COMPOSED prompt over 1000 chars, and
+              the composed prompt carries this card's label prefix. Capping here
+              is what stops a bare `validation_error` arriving after the user has
+              already committed to the build. */}
+          <p
+            id="quick-start-prompt-count"
+            className="text-right text-xs text-[var(--sf-text-muted)]"
+          >
+            {prompt.length} / {promptMax}
+          </p>
         </div>
       )}
 
       {phase === 'running' && (
         <div className="space-y-3">
-          <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm">
+          <div
+            ref={statusRef}
+            tabIndex={-1}
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
+          >
             {(starting || status === 'decomposing' || status === 'planning' || status === 'executing') && (
               <Loader2 className="h-4 w-4 animate-spin text-[var(--sf-accent)]" aria-hidden="true" />
             )}
             <span>{STATUS_MESSAGES[status]}</span>
           </div>
 
+          {/* A gate_assets list is as long as the plan makes it; without its own
+              scroll region it pushed Approve/Cancel off a short mobile viewport,
+              where the dialog itself does not scroll. */}
           {pendingGate && (
-            <ApprovalGateDialog
-              gate={pendingGate}
-              onApprove={() => resolveGate('approved')}
-              onCancel={() => resolveGate('rejected')}
-            />
+            <div className="max-h-[45vh] overflow-y-auto">
+              <ApprovalGateDialog
+                gate={pendingGate}
+                onApprove={() => resolveGate('approved')}
+                onCancel={() => resolveGate('rejected')}
+                autoFocus
+              />
+            </div>
           )}
         </div>
       )}

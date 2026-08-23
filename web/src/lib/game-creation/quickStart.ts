@@ -37,8 +37,18 @@ export interface QuickStartGameTypeCard {
   label: string;
   /** One-line description under the label. */
   description: string;
-  /** Accent colour for the card, as a CSS colour string. */
-  accentColor: string;
+  /**
+   * Accent for the card icon, as a reference to a THEME token — never a literal
+   * colour. The card sits inside the token-themed `@spawnforge/ui` Dialog, so a
+   * hardcoded hex is the one thing on screen that does not follow the seven
+   * themes (and on the light theme the old values failed WCAG AA against the
+   * dialog surface).
+   *
+   * `--sf-accent`, `--sf-success`, `--sf-warning` and `--sf-destructive` are the
+   * only per-theme hues `applyThemeTokens` writes, so the four cards take one
+   * each: the mapping exists to tell them apart, not to assert severity.
+   */
+  accentToken: string;
   /** Starter prompt pre-filled into the textarea, and the fallback if it is cleared. */
   placeholder: string;
 }
@@ -49,31 +59,52 @@ export const QUICK_START_GAME_TYPES: readonly QuickStartGameTypeCard[] = [
     id: 'platformer',
     label: 'Platformer',
     description: 'Jump, run, collect coins',
-    accentColor: '#22c55e',
+    accentToken: 'var(--sf-success)',
     placeholder: 'A jungle platformer where the player collects gems to unlock a golden door',
   },
   {
     id: 'shooter',
     label: 'Shooter',
     description: 'Aim, shoot, destroy targets',
-    accentColor: '#ef4444',
+    accentToken: 'var(--sf-destructive)',
     placeholder: 'A sci-fi arena where robots shoot back and drop power-ups',
   },
   {
     id: 'puzzle',
     label: 'Puzzle',
     description: 'Think, solve, advance levels',
-    accentColor: '#8b5cf6',
+    accentToken: 'var(--sf-accent)',
     placeholder: 'Push crates onto switches to open doors in a haunted mansion',
   },
   {
     id: 'explorer',
     label: 'Explorer',
     description: 'Wander, discover, experience',
-    accentColor: '#06b6d4',
+    accentToken: 'var(--sf-warning)',
     placeholder: 'A peaceful forest walk where you find glowing crystals and hidden messages',
   },
 ] as const;
+
+/**
+ * Hard cap the composed prompt must respect.
+ *
+ * Mirrors `z.string().min(1).max(1000)` on `/api/game/decompose`. The route
+ * validates the COMPOSED prompt, so a textarea capped at 1000 would still be
+ * rejected once the label prefix is added — see `quickStartPromptMaxLength`.
+ */
+export const QUICK_START_PROMPT_MAX = 1000;
+
+/**
+ * How many characters the user may type for a given card, so that the prompt
+ * `buildQuickStartPrompt` composes from it still fits `QUICK_START_PROMPT_MAX`.
+ *
+ * Without this the run fails server-side with a bare `validation_error` after
+ * the user has already committed to the build.
+ */
+export function quickStartPromptMaxLength(card: QuickStartGameTypeCard): number {
+  // `buildQuickStartPrompt` emits `<label>: <body>` — label plus the ": " join.
+  return Math.max(0, QUICK_START_PROMPT_MAX - card.label.length - 2);
+}
 
 /** Look up a card by id. Returns `null` rather than throwing on an unknown id. */
 export function findQuickStartGameType(

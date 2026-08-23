@@ -12,7 +12,10 @@ import {
 } from '@/test/utils/componentTestUtils';
 import { toast } from 'sonner';
 import { QuickStartDialog } from '../QuickStartDialog';
-import { QUICK_START_GAME_TYPES } from '@/lib/game-creation/quickStart';
+import {
+  QUICK_START_GAME_TYPES,
+  QUICK_START_PROMPT_MAX,
+} from '@/lib/game-creation/quickStart';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -37,7 +40,9 @@ vi.mock('@/stores/workspaceStore', () => ({
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-const startQuickStart = vi.fn().mockResolvedValue(undefined);
+// `startQuickStart` resolves true when THIS call owned the run and false
+// when it was refused because one was already live (orchestratorSlice.ts).
+const startQuickStart = vi.fn().mockResolvedValue(true);
 const resolveGate = vi.fn();
 const cancelPipeline = vi.fn();
 
@@ -57,7 +62,7 @@ function setState(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  startQuickStart.mockResolvedValue(undefined);
+  startQuickStart.mockResolvedValue(true);
   setState();
 });
 
@@ -127,7 +132,10 @@ describe('QuickStartDialog', () => {
   });
 
   it('reports progress from the orchestrator in a polite live region', async () => {
-    setState({ orchestratorStatus: 'executing' });
+    startQuickStart.mockImplementationOnce(async () => {
+      hoisted.state.orchestratorStatus = 'executing';
+      return true;
+    });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
     await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
@@ -151,6 +159,7 @@ describe('QuickStartDialog', () => {
   it('surfaces a failure the store only recorded (no throw) as an alert and a toast', async () => {
     startQuickStart.mockImplementationOnce(async () => {
       hoisted.state.orchestratorError = 'Not enough tokens to build this game.';
+      return true;
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
@@ -203,5 +212,137 @@ describe('QuickStartDialog', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('moves focus with the phase so it never drops to document.body', async () => {
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+
+    // pick -> describe: the card that was focused is unmounted by the transition.
+    await pickPlatformer();
+    expect(document.activeElement).toBe(
+      screen.getByLabelText(/what happens in your platformer/i),
+    );
+
+    // describe -> pick: "Back" is unmounted with the prompt step.
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', {
+        name: new RegExp(QUICK_START_GAME_TYPES[0].label, 'i'),
+      }),
+    );
+  });
+
+  it('focuses the live region when the build view replaces the prompt', async () => {
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+    expect(document.activeElement).toBe(await screen.findByRole('status'));
+  });
+
+  it('caps the prompt so the composed prompt cannot exceed what the route accepts', async () => {
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+
+    const card = QUICK_START_GAME_TYPES[0];
+    const field = screen.getByLabelText(
+      /what happens in your platformer/i,
+    ) as HTMLTextAreaElement;
+
+    // `buildQuickStartPrompt` sends "<label>: <body>", and the route validates
+    // that whole string — so the body's budget is the cap minus the prefix.
+    expect(field.maxLength).toBe(QUICK_START_PROMPT_MAX - card.label.length - 2);
+    expect(screen.getByText(`0 / ${field.maxLength}`)).toBeTruthy();
+  });
+
+  it('says why nothing started when the slice refuses a second run', async () => {
+    startQuickStart.mockResolvedValueOnce(false);
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('A build is already running');
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('A build is already running'),
+    );
+    // Back on the prompt, not on a build view for a run that never started.
+    expect(screen.getByLabelText(/what happens in your platformer/i)).toBeTruthy();
+  });
+
+  it('resumes the running view when reopened during a live run', () => {
+    setState({ orchestratorStatus: 'executing' });
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+
+    // Reopening must not put "Build it" back in front of a user whose second
+    // run the slice would refuse.
+    expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
+    expect(screen.getByRole('status').textContent).toContain('Building your game');
+  });
+
+  it('stops the live run and closes when Stop is pressed', async () => {
+    const onClose = vi.fn();
+    setState({ orchestratorStatus: 'executing' });
+    render(<QuickStartDialog open onClose={onClose} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    expect(cancelPipeline).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no Stop once the run is over, so a finished run is not re-cancelled', async () => {
+    startQuickStart.mockImplementationOnce(async () => {
+      hoisted.state.orchestratorStatus = 'completed';
+      return true;
+    });
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+    expect((await screen.findByRole('status')).textContent).toContain('ready');
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
+  });
+
+  it('returns to the prompt on Try again and clears the failure', async () => {
+    startQuickStart.mockRejectedValueOnce(new Error('decompose route is down'));
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await screen.findByRole('alert');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByLabelText(/what happens in your platformer/i)).toBeTruthy();
+  });
+
+  it('lands focus on Approve when a gate appears and rejects it on Cancel', async () => {
+    const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+    setState({
+      orchestratorStatus: 'executing',
+      pendingGate: {
+        id: 'gate_assets',
+        label: 'Generate assets?',
+        description: 'These cost tokens.',
+        displayData: {},
+      },
+    });
+    rerender(<QuickStartDialog open onClose={vi.fn()} />);
+
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    await waitFor(() => expect(document.activeElement).toBe(approve));
+
+    // Cancel is the next stop, so the whole gate is reachable by keyboard.
+    await userEvent.tab();
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    expect(document.activeElement).toBe(cancel);
+
+    await userEvent.click(cancel);
+    expect(resolveGate).toHaveBeenCalledWith('rejected');
   });
 });

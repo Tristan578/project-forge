@@ -28,6 +28,8 @@ import { useEditorStore } from '@/stores/editorStore';
 import type { OrchestratorStatus } from '@/stores/slices/orchestratorSlice';
 import type { PlanStep, TokenEstimate, ExecutorName } from '@/lib/game-creation/types';
 import { ApprovalGateDialog } from './ApprovalGateDialog';
+import { useQuickStartOwnsGate } from './quickStartGateOwner';
+import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 
 // ---------------------------------------------------------------------------
 // Executor name -> user-friendly label
@@ -239,6 +241,12 @@ export function OrchestratorPanel() {
   const runPipelineFromPlan = useEditorStore((s) => s.runPipelineFromPlan);
   const resetOrchestrator = useEditorStore((s) => s.resetOrchestrator);
 
+  // The quick-start dialog is modal and covers this panel, so while it is open
+  // it owns the gate; rendering a second copy here gave the same gate two
+  // Approve buttons, the second landing on an already-answered gate.
+  const quickStartOwnsGate = useQuickStartOwnsGate();
+  const { mode } = useResponsiveLayout();
+
   const handleApprove = useCallback(() => {
     resolveGate('approved');
   }, [resolveGate]);
@@ -267,9 +275,14 @@ export function OrchestratorPanel() {
           <Sparkles className="mx-auto mb-2 h-8 w-8 text-zinc-600" />
           <p>No game creation in progress</p>
           {/* PF-1215: name the control that actually exists. "QuickStart" was
-              not a label on anything in the editor. */}
+              not a label on anything in the editor — and on compact widths that
+              control is the icon-only toolbar button, whose only "Make me a
+              game" is its accessible name, so quoting the label there would
+              point at text nobody can see. */}
           <p className="mt-1 text-xs">
-            Click &ldquo;Make me a game&rdquo; in the toolbar, or describe one in AI chat
+            {mode === 'compact'
+              ? 'Tap the sparkle button in the toolbar, or describe a game in AI chat'
+              : 'Click \u201CMake me a game\u201D in the toolbar, or describe one in AI chat'}
           </p>
         </div>
       </div>
@@ -331,7 +344,7 @@ export function OrchestratorPanel() {
         {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
 
         {/* Approval gate */}
-        {pendingGate && (
+        {pendingGate && !quickStartOwnsGate && (
           <ApprovalGateDialog
             gate={pendingGate}
             onApprove={handleApprove}
