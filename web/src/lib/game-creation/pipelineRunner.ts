@@ -55,6 +55,20 @@ function skipStepAt(plan: OrchestratorPlan, index: number): void {
 }
 
 /**
+ * The two user-facing notices `recordEmptyStepSlots` can write. Kept as
+ * constants (rather than interpolating the empty-slot indices into the
+ * displayed text) for two reasons: the text is what a player reads, so it
+ * stays in plain language with no zero-based "slot" jargon — the dev-facing
+ * detail (which indices, how many) goes to `console.warn` instead — and a
+ * fixed, finite set of possible strings is what makes de-duplication on
+ * re-run (below) a simple equality filter rather than a parse.
+ */
+const EMPTY_STEP_WARNING_SINGULAR =
+  'One of the planned steps was missing from the plan and was not run — regenerate the plan to fill it in.';
+const EMPTY_STEP_WARNING_PLURAL =
+  'Some of the planned steps were missing from the plan and were not run — regenerate the plan to fill them in.';
+
+/**
  * Record every empty slot in `plan.steps` on the plan itself.
  *
  * The runner does not build the plan it is handed: `runPipeline` is exported
@@ -75,19 +89,42 @@ function skipStepAt(plan: OrchestratorPlan, index: number): void {
  * folds `plan.warnings` into `orchestratorWarnings` once the run settles, which
  * is what puts it in front of a user; a write no reader picks up would be the
  * same silence in a different place.
+ *
+ * This function is the sole writer of `plan.warnings` in the codebase today.
+ * `runPipeline` can run the same plan object more than once (a retry, a
+ * re-run after a fix) and a plan handed back through `setPlan` can arrive
+ * with its own `warnings` array already carrying a PRIOR run's notice — so a
+ * bare `push` would grow the array by one every time `plan.steps` still has
+ * the same gap, and the panel would show the same note N times. Strip any
+ * notice this function wrote on an earlier call before deciding whether to
+ * write a fresh one, rather than blindly appending or replacing the whole
+ * array (which would also be safe today, but would silently discard any
+ * OTHER producer's warnings the day one exists).
  */
 function recordEmptyStepSlots(plan: OrchestratorPlan): void {
   const empty: number[] = [];
   for (let i = 0; i < plan.steps.length; i += 1) {
     if (!plan.steps[i]) empty.push(i);
   }
-  if (empty.length === 0) return;
-  const warnings = plan.warnings ?? [];
-  warnings.push(
-    `Plan step ${empty.length === 1 ? 'slot' : 'slots'} ${empty.join(', ')} `
+  const original = plan.warnings;
+  const withoutOwnNotice = (original ?? []).filter(
+    w => w !== EMPTY_STEP_WARNING_SINGULAR && w !== EMPTY_STEP_WARNING_PLURAL,
+  );
+  if (empty.length === 0) {
+    // Only write back when this function actually had a stale notice of its
+    // own to drop — an untouched `undefined` (no warnings ever recorded)
+    // must stay `undefined`, not become `[]`.
+    if (withoutOwnNotice.length !== (original ?? []).length) {
+      plan.warnings = withoutOwnNotice;
+    }
+    return;
+  }
+  console.warn(
+    `[pipelineRunner] plan step ${empty.length === 1 ? 'slot' : 'slots'} ${empty.join(', ')} `
       + `${empty.length === 1 ? 'is' : 'are'} empty; ${empty.length === 1 ? 'that step' : 'those steps'} did not run.`,
   );
-  plan.warnings = warnings;
+  withoutOwnNotice.push(empty.length === 1 ? EMPTY_STEP_WARNING_SINGULAR : EMPTY_STEP_WARNING_PLURAL);
+  plan.warnings = withoutOwnNotice;
 }
 
 /**

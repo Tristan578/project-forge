@@ -807,7 +807,9 @@ describe('runPipeline', () => {
   it('records an empty step slot on the plan instead of quietly finishing without it', async () => {
     // Tolerating a gap is only half an answer: a plan that runs every step it
     // HAS and reports `completed` leaves nothing to say a step it called for
-    // never ran.
+    // never ran. The notice is user-facing language, not the zero-based
+    // "slot" indices a player has no way to act on — those go to
+    // `console.warn` instead (asserted separately below).
     const steps = [
       makeStep('step_0', 'scene_create'),
       ,
@@ -819,7 +821,7 @@ describe('runPipeline', () => {
 
     expect(result.status).toBe('completed');
     expect(result.warnings).toEqual([
-      'Plan step slots 1, 2 are empty; those steps did not run.',
+      'Some of the planned steps were missing from the plan and were not run — regenerate the plan to fill them in.',
     ]);
 
     const single = makePlan({
@@ -834,8 +836,69 @@ describe('runPipeline', () => {
       makeContext(controller.signal),
     );
     expect(singleResult.warnings).toEqual([
-      'Plan step slot 1 is empty; that step did not run.',
+      'One of the planned steps was missing from the plan and was not run — regenerate the plan to fill it in.',
     ]);
+  });
+
+  it('logs the empty-slot indices to the console rather than the user-facing warning', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const steps = [
+        makeStep('step_0', 'scene_create'),
+        ,
+        null as unknown as OrchestratorPlan['steps'][number],
+      ] as OrchestratorPlan['steps'];
+      const plan = makePlan({ steps });
+
+      await runPipeline(plan, makeRegistry(successExecutor), makeContext(controller.signal));
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const [devMessage] = warnSpy.mock.calls[0] as [string];
+      expect(devMessage).toContain('1, 2');
+      expect(devMessage).not.toContain('regenerate the plan');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('does not duplicate the empty-slot warning when the same plan is run twice', async () => {
+    // `recordEmptyStepSlots` is the sole writer of `plan.warnings`. Re-running
+    // the same plan object (a retry, a re-run after a fix that did not touch
+    // `plan.steps`) must not grow the array — the panel would otherwise show
+    // the identical notice once per run.
+    const steps = [
+      makeStep('step_0', 'scene_create'),
+      ,
+      null as unknown as OrchestratorPlan['steps'][number],
+    ] as OrchestratorPlan['steps'];
+    const plan = makePlan({ steps });
+
+    await runPipeline(plan, makeRegistry(successExecutor), makeContext(controller.signal));
+    const secondResult = await runPipeline(plan, makeRegistry(successExecutor), makeContext(controller.signal));
+
+    expect(secondResult.warnings).toEqual([
+      'Some of the planned steps were missing from the plan and were not run — regenerate the plan to fill them in.',
+    ]);
+  });
+
+  it('clears its own empty-slot warning once every slot is filled, without disturbing others', async () => {
+    // Filtering by exact message match (not a blanket array replace) is what
+    // keeps this safe alongside a future second producer of `plan.warnings`.
+    const holedSteps = [
+      makeStep('step_0', 'scene_create'),
+      null as unknown as OrchestratorPlan['steps'][number],
+    ] as OrchestratorPlan['steps'];
+    const plan = makePlan({ steps: holedSteps, warnings: ['unrelated warning from elsewhere'] });
+
+    await runPipeline(plan, makeRegistry(successExecutor), makeContext(controller.signal));
+    expect(plan.warnings).toEqual([
+      'unrelated warning from elsewhere',
+      'One of the planned steps was missing from the plan and was not run — regenerate the plan to fill it in.',
+    ]);
+
+    plan.steps = [makeStep('step_0', 'scene_create'), makeStep('step_1', 'scene_create')];
+    await runPipeline(plan, makeRegistry(successExecutor), makeContext(controller.signal));
+    expect(plan.warnings).toEqual(['unrelated warning from elsewhere']);
   });
 
   it('leaves warnings alone on a plan with no empty slot', async () => {
