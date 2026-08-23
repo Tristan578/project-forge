@@ -862,10 +862,10 @@ describe('runPipeline', () => {
   });
 
   it('does not duplicate the empty-slot warning when the same plan is run twice', async () => {
-    // `recordEmptyStepSlots` is the sole writer of `plan.warnings`. Re-running
-    // the same plan object (a retry, a re-run after a fix that did not touch
-    // `plan.steps`) must not grow the array — the panel would otherwise show
-    // the identical notice once per run.
+    // `recordEmptyStepSlots` owns only its own two exact notices (`planBuilder`
+    // writes to the same array). Re-running the same plan object (a retry, a
+    // re-run after a fix that did not touch `plan.steps`) must not grow the
+    // array — the panel would otherwise show the identical notice once per run.
     const steps = [
       makeStep('step_0', 'scene_create'),
       ,
@@ -883,7 +883,9 @@ describe('runPipeline', () => {
 
   it('clears its own empty-slot warning once every slot is filled, without disturbing others', async () => {
     // Filtering by exact message match (not a blanket array replace) is what
-    // keeps this safe alongside a future second producer of `plan.warnings`.
+    // keeps this safe alongside the OTHER producer of `plan.warnings` that
+    // already exists: `planBuilder` writes its planning warnings onto the same
+    // array before the run starts.
     const holedSteps = [
       makeStep('step_0', 'scene_create'),
       null as unknown as OrchestratorPlan['steps'][number],

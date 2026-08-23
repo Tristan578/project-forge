@@ -90,7 +90,11 @@ const EMPTY_STEP_WARNING_PLURAL =
  * is what puts it in front of a user; a write no reader picks up would be the
  * same silence in a different place.
  *
- * This function is the sole writer of `plan.warnings` in the codebase today.
+ * This function owns only the two exact notices it writes below — it is NOT
+ * the only writer of `plan.warnings`. `planBuilder` writes its own planning
+ * warnings onto the same array, which is why the cleanup below filters by
+ * exact message match instead of replacing the array: whatever another
+ * producer put there must survive this pass untouched.
  * `runPipeline` can run the same plan object more than once (a retry, a
  * re-run after a fix) and a plan handed back through `setPlan` can arrive
  * with its own `warnings` array already carrying a PRIOR run's notice — so a

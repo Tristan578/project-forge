@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@/test/utils/componentTestUtils';
 import { OrchestratorPanel } from '../OrchestratorPanel';
 import { useEditorStore } from '@/stores/editorStore';
+import type { OrchestratorPlan } from '@/lib/game-creation/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -39,8 +40,15 @@ function makeState(overrides: Record<string, unknown> = {}) {
 
 function mockStore(overrides: Record<string, unknown> = {}) {
   const state = makeState(overrides);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vi.mocked(useEditorStore).mockImplementation((selector: any) => selector(state));
+  // The real hook is generic over its selector; the module mock declares it as
+  // a zero-arg `vi.fn()`, so the selector-taking implementation is not
+  // assignable to that narrower signature. Widen the MOCK rather than reaching
+  // for `any` on the selector (PF-1229 finding #7).
+  (
+    vi.mocked(useEditorStore) as unknown as {
+      mockImplementation: (impl: (selector: (s: unknown) => unknown) => unknown) => void;
+    }
+  ).mockImplementation(selector => selector(state));
 }
 
 const MOCK_PLAN = {
@@ -159,8 +167,7 @@ describe('OrchestratorPanel', () => {
     };
     mockStore({
       orchestratorStatus: 'executing',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      currentPlan: sparsePlan as any,
+      currentPlan: sparsePlan as unknown as OrchestratorPlan,
       stepStatuses: { 'step-1': 'completed', 'step-3': 'pending' },
     });
 
