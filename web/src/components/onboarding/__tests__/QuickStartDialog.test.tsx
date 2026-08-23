@@ -196,7 +196,11 @@ describe('QuickStartDialog', () => {
   });
 
   it('surfaces a failure the store only recorded (no throw) as an alert and a toast', async () => {
+    // Mirrors `runPipelineFromPlan`'s own guard clauses (orchestratorSlice.ts):
+    // every real path that sets `orchestratorError` sets `orchestratorStatus:
+    // 'failed'` in the same `set()` call, so the mock does both together.
     startQuickStart.mockImplementationOnce(async () => {
+      hoisted.state.orchestratorStatus = 'failed';
       hoisted.state.orchestratorError = 'Not enough tokens to build this game.';
       return true;
     });
@@ -207,6 +211,34 @@ describe('QuickStartDialog', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Not enough tokens to build this game.');
     expect(toast.error).toHaveBeenCalledWith('Not enough tokens to build this game.');
+  });
+
+  // PF-1215 round 2: `runPipelineFromPlan`'s `onPlanStatusChange` callback --
+  // the path a normal step failure takes, e.g. `verify_all_scenes` reporting
+  // an unwinnable game -- sets ONLY `orchestratorStatus: 'failed'` and never
+  // touches `orchestratorError` (see the design-intent comment on
+  // `OrchestratorPanel`'s `StepItem`, PF-1224: that field is reserved for a
+  // genuine throw). Reading `orchestratorError` truthiness alone left this
+  // case undetected: `error` stayed null, so the actions row rendered no
+  // "Try again" (needs `error`) and no "Stop" (needs `runIsLive`, false for
+  // 'failed') -- only "Close" was left, with no way back into the flow short
+  // of closing and reopening the dialog.
+  it('surfaces a normal step failure (status only, no recorded message) with a generic message and Try again', async () => {
+    startQuickStart.mockImplementationOnce(async () => {
+      hoisted.state.orchestratorStatus = 'failed';
+      return true;
+    });
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Could not start building your game. Please try again.');
+    expect(toast.error).toHaveBeenCalledWith(
+      'Could not start building your game. Please try again.',
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
   });
 
   it('shows a gate the run did not auto-approve so the user is never stranded', async () => {

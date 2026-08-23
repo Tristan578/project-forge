@@ -174,11 +174,22 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       }
 
       // `startDecomposition` records its failures on the store rather than
-      // throwing, so without this read a failed run would show as a silent stall.
-      const failure = useEditorStore.getState().orchestratorError;
-      if (failure) {
-        setError(failure);
-        toast.error(failure);
+      // throwing, and a step that fails mid-run does the same:
+      // `runPipelineFromPlan`'s `onPlanStatusChange` callback sets
+      // `orchestratorStatus: 'failed'` without ever touching
+      // `orchestratorError` -- that field is reserved for a genuine throw
+      // (see the design-intent comment on `OrchestratorPanel`'s `StepItem`,
+      // PF-1224). Checking `orchestratorError` alone left the dialog stuck on
+      // the common case of a normal step failure: `error` here stayed null,
+      // so neither "Try again" nor "Stop" rendered and only "Close" was
+      // left, with no way back into the flow short of closing and reopening
+      // the dialog. Read `status` instead, and fall back to a generic
+      // message when the store has no more specific one.
+      const state = useEditorStore.getState();
+      if (state.orchestratorStatus === 'failed') {
+        const message = state.orchestratorError ?? GENERIC_FAILURE;
+        setError(message);
+        toast.error(message);
       }
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : GENERIC_FAILURE;
