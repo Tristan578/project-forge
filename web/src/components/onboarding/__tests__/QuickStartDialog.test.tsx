@@ -220,6 +220,37 @@ describe('QuickStartDialog', () => {
     expect(resolveGate).toHaveBeenCalledWith('approved');
   });
 
+  // PF-1215 round 2 (4/5): a second `max-h-[45vh] overflow-y-auto` wrapper
+  // around the whole ApprovalGateDialog used to clip the Approve/Cancel row
+  // along with the scroll body -- the outer, SMALLER bound always engaged
+  // before ApprovalGateDialog's own inner max-h-[50vh] region could, so the
+  // inner bound was dead code and the buttons scrolled out of view again,
+  // the exact failure the inner region exists to prevent. Approve must not
+  // sit inside ANY scrollable-bounded ancestor between it and the dialog.
+  it('never nests the approval gate action row inside a scroll-bounded container', async () => {
+    const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+    setState({
+      orchestratorStatus: 'executing',
+      pendingGate: {
+        id: 'gate_assets',
+        label: 'Generate assets?',
+        description: 'These cost tokens.',
+        displayData: {},
+      },
+    });
+    rerender(<QuickStartDialog open onClose={vi.fn()} />);
+
+    const approveButton = screen.getByRole('button', { name: 'Approve' });
+    let node: HTMLElement | null = approveButton.parentElement;
+    while (node && node !== document.body) {
+      expect(node.className).not.toContain('overflow-y-auto');
+      node = node.parentElement;
+    }
+  });
+
   it('reaches the submit button by keyboard from the prompt field', async () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();

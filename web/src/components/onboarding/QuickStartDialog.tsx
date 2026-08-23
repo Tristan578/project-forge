@@ -328,18 +328,22 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             <span>{STATUS_MESSAGES[status]}</span>
           </div>
 
-          {/* A gate_assets list is as long as the plan makes it; without its own
-              scroll region it pushed Approve/Cancel off a short mobile viewport,
-              where the dialog itself does not scroll. */}
+          {/* A gate_assets list is as long as the plan makes it. ApprovalGateDialog
+              already bounds its own scrollable body to max-h-[50vh] and renders
+              Approve/Cancel OUTSIDE that scroll region, so those buttons are never
+              pushed off-screen. A second `max-h-[45vh] overflow-y-auto` wrapper
+              here previously clipped the WHOLE dialog (heading, description, and
+              action row included) to a bound smaller than the inner one — the
+              outer scrollbar always engaged first, the inner max-h-[50vh] region
+              could never reach its own limit, and the buttons scrolled out of
+              view again inside the outer box (round 2 review, 4/5 agreement). */}
           {pendingGate && (
-            <div className="max-h-[45vh] overflow-y-auto">
-              <ApprovalGateDialog
-                gate={pendingGate}
-                onApprove={() => resolveGate('approved')}
-                onCancel={() => resolveGate('rejected')}
-                autoFocus
-              />
-            </div>
+            <ApprovalGateDialog
+              gate={pendingGate}
+              onApprove={() => resolveGate('approved')}
+              onCancel={() => resolveGate('rejected')}
+              autoFocus
+            />
           )}
         </div>
       )}
