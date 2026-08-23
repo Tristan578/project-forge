@@ -28,7 +28,7 @@
  *     web/public/engine-pkg-webgl2/ BEFORE this runs (SwiftShader cannot drive
  *     WebGPU, so only the webgl2 variant is needed).
  *   - The editor.fixture `load()` seeds localStorage['forge:preferred-backend']
- *     = 'webgl2' so loadWasm() forces WebGL2 and never spends GPU_INIT_TIMEOUT
+ *     = 'webgl2' so loadWasm() forces WebGL2 and never spends GPU_INIT_TIMEOUT_MS
  *     probing WebGPU first.
  *   - SKIP_ENV_VALIDATION=true (no Clerk/Stripe keys in CI).
  *

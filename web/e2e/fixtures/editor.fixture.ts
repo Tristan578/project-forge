@@ -18,10 +18,13 @@ export class EditorPage {
   /** Navigate to /dev and wait for WASM engine to initialize */
   async load() {
     // Suppress onboarding overlays and the init overlay so they don't block
-    // interactions. `InitOverlay` returns null once `isReady` flips — the same
-    // `setIsReady(true)` that sets `__FORGE_ENGINE_READY` — so it clears on
-    // every config; the suppression covers the window before that, plus a boot
-    // that stalls, so a click never lands on an overlay instead of the editor.
+    // interactions. `InitOverlay` returns null only once `isReady` flips (the
+    // same `setIsReady(true)` that sets `__FORGE_ENGINE_READY`), and that needs
+    // the Rust renderer to initialize — in headless Chrome with --disable-gpu
+    // (every CI config except playwright.engine.config.ts) `init_engine()`
+    // never completes, so the overlay never clears on its own. The CSS
+    // suppression below is what keeps a click from landing on it there; on the
+    // engine config it only covers the window before the flag flips.
     await this.page.addInitScript(() => {
       localStorage.setItem('forge-welcomed', '1');
       localStorage.setItem('forge-mobile-dismissed', '1');
@@ -30,7 +33,7 @@ export class EditorPage {
       // Seed the persisted backend choice so `loadWasm()` (useEngine.ts) takes
       // the WebGL2 path directly: it reads this key before anything else and
       // only calls `probeWebGPU()` when it is not 'webgl2', so no config spends
-      // GPU_INIT_TIMEOUT probing for an adapter before falling back. This is
+      // GPU_INIT_TIMEOUT_MS probing for an adapter before falling back. This is
       // what playwright.engine.config.ts's header requires of the fixture —
       // SwiftShader cannot drive WebGPU, so the engine-smoke job must never
       // wait on that probe. It lives here rather than in each engine spec so a
