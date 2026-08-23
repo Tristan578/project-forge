@@ -46,6 +46,14 @@ import crystalRun3d from '../fixtures/gdd/crystal-run-3d.json';
  * "every step completed" mean "the engine accepted every command the step sent"
  * rather than merely "no executor threw".
  *
+ * That covers HARD rejections only, and the distinction matters when reading a
+ * green run. A payload whose keys deserialize to `None` (the wrong-wire-shape
+ * and undetectable-typo shapes in the same gotchas entry) is ACCEPTED by the
+ * engine and logs nothing, so this gate cannot see it either — what it adds
+ * over the integration suite is real deserialization, real routing through
+ * `route_domain`, and a real play transition. Payload-shape discipline stays
+ * with the pick-based builders and their unit pins.
+ *
  * DEFERRED — `game_win` is deliberately NOT asserted here. Winning requires the
  * player to physically reach a collectible under a software rasteriser at an
  * unpinned frame rate, which is not deterministic in CI. It is also the one
