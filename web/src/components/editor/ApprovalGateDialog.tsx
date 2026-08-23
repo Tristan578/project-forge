@@ -52,47 +52,55 @@ export function ApprovalGateDialog({
       <h3 className="mb-1 text-sm font-semibold text-[var(--sf-warning)]">{gate.label}</h3>
       <p className="mb-3 text-xs text-[var(--sf-text-secondary)]">{gate.description}</p>
 
-      {/* Scene summaries */}
-      {displayData.sceneSummaries && displayData.sceneSummaries.length > 0 && (
-        <div className="mb-3 space-y-1">
-          <h4 className="text-xs font-medium text-[var(--sf-text)]">Scenes</h4>
-          {displayData.sceneSummaries.map((scene) => (
-            <div key={scene.name} className={ROW}>
-              <span className="text-[var(--sf-text)]">{scene.name}</span>
-              <span className="ml-2">({scene.entityCount} entities)</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/*
+       * A large plan (many scenes / many generated assets) has no natural
+       * height limit, and this box sits inside a modal that does not scroll
+       * itself — without a bound here the Approve/Reject row below gets
+       * pushed off the bottom of the dialog with no way to reach it.
+       */}
+      <div data-testid="approval-gate-scroll" className="mb-3 max-h-[50vh] overflow-y-auto pr-1">
+        {/* Scene summaries */}
+        {displayData.sceneSummaries && displayData.sceneSummaries.length > 0 && (
+          <div className="mb-3 space-y-1">
+            <h4 className="text-xs font-medium text-[var(--sf-text)]">Scenes</h4>
+            {displayData.sceneSummaries.map((scene) => (
+              <div key={scene.name} className={ROW}>
+                <span className="text-[var(--sf-text)]">{scene.name}</span>
+                <span className="ml-2">({scene.entityCount} entities)</span>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {/* Asset list */}
-      {displayData.assetList && displayData.assetList.length > 0 && (
-        <div className="mb-3 space-y-1">
-          <h4 className="text-xs font-medium text-[var(--sf-text)]">Assets to generate</h4>
-          {displayData.assetList.map((asset, i) => (
-            <div key={i} className={`flex items-center justify-between ${ROW}`}>
-              <span>{asset.description}</span>
-              <span className="font-mono">{asset.estimatedTokenCost} tokens</span>
-            </div>
-          ))}
-        </div>
-      )}
+        {/* Asset list */}
+        {displayData.assetList && displayData.assetList.length > 0 && (
+          <div className="mb-3 space-y-1">
+            <h4 className="text-xs font-medium text-[var(--sf-text)]">Assets to generate</h4>
+            {displayData.assetList.map((asset, i) => (
+              <div key={i} className={`flex items-center justify-between ${ROW}`}>
+                <span>{asset.description}</span>
+                <span className="font-mono">{asset.estimatedTokenCost} tokens</span>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {/* Completion summary */}
-      {displayData.completionSummary && (
-        <div className={`mb-3 ${ROW}`}>
-          <span>{displayData.completionSummary.totalEntities} entities, </span>
-          <span>{displayData.completionSummary.totalScenes} scenes, </span>
-          <span>{displayData.completionSummary.totalScripts} scripts</span>
-          {displayData.completionSummary.warnings.length > 0 && (
-            <div className="mt-1 text-[var(--sf-warning)]">
-              {displayData.completionSummary.warnings.map((w, i) => (
-                <div key={i}>{w}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+        {/* Completion summary */}
+        {displayData.completionSummary && (
+          <div className={ROW}>
+            <span>{displayData.completionSummary.totalEntities} entities, </span>
+            <span>{displayData.completionSummary.totalScenes} scenes, </span>
+            <span>{displayData.completionSummary.totalScripts} scripts</span>
+            {displayData.completionSummary.warnings.length > 0 && (
+              <div className="mt-1 text-[var(--sf-warning)]">
+                {displayData.completionSummary.warnings.map((w, i) => (
+                  <div key={i}>{w}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="flex gap-2">
         <Button ref={approveRef} type="button" size="sm" onClick={onApprove} className="flex-1">
