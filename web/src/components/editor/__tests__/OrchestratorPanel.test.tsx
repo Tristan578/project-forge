@@ -156,6 +156,33 @@ describe('OrchestratorPanel', () => {
     expect(screen.getByText('Polishing game')).toBeTruthy();
   });
 
+  it('renders the failed icon for a step whose status is failed', () => {
+    mockStore({
+      orchestratorStatus: 'failed',
+      currentPlan: MOCK_PLAN,
+      orchestratorError: 'Something broke',
+      stepStatuses: { 'step-1': 'completed', 'step-2': 'failed', 'step-3': 'pending' },
+    });
+    const { container } = render(<OrchestratorPanel />);
+
+    // lucide-react's stable per-icon class, not a snapshot of the raw SVG --
+    // StepStatusIcon has five branches (completed/running/failed/skipped/
+    // pending-default) and only this one renders XCircle in red.
+    // The header's StatusBadge ALSO renders an XCircle when the run overall
+    // failed (h-3 w-3, no colour class of its own) -- scope past it to the
+    // h-4 w-4 icon StepStatusIcon renders for the step itself.
+    const stepIcons = Array.from(container.querySelectorAll('.lucide-circle-x'));
+    const failedStepIcon = stepIcons.find((el) => el.getAttribute('class')?.includes('h-4 w-4'));
+    expect(failedStepIcon).toBeTruthy();
+    expect(failedStepIcon?.getAttribute('class')).toContain('text-red-400');
+    // Sanity: the completed step next to it still gets its own distinct icon,
+    // proving this isn't just "any icon happens to be red-ish."
+    const completedStepIcon = Array.from(container.querySelectorAll('.lucide-circle-check')).find(
+      (el) => el.getAttribute('class')?.includes('h-4 w-4'),
+    );
+    expect(completedStepIcon).toBeTruthy();
+  });
+
   it('shows optional badge for optional steps', () => {
     mockStore({
       orchestratorStatus: 'executing',
