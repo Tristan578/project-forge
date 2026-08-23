@@ -393,8 +393,14 @@ export function OrchestratorPanel() {
             </div>
             <ul className="space-y-1">
               {warnings.map((warning, i) => (
-                <li key={`${warning.stepId}-${i}`} className="text-xs leading-snug">
-                  <span className="text-amber-400">{getStepLabel(warning.executor)}:</span>{' '}
+                <li key={`${warning.stepId ?? 'plan'}-${i}`} className="text-xs leading-snug">
+                  {/* A note about the plan itself (an empty `steps` slot) names
+                      no step, so it gets no label rather than a fabricated one. */}
+                  {warning.executor && (
+                    <>
+                      <span className="text-amber-400">{getStepLabel(warning.executor)}:</span>{' '}
+                    </>
+                  )}
                   {warning.message}
                 </li>
               ))}
@@ -420,7 +426,12 @@ export function OrchestratorPanel() {
             <h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
               Steps
             </h4>
-            {plan.steps.map((step) => (
+            {/* `.map` skips a hole but NOT a `null`, and `plan` is
+                caller-supplied via the public `setPlan` — so the slot is
+                filtered by an explicit predicate rather than trusted. The gap
+                itself is not silent: `runPipeline` records it on
+                `plan.warnings`, which the warning list above renders. */}
+            {plan.steps.filter((step): step is PlanStep => Boolean(step)).map((step) => (
               <StepItem
                 key={step.id}
                 step={step}

@@ -570,6 +570,13 @@ describe('orchestratorSlice', () => {
           callbacks: PipelineCallbacks,
         ) => {
           for (const [stepId, result] of results) {
+            // The real runner writes the step's status onto the plan BEFORE it
+            // fires the callback, and the store re-reads the plan once the run
+            // settles (the plan is where every 'skipped' lives) — so a fake
+            // runner that only fires callbacks would leave the plan saying
+            // 'pending' and the re-read would rewind what the callback set.
+            const step = plan.steps.find((s) => s.id === stepId);
+            if (step) step.status = result.success ? 'completed' : 'failed';
             callbacks.onStepComplete?.(stepId, result);
           }
           return plan;

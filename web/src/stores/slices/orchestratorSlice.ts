@@ -38,9 +38,14 @@ import { captureException } from '@/lib/monitoring/sentry-client';
  * across the run and are never fatal.
  */
 export interface OrchestratorWarning {
-  stepId: string;
+  /**
+   * Absent for a note about the PLAN rather than a step — an empty `steps` slot
+   * has no step to name. Optional rather than a sentinel id so the UI has to
+   * decide what to render instead of printing a fake step label.
+   */
+  stepId?: string;
   /** Executor name — the UI already maps this to a human step label. */
-  executor: string;
+  executor?: string;
   message: string;
 }
 
@@ -85,6 +90,26 @@ export interface OrchestratorSlice {
   cancelPipeline: () => void;
   resetOrchestrator: () => void;
   runPipelineFromPlan: () => Promise<void>;
+}
+
+/**
+ * Build the `stepStatuses` map from a plan, tolerating an empty `steps` slot.
+ *
+ * `plan` is caller-supplied (`setPlan` is public and takes any
+ * `OrchestratorPlan`), so a hole or a `null` in `steps` reaches here as data.
+ * `for (const step of plan.steps)` does NOT skip a hole — it yields `undefined`
+ * — so the old loop threw on `step.id` before `runPipeline` ever ran, which
+ * made the runner's own tolerance of that gap unreachable in the product.
+ * Indexed, because only an indexed read sees every slot.
+ */
+function deriveStepStatuses(plan: OrchestratorPlan): Record<string, PlanStep['status']> {
+  const statuses: Record<string, PlanStep['status']> = {};
+  for (let i = 0; i < plan.steps.length; i += 1) {
+    const step = plan.steps[i];
+    if (!step) continue;
+    statuses[step.id] = step.status;
+  }
+  return statuses;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,10 +202,7 @@ export const createOrchestratorSlice: StateCreator<
       );
 
       // Initialize step statuses map
-      const stepStatuses: Record<string, PlanStep['status']> = {};
-      for (const step of plan.steps) {
-        stepStatuses[step.id] = step.status;
-      }
+      const stepStatuses = deriveStepStatuses(plan);
 
       // Reserve tokens for the pipeline (server-side via API)
       let reservationId: string | null = null;
@@ -240,10 +262,7 @@ export const createOrchestratorSlice: StateCreator<
   },
 
   setPlan: (plan) => {
-    const stepStatuses: Record<string, PlanStep['status']> = {};
-    for (const step of plan.steps) {
-      stepStatuses[step.id] = step.status;
-    }
+    const stepStatuses = deriveStepStatuses(plan);
     set({
       currentPlan: plan,
       tokenEstimate: plan.tokenEstimate,
@@ -439,6 +458,28 @@ export const createOrchestratorSlice: StateCreator<
       });
     } finally {
       _abortController = null;
+
+      // Re-read the plan the runner mutated.
+      //
+      // `onStepComplete` is the store's only other writer and it fires ONLY for
+      // a step that actually executed, mapping its result to 'completed' or
+      // 'failed'. Every 'skipped' the runner writes — a required step whose
+      // dependency failed, the cascade after a failure or a cancel, an optional
+      // step that exhausted its retries — is written straight onto the plan with
+      // no callback, and `setPlan` seeded an entry for every step id, so
+      // `stepStatuses[step.id] ?? step.status` in the panel never falls back.
+      // Without this pass a dependency-skipped step renders as 'Pending' with no
+      // alert for the whole life of a failed run. Same for `plan.warnings`,
+      // which nothing else reads.
+      //
+      // In `finally` so a run that threw still shows how far it got.
+      set(s => ({
+        stepStatuses: { ...s.stepStatuses, ...deriveStepStatuses(currentPlan) },
+        orchestratorWarnings: [
+          ...s.orchestratorWarnings,
+          ...(currentPlan.warnings ?? []).map(message => ({ message })),
+        ],
+      }));
 
       // Release unused tokens — prorate by completed steps (fire-and-forget)
       if (reservationId) {

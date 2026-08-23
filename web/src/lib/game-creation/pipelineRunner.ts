@@ -69,6 +69,12 @@ function skipStepAt(plan: OrchestratorPlan, index: number): void {
  * are recorded rather than compacted away so the indices the rest of the run
  * reports — `currentStepIndex`, the panel's progress — keep meaning what they
  * meant when the plan was handed over.
+ *
+ * Written on the plan rather than handed to a callback because there is no step
+ * to hang it on — the slot is empty. `orchestratorSlice.runPipelineFromPlan`
+ * folds `plan.warnings` into `orchestratorWarnings` once the run settles, which
+ * is what puts it in front of a user; a write no reader picks up would be the
+ * same silence in a different place.
  */
 function recordEmptyStepSlots(plan: OrchestratorPlan): void {
   const empty: number[] = [];
@@ -107,9 +113,14 @@ function dependenciesMet(step: PlanStep, stepMap: Map<string, PlanStep>): boolea
  * game must fail the plan rather than be handed over. `step.output` used to be
  * assigned on the success path only, so everything the step had to say was
  * dropped the moment it said it — the live `onStepComplete` callback saw the
- * result, but the plan itself carried an empty step, and the plan is what
- * `resolveStepOutput` reads and what the orchestrator store keeps to re-render
- * a finished run.
+ * result, but the plan itself carried an empty step, and the plan is what the
+ * orchestrator store re-reads when the run settles and what the panel renders
+ * from afterwards.
+ *
+ * NOT for downstream steps: `resolveStepOutput` and `resolveStepOutputs` both
+ * filter on `status === 'completed'`, so a failed step's diagnostics can never
+ * be mistaken for a result an executor can build on. Retaining it is for the
+ * humans reading the finished run.
  *
  * Only assigned when the executor really produced output: a genuinely empty
  * failure must stay `undefined` rather than become `{}`, which a dependent
