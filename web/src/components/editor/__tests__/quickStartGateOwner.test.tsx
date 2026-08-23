@@ -33,10 +33,11 @@ describe('quickStartGateOwner', () => {
     expect(result.current).toBe(false);
   });
 
-  it('stays claimed while a remount overlaps the unmount it replaces', () => {
-    // React runs the new effect before the old cleanup on a remount, so a
-    // boolean flag would be set then immediately cleared and the panel would
-    // render a second copy of the gate. Counting survives the overlap.
+  it('stays claimed while a second claimant overlaps the first', () => {
+    // A boolean flag would be clobbered here: releasing the first claim
+    // would flip it straight to "unclaimed" while the second claimant is
+    // still holding the gate, and the panel would render a second copy of
+    // it. Counting survives the overlap.
     const { result } = renderHook(() => useQuickStartOwnsGate());
 
     let first = () => {};

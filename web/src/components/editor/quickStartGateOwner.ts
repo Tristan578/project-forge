@@ -32,8 +32,10 @@ function emit(): void {
 
 /**
  * Claim the gate for the quick-start dialog. Returns the release function —
- * call it on unmount. Counted rather than boolean so a remount that runs the
- * new effect before the old cleanup cannot leave the panel permanently muted.
+ * call it on unmount. Counted rather than boolean so two overlapping
+ * claimants can't clobber each other: a boolean set by whichever caller
+ * releases first would flip straight to "unclaimed" while the other
+ * claimant is still holding the gate, un-muting the panel out from under it.
  */
 export function claimQuickStartGate(): () => void {
   claims += 1;

@@ -479,9 +479,13 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
     // -----------------------------------------------------------------------
     // Approve the gates quick-start does NOT auto-approve, through the real
     // Approve button the dialog renders inline — the control that stops a
-    // quick-start user being stranded mid-run. The locator is scoped to the
-    // dialog because OrchestratorPanel renders a second ApprovalGateDialog with
-    // an identically-named button, and the panel is open by this point.
+    // quick-start user being stranded mid-run. `role="dialog"` only exists on
+    // QuickStartDialog's modal wrapper (ApprovalGateDialog itself carries no
+    // such role), so this locator can only ever match that copy — even though
+    // OrchestratorPanel is open behind it, `useQuickStartOwnsGate` already
+    // stops the panel from rendering its own ApprovalGateDialog while the
+    // quick-start dialog holds the gate, so the scoping is defense-in-depth,
+    // not a workaround for a live double-render.
     // -----------------------------------------------------------------------
     const terminalStatuses = ['completed', 'failed', 'cancelled'];
     const approvedGateIds: string[] = [];
