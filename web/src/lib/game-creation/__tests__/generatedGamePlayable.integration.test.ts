@@ -33,6 +33,7 @@ vi.mock('@/lib/ai/client', () => ({
   fetchAI: vi.fn(async () => 'forge.on("update", () => {});'),
 }));
 
+import { z } from 'zod';
 import { fetchAI } from '@/lib/ai/client';
 import { buildPlan } from '../planBuilder';
 import { runPipeline } from '../pipelineRunner';
@@ -44,6 +45,8 @@ import type {
   OrchestratorPlan,
   PlanStep,
 } from '../types';
+import { zSystemCategory, zEntityRole } from '../types';
+import { GDD_SCOPES } from '@/lib/config/enums';
 import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
 import { setWinnabilityStateReader } from '@/stores/slices';
 import { createTestHarness } from '@/__integration__/harness';
@@ -128,17 +131,101 @@ function makeContext(harness: TestHarness, projectType: '2d' | '3d'): ExecutorCo
  * `web/e2e/tests/pipeline-live-engine.spec.ts` (real WASM, real Play button).
  * One fixture is what stops the two from silently testing different games.
  *
- * Both casts are load-bearing. A JSON import widens every literal (`'3d'`
- * becomes `string`), so the shape has to be re-narrowed; and `structuredClone`
- * is not defensive here — three call sites take this GDD and one of them
- * (`crystalRunWithoutProgression`) rewrites it, so a shared reference would
+ * It is PARSED, not cast. A `resolveJsonModule` import widens every literal
+ * (`'3d'` becomes `string`), so `as OrchestratorGDD` was the only way to make
+ * it type-check — and a cast is exactly as happy with a fixture whose fields
+ * have been renamed or dropped, which is the failure this shared file makes
+ * possible. The schema below is `.strict()`, so a renamed field fails twice
+ * (missing here, unknown there) at module load, naming the field, instead of
+ * surfacing as a mystery mid-pipeline.
+ *
+ * The schema is pinned to the interface from the other side too: `parse()`'s
+ * result is annotated `OrchestratorGDD`, so a field ADDED to the interface
+ * without being added here is a compile error rather than a silent gap.
+ */
+const zOrchestratorGdd = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string(),
+    systems: z.array(
+      z
+        .object({
+          category: zSystemCategory,
+          type: z.string(),
+          config: z.record(z.string(), z.unknown()),
+          priority: z.enum(['core', 'secondary', 'polish']),
+          dependsOn: z.array(zSystemCategory),
+        })
+        .strict()
+    ),
+    scenes: z.array(
+      z
+        .object({
+          name: z.string(),
+          purpose: z.string(),
+          systems: z.array(zSystemCategory),
+          entities: z.array(
+            z
+              .object({
+                name: z.string(),
+                role: zEntityRole,
+                systems: z.array(zSystemCategory),
+                appearance: z.string(),
+              })
+              .strict()
+          ),
+          transitions: z.array(
+            z.object({ to: z.string(), trigger: z.string() }).strict()
+          ),
+        })
+        .strict()
+    ),
+    assetManifest: z.array(
+      z
+        .object({
+          type: z.enum(['3d-model', 'texture', 'sound', 'music', 'voice', 'sprite']),
+          description: z.string(),
+          entityRef: z.string().optional(),
+          styleDirective: z.string(),
+          priority: z.enum(['required', 'nice-to-have']),
+          fallback: z.string(),
+        })
+        .strict()
+    ),
+    estimatedScope: z.enum(GDD_SCOPES),
+    styleDirective: z.string(),
+    feelDirective: z
+      .object({
+        mood: z.string(),
+        pacing: z.enum(['slow', 'medium', 'fast']),
+        weight: z.enum(['floaty', 'light', 'medium', 'heavy', 'weighty']),
+        referenceGames: z.array(z.string()),
+        oneLiner: z.string(),
+      })
+      .strict(),
+    constraints: z.array(z.string()),
+    projectType: z.enum(['2d', '3d']),
+  })
+  .strict();
+
+/**
+ * Parsed once, at module load, so a bad fixture fails the whole file loudly
+ * rather than one assertion obscurely.
+ */
+const CRYSTAL_RUN_3D: OrchestratorGDD = zOrchestratorGdd.parse(crystalRun3dFixture);
+
+const FEEL: FeelDirective = CRYSTAL_RUN_3D.feelDirective;
+
+/**
+ * Collect-everything platformer in 3D.
+ *
+ * `structuredClone` is not defensive: three call sites take this GDD and one of
+ * them (`crystalRunWithoutProgression`) rewrites it, so a shared reference would
  * mutate another test's input.
  */
-const FEEL = crystalRun3dFixture.feelDirective as FeelDirective;
-
-/** Collect-everything platformer in 3D. */
 function crystalRun3d(): OrchestratorGDD {
-  return structuredClone(crystalRun3dFixture) as OrchestratorGDD;
+  return structuredClone(CRYSTAL_RUN_3D);
 }
 
 /** Reach-the-exit side-scroller in 2D. */
