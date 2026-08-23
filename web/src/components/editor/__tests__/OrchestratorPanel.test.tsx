@@ -718,28 +718,35 @@ describe('OrchestratorPanel', () => {
      * graded against the same expected shape — they may differ by exactly one
      * token name and nothing else.
      */
-    const TINT_ROWS: Array<[string, Record<string, unknown>, string, string]> = [
-      [
-        'insufficient balance',
-        { ...MOCK_PLAN.tokenEstimate, sufficientBalance: false },
-        'Insufficient token balance',
-        '--sf-destructive',
-      ],
-      [
-        'token warning',
-        {
+    // Object form, not tuples: a tuple row would have its whole token-estimate
+    // object printed into the test name by the `%s` formatter.
+    const TINT_ROWS: Array<{
+      label: string;
+      tokenEstimate: Record<string, unknown>;
+      copy: string;
+      token: string;
+    }> = [
+      {
+        label: 'insufficient balance',
+        tokenEstimate: { ...MOCK_PLAN.tokenEstimate, sufficientBalance: false },
+        copy: 'Insufficient token balance',
+        token: '--sf-destructive',
+      },
+      {
+        label: 'token warning',
+        tokenEstimate: {
           ...MOCK_PLAN.tokenEstimate,
           sufficientBalance: true,
           warningMessage: 'This will use most of your balance',
         },
-        'This will use most of your balance',
-        '--sf-warning',
-      ],
+        copy: 'This will use most of your balance',
+        token: '--sf-warning',
+      },
     ];
 
     it.each(TINT_ROWS)(
-      'draws the %s row as a 10%% tint of its semantic token',
-      (_label, tokenEstimate, copy, token) => {
+      'draws the $label row as a semantic-token tint with an AA-safe foreground',
+      ({ tokenEstimate, copy, token }) => {
         mockStore({
           orchestratorStatus: 'awaiting_approval',
           currentPlan: MOCK_PLAN,
