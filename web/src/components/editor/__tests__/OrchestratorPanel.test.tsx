@@ -1,6 +1,8 @@
 /**
  * @vitest-environment jsdom
  */
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@/test/utils/componentTestUtils';
 import { OrchestratorPanel } from '../OrchestratorPanel';
@@ -630,6 +632,158 @@ describe('OrchestratorPanel', () => {
       render(<OrchestratorPanel />);
 
       expect(screen.queryByLabelText('Game creation warnings')).toBeNull();
+    });
+  });
+
+  /**
+   * PF-1229 findings #1 and #2.
+   *
+   * Finding #1 was a live light-theme break. The round-2 migration paired
+   * `bg-[var(--sf-destructive)]/10` with `text-[var(--sf-text)]`, but this
+   * panel painted no background of its own, and a `/N` Tailwind modifier
+   * composites over whatever is actually painted behind it. Every lazy panel
+   * is mounted by `WorkspaceProvider`'s `withSuspense` wrapper inside a
+   * hardcoded `bg-zinc-900` (#18181b), so the tint blended over #18181b in
+   * all seven themes while `packages/ui/.../themes.test.ts` graded it against
+   * `--sf-bg-surface`. In the `light` theme `--sf-text` IS #18181b: ~1.06:1,
+   * invisible, and the pin passed anyway. The host was deliberately not
+   * retokenised (its other panels are dark-only zinc designs), so the panel
+   * paints its own opaque token surface instead — which is the fact that
+   * makes the contrast pin honest.
+   *
+   * Finding #2 was the other half: the amber/zinc/blue/green literals left in
+   * the file were dark-palette assumptions no theme switch could reach.
+   */
+  describe('theme tokens', () => {
+    const ROOT_STATES: Array<[string, Record<string, unknown>]> = [
+      ['idle', { orchestratorStatus: 'idle', currentPlan: null }],
+      [
+        'active',
+        { orchestratorStatus: 'executing', currentPlan: MOCK_PLAN, stepStatuses: {} },
+      ],
+    ];
+
+    it.each(ROOT_STATES)('paints an opaque token background on the %s root', (_label, state) => {
+      mockStore(state);
+      const { container } = render(<OrchestratorPanel />);
+
+      const root = container.firstElementChild;
+      expect(root).toBeTruthy();
+      // Opaque, and a token. `bg-[var(--sf-bg-surface)]/50` would satisfy a
+      // substring check while leaving the host's #18181b showing through.
+      expect(Array.from(root?.classList ?? [])).toContain('bg-[var(--sf-bg-surface)]');
+    });
+
+    /**
+     * A DOM assertion only covers the branches a given test renders, so it
+     * goes quietly stale the moment someone hardcodes a colour in a branch
+     * nobody exercises. Scan the source instead.
+     */
+    it('routes every colour in the component through a --sf-* token', () => {
+      const source = readFileSync(resolve(__dirname, '../OrchestratorPanel.tsx'), 'utf-8');
+
+      const PALETTES = [
+        'slate', 'gray', 'zinc', 'neutral', 'stone', 'red', 'orange', 'amber',
+        'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue',
+        'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose', 'white', 'black',
+      ];
+      const UTILITIES = ['bg', 'text', 'border', 'ring', 'fill', 'stroke', 'from', 'via', 'to'];
+      const literal = new RegExp(
+        `(?:^|[\\s"'\`:])(?:${UTILITIES.join('|')})-(?:${PALETTES.join('|')})` +
+          `(?:-\\d{2,3})?(?:/\\d{1,3})?(?![\\w-])`
+      );
+
+      // Lines are skipped only by their LEADING token (`//`, `/*`, `*`). No
+      // JSX className can start a line that way, so this cannot hide a real
+      // class; it spares only the prose above ERROR_SURFACE_CLASSES and
+      // WARNING_SURFACE_CLASSES, which quote the literals they replaced so
+      // the reason for the migration survives in the file.
+      const offenders = source
+        .split('\n')
+        .map((line, i) => [i + 1, line] as const)
+        .filter(([, line]) => {
+          const t = line.trimStart();
+          return !(t.startsWith('//') || t.startsWith('/*') || t.startsWith('*'));
+        })
+        .filter(([, line]) => literal.test(line))
+        .map(([n, line]) => `${n}: ${line.trim()}`);
+
+      expect(offenders).toEqual([]);
+    });
+
+    /**
+     * The reviewer's requirement in words: two alert surfaces sitting side by
+     * side must respond to a theme switch identically. These two are mutually
+     * exclusive branches of `TokenCostBar`, so each is rendered on its own and
+     * graded against the same expected shape — they may differ by exactly one
+     * token name and nothing else.
+     */
+    const TINT_ROWS: Array<[string, Record<string, unknown>, string, string]> = [
+      [
+        'insufficient balance',
+        { ...MOCK_PLAN.tokenEstimate, sufficientBalance: false },
+        'Insufficient token balance',
+        '--sf-destructive',
+      ],
+      [
+        'token warning',
+        {
+          ...MOCK_PLAN.tokenEstimate,
+          sufficientBalance: true,
+          warningMessage: 'This will use most of your balance',
+        },
+        'This will use most of your balance',
+        '--sf-warning',
+      ],
+    ];
+
+    it.each(TINT_ROWS)(
+      'draws the %s row as a 10%% tint of its semantic token',
+      (_label, tokenEstimate, copy, token) => {
+        mockStore({
+          orchestratorStatus: 'awaiting_approval',
+          currentPlan: MOCK_PLAN,
+          tokenEstimate,
+          stepStatuses: {},
+        });
+        render(<OrchestratorPanel />);
+
+        const row = screen.getByText(copy);
+        expect(Array.from(row.classList).sort()).toEqual(
+          [
+            'mt-2',
+            'flex',
+            'items-center',
+            'gap-1.5',
+            'rounded',
+            `bg-[var(${token})]/10`,
+            'px-2',
+            'py-1',
+            'text-xs',
+            'text-[var(--sf-text)]',
+          ].sort()
+        );
+      }
+    );
+
+    it('builds the warnings list on the same construction as the error banner', () => {
+      mockStore({
+        orchestratorStatus: 'completed',
+        currentPlan: MOCK_PLAN,
+        stepStatuses: {},
+        orchestratorWarnings: [
+          { stepId: 'step-2', executor: 'physics_profile', message: 'Matched no entities.' },
+        ],
+      });
+      render(<OrchestratorPanel />);
+
+      // Same border/background proportions as ERROR_SURFACE_CLASSES with
+      // --sf-warning substituted for --sf-destructive, and the same AA-safe
+      // foreground. A theme switch therefore moves both by the same amount.
+      const classes = Array.from(screen.getByLabelText('Game creation warnings').classList);
+      expect(classes).toContain('border-[var(--sf-warning)]/40');
+      expect(classes).toContain('bg-[var(--sf-warning)]/10');
+      expect(classes).toContain('text-[var(--sf-text)]');
     });
   });
 });

@@ -72,10 +72,12 @@ function getStepLabel(executor: string): string {
  * annotation; only the colour is shared, because the colour is the meaning.
  *
  * Built off `--sf-destructive` (`packages/ui/src/tokens/colors.ts`) rather than
- * a raw `red-*` Tailwind shade, so a theme swap (this panel supports all
- * `ThemeName`s, not just the dark palette these `zinc-*` neighbours assume)
- * recolours the failure surface along with everything else instead of leaving
- * one hardcoded red behind.
+ * a raw `red-*` Tailwind shade, so a theme swap recolours the failure surface
+ * along with everything else instead of leaving one hardcoded red behind. This
+ * panel supports all seven `ThemeName`s, and as of PF-1229 it holds no
+ * hardcoded colour at all — the `zinc-*`/`amber-*`/`blue-*` literals that used
+ * to sit alongside these tokens were dark-palette assumptions that a theme
+ * switch could not reach.
  *
  * The border and background legitimately use `--sf-destructive` — a border
  * only needs WCAG 1.4.11's 3:1 non-text floor (pinned by the `NONTEXT_PAIRS`
@@ -87,12 +89,48 @@ function getStepLabel(executor: string): string {
  * token in the design system, so this uses `--sf-text` instead — the ordinary
  * text-color token, already proven >= 4.5:1 against solid `--sf-bg-surface`,
  * and re-pinned here against the actual blended 10%-alpha destructive tint by
- * the `error surface text clears WCAG AA against the blended destructive
- * tint` test in the same `themes.test.ts` file.
+ * the `<theme> theme: --sf-destructive/10 tint keeps OrchestratorPanel body
+ * text at WCAG AA` case in the same `themes.test.ts` file. That pin runs over
+ * every semantic token this panel tints at 10% (destructive, warning, accent,
+ * success) x every theme, so adding a fifth tinted surface means adding its
+ * token to `SEMANTIC_TINT_TOKENS` there.
+ *
+ * That pin is only honest because BOTH of this component's return branches
+ * paint an opaque `bg-[var(--sf-bg-surface)]` themselves. A `/10` Tailwind
+ * modifier composites over whatever is actually painted behind it, and this
+ * panel is mounted by `WorkspaceProvider`'s `withSuspense` wrapper inside a
+ * hardcoded `bg-zinc-900` host that every other (dark-only) lazy panel
+ * depends on. Without a background of our own, the tint would blend over
+ * #18181b in all seven themes while the test graded it against
+ * `--sf-bg-surface` — and in the `light` theme `--sf-text` IS #18181b, i.e.
+ * ~1.06:1, unreadable. Painting the surface here is what makes the rendered
+ * contrast match the pinned contrast; do not remove it (PF-1229 finding #1).
  */
 const ERROR_SURFACE_CLASSES = cn(
   'border border-[var(--sf-destructive)]/40',
   'bg-[var(--sf-destructive)]/10',
+  'text-[var(--sf-text)]',
+);
+
+/**
+ * The warning counterpart, built the same way and for the same reason.
+ *
+ * Every amber surface in this panel used to be a dark-theme literal
+ * (`border-amber-800 bg-amber-950/40 text-amber-200` and friends), so it
+ * neither followed a theme switch nor stayed legible once the panel root
+ * started painting `--sf-bg-surface`. Sharing ONE constant with the two
+ * inline `bg-[var(--sf-warning)]/10 text-[var(--sf-text)]` rows below is what
+ * makes the reviewer's requirement hold: the warning tile and the error tile
+ * that sit side by side now respond to a theme switch identically, because
+ * they are the same construction over two different semantic tokens.
+ *
+ * `--sf-warning` is pinned >= 3:1 against the surfaces as a non-text colour,
+ * and `--sf-text` is re-pinned >= 4.5:1 against the blended 10%-alpha warning
+ * tint by `themes.test.ts`.
+ */
+const WARNING_SURFACE_CLASSES = cn(
+  'border border-[var(--sf-warning)]/40',
+  'bg-[var(--sf-warning)]/10',
   'text-[var(--sf-text)]',
 );
 
@@ -113,14 +151,14 @@ const STATUS_LABELS: Record<OrchestratorStatus, string> = {
 
 function StatusBadge({ status }: { status: OrchestratorStatus }) {
   const colorClasses: Record<OrchestratorStatus, string> = {
-    idle: 'bg-zinc-700 text-zinc-300',
-    decomposing: 'bg-blue-900/50 text-blue-300',
-    planning: 'bg-blue-900/50 text-blue-300',
-    awaiting_approval: 'bg-amber-900/50 text-amber-300',
-    executing: 'bg-blue-900/50 text-blue-300',
-    completed: 'bg-green-900/50 text-green-300',
+    idle: 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text-secondary)]',
+    decomposing: 'bg-[var(--sf-accent)]/10 text-[var(--sf-text)]',
+    planning: 'bg-[var(--sf-accent)]/10 text-[var(--sf-text)]',
+    awaiting_approval: 'bg-[var(--sf-warning)]/10 text-[var(--sf-text)]',
+    executing: 'bg-[var(--sf-accent)]/10 text-[var(--sf-text)]',
+    completed: 'bg-[var(--sf-success)]/10 text-[var(--sf-text)]',
     failed: 'bg-[var(--sf-destructive)]/10 text-[var(--sf-text)]',
-    cancelled: 'bg-zinc-700 text-zinc-400',
+    cancelled: 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text-secondary)]',
   };
 
   return (
@@ -142,16 +180,16 @@ function StatusBadge({ status }: { status: OrchestratorStatus }) {
 function StepStatusIcon({ status }: { status: PlanStep['status'] }) {
   switch (status) {
     case 'completed':
-      return <CheckCircle2 className="h-4 w-4 text-green-400" />;
+      return <CheckCircle2 className="h-4 w-4 text-[var(--sf-success)]" />;
     case 'running':
-      return <Loader2 className="h-4 w-4 animate-spin text-blue-400" />;
+      return <Loader2 className="h-4 w-4 animate-spin text-[var(--sf-accent)]" />;
     case 'failed':
       return <XCircle className="h-4 w-4 text-[var(--sf-destructive)]" />;
     case 'skipped':
-      return <Clock className="h-4 w-4 text-zinc-500" />;
+      return <Clock className="h-4 w-4 text-[var(--sf-text-muted)]" />;
     case 'pending':
     default:
-      return <Clock className="h-4 w-4 text-zinc-600" />;
+      return <Clock className="h-4 w-4 text-[var(--sf-text-disabled)]" />;
   }
 }
 
@@ -191,11 +229,13 @@ function StepItem({
     <div className="py-1.5 px-2 rounded text-sm">
       <div className="flex items-center gap-2">
         <StepStatusIcon status={status} />
-        <span className={status === 'pending' || status === 'skipped' ? 'text-zinc-500' : 'text-zinc-200'}>
+        <span className={status === 'pending' || status === 'skipped'
+            ? 'text-[var(--sf-text-secondary)]'
+            : 'text-[var(--sf-text)]'}>
           {getStepLabel(step.executor)}
         </span>
         {step.optional && (
-          <span className="ml-auto text-[10px] text-zinc-500 uppercase">optional</span>
+          <span className="ml-auto text-[10px] uppercase text-[var(--sf-text-secondary)]">optional</span>
         )}
       </div>
       {failureMessage && (
@@ -216,14 +256,14 @@ function StepItem({
 
 function TokenCostBar({ estimate }: { estimate: TokenEstimate }) {
   return (
-    <div className="rounded-md border border-zinc-700 bg-zinc-800/50 p-3">
+    <div className="rounded-md border border-[var(--sf-border)] bg-[var(--sf-bg-elevated)] p-3">
       <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="font-medium text-zinc-300">Estimated token cost</span>
-        <span className="font-mono text-zinc-200">{estimate.totalEstimated}</span>
+        <span className="font-medium text-[var(--sf-text-secondary)]">Estimated token cost</span>
+        <span className="font-mono text-[var(--sf-text)]">{estimate.totalEstimated}</span>
       </div>
       <div className="space-y-1">
         {estimate.breakdown.map((item) => (
-          <div key={item.category} className="flex items-center justify-between text-[11px] text-zinc-400">
+          <div key={item.category} className="flex items-center justify-between text-[11px] text-[var(--sf-text-secondary)]">
             <span>{item.category}</span>
             <span className="font-mono">{item.estimatedTokens}</span>
           </div>
@@ -236,7 +276,7 @@ function TokenCostBar({ estimate }: { estimate: TokenEstimate }) {
         </div>
       )}
       {estimate.warningMessage && estimate.sufficientBalance && (
-        <div className="mt-2 flex items-center gap-1.5 rounded bg-amber-950/50 px-2 py-1 text-xs text-amber-300">
+        <div className="mt-2 flex items-center gap-1.5 rounded bg-[var(--sf-warning)]/10 px-2 py-1 text-xs text-[var(--sf-text)]">
           <AlertTriangle className="h-3 w-3" />
           {estimate.warningMessage}
         </div>
@@ -261,17 +301,17 @@ function ApprovalGateDialog({
   const { displayData } = gate;
 
   return (
-    <div className="rounded-md border border-amber-800/50 bg-amber-950/30 p-4">
-      <h4 className="mb-1 text-sm font-semibold text-amber-200">{gate.label}</h4>
-      <p className="mb-3 text-xs text-zinc-400">{gate.description}</p>
+    <div className={cn('rounded-md p-4', WARNING_SURFACE_CLASSES)}>
+      <h4 className="mb-1 text-sm font-semibold text-[var(--sf-text)]">{gate.label}</h4>
+      <p className="mb-3 text-xs text-[var(--sf-text-secondary)]">{gate.description}</p>
 
       {/* Scene summaries */}
       {displayData.sceneSummaries && displayData.sceneSummaries.length > 0 && (
         <div className="mb-3 space-y-1">
-          <h5 className="text-xs font-medium text-zinc-300">Scenes</h5>
+          <h5 className="text-xs font-medium text-[var(--sf-text-secondary)]">Scenes</h5>
           {displayData.sceneSummaries.map((scene) => (
-            <div key={scene.name} className="rounded bg-zinc-800/50 px-2 py-1 text-xs text-zinc-400">
-              <span className="text-zinc-200">{scene.name}</span>
+            <div key={scene.name} className="rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text-secondary)]">
+              <span className="text-[var(--sf-text)]">{scene.name}</span>
               <span className="ml-2">({scene.entityCount} entities)</span>
             </div>
           ))}
@@ -281,9 +321,9 @@ function ApprovalGateDialog({
       {/* Asset list */}
       {displayData.assetList && displayData.assetList.length > 0 && (
         <div className="mb-3 space-y-1">
-          <h5 className="text-xs font-medium text-zinc-300">Assets to generate</h5>
+          <h5 className="text-xs font-medium text-[var(--sf-text-secondary)]">Assets to generate</h5>
           {displayData.assetList.map((asset, i) => (
-            <div key={i} className="flex items-center justify-between rounded bg-zinc-800/50 px-2 py-1 text-xs text-zinc-400">
+            <div key={i} className="flex items-center justify-between rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text-secondary)]">
               <span>{asset.description}</span>
               <span className="font-mono">{asset.estimatedTokenCost} tokens</span>
             </div>
@@ -293,12 +333,12 @@ function ApprovalGateDialog({
 
       {/* Completion summary */}
       {displayData.completionSummary && (
-        <div className="mb-3 rounded bg-zinc-800/50 px-2 py-1.5 text-xs text-zinc-400">
+        <div className="mb-3 rounded bg-[var(--sf-bg-elevated)] px-2 py-1.5 text-xs text-[var(--sf-text-secondary)]">
           <span>{displayData.completionSummary.totalEntities} entities, </span>
           <span>{displayData.completionSummary.totalScenes} scenes, </span>
           <span>{displayData.completionSummary.totalScripts} scripts</span>
           {displayData.completionSummary.warnings.length > 0 && (
-            <div className="mt-1 text-amber-300">
+            <div className="mt-1 border-l-2 border-[var(--sf-warning)] pl-2 text-[var(--sf-text)]">
               {displayData.completionSummary.warnings.map((w, i) => (
                 <div key={i}>{w}</div>
               ))}
@@ -310,13 +350,13 @@ function ApprovalGateDialog({
       <div className="flex gap-2">
         <button
           onClick={onApprove}
-          className="flex-1 rounded bg-green-700 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-600"
+          className="flex-1 rounded bg-[var(--sf-accent-hover)] px-3 py-1.5 text-xs font-medium text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)]"
         >
           Approve
         </button>
         <button
           onClick={onCancel}
-          className="flex-1 rounded bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-600"
+          className="flex-1 rounded bg-[var(--sf-bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-overlay)]"
         >
           Cancel
         </button>
@@ -365,9 +405,9 @@ export function OrchestratorPanel() {
   // Idle state — nothing to show
   if (status === 'idle' && !plan) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-center text-sm text-zinc-500">
+      <div className="flex h-full items-center justify-center bg-[var(--sf-bg-surface)] p-4 text-center text-sm text-[var(--sf-text-secondary)]">
         <div>
-          <Sparkles className="mx-auto mb-2 h-8 w-8 text-zinc-600" />
+          <Sparkles className="mx-auto mb-2 h-8 w-8 text-[var(--sf-text-muted)]" />
           <p>No game creation in progress</p>
           <p className="mt-1 text-xs">Use chat or QuickStart to create a game</p>
         </div>
@@ -376,12 +416,12 @@ export function OrchestratorPanel() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-[var(--sf-bg-surface)]">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
+      <div className="flex items-center justify-between border-b border-[var(--sf-border)] px-3 py-2">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-blue-400" />
-          <span className="text-sm font-medium text-zinc-200">
+          <Sparkles className="h-4 w-4 text-[var(--sf-accent)]" />
+          <span className="text-sm font-medium text-[var(--sf-text)]">
             {plan?.gdd.title ?? 'Game Creation'}
           </span>
         </div>
@@ -405,7 +445,7 @@ export function OrchestratorPanel() {
             role="status"
             aria-live="polite"
             aria-label="Game creation warnings"
-            className="rounded-md border border-amber-800 bg-amber-950/40 px-3 py-2 text-sm text-amber-200"
+            className={cn('rounded-md px-3 py-2 text-sm', WARNING_SURFACE_CLASSES)}
           >
             <div className="mb-1 flex items-center gap-1.5 font-medium">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -422,7 +462,7 @@ export function OrchestratorPanel() {
                       no step, so it gets no label rather than a fabricated one. */}
                   {warning.executor && (
                     <>
-                      <span className="text-amber-400">{getStepLabel(warning.executor)}:</span>{' '}
+                      <span className="font-medium text-[var(--sf-text)]">{getStepLabel(warning.executor)}:</span>{' '}
                     </>
                   )}
                   {warning.message}
@@ -447,7 +487,7 @@ export function OrchestratorPanel() {
         {/* Step list */}
         {plan && (
           <div className="space-y-0.5">
-            <h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
+            <h4 className="mb-1 text-xs font-medium uppercase tracking-wider text-[var(--sf-text-secondary)]">
               Steps
             </h4>
             {/* `.map` skips a hole but NOT a `null`, and `plan` is
@@ -468,11 +508,11 @@ export function OrchestratorPanel() {
       </div>
 
       {/* Footer actions */}
-      <div className="border-t border-zinc-800 px-3 py-2">
+      <div className="border-t border-[var(--sf-border)] px-3 py-2">
         {status === 'awaiting_approval' && !pendingGate && (
           <button
             onClick={handleStartPipeline}
-            className="flex w-full items-center justify-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+            className="flex w-full items-center justify-center gap-2 rounded bg-[var(--sf-accent-hover)] px-3 py-2 text-sm font-medium text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)]"
           >
             <Play className="h-3.5 w-3.5" />
             Start Building
@@ -482,7 +522,7 @@ export function OrchestratorPanel() {
         {(status === 'executing' || status === 'decomposing' || status === 'planning') && (
           <button
             onClick={handleCancel}
-            className="flex w-full items-center justify-center gap-2 rounded bg-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-600"
+            className="flex w-full items-center justify-center gap-2 rounded bg-[var(--sf-bg-elevated)] px-3 py-2 text-sm font-medium text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-overlay)]"
           >
             <Square className="h-3.5 w-3.5" />
             Cancel
@@ -492,7 +532,7 @@ export function OrchestratorPanel() {
         {(status === 'completed' || status === 'failed' || status === 'cancelled') && (
           <button
             onClick={handleReset}
-            className="flex w-full items-center justify-center gap-2 rounded bg-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-600"
+            className="flex w-full items-center justify-center gap-2 rounded bg-[var(--sf-bg-elevated)] px-3 py-2 text-sm font-medium text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-overlay)]"
           >
             Start Over
           </button>

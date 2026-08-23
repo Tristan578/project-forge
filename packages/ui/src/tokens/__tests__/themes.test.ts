@@ -162,51 +162,55 @@ describe('Theme Definitions', () => {
       ).toBeGreaterThanOrEqual(4.5);
     }
   });
-  // Regression for PF-1229 finding #1: OrchestratorPanel's ERROR_SURFACE_CLASSES
-  // paints `text-[var(--sf-destructive)]` over `bg-[var(--sf-destructive)]/10`
-  // (see web/src/components/editor/OrchestratorPanel.tsx). --sf-destructive is
-  // only pinned at the WCAG 1.4.11 non-text floor (3:1, see NONTEXT_PAIRS
-  // above) — using it as TEXT against its own 10%-alpha tint failed AA 4.5:1
-  // in several themes. There is no --sf-destructive-foreground token, so the
-  // fix pairs the surface with --sf-text (already proven >= 4.5:1 against
-  // solid --sf-bg-surface via TEXT_BG_PAIRS above) and this test proves that
-  // holds against the actual blended background a viewer sees.
-  it.each(THEMES)('%s theme: error surface text clears WCAG AA against the blended destructive tint', (theme) => {
-    const tokens = THEME_DEFINITIONS[theme];
-    const destructiveHex = tokens['--sf-destructive'] as string;
-    const surfaceHex = tokens['--sf-bg-surface'] as string;
-    const textHex = tokens['--sf-text'] as string;
-    const blendedBg = blendHex(destructiveHex, surfaceHex, 0.1);
-    const ratio = contrastRatio(textHex, blendedBg);
-    expect(
-      ratio,
-      `${theme}: --sf-text ${textHex} on blended destructive/10 ${blendedBg} (over ${surfaceHex}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
-    ).toBeGreaterThanOrEqual(4.5);
-  });
+  // Regression for PF-1229. `web/src/components/editor/OrchestratorPanel.tsx`
+  // holds no hardcoded colour: every semantic surface in it is a 10%-alpha
+  // tint of a semantic token carrying `text-[var(--sf-text)]`, and the four
+  // tokens below are the complete set it uses that way. Grep the component
+  // for `]/10` to re-derive this list.
+  //
+  // Why the pin is needed at all: each of these tokens is pinned only at the
+  // WCAG 1.4.11 non-text floor (3:1, see NONTEXT_PAIRS above), and there is
+  // no `--sf-destructive-foreground` / `--sf-warning-foreground` token to
+  // pair them with. Using the token itself as TEXT against its own tint fails
+  // AA 4.5:1 in several themes (as low as ~2.9:1 for destructive in `rust`),
+  // so the component pairs each tint with `--sf-text` instead — already
+  // proven >= 4.5:1 against solid `--sf-bg-surface` by TEXT_BG_PAIRS above,
+  // and proven here against the tint that is actually painted.
+  //
+  // The blend base is `--sf-bg-surface` because that is the background the
+  // component really paints: BOTH of its return branches carry an opaque
+  // `bg-[var(--sf-bg-surface)]`. That was added in the same change as this
+  // pin and is load-bearing for it. The panel is mounted by
+  // `WorkspaceProvider`'s `withSuspense` wrapper inside a hardcoded
+  // `bg-zinc-900` host (shared with dark-only sibling panels, so it was not
+  // retokenised); without the panel painting its own surface, a `/10` tint
+  // would composite over #18181b in all seven themes while this test graded
+  // it against `--sf-bg-surface` — and in `light`, `--sf-text` IS #18181b,
+  // i.e. ~1.06:1. The pin would then have passed on unreadable output.
+  const SEMANTIC_TINT_TOKENS = [
+    ['--sf-destructive', 'ERROR_SURFACE_CLASSES, the insufficient-balance row, the `failed` badge'],
+    ['--sf-warning', 'WARNING_SURFACE_CLASSES, the token-warning row, the `awaiting_approval` badge'],
+    ['--sf-accent', 'the `decomposing` / `planning` / `executing` badges'],
+    ['--sf-success', 'the `completed` badge'],
+  ] as const;
 
-  // Regression for PF-1229 finding #9: OrchestratorPanel's warnings-list
-  // container (see web/src/components/editor/OrchestratorPanel.tsx) was
-  // migrated off hardcoded `border-amber-800 bg-amber-950/40 text-amber-200`
-  // onto `border-[var(--sf-warning)]/40 bg-[var(--sf-warning)]/10
-  // text-[var(--sf-text)]` — the same border/bg proportions as
-  // ERROR_SURFACE_CLASSES above, with --sf-warning substituted for
-  // --sf-destructive. --sf-warning is only pinned at the WCAG 1.4.11
-  // non-text floor (3:1, see NONTEXT_PAIRS above); there is no
-  // --sf-warning-foreground token and no existing pin proves --sf-text
-  // clears AA against a --sf-warning tint specifically (only against the
-  // solid --sf-destructive tint above), so this test proves that holds
-  // against the actual blended background a viewer sees before the
-  // component relies on it.
-  it.each(THEMES)('%s theme: warning surface text clears WCAG AA against the blended warning tint', (theme) => {
-    const tokens = THEME_DEFINITIONS[theme];
-    const warningHex = tokens['--sf-warning'] as string;
-    const surfaceHex = tokens['--sf-bg-surface'] as string;
-    const textHex = tokens['--sf-text'] as string;
-    const blendedBg = blendHex(warningHex, surfaceHex, 0.1);
-    const ratio = contrastRatio(textHex, blendedBg);
-    expect(
-      ratio,
-      `${theme}: --sf-text ${textHex} on blended warning/10 ${blendedBg} (over ${surfaceHex}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
-    ).toBeGreaterThanOrEqual(4.5);
-  });
+  const TINT_CASES = THEMES.flatMap((theme) =>
+    SEMANTIC_TINT_TOKENS.map(([tokenKey, usedBy]) => [theme, tokenKey, usedBy] as const)
+  );
+
+  it.each(TINT_CASES)(
+    '%s theme: %s/10 tint keeps OrchestratorPanel body text at WCAG AA',
+    (theme, tokenKey, usedBy) => {
+      const tokens = THEME_DEFINITIONS[theme];
+      const tintHex = tokens[tokenKey] as string;
+      const surfaceHex = tokens['--sf-bg-surface'] as string;
+      const textHex = tokens['--sf-text'] as string;
+      const blendedBg = blendHex(tintHex, surfaceHex, 0.1);
+      const ratio = contrastRatio(textHex, blendedBg);
+      expect(
+        ratio,
+        `${theme}: --sf-text ${textHex} on blended ${tokenKey}/10 ${blendedBg} (over --sf-bg-surface ${surfaceHex}, used by ${usedBy}) = ${ratio.toFixed(2)}:1, need >= 4.5:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  );
 });
