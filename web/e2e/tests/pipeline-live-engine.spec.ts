@@ -107,30 +107,34 @@ const TERMINAL = ['completed', 'failed', 'cancelled'];
  * Derived from the shared fixture rather than stored as a second file on
  * purpose: two hand-maintained copies of the same GDD drift.
  *
- * TWO things are stripped below, and they do different jobs.
- *
- * `entities: []` is what makes the design unwinnable, and it is the only shape
- * that still is. Since PF-1199 the plan-level win-condition guarantee
- * substitutes a `score` condition whenever a design names no progression, so
- * dropping progression ALONE now legitimately COMPLETES and Play is permitted
+ * ONE thing is stripped, and it is the only shape that is still unwinnable.
+ * Since PF-1199 the plan-level win-condition guarantee substitutes a `score`
+ * condition whenever a design names no progression, so dropping progression
+ * alone now legitimately COMPLETES and Play is permitted
  * (`generatedGamePlayable.integration.test.ts` asserts exactly that). With no
  * entities there is nothing for a condition to hang on, so `verify_all_scenes`
  * reports NOT_WINNABLE however the plan was assembled.
  *
- * Progression is stripped as well so the plan fails AT `verify_all_scenes`.
- * Left in, its `game_component` step targets the collectible ids the design
- * named — ids an empty world does not contain — so that step fails first and
- * the verification step never runs at all. The assertion below (every
- * `verify_all_scenes` step FAILED) would then be red for a different reason
- * than the one this test exists to catch.
+ * Progression is deliberately LEFT IN, and that was measured rather than
+ * assumed. Running this exact design (progression retained, `entities: []`)
+ * through the real `buildPlan` + `runPipeline` records:
+ *
+ *   plan_present / scene_create / world_build / physics_enable /
+ *   camera_setup / physics_profile  -> completed
+ *   verify_all_scenes               -> failed, NOT_WINNABLE / NO_WIN_CONDITION
+ *   auto_polish                     -> skipped
+ *
+ * No `game_component` step is planned at all — the progression system has no
+ * entities to bind a collectible to — so nothing upstream can fail first and
+ * pre-empt the verification step the assertion below reads. Stripping
+ * progression as well would only remove a system whose presence the failure
+ * does not depend on.
  */
 const emptyWorldGdd = {
   ...crystalRun3d,
   id: 'gdd-empty-world',
-  systems: crystalRun3d.systems.filter(s => s.category !== 'progression'),
   scenes: crystalRun3d.scenes.map(scene => ({
     ...scene,
-    systems: scene.systems.filter(c => c !== 'progression'),
     entities: [],
   })),
 };
