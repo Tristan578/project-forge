@@ -1223,10 +1223,16 @@ jobs:
         run: npx next build
 
       # Runs the curated @engine-smoke set (two specs — see the job comment
-      # above), under SwiftShader software WebGL2; launch flags, testMatch and
-      # the per-test timeouts all live in playwright.engine.config.ts. The
-      # editor fixture's load() seeds localStorage['forge:preferred-backend'] =
-      # 'webgl2' so loadWasm never probes WebGPU, which SwiftShader cannot drive.
+      # above), under SwiftShader software WebGL2. Launch flags and testMatch
+      # live in playwright.engine.config.ts, which also carries the 90s DEFAULT
+      # per-test budget; the 180s these two specs actually get comes from
+      # `test.describe.configure({ timeout: E2E_TIMEOUT_PIPELINE_LIVE_MS })` in
+      # e2e/tests/pipeline-live-engine.spec.ts. Both numbers are defined in
+      # e2e/constants.ts — no spec may inline a timeout literal — so raising the
+      # budget for this gate means editing the spec's configure call, not this
+      # workflow and not the config. The editor fixture's load() seeds
+      # localStorage['forge:preferred-backend'] = 'webgl2' so loadWasm never
+      # probes WebGPU, which SwiftShader cannot drive.
       - name: Run engine smoke gate
         working-directory: web
         env:
