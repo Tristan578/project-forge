@@ -122,4 +122,28 @@ describe('ApprovalGateDialog', () => {
     );
     expect(screen.getByText('Missing a win condition')).toBeInTheDocument();
   });
+
+  // PF-1215 round 2 (5/5 UX BLOCKER): a keyboard-only user has no mouse
+  // wheel/trackpad to reach content below the fold, so the scroll region
+  // itself must be a reachable, labelled landmark, not just a CSS overflow
+  // box. Resolving the accessible name via role+name proves aria-labelledby
+  // points at the REAL heading id, not just that the attribute is present.
+  it('exposes the scroll region as a keyboard-reachable, labelled landmark', () => {
+    render(<ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()} />);
+    const region = screen.getByRole('region', { name: 'Review the plan' });
+    expect(region).toHaveAttribute('data-testid', 'approval-gate-scroll');
+    expect(region).toHaveAttribute('tabIndex', '0');
+  });
+
+  // PF-1215 round 2 (3/5 UX BLOCKER): `--sf-warning` measures ~3.64:1 on
+  // `--sf-bg-surface` in the light theme, below the 4.5:1 AA floor for
+  // `text-sm font-semibold` (not "large text" under WCAG 1.4.3). The token
+  // stays valid for the border (a non-text role, pinned >= 3:1 in
+  // themes.test.ts); only the TEXT color must move to `--sf-text`.
+  it('pairs the gate heading text with --sf-text, not --sf-warning', () => {
+    render(<ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()} />);
+    const heading = screen.getByText('Review the plan');
+    expect(heading.className).toContain('text-[var(--sf-text)]');
+    expect(heading.className).not.toContain('text-[var(--sf-warning)]');
+  });
 });
