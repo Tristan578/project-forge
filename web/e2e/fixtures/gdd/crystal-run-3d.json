@@ -1,0 +1,87 @@
+{
+  "id": "gdd-crystal-run",
+  "title": "Crystal Run",
+  "description": "Bounce around a small arena and gather every crystal.",
+  "projectType": "3d",
+  "estimatedScope": "small",
+  "styleDirective": "low-poly pastel",
+  "feelDirective": {
+    "mood": "bright and curious",
+    "pacing": "medium",
+    "weight": "medium",
+    "referenceGames": ["Super Mario 64"],
+    "oneLiner": "Bouncy exploration with a goal you can see from the start."
+  },
+  "constraints": [],
+  "systems": [
+    {
+      "category": "movement",
+      "type": "platformer",
+      "config": {},
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "world",
+      "type": "platformer arena",
+      "config": { "width": 40, "depth": 40, "platforms": 4, "bounds": true },
+      "priority": "core",
+      "dependsOn": []
+    },
+    {
+      "category": "camera",
+      "type": "thirdPersonFollow",
+      "config": {},
+      "priority": "core",
+      "dependsOn": ["movement"]
+    },
+    {
+      "category": "progression",
+      "type": "collect-all",
+      "config": { "collectibleValue": 25 },
+      "priority": "core",
+      "dependsOn": ["movement"]
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Crystal Arena",
+      "purpose": "The only level.",
+      "systems": ["movement", "world", "camera", "progression"],
+      "entities": [
+        {
+          "name": "Player",
+          "role": "player",
+          "systems": ["movement"],
+          "appearance": "primitive:capsule"
+        },
+        {
+          "name": "Crystal Alpha",
+          "role": "interactable",
+          "systems": [],
+          "appearance": "primitive:sphere"
+        },
+        {
+          "name": "Crystal Beta",
+          "role": "interactable",
+          "systems": [],
+          "appearance": "primitive:sphere"
+        },
+        {
+          "name": "Main Camera",
+          "role": "decoration",
+          "systems": ["camera"],
+          "appearance": "primitive:cube"
+        },
+        {
+          "name": "Sun Light",
+          "role": "decoration",
+          "systems": [],
+          "appearance": "primitive:cube"
+        }
+      ],
+      "transitions": []
+    }
+  ],
+  "assetManifest": []
+}

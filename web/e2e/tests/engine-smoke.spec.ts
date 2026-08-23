@@ -9,8 +9,10 @@ import {
 /**
  * #8602 (F10): curated per-PR @engine-smoke journey.
  *
- * This is the SINGLE spec run by the test-e2e-engine-smoke CI job
- * (playwright.engine.config.ts) — the first per-PR job that actually boots the
+ * One of the two curated specs run by the test-e2e-engine-smoke CI job
+ * (playwright.engine.config.ts; the other is `pipeline-live-engine.spec.ts`,
+ * which drives the game-creation pipeline through the same engine). This job is
+ * the only per-PR job that actually boots the
  * WASM engine, under ANGLE/SwiftShader software WebGL2 (NOT --disable-gpu, which
  * leaves wgpu with no GL context and hangs `init_engine`).
  *
@@ -28,16 +30,9 @@ import {
  * / play / export journeys but NOT WebGPU or real-GPU rendering correctness.
  */
 test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
-  test.beforeEach(async ({ page, editor }) => {
-    // Force the WebGL2 backend BEFORE the app loads so loadWasm() (useEngine.ts)
-    // never probes WebGPU (SwiftShader cannot drive it) and never spends
-    // GPU_INIT_TIMEOUT before falling back. This uses the same persisted
-    // preference key the in-app WebGL2 fallback button writes
-    // (PREFERRED_BACKEND_KEY = 'forge:preferred-backend'); we set it via the
-    // app's own mechanism rather than editing production code.
-    await page.addInitScript(() => {
-      localStorage.setItem('forge:preferred-backend', 'webgl2');
-    });
+  test.beforeEach(async ({ editor }) => {
+    // `editor.load()` seeds 'forge:preferred-backend' = 'webgl2' for every spec
+    // that uses it, so SwiftShader is never asked for WebGPU here.
     await editor.load();
   });
 

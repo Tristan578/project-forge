@@ -37,3 +37,17 @@ export const E2E_TIMEOUT_TEST_MS = 60_000;
 
 /** Full engine cold-start timeout (first load, CI webpack compile) */
 export const E2E_TIMEOUT_ENGINE_FULL_MS = 90_000;
+
+/**
+ * Per-test cap for the live-engine pipeline gate (`pipeline-live-engine.spec.ts`).
+ *
+ * Deliberately double `E2E_TIMEOUT_ENGINE_FULL_MS`: these tests pay for a cold
+ * WASM boot under ANGLE/SwiftShader (a software rasteriser — every frame is on
+ * the CPU) AND then run the whole game-creation pipeline, which is dozens of
+ * engine round-trips. Measured locally against a production build on an M2
+ * (`npx playwright test --config playwright.engine.config.ts
+ * pipeline-live-engine`): 7.2s and 6.1s, 16.8s wall for the pair. The CI engine
+ * shard is the slowest machine either flow ever runs on and boots cold, so the
+ * cap is sized for the worst plausible cold start rather than that median.
+ */
+export const E2E_TIMEOUT_PIPELINE_LIVE_MS = 180_000;

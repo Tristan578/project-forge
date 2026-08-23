@@ -28,13 +28,17 @@
  *     web/public/engine-pkg-webgl2/ BEFORE this runs (SwiftShader cannot drive
  *     WebGPU, so only the webgl2 variant is needed).
  *   - The editor.fixture `load()` seeds localStorage['forge:preferred-backend']
- *     = 'webgl2' so loadWasm() forces WebGL2 and never spends GPU_INIT_TIMEOUT
+ *     = 'webgl2' so loadWasm() forces WebGL2 and never spends GPU_INIT_TIMEOUT_MS
  *     probing WebGPU first.
  *   - SKIP_ENV_VALIDATION=true (no Clerk/Stripe keys in CI).
  *
  * Timeouts are deliberately generous: software rendering + WASM load + Bevy init
  * is slow, so a too-tight cap would produce flaky reds that masquerade as real
- * regressions. We reuse E2E_TIMEOUT_ENGINE_FULL_MS (90s) for the per-test cap.
+ * regressions. E2E_TIMEOUT_ENGINE_FULL_MS (90s) is the default per-test cap;
+ * pipeline-live-engine.spec.ts raises its own describe block to
+ * E2E_TIMEOUT_PIPELINE_LIVE_MS (180s), since it pays for the same cold boot and
+ * then runs a whole pipeline of engine round-trips on top of it. Both constants
+ * live in e2e/constants.ts — no spec may inline a timeout literal.
  */
 import { defineConfig, devices } from '@playwright/test';
 import { E2E_NAVIGATION_TIMEOUT_MS } from './src/lib/config/timeouts';
@@ -45,9 +49,15 @@ import {
 
 export default defineConfig({
   testDir: './e2e',
-  // Match ONLY the curated engine-smoke spec so a slow @engine spec elsewhere
-  // can't blow this job's budget. `grep` is a belt-and-suspenders tag filter.
-  testMatch: '**/engine-smoke.spec.ts',
+  // Match ONLY the curated engine specs so a slow @engine spec elsewhere can't
+  // blow this job's budget. `grep` is a belt-and-suspenders tag filter.
+  // pipeline-live-engine (PF-1202) is the second member: it runs the real
+  // game-creation pipeline through the real engine and clicks the real Play
+  // button, which is the only place a silently-rejected engine command shows up
+  // (`dispatchCommand` returns void, so the fake-bridge integration suite can
+  // never see one). Its describe block raises the cap to
+  // E2E_TIMEOUT_PIPELINE_LIVE_MS.
+  testMatch: '**/{engine-smoke,pipeline-live-engine}.spec.ts',
   grep: /@engine-smoke/,
   fullyParallel: true,
   forbidOnly: true,

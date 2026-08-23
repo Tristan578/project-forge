@@ -17,13 +17,34 @@ export class EditorPage {
 
   /** Navigate to /dev and wait for WASM engine to initialize */
   async load() {
-    // Suppress onboarding overlays and init overlay so they don't block interactions.
-    // The InitOverlay stays visible until the Rust renderer fully initializes, which
-    // requires GPU — in headless Chrome with --disable-gpu it never completes.
+    // Suppress onboarding overlays and the init overlay so they don't block
+    // interactions. `InitOverlay` returns null only once `useEngineStatus`
+    // reports the `'ready'` phase, which is emitted by the Rust first-frame
+    // system (`detect_first_frame`, engine/src/core/observability.rs) — NOT
+    // by `__FORGE_ENGINE_READY`, which useEngine.ts sets synchronously when
+    // `init_engine()` returns, before the renderer has drawn anything. So the
+    // overlay clears strictly LATER than the flag this fixture waits on. In
+    // headless Chrome with --disable-gpu (every CI config except
+    // playwright.engine.config.ts) `init_engine()` never completes, so the
+    // overlay never clears on its own; on the engine config there is still a
+    // window between the flag flipping and the first rendered frame. The CSS
+    // suppression below is what keeps a click from landing on it in both cases.
     await this.page.addInitScript(() => {
       localStorage.setItem('forge-welcomed', '1');
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
+
+      // Seed the persisted backend choice so `loadWasm()` (useEngine.ts) takes
+      // the WebGL2 path directly: it reads this key before anything else and
+      // only calls `probeWebGPU()` when it is not 'webgl2', so no config spends
+      // GPU_INIT_TIMEOUT_MS probing for an adapter before falling back. This is
+      // what playwright.engine.config.ts's header requires of the fixture —
+      // SwiftShader cannot drive WebGPU, so the engine-smoke job must never
+      // wait on that probe. It lives here rather than in each engine spec so a
+      // third one cannot forget it. Same persisted key the in-app fallback
+      // button writes (`PREFERRED_BACKEND_KEY`, useEngine.ts). A future
+      // WebGPU-capable project must clear the key rather than inherit it.
+      localStorage.setItem('forge:preferred-backend', 'webgl2');
 
       // Inject CSS to hide blocking overlays
       const style = document.createElement('style');
