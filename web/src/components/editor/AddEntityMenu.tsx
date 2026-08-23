@@ -187,13 +187,20 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
 
   return (
     <div ref={menuRef} className="relative">
+      {/* PF-1215 round 2 (5/5 UX BLOCKER, adjacent finding): 44px is the WCAG
+          2.5.5 touch-target minimum. This trigger is used both here (inside
+          MobileToolbar's fixed 320px-budget row, where it also needs
+          `shrink-0` from the parent) and in Sidebar's 56px-wide desktop rail,
+          where extra headroom is harmless. The dropdown below positions off
+          this button's own box (`left-full top-0 ml-2`), so growing the
+          trigger does not shift it. */}
       <button
         onClick={() => setOpen(!open)}
         title="Add Entity"
         aria-label="Add Entity"
         aria-haspopup="true"
         aria-expanded={open}
-        className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg transition-colors ${
           open
             ? 'bg-blue-600 text-white'
             : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'

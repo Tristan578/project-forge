@@ -55,10 +55,23 @@ describe('AddEntityMenu', () => {
     render(<AddEntityMenu onSpawn={mockSpawnEntity} />);
     const buttons = screen.getAllByRole('button', { name: /Add Entity/i });
     fireEvent.click(buttons[0]);
-    
+
     const cubeOption = (await screen.findAllByText('Cube'))[0];
     fireEvent.click(cubeOption);
 
     expect(mockSpawnEntity).toHaveBeenCalledWith('cube');
+  });
+
+  // PF-1215 round 2 (5/5 UX BLOCKER, adjacent finding): this is the trigger's
+  // own source of truth for its WCAG 2.5.5 44px touch target. MobileToolbar's
+  // 320px-budget tests mock this component out entirely, so they cannot catch
+  // a regression here -- that gap is exactly what this test closes.
+  it('renders the trigger at the 44px WCAG touch-target minimum with shrink-0', () => {
+    render(<AddEntityMenu onSpawn={mockSpawnEntity} />);
+    const trigger = screen.getByRole('button', { name: /Add Entity/i });
+
+    expect(trigger.className).toMatch(/\bh-11\b/);
+    expect(trigger.className).toMatch(/\bw-11\b/);
+    expect(trigger.className).toMatch(/\bshrink-0\b/);
   });
 });
