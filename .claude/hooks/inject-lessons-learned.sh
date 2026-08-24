@@ -6,9 +6,21 @@
 # subagent — sees relevant anti-patterns before modifying code or running
 # commands that touch files.
 #
-# DESIGN: Uses keyword matching against file paths and bash commands, NOT
-# hardcoded lesson numbers. When new lessons are added, they're automatically
-# picked up if their title/prevention text contains matching keywords.
+# TARGETING, in precedence order:
+#   1. `**Applies:** <substr>|<substr>` on a lesson — an explicit, case-insensitive
+#      SUBSTRING list matched against the target (file path, or the whole bash
+#      command). Substrings, deliberately NOT regexes: an author typo in a regex
+#      aborts awk mid-file and the hook silently injects nothing, which is the
+#      one failure mode this hook must never have. Annotated lessons are emitted
+#      FIRST so the match cap can never starve a precisely-targeted lesson.
+#   2. Keyword-vs-prose matching (the table below) for un-annotated lessons, so a
+#      newly added lesson is still picked up with no edit to this file.
+#
+# PERFORMANCE: the whole lessons file is matched in ONE awk pass. The previous
+# implementation piped every line through `grep` in a shell while-loop — ~1,400
+# forks per invocation, a 5.8s MEDIAN against a 5s timeout, so the hook was being
+# KILLED (540 times in a 120-session window) and enforcement silently did not
+# happen. Do not reintroduce a per-line fork.
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
@@ -27,6 +39,17 @@ fi
 LESSONS="$HOME/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md"
 
 if [ ! -f "$LESSONS" ]; then
+  exit 0
+fi
+
+# A read-only bash command gets NOTHING — not the fallback, not keyword
+# matches. 60% of this hook's fires were `ls`/`cat`/`grep`/`git status`, each
+# stamped MANDATORY with warnings about mistakes you cannot make by reading a
+# file. 5,700 irrelevant mandatory blocks per month is how an agent learns to
+# skim the block, which costs enforcement on the calls that DO matter. Editing
+# the same path still warns; so does any command that can change state.
+# Exiting here also skips ~19 greps, so the cheapest case is also the fastest.
+if [ "$TOOL_NAME" = "Bash" ] && ! echo "$TARGET" | grep -qE '(^|[;&|[:space:]])(git[[:space:]]+(push|checkout|revert|reset|cherry-pick|commit|rebase|merge|branch|worktree|clean|stash)|gh[[:space:]]+(pr|issue|release|api)|vercel|wrangler|stripe|npm[[:space:]]+(install|ci|update|publish|uninstall)|npx[[:space:]]+changeset|db:(push|migrate|generate)|rm|mv|chmod|ln|tee)([[:space:]]|$)'; then
   exit 0
 fi
 
@@ -147,7 +170,7 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   fi
 fi
 
-# If nothing matched, inject the universal top lessons
+# If no branch matched, fall back to the universal top lessons.
 if [ -z "$KEYWORDS" ]; then
   KEYWORDS="panelRegistry|rateLimit|nullish|refund|await"
 fi
@@ -155,72 +178,84 @@ fi
 # Strip leading pipe
 KEYWORDS="${KEYWORDS#|}"
 
-# Search lessons file for matching anti-patterns using keywords
-# Extract each ### N. block and check if it matches any keyword
-WARNINGS=""
-CURRENT_TITLE=""
-CURRENT_PREVENT=""
-CURRENT_BLOCK=""
-MATCH_COUNT=0
-MAX_MATCHES=12  # Cap to avoid overwhelming context
+# Single-pass match. Emits `**Applies:**`-targeted lessons first, then
+# keyword-vs-prose matches, capped at MAX total.
+#
+# KW/TARGET go through the ENVIRONMENT, not `awk -v`: -v processes escape
+# sequences in the value, so the keyword `Number\(` arrives as `Number(` — an
+# unmatched paren, an illegal ERE, and awk aborts mid-file. The hook then exits
+# 0 with empty output and the operation proceeds unwarned. That is this hook's
+# worst failure mode, so the awk status is checked below rather than swallowed.
+export LL_KW="$KEYWORDS" LL_TARGET="$TARGET"
+WARNINGS=$(awk '
+BEGIN {
+  nk = split(ENVIRON["LL_KW"], K, "|")
+  lt = tolower(ENVIRON["LL_TARGET"])
+  MAX = 12
+  na = 0; nb = 0
+}
+/^### [0-9]+\. / {
+  classify()
+  title = substr($0, 5); block = $0; prev = ""; applies = ""
+  next
+}
+{
+  block = block " " $0
+  if (index($0, "**Prevention:**") == 1) prev = substr($0, 17)
+  else if (index($0, "**Applies:**") == 1) applies = substr($0, 14)
+}
+END {
+  classify()
+  n = 0
+  for (i = 1; i <= na && n < MAX; i++) { print A[i]; n++ }
+  for (i = 1; i <= nb && n < MAX; i++) { print B[i]; n++ }
+}
+# Route the block just finished into the Applies list, the keyword list, or neither.
+function classify(   i, np, part, p, cut, line) {
+  if (title == "") return
+  p = prev
+  if (length(p) > 200) {
+    # Cut back to the last space rather than slicing at exactly 200. awk on macOS
+    # counts BYTES, so a hard cut can land inside a multi-byte character (the
+    # lessons prose is full of em dashes) and emit invalid UTF-8.
+    cut = substr(p, 1, 200)
+    if (match(cut, /^.*[ \t]/)) cut = substr(cut, 1, RLENGTH - 1)
+    p = cut "..."
+  }
+  line = "- " title ": " p
 
-while IFS= read -r line; do
-  if echo "$line" | grep -qE "^### [0-9]+\. "; then
-    # Process previous block if it exists
-    if [ -n "$CURRENT_TITLE" ] && [ -n "$CURRENT_BLOCK" ]; then
-      # Check if any keyword matches in the block text
-      IFS='|' read -ra KW_ARRAY <<< "$KEYWORDS"
-      for kw in "${KW_ARRAY[@]}"; do
-        kw=$(echo "$kw" | tr -d ' ')
-        [ -z "$kw" ] && continue
-        if echo "$CURRENT_BLOCK" | grep -qiE "$kw" 2>/dev/null; then
-          if [ $MATCH_COUNT -lt $MAX_MATCHES ]; then
-            PREVENT_SHORT="$CURRENT_PREVENT"
-            if [ ${#PREVENT_SHORT} -gt 200 ]; then
-              PREVENT_SHORT="${PREVENT_SHORT:0:200}..."
-            fi
-            WARNINGS="${WARNINGS}
-- ${CURRENT_TITLE}: ${PREVENT_SHORT}"
-            MATCH_COUNT=$((MATCH_COUNT + 1))
-          fi
-          break  # One match per lesson is enough
-        fi
-      done
-    fi
-    # Start new block
-    CURRENT_TITLE="${line#\#\#\# }"
-    CURRENT_BLOCK="$line"
-    CURRENT_PREVENT=""
-  else
-    CURRENT_BLOCK="${CURRENT_BLOCK} ${line}"
-    if echo "$line" | grep -qE "^\*\*Prevention:\*\*"; then
-      CURRENT_PREVENT="${line#\*\*Prevention:\*\* }"
-    fi
-  fi
-done < "$LESSONS"
+  if (applies != "") {
+    # Explicit targeting wins outright: substring match, no regex, no fallthrough
+    # to prose keywords (an annotated lesson has already said where it applies).
+    np = split(tolower(applies), part, "|")
+    for (i = 1; i <= np; i++) {
+      gsub(/^[ \t]+|[ \t]+$/, "", part[i])
+      if (part[i] != "" && index(lt, part[i]) > 0) { A[++na] = line; return }
+    }
+    return
+  }
 
-# Process last block
-if [ -n "$CURRENT_TITLE" ] && [ -n "$CURRENT_BLOCK" ]; then
-  IFS='|' read -ra KW_ARRAY <<< "$KEYWORDS"
-  for kw in "${KW_ARRAY[@]}"; do
-    kw=$(echo "$kw" | tr -d ' ')
-    [ -z "$kw" ] && continue
-    if echo "$CURRENT_BLOCK" | grep -qiE "$kw" 2>/dev/null; then
-      if [ $MATCH_COUNT -lt $MAX_MATCHES ]; then
-        PREVENT_SHORT="$CURRENT_PREVENT"
-        if [ ${#PREVENT_SHORT} -gt 200 ]; then
-          PREVENT_SHORT="${PREVENT_SHORT:0:200}..."
-        fi
-        WARNINGS="${WARNINGS}
-- ${CURRENT_TITLE}: ${PREVENT_SHORT}"
-      fi
-      break
-    fi
-  done
+  for (i = 1; i <= nk; i++) {
+    if (K[i] == "") continue
+    if (tolower(block) ~ tolower(K[i])) { B[++nb] = line; return }
+  }
+}
+' "$LESSONS" 2>/dev/null)
+AWK_STATUS=$?
+unset LL_KW LL_TARGET
+
+# A malformed keyword regex aborts awk mid-file. Never let that pass silently as
+# "no lessons apply" — an unwarned edit is exactly what this hook exists to stop.
+if [ "$AWK_STATUS" -ne 0 ]; then
+  echo "LESSONS HOOK FAILED (awk exit $AWK_STATUS) — anti-pattern warnings were NOT injected for this operation."
+  echo "Fix the keyword table in .claude/hooks/inject-lessons-learned.sh, then re-run:"
+  echo "  bash .claude/hooks/__tests__/inject-lessons-learned.test.sh"
+  exit 0
 fi
 
 if [ -n "$WARNINGS" ]; then
-  echo "MANDATORY — Lessons learned relevant to this operation. Violating these has caused real bugs:${WARNINGS}"
+  echo "MANDATORY — Lessons learned relevant to this operation. Violating these has caused real bugs:"
+  echo "$WARNINGS"
 fi
 
 exit 0
