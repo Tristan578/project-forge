@@ -67,6 +67,11 @@ cat > "$FIX_HOME/$MEM_REL/project_lessons_learned.md" <<'FIXTURE'
 **What happens:** prose that mentions panelRegistry.
 **Prevention:** ECHO — this prevention line is deliberately far longer than the two hundred character truncation threshold — it is padded with em dashes so that a byte-wise cut would land inside a multi-byte character and emit invalid UTF-8 — padding — padding — padding.
 **Ticket:** PF-0005
+
+### 6. Worktree lesson
+**What happens:** prose about a nested worktree losing branches.
+**Prevention:** FOXTROT never nest a worktree
+**Ticket:** PF-0006
 FIXTURE
 
 # Second fixture: enough keyword lessons to exceed the 12-line cap, plus one
@@ -132,6 +137,11 @@ assert_not_contains() {
 assert_empty() {
   local label="$1" hay="$2"
   if [ -z "$hay" ]; then pass "$label"; else fail "$label (expected no output, got: ${hay:0:80})"; fi
+}
+
+assert_not_empty() {
+  local label="$1" hay="$2"
+  if [ -n "$hay" ]; then pass "$label"; else fail "$label (expected some warning, got silence)"; fi
 }
 
 assert_status_zero() {
@@ -216,15 +226,60 @@ fi
 # match either. Nothing you can do by reading a file violates a lesson.
 for CMD in "cat web/src/lib/foo.ts" "ls -la" "npx vitest run" \
            "grep -r panelRegistry web/src" "cat web/src/app/api/x/route.ts" \
-           "git status" "git log --oneline" "sed -n 1,20p fixture-target.ts"; do
+           "git status" "git log --oneline" "sed -n 1,20p fixture-target.ts" \
+           "git branch --show-current" "git remote -v" "gh pr view 9369" \
+           "git log --oneline | head -20" "cat a.ts; ls -la" \
+           "env -u UPSTASH_REDIS_REST_URL npx vitest run"; do
   OUT="$(run "$FIX_HOME" Bash "$CMD")"
   assert_empty "read-only bash gets no fallback injection: $CMD" "$OUT"
   assert_status_zero "read-only bash exits 0: $CMD" "$RUN_STATUS"
 done
 
-for CMD in "rm -rf build" "mv a b" "npm install lodash" "git commit -m x"; do
+for CMD in "rm -rf build" "mv a b" "npm install lodash" "git commit -m x" \
+           "sed -i s/a/b/ web/src/foo.ts" "cp a.ts b.ts" "mkdir -p x" "touch x" \
+           "echo hi > web/src/foo.tsx"; do
   OUT="$(run "$FIX_HOME" Bash "$CMD")"
   assert_contains "mutating bash still gets the fallback injection: $CMD" "$OUT" "CHARLIE"
+done
+
+# A previously-allowlisted mutating verb (git commit) getting no special
+# handling from the redirect/allowlist gate still relies on the keyword table
+# below it — pinned above. This case pins that an UNRECOGNIZED command (not on
+# either the old mutating-verb list or the new read-only allowlist) also
+# defaults to warning, not silence — the exact regression this suite guards.
+OUT="$(run "$FIX_HOME" Bash "some-unknown-binary --write web/src/foo.ts")"
+assert_contains "unrecognized bash command defaults to warning, not silence" "$OUT" "CHARLIE"
+
+# A verb is not a permission: the read-only allowlist names SUBCOMMANDS and
+# flags, because the same leading verb both reads and writes. `git branch`
+# lists, `git branch -d` deletes; `npx eslint` reports, `npx eslint --fix`
+# rewrites source. An allowlist keyed on the bare verb silently skips
+# injection on the mutating half — the exact class of bug this gate replaced,
+# moved one level up from the verb to its arguments.
+# `git branch <name>` lands on the worktree keyword branch rather than the
+# universal fallback, so assert on WARNED-AT-ALL, not on a specific lesson:
+# the property under test is that no mutating form exits silently.
+for CMD in "git branch new-feature" "git branch -d old-branch" \
+           "git branch -D old-branch" "git branch -m renamed" \
+           "git remote add origin git@github.com:x/y.git" \
+           "git remote set-url origin git@github.com:x/y.git" \
+           "npx eslint --fix ." "find web/src -name '*.tmp' -delete"; do
+  OUT="$(run "$FIX_HOME" Bash "$CMD")"
+  assert_not_empty "verb allowlisted, mutating subcommand is not: $CMD" "$OUT"
+done
+
+# ...and specifically that `git branch <name>` reaches the worktree keyword
+# branch it is supposed to reach, rather than merely producing some output.
+OUT="$(run "$FIX_HOME" Bash "git branch -D old-branch")"
+assert_contains "git branch -D reaches the worktree lesson" "$OUT" "FOXTROT"
+
+# EVERY segment of a compound command must be read-only. A single grep over
+# the whole string matches the trailing `; ls` and would wave through a
+# command whose first segment deletes a directory.
+for CMD in "rm -rf build; ls" "ls && rm -rf build" "cat a.ts | tee b.ts" \
+           "echo \$(rm -rf build)"; do
+  OUT="$(run "$FIX_HOME" Bash "$CMD")"
+  assert_contains "one read-only segment does not launder the command: $CMD" "$OUT" "CHARLIE"
 done
 
 # An Edit whose path matches no keyword branch must still get the fallback.

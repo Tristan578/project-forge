@@ -46,10 +46,57 @@ fi
 # matches. 60% of this hook's fires were `ls`/`cat`/`grep`/`git status`, each
 # stamped MANDATORY with warnings about mistakes you cannot make by reading a
 # file. 5,700 irrelevant mandatory blocks per month is how an agent learns to
-# skim the block, which costs enforcement on the calls that DO matter. Editing
-# the same path still warns; so does any command that can change state.
+# skim the block, which costs enforcement on the calls that DO matter.
+#
+# This is an ALLOWLIST of known read-only commands, not a denylist of known
+# mutating ones: a denylist only ever catches verbs someone remembered to add
+# — `sed -i`, `cp`, `mkdir`, `touch` and a plain `>` redirect all slipped
+# through the previous denylist and silently skipped injection, and any newly
+# invented command starts out missing from a denylist too. An allowlist
+# defaults the other way: anything not explicitly known to be read-only falls
+# through to keyword matching (worst case, the universal fallback), so an
+# unrecognized command warns instead of silently passing.
+#
+# Three properties this gate MUST keep, each of which a naive allowlist gets
+# wrong:
+#   1. EVERY segment must be read-only, not merely one of them. A single grep
+#      over the whole string matches the `; ls` in `rm -rf build; ls` and
+#      would skip injection on a command that deletes a directory. The command
+#      is split on `;`/`&`/`|` and each segment is anchored with `^`.
+#   2. A verb is not a permission — the SUBCOMMAND and flags decide. `git
+#      branch` reads, `git branch -d x` deletes; `npx eslint` reads, `npx
+#      eslint --fix` rewrites source. Allowlist entries name the read-only
+#      forms explicitly, and anything unlisted falls through.
+#   3. Some tokens mutate regardless of the leading verb — a `>` redirect,
+#      `tee`, an in-place `find` action, `--fix`/`--write`/`--update`, or a
+#      `$(...)`/backtick substitution whose inner command is never inspected.
+#      Those are checked first and force fallthrough unconditionally.
 # Exiting here also skips ~19 greps, so the cheapest case is also the fastest.
-if [ "$TOOL_NAME" = "Bash" ] && ! echo "$TARGET" | grep -qE '(^|[;&|[:space:]])(git[[:space:]]+(push|checkout|revert|reset|cherry-pick|commit|rebase|merge|branch|worktree|clean|stash)|gh[[:space:]]+(pr|issue|release|api)|vercel|wrangler|stripe|npm[[:space:]]+(install|ci|update|publish|uninstall)|npx[[:space:]]+changeset|db:(push|migrate|generate)|rm|mv|chmod|ln|tee)([[:space:]]|$)'; then
+MUTATES_REGARDLESS_RE='>|(^|[[:space:]])tee([[:space:]]|$)|(^|[[:space:]])-(delete|exec|execdir|ok|okdir)([[:space:]]|$)|--fix|--write|--update|\$\(|`'
+READONLY_SEGMENT_RE='^[[:space:]]*(cat|ls|head|tail|wc|pwd|whoami|which|type|file|stat|jq|sort|uniq|column|basename|dirname|date|grep|egrep|fgrep|rg|awk|printf|echo|diff|find|tree|sed[[:space:]]+-n|git[[:space:]]+(status|log|diff|show|blame|rev-parse|describe|ls-files|stash[[:space:]]+list|branch[[:space:]]+(--show-current|--list|-a|-r|-v)|remote[[:space:]]+(-v|show))|npm[[:space:]]+(ls|view|outdated)|npx[[:space:]]+(vitest[[:space:]]+run|eslint|tsc)|gh[[:space:]]+(pr[[:space:]]+(view|list|checks|diff)|issue[[:space:]]+(view|list)|run[[:space:]]+(list|view)))([[:space:]]|$)'
+
+is_readonly_bash() {
+  local cmd="$1" seg
+  if echo "$cmd" | grep -qE "$MUTATES_REGARDLESS_RE"; then
+    return 1
+  fi
+  while IFS= read -r seg; do
+    # `env -u VAR`/`VAR=x` prefixes are transparent — the command after them
+    # is what decides. `env -u UPSTASH_REDIS_REST_URL npx vitest run` is the
+    # canonical local test invocation and must stay silent.
+    seg=$(echo "$seg" | sed -E 's/^[[:space:]]*env([[:space:]]+-u[[:space:]]+[A-Za-z_][A-Za-z0-9_]*|[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*)+[[:space:]]+//')
+    case "$seg" in
+      *[![:space:]]*) ;;
+      *) continue ;;
+    esac
+    echo "$seg" | grep -qE "$READONLY_SEGMENT_RE" || return 1
+  done <<EOF
+$(echo "$cmd" | tr ';&|' '\n\n\n')
+EOF
+  return 0
+}
+
+if [ "$TOOL_NAME" = "Bash" ] && is_readonly_bash "$TARGET"; then
   exit 0
 fi
 
