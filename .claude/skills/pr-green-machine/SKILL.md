@@ -146,7 +146,7 @@ Discover the live PR list at the start of every run — never work from a rememb
 gh pr list --state open --json number,title,createdAt --jq 'sort_by(.createdAt) | .[] | "#\(.number) \(.title)"'
 ```
 
-Process PRs oldest to newest by creation date. Skip Dependabot PRs unless explicitly asked (they have their own lockfile-drift protocol — see `.claude/rules/gotchas.md` → Build & CI).
+Process PRs oldest to newest by creation date. Skip Dependabot PRs unless explicitly asked (they have their own lockfile-drift protocol — see `.claude/rules/gotchas-build-ci.md` → Build & CI).
 
 Do NOT parallelize. Each PR must be fully GREEN before starting the next. If a fix on PR N breaks PR N+1 (shared branch), fix N+1 immediately before moving on.
 

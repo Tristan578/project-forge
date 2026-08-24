@@ -68,5 +68,13 @@ Key: `_` prefix for unused params, no `useRef.current` during render, no blanket
 | `rules/web-quality.md` | ESLint rules, React patterns, Next.js constraints |
 | `rules/library-apis.md` | csgrs, noise, terrain, texture pipeline, particles |
 | `rules/file-map.md` | Engine + web structure, communication pattern |
-| `rules/gotchas.md` | Extended gotchas (40+ context-specific) |
+| `rules/gotchas.md` | Index of the four gotchas files below (always loaded; the bodies are not) |
+| `rules/gotchas-build-ci.md` | Build/CI, lockfiles, self-defense gates, npm audit, RSC boundary, bundle size |
+| `rules/gotchas-web.md` | Database, API & security, WASM/CDN, UI & frontend |
+| `rules/gotchas-engine.md` | Engine & game loop: command wire, route_domain, component carry, physics |
+| `rules/gotchas-ops.md` | Claude Code config, deploy/service infrastructure, enforcement hooks |
 | `rules/agent-operations.md` | Agent SOPs, testing, committing, PR creation |
+| `rules/hook-testing.md` | Conventions for the bash suites under `.claude/hooks/__tests__/` |
+
+Every file except `gotchas.md` carries `paths:` frontmatter and loads only in sessions that
+touch its area; `Read` one directly if you need it outside those paths.
