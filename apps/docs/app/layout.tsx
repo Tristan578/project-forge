@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
 import { DOCS_URL } from '../lib/site';
+import { hasValidClerkKey } from '../lib/clerk';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +36,9 @@ export const metadata: Metadata = {
 // exactly when `canUseKeyless` holds — development, not CI. So `npm run dev` in
 // apps/docs now throws for any developer without Clerk keys, while CI (where
 // isAutomatedEnvironment() is true) never reaches it. See #9378.
-const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
-const hasValidClerkKey = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
+//
+// The predicate lives in lib/clerk.ts because the /sign-in route has to gate on
+// the same value — it renders <SignIn />, which needs the provider this skips.
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   // Clerk Core 3 (@clerk/nextjs v7) requires <ClerkProvider> INSIDE <body>, not
@@ -45,7 +47,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   // this way; this layout was still on the pre-Core-3 shape.
   return (
     <html lang="en" className="dark">
-      <body>{hasValidClerkKey ? <ClerkProvider>{children}</ClerkProvider> : children}</body>
+      <body>{hasValidClerkKey() ? <ClerkProvider>{children}</ClerkProvider> : children}</body>
     </html>
   );
 }
