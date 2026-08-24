@@ -295,7 +295,7 @@ jobs:
         run: cargo test --lib --features bevy/x11
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.108
+        run: cargo install wasm-bindgen-cli --version 0.2.127
 
       - name: Install wasm-opt (binaryen)
         run: sudo apt-get install -y binaryen

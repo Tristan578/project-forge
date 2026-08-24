@@ -12,7 +12,7 @@
 #
 # Requirements:
 #   - Rust stable with wasm32-unknown-unknown target
-#   - wasm-bindgen-cli 0.2.108 (PINNED — must match Cargo.lock)
+#   - wasm-bindgen-cli 0.2.127 (PINNED — must match Cargo.lock)
 #   - ~5-10 minutes build time
 #
 # Usage:
@@ -22,7 +22,7 @@
 #
 # Install prerequisites:
 #   rustup target add wasm32-unknown-unknown
-#   cargo install wasm-bindgen-cli --version 0.2.108
+#   cargo install wasm-bindgen-cli --version 0.2.127
 
 set -euo pipefail
 
@@ -56,14 +56,14 @@ fi
 
 if ! command -v wasm-bindgen &>/dev/null; then
   echo "ERROR: wasm-bindgen not found." >&2
-  echo "Run: cargo install wasm-bindgen-cli --version 0.2.108" >&2
+  echo "Run: cargo install wasm-bindgen-cli --version 0.2.127" >&2
   exit 1
 fi
 
 WB_VERSION=$(wasm-bindgen --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-if [[ "$WB_VERSION" != "0.2.108" ]]; then
-  echo "ERROR: wasm-bindgen version mismatch. Found $WB_VERSION, required 0.2.108." >&2
-  echo "Run: cargo install wasm-bindgen-cli --version 0.2.108 --force" >&2
+if [[ "$WB_VERSION" != "0.2.127" ]]; then
+  echo "ERROR: wasm-bindgen version mismatch. Found $WB_VERSION, required 0.2.127." >&2
+  echo "Run: cargo install wasm-bindgen-cli --version 0.2.127 --force" >&2
   exit 1
 fi
 

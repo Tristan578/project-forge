@@ -46,7 +46,7 @@ The session start hook auto-starts the server if the binary is found. If it fail
 - Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.108 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
 **Coverage thresholds (CI-enforced):** statements 83 · branches 74 · functions 77 · lines 84
 
@@ -140,7 +140,7 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 - **Bridge isolation**: Only `engine/src/bridge/` may import web_sys/js_sys/wasm_bindgen
 - **Command-driven**: All engine ops go through `handle_command()` JSON commands
 - **Zero ESLint warnings**: `npx eslint --max-warnings 0`
-- **wasm-bindgen v0.2.108**: Must match Cargo.lock exactly
+- **wasm-bindgen v0.2.127**: Must match Cargo.lock exactly
 - **Worktree commit safety**: When in a git worktree, commit after every logical chunk. Rate limits/crashes kill agents — uncommitted work is permanently lost
 - **CI enforcement**: All PRs must pass CI before merge. Never skip checks or force-merge
 

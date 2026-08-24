@@ -18,10 +18,10 @@ a different version of wasm-bindgen
 
 **Fix:**
 ```bash
-cargo install wasm-bindgen-cli --version 0.2.108 --force
+cargo install wasm-bindgen-cli --version 0.2.127 --force
 ```
 
-The version is pinned to `0.2.108` and MUST match `Cargo.lock`. Never upgrade without
+The version is pinned to `0.2.127` and MUST match `Cargo.lock`. Never upgrade without
 updating both the CLI and `Cargo.toml`.
 
 ---

@@ -55,7 +55,7 @@ Always-on protections & observability (not env-gated):
 - **Bridge isolation**: Only `engine/src/bridge/` may import web_sys/js_sys/wasm_bindgen. `core/` is pure Rust.
 - **Command-driven**: All engine ops go through `handle_command()` JSON commands.
 - **Event-driven**: Bevy -> bridge -> JS callback -> Zustand store -> React re-render.
-- **wasm-bindgen**: Must be 0.2.108 (pinned to Cargo.lock).
+- **wasm-bindgen**: Must be 0.2.127 (pinned to Cargo.lock).
 - **Import boundary**: `@spawnforge/ui` is the only allowed external import via `transpilePackages`.
 
 ## Test Conventions

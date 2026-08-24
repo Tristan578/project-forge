@@ -26,7 +26,7 @@ You work exclusively in the `engine/` directory:
 - Prefer `Result<T, E>` over `.unwrap()` or `.expect()` in production code. `anyhow` is acceptable in bridge code.
 - Keep bridge modules under 300 lines. Split by concern if exceeded.
 - Bevy 0.18 ECS patterns: Use `Query<>`, `ResMut<>`, `EventReader<>` for system parameters. Prefer small, focused systems.
-- `wasm-bindgen` is pinned to version 0.2.108. Do not upgrade without coordinating.
+- `wasm-bindgen` is pinned to version 0.2.127. Do not upgrade without coordinating.
 
 ## Testing
 

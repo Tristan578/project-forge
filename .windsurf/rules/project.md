@@ -33,7 +33,7 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 - **Bridge isolation**: Only `engine/src/bridge/` may import `web_sys`/`js_sys`/`wasm_bindgen`. `core/` is pure Rust, platform-agnostic.
 - **Event-driven**: Bevy → bridge → JS callback → Zustand store → React re-render.
 - **Store slices (Zustand)**: Each concern gets its own slice. Use selectors to prevent unnecessary re-renders. Do not prop-drill — consume stores directly.
-- **wasm-bindgen version**: Must be 0.2.108 (pinned to match Cargo.lock).
+- **wasm-bindgen version**: Must be 0.2.127 (pinned to match Cargo.lock).
 
 ## Build Commands
 
@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 ```
 - Produces 4 variants in `web/public/engine-pkg-*`
 - Takes ~5-10 minutes
-- Requires: Rust stable, wasm32-unknown-unknown target, wasm-bindgen-cli v0.2.108
+- Requires: Rust stable, wasm32-unknown-unknown target, wasm-bindgen-cli v0.2.127
 
 ### Web Frontend
 ```bash

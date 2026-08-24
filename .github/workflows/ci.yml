@@ -1170,7 +1170,7 @@ jobs:
       # --- WASM (WebGL2 only) -------------------------------------------------
       # SwiftShader cannot drive WebGPU, so we build ONLY the webgl2 variant —
       # not the 4 variants cd.yml/quality-gates.yml produce — to keep the cargo
-      # cost to one binary. wasm-bindgen MUST be 0.2.108 (pinned per CLAUDE.md),
+      # cost to one binary. wasm-bindgen MUST be 0.2.127 (pinned per CLAUDE.md),
       # exactly as quality-gates.yml / cd.yml install it.
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -1182,7 +1182,7 @@ jobs:
           workspaces: engine -> target
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.108
+        run: cargo install wasm-bindgen-cli --version 0.2.127
 
       - name: Build WebGL2 WASM + wasm-bindgen
         working-directory: engine

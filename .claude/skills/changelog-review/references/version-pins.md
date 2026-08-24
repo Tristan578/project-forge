@@ -20,7 +20,7 @@ Documenting why specific dependencies are pinned and what must be audited before
 
 ---
 
-### wasm-bindgen (Rust) — Pinned at `=0.2.108`
+### wasm-bindgen (Rust) — Pinned at `=0.2.127`
 
 **Why pinned:** `wasm-bindgen` must match exactly between the Rust crate and the installed CLI tool (`wasm-bindgen-cli`). A mismatch causes the WASM build to fail with cryptic errors about missing exports.
 
@@ -91,7 +91,7 @@ See `.claude/rules/gotchas-build-ci.md` for the canonical statement of this rule
 | Dependency | Current | Upgrade Risk | Recommended Action |
 |-----------|---------|-------------|-------------------|
 | `stripe` | 22.5.0 | LOW | Centralized in `stripe-client.ts`, check apiVersion string |
-| `wasm-bindgen` | =0.2.108 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
+| `wasm-bindgen` | =0.2.127 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
 | `next` | 16.x | MEDIUM | Check migration guide, test E2E |
 | `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |
 | `@clerk/nextjs` | ^7.7.5 | LOW-MEDIUM | Check for auth() API changes (7.5 dropped `baseTheme` — appearance API migrated in f55ec99d) |

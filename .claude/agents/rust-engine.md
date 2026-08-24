@@ -37,7 +37,7 @@ You work exclusively in `engine/src/`. You understand ECS architecture, WASM con
 2. **Command-driven**: All ops through `handle_command()` JSON → `commands::dispatch()` chain. No shortcuts.
 3. **Target**: `wasm32-unknown-unknown`. No `std::fs`, `std::net`, `std::thread`.
 4. **Feature flags**: `webgl2`/`webgpu` control rendering backend. `runtime` strips editor-only systems.
-5. **wasm-bindgen**: Pinned to `=0.2.108`. Never upgrade without coordinating.
+5. **wasm-bindgen**: Pinned to `=0.2.127`. Never upgrade without coordinating.
 
 ## ECS System Limits
 

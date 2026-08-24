@@ -27,7 +27,7 @@ Design decisions must account for these constraints. A pattern that works on nat
 │  React Shell (Next.js 16, Zustand 5, Tailwind)  │  ← Editor UI + AI chat
 │  TypeScript 5.x, ESLint strict, Clerk auth      │
 ├─────────────────────────────────────────────────┤
-│  JSON Commands (wasm-bindgen 0.2.108)           │  ← Bridge protocol
+│  JSON Commands (wasm-bindgen 0.2.127)           │  ← Bridge protocol
 ├─────────────────────────────────────────────────┤
 │  Bevy 0.18 Engine (Rust → WASM)                 │  ← ECS, rendering, physics
 │  Rapier 0.33, Hanabi 0.18, PanOrbit 0.34       │

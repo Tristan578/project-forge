@@ -63,4 +63,4 @@ After verification passes, update project context files:
 All implementations must use these exact versions:
 - Bevy 0.18, bevy_rapier 0.33, bevy_hanabi 0.18, bevy_panorbit_camera 0.34
 - Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4, Vitest 4
-- Rust stable, wasm-bindgen 0.2.108, csgrs 0.20
+- Rust stable, wasm-bindgen 0.2.127, csgrs 0.20

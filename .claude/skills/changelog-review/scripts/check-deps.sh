@@ -80,7 +80,7 @@ done
 echo ""
 echo "--- Notes ---"
 echo "  'stripe' is on ^22.3.0 (API version 2026-06-24.dahlia) — the SDK pins its ApiVersion literal, so any major/minor bump must update apiVersion in stripe-client.ts + the 3 billing route tests + the webhook route comment (see references/version-pins.md)"
-echo "  'wasm-bindgen' Rust dep is pinned at =0.2.108 — cannot upgrade without full WASM rebuild"
+echo "  'wasm-bindgen' Rust dep is pinned at =0.2.127 — cannot upgrade without full WASM rebuild"
 echo "  'next' upgrades may require E2E test updates for hydration dialog selectors"
 echo ""
 echo "MAJOR UPDATEs require audit before upgrading."

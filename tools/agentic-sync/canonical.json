@@ -17,7 +17,7 @@
     "versions": {
       "Next.js": "16.2.0",
       "React": "19.2.4",
-      "wasm-bindgen": "0.2.108",
+      "wasm-bindgen": "0.2.127",
       "Bevy": "0.18"
     },
     "versionsNote": "wasm-bindgen must match Cargo.lock exactly",
