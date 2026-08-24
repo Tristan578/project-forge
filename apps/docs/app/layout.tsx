@@ -39,11 +39,13 @@ const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
 const hasValidClerkKey = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
 
 export default function RootLayout({ children }: { children: ReactNode }) {
-  const shell = (
+  // Clerk Core 3 (@clerk/nextjs v7) requires <ClerkProvider> INSIDE <body>, not
+  // wrapped around <html> — the Next.js 16 cache-components work made the old
+  // outer placement a hydration hazard. web/src/app/layout.tsx already does it
+  // this way; this layout was still on the pre-Core-3 shape.
+  return (
     <html lang="en" className="dark">
-      <body>{children}</body>
+      <body>{hasValidClerkKey ? <ClerkProvider>{children}</ClerkProvider> : children}</body>
     </html>
   );
-
-  return hasValidClerkKey ? <ClerkProvider>{shell}</ClerkProvider> : shell;
 }
