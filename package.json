@@ -61,13 +61,13 @@
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.0",
-    "@changesets/cli": "^3.0.0",
-    "@storybook/react": "^10.5.8",
-    "@storybook/react-vite": "^10.5.8",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@changesets/cli": "^3.0.1",
+    "@storybook/react": "^10.5.10",
+    "@storybook/react-vite": "^10.5.10",
+    "@vitest/coverage-v8": "^4.1.11",
     "jsdom": "^30.0.1",
     "storybook": "^10.4.6",
-    "turbo": "^2.10.10",
+    "turbo": "^2.10.11",
     "vitest": "^4.1.8",
     "sharp": "^0.35.0"
   }
