@@ -3406,7 +3406,7 @@ fi
 IFS= read -r -d '' expected_steps_1 <<'STEPS_EOF' || true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -3438,7 +3438,7 @@ assert_steps_block "${qg_sec:-}" "quality-gates security job steps:" "${expected
 IFS= read -r -d '' expected_steps_2 <<'STEPS_EOF' || true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -3470,7 +3470,7 @@ assert_steps_block "${cd_sec:-}" "cd.yml security job steps:" "${expected_steps_
 IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
       - name: Shellcheck the gate scripts and their suites
