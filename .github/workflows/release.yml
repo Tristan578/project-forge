@@ -48,6 +48,19 @@ jobs:
       # v2 also pushes the release branch through the GitHub API by default
       # (commits land GitHub-signed); the workflow's `contents: write` +
       # `pull-requests: write` grants are sufficient for that.
+      #
+      # The SAME Dependabot wave bumped @changesets/cli to 3.0.0 (#9300), whose
+      # breaking change "private packages are no longer versioned by default"
+      # silently emptied this step: `web` is `private: true` and owns every real
+      # changeset, so `changeset version` bumped nothing, printed "All files have
+      # been updated", and the action pushed an EMPTY "chore: version packages"
+      # commit. The run stayed green and the PR stayed open with a blank
+      # `# Releases` body and no changelog PR/author links — the only symptom.
+      # `.changeset/config.json` now pins `privatePackages` explicitly. If that
+      # PR ever goes contentless again while changesets sit on main, diff
+      # `npx changeset status` against the CLI version in package-lock.json
+      # BEFORE trusting a local run: a stale local node_modules will happily
+      # report a bump that CI does not perform.
       - name: Create or update Version Packages PR
         uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
