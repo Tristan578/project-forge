@@ -23,12 +23,27 @@ export const metadata: Metadata = {
   },
 };
 
+// Clerk validates key format at runtime — skip wrapping when the key is missing
+// or malformed. This mirrors the guard web/src/app/layout.tsx has always carried;
+// this layout was the one Clerk entry point in the tree without it.
+//
+// It became load-bearing in @clerk/nextjs 7.8.0 (on main since #9374). Through
+// 7.7.5 a missing key in local development took Clerk's keyless branch and
+// rendered fine, so an unguarded <ClerkProvider> was harmless. 7.8.0 added a
+// `throwMissingPublishableKeyError()` at the top of that same branch
+// (dist/esm/app-router/server/ClerkProvider.js), and the branch is entered
+// exactly when `canUseKeyless` holds — development, not CI. So `npm run dev` in
+// apps/docs now throws for any developer without Clerk keys, while CI (where
+// isAutomatedEnvironment() is true) never reaches it. See #9378.
+const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
+const hasValidClerkKey = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
+
 export default function RootLayout({ children }: { children: ReactNode }) {
-  return (
-    <ClerkProvider>
-      <html lang="en" className="dark">
-        <body>{children}</body>
-      </html>
-    </ClerkProvider>
+  const shell = (
+    <html lang="en" className="dark">
+      <body>{children}</body>
+    </html>
   );
+
+  return hasValidClerkKey ? <ClerkProvider>{shell}</ClerkProvider> : shell;
 }
