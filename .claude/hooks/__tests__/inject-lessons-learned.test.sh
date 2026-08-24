@@ -229,14 +229,27 @@ for CMD in "cat web/src/lib/foo.ts" "ls -la" "npx vitest run" \
            "git status" "git log --oneline" "sed -n 1,20p fixture-target.ts" \
            "git branch --show-current" "git remote -v" "gh pr view 9369" \
            "git log --oneline | head -20" "cat a.ts; ls -la" \
+           "sed -n -e p fixture-target.ts" "sed -n /x/p fixture-target.ts" \
+           "grep -i panelregistry web/src" "grep -ril todo web/src" \
            "env -u UPSTASH_REDIS_REST_URL npx vitest run"; do
   OUT="$(run "$FIX_HOME" Bash "$CMD")"
   assert_empty "read-only bash gets no fallback injection: $CMD" "$OUT"
   assert_status_zero "read-only bash exits 0: $CMD" "$RUN_STATUS"
 done
 
+# `sed -n -i` is the whole reason the read-only allowlist names FLAGS and not
+# verbs, and it is the one ordering that got through: the allowlist matched the
+# leading `sed -n` and stopped reading, so a real in-place rewrite was scored
+# read-only and the hook stayed silent. The other three orderings never matched
+# the allowlist in the first place, but they are pinned alongside it so a future
+# widening of that alternation cannot reintroduce the hole from a new angle.
 for CMD in "rm -rf build" "mv a b" "npm install lodash" "git commit -m x" \
-           "sed -i s/a/b/ web/src/foo.ts" "cp a.ts b.ts" "mkdir -p x" "touch x" \
+           "sed -i s/a/b/ web/src/foo.ts" "sed -n -i s/a/b/ web/src/foo.ts" \
+           "sed -ni s/a/b/ web/src/foo.ts" "sed -i -n s/a/b/ web/src/foo.ts" \
+           "sed -n --in-place s/a/b/ web/src/foo.ts" \
+           "sed -i.bak s/a/b/ web/src/foo.ts" \
+           "sed --expression=s/a/b/ -i web/src/foo.ts" \
+           "cp a.ts b.ts" "mkdir -p x" "touch x" \
            "echo hi > web/src/foo.tsx"; do
   OUT="$(run "$FIX_HOME" Bash "$CMD")"
   assert_contains "mutating bash still gets the fallback injection: $CMD" "$OUT" "CHARLIE"

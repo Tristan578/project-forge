@@ -72,7 +72,14 @@ fi
 #      `$(...)`/backtick substitution whose inner command is never inspected.
 #      Those are checked first and force fallthrough unconditionally.
 # Exiting here also skips ~19 greps, so the cheapest case is also the fastest.
-MUTATES_REGARDLESS_RE='>|(^|[[:space:]])tee([[:space:]]|$)|(^|[[:space:]])-(delete|exec|execdir|ok|okdir)([[:space:]]|$)|--fix|--write|--update|\$\(|`'
+# `sed -i` has to be listed here rather than excluded from READONLY_SEGMENT_RE:
+# ERE has no negative lookahead, so the read-only `sed -n` alternative cannot say
+# "unless -i appears later" and `sed -n -i s/a/b/ f` matched it as read-only.
+# The flag is matched only when `sed` leads the segment — a bare `-i` would
+# reclassify `grep -i`, which is read-only and ubiquitous. `-[a-zA-Z]*i` covers
+# the combined and suffixed forms (`-ni`, `-i.bak`); `--in-place` is spelled out
+# because its second character is a dash.
+MUTATES_REGARDLESS_RE='>|(^|[[:space:]])tee([[:space:]]|$)|(^|[[:space:]])-(delete|exec|execdir|ok|okdir)([[:space:]]|$)|(^|[[:space:]])sed[[:space:]]+(-[^[:space:]]+[[:space:]]+)*(--in-place|-[a-zA-Z]*i)|--fix|--write|--update|\$\(|`'
 READONLY_SEGMENT_RE='^[[:space:]]*(cat|ls|head|tail|wc|pwd|whoami|which|type|file|stat|jq|sort|uniq|column|basename|dirname|date|grep|egrep|fgrep|rg|awk|printf|echo|diff|find|tree|sed[[:space:]]+-n|git[[:space:]]+(status|log|diff|show|blame|rev-parse|describe|ls-files|stash[[:space:]]+list|branch[[:space:]]+(--show-current|--list|-a|-r|-v)|remote[[:space:]]+(-v|show))|npm[[:space:]]+(ls|view|outdated)|npx[[:space:]]+(vitest[[:space:]]+run|eslint|tsc)|gh[[:space:]]+(pr[[:space:]]+(view|list|checks|diff)|issue[[:space:]]+(view|list)|run[[:space:]]+(list|view)))([[:space:]]|$)'
 
 is_readonly_bash() {
@@ -91,7 +98,7 @@ is_readonly_bash() {
     esac
     echo "$seg" | grep -qE "$READONLY_SEGMENT_RE" || return 1
   done <<EOF
-$(echo "$cmd" | tr ';&|' '\n\n\n')
+$(echo "$cmd" | tr ';&|' '\n')
 EOF
   return 0
 }
