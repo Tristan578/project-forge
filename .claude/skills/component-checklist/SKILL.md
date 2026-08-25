@@ -56,4 +56,4 @@ existing enum, not a new ECS component. Adding a 14th type touches six places:
 
 Everything between the store and the engine — both directions — goes through
 `gameComponentWire.ts`. Never hand-build a component payload and never cast an
-emitted one: see `rules/gotchas.md` → "`dispatchCommand` returns `void`".
+emitted one: see `rules/gotchas-engine.md` → "`dispatchCommand` returns `void`".
