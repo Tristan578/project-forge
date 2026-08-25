@@ -76,7 +76,14 @@ export interface QuickStartDialogProps {
 }
 
 export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
-  const [phase, setPhase] = useState<Phase>('pick');
+  // Lazily initialised rather than a bare 'pick': the dialog can mount already
+  // open while a run from a previous mount is still live, and 'pick' would put
+  // "Build it" in front of a user whose second run the slice refuses.
+  const [phase, setPhase] = useState<Phase>(() =>
+    open && isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)
+      ? 'running'
+      : 'pick',
+  );
   const [selectedId, setSelectedId] = useState<QuickStartGameType | null>(null);
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -108,18 +115,27 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // to 'pick' put "Build it" back in front of the user, whose second run the
   // slice now refuses. Resume the running view instead, which is also where the
   // pending gate is rendered.
-  useEffect(() => {
-    if (!open) return;
-    setError(null);
-    setStarting(false);
-    if (isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)) {
-      setPhase('running');
-      return;
+  //
+  // Adjusted DURING RENDER, not in an effect: an effect would paint the previous
+  // run's prompt and error for one frame before clearing them, and calling
+  // setState synchronously in an effect body is what `set-state-in-effect`
+  // rejects. React re-runs this render before committing, so nothing downstream
+  // ever observes the stale values. Same shape as FeedbackDialog.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    if (open) {
+      setError(null);
+      setStarting(false);
+      if (isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)) {
+        setPhase('running');
+      } else {
+        setPhase('pick');
+        setSelectedId(null);
+        setPrompt('');
+      }
     }
-    setPhase('pick');
-    setSelectedId(null);
-    setPrompt('');
-  }, [open]);
+  }
 
   // Every phase change unmounts the element that was focused (the card on
   // pick->describe, "Build it" on describe->running), which drops focus to
