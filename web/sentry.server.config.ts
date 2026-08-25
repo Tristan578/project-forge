@@ -72,7 +72,12 @@ if (DSN) {
     // `enableLogs` routes Sentry.logger.* through a SEPARATE pipeline that
     // beforeSend/beforeSendTransaction (and thus scrubSentryEvent) never touch.
     // scrubSentryLog closes that channel so a stray log call can't ship a
-    // prompt/BYOK key/PII unredacted. Keep this wired wherever enableLogs is on.
+    // prompt/BYOK key/PII unredacted. `enableLogs` defaults to false on the
+    // installed @sentry/core 10.70.0 but flips to TRUE from 10.71.0 onward
+    // (client.js `?? true`), and web/package.json's `^10.70.0` range will pull
+    // that in — so this pin is unconditional for every init, exactly like
+    // beforeSendMetric below. Keep it wired regardless of whether this file
+    // still carries an explicit `enableLogs: true` line.
     beforeSendLog: scrubSentryLog,
     // Metrics (PF-1053) are a THIRD pipeline, touched by neither beforeSend nor
     // beforeSendLog — and unlike logs they are ON BY DEFAULT (`enableMetrics`
