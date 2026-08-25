@@ -1,5 +1,5 @@
 ---
-"spawnforge-web": patch
+"web": patch
 ---
 
 Game-creation pipeline steps now report engine rejections instead of silently
