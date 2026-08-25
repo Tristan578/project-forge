@@ -7,6 +7,27 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 const WELCOMED_KEY = 'forge-welcomed';
 
+/**
+ * The menu's focusable items, in the order the user tabs and arrows through them.
+ *
+ * This used to be an `itemsRef` array filled by a callback ref per item, indexed
+ * by a `let itemIndex` counter incremented during render. That is render-time
+ * bookkeeping deciding where a ref write lands (`react-hooks/refs` refuses it,
+ * and rightly — the indices only lined up because the counter reset on every
+ * render, so one conditionally rendered item would have shifted every later item
+ * into the wrong arrow-key slot silently).
+ *
+ * The DOM already holds the answer, in true visual order, and both callers reach
+ * it somewhere refs are legal to read: an effect and an event handler. Disabled
+ * items stay in the list deliberately — that is the existing behaviour, and
+ * `MenuItem` renders them as real buttons.
+ */
+function menuItems(root: HTMLElement | null): HTMLButtonElement[] {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+}
+
+
 interface HelpMenuProps {
   onOpenShortcuts: () => void;
   onOpenFeedback: () => void;
@@ -16,7 +37,6 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const itemsRef = useRef<(HTMLButtonElement | null)[]>([]);
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
   const openPanel = useWorkspaceStore((s) => s.openPanel);
   const hasWorkspaceApi = useWorkspaceStore((s) => s.api !== null);
@@ -43,14 +63,14 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
     if (open) {
       // Defer to next frame so items are rendered
       requestAnimationFrame(() => {
-        itemsRef.current[0]?.focus();
+        menuItems(menuRef.current)[0]?.focus();
       });
     }
   }, [open]);
 
   const handleMenuKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const items = itemsRef.current.filter(Boolean) as HTMLButtonElement[];
+      const items = menuItems(menuRef.current);
       const idx = items.indexOf(document.activeElement as HTMLButtonElement);
 
       switch (e.key) {
@@ -107,15 +127,6 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
     onOpenFeedback();
   };
 
-  // Track item index for ref assignment
-  let itemIndex = 0;
-  const getItemRef = () => {
-    const i = itemIndex++;
-    return (el: HTMLButtonElement | null) => {
-      itemsRef.current[i] = el;
-    };
-  };
-
   return (
     <div ref={menuRef} className="relative">
       <button
@@ -143,14 +154,12 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
           onKeyDown={handleMenuKeyDown}
         >
           <MenuItem
-            ref={getItemRef()}
             icon={<Keyboard size={14} />}
             label="Keyboard Shortcuts"
             shortcut="?"
             onClick={handleOpenShortcuts}
           />
           <MenuItem
-            ref={getItemRef()}
             icon={<BookOpen size={14} />}
             label="Documentation"
             shortcut="F1"
@@ -159,20 +168,17 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
           />
           <div className="my-1 h-px bg-zinc-800" role="separator" />
           <MenuItem
-            ref={getItemRef()}
             icon={<GraduationCap size={14} />}
             label="Restart Tutorial"
             onClick={handleRestartTutorial}
           />
           <MenuItem
-            ref={getItemRef()}
             icon={<RotateCcw size={14} />}
             label="Show Welcome Screen"
             onClick={handleResetWelcome}
           />
           <div className="my-1 h-px bg-zinc-800" role="separator" />
           <MenuItem
-            ref={getItemRef()}
             icon={<MessageSquareText size={14} />}
             label="Send Feedback"
             onClick={handleOpenFeedback}
