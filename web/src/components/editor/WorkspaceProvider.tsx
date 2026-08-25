@@ -138,11 +138,15 @@ import { LockedPanelOverlay } from './LockedPanelOverlay';
 // ---- Loading skeleton shown while a lazy panel is fetched ----
 function PanelLoadingSkeleton() {
   return (
-    <div className="flex h-full w-full flex-col gap-2 bg-zinc-900 p-3" role="status" aria-label="Loading panel">
-      <div className="h-3 w-2/3 animate-pulse rounded bg-zinc-700" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-zinc-700" />
-      <div className="h-3 w-3/4 animate-pulse rounded bg-zinc-700" />
-      <div className="mt-2 h-3 w-1/3 animate-pulse rounded bg-zinc-700" />
+    <div
+      className="flex h-full w-full flex-col gap-2 bg-[var(--sf-bg-surface)] p-3"
+      role="status"
+      aria-label="Loading panel"
+    >
+      <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--sf-bg-overlay)]" />
+      <div className="h-3 w-1/2 animate-pulse rounded bg-[var(--sf-bg-overlay)]" />
+      <div className="h-3 w-3/4 animate-pulse rounded bg-[var(--sf-bg-overlay)]" />
+      <div className="mt-2 h-3 w-1/3 animate-pulse rounded bg-[var(--sf-bg-overlay)]" />
     </div>
   );
 }
@@ -151,7 +155,7 @@ function PanelLoadingSkeleton() {
 function withSuspense(Component: React.ComponentType): React.FunctionComponent<IDockviewPanelProps> {
   return function LazyPanelWrapper(_props: IDockviewPanelProps) {
     return (
-      <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
         <Suspense fallback={<PanelLoadingSkeleton />}>
           <Component />
         </Suspense>
@@ -185,13 +189,13 @@ function withTierGate(
 
     if (!hasAccess) {
       return (
-        <div className="h-full w-full overflow-hidden bg-zinc-900">
+        <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
           <LockedPanelOverlay panelId={panelId} />
         </div>
       );
     }
     return (
-      <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
         <Suspense fallback={<PanelLoadingSkeleton />}>
           <Component />
         </Suspense>
@@ -215,7 +219,7 @@ function SceneViewportPanel(_props: IDockviewPanelProps) {
 
 function SceneHierarchyPanel(_props: IDockviewPanelProps) {
   return (
-    <div className="h-full w-full overflow-hidden bg-zinc-900">
+    <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
       <SceneHierarchy />
     </div>
   );
@@ -223,7 +227,7 @@ function SceneHierarchyPanel(_props: IDockviewPanelProps) {
 
 function InspectorPanelWrapper(_props: IDockviewPanelProps) {
   return (
-    <div className="h-full w-full overflow-hidden bg-zinc-900">
+    <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
       <InspectorPanel />
     </div>
   );
@@ -231,7 +235,7 @@ function InspectorPanelWrapper(_props: IDockviewPanelProps) {
 
 function ScriptEditorPanelWrapper(_props: IDockviewPanelProps) {
   return (
-    <div className="h-full w-full overflow-hidden bg-zinc-900">
+    <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
       <ScriptEditorPanel />
     </div>
   );
@@ -239,7 +243,7 @@ function ScriptEditorPanelWrapper(_props: IDockviewPanelProps) {
 
 function ScriptExplorerPanelWrapper(_props: IDockviewPanelProps) {
   return (
-    <div className="h-full w-full overflow-hidden bg-zinc-900">
+    <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
       <ScriptExplorerPanel />
     </div>
   );
@@ -247,7 +251,7 @@ function ScriptExplorerPanelWrapper(_props: IDockviewPanelProps) {
 
 function SceneSettingsPanel(_props: IDockviewPanelProps) {
   return (
-    <div className="h-full w-full overflow-hidden bg-zinc-900">
+    <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
       <SceneSettings />
     </div>
   );
@@ -255,7 +259,7 @@ function SceneSettingsPanel(_props: IDockviewPanelProps) {
 
 function AssetPanelWrapper(_props: IDockviewPanelProps) {
   return (
-    <div className="h-full w-full overflow-hidden bg-zinc-900">
+    <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
       <AssetPanel />
     </div>
   );
@@ -263,7 +267,7 @@ function AssetPanelWrapper(_props: IDockviewPanelProps) {
 
 function DocsPanelWrapper(_props: IDockviewPanelProps) {
   return (
-    <div className="h-full w-full overflow-hidden bg-zinc-900">
+    <div className="h-full w-full overflow-hidden bg-[var(--sf-bg-surface)]">
       <DocsPanel />
     </div>
   );

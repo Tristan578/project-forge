@@ -55,6 +55,20 @@ function skipStepAt(plan: OrchestratorPlan, index: number): void {
 }
 
 /**
+ * The two user-facing notices `recordEmptyStepSlots` can write. Kept as
+ * constants (rather than interpolating the empty-slot indices into the
+ * displayed text) for two reasons: the text is what a player reads, so it
+ * stays in plain language with no zero-based "slot" jargon — the dev-facing
+ * detail (which indices, how many) goes to `console.warn` instead — and a
+ * fixed, finite set of possible strings is what makes de-duplication on
+ * re-run (below) a simple equality filter rather than a parse.
+ */
+const EMPTY_STEP_WARNING_SINGULAR =
+  'One of the planned steps was missing from the plan and was not run — regenerate the plan to fill it in.';
+const EMPTY_STEP_WARNING_PLURAL =
+  'Some of the planned steps were missing from the plan and were not run — regenerate the plan to fill them in.';
+
+/**
  * Record every empty slot in `plan.steps` on the plan itself.
  *
  * The runner does not build the plan it is handed: `runPipeline` is exported
@@ -69,19 +83,52 @@ function skipStepAt(plan: OrchestratorPlan, index: number): void {
  * are recorded rather than compacted away so the indices the rest of the run
  * reports — `currentStepIndex`, the panel's progress — keep meaning what they
  * meant when the plan was handed over.
+ *
+ * Written on the plan rather than handed to a callback because there is no step
+ * to hang it on — the slot is empty. `orchestratorSlice.runPipelineFromPlan`
+ * folds `plan.warnings` into `orchestratorWarnings` once the run settles, which
+ * is what puts it in front of a user; a write no reader picks up would be the
+ * same silence in a different place.
+ *
+ * This function owns only the two exact notices it writes below — it is NOT
+ * the only writer of `plan.warnings`. `planBuilder` writes its own planning
+ * warnings onto the same array, which is why the cleanup below filters by
+ * exact message match instead of replacing the array: whatever another
+ * producer put there must survive this pass untouched.
+ * `runPipeline` can run the same plan object more than once (a retry, a
+ * re-run after a fix) and a plan handed back through `setPlan` can arrive
+ * with its own `warnings` array already carrying a PRIOR run's notice — so a
+ * bare `push` would grow the array by one every time `plan.steps` still has
+ * the same gap, and the panel would show the same note N times. Strip any
+ * notice this function wrote on an earlier call before deciding whether to
+ * write a fresh one, rather than blindly appending or replacing the whole
+ * array (which would also be safe today, but would silently discard any
+ * OTHER producer's warnings the day one exists).
  */
 function recordEmptyStepSlots(plan: OrchestratorPlan): void {
   const empty: number[] = [];
   for (let i = 0; i < plan.steps.length; i += 1) {
     if (!plan.steps[i]) empty.push(i);
   }
-  if (empty.length === 0) return;
-  const warnings = plan.warnings ?? [];
-  warnings.push(
-    `Plan step ${empty.length === 1 ? 'slot' : 'slots'} ${empty.join(', ')} `
+  const original = plan.warnings;
+  const withoutOwnNotice = (original ?? []).filter(
+    w => w !== EMPTY_STEP_WARNING_SINGULAR && w !== EMPTY_STEP_WARNING_PLURAL,
+  );
+  if (empty.length === 0) {
+    // Only write back when this function actually had a stale notice of its
+    // own to drop — an untouched `undefined` (no warnings ever recorded)
+    // must stay `undefined`, not become `[]`.
+    if (withoutOwnNotice.length !== (original ?? []).length) {
+      plan.warnings = withoutOwnNotice;
+    }
+    return;
+  }
+  console.warn(
+    `[pipelineRunner] plan step ${empty.length === 1 ? 'slot' : 'slots'} ${empty.join(', ')} `
       + `${empty.length === 1 ? 'is' : 'are'} empty; ${empty.length === 1 ? 'that step' : 'those steps'} did not run.`,
   );
-  plan.warnings = warnings;
+  withoutOwnNotice.push(empty.length === 1 ? EMPTY_STEP_WARNING_SINGULAR : EMPTY_STEP_WARNING_PLURAL);
+  plan.warnings = withoutOwnNotice;
 }
 
 /**
@@ -107,9 +154,14 @@ function dependenciesMet(step: PlanStep, stepMap: Map<string, PlanStep>): boolea
  * game must fail the plan rather than be handed over. `step.output` used to be
  * assigned on the success path only, so everything the step had to say was
  * dropped the moment it said it — the live `onStepComplete` callback saw the
- * result, but the plan itself carried an empty step, and the plan is what
- * `resolveStepOutput` reads and what the orchestrator store keeps to re-render
- * a finished run.
+ * result, but the plan itself carried an empty step, and the plan is what the
+ * orchestrator store re-reads when the run settles and what the panel renders
+ * from afterwards.
+ *
+ * NOT for downstream steps: `resolveStepOutput` and `resolveStepOutputs` both
+ * filter on `status === 'completed'`, so a failed step's diagnostics can never
+ * be mistaken for a result an executor can build on. Retaining it is for the
+ * humans reading the finished run.
  *
  * Only assigned when the executor really produced output: a genuinely empty
  * failure must stay `undefined` rather than become `{}`, which a dependent

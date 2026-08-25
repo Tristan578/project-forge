@@ -38,9 +38,14 @@ import { captureException } from '@/lib/monitoring/sentry-client';
  * across the run and are never fatal.
  */
 export interface OrchestratorWarning {
-  stepId: string;
+  /**
+   * Absent for a note about the PLAN rather than a step — an empty `steps` slot
+   * has no step to name. Optional rather than a sentinel id so the UI has to
+   * decide what to render instead of printing a fake step label.
+   */
+  stepId?: string;
   /** Executor name — the UI already maps this to a human step label. */
-  executor: string;
+  executor?: string;
   message: string;
 }
 
@@ -85,6 +90,45 @@ export interface OrchestratorSlice {
   cancelPipeline: () => void;
   resetOrchestrator: () => void;
   runPipelineFromPlan: () => Promise<void>;
+}
+
+/**
+ * Build the `stepStatuses` map from a plan, tolerating an empty `steps` slot.
+ *
+ * `plan` is caller-supplied (`setPlan` is public and takes any
+ * `OrchestratorPlan`), so a hole or a `null` in `steps` reaches here as data.
+ * `for (const step of plan.steps)` does NOT skip a hole — it yields `undefined`
+ * — so the old loop threw on `step.id` before `runPipeline` ever ran, which
+ * made the runner's own tolerance of that gap unreachable in the product.
+ * Indexed, because only an indexed read sees every slot.
+ */
+function deriveStepStatuses(plan: OrchestratorPlan): Record<string, PlanStep['status']> {
+  const statuses: Record<string, PlanStep['status']> = {};
+  for (let i = 0; i < plan.steps.length; i += 1) {
+    const step = plan.steps[i];
+    if (!step) continue;
+    statuses[step.id] = step.status;
+  }
+  return statuses;
+}
+
+/**
+ * Find a step's index by id, tolerating the same hole/`null` slots
+ * `deriveStepStatuses` tolerates.
+ *
+ * `Array.prototype.findIndex` does NOT skip holes (unlike forEach/map/filter/
+ * some/every) — it visits every index, invoking the predicate with `undefined`
+ * for a hole or an explicit null slot. `onStepComplete` used to call
+ * `plan.steps.findIndex(s => s.id === stepId)` directly, so `s.id` threw
+ * before `runPipeline`'s own tolerance of the same gap was ever reached
+ * (PF-1229 finding #2).
+ */
+function findStepIndex(plan: OrchestratorPlan, stepId: string): number {
+  for (let i = 0; i < plan.steps.length; i += 1) {
+    const step = plan.steps[i];
+    if (step && step.id === stepId) return i;
+  }
+  return -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,10 +221,7 @@ export const createOrchestratorSlice: StateCreator<
       );
 
       // Initialize step statuses map
-      const stepStatuses: Record<string, PlanStep['status']> = {};
-      for (const step of plan.steps) {
-        stepStatuses[step.id] = step.status;
-      }
+      const stepStatuses = deriveStepStatuses(plan);
 
       // Reserve tokens for the pipeline (server-side via API)
       let reservationId: string | null = null;
@@ -240,10 +281,7 @@ export const createOrchestratorSlice: StateCreator<
   },
 
   setPlan: (plan) => {
-    const stepStatuses: Record<string, PlanStep['status']> = {};
-    for (const step of plan.steps) {
-      stepStatuses[step.id] = step.status;
-    }
+    const stepStatuses = deriveStepStatuses(plan);
     set({
       currentPlan: plan,
       tokenEstimate: plan.tokenEstimate,
@@ -303,8 +341,25 @@ export const createOrchestratorSlice: StateCreator<
   },
 
   resetOrchestrator: () => {
+    // Abort BEFORE dropping the handle. Nulling it alone leaves an in-flight
+    // `runPipeline` running to completion against an engine the user has
+    // already walked away from — the runner honours `ctx.signal`, so this is
+    // the only thing that actually stops the abandoned run doing more work
+    // (PF-1229 finding #4).
+    if (_abortController) {
+      _abortController.abort();
+    }
     _abortController = null;
-    _gateResolver = null;
+    // Resolve BEFORE dropping the handle, exactly as `cancelPipeline` does.
+    // An `AbortSignal` does not settle a promise, and `pipelineRunner` awaits
+    // this gate bare — so nulling the resolver alone parks the abandoned run
+    // at `await callbacks.onGateReached(gate)` forever: `runPipeline` never
+    // returns, its `finally` never runs, and the token reservation is never
+    // released (PF-1229 finding #3).
+    if (_gateResolver) {
+      _gateResolver('rejected');
+      _gateResolver = null;
+    }
     set({
       orchestratorStatus: 'idle',
       currentPlan: null,
@@ -372,14 +427,40 @@ export const createOrchestratorSlice: StateCreator<
     let completedSteps = 0;
     const totalSteps = currentPlan.steps.length;
 
+    /**
+     * Run identity: is the store still showing the plan THIS run belongs to?
+     *
+     * `resetOrchestrator` aborts, but an abort is cooperative — the runner
+     * checks `ctx.signal` between steps, so a step already in flight still
+     * settles and still fires its callbacks. If the user has since reset and
+     * started a DIFFERENT plan, every writer below would be writing the
+     * abandoned run's progress onto the new plan: `step_${n}` ids collide
+     * across plans by construction. Every writer below is gated on it, and
+     * the list here is exhaustive on purpose — an unguarded one is invisible
+     * until it ships: a stale `onStepComplete` marks a step the new plan has
+     * not run, a stale `onGateReached` repaints an approval gate over an idle
+     * store and hijacks `approveGate`/`cancelPipeline`, a stale
+     * `onPlanStatusChange` reports the new run completed/failed
+     * mid-execution, a stale `catch` fails it outright, and the `finally`
+     * both drops the LIVE run's abort handle and folds the abandoned run's
+     * step statuses onto the new plan.
+     * Identity on the captured plan object is the whole test —
+     * `setPlan` stores the reference, so it holds across a re-run of the same
+     * plan and breaks the moment a different one (or `null`) is live
+     * (PF-1229 finding #4).
+     */
+    const isCurrentRun = () => get().currentPlan === currentPlan;
+
     const callbacks: PipelineCallbacks = {
       onStepComplete: (stepId, result) => {
+        if (!isCurrentRun()) return;
+
         const status = result.success ? 'completed' : 'failed';
         get().updateStepStatus(stepId, status);
 
         // Update currentStepIndex
         const plan = get().currentPlan;
-        const idx = plan ? plan.steps.findIndex(s => s.id === stepId) : -1;
+        const idx = plan ? findStepIndex(plan, stepId) : -1;
         if (idx >= 0) {
           set({ currentStepIndex: idx });
         }
@@ -404,6 +485,21 @@ export const createOrchestratorSlice: StateCreator<
       },
 
       onGateReached: (gate) => {
+        // A superseded run must not repaint an approval gate over the live
+        // store — but it still has to be UNPARKED, or its `await` never
+        // returns, `runPipeline` never reaches its `finally`, and the token
+        // reservation leaks for the rest of the session. `pipelineRunner`
+        // checks `ctx.signal` only at the top of each step iteration, so a
+        // step that settles just before a reset still reaches this gate with
+        // no abort check in between, and `planBuilder` gives every plan
+        // gates. Resolve with the VALUE 'rejected' rather than rejecting the
+        // promise: the runner reads that as a decision, cancels the abandoned
+        // plan, skips its remaining steps and returns normally
+        // (PF-1229 finding #1).
+        if (!isCurrentRun()) {
+          return Promise.resolve<'approved' | 'rejected'>('rejected');
+        }
+
         return new Promise<'approved' | 'rejected'>((resolve) => {
           _gateResolver = resolve;
           set({
@@ -422,7 +518,7 @@ export const createOrchestratorSlice: StateCreator<
           cancelled: 'cancelled',
         };
         const mapped = statusMap[planStatus];
-        if (mapped) {
+        if (mapped && isCurrentRun()) {
           set({ orchestratorStatus: mapped });
         }
       },
@@ -433,12 +529,61 @@ export const createOrchestratorSlice: StateCreator<
 
       // Final status is set by onPlanStatusChange callback
     } catch (err) {
-      set({
-        orchestratorStatus: 'failed',
-        orchestratorError: err instanceof Error ? err.message : String(err),
-      });
+      // Same run-identity gate as the callbacks: an abandoned run that throws
+      // (including the AbortError `resetOrchestrator` now provokes) must not
+      // paint the plan the user moved on to as failed.
+      if (isCurrentRun()) {
+        set({
+          orchestratorStatus: 'failed',
+          orchestratorError: err instanceof Error ? err.message : String(err),
+        });
+      }
     } finally {
-      _abortController = null;
+      // Only the CURRENT run may drop the shared abort handle. A superseded
+      // run settling after `startPipeline` assigned a fresh
+      // `_abortController` would otherwise null out the LIVE run's handle,
+      // leaving `cancelPipeline` and `resetOrchestrator` with nothing to
+      // abort — silently, since both no-op on a null handle. That is the
+      // Round-2 defect this gate exists to close, one scope out
+      // (PF-1229 finding #2).
+      if (isCurrentRun()) {
+        _abortController = null;
+      }
+
+      // Re-read the plan the runner mutated.
+      //
+      // `onStepComplete` is the only other writer of `stepStatuses` (the other
+      // callback writers touch `orchestratorStatus`/`orchestratorWarnings`,
+      // and the `catch` writes the error), and it fires ONLY for a step that
+      // actually executed, mapping its result to 'completed' or
+      // 'failed'. Every 'skipped' the runner writes — a required step whose
+      // dependency failed, the cascade after a failure or a cancel, an optional
+      // step that exhausted its retries — is written straight onto the plan with
+      // no callback, and `setPlan` seeded an entry for every step id, so
+      // `stepStatuses[step.id] ?? step.status` in the panel never falls back.
+      // Without this pass a dependency-skipped step renders as 'Pending' with no
+      // alert for the whole life of a failed run. Same for `plan.warnings`,
+      // which nothing else reads.
+      //
+      // In `finally` so a run that threw still shows how far it got.
+      //
+      // `resetOrchestrator` aborts, but an abort is cooperative — a step
+      // already in flight still settles, so this promise chain still reaches
+      // here. `currentPlan` is a stale closure capture from function entry, so
+      // folding it unconditionally would resurrect the abandoned run's step
+      // statuses under the new plan's ids (`step_${n}` collides across plans
+      // by construction) after the user has already moved on. Same
+      // `isCurrentRun()` gate every other writer in this run uses
+      // (PF-1229 finding #4).
+      if (isCurrentRun()) {
+        set(s => ({
+          stepStatuses: { ...s.stepStatuses, ...deriveStepStatuses(currentPlan) },
+          orchestratorWarnings: [
+            ...s.orchestratorWarnings,
+            ...(currentPlan.warnings ?? []).map(message => ({ message })),
+          ],
+        }));
+      }
 
       // Release unused tokens — prorate by completed steps (fire-and-forget)
       if (reservationId) {
