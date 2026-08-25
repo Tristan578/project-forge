@@ -278,8 +278,12 @@ assert_out "reconcile wires the database resolver into classify_drift" "wired" "
 # reconcile now runs detached from session start, so it can overlap a push.
 # They write the same two systems, and reconcile decides from a snapshot of
 # GitHub state that a concurrent push is busy invalidating.
+# Redirect _MAIN_HOOKS to a temp dir first: taking the REAL lock here fails
+# with BlockingIOError whenever a live sync (or a session that parks the lock)
+# already holds it, turning an unrelated background process into a red suite.
 out="$(run_py "
-import fcntl
+import fcntl, pathlib, tempfile
+m._MAIN_HOOKS = pathlib.Path(tempfile.mkdtemp())
 lock = open(m._MAIN_HOOKS / '.sync-push.lock', 'w')
 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 ran = []

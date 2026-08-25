@@ -6,11 +6,11 @@ Documenting why specific dependencies are pinned and what must be audited before
 
 ## JavaScript / Node
 
-### stripe — `22.4.0`, API version `2026-07-29.dahlia`
+### stripe — `22.5.0`, API version `2026-07-29.dahlia`
 
 **Upgraded from** `^20.4.1` in PR #8136 (v21 `decimal_string` and v22 callback/ES6-class changes were non-issues — all amounts use integer cents, no callbacks, ESM imports). Bumped `22.2.x → 22.3.0` in the 2026-06-27 changelog-review wave.
 
-**ApiVersion moves in lockstep with the SDK.** stripe-node pins an `ApiVersion` literal (`22.4.0` → `2026-07-29.dahlia`); the hardcoded string must stay in sync across FIVE sites. Four are code, where a mismatch breaks `tsc`: `web/src/lib/billing/stripe-client.ts` (single source) plus the 3 billing route tests (`checkout`/`portal`/`status`). The fifth is the `web/src/app/api/stripe/webhook/route.ts` comment — it must track the literal but does not affect compilation.
+**ApiVersion moves in lockstep with the SDK.** stripe-node pins an `ApiVersion` literal (`22.5.0` → `2026-07-29.dahlia`); the hardcoded string must stay in sync across FIVE sites. Four are code, where a mismatch breaks `tsc`: `web/src/lib/billing/stripe-client.ts` (single source) plus the 3 billing route tests (`checkout`/`portal`/`status`). The fifth is the `web/src/app/api/stripe/webhook/route.ts` comment — it must track the literal but does not affect compilation.
 
 **Before future upgrades:**
 1. Check for new `apiVersion` string — update `web/src/lib/billing/stripe-client.ts` (single source)
@@ -70,13 +70,19 @@ Documenting why specific dependencies are pinned and what must be audited before
 
 ---
 
-### actions/upload-artifact + actions/download-artifact — Must Match Major Version
+### actions/upload-artifact + actions/download-artifact — Pin to a Node24 major, NOT to a shared major
 
-**Why constrained:** These GitHub Actions must always use the same major version. v4 changed artifact storage format — v3 artifacts cannot be downloaded by v4 and vice versa.
+**Current versions:** `upload-artifact@v7.0.1`, `download-artifact@v8.0.1` (both SHA-pinned, both Node24).
 
-**Current version:** v4 (both)
+**The old "must match `@v4`" rule was wrong and has been removed.** The v4+ artifact format is cross-compatible across majors, and the two actions deliberately release out of step: `download-artifact@v8` was published *to support* `upload-artifact@v7`'s new direct-upload (unzipped) mode. Requiring a shared major would force a downgrade.
 
-**Rule:** Never upgrade one without upgrading the other in the same PR.
+**The real constraint is the runner Node runtime.** GitHub removed Node20 from hosted runners in fall 2026; any artifact action major still targeting Node20 (upload `@v4`, download `@v4`) fails outright. Pin to a Node24-era major.
+
+**Breaking changes to know when bumping:**
+- `upload-artifact@v7`: migrated to ESM; new `archive: false` for single-file direct upload (ignores `name`, fails on a multi-file glob).
+- `download-artifact@v8`: migrated to ESM; **digest/hash mismatches now `error` by default** (was a warning) — override via the `digest-mismatch` parameter. Non-zipped downloads are detected by `Content-Type` and skipped for decompression; `skip-decompress: true` forces it.
+
+See `.claude/rules/gotchas-build-ci.md` for the canonical statement of this rule.
 
 ---
 
@@ -84,14 +90,14 @@ Documenting why specific dependencies are pinned and what must be audited before
 
 | Dependency | Current | Upgrade Risk | Recommended Action |
 |-----------|---------|-------------|-------------------|
-| `stripe` | 22.4.0 | LOW | Centralized in `stripe-client.ts`, check apiVersion string |
+| `stripe` | 22.5.0 | LOW | Centralized in `stripe-client.ts`, check apiVersion string |
 | `wasm-bindgen` | =0.2.108 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
 | `next` | 16.x | MEDIUM | Check migration guide, test E2E |
 | `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |
-| `@clerk/nextjs` | ^7.5.12 | LOW-MEDIUM | Check for auth() API changes (7.5 dropped `baseTheme` — appearance API migrated in f55ec99d) |
+| `@clerk/nextjs` | ^7.7.5 | LOW-MEDIUM | Check for auth() API changes (7.5 dropped `baseTheme` — appearance API migrated in f55ec99d) |
 | `drizzle-orm` | 0.45.2 | LOW | Check migration query syntax |
 | `vitest` | ^4.1.9 | LOW | Check for workspace config changes |
-| `zod` | ^4.3.6 | LOW | Already on v4 |
+| `zod` | ^4.4.3 | LOW | Already on v4 |
 
 ---
 
