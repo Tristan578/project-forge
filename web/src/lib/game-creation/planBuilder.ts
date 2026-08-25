@@ -355,7 +355,13 @@ export function buildPlan(
         // [S1] Hardcoded values injected by executor, not spread from config
         const stepPayload: Record<string, unknown> = {
           ...stepInput.input,
-          projectType: gdd.projectType,    // [B5]
+          // [B5] Required by `character_setup` and `entity_setup`, neither of
+          // which is given it by the system registry that builds these steps
+          // (`systems/movement.ts` supplies only movementType/systemConfig/
+          // entityId/entity). `physics_profile` no longer declares it — it
+          // reads `ctx.projectType` — so zod strips it there; that is the
+          // intended shape, not a leak.
+          projectType: gdd.projectType,
           feelDirective: gdd.feelDirective, // [B3]
         };
 

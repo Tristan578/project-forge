@@ -11,7 +11,6 @@ import {
 const inputSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
   feelDirective: feelDirectiveSchema,
-  projectType: z.enum(['2d', '3d']),
   entityIds: z.array(z.string()).optional(),
 });
 
@@ -87,8 +86,16 @@ export const physicsProfileExecutor: ExecutorDefinition = {
   // what to do next. "Your game will use default physics" describes the damage
   // and stops there; the remediation below is the same one the zero-ids WARNING
   // carries, for the same reason and in the same on-screen vocabulary
-  // (Hierarchy, Physics › Enabled, Friction/Restitution/Gravity) — one failure
-  // mode should not be followable and the other a dead end.
+  // (Hierarchy, Physics › Enabled, Friction/Gravity) — one failure mode should
+  // not be followable and the other a dead end.
+  //
+  // The third field is named twice on purpose: the 3D `PhysicsInspector` labels
+  // it "Restitution", but the 2D `Physics2dInspector` labels the same value
+  // "Bounciness" — there is no field literally called "Restitution" on a 2D
+  // project's screen. This string is a plain object property evaluated once at
+  // module load, not a function of `ctx`, so — unlike the zero-ids `warning`
+  // below, which knows `projectType` at call time and names only the matching
+  // label — it cannot branch and names both.
   //
   // No "re-run the build" clause here either: a new build starts at
   // `scene_create`, which calls `newScene()` and despawns everything, so it
@@ -96,7 +103,8 @@ export const physicsProfileExecutor: ExecutorDefinition = {
   userFacingErrorMessage:
     'Could not tune how the game moves, so everything will use default physics. '
     + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
-    + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+    + 'in the Inspector, then set Friction, Restitution (called Bounciness in 2D) and '
+    + 'Gravity there. '
     + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
 
   async execute(
@@ -183,6 +191,19 @@ export const physicsProfileExecutor: ExecutorDefinition = {
       // the enablement failure upstream. It is a WARNING rather than a failure
       // because the step is not optional — failing it would set the whole plan
       // to `failed` and discard a game that is merely mistuned.
+      // Unlike the static `userFacingErrorMessage` above, `ctx.projectType` is
+      // known here, so the warning names only the label that is actually on
+      // this project's screen — "Bounciness" for 2D, "Restitution" for 3D —
+      // instead of both. Read off `ctx`, not a copy on this step's own input:
+      // `ctx.projectType` is what the orchestrator dispatches to the engine
+      // via `setProjectType` before the run (`orchestratorSlice`), so it is
+      // the value provably in sync with the live scene. This executor is also
+      // invoked directly against an already-built scene (see the "read the
+      // store LIVE" comment above), where a caller could otherwise pass a
+      // stale or mismatched value on the input (PF-1229 finding #8) —
+      // matching the `ctx.projectType` idiom `physicsEnableExecutor` already
+      // uses for its own `bodyTypeLabel`.
+      const restitutionLabel = ctx.projectType === '2d' ? 'Bounciness' : 'Restitution';
       return successResult({
         presetUsed: presetKey,
         entityCount: 0,
@@ -195,7 +216,7 @@ export const physicsProfileExecutor: ExecutorDefinition = {
           'No entities had physics turned on, so the movement feel could not be applied. '
           + 'Things may not move or collide the way the design describes. '
           + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
-          + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+          + `in the Inspector, then set Friction, ${restitutionLabel} and Gravity there. `
           + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
       });
     }

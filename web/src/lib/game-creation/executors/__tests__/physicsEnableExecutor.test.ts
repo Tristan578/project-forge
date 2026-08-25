@@ -73,12 +73,15 @@ describe('physicsEnableExecutor', () => {
     // so guidance that stops at "turn Physics on" turns the floor into a falling
     // body; every noun has to be a label that is actually on screen; and there is
     // no "please try again", because a new build despawns the scene the user
-    // would have just fixed by hand.
+    // would have just fixed by hand. Body Type is named BOTH ways — "Fixed" in
+    // the 3D `PhysicsInspector`, "Static" in the 2D `Physics2dInspector` — because
+    // this is a plain string with no `projectType` to branch on at module-load
+    // time (PF-1229; see the zero-match warning below for the branched version).
     expect(physicsEnableExecutor.userFacingErrorMessage).toBe(
       'Could not switch physics on for the level, so nothing in the game will collide. '
       + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
-      + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
-      + '(the default, Dynamic, makes them fall). '
+      + 'in the Inspector, then set Body Type to Fixed (3D) or Static (2D) for ground, '
+      + 'platforms and walls (the default, Dynamic, makes them fall). '
       + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
     );
     expect(physicsEnableExecutor.userFacingErrorMessage).not.toMatch(/try again/i);
@@ -293,7 +296,8 @@ describe('physicsEnableExecutor', () => {
     expect(output.enabled).toBe(0);
     // Exact string, not a `toContain`: this sentence is the ONLY signal the user
     // gets that a step reporting success changed nothing, and it has to tell
-    // them what to do about it.
+    // them what to do about it. `makeCtx()` defaults to `projectType: '3d'`, so
+    // "Fixed" is the correct label here (PF-1229 — see the 2D case below).
     expect(output.warning).toBe(
       'Nothing in this step could be given a physical body, so none of it will collide, '
       + 'land on the ground or be picked up. '
@@ -301,6 +305,30 @@ describe('physicsEnableExecutor', () => {
       + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
       + '(the default, Dynamic, makes them fall) and tick Sensor for pickups.',
     );
+  });
+
+  it('warns with the 2D body-type label (Static, not Fixed) when nothing gets a body on a 2D project (PF-1229)', async () => {
+    const batch = vi.fn().mockReturnValue({ success: true });
+    const ctx = makeCtx({ dispatchCommandBatch: batch, projectType: '2d' });
+
+    const result = await physicsEnableExecutor.execute({
+      entities: [{ entityId: 'aaaaaaaa-0000-4000-8000-000000000009', name: 'Sun', role: 'decoration' }],
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(batch).not.toHaveBeenCalled();
+    const output = result.output as { enabled: number; warning?: string };
+    expect(output.enabled).toBe(0);
+    // The 2D `Physics2dInspector` has no "Fixed" option — a 2D reader following
+    // the 3D wording would look for a Body Type value that is not on their screen.
+    expect(output.warning).toBe(
+      'Nothing in this step could be given a physical body, so none of it will collide, '
+      + 'land on the ground or be picked up. '
+      + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
+      + 'in the Inspector, then set Body Type to Static for ground, platforms and walls '
+      + '(the default, Dynamic, makes them fall) and tick Sensor for pickups.',
+    );
+    expect(output.warning).not.toMatch(/Fixed/);
   });
 
   it('falls back to per-command dispatch when the caller has no batcher', async () => {
