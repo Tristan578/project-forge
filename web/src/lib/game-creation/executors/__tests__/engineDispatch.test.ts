@@ -216,12 +216,11 @@ describe('sendCommands', () => {
     expect(sendCommands(makeCtx({ dispatchCommandBatch: refused }), commands)).toBe(false);
   });
 
-  it('reports success on the single-dispatch path because nothing there can report failure', () => {
-    // `dispatchCommand` returns void. `true` is not optimism, it is the only
-    // answer available — and it is why every executor that needs to KNOW an
-    // outcome is given a batch dispatcher. Each command still goes out
-    // individually, in order.
-    const single = vi.fn();
+  it('sends each command in order on the single-dispatch path', () => {
+    // No batch dispatcher is not a rare configuration: `orchestratorSlice` fills
+    // the field from `getCommandBatchDispatcher() ?? undefined`, so a WASM build
+    // without `handle_command_batch` runs the entire pipeline down this branch.
+    const single = vi.fn().mockReturnValue({ success: true });
     const ctx = makeCtx({ dispatchCommand: single, dispatchCommandBatch: undefined });
 
     const result = sendCommands(ctx, [
@@ -237,5 +236,66 @@ describe('sendCommands', () => {
       'update_transform',
       { entityId: 'a', scale: [1, 1, 1] },
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Single-path rejection reporting (PF-1231)
+  // -------------------------------------------------------------------------
+  //
+  // This path used to return `true` unconditionally, on the premise that
+  // `dispatchCommand` returned void. It never did — `useEngineEvents` has always
+  // answered with a `CommandResponse`; it was `ExecutorContext` that typed the
+  // answer away. Every executor running without a batch dispatcher therefore
+  // reported success for commands the engine had refused.
+
+  it('reports failure when the single dispatcher refuses a command', () => {
+    const single = vi.fn().mockReturnValue({ success: false, error: 'unknown command' });
+    const ctx = makeCtx({ dispatchCommand: single, dispatchCommandBatch: undefined });
+
+    expect(sendCommands(ctx, [{ command: 'nope', payload: {} }])).toBe(false);
+  });
+
+  it('sends the WHOLE list even after a refusal, and still reports failure', () => {
+    // No early exit, deliberately. These commands are one step's worth of work,
+    // the batch path runs the whole envelope too, and a caller that saw half a
+    // step applied on one path and a different half on the other would have to
+    // know which dispatcher it was handed.
+    const single = vi.fn((command: string) =>
+      (command === 'b' ? { success: false, error: 'refused' } : { success: true }));
+    const ctx = makeCtx({ dispatchCommand: single, dispatchCommandBatch: undefined });
+
+    const result = sendCommands(ctx, [
+      { command: 'a', payload: {} },
+      { command: 'b', payload: {} },
+      { command: 'c', payload: {} },
+    ]);
+
+    expect(result).toBe(false);
+    expect(single).toHaveBeenCalledTimes(3);
+    // A refusal in the middle must not be laundered by the commands after it
+    // answering `success` — the verdict latches.
+    expect(single).toHaveBeenNthCalledWith(3, 'c', {});
+  });
+
+  it('treats a dispatcher that answers nothing as acceptance', () => {
+    // The store-level `CommandDispatcher` is typed `CommandResponse | void`, and
+    // test doubles overwhelmingly return nothing. Reading `undefined` as a
+    // rejection would fail every one of them for a defect that is not there.
+    const ctx = makeCtx({
+      dispatchCommand: vi.fn(() => undefined),
+      dispatchCommandBatch: undefined,
+    });
+
+    expect(sendCommands(ctx, [{ command: 'spawn_entity', payload: {} }])).toBe(true);
+  });
+
+  it('does not read a truthy non-response as a rejection', () => {
+    // `success` absent is not `success: false`. Only an explicit `false` refuses.
+    const ctx = makeCtx({
+      dispatchCommand: vi.fn(() => ({}) as never),
+      dispatchCommandBatch: undefined,
+    });
+
+    expect(sendCommands(ctx, [{ command: 'spawn_entity', payload: {} }])).toBe(true);
   });
 });

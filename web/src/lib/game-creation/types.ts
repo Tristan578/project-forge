@@ -261,7 +261,29 @@ export interface TokenEstimate {
 export type UserTier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 
 export interface ExecutorContext {
-  dispatchCommand: (command: string, payload: unknown) => void;
+  /**
+   * Sends ONE command and answers whether the engine took it.
+   *
+   * The return type used to be `void`, and that was a lie about the wire: the
+   * real dispatcher (`useEngineEvents.dispatchCommand`) has always returned a
+   * `CommandResponse` carrying `success` and `error`, and the engine's own
+   * rejections — an unknown command name, a malformed payload, an oversized
+   * batch — arrive through it. Erasing that to `void` here meant every executor
+   * calling this directly reported `success` for a command the engine had
+   * refused, and `sendCommands` had no choice but to return `true` on its
+   * unbatched path (PF-1231).
+   *
+   * `| void` rather than a plain `CommandResponse`: the store-level
+   * `CommandDispatcher` (`stores/editorStore.ts`) permits either, and test
+   * doubles overwhelmingly return nothing. A dispatcher that answers nothing is
+   * read as "no rejection to report", which is the same verdict the old
+   * signature forced — so widening the type cannot make a passing case fail.
+   *
+   * Prefer `sendCommands()` (executors/engineDispatch.ts) over calling this
+   * directly: it batches when the context has a batch dispatcher and collapses
+   * either path to a single boolean.
+   */
+  dispatchCommand: (command: string, payload: unknown) => import('@/hooks/useEngine').CommandResponse | void;
   dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
   /**
    * Reads the editor store LIVE at call time.

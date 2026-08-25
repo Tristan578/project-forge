@@ -5,6 +5,7 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { zSystemCategory } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { sendCommands } from './engineDispatch';
 
 // --- [S6] PREREQUISITE: Reflect and Proxy must be in SHADOWED_GLOBALS ---
 // [S6] Sandbox requirement: Reflect and Proxy must remain in SHADOWED_GLOBALS.
@@ -285,11 +286,19 @@ export const customScriptExecutor: ExecutorDefinition = {
     // entity's EntityId component (bridge/scripts.rs `apply_script_updates`). The
     // sanitized copy exists only to be safe inside the LLM prompt. A miss here is
     // SILENT: the engine's match loop simply never runs and emits nothing.
-    ctx.dispatchCommand('set_script', {
-      entityId: targetEntityId,
-      source: code,
-      enabled: true,
-    });
+    if (!sendCommands(ctx, [{
+      command: 'set_script',
+      payload: { entityId: targetEntityId, source: code, enabled: true },
+    }])) {
+      return failResult(
+        makeStepError(
+          'COMMAND_FAILED',
+          'Engine rejected the generated script',
+          this.userFacingErrorMessage,
+          true,
+        ),
+      );
+    }
 
     // [FIX: NU1] Dynamic confidence based on script complexity
     const confidence = computeScriptConfidence(code);
