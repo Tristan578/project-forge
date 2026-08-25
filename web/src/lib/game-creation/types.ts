@@ -190,7 +190,13 @@ export interface OrchestratorPlan {
    * `runPipeline` records an empty `steps` slot here. It tolerates one rather
    * than crashing on it, and a tolerated gap with nothing written down is a
    * plan that reports full success while a step it was supposed to run simply
-   * is not there — so the gap is recorded where the caller can see it.
+   * is not there.
+   *
+   * Read by `orchestratorSlice.runPipelineFromPlan`, which folds these into
+   * `orchestratorWarnings` once the run settles so they render in the panel's
+   * warning list alongside the per-step notes. Anything written here that no
+   * caller picks up is invisible to the user, which is the whole failure this
+   * field exists to prevent.
    */
   warnings?: string[];
 }
