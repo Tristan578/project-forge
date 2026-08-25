@@ -466,15 +466,24 @@ describe('F03/F04 (#8778): Sentry dataCollection opt-out must stay exhaustive', 
   );
 });
 
-describe('Sentry Logs scrubber gap: enableLogs requires beforeSendLog: scrubSentryLog', () => {
+describe('Sentry Logs scrubber gap: beforeSendLog: scrubSentryLog is required unconditionally', () => {
   /**
-   * `enableLogs: true` routes `Sentry.logger.*` calls through a SEPARATE
-   * delivery pipeline (`beforeSendLog`) that `beforeSend` / `beforeSendTransaction`
-   * — and therefore `scrubSentryEvent` — never touch. Without a `beforeSendLog`
-   * scrubber, a stray log call could ship a prompt, BYOK key, or PII unredacted,
-   * bypassing the F03/F04 posture. This guard ties the requirement to its trigger:
-   * ANY init config that turns logs on must also wire the log scrubber. All three
-   * configs currently enable logs, so all three must carry it.
+   * `Sentry.logger.*` calls route through a SEPARATE delivery pipeline
+   * (`beforeSendLog`) that `beforeSend` / `beforeSendTransaction` — and
+   * therefore `scrubSentryEvent` — never touch. Without a `beforeSendLog`
+   * scrubber, a stray log call could ship a prompt, BYOK key, or PII
+   * unredacted, bypassing the F03/F04 posture.
+   *
+   * This used to be gated on `content.includes('enableLogs: true')`, which
+   * coupled the scrubber requirement to a line that is on its way to becoming
+   * deletable: @sentry/core flips the `enableLogs` default from false to TRUE
+   * in 10.71.0 (client.js's `... ?? true`), and web/package.json pins
+   * `"@sentry/nextjs": "^10.70.0"`, so a future bump makes the explicit opt-in
+   * look redundant. Rather than let one deletion take both the trigger and the
+   * guard with it, the two requirements are now pinned INDEPENDENTLY and
+   * unconditionally: every init must wire the scrubber (below), and every init
+   * must still opt into logs explicitly (below that, which is what the
+   * installed 10.70.0 actually needs to emit logs at all).
    */
   const CONFIG_FILES = [
     'sentry.server.config.ts',
@@ -494,27 +503,42 @@ describe('Sentry Logs scrubber gap: enableLogs requires beforeSendLog: scrubSent
   }
 
   it.each(CONFIG_FILES)(
-    '%s wires beforeSendLog: scrubSentryLog whenever it enables logs',
+    '%s wires beforeSendLog: scrubSentryLog',
     async (file) => {
       const content = await readConfig(file);
-      if (content.includes('enableLogs: true')) {
-        expect(
-          content,
-          `${file} enables Sentry Logs but does not route them through scrubSentryLog — Sentry.logger.* would bypass scrubSentryEvent`,
-        ).toContain('beforeSendLog: scrubSentryLog');
-      }
+      expect(
+        content,
+        `${file} initializes Sentry but does not route Sentry Logs through scrubSentryLog — Sentry.logger.* bypasses scrubSentryEvent, and enableLogs defaults to TRUE from @sentry/core 10.71.0, so there is no opt-in line gating the pipeline`,
+      ).toContain('beforeSendLog: scrubSentryLog');
     },
   );
 
-  it('keeps the conditional guard non-vacuous (at least one config still enables logs)', async () => {
-    // If a future edit turned logs OFF in every config, the conditional guard
-    // above would pass vacuously and silently stop protecting anything. Assert
-    // the trigger is still live so the guard keeps biting; today all three enable
-    // logs.
-    const enabled = await Promise.all(
-      CONFIG_FILES.map(async (f) => (await readConfig(f)).includes('enableLogs: true')),
+  it('every config still opts in explicitly: enableLogs: true', async () => {
+    // Two independent reasons this line must stay, both of which the
+    // unconditional scrubber pin above cannot see:
+    //   1. On the version actually installed (@sentry/core 10.70.0) enableLogs
+    //      still defaults to FALSE — client.js has no `?? true`. Deleting the
+    //      opt-in silently turns Sentry Logs OFF, killing the PF-967 server
+    //      lifecycle logging in lib/monitoring/sentry-server.ts and reducing
+    //      the scrubber pin to busywork.
+    //   2. Once ^10.70.0 resolves 10.71.0+ the default flips to true and the
+    //      line reads as redundant — precisely when someone deletes it. The
+    //      explicit opt-in pins intent across the whole supported range.
+    const optedIn = await Promise.all(
+      CONFIG_FILES.map(async (f) => [f, (await readConfig(f)).includes('enableLogs: true')] as const),
     );
-    expect(enabled.filter(Boolean).length).toBeGreaterThan(0);
+    const missing = optedIn.filter(([, on]) => !on).map(([f]) => f);
+    expect(
+      missing,
+      `these configs no longer opt into Sentry Logs: ${missing.join(', ')} — on @sentry/core 10.70.0 enableLogs defaults to false, so Sentry.logger.* silently stops shipping`,
+    ).toEqual([]);
+  });
+
+  it('no config opts OUT of logs while pinning the scrubber', async () => {
+    const optedOut = await Promise.all(
+      CONFIG_FILES.map(async (f) => (await readConfig(f)).includes('enableLogs: false')),
+    );
+    expect(optedOut.filter(Boolean)).toHaveLength(0);
   });
 });
 

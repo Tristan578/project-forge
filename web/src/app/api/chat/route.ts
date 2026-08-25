@@ -603,9 +603,14 @@ export async function POST(request: NextRequest) {
   const canUseThinking = auth.ctx.user.tier === 'creator' || auth.ctx.user.tier === 'pro';
   // Use the route's translated modelId (e.g. 'anthropic/claude-opus-4-8' for
   // the gateway) when available, falling back to the bare canonical model.
-  // Without this, the gateway path silently downgrades unmapped premium IDs to
-  // Sonnet inside createSpawnforgeAgent — but billing already deducted at the
-  // higher tier. Direct backends pass-through the canonical name unchanged.
+  // Without this, the gateway path silently downgrades unmapped premium IDs
+  // to Sonnet inside createSpawnforgeAgent. The gateway/openrouter path is
+  // never token-metered (see `usingDirectBackend` above), so a downgrade
+  // here costs the user the model quality their tier entitles them to —
+  // and on the fast-model direction it inflates our own upstream spend by
+  // billing a Haiku-tier request at Sonnet rates — not a double-charge on
+  // the user's token balance. Direct backends pass-through the canonical
+  // name unchanged.
   const resolvedModelId = chatRoute?.modelId ?? model ?? '';
   // Effort piggybacks the same tier gate as thinking — both consume extra reasoning
   // tokens and must be off by default for free/starter tiers.
