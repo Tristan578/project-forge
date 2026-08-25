@@ -178,7 +178,7 @@ GitHub is a primary dependency (CI/CD, issue tracking, PR workflows, CLI). Check
 - **Focus on breaking changes** — minor features are noise; breaking API changes are signal
 - **Check against actual usage** — a breaking change in a feature we don't use isn't actionable
 - **wasm-bindgen is pinned** — `=0.2.108` must match Cargo.lock. Never recommend upgrading without explicit user approval
-- **GitHub Actions versions** — `upload-artifact` and `download-artifact` MUST use the same major version (@v4). Never upgrade one without the other
+- **GitHub Actions versions** — the v4+ artifact format is cross-compatible, so `upload-artifact` and `download-artifact` do NOT have to share a major. The tree runs `upload-artifact@v7.0.1` + `download-artifact@v8.0.1` (download v8 exists *to support* upload v7's direct-upload mode). The real constraint is the **runner Node runtime**, not a shared major — never pin an artifact action to a major still on the deprecated Node20. See `.claude/rules/gotchas-build-ci.md`.
 
 ## Scripts
 
