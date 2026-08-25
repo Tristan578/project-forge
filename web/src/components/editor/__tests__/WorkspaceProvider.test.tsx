@@ -6,8 +6,11 @@
  * @vitest-environment jsdom
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup } from '@/test/utils/componentTestUtils';
+import type { IDockviewPanelProps } from 'dockview-react';
+import { render, cleanup, screen, waitFor } from '@/test/utils/componentTestUtils';
 import { WorkspaceProvider } from '../WorkspaceProvider';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
@@ -22,17 +25,24 @@ vi.mock('@/stores/workspaceStore', () => ({
 const mockFromJSON = vi.fn();
 const mockOnDidLayoutChange = vi.fn(() => ({ dispose: vi.fn() }));
 let capturedOnReady: ((e: { api: unknown }) => void) | null = null;
+// The real DockviewReact is what instantiates the panel components, so the
+// stub has to hand them back or every wrapper in this file is unreachable.
+let capturedComponents: Record<string, React.FunctionComponent<IDockviewPanelProps>> | null =
+  null;
 
 vi.mock('dockview-react', () => ({
   DockviewReact: ({
     onReady,
     className,
+    components,
   }: {
     onReady: (e: { api: unknown }) => void;
     className?: string;
+    components?: Record<string, React.FunctionComponent<IDockviewPanelProps>>;
   }) => {
     // Capture the onReady callback for manual invocation in tests
     capturedOnReady = onReady;
+    capturedComponents = components ?? null;
     return <div data-testid="dockview" className={className} />;
   },
 }));
@@ -133,6 +143,7 @@ describe('WorkspaceProvider', () => {
     vi.resetModules();
     vi.clearAllMocks();
     capturedOnReady = null;
+    capturedComponents = null;
     setupStore();
     localStorage.clear();
   });
@@ -211,5 +222,70 @@ describe('WorkspaceProvider', () => {
     capturedOnReady?.({ api });
 
     expect(mockOnDidLayoutChange).toHaveBeenCalled();
+  });
+
+  // ── Panel chrome theming ───────────────────────────────────────────────
+
+  /**
+   * PF-1229 finding E2. Every panel shell and the lazy-loading skeleton were
+   * painted with hardcoded `zinc-*` classes, which do not participate in the
+   * theme at all. The worst case is not merely off-palette: in the light
+   * theme `--sf-text` IS `#18181b`, the same value `bg-zinc-900` paints, so a
+   * panel caught mid-load rendered black-on-black at 1.00:1.
+   */
+  describe('panel chrome theming', () => {
+    function renderPanel(panelId: string) {
+      render(<WorkspaceProvider />);
+      const Panel = capturedComponents?.[panelId];
+      if (!Panel) {
+        throw new Error(`dockview was given no component for panel '${panelId}'`);
+      }
+      return render(<Panel {...({} as IDockviewPanelProps)} />);
+    }
+
+    // ONE test covers both the shell and the skeleton on purpose: `React.lazy`
+    // caches its resolved module on the component object, which outlives
+    // `vi.resetModules()` because `WorkspaceProvider` is imported statically.
+    // Only the FIRST render in this file suspends, so a second test asking for
+    // the skeleton would find the panel already resolved.
+    it('paints the lazy panel shell and its loading skeleton from theme tokens', async () => {
+      const { container } = renderPanel('ui-builder');
+
+      const shell = container.firstElementChild as HTMLElement;
+      expect(shell.className).toContain('bg-[var(--sf-bg-surface)]');
+      expect(shell.className).not.toMatch(/\bzinc-/);
+
+      const skeleton = screen.getByRole('status', { name: 'Loading panel' });
+      expect(skeleton.className).toContain('bg-[var(--sf-bg-surface)]');
+      expect(skeleton.className).not.toMatch(/\bzinc-/);
+
+      const bars = Array.from(skeleton.children);
+      expect(bars.length).toBeGreaterThan(0);
+      for (const bar of bars) {
+        // `--sf-bg-overlay` is the one token that reproduces the previous
+        // hardcoded bar/panel separation (1.70:1 in dark) rather than washing
+        // the bars out; `--sf-bg-elevated` drops dark to 1.19:1.
+        expect(bar.className).toContain('bg-[var(--sf-bg-overlay)]');
+        expect(bar.className).not.toMatch(/\bzinc-/);
+      }
+
+      // Let the lazy import settle so the skeleton unmounts inside act().
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    });
+
+    it('leaves no hardcoded palette class anywhere in the module', () => {
+      // Fifteen call sites were converted, and the two tests above can only
+      // reach four of them — the tier-gated branches in particular need a
+      // user tier this suite does not stub. A file-scoped scan covers the
+      // rest without pretending to police the whole directory.
+      const source = readFileSync(
+        resolve(process.cwd(), 'src/components/editor/WorkspaceProvider.tsx'),
+        'utf-8',
+      );
+      // Fail closed: a mis-resolved path would otherwise pass vacuously.
+      expect(source).toContain('function PanelLoadingSkeleton()');
+      expect(source).not.toMatch(/\bbg-zinc-/);
+      expect(source).not.toMatch(/\b(?:text|border)-zinc-/);
+    });
   });
 });

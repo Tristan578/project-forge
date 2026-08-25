@@ -1290,7 +1290,7 @@ export function makeStepError(
 | Executor | Input Schema | Dependencies | userFacingErrorMessage | Notes |
 |----------|-------------|--------------|----------------------|-------|
 | `scene_create` | `{ name: string, purpose: string }` | None | "Could not create the scene. Please try again." | Thin wrapper around dispatchCommand |
-| `physics_profile` | `{ config, feelDirective, projectType, entityIds? }` | Entity steps | "Could not configure physics. Your game will use default physics." | [S1][B3][B5] |
+| `physics_profile` | `{ config, feelDirective, entityIds? }` | Entity steps | "Could not configure physics. Your game will use default physics." | [S1][B3] — project type comes from `ctx.projectType`, not the step input |
 | `character_setup` | `{ entity, projectType, entityId? }` | Entity steps | "Could not set up the character rig. The character will work without animations." | [B5] 2D/3D routing |
 | `entity_setup` | `{ entity, scene, projectType }` | Scene steps | "Could not create an entity. It will be skipped." | Spawns entity + components |
 | `asset_generate` | `{ type, description, fallback, ... }` | Entity + system steps | "Asset generation failed. Using a placeholder instead." | Calls /api/generate, falls back |

@@ -64,7 +64,18 @@ export const physicsEnableExecutor: ExecutorDefinition = {
   inputSchema,
   // Every noun here is a label that is actually on screen: the panel is
   // "Hierarchy", the Inspector's section is "Physics" with an "Enabled"
-  // checkbox, and "Fixed" is the Body Type option (there is no "Static").
+  // checkbox, and the immovable Body Type option is named "Fixed" in the 3D
+  // `PhysicsInspector` and "Static" in the 2D `Physics2dInspector` — the two
+  // inspectors do not share a vocabulary here, so a copy that says only
+  // "Fixed" sends a 2D reader looking for an option that is not on their
+  // screen (there is no "Fixed" choice in 2D; there is no "Static" choice in
+  // 3D).
+  //
+  // This field is a plain string evaluated once at module load, not a
+  // function of `ctx`, so it cannot branch on `ctx.projectType` the way the
+  // zero-match `warning` below does — it names both spellings instead. The
+  // runtime warning knows which project it is actually looking at and says
+  // only the one that matches.
   //
   // Naming Body Type is not padding. `PhysicsData::default()` is DYNAMIC
   // (engine/src/core/physics.rs), so a user who follows guidance that stops at
@@ -79,8 +90,8 @@ export const physicsEnableExecutor: ExecutorDefinition = {
   userFacingErrorMessage:
     'Could not switch physics on for the level, so nothing in the game will collide. '
     + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
-    + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
-    + '(the default, Dynamic, makes them fall). '
+    + 'in the Inspector, then set Body Type to Fixed (3D) or Static (2D) for ground, '
+    + 'platforms and walls (the default, Dynamic, makes them fall). '
     + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
 
   async execute(
@@ -164,6 +175,12 @@ export const physicsEnableExecutor: ExecutorDefinition = {
       // Not a step failure — the plan can still run — but the level is inert, so
       // it has to reach the user through the warning channel rather than a
       // green tick.
+      //
+      // Unlike the static `userFacingErrorMessage` above, this string is built
+      // at call time and `ctx.projectType` is known here, so it names the one
+      // Body Type spelling that is actually on the reader's screen instead of
+      // both.
+      const bodyTypeLabel = ctx.projectType === '2d' ? 'Static' : 'Fixed';
       return successResult({
         enabled: 0,
         skipped: skipped.length,
@@ -172,7 +189,7 @@ export const physicsEnableExecutor: ExecutorDefinition = {
           'Nothing in this step could be given a physical body, so none of it will collide, '
           + 'land on the ground or be picked up. '
           + 'To set it by hand: select an entity in the Hierarchy, tick Enabled under Physics '
-          + 'in the Inspector, then set Body Type to Fixed for ground, platforms and walls '
+          + `in the Inspector, then set Body Type to ${bodyTypeLabel} for ground, platforms and walls `
           + '(the default, Dynamic, makes them fall) and tick Sensor for pickups.',
       });
     }

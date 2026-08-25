@@ -92,10 +92,14 @@ describe('physicsProfileExecutor', () => {
     // default physics" that said nothing about what to do next. Every noun is a
     // label that is on screen, and the last sentence exists because re-running
     // the build calls `newScene()` and would throw away the hand fix.
+    // Names the restitution field both ways — "Restitution" in the 3D
+    // Inspector, "Bounciness" in the 2D one (PF-1229) — because this is a
+    // plain string with no `projectType` to branch on at module-load time.
     expect(physicsProfileExecutor.userFacingErrorMessage).toBe(
       'Could not tune how the game moves, so everything will use default physics. '
       + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
-      + 'in the Inspector, then set Friction, Restitution and Gravity there. '
+      + 'in the Inspector, then set Friction, Restitution (called Bounciness in 2D) and '
+      + 'Gravity there. '
       + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
     );
     expect(physicsProfileExecutor.userFacingErrorMessage).not.toMatch(/try again/i);
@@ -253,7 +257,9 @@ describe('physicsProfileExecutor', () => {
     expect(output.entityCount).toBe(0);
     // The exact sentence, not `toContain('physics')` — that matched the word in
     // its own executor name and would have passed on any wording, including one
-    // that told the user nothing to do next.
+    // that told the user nothing to do next. "Restitution" is the 3D
+    // `PhysicsInspector` label, correct for this `projectType: '3d'` case
+    // (PF-1229 — see the 2D counterpart below for "Bounciness").
     expect(output.warning).toBe(
       'No entities had physics turned on, so the movement feel could not be applied. '
       + 'Things may not move or collide the way the design describes. '
@@ -261,6 +267,59 @@ describe('physicsProfileExecutor', () => {
       + 'in the Inspector, then set Friction, Restitution and Gravity there. '
       + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
     );
+  });
+
+  it('warns with the 2D field label (Bounciness, not Restitution) when it matches nothing on a 2D project (PF-1229)', async () => {
+    const ctx = makeCtx({ projectType: '2d' });
+    const result = await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      projectType: '2d',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(mockApplyPhysicsProfile).not.toHaveBeenCalled();
+    const output = result.output as { entityCount: number; warning?: string };
+    expect(output.entityCount).toBe(0);
+    // The 2D `Physics2dInspector` labels this field "Bounciness", not
+    // "Restitution" — a 2D reader following the 3D wording would look for a
+    // field that is not on their screen.
+    expect(output.warning).toBe(
+      'No entities had physics turned on, so the movement feel could not be applied. '
+      + 'Things may not move or collide the way the design describes. '
+      + 'To set it by hand: select the player in the Hierarchy, tick Enabled under Physics '
+      + 'in the Inspector, then set Friction, Bounciness and Gravity there. '
+      + 'Starting a new build rebuilds the scene from scratch, so it will not keep those edits.',
+    );
+    expect(output.warning).not.toMatch(/Restitution/);
+  });
+
+  /**
+   * `physicsEnableExecutor` reads `ctx.projectType` for this same kind of
+   * dynamic label (see its `bodyTypeLabel`); this executor used to read a
+   * SEPARATE copy off its own Zod-validated input instead. Both are authored
+   * from `gdd.projectType` by `planBuilder`, so they agree in the normal
+   * orchestrator flow — but `ctx.projectType` is the one the orchestrator
+   * actually dispatches to the engine via `setProjectType` before the run
+   * (`orchestratorSlice.runPipelineFromPlan`), and this executor is also
+   * invoked directly against an already-built scene (see the "read the store
+   * LIVE" comment above `collectTargetIds`'s call site), where a caller could
+   * pass a stale or mismatched `input.projectType`. Aligning on `ctx`
+   * (PF-1229 finding #8) means a caller cannot make the label lie about which
+   * project this actually is. The two are set to DIFFERENT values here
+   * specifically to prove the label follows `ctx`, not `input`.
+   */
+  it('uses ctx.projectType for the warning label, not a mismatched input.projectType', async () => {
+    const ctx = makeCtx({ projectType: '2d' });
+    const result = await physicsProfileExecutor.execute({
+      feelDirective: makeFeelDirective(),
+      // Deliberately the opposite of ctx.projectType.
+      projectType: '3d',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    const output = result.output as { warning?: string };
+    expect(output.warning).toContain('Bounciness');
+    expect(output.warning).not.toMatch(/Restitution/);
   });
 
   it('tunes the entities the physics_enable step reported (PF-1213)', async () => {
@@ -454,14 +513,19 @@ describe('physicsProfileExecutor', () => {
     expect(result.error?.code).toBe('INVALID_INPUT');
   });
 
-  it('rejects missing projectType', async () => {
+  /**
+   * `projectType` is no longer part of this executor's own input schema
+   * (PF-1229 finding #8) — it reads `ctx.projectType` instead, which is
+   * always present on `ExecutorContext`. A caller omitting it from the
+   * step input must succeed, not fail validation.
+   */
+  it('does not require projectType on input', async () => {
     const ctx = makeCtx();
     const result = await physicsProfileExecutor.execute({
       feelDirective: makeFeelDirective(),
     }, ctx);
 
-    expect(result.success).toBe(false);
-    expect(result.error?.code).toBe('INVALID_INPUT');
+    expect(result.success).toBe(true);
   });
 
   it('rejects invalid pacing enum', async () => {
