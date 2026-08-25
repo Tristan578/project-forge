@@ -17,7 +17,6 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "@spawnforge/design",
-    "@spawnforge/docs"
+    "@spawnforge/design"
   ]
 }
