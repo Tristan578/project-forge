@@ -91,4 +91,46 @@ describe('customScriptExecutor', () => {
     expect(fetchAI).not.toHaveBeenCalled();
     expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
+  // ---------------------------------------------------------------------------
+  // Command routing (PF-1231)
+  // ---------------------------------------------------------------------------
+  //
+  // `set_script` used to go out through `ctx.dispatchCommand` directly. A
+  // refusal there is the worst kind for this executor: the step reports a
+  // generated, validated script bound to the entity, and the entity has no
+  // script — indistinguishable from the silent name-vs-id miss the suite's
+  // first test exists to prevent.
+  describe('command routing (PF-1231)', () => {
+    it('sends set_script through the batch dispatcher when there is one', async () => {
+      const dispatchCommandBatch = vi.fn(() => ({ success: true, results: [] }));
+      const ctx = makeCtx({ dispatchCommandBatch });
+
+      const result = await customScriptExecutor.execute(makeInput(), ctx);
+
+      expect(result.success).toBe(true);
+      expect(dispatchCommandBatch).toHaveBeenCalledWith([{
+        command: 'set_script',
+        payload: {
+          entityId: 'e1e1e1e1-0000-4000-8000-000000000001',
+          source: expect.any(String),
+          enabled: true,
+        },
+      }]);
+      expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+    });
+
+    it('FAILS the step when the engine refuses set_script', async () => {
+      const ctx = makeCtx({
+        dispatchCommand: vi.fn(() => ({ success: false, error: 'no such entity' })),
+      });
+
+      const result = await customScriptExecutor.execute(makeInput(), ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('COMMAND_FAILED');
+      // Retryable: the same generated script against a scene that has settled
+      // may well bind, so this is not a dead end for the pipeline.
+      expect(result.error?.retryable).toBe(true);
+    });
+  });
 });

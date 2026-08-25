@@ -530,4 +530,57 @@ describe('cameraSetupExecutor', () => {
     expect(result.error?.code).toBe('ABORTED');
     expect(dispatch).not.toHaveBeenCalled();
   });
+  // ---------------------------------------------------------------------------
+  // Command routing (PF-1231)
+  // ---------------------------------------------------------------------------
+  //
+  // Both commands used to go out through `ctx.dispatchCommand` directly, which
+  // meant an engine refusal — an unknown mode, a payload the bridge would not
+  // deserialize — was reported to the user as a configured camera.
+  describe('command routing (PF-1231)', () => {
+    const INPUT = { cameraMode: 'third_person', targetEntityId: 'player-1' };
+
+    it('sends both commands in ONE batch when the context has a batch dispatcher', async () => {
+      const dispatchCommandBatch = vi.fn(() => ({ success: true, results: [] }));
+      const { ctx, dispatch } = makeCtx(CAMERA_NODE, { dispatchCommandBatch });
+
+      const result = await cameraSetupExecutor.execute(INPUT, ctx);
+
+      expect(result.success).toBe(true);
+      // Configuring a camera and activating it are one unit of work: split
+      // across two crossings, a scene can render through the old camera for a
+      // frame with the new one already configured.
+      expect(dispatchCommandBatch).toHaveBeenCalledTimes(1);
+      expect(dispatchCommandBatch.mock.calls[0][0]).toEqual([
+        { command: 'set_game_camera', payload: expect.objectContaining({ entityId: 'e-9' }) },
+        { command: 'set_active_game_camera', payload: { entityId: 'e-9' } },
+      ]);
+      expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('FAILS the step when the engine refuses the camera commands', async () => {
+      const { ctx } = makeCtx(CAMERA_NODE, {
+        dispatchCommandBatch: vi.fn(() => ({
+          success: false,
+          results: [{ success: false, error: 'unknown command' }],
+        })),
+      });
+
+      const result = await cameraSetupExecutor.execute(INPUT, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('COMMAND_FAILED');
+    });
+
+    it('FAILS the step when the single dispatcher refuses, with no batch dispatcher', async () => {
+      const { ctx } = makeCtx(CAMERA_NODE, {
+        dispatchCommand: vi.fn(() => ({ success: false, error: 'bad payload' })),
+      });
+
+      const result = await cameraSetupExecutor.execute(INPUT, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('COMMAND_FAILED');
+    });
+  });
 });
