@@ -541,7 +541,12 @@ describe('cameraSetupExecutor', () => {
     const INPUT = { cameraMode: 'third_person', targetEntityId: 'player-1' };
 
     it('sends both commands in ONE batch when the context has a batch dispatcher', async () => {
-      const dispatchCommandBatch = vi.fn(() => ({ success: true, results: [] }));
+      // The parameter is named even though the body ignores it: without it TS
+      // infers the mock's arg tuple as `[]` and `mock.calls[0][0]` stops
+      // typechecking, which is the assertion this test exists for.
+      const dispatchCommandBatch = vi.fn(
+        (_commands: Array<{ command: string; payload?: unknown }>) => ({ success: true, results: [] }),
+      );
       const { ctx, dispatch } = makeCtx(CAMERA_NODE, { dispatchCommandBatch });
 
       const result = await cameraSetupExecutor.execute(INPUT, ctx);
