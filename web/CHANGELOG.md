@@ -1,5 +1,490 @@
 # web
 
+## 0.7.0
+
+### Minor Changes
+
+- [#9314](https://github.com/Tristan578/project-forge/pull/9314) [`4bbf57a`](https://github.com/Tristan578/project-forge/commit/4bbf57aba665d142684beee9bd0eb18767998f65) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated games are now playable: the pipeline builds a world and a goal
+  
+  Two gaps meant that nearly every game the pipeline produced could not be
+  started at all. A GDD's `world` system described ground, platforms and bounds
+  that nothing ever spawned, so the player landed in an empty room; and only a
+  `progression` system planned a win condition, which most designs never declare,
+  so `validateWinnability` answered `NO_WIN_CONDITION` and the Play button
+  refused before dispatching anything.
+  
+  - `world` now turns `worldConfig` into real geometry — ground, platforms and
+    bounds — in both 2D and 3D.
+  - Every plan is guaranteed a satisfiable win condition, bound to the player by
+    engine id. It defers to a real progression system rather than adding a second
+    rule the player was never told about, and where there is nothing in the world
+    to carry a goal it says so instead of emitting a component the engine would
+    reject.
+  - New `progression`, `feedback`, `entities` and `challenge` system definitions
+    emit real `add_game_component` steps (win conditions, health, collectibles,
+    damage zones) instead of falling through to generated scripts.
+  - `verify_all_scenes` now asserts winnability and fails the plan when a game
+    cannot be won, rather than reporting a playability it never checked.
+
+### Patch Changes
+
+- [#9276](https://github.com/Tristan578/project-forge/pull/9276) [`b1598da`](https://github.com/Tristan578/project-forge/commit/b1598da0535c09f7ec5af10f045ee55feb00c565) Thanks [@Tristan578](https://github.com/Tristan578)! - 2D physics now reaches the engine, and what the engine does with it comes back.
+  Every 2D physics edit made from chat or the editor was being dropped before the
+  simulation saw it — the payload was the wrong shape, two of the three commands
+  had no engine handler at all, and nothing ever switched the body on. So no
+  static platform, sensor trigger, one-way platform or conveyor had ever behaved
+  as authored, while the inspector displayed the value that was asked for.
+  
+  Setting one property no longer resets the others: changing a body type or
+  collider shape used to silently reset the thirteen other fields. And the editor
+  now reflects what the simulation actually holds, rather than only its own
+  optimistic copy.
+  
+  2D joints now connect. Every joint the editor has ever created was rejected
+  before it reached the simulation, so no hinge, slider, rope or spring had ever
+  held two sprites together — and a joint the engine reported back was dropped
+  without being read, so the inspector never showed the real one. Both directions
+  now speak the same vocabulary, and a parameter that belongs to a different joint
+  type is no longer sent along to be quietly ignored.
+  
+  Adding 2D physics to an entity now starts it at the engine's own defaults, so
+  the collider shape reads Box rather than Auto.
+  
+  Configuring an entity's 2D physics in one go — as chat and the generation
+  pipeline do — no longer loses the earlier half of the change or leaves two undo
+  steps behind where one edit was made.
+
+- [#9328](https://github.com/Tristan578/project-forge/pull/9328) [`cb5ace4`](https://github.com/Tristan578/project-forge/commit/cb5ace43893f13f89228b2a426309bbac9d6d4d4) Thanks [@Tristan578](https://github.com/Tristan578)! - Add admin unpublish endpoint for DMCA/IP-infringement game takedowns.
+
+- [#9249](https://github.com/Tristan578/project-forge/pull/9249) [`a7db9b6`](https://github.com/Tristan578/project-forge/commit/a7db9b68de88ccee9ae4bc7da13ef8df0eae0993) Thanks [@Tristan578](https://github.com/Tristan578)! - Stop the pre-play winnability check from passing a scene whose win condition type it does not recognize. Such a scene reported as winnable and started, but the engine treats an unparseable type as "reach a score" with a target that never accrues, so the game could not actually be won. The check now blocks Play and names the offending value.
+
+- [#9246](https://github.com/Tristan578/project-forge/pull/9246) [`ee8ceae`](https://github.com/Tristan578/project-forge/commit/ee8ceae29a8232939bd555df9e9b0e4310143594) Thanks [@Tristan578](https://github.com/Tristan578)! - Cutscene playback now reaches something, and every track fires once. Dialogue starts through the dialogue store instead of dispatching `start_dialogue`, an engine command no arm has ever handled. A keyframe's `duration` bounds its beat rather than making it re-dispatch on every frame — that restarted audio and animations continuously, and on the camera track it zeroed the shake state and threw away the accumulated orbital angle and first-person look direction every tick. A keyframe payload is picked field-by-field against a per-track-type allowlist instead of being spread through whole, so nothing the generator invented reaches an engine command; audio's `volume` and `pitch` are bounded to the ranges the audio graph can produce, ahead of the entity-audio wiring that will consume them.
+  
+  A sink that throws now loses only its own beat instead of every later beat in the same tick, and reports to Sentry rather than only the console. Three playback transitions that each worked alone but broke in combination are fixed: seeking a stopped player and then pressing play no longer burst-fires every beat before the seek point, seeking while paused no longer charges the seek for however long the player sat paused, and pausing a player that never played no longer strands it at "playing" with nothing running and no completion.
+  
+  Ids named after `Object.prototype` members (`__proto__`, `constructor`, `toString`, and friends) are rejected across every reachable cutscene and dialogue surface — the chat handlers, both stores, the script runner, and the tree editor — rather than resolving to the prototype and either throwing mid-scene or handing back an object that passes an existence check.
+
+- [#9246](https://github.com/Tristan578/project-forge/pull/9246) [`ee8ceae`](https://github.com/Tristan578/project-forge/commit/ee8ceae29a8232939bd555df9e9b0e4310143594) Thanks [@Tristan578](https://github.com/Tristan578)! - Cutscenes: keyframe payloads are now read against the track type's own vocabulary instead of being copied through whole, so a generated cutscene no longer carries invented fields into the engine. An animation keyframe with no clip and a dialogue keyframe with no tree now decline to dispatch rather than firing a command that addresses nothing. An animation keyframe that names no crossfade now omits the field entirely, letting the engine apply its own 0.3s blend — previously it was sent as `0`, an instant cut nobody asked for.
+
+- [#9386](https://github.com/Tristan578/project-forge/pull/9386) [`188afe2`](https://github.com/Tristan578/project-forge/commit/188afe2a16dc165885456bb58bcc2e5dec1afe2a) Thanks [@Tristan578](https://github.com/Tristan578)! - Update the AI SDK and PostHog packages to their latest patch releases: `ai` 7.0.78, `@ai-sdk/react` 4.0.81, `@ai-sdk/anthropic` 4.0.41, and `posthog-js` 1.418.14. All four are patch-level bug-fix releases within the ranges already declared, so behaviour is unchanged apart from the fixes they carry.
+
+- [#9330](https://github.com/Tristan578/project-forge/pull/9330) [`c637563`](https://github.com/Tristan578/project-forge/commit/c63756341b5b584669e35e56110dfad87c2aa8f0) Thanks [@Tristan578](https://github.com/Tristan578)! - Add DMCA takedown process to Terms of Service.
+
+- [#9348](https://github.com/Tristan578/project-forge/pull/9348) [`2913958`](https://github.com/Tristan578/project-forge/commit/291395884754f587cb586d7ff42baf1a9b1278d3) Thanks [@Tristan578](https://github.com/Tristan578)! - The engine's command vocabulary now describes what the engine actually does.
+  
+  Twenty command names were routed to a domain that had no handler for them, so
+  anything that called one — chat, a tool, the generation pipeline — got back
+  "unknown command" for a name the surface advertised as real. Names with no
+  implementation behind them have been removed; the ones worth keeping
+  (`get_sprite`, `get_camera_2d`, `get_joint_2d`, `list_joints_2d`) are now
+  answered. A test walks the router against every domain's own handlers, so a
+  name can no longer be advertised without being reachable, and a name can no
+  longer be routed to the wrong domain where a stub shadows a working handler.
+  
+  The ten tilemap tools now declare the parameters their handlers really read.
+  Every one of them documented at least one wrong name — a tileset id, a layer
+  index, a fill rectangle — so a model following the tool description supplied
+  arguments that were silently discarded and the edit did nothing. The
+  descriptions and the validation are now the same list, pinned by a test so they
+  cannot drift apart again.
+  
+  Reading a 3D joint back from the engine works. The reply to a joint list
+  request had no listener, so the editor asked and nothing ever arrived.
+  
+  Painting, erasing or filling a tile at a coordinate far outside the map no
+  longer writes to an unrelated cell. On the 32-bit WebAssembly target the
+  coordinate arithmetic could wrap back into range, so an out-of-bounds edit
+  landed on a real tile somewhere else in the map instead of being skipped.
+  
+  Two identical `get_tilemap` handlers were registered, and which one ran depended
+  on registration order. The remaining one is the one that rejects a malicious
+  entity id rather than returning an internal object as tilemap data.
+
+- [#9249](https://github.com/Tristan578/project-forge/pull/9249) [`a7db9b6`](https://github.com/Tristan578/project-forge/commit/a7db9b68de88ccee9ae4bc7da13ef8df0eae0993) Thanks [@Tristan578](https://github.com/Tristan578)! - Game components: numeric properties are now clamped to the same ranges the engine applies, so an out-of-range value from the AI, the MCP tools or the inspector reads back as the number the running game actually uses instead of the one that was requested.
+
+- [#9249](https://github.com/Tristan578/project-forge/pull/9249) [`a7db9b6`](https://github.com/Tristan578/project-forge/commit/a7db9b68de88ccee9ae4bc7da13ef8df0eae0993) Thanks [@Tristan578](https://github.com/Tristan578)! - Game component values authored by the AI are now range-checked against the
+  engine's own bounds before they are stored. A speed of a billion, a negative
+  gravity scale, a waypoint list of strings, or a loop mode the engine has never
+  heard of used to be kept verbatim by the editor while the engine quietly
+  simulated something else entirely, and nothing anywhere reported the
+  disagreement.
+  
+  The inspector also reads game components correctly for the first time, and this
+  half is the more visible one: the Game Components panel was replaced by a "failed
+  to render" message whose Retry button re-rendered the same crash. The engine sends
+  each component in its own flat, tagged form, which the editor was casting into a
+  differently-shaped type, so every component the engine reported arrived with no
+  data bag at all — not an empty one, an absent one — and the panel threw the
+  moment it read a field off it. Any add, update or removal
+  of a game component put the panel into that state. Attaching a component now shows
+  its real values in the inspector.
+
+- [#9345](https://github.com/Tristan578/project-forge/pull/9345) [`2622710`](https://github.com/Tristan578/project-forge/commit/2622710a3569145cb59c92e060525b33d37ad160) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated games can now collide, which is what makes them winnable.
+  
+  The creation pipeline built a player, a floor and a set of collectibles and then
+  never switched physics on for any of them. Rapier only attaches a collider to an
+  entity that has been enabled, and collision tracking is built purely from those
+  colliders, so nothing in a generated 3D game ever touched anything else: the
+  player fell through the ground, collectibles could not be picked up, score never
+  moved and the win condition was unreachable however the game was played.
+  
+  Every gameplay entity is now given a body sized to the shape it was spawned as —
+  a rotation-locked dynamic capsule for the player, sensors for pickups so
+  collecting one does not knock the player sideways, and solid static bodies for
+  the ground, platforms and walls. Cameras and lights are deliberately left alone
+  rather than dropping invisible walls into the level.
+  
+  Enablement also waits for the engine to finish creating the entities before it
+  addresses them. Without that pause the commands arrived a frame early, named
+  entities that did not exist yet, and were discarded without any error being
+  reported — the step looked successful while enabling nothing. The engine now
+  also logs a warning when it is asked to enable physics on an entity it cannot
+  find, so the same class of mistake cannot be silent again.
+
+- [#9346](https://github.com/Tristan578/project-forge/pull/9346) [`0ecf5b4`](https://github.com/Tristan578/project-forge/commit/0ecf5b4f903a7180927de1c508d6fbe5e6021826) Thanks [@Tristan578](https://github.com/Tristan578)! - The player now stands on the ground. Character movement was raw translation
+  added straight onto the transform, so a 3D character had no gravity, no ground
+  contact and no collision response: it walked through walls and floors, and a
+  jump was a tween that could be held indefinitely. It is now driven through a
+  kinematic character controller with gravity, terminal velocity, ground
+  snapping, a 45-degree slope limit and 0.3-unit step handling, and it collides
+  with the static geometry the scene already has.
+  
+  Jumping requires ground. A jump is only spent when the character is actually
+  standing on something, so the double jump a game grants is the double jump the
+  player gets — not an unlimited one.
+  
+  A jump that meets a ceiling now falls. Rapier stops the character but does not
+  touch its upward speed, so the character used to keep asking to rise and slid
+  along the underside of the platform for the whole ascent — around 48 frames at
+  the default jump height.
+  
+  A character the pipeline forgot to enable physics on no longer fails silently.
+  It still uses the old movement path, because a kinematic controller needs a
+  collider, but the engine now warns and names it instead of leaving a player who
+  walks through walls in a scene that looks correct.
+  
+  Scripts can tell a jump from a fall. `forge.physics.isGrounded(entityId)`
+  reports the ground contact the engine computed during the character sweep,
+  synchronously, so a script no longer has to guess at the top of an arc. It
+  answers `false` for an entity with no character controller.
+  
+  Shipping the engine half of this requires a WASM rebuild.
+
+- [#9354](https://github.com/Tristan578/project-forge/pull/9354) [`9701c74`](https://github.com/Tristan578/project-forge/commit/9701c749e163a9c34f85d6e4712b788d1567fed6) Thanks [@Tristan578](https://github.com/Tristan578)! - Array and Combine now keep everything attached to your objects.
+  
+  Repeating an object with Array kept its look, lights, physics body, sound and
+  particles, but silently threw away its gameplay components (health, damage,
+  pickups), animation clips, terrain, joints, camera settings, level-of-detail
+  settings and everything 2D — sprites, 2D physics, tilemaps and 2D skeletons. A
+  repeated enemy stopped being an enemy.
+  
+  Combine was worse: the merged object inherited nothing at all from the objects
+  that went into it, coming out as a plain grey shape with no material, no
+  physics and no behaviour. Undoing a Combine also brought the originals back
+  stripped of their physics, lights and source files.
+  
+  Nothing reported either loss — the objects simply came out inert.
+  
+  Both now carry the full component set. Sounds that were muted stay muted rather
+  than switching themselves on, and a merged object keeps the gameplay behaviour
+  of the first object that contributed geometry while dropping the parts that
+  only describe a single shape.
+
+- [#9366](https://github.com/Tristan578/project-forge/pull/9366) [`87399dc`](https://github.com/Tristan578/project-forge/commit/87399dcf1babfddb82f410c7441c775d2a927163) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a live-engine CI gate for the game-creation pipeline (PF-1202).
+  
+  The per-PR `test-e2e-engine-smoke` job now also runs
+  `e2e/tests/pipeline-live-engine.spec.ts`, which drives the real game-creation
+  pipeline against the real WASM engine under SwiftShader and clicks the real Play
+  button, asserting the engine itself reports `engineMode === 'play'`.
+  
+  What that buys over the existing fake-bridge integration suite is real
+  deserialization, real routing through `route_domain`, and a real play
+  transition. Because `dispatchCommand` returns `void`, a payload the engine HARD
+  rejects leaves its pipeline step reporting `completed` and surfaces only as the
+  `Engine rejected command '<name>'` line `editorStore`'s `tracked` wrapper writes
+  to the console — so both tests collect console errors and page errors for their
+  whole lifetime, and assert that none of those console lines names an engine
+  rejection and that no page error occurred. A payload the engine accepts but whose
+  keys deserialize to `None` still logs nothing and is still not caught here; that
+  remains the job of the pick-based payload builders and their unit pins.
+  
+  A companion negative test proves an unwinnable design fails verification, that
+  Play refuses it by appending the winnability refusal to the chat surface, and
+  that the engine is still answering commands afterwards — so a dead engine cannot
+  pass it by staying silent.
+  
+  The 3D "Crystal Run" GDD used by both gates now lives in one shared fixture,
+  `web/e2e/fixtures/gdd/crystal-run-3d.json`, so the fast and slow gates cannot
+  drift into testing different games.
+
+- [#9353](https://github.com/Tristan578/project-forge/pull/9353) [`77415d9`](https://github.com/Tristan578/project-forge/commit/77415d95749a18cd154299510c88e88e5eb40ea6) Thanks [@Tristan578](https://github.com/Tristan578)! - Physics enablement in the generation pipeline now covers every shape it claims
+  to.
+  
+  The feel pass (`physics_profile`) tunes gravity scale, friction and restitution
+  on entities that a `physics_enable` step has already given a body to. It read only
+  the first such step, so anything enabled later — the ground, platforms and walls
+  planned by the world system — kept a body but never received a profile. It now
+  reads every one.
+  
+  The ground the auto-polish repair drops in is now sized the way the world
+  builder sizes it, rather than at a default scale that left a visible seam
+  between a repaired floor and an authored one.
+  
+  The shape catalogue the pipeline spawns from is now shared with the world
+  builder instead of being restated, so the two can no longer disagree about what
+  is spawnable, and a role whose name collides with a built-in object property no
+  longer reads a shape off the prototype chain.
+  
+  Entity ids are validated the way the engine counts them — raw, in bytes, against
+  the full control-character set — so an id the engine would refuse is refused
+  here, loudly, instead of being dispatched into silence.
+
+- [#9360](https://github.com/Tristan578/project-forge/pull/9360) [`ee558ec`](https://github.com/Tristan578/project-forge/commit/ee558ecaf293668f36905f6d6dfb352299dd8b0f) Thanks [@Tristan578](https://github.com/Tristan578)! - The generation pipeline's feel pass now runs where it can see the entities it
+  profiles, and a step that fails explains itself.
+  
+  Reading every `physics_enable` step is worthless if the feel pass runs first.
+  The planner now orders `physics_profile` after every enable step, so the ground,
+  platforms and walls the world system enables actually receive gravity scale,
+  friction and restitution rather than being profiled against a set that is still
+  empty when the pass runs.
+  
+  Moving the pass also puts it after the player is rigged, so it now re-tunes the
+  player's character controller — the same speed, jump height and gravity the rig
+  step chose, merged onto the existing controller so nothing else about it is
+  lost.
+  
+  A failed pipeline step showed as a red icon and nothing else: the message
+  explaining what went wrong was recorded and never rendered. The orchestrator
+  panel now shows it and announces it to assistive tech.
+  
+  That message is also followable now. It names the controls as they are labelled
+  on screen, and it names the Body Type each kind of entity needs — the previous
+  wording would have turned the floor into a falling body, and pointed at a re-run
+  that discards the fix it had just asked for.
+  
+  Step outputs handed to a later step are limited to steps that completed. A
+  failed step keeps its diagnostic output on purpose, so a step having output was
+  never evidence that it worked.
+
+- [#9359](https://github.com/Tristan578/project-forge/pull/9359) [`e52a13b`](https://github.com/Tristan578/project-forge/commit/e52a13b522ca3580493d2641bcbf06ab968bcbfe) Thanks [@Tristan578](https://github.com/Tristan578)! - A tilemap coordinate past the 32-bit range is now refused instead of wrapping
+  into a real cell.
+  
+  The overflow guard in the engine's tilemap module caught coordinates outside
+  the declared map, but the numbers reaching it had already been truncated. The
+  layer, x and y of every paint, erase and fill were read by casting a 64-bit
+  value straight to a pointer-sized one, which drops the high bits on the 32-bit
+  WebAssembly target the engine ships on: an x of 4,294,967,299 arrived as 3,
+  looked like an ordinary in-range cell, and painted a tile the caller never
+  asked for. The tile index was cast to a fixed 32-bit integer instead, so it
+  wrapped everywhere, the 64-bit test host included; the pointer-sized cast is
+  the one that reproduces only on wasm32, since the host keeps the high bits.
+  All four values are now rejected above the 32-bit maximum. The new native
+  tests cover all four, and all four go red on the host the moment any of the
+  old casts is put back: they demand that one-past-the-maximum be refused, and
+  the old code accepts it on a host where nothing was truncated. What a host
+  test could never have shown is the wrap itself -- the coordinate that came
+  back as 3 and painted a cell.
+  
+  A script that passes such a coordinate gets an error naming the field, the
+  value and the limit, rather than a command that disappears.
+  `forge.tilemap.fillRect` also checks the far edge of the rectangle, not just
+  its origin and size -- it is the cells in between that the engine reads -- and
+  its error says which axis ran off the end and what it reached.
+
+- [#9362](https://github.com/Tristan578/project-forge/pull/9362) [`a9187ab`](https://github.com/Tristan578/project-forge/commit/a9187abc3554fff92b11f5a350ffcd33f5f73ba5) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated players now jump a distance a person would recognise as a jump.
+  
+  Every path that tuned a character controller from a physics preset passed the
+  preset's unitless `jumpForce` dial straight into `jumpHeight`, which the engine
+  reads as a real height in metres. The default preset therefore asked for a
+  ten-metre apex with close to three seconds of hang time. The dials are now
+  converted to heights through one shared calibration, and the presets that jump
+  land between roughly half a second and one and a half seconds of airtime.
+  
+  `forge.physics.isGrounded` works in an exported game. It was documented and
+  typed but the exported runtime never exposed it, so a script that ran in the
+  editor threw as soon as the game was published. The event handler both exporters
+  install is now generated once rather than written out twice, which is what let
+  the two drift apart in the first place.
+  
+  Ground contact reported before the script worker starts is no longer discarded,
+  so a character standing on the floor at the moment play begins is grounded to a
+  script immediately instead of only after its next landing.
+  
+  The kinematic controller gained a coyote window and a jump buffer, carries a
+  player standing on a moving platform, bounds upward velocity as well as
+  downward, and reports characters it had to skip for having no collider.
+  
+  A character the engine cannot drive is now something you are told about instead
+  of something you discover by walking through a wall. Without physics an entity
+  never receives a collider, so the engine never even considers it for a character
+  controller — it simply keeps sliding, with no gravity and no collisions, and
+  nothing anywhere said so. Pressing Play on such a scene now raises a message
+  naming the characters and how to fix them, and building a game reports the same
+  thing one step earlier, while it can still be repaired.
+  
+  Adding a Character Controller by hand now starts from the same calibrated jump
+  the generation pipeline uses, and the inspector's jump slider is labelled and
+  bounded for the project type — a height in metres in 3D, a rise rate in 2D —
+  instead of offering the same unitless range to both.
+  
+  The physics-feel analysis now converts each character's jump using that
+  character's own gravity, rather than the average gravity of everything in the
+  scene with a body, so a heavy prop can no longer make the player look like it
+  jumps harder than it does.
+
+- [#9287](https://github.com/Tristan578/project-forge/pull/9287) [`65d66f5`](https://github.com/Tristan578/project-forge/commit/65d66f55a0cfd1750c1d835f3432456397c701f1) Thanks [@Tristan578](https://github.com/Tristan578)! - Stop undo from switching 2D physics, tilemap rendering, or 2D skeletal animation
+  on for an entity the user disabled.
+  
+  Three `UndoableAction` variants — `Physics2dChange`, `TilemapChange`,
+  `SkeletonChange` — each record a change to their data component and nothing
+  else. Enablement lives in a separate marker (`Physics2dEnabled`,
+  `TilemapEnabled`, `SkeletonEnabled2d`). All three had undo and redo arms that
+  inserted that marker alongside the restored data, so undoing *any* property edit
+  started simulating, rendering, or animating an entity that had been deliberately
+  switched off. The 3D `PhysicsChange` arm has always got this right: it mutates
+  the data in place and never touches `PhysicsEnabled`.
+  
+  "Data present, marker absent" is a state the engine deliberately round-trips —
+  every other restore path reinstates these markers conditionally from a recorded
+  bool (`insert_aux_components`, `spawn_from_snapshot`, and the play-mode snapshot
+  restore in `engine_mode.rs`). An action that records no enablement must not
+  invent one.
+  
+  Nothing surfaced it. The inspectors read the data, not the marker, so the panels
+  looked correct while the body began falling; and because the marker is what the
+  lifecycle systems key on, the recovery is not another undo — the user has to
+  find and un-toggle a switch they never touched.
+  
+  All six arms now restore the data only. Each `None` branch still clears the
+  marker with the data, because a marker with no data is a state no command can
+  produce (the bridge inserts and removes each pair together), and that asymmetry
+  is now written down where the arms are. Fifteen native regression tests pin the
+  disabled case, the redo mirror, the enabled case in the opposite direction, and
+  both `None` branches for each component. Every fixture is deliberately off its
+  type's `Default` on the fields it asserts, so a regression inserting a blank
+  struct fails instead of coincidentally passing — measured by mutation: reverting
+  the data restore reddens the physics tests, and reinstating either unconditional
+  marker insert reddens the four "stays disabled" tests.
+  
+  Merge order: `Physics2dEnabled` has no writer on `main` — the
+  `toggle_physics_2d` command that owns it arrives with [#9276](https://github.com/Tristan578/project-forge/issues/9276). This should land
+  *after* that PR, or 2D physics is un-enableable in between.
+
+- [#9383](https://github.com/Tristan578/project-forge/pull/9383) [`957a185`](https://github.com/Tristan578/project-forge/commit/957a1854b2db74ebcc4837aa4749a09bb4e727ad) Thanks [@Tristan578](https://github.com/Tristan578)! - Asking for a premium or a fast model now gets you that model. On the OpenRouter
+  and Vercel Gateway paths, every current Anthropic model id except Sonnet was
+  missing from the translation table, so a request for Opus, Haiku or the deep
+  tier silently resolved to the default chat model instead. Nothing failed and
+  nothing warned — the reply simply came back from a different model than the one
+  that was asked for, at whatever quality that model happens to give.
+  
+  Two ids that name no real model were removed from the same table at the same
+  time. They had been mapping onto retired upstream models.
+  
+  A coverage test now derives the id list from the model registry and the backend
+  list from the provider registry, so a model id added to the app, or a chat
+  backend added to the registry, is checked on the day it lands rather than the
+  day someone remembers this table exists.
+
+- [#9288](https://github.com/Tristan578/project-forge/pull/9288) [`c73bb7c`](https://github.com/Tristan578/project-forge/commit/c73bb7c24857332f6316fa9ac88d9b1cda717032) Thanks [@Tristan578](https://github.com/Tristan578)! - Reverb zones now actually apply, and survive being duplicated. Authoring a zone dispatched `update_reverb_zone`, a command name the engine has never had a dispatch arm for, and flattened an `enabled` key onto `set_reverb_zone` that serde silently discards — so every reverb zone ever created was configured and never switched on. The store now sends `set_reverb_zone` plus `toggle_reverb_zone`, the inspector's Add button enables the zone it creates (which is what reveals the editing controls, previously unreachable), and inbound engine events route to state-only actions instead of dispatching straight back at the engine.
+  
+  Separately, duplicating an entity dropped its reverb zone. The engine has two independent restore paths — `spawn_from_snapshot` for undo/redo and `insert_aux_components` for duplication — and reverb was wired into only the first, so Ctrl+D silently discarded a configured zone while undoing a delete kept it. Both fields now restore on the duplicate path, and a source-parity test asserts the two paths agree on every field of `AuxComponentData` so the next one added cannot go missing the same way.
+
+- [#9323](https://github.com/Tristan578/project-forge/pull/9323) [`9056fd3`](https://github.com/Tristan578/project-forge/commit/9056fd3e5655d049cb53082ee47831d2b7bfd78a) Thanks [@sentry](https://github.com/apps/sentry)! - Fix addEL_hook crash by reordering Sentry init before botId protection.
+
+- [#9324](https://github.com/Tristan578/project-forge/pull/9324) [`d168a2f`](https://github.com/Tristan578/project-forge/commit/d168a2f8eb2932e08f1229432b39233f06dc7495) Thanks [@sentry](https://github.com/apps/sentry)! - Guard localStorage access in CookieConsent for WebView environments.
+
+- [#9277](https://github.com/Tristan578/project-forge/pull/9277) [`78a63bf`](https://github.com/Tristan578/project-forge/commit/78a63bfce9dade017a6565ca2e1e056a4f6bee69) Thanks [@Tristan578](https://github.com/Tristan578)! - Four editor actions that appeared to work now actually reach the engine.
+  
+  Deleting a sprite, changing the 2D camera, editing a reverb zone, and setting a
+  2D skeleton each dispatched a command name the engine has never had an arm for.
+  The engine returned "unknown command" into a value nobody reads, so the panel
+  updated, the undo entry recorded, and the running scene simply ignored it — no
+  error, no warning, nothing in the console. All four have working arms under
+  different spellings and now use them.
+  
+  The skeleton case was wrong twice: the engine also expects the skeleton nested
+  one level down rather than spread across the payload, so a corrected name on the
+  old shape would have replaced the rig with an empty one instead of doing nothing.
+  That same mismatch had already broken Apply Rig in the auto-rigging panel, which
+  searched for the old command name and therefore never found it — the button had
+  been doing nothing at all, and its only test checked that the panel rendered.
+  Apply Rig works, and the test now drives the button and checks what the store
+  receives.
+  
+  2D tilemaps and 2D skeletal animation work again. The engine keeps a routing
+  table in front of its command handlers, and sixteen sprite commands were missing
+  from it — so tile painting, tilemap edits, skin changes, IK chains, auto-weighting
+  and sprite animation state machines all had complete, correct handlers that could
+  never be reached. Every one of them returned "unknown command" into a value
+  nobody reads. Two were worse: they were pointed at the wrong section of the
+  table, where an unfinished placeholder answered in place of the real handler.
+  Both the tilemap panels and the AI tools that edit tilemaps were affected, as
+  were user scripts calling the 2D skeletal API.
+  
+  Tileset assignment is the one piece still not connected: the engine wants a
+  tileset attached to a specific object while the editor tracks tilesets per
+  image, and picking a side changes behaviour rather than just wiring. It is
+  tracked and now recorded in the code instead of failing quietly.
+  
+  A new test scans every command name the editor's state layer dispatches and
+  fails if one has no working engine arm behind it, so the next one cannot ship
+  silently. It covers the store, which is where all of these bugs were; the AI
+  tool handlers dispatch a few names of their own and are not scanned yet. Names
+  that are genuinely waiting on engine work are listed explicitly with a ticket,
+  and the list fails if an entry becomes implemented or stops being used — it
+  cannot quietly grow stale.
+  
+  A second test on the engine side reads the routing table against the handlers it
+  points at and fails if any handler is unreachable or pointed at the wrong
+  section. That is what found the sixteen, and it covers every command the engine
+  has rather than only the ones the editor happens to send. It reads the list of
+  handler sections off disk rather than from a list kept by hand, so a section
+  added later cannot sit outside the check by not being mentioned in it.
+  
+  Auto-weighting a 2D skeleton now recomputes vertex weights instead of erasing
+  them. The tool never called the engine command that does the work; it re-sent the
+  whole rig from the editor's own copy, and that copy carries no weights at all —
+  so the one action whose entire job is computing weights was the action that
+  cleared them. Its two options are also gone: the engine has only ever had one
+  weighting method and ignores the iteration count, so offering a choice between
+  them described a control that did not exist. Sending one still works and still
+  weights the rig, and the result now says the option had no effect.
+  
+  IK chains created by the AI now bend. Every one of them pointed at a target
+  entity that does not exist, on both sides of the bridge, and the solver skips any
+  constraint whose target it cannot find — so an IK chain could be created, listed
+  in the inspector, and never move a bone. The engine also built its chain out of
+  one bone name repeated, and read the chain length straight from the request as an
+  allocation size, which made an oversized number enough to take the engine down
+  for the session. Asking for a chain between two bones with no path between them
+  used to invent one; it now says so. A cycle in the bone hierarchy used to hang
+  the tab.
+  
+  The target-entity field was published as a number everywhere it was documented —
+  in the command reference an assistant reads before composing a call — while the
+  engine has only ever held a text id. A model following the documentation
+  therefore produced a constraint the solver was always going to skip. It is a
+  string on both sides now, and the reference is checked against the code rather
+  than kept in step by hand.
+  
+  The same limits are applied wherever a constraint is built, not only on the AI
+  path. Editing a rig in the inspector and importing one from a file both went
+  through a builder that had none of them, so a chain long enough to crash the
+  engine, a blend weight outside the range the solver understands, or a bend
+  direction that is neither left nor right could all still reach it from the
+  editor. Importing a rig is also no longer destructive. Storing a rig replaces
+  whatever the object had, and anything the importer did not understand — a
+  mistyped file, an export from another animation tool, a file that is not a rig at
+  all — was quietly turned into an empty rig and reported as a successful import.
+  So a bad file replaced a real rig with nothing and said it had worked. A file
+  that cannot be read is now refused, the reason names the part of it that is
+  wrong, and the rig already on the object is left alone. Formats the importer has
+  never been able to read are no longer offered in the first place.
+
+- [#9326](https://github.com/Tristan578/project-forge/pull/9326) [`4437400`](https://github.com/Tristan578/project-forge/commit/4437400f67a78efa4b86d613b067b1846a5db9be) Thanks [@Tristan578](https://github.com/Tristan578)! - Block trademarked IP names in game titles and slugs at publish time.
+
+- [#9321](https://github.com/Tristan578/project-forge/pull/9321) [`9cf908d`](https://github.com/Tristan578/project-forge/commit/9cf908df280d01b39a9a08bf32b0b583e54025af) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated games now get real chasing enemies, moving platforms, spawners and checkpoints instead of a placeholder script that never ran.
+
 ## 0.6.0
 
 ### Minor Changes
