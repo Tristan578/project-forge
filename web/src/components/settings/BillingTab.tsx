@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUserStore } from '@/stores/userStore';
 import { CreditCard, ExternalLink } from 'lucide-react';
@@ -21,11 +21,7 @@ export function BillingTab() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [portalError, setPortalError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchBillingStatus();
-  }, []);
-
-  const fetchBillingStatus = async () => {
+  const fetchBillingStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/billing/status');
       if (res.ok) {
@@ -39,7 +35,16 @@ export function BillingTab() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Declared above so the effect is not reaching forward to it. Nothing here
+  // writes state synchronously — every setState in fetchBillingStatus happens
+  // after an await — so the effect cannot cascade a second render.
+  useEffect(() => {
+    void (async () => {
+      await fetchBillingStatus();
+    })();
+  }, [fetchBillingStatus]);
 
   const handleManageSubscription = async () => {
     setPortalError(null);

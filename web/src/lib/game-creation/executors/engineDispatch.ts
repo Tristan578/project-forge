@@ -16,9 +16,10 @@ import type { ExecutorContext } from '../types';
  *
  * An id the engine rejects is not an error there — it silently falls back to a
  * random UUID, which is exactly the invisible failure a planned id exists to
- * prevent: every later command in the plan names an entity that does not exist,
- * and `dispatchCommand` returns void, so nothing reports a word. Reject it here
- * instead, where a step can say so.
+ * prevent: every later command in the plan names an entity that does not exist.
+ * A dispatch response cannot catch this — the engine did not refuse the command,
+ * it accepted it and renamed the entity, so `success` is honestly `true`. Reject
+ * it here instead, where a step can say so.
  *
  * THE CHECK RUNS ON THE RAW STRING, NOT A TRIMMED COPY. It used to trim first,
  * and that made this validator disagree with the engine in the one direction
@@ -71,7 +72,9 @@ export interface EngineCommand {
  *    (bridge/mod.rs), so a toggle and its patch in the same frame lose the
  *    patch.
  *
- * `dispatchCommand` returns void, so neither case reports anything JS-side.
+ * Neither case reports anything JS-side, and a dispatch response cannot rescue
+ * either one: both commands were accepted and answered `success` — the loss
+ * happens a frame later, inside a system that has no way back to the caller.
  *
  * Two `requestAnimationFrame` ticks rather than one: the engine drives its own
  * loop, so a single tick can land inside the same engine frame that queued the
@@ -94,17 +97,32 @@ export function waitForEngineFrame(): Promise<void> {
  * Send a batch of commands, preferring the batch dispatcher when the caller
  * supplied one.
  *
- * Returns whether the engine accepted them. Single `dispatchCommand` returns
- * void, so on that path nothing can observe a rejection and `true` is the only
- * answer it can give — the batch path is the only one that can report.
+ * Returns whether the engine accepted them ALL. Both paths report now:
+ * `dispatchCommandBatch` answers with a `BatchResult`, and `dispatchCommand`
+ * answers with a `CommandResponse` — which it always did, but `ExecutorContext`
+ * used to type away as `void`, so this function had no choice but to return
+ * `true` unconditionally whenever the context carried no batch dispatcher
+ * (PF-1231). That is not a hypothetical branch: `orchestratorSlice` fills the
+ * field from `getCommandBatchDispatcher() ?? undefined`, and a WASM build
+ * without `handle_command_batch` leaves it unset, so the whole pipeline runs on
+ * the single path.
+ *
+ * The loop does NOT stop at the first rejection. Every command here belongs to
+ * one step's worth of work, the batch path has no early exit either (the engine
+ * runs the whole envelope and returns a result per command), and a caller that
+ * saw half a step applied on one path and a different half on the other would
+ * have to know which dispatcher it got. A dispatcher returning nothing counts
+ * as acceptance — see the note on `ExecutorContext.dispatchCommand`.
  */
 export function sendCommands(ctx: ExecutorContext, commands: EngineCommand[]): boolean {
   if (commands.length === 0) return true;
   if (ctx.dispatchCommandBatch) {
     return ctx.dispatchCommandBatch(commands).success;
   }
+  let accepted = true;
   for (let i = 0; i < commands.length; i += 1) {
-    ctx.dispatchCommand(commands[i].command, commands[i].payload);
+    const response = ctx.dispatchCommand(commands[i].command, commands[i].payload);
+    if (response && response.success === false) accepted = false;
   }
-  return true;
+  return accepted;
 }

@@ -34,9 +34,10 @@ export function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // Loader with no synchronous state writes, so the mount effect below cannot
+  // trigger a cascading render. `loading`/`error` already hold their initial
+  // values on mount; only an explicit refresh needs to reset them.
+  const loadData = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/economics');
       if (!res.ok) {
@@ -51,9 +52,19 @@ export function AdminDashboard() {
     }
   }, []);
 
+  // Explicit refresh (Refresh button, post-save reload): shows the spinner and
+  // clears any stale error before reloading.
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    await loadData();
+  }, [loadData]);
+
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    void (async () => {
+      await loadData();
+    })();
+  }, [loadData]);
 
   const saveTokenConfig = useCallback(async (config: TokenConfig) => {
     setSaving(config.id);

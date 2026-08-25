@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { applyPhysicsProfile } from '@/lib/ai/physicsFeel';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { sendCommands, type EngineCommand } from './engineDispatch';
 import {
   feelDirectiveSchema,
   resolvePhysicsProfile,
@@ -19,7 +20,9 @@ const inputSchema = z.object({
  *
  * Indexed loops throughout: `.filter`/`.map` skip an array hole outright, and a
  * hole in an id list would silently drop an entity from the tuning pass with no
- * error anywhere — `dispatchCommand` returns void.
+ * error anywhere. A dispatch response cannot catch this one — a dropped id means
+ * no command is built for that entity, so there is nothing for the engine to
+ * refuse.
  */
 function collectTargetIds(
   explicit: string[] | undefined,
@@ -221,7 +224,35 @@ export const physicsProfileExecutor: ExecutorDefinition = {
       });
     }
 
-    applyPhysicsProfile(finalProfile, ctx.dispatchCommand, ids, liveGameComponents);
+    // Collect into a buffer, then send once. `applyPhysicsProfile` is shared with
+    // `PhysicsFeelPanel`, where the dispatcher IS the store's, so it keeps taking
+    // a plain `CommandDispatcher` rather than learning about `ExecutorContext`.
+    // Handing it a collector gets both things this step needs: every command in
+    // one batch (up to two per entity, over every physics entity in the scene —
+    // a scene's worth of individual WASM crossings otherwise), and one verdict
+    // covering all of them.
+    const commands: EngineCommand[] = [];
+    applyPhysicsProfile(
+      finalProfile,
+      (command, payload) => { commands.push({ command, payload }); },
+      ids,
+      liveGameComponents,
+    );
+
+    if (!sendCommands(ctx, commands)) {
+      // A failure, not a warning — unlike the "nothing had physics enabled"
+      // branch above. There the step had nothing to apply and the game is merely
+      // mistuned; here the engine REFUSED what was applied, so some entities may
+      // carry the new profile and others their old values. That is a scene in a
+      // state no design asked for, and reporting it green would hide it.
+      return failResult(
+        makeStepError(
+          'COMMAND_FAILED',
+          'Engine rejected the physics profile',
+          this.userFacingErrorMessage,
+        ),
+      );
+    }
 
     return successResult({ presetUsed: presetKey, entityCount: ids.length, appliedGlobally: false });
   },

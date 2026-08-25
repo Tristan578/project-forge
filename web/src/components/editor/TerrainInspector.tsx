@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Shuffle, HelpCircle } from 'lucide-react';
 import { useEditorStore, type TerrainDataState } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -22,10 +22,13 @@ export function TerrainInspector() {
   const [localData, setLocalData] = useState<TerrainDataState | null>(terrainData);
   const [updateTimer, setUpdateTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync local state with store
-  useEffect(() => {
+  // Sync local state with the store. Derived state, so it is applied during
+  // render rather than in an effect.
+  const [prevTerrainData, setPrevTerrainData] = useState(terrainData);
+  if (prevTerrainData !== terrainData) {
+    setPrevTerrainData(terrainData);
     setLocalData(terrainData);
-  }, [terrainData]);
+  }
 
   const debouncedUpdate = useCallback((updatedData: TerrainDataState) => {
     if (!primaryId) return;

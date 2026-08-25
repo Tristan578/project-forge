@@ -664,4 +664,54 @@ describe('characterSetupExecutor', () => {
     expect(storeOf(ctx).addGameComponent).toHaveBeenCalledTimes(1);
     expect(storeOf(ctx).setInputPreset).toHaveBeenCalledTimes(1);
   });
+  // ---------------------------------------------------------------------------
+  // Command routing (PF-1231)
+  // ---------------------------------------------------------------------------
+  describe('create_skeleton2d routing (PF-1231)', () => {
+    const INPUT = {
+      entity: { name: 'Sprite', role: 'player', appearance: 'pixel' },
+      projectType: '2d',
+      entityId: 'ent_456',
+    };
+
+    it('sends the skeleton through the batch dispatcher when there is one', async () => {
+      const dispatchCommandBatch = vi.fn(() => ({ success: true, results: [] }));
+      const ctx = makeCtx({ dispatchCommandBatch });
+
+      const result = await characterSetupExecutor.execute(INPUT, ctx);
+
+      expect(result.success).toBe(true);
+      expect(dispatchCommandBatch).toHaveBeenCalledWith([
+        { command: 'create_skeleton2d', payload: { entityId: 'ent_456' } },
+      ]);
+      expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+    });
+
+    it('FAILS the step when the engine refuses create_skeleton2d', async () => {
+      // Previously this returned `rigApplied: true` for a rig that was never
+      // created — the exact shape of failure this executor's own comment warns
+      // about for the misspelled `set_skeleton_2d`.
+      const ctx = makeCtx({
+        dispatchCommand: vi.fn(() => ({ success: false, error: 'unknown command' })),
+      });
+
+      const result = await characterSetupExecutor.execute(INPUT, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('COMMAND_FAILED');
+    });
+
+    it('leaves 3D projects alone — no skeleton command, no failure path', async () => {
+      const dispatchCommandBatch = vi.fn(() => ({ success: false, results: [] }));
+      const ctx = makeCtx({ dispatchCommandBatch });
+
+      const result = await characterSetupExecutor.execute(
+        { ...INPUT, projectType: '3d' },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+      expect(dispatchCommandBatch).not.toHaveBeenCalled();
+    });
+  });
 });
