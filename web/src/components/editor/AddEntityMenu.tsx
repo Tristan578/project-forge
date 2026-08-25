@@ -67,16 +67,22 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
     }
   }, [open]);
 
-  // Auto-focus first item when menu opens
+  // The highlighted index is derived from `open`: first item when the menu
+  // opens, nothing when it closes. Applied during render rather than in an
+  // effect so the first paint already carries the right highlight.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    setFocusedIndex(open ? 0 : -1);
+  }
+
+  // Move real DOM focus once the menu has been painted.
   useEffect(() => {
-    if (open) {
-      setFocusedIndex(0);
-      requestAnimationFrame(() => {
-        itemRefs.current[0]?.focus();
-      });
-    } else {
-      setFocusedIndex(-1);
-    }
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      itemRefs.current[0]?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
   }, [open]);
 
   const handleSpawn = useCallback((type: EntityType) => {

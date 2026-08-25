@@ -35,7 +35,7 @@ export function TokenDashboard() {
       });
       const data = await res.json();
       if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+        window.location.assign(data.checkoutUrl);
       }
     } catch (err) {
       console.error('Purchase failed:', err);

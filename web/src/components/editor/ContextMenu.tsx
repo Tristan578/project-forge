@@ -55,10 +55,14 @@ export function ContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const [clampedPosition, setClampedPosition] = useState(position);
 
-  // Reset position when it changes
-  useEffect(() => {
+  // Reset to the requested position whenever it changes. Derived from a prop,
+  // so it is computed during render — the layout effect below then clamps it to
+  // the viewport once the menu has been measured.
+  const [prevPosition, setPrevPosition] = useState(position);
+  if (prevPosition !== position) {
+    setPrevPosition(position);
     setClampedPosition(position);
-  }, [position]);
+  }
 
   // Menu item definitions (multi-select aware labels)
   const isMulti = selectionCount > 1;
@@ -166,16 +170,24 @@ export function ContextMenu({
     };
   }, [isOpen, onClose, focusedIndex, actionableIndices, focusItem]);
 
+  // Drop the focus highlight as the menu closes. Derived from `isOpen`, so it
+  // is applied during render rather than in an effect.
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (prevIsOpen !== isOpen) {
+    setPrevIsOpen(isOpen);
+    if (!isOpen) {
+      setFocusedIndex(-1);
+    }
+  }
+
   // Auto-focus first item when menu opens
   useEffect(() => {
     if (isOpen && actionableIndices.length > 0) {
       // Delay to allow layout effect to run first
-      requestAnimationFrame(() => {
+      const frame = requestAnimationFrame(() => {
         focusItem(actionableIndices[0]);
       });
-    }
-    if (!isOpen) {
-      setFocusedIndex(-1);
+      return () => cancelAnimationFrame(frame);
     }
   // Only trigger on open state changes
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Edit, Trash2, Eye, TrendingUp } from 'lucide-react';
 import { AssetUploadDialog } from './AssetUploadDialog';
 
@@ -32,12 +32,7 @@ export function SellerDashboard() {
   const [bio, setBio] = useState('');
   const [portfolioUrl, setPortfolioUrl] = useState('');
 
-  useEffect(() => {
-    fetchProfile();
-    fetchAssets();
-  }, []);
-
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       const res = await fetch('/api/marketplace/seller');
       if (res.ok) {
@@ -52,9 +47,9 @@ export function SellerDashboard() {
     } catch {
       // Silent fail
     }
-  };
+  }, []);
 
-  const fetchAssets = async () => {
+  const fetchAssets = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/marketplace/seller/assets');
@@ -67,7 +62,17 @@ export function SellerDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Both fetchers are declared above so the mount effect is not reaching
+  // forward to them. fetchAssets opens with a synchronous setLoading(true), so
+  // the effect calls it from inside an async IIFE rather than directly — the
+  // write then lands in a microtask, not in the effect body.
+  useEffect(() => {
+    void (async () => {
+      await Promise.all([fetchProfile(), fetchAssets()]);
+    })();
+  }, [fetchProfile, fetchAssets]);
 
   const handleSaveProfile = async () => {
     try {
