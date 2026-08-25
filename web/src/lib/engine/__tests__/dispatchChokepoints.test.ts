@@ -73,6 +73,11 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
   // --- Not a call at all --------------------------------------------------
   'lib/engine/commandPayloadGuard.ts': { calls: 0, reason: 'the guard, describing what it protects' },
   'lib/engine/loadPlayEngine.ts': { calls: 0, reason: 'type declaration only' },
+  'lib/game-creation/executors/engineDispatch.ts': {
+    calls: 0,
+    reason:
+      'prose in a doc comment explaining why the batch dispatcher can be unset; it reaches the engine only through ctx.dispatchCommand / ctx.dispatchCommandBatch, which orchestratorSlice fills from the store dispatchers this list already guards',
+  },
   'lib/ai/smartCamera.ts': { calls: 0, reason: 'comment' },
   'lib/monitoring/sentryConfig.ts': { calls: 0, reason: 'regex matched against error message text' },
   'lib/perf/baselines.ts': { calls: 1, reason: 'benchmark description string' },

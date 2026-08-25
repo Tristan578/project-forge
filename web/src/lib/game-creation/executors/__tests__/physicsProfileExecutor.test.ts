@@ -1,7 +1,7 @@
 /**
  * Tests for physicsProfileExecutor — physics feel to preset mapping.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { physicsProfileExecutor } from '../physicsProfileExecutor';
 import { useEditorStore, type EditorState } from '@/stores/editorStore';
 import type { GameComponentData } from '@/stores/slices/types';
@@ -29,6 +29,19 @@ vi.mock('@/lib/ai/physicsFeel', async (importOriginal) => ({
   },
   applyPhysicsProfile: (...args: unknown[]) => mockApplyPhysicsProfile(...args),
 }));
+
+/**
+ * The second argument `applyPhysicsProfile` receives.
+ *
+ * It used to be `ctx.dispatchCommand` itself. It is now a COLLECTOR the executor
+ * hands over so every command the profile emits can be sent as one batch and
+ * produce one verdict (PF-1231), so identity against the context's dispatcher is
+ * no longer the right assertion. `expect.any(Function)` on its own would accept a
+ * no-op collector, so the routing it stands for — collector in, engine out, and a
+ * refusal surfacing as a failed step — is pinned behaviourally by the
+ * "command routing (PF-1231)" block at the bottom of this file instead.
+ */
+const COLLECTOR = expect.any(Function);
 
 /** Seed the real store's component map (what `character_setup` does mid-pipeline). */
 function seedLiveGameComponents(map: Record<string, GameComponentData[]>): void {
@@ -164,7 +177,7 @@ describe('physicsProfileExecutor', () => {
     expect(result.success).toBe(true);
     expect(mockApplyPhysicsProfile).toHaveBeenCalledWith(
       expect.any(Object),
-      ctx.dispatchCommand,
+      COLLECTOR,
       ['e1', 'e2'],
       useEditorStore.getState().allGameComponents,
     );
@@ -232,7 +245,7 @@ describe('physicsProfileExecutor', () => {
     expect(result.success).toBe(true);
     expect(mockApplyPhysicsProfile).toHaveBeenCalledWith(
       expect.any(Object),
-      ctx.dispatchCommand,
+      COLLECTOR,
       ['e1', 'e2'],
       useEditorStore.getState().allGameComponents,
     );
@@ -340,7 +353,7 @@ describe('physicsProfileExecutor', () => {
     expect(result.success).toBe(true);
     expect(mockApplyPhysicsProfile).toHaveBeenCalledWith(
       expect.anything(),
-      ctx.dispatchCommand,
+      COLLECTOR,
       ['id-player', 'id-crystal'],
       expect.anything(),
     );
@@ -569,7 +582,7 @@ describe('physicsProfileExecutor', () => {
       expect(result.success).toBe(true);
       expect(mockApplyPhysicsProfile).toHaveBeenCalledWith(
         expect.any(Object),
-        ctx.dispatchCommand,
+        COLLECTOR,
         ['sprite_1'],
         components,
       );
@@ -599,7 +612,7 @@ describe('physicsProfileExecutor', () => {
       expect(result.success).toBe(true);
       expect(mockApplyPhysicsProfile).toHaveBeenCalledWith(
         expect.any(Object),
-        ctx.dispatchCommand,
+        COLLECTOR,
         ['sprite_1'],
         useEditorStore.getState().allGameComponents,
       );
@@ -629,6 +642,122 @@ describe('physicsProfileExecutor', () => {
       const twoD = mockApplyPhysicsProfile.mock.calls[0][0];
 
       expect(twoD).toEqual(threeD);
+    });
+  });
+  // -------------------------------------------------------------------------
+  // Command routing (PF-1231)
+  // -------------------------------------------------------------------------
+  //
+  // The executor used to hand `ctx.dispatchCommand` straight to
+  // `applyPhysicsProfile`, which sent one command per crossing and threw the
+  // engine's answer away. It now collects into a buffer and sends the lot
+  // through `sendCommands`, so these pin the two things that change: the
+  // commands still reach the engine, and a refusal now fails the step.
+  describe('command routing (PF-1231)', () => {
+    // The file-level `beforeEach` runs `vi.clearAllMocks()`, which clears CALLS
+    // but leaves implementations in place — so the stub below would otherwise
+    // outlive this block and silently drive any test appended after it.
+    afterEach(() => { mockApplyPhysicsProfile.mockReset(); });
+
+    /** Emit the two commands a real `applyPhysicsProfile` sends for one entity. */
+    function emitTwoCommands(): void {
+      mockApplyPhysicsProfile.mockImplementation(
+        (_profile: unknown, dispatch: (c: string, p: unknown) => void) => {
+          dispatch('update_physics', { entityId: 'e1', friction: 0.5 });
+          dispatch('update_game_component', { entityId: 'e1' });
+        },
+      );
+    }
+
+    it('sends every collected command as ONE batch when a batch dispatcher exists', async () => {
+      emitTwoCommands();
+      const dispatchCommandBatch = vi.fn(() => ({ success: true, results: [] }));
+      const ctx = makeCtx({ dispatchCommandBatch });
+
+      const result = await physicsProfileExecutor.execute(
+        { feelDirective: makeFeelDirective(), projectType: '3d', entityIds: ['e1'] },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+      // One call, not one per command — that is the whole point of collecting.
+      expect(dispatchCommandBatch).toHaveBeenCalledTimes(1);
+      expect(dispatchCommandBatch).toHaveBeenCalledWith([
+        { command: 'update_physics', payload: { entityId: 'e1', friction: 0.5 } },
+        { command: 'update_game_component', payload: { entityId: 'e1' } },
+      ]);
+      expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the single dispatcher when the context has no batch dispatcher', async () => {
+      emitTwoCommands();
+      const ctx = makeCtx();
+
+      const result = await physicsProfileExecutor.execute(
+        { feelDirective: makeFeelDirective(), projectType: '3d', entityIds: ['e1'] },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+      expect(ctx.dispatchCommand).toHaveBeenCalledTimes(2);
+      expect(ctx.dispatchCommand).toHaveBeenNthCalledWith(
+        1, 'update_physics', { entityId: 'e1', friction: 0.5 },
+      );
+      expect(ctx.dispatchCommand).toHaveBeenNthCalledWith(
+        2, 'update_game_component', { entityId: 'e1' },
+      );
+    });
+
+    it('FAILS the step when the batch dispatcher reports a rejection', async () => {
+      emitTwoCommands();
+      const ctx = makeCtx({
+        dispatchCommandBatch: vi.fn(() => ({
+          success: false,
+          results: [{ success: false, error: 'batch too large' }],
+        })),
+      });
+
+      const result = await physicsProfileExecutor.execute(
+        { feelDirective: makeFeelDirective(), projectType: '3d', entityIds: ['e1'] },
+        ctx,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('COMMAND_FAILED');
+    });
+
+    it('FAILS the step when the single dispatcher reports a rejection', async () => {
+      emitTwoCommands();
+      // Only the SECOND command is refused: the loop must not stop reporting
+      // because the first one was accepted.
+      const ctx = makeCtx({
+        dispatchCommand: vi.fn((command: string) =>
+          (command === 'update_game_component'
+            ? { success: false, error: 'unknown component' }
+            : { success: true })),
+      });
+
+      const result = await physicsProfileExecutor.execute(
+        { feelDirective: makeFeelDirective(), projectType: '3d', entityIds: ['e1'] },
+        ctx,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('COMMAND_FAILED');
+      // Both were still attempted — one step's commands are sent as a unit.
+      expect(ctx.dispatchCommand).toHaveBeenCalledTimes(2);
+    });
+
+    it('succeeds when the dispatcher answers nothing (a void dispatcher is not a rejection)', async () => {
+      emitTwoCommands();
+      const ctx = makeCtx({ dispatchCommand: vi.fn(() => undefined) });
+
+      const result = await physicsProfileExecutor.execute(
+        { feelDirective: makeFeelDirective(), projectType: '3d', entityIds: ['e1'] },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
     });
   });
 });

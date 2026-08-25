@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { sendCommands } from './engineDispatch';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import {
   cameraModeNeedsTarget,
@@ -113,10 +114,22 @@ export const cameraSetupExecutor: ExecutorDefinition = {
       ...filterCameraNumerics(parsed.data.cameraConfig),
     };
 
-    ctx.dispatchCommand('set_game_camera', buildSetGameCameraPayload(entityId, cameraData));
-    // Configuring a camera the engine is not rendering through would be a no-op
-    // from the player's point of view, so activation is part of the same step.
-    ctx.dispatchCommand('set_active_game_camera', { entityId });
+    // One `sendCommands` call, not two: configuring a camera the engine is not
+    // rendering through would be a no-op from the player's point of view, so
+    // activation belongs to the same unit of work — and sending them together
+    // lets the batch dispatcher carry both across the WASM boundary at once.
+    if (!sendCommands(ctx, [
+      { command: 'set_game_camera', payload: buildSetGameCameraPayload(entityId, cameraData) },
+      { command: 'set_active_game_camera', payload: { entityId } },
+    ])) {
+      return failResult(
+        makeStepError(
+          'COMMAND_FAILED',
+          'Engine rejected the camera configuration',
+          this.userFacingErrorMessage,
+        ),
+      );
+    }
 
     // A follow mode with no target is the failure this executor exists to
     // prevent, one layer down: the engine skips its entire update arm, so the

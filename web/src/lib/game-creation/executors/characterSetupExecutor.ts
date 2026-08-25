@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { sendCommands } from './engineDispatch';
 import { resolveInputPreset } from '../inputPresetResolution';
 import { PHYSICS_PRESETS } from '@/lib/ai/physicsFeel';
 import {
@@ -156,7 +157,15 @@ export const characterSetupExecutor: ExecutorDefinition = {
       // optional and the engine defaults it, so an empty rig needs no payload
       // beyond the entity. (This used to dispatch `set_skeleton_2d`, which is
       // not a command the engine implements — the rig was never created.)
-      ctx.dispatchCommand('create_skeleton2d', { entityId });
+      if (!sendCommands(ctx, [{ command: 'create_skeleton2d', payload: { entityId } }])) {
+        return failResult(
+          makeStepError(
+            'COMMAND_FAILED',
+            'Engine rejected the 2D skeleton creation',
+            this.userFacingErrorMessage,
+          ),
+        );
+      }
     }
 
     return successResult({
