@@ -11,12 +11,25 @@ import { AI_MODELS } from '@/lib/ai/models';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1';
 
-/** Canonical model → OpenRouter model ID */
+/**
+ * Canonical model → OpenRouter model ID.
+ *
+ * Anthropic models — keep in sync with AI_MODELS in @/lib/ai/models. Every
+ * canonical chat ID exposed to clients MUST appear here, otherwise
+ * resolveModelId falls back to DEFAULT_MODEL (Sonnet) and silently
+ * downgrades the request. On the premium path that means a Pro user whose
+ * subscription entitles them to Opus 4.8 (the premium gate in
+ * /api/chat/route.ts has already admitted the request) silently gets
+ * Sonnet instead. On the fast path it runs the other way: a Haiku request
+ * gets upgraded to Sonnet, inflating upstream per-request cost for what was
+ * meant to be the cheap tier.
+ */
 const MODEL_MAP: Record<string, string> = {
   // Anthropic models on OpenRouter
   'claude-sonnet-4-6': 'anthropic/claude-sonnet-4-6',
-  'claude-opus-4': 'anthropic/claude-opus-4',
-  'claude-haiku-3-5': 'anthropic/claude-haiku-3-5',
+  'claude-opus-4-8': 'anthropic/claude-opus-4-8',
+  'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
+  'claude-haiku-4-5-20251001': 'anthropic/claude-haiku-4-5',
   // OpenAI models on OpenRouter
   'gpt-4o': 'openai/gpt-4o',
   'gpt-4o-mini': 'openai/gpt-4o-mini',

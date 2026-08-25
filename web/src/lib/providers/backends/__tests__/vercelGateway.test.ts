@@ -94,8 +94,19 @@ describe('vercelGatewayBackend', () => {
     it('maps Anthropic canonical models to gateway format', async () => {
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
       expect(vercelGatewayBackend.resolveModelId('claude-sonnet-4-6')).toBe('anthropic/claude-sonnet-4-6');
-      expect(vercelGatewayBackend.resolveModelId('claude-opus-4')).toBe('anthropic/claude-opus-4');
-      expect(vercelGatewayBackend.resolveModelId('claude-haiku-3-5')).toBe('anthropic/claude-haiku-3-5');
+    });
+
+    it('treats retired Anthropic IDs as unknown, not as mapped models', async () => {
+      // 'claude-opus-4' and 'claude-haiku-3-5' name nothing in
+      // @/lib/ai/models and are not real gateway model IDs, so they were
+      // removed from MODEL_MAP. What is pinned here is only that removal:
+      // they now take the same path as any other unknown bare string. The
+      // fallback itself is NOT the desired outcome for a live canonical id —
+      // modelMapCoverage.test.ts is what keeps every current canonical id off
+      // this path.
+      const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
+      expect(vercelGatewayBackend.resolveModelId('claude-opus-4')).toBe('anthropic/claude-sonnet-4-6');
+      expect(vercelGatewayBackend.resolveModelId('claude-haiku-3-5')).toBe('anthropic/claude-sonnet-4-6');
     });
 
     it('maps premium and fast Anthropic models so they do not silently downgrade', async () => {
