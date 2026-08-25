@@ -6,9 +6,21 @@
 # subagent — sees relevant anti-patterns before modifying code or running
 # commands that touch files.
 #
-# DESIGN: Uses keyword matching against file paths and bash commands, NOT
-# hardcoded lesson numbers. When new lessons are added, they're automatically
-# picked up if their title/prevention text contains matching keywords.
+# TARGETING, in precedence order:
+#   1. `**Applies:** <substr>|<substr>` on a lesson — an explicit, case-insensitive
+#      SUBSTRING list matched against the target (file path, or the whole bash
+#      command). Substrings, deliberately NOT regexes: an author typo in a regex
+#      aborts awk mid-file and the hook silently injects nothing, which is the
+#      one failure mode this hook must never have. Annotated lessons are emitted
+#      FIRST so the match cap can never starve a precisely-targeted lesson.
+#   2. Keyword-vs-prose matching (the table below) for un-annotated lessons, so a
+#      newly added lesson is still picked up with no edit to this file.
+#
+# PERFORMANCE: the whole lessons file is matched in ONE awk pass. The previous
+# implementation piped every line through `grep` in a shell while-loop — ~1,400
+# forks per invocation, a 5.8s MEDIAN against a 5s timeout, so the hook was being
+# KILLED (540 times in a 120-session window) and enforcement silently did not
+# happen. Do not reintroduce a per-line fork.
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
@@ -27,6 +39,71 @@ fi
 LESSONS="$HOME/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md"
 
 if [ ! -f "$LESSONS" ]; then
+  exit 0
+fi
+
+# A read-only bash command gets NOTHING — not the fallback, not keyword
+# matches. 60% of this hook's fires were `ls`/`cat`/`grep`/`git status`, each
+# stamped MANDATORY with warnings about mistakes you cannot make by reading a
+# file. 5,700 irrelevant mandatory blocks per month is how an agent learns to
+# skim the block, which costs enforcement on the calls that DO matter.
+#
+# This is an ALLOWLIST of known read-only commands, not a denylist of known
+# mutating ones: a denylist only ever catches verbs someone remembered to add
+# — `sed -i`, `cp`, `mkdir`, `touch` and a plain `>` redirect all slipped
+# through the previous denylist and silently skipped injection, and any newly
+# invented command starts out missing from a denylist too. An allowlist
+# defaults the other way: anything not explicitly known to be read-only falls
+# through to keyword matching (worst case, the universal fallback), so an
+# unrecognized command warns instead of silently passing.
+#
+# Three properties this gate MUST keep, each of which a naive allowlist gets
+# wrong:
+#   1. EVERY segment must be read-only, not merely one of them. A single grep
+#      over the whole string matches the `; ls` in `rm -rf build; ls` and
+#      would skip injection on a command that deletes a directory. The command
+#      is split on `;`/`&`/`|` and each segment is anchored with `^`.
+#   2. A verb is not a permission — the SUBCOMMAND and flags decide. `git
+#      branch` reads, `git branch -d x` deletes; `npx eslint` reads, `npx
+#      eslint --fix` rewrites source. Allowlist entries name the read-only
+#      forms explicitly, and anything unlisted falls through.
+#   3. Some tokens mutate regardless of the leading verb — a `>` redirect,
+#      `tee`, an in-place `find` action, `--fix`/`--write`/`--update`, or a
+#      `$(...)`/backtick substitution whose inner command is never inspected.
+#      Those are checked first and force fallthrough unconditionally.
+# Exiting here also skips ~19 greps, so the cheapest case is also the fastest.
+# `sed -i` has to be listed here rather than excluded from READONLY_SEGMENT_RE:
+# ERE has no negative lookahead, so the read-only `sed -n` alternative cannot say
+# "unless -i appears later" and `sed -n -i s/a/b/ f` matched it as read-only.
+# The flag is matched only when `sed` leads the segment — a bare `-i` would
+# reclassify `grep -i`, which is read-only and ubiquitous. `-[a-zA-Z]*i` covers
+# the combined and suffixed forms (`-ni`, `-i.bak`); `--in-place` is spelled out
+# because its second character is a dash.
+MUTATES_REGARDLESS_RE='>|(^|[[:space:]])tee([[:space:]]|$)|(^|[[:space:]])-(delete|exec|execdir|ok|okdir)([[:space:]]|$)|(^|[[:space:]])sed[[:space:]]+(-[^[:space:]]+[[:space:]]+)*(--in-place|-[a-zA-Z]*i)|--fix|--write|--update|\$\(|`'
+READONLY_SEGMENT_RE='^[[:space:]]*(cat|ls|head|tail|wc|pwd|whoami|which|type|file|stat|jq|sort|uniq|column|basename|dirname|date|grep|egrep|fgrep|rg|awk|printf|echo|diff|find|tree|sed[[:space:]]+-n|git[[:space:]]+(status|log|diff|show|blame|rev-parse|describe|ls-files|stash[[:space:]]+list|branch[[:space:]]+(--show-current|--list|-a|-r|-v)|remote[[:space:]]+(-v|show))|npm[[:space:]]+(ls|view|outdated)|npx[[:space:]]+(vitest[[:space:]]+run|eslint|tsc)|gh[[:space:]]+(pr[[:space:]]+(view|list|checks|diff)|issue[[:space:]]+(view|list)|run[[:space:]]+(list|view)))([[:space:]]|$)'
+
+is_readonly_bash() {
+  local cmd="$1" seg
+  if echo "$cmd" | grep -qE "$MUTATES_REGARDLESS_RE"; then
+    return 1
+  fi
+  while IFS= read -r seg; do
+    # `env -u VAR`/`VAR=x` prefixes are transparent — the command after them
+    # is what decides. `env -u UPSTASH_REDIS_REST_URL npx vitest run` is the
+    # canonical local test invocation and must stay silent.
+    seg=$(echo "$seg" | sed -E 's/^[[:space:]]*env([[:space:]]+-u[[:space:]]+[A-Za-z_][A-Za-z0-9_]*|[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*)+[[:space:]]+//')
+    case "$seg" in
+      *[![:space:]]*) ;;
+      *) continue ;;
+    esac
+    echo "$seg" | grep -qE "$READONLY_SEGMENT_RE" || return 1
+  done <<EOF
+$(echo "$cmd" | tr ';&|' '\n')
+EOF
+  return 0
+}
+
+if [ "$TOOL_NAME" = "Bash" ] && is_readonly_bash "$TARGET"; then
   exit 0
 fi
 
@@ -147,7 +224,7 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   fi
 fi
 
-# If nothing matched, inject the universal top lessons
+# If no branch matched, fall back to the universal top lessons.
 if [ -z "$KEYWORDS" ]; then
   KEYWORDS="panelRegistry|rateLimit|nullish|refund|await"
 fi
@@ -155,72 +232,84 @@ fi
 # Strip leading pipe
 KEYWORDS="${KEYWORDS#|}"
 
-# Search lessons file for matching anti-patterns using keywords
-# Extract each ### N. block and check if it matches any keyword
-WARNINGS=""
-CURRENT_TITLE=""
-CURRENT_PREVENT=""
-CURRENT_BLOCK=""
-MATCH_COUNT=0
-MAX_MATCHES=12  # Cap to avoid overwhelming context
+# Single-pass match. Emits `**Applies:**`-targeted lessons first, then
+# keyword-vs-prose matches, capped at MAX total.
+#
+# KW/TARGET go through the ENVIRONMENT, not `awk -v`: -v processes escape
+# sequences in the value, so the keyword `Number\(` arrives as `Number(` — an
+# unmatched paren, an illegal ERE, and awk aborts mid-file. The hook then exits
+# 0 with empty output and the operation proceeds unwarned. That is this hook's
+# worst failure mode, so the awk status is checked below rather than swallowed.
+export LL_KW="$KEYWORDS" LL_TARGET="$TARGET"
+WARNINGS=$(awk '
+BEGIN {
+  nk = split(ENVIRON["LL_KW"], K, "|")
+  lt = tolower(ENVIRON["LL_TARGET"])
+  MAX = 12
+  na = 0; nb = 0
+}
+/^### [0-9]+\. / {
+  classify()
+  title = substr($0, 5); block = $0; prev = ""; applies = ""
+  next
+}
+{
+  block = block " " $0
+  if (index($0, "**Prevention:**") == 1) prev = substr($0, 17)
+  else if (index($0, "**Applies:**") == 1) applies = substr($0, 14)
+}
+END {
+  classify()
+  n = 0
+  for (i = 1; i <= na && n < MAX; i++) { print A[i]; n++ }
+  for (i = 1; i <= nb && n < MAX; i++) { print B[i]; n++ }
+}
+# Route the block just finished into the Applies list, the keyword list, or neither.
+function classify(   i, np, part, p, cut, line) {
+  if (title == "") return
+  p = prev
+  if (length(p) > 200) {
+    # Cut back to the last space rather than slicing at exactly 200. awk on macOS
+    # counts BYTES, so a hard cut can land inside a multi-byte character (the
+    # lessons prose is full of em dashes) and emit invalid UTF-8.
+    cut = substr(p, 1, 200)
+    if (match(cut, /^.*[ \t]/)) cut = substr(cut, 1, RLENGTH - 1)
+    p = cut "..."
+  }
+  line = "- " title ": " p
 
-while IFS= read -r line; do
-  if echo "$line" | grep -qE "^### [0-9]+\. "; then
-    # Process previous block if it exists
-    if [ -n "$CURRENT_TITLE" ] && [ -n "$CURRENT_BLOCK" ]; then
-      # Check if any keyword matches in the block text
-      IFS='|' read -ra KW_ARRAY <<< "$KEYWORDS"
-      for kw in "${KW_ARRAY[@]}"; do
-        kw=$(echo "$kw" | tr -d ' ')
-        [ -z "$kw" ] && continue
-        if echo "$CURRENT_BLOCK" | grep -qiE "$kw" 2>/dev/null; then
-          if [ $MATCH_COUNT -lt $MAX_MATCHES ]; then
-            PREVENT_SHORT="$CURRENT_PREVENT"
-            if [ ${#PREVENT_SHORT} -gt 200 ]; then
-              PREVENT_SHORT="${PREVENT_SHORT:0:200}..."
-            fi
-            WARNINGS="${WARNINGS}
-- ${CURRENT_TITLE}: ${PREVENT_SHORT}"
-            MATCH_COUNT=$((MATCH_COUNT + 1))
-          fi
-          break  # One match per lesson is enough
-        fi
-      done
-    fi
-    # Start new block
-    CURRENT_TITLE="${line#\#\#\# }"
-    CURRENT_BLOCK="$line"
-    CURRENT_PREVENT=""
-  else
-    CURRENT_BLOCK="${CURRENT_BLOCK} ${line}"
-    if echo "$line" | grep -qE "^\*\*Prevention:\*\*"; then
-      CURRENT_PREVENT="${line#\*\*Prevention:\*\* }"
-    fi
-  fi
-done < "$LESSONS"
+  if (applies != "") {
+    # Explicit targeting wins outright: substring match, no regex, no fallthrough
+    # to prose keywords (an annotated lesson has already said where it applies).
+    np = split(tolower(applies), part, "|")
+    for (i = 1; i <= np; i++) {
+      gsub(/^[ \t]+|[ \t]+$/, "", part[i])
+      if (part[i] != "" && index(lt, part[i]) > 0) { A[++na] = line; return }
+    }
+    return
+  }
 
-# Process last block
-if [ -n "$CURRENT_TITLE" ] && [ -n "$CURRENT_BLOCK" ]; then
-  IFS='|' read -ra KW_ARRAY <<< "$KEYWORDS"
-  for kw in "${KW_ARRAY[@]}"; do
-    kw=$(echo "$kw" | tr -d ' ')
-    [ -z "$kw" ] && continue
-    if echo "$CURRENT_BLOCK" | grep -qiE "$kw" 2>/dev/null; then
-      if [ $MATCH_COUNT -lt $MAX_MATCHES ]; then
-        PREVENT_SHORT="$CURRENT_PREVENT"
-        if [ ${#PREVENT_SHORT} -gt 200 ]; then
-          PREVENT_SHORT="${PREVENT_SHORT:0:200}..."
-        fi
-        WARNINGS="${WARNINGS}
-- ${CURRENT_TITLE}: ${PREVENT_SHORT}"
-      fi
-      break
-    fi
-  done
+  for (i = 1; i <= nk; i++) {
+    if (K[i] == "") continue
+    if (tolower(block) ~ tolower(K[i])) { B[++nb] = line; return }
+  }
+}
+' "$LESSONS" 2>/dev/null)
+AWK_STATUS=$?
+unset LL_KW LL_TARGET
+
+# A malformed keyword regex aborts awk mid-file. Never let that pass silently as
+# "no lessons apply" — an unwarned edit is exactly what this hook exists to stop.
+if [ "$AWK_STATUS" -ne 0 ]; then
+  echo "LESSONS HOOK FAILED (awk exit $AWK_STATUS) — anti-pattern warnings were NOT injected for this operation."
+  echo "Fix the keyword table in .claude/hooks/inject-lessons-learned.sh, then re-run:"
+  echo "  bash .claude/hooks/__tests__/inject-lessons-learned.test.sh"
+  exit 0
 fi
 
 if [ -n "$WARNINGS" ]; then
-  echo "MANDATORY — Lessons learned relevant to this operation. Violating these has caused real bugs:${WARNINGS}"
+  echo "MANDATORY — Lessons learned relevant to this operation. Violating these has caused real bugs:"
+  echo "$WARNINGS"
 fi
 
 exit 0

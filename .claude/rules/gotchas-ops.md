@@ -1,0 +1,37 @@
+---
+description: Gotchas for Claude Code config, deployment/service infrastructure, and the enforcement hooks in .claude/hooks
+paths:
+  - ".claude/**"
+  - ".github/**"
+  - "vercel.json"
+---
+
+# Gotchas — Claude Code Config, Infrastructure & Hooks
+
+## Claude Code Config
+- **`.claude/prompts/` ≠ `.claude/skills/`** — Prompts are template files only accessible from the prompt bar UI. Skills (in `.claude/skills/<name>/SKILL.md`) are invocable via `/name` from the CLI and via the `Skill` tool. If it should be callable as `/foo`, it MUST be a skill, not a prompt. Never create automation in `.claude/prompts/`.
+- **Hook input: two patterns, not interchangeable** — Edit/Write hooks get `TOOL_INPUT_<field>` env vars (e.g. `TOOL_INPUT_file_path`). Bash hooks get stdin JSON parsed with `jq -r '.tool_input.command'`. Using the wrong pattern = silent no-op. For Bash hooks, source `.claude/hooks/hook-utils.sh` and call `get_bash_command()`. See `check-pr-metadata.sh` for the canonical Bash hook pattern.
+
+## Infrastructure
+- **WASM CDN fallback — same-origin requires JS glue + WASM from same origin** — `useEngine.ts` tries CDN first, falls back to `/engine-pkg-*/`. Both JS glue and WASM binary must come from the same origin (CDN or same-origin) due to wasm-bindgen import path coupling. To force same-origin: unset `NEXT_PUBLIC_ENGINE_CDN_URL`. AbortError from navigation is suppressed in the `useEngine` `.catch` handler (not inside `loadWasm` itself) so it doesn't surface as a user-visible error.
+- **Vercel account scope** — ALWAYS use `--scope tnolan`. Never `nolantj-livecoms-projects`.
+- **Worktree branch loss** — Nested worktrees lose branches. Never nest. Always rebase onto main first.
+- **Schema changes need migrations** — `db:push` works in dev but production needs `ALTER TABLE`.
+- **IV/crypto changes need migration path** — Changing parameters breaks existing stored data.
+- **`experimental.sri` is incompatible with Vercel CDN** — Do NOT re-enable.
+- **Stripe v22 API version** — On `22.4.0`, API version `2026-07-29.dahlia` (the SDK pins its `ApiVersion` literal; `apiVersion` in `stripe-client.ts` MUST match the installed SDK or tsc fails). No `decimal_string` fields used — all amounts are integer cents. When bumping `stripe`, update the literal in `stripe-client.ts` + the 3 billing route tests (status/portal/checkout) + the webhook `route.ts` comment.
+- **Max 5-7 fixes per builder dispatch** — Agents rushing through 25+ lists introduce anti-patterns.
+- **GraphQL rate limit exhaustion** — Use `gh issue list` (REST) for sync, not `gh project item-list` (GraphQL).
+- **Taskboard `localProjectId` drifts** — Verify sync config against `curl http://localhost:3010/api/projects`.
+
+## Enforcement Hooks
+- **`block-deferred-fixes.sh` fails closed** — If body extraction fails, the hook BLOCKS (exit 2), not allows (exit 0). Previous behavior silently let unparseable replies through.
+- **Subagent hook inheritance gap** — `.claude/settings.json` PreToolUse hooks do NOT fire for subagents. The `block-deferred-fixes.sh` hook only catches the main agent. Subagents must self-enforce via the banned-phrase list embedded in `/resolve-pr-comments` SKILL.md.
+- **Bare SHA is not enough** — A reply must contain BOTH a commit SHA AND an action verb ("Fixed in", "Addressed in"). A reply like "Good catch abc1234" is blocked — it has a SHA but no action verb, so it's likely deferred-fix language with an unrelated hex string.
+- **`#NNNN` ticket reference is acceptable** — A deferred reply with a real GitHub issue number (#8307) is allowed. The rule is "fix it or track it", not "fix it or die".
+- **Two hooks can each be correct and jointly unsatisfiable — check the OTHER hooks on the same tool before adding a constraint.** `block-main-commits.sh` refuses to analyse a Bash command over 4000 chars and directs large content to a file; `check-pr-metadata.sh` used to grep only the COMMAND STRING for `Closes #NNNN`, and its own comment admitted it "catches inline `--body` but not `--body-file`". Together they made any substantive PR body unsubmittable: inline was too long to allow, and `--body-file` could never satisfy the `Closes` check. Both hooks passed their own tests; nothing tested the pair. It shipped and blocked the PF-1051 PR (PF-1052). Fixed by teaching `check-pr-metadata.sh` to extract the path from `--body-file <path>` / `--body-file=<path>` / `-F <path>` (quoted or not) and read THAT file.
+  - **When a body file is present it is the only thing gh sends, so it alone decides** — a `Closes #NNNN` sitting elsewhere in the command (in `--title`, say) must not launder a linkless body file. Fails closed on a missing/unreadable/directory path or a flag with no value: an unverifiable body is not a verified one.
+  - **A blocking hook MUST write its reason to STDERR — the harness surfaces stderr on exit 2, so a reason echoed to stdout arrives as "No stderr output" and the block reads as a mystery instead of a policy.** `check-pr-metadata.sh` printed a full diagnostic to stdout and was silent from the caller's side for its whole life. Wrap the message block in `{ ... } >&2` — the convention `block-main-commits.sh` already documents. Pinned by a `check_err` assertion per blocking path.
+  - **A `--title` that MENTIONS a flag is indistinguishable from the flag itself to a grep-based hook.** These hooks cannot parse shell quoting, so first-occurrence extraction pulled the path `so` out of the title `read --body-file so the PR metadata check is satisfiable` — this hook's own PR title — and blocked on it. Scan EVERY occurrence and take the first that names a readable file, falling back to the first occurrence so a command with no usable path still fails closed.
+  - **Piping a variable into `grep -q` is SIGPIPE-unsafe under `set -o pipefail`** — `grep -q` exits on first match, SIGPIPEs the writer, and the pipeline reports failure, INVERTING the verdict of a negated test. Use a here-string instead. Latent while commands stay under the pipe buffer; free to remove. `.claude/hooks/__tests__/check-pr-metadata.test.sh` carries a structural guard against reintroducing the pattern.
+- **60+ deferred-fix phrases** — The hook checks for phrases like "known limitation", "out of scope", "low-priority", "acceptable tradeoff", "future refactor" in addition to the obvious "will fix later" family. Full list in `.claude/hooks/block-deferred-fixes.sh`.

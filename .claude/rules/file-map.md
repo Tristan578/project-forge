@@ -1,3 +1,13 @@
+---
+description: Where everything lives — engine module map (bridge/core), web stores/hooks/lib, packages/ui, apps/docs, apps/design, and the JS<->Rust communication pattern
+paths:
+  - "engine/**"
+  - "web/**"
+  - "packages/**"
+  - "apps/**"
+  - "mcp-server/**"
+---
+
 # Project File Map
 
 ## Engine Structure (`engine/src/`)
@@ -9,7 +19,7 @@
 - `material.rs` — Material/light emit, environment, skybox, post-processing, shader apply/sync
 - `physics.rs` — 3D + 2D physics, collisions, raycasts, joints, forces, debug toggle
 - `audio.rs` — Audio updates/removals/playback, bus CRUD, reverb zones
-- `query.rs` — Query request processing (main, terrain, quality, reverb zone, 3D joints, 2D joints). `process_query_requests` is the DEFAULT drain: a `QueryRequest` variant missing from its `remaining` list is dropped before the dedicated system for it can run (PF-1194 — see `rules/gotchas.md` → Engine & Game Loop)
+- `query.rs` — Query request processing (main, terrain, quality, reverb zone, 3D joints, 2D joints). `process_query_requests` is the DEFAULT drain: a `QueryRequest` variant missing from its `remaining` list is dropped before the dedicated system for it can run (PF-1194 — see `rules/gotchas-engine.md` → Engine & Game Loop)
 - `animation.rs` — GLTF animation registration, playback, state polling
 - `particles.rs` — Particle apply/toggle/removal/preset, Hanabi GPU sync (webgpu)
 - `scene_io.rs` — Scene export/load, new scene, GLTF import, texture load, asset placement
@@ -24,7 +34,7 @@
 #### `core/commands/` — Command dispatch (split into domain modules)
 | File | Purpose |
 |------|---------|
-| `mod.rs` | `dispatch()` chain, `CommandResponse`, `CommandResult`, shared helpers, and `fn route_domain` — the routing table consulted BEFORE any domain module, so a name it omits is unreachable however correct its arm (`_ => 255` → `Err("Unknown command")`). Its `#[cfg(test)] mod route_domain_parity` compares the router's index against each domain's own `pub fn dispatch` arms, which is the only way to catch a name routed to the WRONG domain (PF-1178 — see `rules/gotchas.md` → Engine & Game Loop) |
+| `mod.rs` | `dispatch()` chain, `CommandResponse`, `CommandResult`, shared helpers, and `fn route_domain` — the routing table consulted BEFORE any domain module, so a name it omits is unreachable however correct its arm (`_ => 255` → `Err("Unknown command")`). Its `#[cfg(test)] mod route_domain_parity` compares the router's index against each domain's own `pub fn dispatch` arms, which is the only way to catch a name routed to the WRONG domain (PF-1178 — see `rules/gotchas-engine.md` → Engine & Game Loop) |
 | `transform.rs` | Spawn, delete, duplicate, rename, reparent, camera, gizmo, snap, input |
 | `material.rs` | Material, light, ambient, environment, post-processing, skybox, shaders |
 | `physics.rs` | Physics 3D, joints, physics 2D, forces, raycasts |
@@ -59,7 +69,7 @@
 | `terrain.rs` | Procedural terrain. `TerrainData`/`TerrainMeshData`/`TerrainEnabled` |
 | `procedural_mesh.rs` | Extrude, lathe, combine. `ProceduralMeshData`/`ProceduralOp` |
 | `entity_factory.rs` | Spawn/delete/duplicate with undo. `EntitySnapshot`, `spawn_from_snapshot` |
-| `component_carry.rs` | The ONE list of components that travel when an entity is rebuilt from another entity — `AuxComponentData`, `build_aux_index`, `snapshot_entity`, `insert_aux_components`, `insert_base_components`, the `AuxQueries` SystemParam, and `COMBINE_RESULT_EXEMPT` (what a combine RESULT deliberately does not inherit, with a reason each). Three of the four rebuild paths call it: duplicate, array, combine. The fourth (`spawn_from_snapshot`, which serves undo/redo and prefab instantiation) reads the snapshot directly and is pinned by its own `entity_factory_parity_tests.rs` gate instead. Lives in `core/` because `bridge/` is wasm32-only and cannot be unit-tested natively; `component_carry_tests.rs` holds the behavioural tests plus `component_carry_parity`, which fails if a field is added without wiring it into every path — including a cross-check against `EntitySnapshot`, the independent list (PF-1193 — see `rules/gotchas.md` → Engine & Game Loop) |
+| `component_carry.rs` | The ONE list of components that travel when an entity is rebuilt from another entity — `AuxComponentData`, `build_aux_index`, `snapshot_entity`, `insert_aux_components`, `insert_base_components`, the `AuxQueries` SystemParam, and `COMBINE_RESULT_EXEMPT` (what a combine RESULT deliberately does not inherit, with a reason each). Three of the four rebuild paths call it: duplicate, array, combine. The fourth (`spawn_from_snapshot`, which serves undo/redo and prefab instantiation) reads the snapshot directly and is pinned by its own `entity_factory_parity_tests.rs` gate instead. Lives in `core/` because `bridge/` is wasm32-only and cannot be unit-tested natively; `component_carry_tests.rs` holds the behavioural tests plus `component_carry_parity`, which fails if a field is added without wiring it into every path — including a cross-check against `EntitySnapshot`, the independent list (PF-1193 — see `rules/gotchas-engine.md` → Engine & Game Loop) |
 | `component_carry_tests.rs` | Test modules for `component_carry.rs`. Split out both to keep that file under the 800-line ceiling and because the parity module slices the source by marker strings — a marker written as a literal inside the file it scans is a second occurrence of itself. `include_str!` still resolves against this directory, so it pins the real production source |
 | `entity_factory_parity_tests.rs` | `mod snapshot_restore_parity` — the sibling gate for `spawn_from_snapshot`, the one rebuild path that does not go through `component_carry.rs`. Asserts every `EntitySnapshot` field is read back, minus `parent_id` (re-established by the caller's reparent pass). Same marker-collision reason for being a sibling file |
 | `json_guard.rs` | Depth + container-count bounds on every `Value` reaching the parser, checked iteratively. Counts containers only, so bulk scalar data (a full-size tilemap) passes. Applied at `commands::dispatch`, `dispatch_batch`, `build_game_component`. Mirrored in TS by `lib/engine/commandPayloadGuard.ts` (PF-1149) |
@@ -90,14 +100,13 @@
 - `userStore.ts` — Tier, token balance, permissions (`canUseAI`, `canUseMCP`, `canPublish`)
 
 ### Editor Components (`components/editor/`)
-EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector, PhysicsInspector, AudioInspector, ParticleInspector, TerrainInspector, AudioMixerPanel, SceneSettings, InputBindingsPanel, ScriptEditorPanel, PlayControls, SceneToolbar, ExportDialog, AssetPanel, Sidebar, CanvasArea, ContextMenu, Vec3Input, AnimationInspector, DrawerPanel, MobileToolbar, WelcomeModal, KeyboardShortcutsPanel
+One file per panel/inspector — `ls web/src/components/editor/` for the current set.
 
 ### Layout Components (`components/layout/`)
-- `ViewportLock.tsx` — `h-dvh overflow-hidden` wrapper applied by `app/editor/layout.tsx` and `app/dev/layout.tsx`. The editor's full-viewport scroll lock lives here, scoped to those route segments; it must NEVER move back to a global `html`/`body` rule (PF-1017 — see `rules/gotchas.md` → UI & Frontend)
+- `ViewportLock.tsx` — `h-dvh overflow-hidden` wrapper applied by `app/editor/layout.tsx` and `app/dev/layout.tsx`. The editor's full-viewport scroll lock lives here, scoped to those route segments; it must NEVER move back to a global `html`/`body` rule (PF-1017 — see `rules/gotchas-web.md` → UI & Frontend)
 
 ### Marketing Components (`components/marketing/`)
 - `LandingPage.tsx` — the `/` landing page body (`'use cache'` + `cacheLife('days')`), rendered by `app/page.tsx`
-- `AiShowcaseSection.tsx`, `Breadcrumbs.tsx`
 
 ### Key Hooks
 - `useEngine.ts` — WASM loading singleton (WebGPU detect, fallback)
@@ -111,9 +120,9 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 - `chat/executor.ts` — Handler registry dispatcher, delegates to `chat/handlers/` (all handlers fully migrated)
 - `chat/handlers/` — 29 domain tool handler files (transform, material, entity, physics, audio, audioEntity, animation, sprite, shader, scene, script, query, export, asset, compound, generation, gameplay, economy, dialogue, cutscene, localization, idea, world, uiBuilder, pixelArt, editMode, performance, security, leaderboard + types/helpers)
 - `chat/context.ts` — Scene context for AI
-- `cutscene/` — rAF playback. `player.ts` builds one command per keyframe and dispatches it; `dispatch.ts` is the routing seam that sends browser-only commands (`start_dialogue` → `dialogueStore`) to their real handler instead of the engine, injected at the `play_cutscene` call site. `__tests__/dispatch.test.ts` pins that every command a track can emit is routed by something (PF-1140 — see `rules/gotchas.md` → Engine & Game Loop)
-- `game/gameCameraPayload.ts` — The ONLY place the authoring camera vocabulary (`followDistance`, `followHeight`, …) and the engine's flat wire vocabulary (`offset`, `damping`, `eyeHeight`, …) meet. Owns both directions (`buildSetGameCameraPayload` / `parseGameCameraWire`) plus `ENGINE_CAMERA_DEFAULTS`, the mirror of `GameCameraMode::from_flat`'s per-variant defaults (pinned against the Rust source by its test — PF-1126). Imports from `@/stores/slices/types` must stay `import type`: this module is reachable from an API route, and a value-import of `@/stores/` breaks `next build` (see `rules/gotchas.md` → the RSC-boundary entry)
-- `game-creation/` — The idea→GDD→playable-scene pipeline. `pipelineRunner.ts` walks a plan; `executors/` holds one module per step (`sceneCreateExecutor`, `cameraSetupExecutor`, `autoPolishExecutor`, `verifyExecutor`, …) reached through a barrel that an API route imports, so NOTHING here may take a value import on `@/stores` or `@/hooks/useEngine` (`__tests__/serverSafeImports.test.ts` scans for it — see `rules/gotchas.md` → the RSC-boundary entry). Six shared modules exist because the same logic was written more than once and the copies drifted; the seventh bullet below is not one of them but the `physics_enable` step itself, listed alongside them because it is the consumer that forced `entityShape.ts` and `physicsRoles.ts` out of executor-local scope:
+- `cutscene/` — rAF playback. `player.ts` builds one command per keyframe and dispatches it; `dispatch.ts` is the routing seam that sends browser-only commands (`start_dialogue` → `dialogueStore`) to their real handler instead of the engine, injected at the `play_cutscene` call site. `__tests__/dispatch.test.ts` pins that every command a track can emit is routed by something (PF-1140 — see `rules/gotchas-engine.md` → Engine & Game Loop)
+- `game/gameCameraPayload.ts` — The ONLY place the authoring camera vocabulary (`followDistance`, `followHeight`, …) and the engine's flat wire vocabulary (`offset`, `damping`, `eyeHeight`, …) meet. Owns both directions (`buildSetGameCameraPayload` / `parseGameCameraWire`) plus `ENGINE_CAMERA_DEFAULTS`, the mirror of `GameCameraMode::from_flat`'s per-variant defaults (pinned against the Rust source by its test — PF-1126). Imports from `@/stores/slices/types` must stay `import type`: this module is reachable from an API route, and a value-import of `@/stores/` breaks `next build` (see `rules/gotchas-build-ci.md` → the RSC-boundary entry)
+- `game-creation/` — The idea→GDD→playable-scene pipeline. `pipelineRunner.ts` walks a plan; `executors/` holds one module per step (`sceneCreateExecutor`, `cameraSetupExecutor`, `autoPolishExecutor`, `verifyExecutor`, …) reached through a barrel that an API route imports, so NOTHING here may take a value import on `@/stores` or `@/hooks/useEngine` (`__tests__/serverSafeImports.test.ts` scans for it — see `rules/gotchas-build-ci.md` → the RSC-boundary entry). Six shared modules exist because the same logic was written more than once and the copies drifted; the seventh bullet below is not one of them but the `physics_enable` step itself, listed alongside them because it is the consumer that forced `entityShape.ts` and `physicsRoles.ts` out of executor-local scope:
   - `cameraResolution.ts` — `normalizeCameraMode` (GDD spellings → engine modes, project-type-aware fallback), `cameraModeNeedsTarget` (the five modes that are INERT without a target entity — the engine wraps their arms in `if let Some(target_t)`), `looksLikeCameraName` (the one heuristic `camera_setup`, `auto_polish` and `verify_all_scenes` all use, so verification cannot disagree with discovery), `filterCameraNumerics` + `classifyCameraConfigKeys` (GDD config → engine params, reporting rather than silently dropping what has no mapping — an unrecognized key, a value the engine cannot take, and a duplicate spelling each get their own reason, so a translator bug and a typo are distinguishable; the unit-converting entries are PF-1134). Range policy lives in `CAMERA_VALUE_POLICIES` and is applied through the narrowing `isSendableCameraValue`, never a post-check `as number` — PF-1166, whose sign policy the engine now HARD-REJECTS, so a refused value would otherwise take the whole full-replace `set_game_camera` command with it
   - `stepWarnings.ts` — `collectStepWarnings`, which is why a partially-applied step is visible at all: an executor's `warning`/`warnings` output used to be computed and then discarded by `onStepComplete`, so a step that half-worked still got a green tick and nothing else (PF-1125)
   - `entityShape.ts` — `resolveEntityShape` (role + `primitive:<shape>` appearance + project type → the `spawn_entity` entityType), `SPAWNABLE_SHAPES`, `ROLE_TO_ENTITY_TYPE`, and `COLLIDER_FOR_SHAPE`, the mesh→collider pairing. It is shared rather than private to `entitySetupExecutor` because `physics_enable` has to derive a collider from the SAME answer the spawn used — two copies drift into a capsule player floating inside a cuboid collider (PF-1213)
@@ -143,37 +152,22 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 Published as `@spawnforge/ui`. The one allowed cross-package import in `next.config.ts` (`transpilePackages`).
 
 ### `packages/ui/src/tokens/` — Design tokens (single source of truth)
-- `colors.ts` — Semantic color palette per theme (`ember`, `ice`, `leaf`, `rust`, `mech`, `light`, `dark`)
-- `spacing.ts` — 4px-grid spacing scale
-- `radius.ts` — Border radius constants
-- `typography.ts` — Font size, weight, line-height scale
-- `z-index.ts` — `Z_INDEX` object (e.g. `Z_INDEX.effects = 5`)
-- `themes.ts` — `ThemeName` union type and theme metadata
-- `theme.css` — CSS custom properties for all theme tokens
-- `index.ts` — Re-exports all tokens
+One file per axis (`colors`, `spacing`, `radius`, `typography`, `z-index`, `themes`), re-exported by `index.ts`.
+Themes are `ember`, `ice`, `leaf`, `rust`, `mech`, `light`, `dark`. `theme.css` publishes every token as a CSS
+custom property and is `@import`ed by `web/src/app/globals.css` — so an `html`/`body` rule added there is global
+(PF-1017). Never hardcode a value these files own.
 
 ### `packages/ui/src/primitives/` — Unstyled base components
-Headless building blocks: `Accordion`, `Avatar`, `Badge`, `Button`, `Card`, `Checkbox`, `Dialog`, `Input`, `Label`, `Popover`, `Progress`, `ScrollArea`, `Select`, `Separator`, `Skeleton`, `Switch`, `Tabs`, `Textarea`, `Toast`, `Tooltip`.
-Each has a co-located `__tests__/` directory.
+Headless building blocks, one directory each with co-located `__tests__/`. Check here before writing any bespoke
+control — a new one-off that duplicates a primitive is a UX review failure.
 
 ### `packages/ui/src/effects/` — Theme ambient visual effects
 - `ThemeAmbient.tsx` — Effect router: reads `data-sf-theme` + `data-sf-effects` from `document.documentElement` via `MutationObserver`, lazily renders the matching effect component. Dark theme → no effect. Must be imported with `next/dynamic({ ssr: false })`.
-- `EmberGlow.tsx`, `IceFrost.tsx`, `LeafDrift.tsx`, `RustGears.tsx`, `MechScanlines.tsx`, `LightRays.tsx` — Individual CSS-animation effect components
-- `effects.css` — Keyframe animations shared by all effects
-- `__tests__/ThemeAmbient.test.tsx` — Unit tests (jsdom environment, MutationObserver simulation)
+- One component per theme (`EmberGlow`, `IceFrost`, …), sharing keyframes in `effects.css`
 
-### `packages/ui/src/hooks/` — Shared React hooks
-- `useTheme.ts` — Reads/writes `data-sf-theme` on `document.documentElement`
-- `useDialogA11y.ts` — Focus trap + aria helpers for modal dialogs
-- `__tests__/` — Unit tests per hook
-
-### `packages/ui/src/utils/` — Utility functions
-- `cn.ts` — `cn()` helper: `clsx` + `tailwind-merge` for conditional class names
-- `__tests__/` — Unit tests
-
-### `packages/ui/src/composites/` — Higher-order composed components (built from primitives + tokens)
-- `internal.ts` — Internal-only composite exports
-- `index.ts` — Public surface of the package
+### `packages/ui/src/hooks/`, `utils/`, `composites/`
+`useTheme` (reads/writes `data-sf-theme` on `documentElement`), `useDialogA11y` (focus trap + aria), `cn()`
+(`clsx` + `tailwind-merge`). `composites/index.ts` is the package's public surface; `internal.ts` is not exported.
 
 ## Documentation Site (`apps/docs/`)
 
@@ -196,9 +190,6 @@ Fumadocs-based docs site for the SpawnForge platform API and MCP command referen
 - `generate-mcp-docs.ts` — Generates MDX pages from the MCP command manifest
 - `__tests__/` — Vitest unit tests for each script (environment: node)
 
-### `apps/docs/content/` — MDX documentation content
-### `apps/docs/public/` — Static assets
-
 **vitest config:** `apps/docs/vitest.config.ts` — includes `scripts/__tests__/**/*.test.ts` and `components/__tests__/**/*.test.tsx` and `lib/__tests__/**/*.test.ts` (environment: node for scripts, jsdom for components).
 
 ## Design Workbench (`apps/design/`)
@@ -209,9 +200,7 @@ Storybook-based catalogue for `@spawnforge/ui` components and effects. Uses Vite
 - `vite.config.ts` — Vite config for the design workbench (added `@vitejs/plugin-react`)
 - `scripts/sync-vendored-ui.sh` — Copies built `@spawnforge/ui` output into `apps/design/vendored/` for Storybook consumption without a monorepo build step
 
-### `apps/design/stories/` — Story files
-- `effects/` — Stories for each theme ambient effect (EmberGlow, IceFrost, etc.)
-- `primitives/` — Stories for each primitive component (Button, Input, etc.)
+### `apps/design/stories/` — one story per effect and per primitive
 
 ## Communication Pattern
 
