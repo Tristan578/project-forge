@@ -49,10 +49,14 @@ export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) 
     }
   }, [router]);
 
-  // Only fetch on mount if the server did not pre-populate the list.
+  // Only fetch on mount if the server did not pre-populate the list. Nothing
+  // here writes state synchronously — every setState in fetchProjects happens
+  // after an await — so the effect cannot cascade a second render.
   useEffect(() => {
     if (initialProjects !== undefined) return;
-    fetchProjects();
+    void (async () => {
+      await fetchProjects();
+    })();
   }, [fetchProjects, initialProjects]);
 
   const handleCreate = async (name: string): Promise<string | null> => {

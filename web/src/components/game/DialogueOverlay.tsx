@@ -30,24 +30,38 @@ export function DialogueOverlay() {
   const tree = (activeTreeId ? getTree(dialogueTrees, activeTreeId) : undefined) ?? null;
   const currentNode = tree?.nodes.find((n) => n.id === currentNodeId) ?? null;
 
-  // Typewriter effect
-  useEffect(() => {
+  // The starting text is derived from the current node and the store's
+  // typewriterComplete flag, so it is computed during render — the very first
+  // paint of a new line already shows the right thing instead of flashing the
+  // previous line's text for a frame.
+  const typewriterKey = `${currentNodeId ?? ''}|${typewriterComplete}`;
+  const [prevTypewriterKey, setPrevTypewriterKey] = useState<string | null>(null);
+  if (prevTypewriterKey !== typewriterKey) {
+    setPrevTypewriterKey(typewriterKey);
     if (!currentNode || currentNode.type !== 'text') {
       setTypewriterText('');
       setTypewriterDone(true);
+    } else if (typewriterComplete) {
+      setTypewriterText(currentNode.text);
+      setTypewriterDone(true);
+    } else {
+      setTypewriterText('');
+      setTypewriterDone(false);
+    }
+  }
+
+  // Typewriter effect — owns only the ticking, which is deferred by design.
+  useEffect(() => {
+    if (!currentNode || currentNode.type !== 'text') {
       return;
     }
 
     if (typewriterComplete) {
-      setTypewriterText(currentNode.text);
-      setTypewriterDone(true);
       return;
     }
 
     const fullText = currentNode.text;
     let charIndex = 0;
-    setTypewriterText('');
-    setTypewriterDone(false);
 
     const interval = setInterval(() => {
       charIndex++;

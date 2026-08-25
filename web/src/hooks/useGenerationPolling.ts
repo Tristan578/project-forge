@@ -52,33 +52,6 @@ export function useGenerationPolling() {
     });
   }, []);
 
-  useEffect(() => {
-    const activeJobs = Object.values(jobs).filter(
-      (j) => j.status === 'pending' || j.status === 'processing'
-    );
-
-    for (const job of activeJobs) {
-      // Skip if already polling
-      if (timersRef.current[job.id]) continue;
-
-      // Start polling for this job
-      startPolling(job.id, job.jobId, job.type);
-    }
-
-    // Cleanup timers for jobs that are no longer active
-    const activeJobIds = new Set(activeJobs.map((j) => j.id));
-    for (const id of Object.keys(timersRef.current)) {
-      if (!activeJobIds.has(id)) {
-        clearInterval(timersRef.current[id]);
-        delete timersRef.current[id];
-        delete pollCountsRef.current[id];
-      }
-    }
-    // NOTE: No cleanup return here — clearing all timers on deps change would stop
-    // in-flight polls every time updateJob() causes a re-render (PF-699 desync bug).
-    // Unmount cleanup is handled by the separate effect below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobs]);
 
   // Separate effect for unmount-only cleanup so that timer teardown does not
   // run on every jobs state change (which would desync the polling loop).
@@ -526,4 +499,42 @@ export function useGenerationPolling() {
       img.src = url;
     });
   }
+
+  // Declared AFTER `startPolling` and its helpers, not before them.
+  //
+  // Function declarations hoist, so calling `startPolling` from above it ran
+  // fine — but `react-hooks/immutability` refuses the shape, and it is right to:
+  // the effect closes over whatever the identifier holds, and a hoisted binding
+  // read before its declaration is one edit away (`function` -> `const`) from
+  // being `undefined` at call time, with nothing at the call site to say so.
+  // Moving the effect below the declarations is behaviour-identical: both of the
+  // other effects have `[]` deps and register cleanup only, so the mount order
+  // this changes is not observable.
+  useEffect(() => {
+    const activeJobs = Object.values(jobs).filter(
+      (j) => j.status === 'pending' || j.status === 'processing'
+    );
+
+    for (const job of activeJobs) {
+      // Skip if already polling
+      if (timersRef.current[job.id]) continue;
+
+      // Start polling for this job
+      startPolling(job.id, job.jobId, job.type);
+    }
+
+    // Cleanup timers for jobs that are no longer active
+    const activeJobIds = new Set(activeJobs.map((j) => j.id));
+    for (const id of Object.keys(timersRef.current)) {
+      if (!activeJobIds.has(id)) {
+        clearInterval(timersRef.current[id]);
+        delete timersRef.current[id];
+        delete pollCountsRef.current[id];
+      }
+    }
+    // NOTE: No cleanup return here — clearing all timers on deps change would stop
+    // in-flight polls every time updateJob() causes a re-render (PF-699 desync bug).
+    // Unmount cleanup is handled by the separate [] -deps effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Maximize, Minimize, Loader2, RotateCw } from 'lucide-react';
 import { ShareButtons } from './ShareButtons';
@@ -15,6 +15,18 @@ import {
 } from '@/lib/config/timeouts';
 
 const CANVAS_ID = 'play-canvas';
+
+// The document URL never changes for the lifetime of this component (a play
+// page is a full navigation), so there is nothing to subscribe to.
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+function getShareUrlSnapshot(): string {
+  return window.location.href;
+}
+function getServerShareUrlSnapshot(): string {
+  return '';
+}
 
 interface GameData {
   id: string;
@@ -42,11 +54,18 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // Only offered when the failure happened BEFORE init_engine ran. Re-entering
   // init_engine on an already-initialized Bevy app is not a supported restart.
   const [canRetry, setCanRetry] = useState(false);
-  // shareUrl must be captured after mount — window.location.href is undefined
+  // shareUrl must come from the browser — window.location.href is undefined
   // during SSR, so reading it at render time causes a hydration mismatch
   // (server: '', client: actual URL). An empty string also throws in addUtm's
   // new URL() call, so ShareButtons is only rendered once the URL is known.
-  const [shareUrl, setShareUrl] = useState('');
+  // useSyncExternalStore gives React both snapshots explicitly: the server one
+  // is used for SSR and hydration, the client one for every render after, with
+  // no state write and so no extra render pass.
+  const shareUrl = useSyncExternalStore(
+    subscribeToNothing,
+    getShareUrlSnapshot,
+    getServerShareUrlSnapshot
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const initStartedRef = useRef(false);
@@ -68,10 +87,6 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         settleTimerRef.current = null;
       }
     };
-  }, []);
-
-  useEffect(() => {
-    setShareUrl(window.location.href);
   }, []);
 
   // Fetch game data from the API

@@ -122,7 +122,9 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
   const hasInitialReport = initialReport !== null;
   useEffect(() => {
     if (!hasInitialReport) {
-      void fetchReport();
+      void (async () => {
+        await fetchReport();
+      })();
     }
   }, [hasInitialReport, fetchReport]);
 
