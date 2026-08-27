@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock posthog-js before importing the module under test
 const mockCapture = vi.fn();
@@ -28,6 +28,14 @@ describe('posthog analytics wrapper', () => {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(CONSENT_KEY);
     }
+  });
+
+  // Must be a hook, not an inline call at the end of each stubbing test: a
+  // failing assertion aborts the test body, so an inline unstub is skipped and
+  // the null/throwing `localStorage` leaks into every test that follows --
+  // which turns one real failure into a cascade that hides its own cause.
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   // ── Consent guard ──────────────────────────────────────────────────────────
@@ -80,6 +88,45 @@ describe('posthog analytics wrapper', () => {
     localStorage.setItem(CONSENT_KEY, 'true');
     const mod = await import('@/lib/analytics/posthog');
     expect(mod.hasConsented()).toBe(true);
+  });
+
+  // The crash this guard exists for (SPAWNFORGE-AI-V): Android Chrome WebViews
+  // configured with DOM storage disabled expose `window` normally but leave
+  // `localStorage` NULL, so the old `typeof window === 'undefined'` guard let
+  // execution straight through to `null.getItem` and threw. It reached users
+  // through `PostHogProvider`'s 'storage' listener, i.e. on the very click that
+  // accepts consent.
+  it('hasConsented returns false instead of throwing when localStorage is null', async () => {
+    vi.stubGlobal('localStorage', null);
+    const mod = await import('@/lib/analytics/posthog');
+    expect(() => mod.hasConsented()).not.toThrow();
+    expect(mod.hasConsented()).toBe(false);
+  });
+
+  // The sibling failure mode: storage is present but every access throws
+  // (Safari private browsing, strict tracking prevention). Same required
+  // outcome -- deny consent, never propagate.
+  it('hasConsented returns false instead of throwing when localStorage access throws', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem() {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      },
+    });
+    const mod = await import('@/lib/analytics/posthog');
+    expect(() => mod.hasConsented()).not.toThrow();
+    expect(mod.hasConsented()).toBe(false);
+  });
+
+  // Denying consent is not enough on its own -- the point of the guard is that
+  // the whole consent path stays inert rather than initialising analytics
+  // against a user who could never have accepted.
+  it('initPostHog stays a no-op when localStorage is null', async () => {
+    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubGlobal('localStorage', null);
+    const mod = await import('@/lib/analytics/posthog');
+    expect(() => mod.initPostHog()).not.toThrow();
+    expect(mockInit).not.toHaveBeenCalled();
   });
 
   // ── Existing guards (key + env) ────────────────────────────────────────────

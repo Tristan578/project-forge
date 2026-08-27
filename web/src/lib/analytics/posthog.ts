@@ -11,6 +11,7 @@
  */
 
 import posthog from 'posthog-js';
+import { safeGetItem } from '@/lib/storage/safeLocalStorage';
 
 /** Type-safe analytics event names for funnel tracking. */
 export enum AnalyticsEvent {
@@ -37,11 +38,11 @@ let initialized = false;
 
 /**
  * Returns true only when the user has explicitly accepted cookies.
- * Safe to call during SSR — returns false when window is unavailable.
+ * Safe to call during SSR or when localStorage is null/unavailable
+ * (e.g. Android WebView with DOM storage disabled) — returns false in all such cases.
  */
 export function hasConsented(): boolean {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
+  return safeGetItem(CONSENT_STORAGE_KEY) === 'true';
 }
 
 /**
