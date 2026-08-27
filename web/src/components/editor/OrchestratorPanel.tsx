@@ -28,7 +28,10 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import type { OrchestratorStatus } from '@/stores/slices/orchestratorSlice';
-import type { PlanStep, ApprovalGate, TokenEstimate, ExecutorName } from '@/lib/game-creation/types';
+import type { PlanStep, TokenEstimate, ExecutorName } from '@/lib/game-creation/types';
+import { ApprovalGateDialog } from './ApprovalGateDialog';
+import { useQuickStartOwnsGate } from './quickStartGateOwner';
+import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 
 // ---------------------------------------------------------------------------
 // Executor name -> user-friendly label
@@ -365,88 +368,6 @@ function TokenCostBar({ estimate }: { estimate: TokenEstimate }) {
 }
 
 // ---------------------------------------------------------------------------
-// ApprovalGateDialog
-// ---------------------------------------------------------------------------
-
-function ApprovalGateDialog({
-  gate,
-  onApprove,
-  onCancel,
-}: {
-  gate: ApprovalGate;
-  onApprove: () => void;
-  onCancel: () => void;
-}) {
-  const { displayData } = gate;
-
-  return (
-    <div className={cn('rounded-md p-4', WARNING_SURFACE_CLASSES)}>
-      <h4 className="mb-1 text-sm font-semibold text-[var(--sf-text)]">{gate.label}</h4>
-      <p className="mb-3 text-xs text-[var(--sf-text)]">{gate.description}</p>
-
-      {/* Scene summaries */}
-      {displayData.sceneSummaries && displayData.sceneSummaries.length > 0 && (
-        <div className="mb-3 space-y-1">
-          <h5 className="text-xs font-medium text-[var(--sf-text)]">Scenes</h5>
-          {displayData.sceneSummaries.map((scene) => (
-            <div key={scene.name} className="rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text)]">
-              {/* The name led on colour alone before the row itself moved to
-                  `--sf-text`; weight carries the hierarchy now instead. */}
-              <span className="font-medium">{scene.name}</span>
-              <span className="ml-2">({scene.entityCount} entities)</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Asset list */}
-      {displayData.assetList && displayData.assetList.length > 0 && (
-        <div className="mb-3 space-y-1">
-          <h5 className="text-xs font-medium text-[var(--sf-text)]">Assets to generate</h5>
-          {displayData.assetList.map((asset, i) => (
-            <div key={i} className="flex items-center justify-between rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text)]">
-              <span>{asset.description}</span>
-              <span className="font-mono">{asset.estimatedTokenCost} tokens</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Completion summary */}
-      {displayData.completionSummary && (
-        <div className="mb-3 rounded bg-[var(--sf-bg-elevated)] px-2 py-1.5 text-xs text-[var(--sf-text)]">
-          <span>{displayData.completionSummary.totalEntities} entities, </span>
-          <span>{displayData.completionSummary.totalScenes} scenes, </span>
-          <span>{displayData.completionSummary.totalScripts} scripts</span>
-          {displayData.completionSummary.warnings.length > 0 && (
-            <div className="mt-1 border-l-2 border-[var(--sf-warning)] pl-2 text-[var(--sf-text)]">
-              {displayData.completionSummary.warnings.map((w, i) => (
-                <div key={i}>{w}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex gap-2">
-        <button
-          onClick={onApprove}
-          className="flex-1 rounded bg-[var(--sf-accent-hover)] px-3 py-1.5 text-xs font-medium text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)]"
-        >
-          Approve
-        </button>
-        <button
-          onClick={onCancel}
-          className="flex-1 rounded bg-[var(--sf-bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-overlay)]"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // OrchestratorPanel
 // ---------------------------------------------------------------------------
 
@@ -462,6 +383,12 @@ export function OrchestratorPanel() {
   const cancelPipeline = useEditorStore((s) => s.cancelPipeline);
   const runPipelineFromPlan = useEditorStore((s) => s.runPipelineFromPlan);
   const resetOrchestrator = useEditorStore((s) => s.resetOrchestrator);
+
+  // The quick-start dialog is modal and covers this panel, so while it is open
+  // it owns the gate; rendering a second copy here gave the same gate two
+  // Approve buttons, the second landing on an already-answered gate.
+  const quickStartOwnsGate = useQuickStartOwnsGate();
+  const { mode } = useResponsiveLayout();
 
   const handleApprove = useCallback(() => {
     resolveGate('approved');
@@ -490,7 +417,16 @@ export function OrchestratorPanel() {
         <div>
           <Sparkles aria-hidden="true" className="mx-auto mb-2 h-8 w-8 text-[var(--sf-text-secondary)]" />
           <p>No game creation in progress</p>
-          <p className="mt-1 text-xs">Use chat or QuickStart to create a game</p>
+          {/* PF-1215: name the control that actually exists. "QuickStart" was
+              not a label on anything in the editor — and on compact widths that
+              control is the icon-only toolbar button, whose only "Make me a
+              game" is its accessible name, so quoting the label there would
+              point at text nobody can see. */}
+          <p className="mt-1 text-xs">
+            {mode === 'compact'
+              ? 'Tap the sparkle button in the toolbar, or describe a game in AI chat'
+              : 'Click \u201CMake me a game\u201D in the toolbar, or describe one in AI chat'}
+          </p>
         </div>
       </div>
     );
@@ -557,7 +493,7 @@ export function OrchestratorPanel() {
         {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
 
         {/* Approval gate */}
-        {pendingGate && (
+        {pendingGate && !quickStartOwnsGate && (
           <ApprovalGateDialog
             gate={pendingGate}
             onApprove={handleApprove}

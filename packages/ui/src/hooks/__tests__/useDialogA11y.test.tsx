@@ -124,4 +124,33 @@ describe('useDialogA11y', () => {
     const dialog = screen.getByTestId('dialog');
     expect(document.activeElement).toBe(dialog);
   });
+
+  // PF-1215 round 2 (4/5): the initial-focus effect is scheduled once, at
+  // open time, via requestAnimationFrame -- `isOpen` staying true across a
+  // content change never re-schedules it. If some other, more specific
+  // focus decision (a gate's autofocus, a wizard step's own effect) wins
+  // the race and moves focus inside the dialog BEFORE that deferred
+  // callback actually runs, the callback must not steal focus back onto
+  // whatever now happens to be first in the DOM.
+  it('does not steal focus that another effect already set inside the dialog before the deferred callback runs', () => {
+    vi.useFakeTimers();
+    render(<TestDialog isOpen onClose={vi.fn()} />);
+
+    // Simulate a second, more specific effect winning the race and
+    // focusing something other than the first focusable element BEFORE
+    // the hook's own deferred rAF callback fires.
+    const second = screen.getByTestId('btn-second');
+    act(() => {
+      second.focus();
+    });
+    expect(document.activeElement).toBe(second);
+
+    // Now let the hook's originally-scheduled callback actually run.
+    act(() => {
+      vi.runAllTimers();
+    });
+    vi.useRealTimers();
+
+    expect(document.activeElement).toBe(second);
+  });
 });

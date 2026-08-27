@@ -101,6 +101,11 @@ paths:
 
 ### Editor Components (`components/editor/`)
 One file per panel/inspector — `ls web/src/components/editor/` for the current set.
+- `ApprovalGateDialog.tsx` — the inline approval prompt for one pipeline gate (Approve/Cancel + a `max-h-[50vh] overflow-y-auto` scroll container around scene summaries/asset lists/completion warnings, `data-testid="approval-gate-scroll"`, so a large plan can't push the buttons off the bottom). Rendered by both `OrchestratorPanel` and `QuickStartDialog` (`components/onboarding/`) against the same `pendingGate` so there is one copy of the markup, not two (PF-1215)
+- `quickStartGateOwner.ts` — module-level `useSyncExternalStore` arbiter deciding which of `OrchestratorPanel` / `QuickStartDialog` renders the shared `ApprovalGateDialog` when both are mounted at once. A counted (not boolean) claim/release so two overlapping claimants can't clobber each other — a boolean would flip to "unclaimed" the instant either one released, even while the other still held the gate. Deliberately not a Zustand slice (pure view arbitration) or React context (the panel is mounted by the Dockview panel registry, outside the dialog's tree); deliberately not under `lib/game-creation/` because that subtree is reachable from `app/api/game/decompose/route.ts` and `useSyncExternalStore` there fails `next build` (PF-1215 — see `rules/gotchas.md` → the RSC-boundary entry)
+
+### Onboarding Components (`components/onboarding/`)
+- `QuickStartDialog.tsx` — the "Make me a game" modal entry point into the game-creation pipeline (desktop CTA + `MobileToolbar`'s `Sparkles` icon-only trigger on compact widths). Opens `OrchestratorPanel` before starting a run and claims `quickStartGateOwner` so the two don't both render `ApprovalGateDialog` for the same gate (PF-1215)
 
 ### Layout Components (`components/layout/`)
 - `ViewportLock.tsx` — `h-dvh overflow-hidden` wrapper applied by `app/editor/layout.tsx` and `app/dev/layout.tsx`. The editor's full-viewport scroll lock lives here, scoped to those route segments; it must NEVER move back to a global `html`/`body` rule (PF-1017 — see `rules/gotchas-web.md` → UI & Frontend)

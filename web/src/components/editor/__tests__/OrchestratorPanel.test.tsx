@@ -7,11 +7,25 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@/test/utils/componentTestUtils';
 import { OrchestratorPanel } from '../OrchestratorPanel';
 import { useEditorStore } from '@/stores/editorStore';
+import {
+  claimQuickStartGate,
+  _resetQuickStartGateOwner,
+} from '../quickStartGateOwner';
+import { getLayoutConfig, useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import type { OrchestratorPlan } from '@/lib/game-creation/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
+
+// The real hook reads window/visualViewport; the panel only branches on `mode`,
+// so drive it through the module's own `getLayoutConfig` rather than a literal.
+vi.mock('@/hooks/useResponsiveLayout', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/hooks/useResponsiveLayout')
+  >('@/hooks/useResponsiveLayout');
+  return { ...actual, useResponsiveLayout: vi.fn(() => actual.getLayoutConfig(1440)) };
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -111,6 +125,8 @@ describe('OrchestratorPanel', () => {
 
   afterEach(() => {
     cleanup();
+    _resetQuickStartGateOwner();
+    vi.mocked(useResponsiveLayout).mockReturnValue(getLayoutConfig(1440));
   });
 
   it('renders idle state with placeholder message', () => {
@@ -118,6 +134,11 @@ describe('OrchestratorPanel', () => {
     render(<OrchestratorPanel />);
 
     expect(screen.getByText('No game creation in progress')).toBeTruthy();
+    // The idle copy must name a control that exists in the editor (PF-1215) —
+    // it used to say "QuickStart", which was not a label on anything.
+    expect(
+      screen.getByText(/Click \u201cMake me a game\u201d in the toolbar, or describe one in AI chat/)
+    ).toBeTruthy();
   });
 
   it('renders game title when plan is set', () => {
@@ -143,6 +164,41 @@ describe('OrchestratorPanel', () => {
     expect(screen.getByText('Creating scene')).toBeTruthy();
     expect(screen.getByText('Setting up entities')).toBeTruthy();
     expect(screen.getByText('Polishing game')).toBeTruthy();
+  });
+
+  it('renders the failed icon for a step whose status is failed', () => {
+    mockStore({
+      orchestratorStatus: 'failed',
+      currentPlan: MOCK_PLAN,
+      orchestratorError: 'Something broke',
+      stepStatuses: { 'step-1': 'completed', 'step-2': 'failed', 'step-3': 'pending' },
+    });
+    const { container } = render(<OrchestratorPanel />);
+
+    // lucide-react's stable per-icon class, not a snapshot of the raw SVG --
+    // StepStatusIcon has five branches (completed/running/failed/skipped/
+    // pending-default) and only this one renders XCircle in the destructive
+    // colour. The header's StatusBadge ALSO renders an XCircle when the run
+    // overall failed (h-3 w-3, no colour class of its own) -- scope past it to
+    // the h-4 w-4 icon StepStatusIcon renders for the step itself.
+    //
+    // The colour is the `--sf-destructive` TOKEN, not a `red-*` Tailwind shade:
+    // PF-1229 (#9388) retokenised this panel so a theme switch recolours it,
+    // and asserting the old literal here would pin the panel back to the
+    // dark-only palette it was moved off.
+    const stepIcons = Array.from(container.querySelectorAll('.lucide-circle-x'));
+    const failedStepIcon = stepIcons.find((el) => el.getAttribute('class')?.includes('h-4 w-4'));
+    expect(failedStepIcon).toBeTruthy();
+    expect(failedStepIcon?.getAttribute('class')).toContain('text-[var(--sf-destructive)]');
+    // The state is also in the accessibility tree -- the row's only other
+    // content is the step label, which reads identically in every state.
+    expect(failedStepIcon?.getAttribute('aria-label')).toBe('Failed');
+    // Sanity: the completed step next to it still gets its own distinct icon,
+    // proving this isn't just "any icon happens to be red-ish."
+    const completedStepIcon = Array.from(container.querySelectorAll('.lucide-circle-check')).find(
+      (el) => el.getAttribute('class')?.includes('h-4 w-4'),
+    );
+    expect(completedStepIcon).toBeTruthy();
   });
 
   it('shows optional badge for optional steps', () => {
@@ -715,6 +771,36 @@ describe('OrchestratorPanel', () => {
 
       expect(screen.queryByLabelText('Game creation warnings')).toBeNull();
     });
+  });
+
+  it('names the icon-only trigger on compact widths, where the label is invisible', () => {
+    vi.mocked(useResponsiveLayout).mockReturnValue(getLayoutConfig(375));
+    mockStore({ orchestratorStatus: 'idle', currentPlan: null });
+    render(<OrchestratorPanel />);
+
+    expect(
+      screen.getByText(/Tap the sparkle button in the toolbar, or describe a game in AI chat/)
+    ).toBeTruthy();
+    expect(screen.queryByText(/Click “Make me a game”/)).toBeNull();
+  });
+
+  it('yields the gate to the quick-start dialog so it is not asked twice', () => {
+    mockStore({
+      orchestratorStatus: 'awaiting_approval',
+      currentPlan: MOCK_PLAN,
+      pendingGate: MOCK_GATE,
+      stepStatuses: {},
+    });
+
+    // The dialog is modal and covers this panel, so while it is open it owns
+    // the gate UI; two copies of the same gate is two Approve buttons.
+    const release = claimQuickStartGate();
+    const { rerender } = render(<OrchestratorPanel />);
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+
+    release();
+    rerender(<OrchestratorPanel />);
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy();
   });
 
   /**

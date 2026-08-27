@@ -5,3 +5,4 @@ export { ContextualTipToast } from './ContextualTipToast';
 export { WelcomeWizard } from './WelcomeWizard';
 export { WhatsNewModal } from './WhatsNewModal';
 export { OnboardingWizard } from './OnboardingWizard';
+export { QuickStartDialog } from './QuickStartDialog';

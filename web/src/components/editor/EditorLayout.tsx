@@ -14,6 +14,7 @@ import { PanelsMenu } from './PanelsMenu';
 import { TokenBalance } from '../settings/TokenBalance';
 import { DrawerPanel } from './DrawerPanel';
 import { MobileToolbar } from './MobileToolbar';
+import { Button } from '@spawnforge/ui';
 
 // ThemeAmbient: SSR must be disabled — reads data-sf-theme from DOM at runtime
 const ThemeAmbient = dynamic(
@@ -34,6 +35,7 @@ const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => (
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
 const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
 const OnboardingWizard = lazy(() => import('../onboarding/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })));
+const QuickStartDialog = lazy(() => import('../onboarding/QuickStartDialog').then(m => ({ default: m.QuickStartDialog })));
 
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
@@ -51,7 +53,8 @@ import { useCelebrations } from '@/hooks/useCelebrations';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
+import { useEditorStore, getCommandDispatcher, setCommandDispatcher } from '@/stores/editorStore';
+import type { CommandResponse } from '@/hooks/useEngine';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useUserStore } from '@/stores/userStore';
@@ -347,7 +350,7 @@ const ONBOARDING_COMPLETED_KEY = 'forge-onboarding-completed';
  * Users with any legacy key (forge-quickstart-completed, forge-welcomed) are treated as
  * returning users and never shown the new wizard.
  */
-function OnboardingGate() {
+function OnboardingGate({ onRequestQuickStart }: { onRequestQuickStart: () => void }) {
   const onboardingCompleted = useOnboardingStore((s) => s.onboardingCompleted);
   const isNewUser = useOnboardingStore((s) => s.isNewUser);
   const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
@@ -390,7 +393,7 @@ function OnboardingGate() {
 
   // True first-time users (isNewUser=true in persisted Zustand store) → wizard
   if (isNewUser) {
-    return <OnboardingWizard onComplete={handleWizardComplete} />;
+    return <OnboardingWizard onComplete={handleWizardComplete} onStartAi={onRequestQuickStart} />;
   }
 
   // Returning users who don't have any legacy key (cleared storage after the wizard
@@ -432,6 +435,13 @@ export function EditorLayout() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // The one visible entry into the game-creation pipeline. Before PF-1215 the
+  // only way to reach `startDecomposition` was to type something the chat
+  // intent classifier happened to recognise, so the product's headline
+  // capability had no control anywhere in the editor.
+  const [quickStartOpen, setQuickStartOpen] = useState(false);
+  const openQuickStart = useCallback(() => setQuickStartOpen(true), []);
+  const closeQuickStart = useCallback(() => setQuickStartOpen(false), []);
 
   // Close drawers when switching away from compact mode (prev-value pattern)
   const [prevMode, setPrevMode] = useState(layout.mode);
@@ -560,6 +570,38 @@ export function EditorLayout() {
         }
         return false;
       };
+      // Install a caller-supplied command dispatcher.
+      //
+      // WHY THIS EXISTS: `runPipelineFromPlan` (orchestratorSlice) refuses with
+      // 'Engine not loaded' and returns before a single step runs when
+      // `getCommandDispatcher()` is null. The strict journey gate builds no WASM
+      // and launches Chromium with `--disable-gpu`, which hangs `init_engine` —
+      // so a dispatcher can never be installed there by the real engine, and the
+      // whole generated-game pipeline would be untestable in that gate. This lets
+      // it install a recording stand-in and drive the REAL pipeline.
+      //
+      // The supplied function is handed to the production `setCommandDispatcher`,
+      // so it is wrapped in the same `tracked` wrapper every engine command goes
+      // through (payload-bounds guard, analytics, rejection reporting) and wired
+      // into all 20 slices — the gate exercises the real dispatch path, not a
+      // parallel one.
+      //
+      // SECURITY: same build-time gate as `__EDITOR_STORE` above — never attached
+      // in a normal production build, and the flag cannot be flipped at runtime.
+      // `__EDITOR_STORE` already lets a caller invoke every store action, and
+      // those dispatch through whatever dispatcher is currently installed — so
+      // this adds no new way to ISSUE a command. What it does add is the
+      // ability to REPLACE that dispatcher: once called, every command any
+      // slice dispatches (not just ones the caller triggers) routes through
+      // the supplied function, so a caller could intercept or rewrite commands
+      // issued by the rest of the app. That capability is scoped by the same
+      // build-time gate as everything else here.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__FORGE_SET_DISPATCH = (
+        dispatch: (cmd: string, payload: unknown) => CommandResponse | void,
+      ) => {
+        setCommandDispatcher(dispatch);
+      };
     }
   }, []);
 
@@ -618,6 +660,7 @@ export function EditorLayout() {
         <MobileToolbar
           onToggleLeft={() => setLeftDrawerOpen((o) => !o)}
           onToggleRight={() => setRightDrawerOpen((o) => !o)}
+          onQuickStart={openQuickStart}
         />
 
         {/* Drawers */}
@@ -639,7 +682,8 @@ export function EditorLayout() {
         <OnboardingChecklist />
         <TokenDepletedModal />
         <Suspense fallback={null}>
-          <OnboardingGate />
+          <OnboardingGate onRequestQuickStart={openQuickStart} />
+          <QuickStartDialog open={quickStartOpen} onClose={closeQuickStart} />
           <ShaderEditorPanel />
           <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
           <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
@@ -667,6 +711,10 @@ export function EditorLayout() {
           <div className="h-3 w-px bg-zinc-700" />
           <SceneNameDisplay sceneName={sceneName} />
           <SceneToolbar />
+          {/* PF-1215: the only visible entry into the game-creation pipeline. */}
+          <Button size="sm" data-testid="quick-start-trigger" onClick={openQuickStart}>
+            Make me a game
+          </Button>
         </div>
         <div className="flex items-center gap-2">
           <PlayControls />
@@ -702,7 +750,8 @@ export function EditorLayout() {
       <OnboardingChecklist />
       <TokenDepletedModal />
       <Suspense fallback={null}>
-        <OnboardingGate />
+        <OnboardingGate onRequestQuickStart={openQuickStart} />
+        <QuickStartDialog open={quickStartOpen} onClose={closeQuickStart} />
         <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />

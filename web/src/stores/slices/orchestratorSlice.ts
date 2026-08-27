@@ -23,6 +23,7 @@ import { runPipeline } from '@/lib/game-creation/pipelineRunner';
 import type { PipelineCallbacks } from '@/lib/game-creation/pipelineRunner';
 import { EXECUTOR_REGISTRY } from '@/lib/game-creation/executors';
 import { collectStepWarnings } from '@/lib/game-creation/stepWarnings';
+import { QUICK_START_AUTO_GATES } from '@/lib/game-creation/quickStart';
 import { captureException } from '@/lib/monitoring/sentry-client';
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,35 @@ export type OrchestratorStatus =
   | 'failed'
   | 'cancelled';
 
+/**
+ * Statuses in which NO pipeline run holds the slice, so a new run may start.
+ *
+ * The complement is what `isOrchestratorRunLive` reports. Kept as data (not an
+ * inline disjunction) because three call sites have to agree: the slice guard
+ * below, the quick-start dialog's reopen behaviour, and `EditorLayout`'s
+ * trigger.
+ */
+const RESTARTABLE_STATUSES: readonly OrchestratorStatus[] = [
+  'idle',
+  'completed',
+  'failed',
+  'cancelled',
+];
+
+/**
+ * Is a pipeline run currently holding the orchestrator slice?
+ *
+ * Starting a second run over a live one is destructive, and silently so:
+ * `startDecomposition`'s opening `set()` clears `currentPlan`, `stepStatuses`,
+ * `pendingGate` and `autoApproveGateIds`, and replaces `_abortController` — so
+ * the first run keeps executing against a store that no longer describes it,
+ * its gate resolver is stranded, and `cancelPipeline` can only ever reach the
+ * second controller.
+ */
+export function isOrchestratorRunLive(status: OrchestratorStatus): boolean {
+  return !RESTARTABLE_STATUSES.includes(status);
+}
+
 export interface OrchestratorSlice {
   // Pipeline state
   orchestratorStatus: OrchestratorStatus;
@@ -79,8 +109,30 @@ export interface OrchestratorSlice {
   /** Non-fatal notes from steps that succeeded partially. Accumulates per run. */
   orchestratorWarnings: OrchestratorWarning[];
 
+  /**
+   * Approval gates this run answers with 'approved' without asking the user.
+   *
+   * Set once, in `startDecomposition`'s opening `set()`, so a run started from
+   * chat can never inherit the previous quick-start run's list. Empty for every
+   * entry point except `startQuickStart`.
+   */
+  autoApproveGateIds: readonly string[];
+
   // Actions
-  startDecomposition: (prompt: string, projectType: ProjectType) => Promise<void>;
+  startDecomposition: (
+    prompt: string,
+    projectType: ProjectType,
+    opts?: { autoApproveGateIds?: readonly string[] },
+  ) => Promise<void>;
+  /**
+   * Quick-start entry point: decompose, then run, with no "Start Building" click.
+   *
+   * Resolves `false` — having changed nothing at all — when a run is already
+   * live (`isOrchestratorRunLive`). `true` means this call owned the run and
+   * drove it to completion; it is NOT a claim the run succeeded, which callers
+   * read off `orchestratorStatus` / `orchestratorError` as before.
+   */
+  startQuickStart: (prompt: string, projectType: ProjectType) => Promise<boolean>;
   setPlan: (plan: OrchestratorPlan) => void;
   setOrchestratorStatus: (status: OrchestratorStatus) => void;
   updateStepStatus: (stepId: string, status: PlanStep['status']) => void;
@@ -169,12 +221,13 @@ export const createOrchestratorSlice: StateCreator<
   reservationId: null,
   orchestratorError: null,
   orchestratorWarnings: [],
+  autoApproveGateIds: [],
 
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
 
-  startDecomposition: async (prompt, projectType) => {
+  startDecomposition: async (prompt, projectType, opts) => {
     // Create abort controller so cancelPipeline can stop in-flight fetches
     _abortController = new AbortController();
 
@@ -187,6 +240,10 @@ export const createOrchestratorSlice: StateCreator<
       pendingGate: null,
       tokenEstimate: null,
       reservationId: null,
+      // The ONLY write point. Every run passes through here, so a run that does
+      // not opt in explicitly clears whatever the previous run left behind —
+      // a chat-initiated run after a quick-start must still ask for the plan.
+      autoApproveGateIds: opts?.autoApproveGateIds ?? [],
     });
 
     try {
@@ -280,6 +337,31 @@ export const createOrchestratorSlice: StateCreator<
     }
   },
 
+  startQuickStart: async (prompt, projectType) => {
+    // Refuse rather than clobber. `startDecomposition` is unconditionally
+    // destructive on entry, so a second "Build it" over a live run orphans the
+    // first one — see `isOrchestratorRunLive`. The dialog keeps its own guard
+    // too; this one is what makes the invariant hold for every caller.
+    if (isOrchestratorRunLive(get().orchestratorStatus)) return false;
+
+    // The quick-start entry point: decompose, then run, with no "Start Building"
+    // click in between. `gate_plan` exists so a chat user can review the plan
+    // before spending tokens — a user who clicked "Make me a game" and typed a
+    // prompt has already said yes to exactly that, and re-asking twice (once for
+    // the plan, once at the gate) is the break this closes.
+    await get().startDecomposition(prompt, projectType, {
+      autoApproveGateIds: QUICK_START_AUTO_GATES,
+    });
+
+    // Read status fresh: `startDecomposition` swallows its own errors into
+    // 'failed'/'cancelled', so the only way to know it produced a plan is to
+    // look at the state it left behind.
+    if (get().orchestratorStatus !== 'awaiting_approval') return true;
+
+    await get().runPipelineFromPlan();
+    return true;
+  },
+
   setPlan: (plan) => {
     const stepStatuses = deriveStepStatuses(plan);
     set({
@@ -337,6 +419,9 @@ export const createOrchestratorSlice: StateCreator<
     set({
       orchestratorStatus: 'cancelled',
       pendingGate: null,
+      // A cancelled run must not leave the next one auto-approving: the next
+      // run may be chat-initiated and never passes through an opt-in.
+      autoApproveGateIds: [],
     });
   },
 
@@ -370,6 +455,7 @@ export const createOrchestratorSlice: StateCreator<
       reservationId: null,
       orchestratorError: null,
       orchestratorWarnings: [],
+      autoApproveGateIds: [],
     });
   },
 
@@ -496,8 +582,21 @@ export const createOrchestratorSlice: StateCreator<
         // promise: the runner reads that as a decision, cancels the abandoned
         // plan, skips its remaining steps and returns normally
         // (PF-1229 finding #1).
+        //
+        // This check comes BEFORE the auto-approve one below: a superseded run
+        // must be cancelled whether or not its gate was pre-approved, and
+        // answering 'approved' here would let a dead run keep executing steps
+        // against the store that replaced it.
         if (!isCurrentRun()) {
           return Promise.resolve<'approved' | 'rejected'>('rejected');
+        }
+
+        // Auto-approved gates never become a `pendingGate`, so the status stays
+        // 'executing' and no UI is asked to render a confirmation the user has
+        // already given. Resolving synchronously also means no `_gateResolver`
+        // is left dangling for `cancelPipeline` to reject.
+        if (get().autoApproveGateIds.includes(gate.id)) {
+          return Promise.resolve<'approved' | 'rejected'>('approved');
         }
 
         return new Promise<'approved' | 'rejected'>((resolve) => {

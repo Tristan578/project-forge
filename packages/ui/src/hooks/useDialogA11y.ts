@@ -48,6 +48,17 @@ export function useDialogA11y({
       // Defer focus so the dialog is fully painted
       const frame = requestAnimationFrame(() => {
         if (!dialogRef.current) return;
+        // Another effect inside the dialog's own subtree (e.g. a
+        // gate/step-specific autofocus) can run and set focus BEFORE this
+        // deferred callback actually fires -- `isOpen` staying true across a
+        // content change never re-schedules this effect, so a callback
+        // scheduled at open time can still be pending when the dialog's
+        // content has since changed shape. Re-querying and forcing focus
+        // onto whatever is now first in the DOM would silently steal focus
+        // back from that more specific, intentional choice (PF-1215 round
+        // 2, 4/5: this previously only got papered over in a test helper
+        // that waited out the race rather than the hook respecting it).
+        if (dialogRef.current.contains(document.activeElement)) return;
         const focusable = dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
         if (focusable.length > 0) {
           focusable[0].focus();
