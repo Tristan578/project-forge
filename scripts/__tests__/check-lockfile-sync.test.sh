@@ -650,8 +650,9 @@ if [ -f "$CI_YML" ]; then
   # legitimately names $LOCKFILE_REGEN_CMD ("injects a stub ..."). Strip full-comment
   # lines first so the check keys on real YAML/shell, not documentation; an attacker's
   # `env:` wiring is a non-comment line and is still caught. ls_block is one job block
-  # (well under the pipe buffer), so the inner grep|grep pipe carries no SIGPIPE risk.
-  if grep -v '^[[:space:]]*#' <<<"$ls_block" | grep -q 'LOCKFILE_REGEN_CMD'; then
+  # Capture before testing so `grep -q` cannot SIGPIPE the comment stripper.
+  ls_executable="$(grep -v '^[[:space:]]*#' <<<"$ls_block" || true)"
+  if grep -q 'LOCKFILE_REGEN_CMD' <<<"$ls_executable"; then
     fail "lockfile-sync job exposes the LOCKFILE_REGEN_CMD test seam in an executable line — gate can be no-op'd into a false pass"
   else
     pass "lockfile-sync job does not wire the LOCKFILE_REGEN_CMD test seam (gate cannot be bypassed via job env)"
@@ -662,7 +663,7 @@ if [ -f "$CI_YML" ]; then
   # straight through to the stage-2 diff — restoring the exact blind spot that
   # let #9070 ship green. Same comment-strip rationale as above (the prose in
   # this suite and the job's doc comment legitimately name the variable).
-  if grep -v '^[[:space:]]*#' <<<"$ls_block" | grep -q 'LOCKFILE_CONSISTENCY_CMD'; then
+  if grep -q 'LOCKFILE_CONSISTENCY_CMD' <<<"$ls_executable"; then
     fail "lockfile-sync job exposes the LOCKFILE_CONSISTENCY_CMD test seam in an executable line — the consistency stage can be no-op'd into a false pass"
   else
     pass "lockfile-sync job does not wire the LOCKFILE_CONSISTENCY_CMD test seam (consistency stage cannot be bypassed via job env)"

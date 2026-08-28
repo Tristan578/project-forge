@@ -135,11 +135,24 @@ if [ "$rc" = "2" ]; then pass "next absent from tree → exit 2 (mis-pointed pat
 #     poisoning the pipeline exit if grep sees a missing path).
 seam_dirs=("$REPO_ROOT/.github/workflows")
 [ -d "$REPO_ROOT/.github/actions" ] && seam_dirs+=("$REPO_ROOT/.github/actions")
-if grep -rh "NATIVE_BINDINGS_" "${seam_dirs[@]}" 2>/dev/null \
-    | grep -v '^[[:space:]]*#' | grep -q "NATIVE_BINDINGS_"; then
+native_seam_hits="$(grep -rh "NATIVE_BINDINGS_" "${seam_dirs[@]}" 2>/dev/null || true)"
+native_seam_executable="$(grep -v '^[[:space:]]*#' <<<"$native_seam_hits" || true)"
+if grep -q "NATIVE_BINDINGS_" <<<"$native_seam_executable"; then
   fail "a workflow or composite action references NATIVE_BINDINGS_* in an executable line — the test-only seam must never be wired in CI"
 else
   pass "no workflow or composite action wires the NATIVE_BINDINGS_* test seams in an executable line"
+fi
+
+# Regression for PF-1005: this exceeds Linux's typical 64 KiB pipe buffer.
+# Capture-then-test must keep the executable wiring visible; a comment-strip |
+# grep -q pipeline can SIGPIPE its producer and invert this verdict under
+# `set -o pipefail`.
+large_seam_hits="$(awk 'BEGIN { for (i=0; i<5000; i++) print "env: NATIVE_BINDINGS_PLATFORM=linux" }')"
+large_seam_executable="$(grep -v '^[[:space:]]*#' <<<"$large_seam_hits" || true)"
+if [ "${#large_seam_executable}" -gt 65536 ] && grep -q 'NATIVE_BINDINGS_' <<<"$large_seam_executable"; then
+  pass "over-64KiB executable seam input remains wired under pipefail"
+else
+  fail "over-64KiB executable seam input was lost or misclassified"
 fi
 
 # 12. Default NM_DIR (no-arg invocation — the exact form the CI steps use):
@@ -193,7 +206,8 @@ if [ -f "$CI_YML" ]; then
   #     cannot cancel out in a whole-file count.
   for job in build-nextjs test-e2e-ui test-e2e-journey test-e2e-engine-smoke; do
     job_block="$(awk -v j="  ${job}:" '$0==j{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && $0!=j{exit}' <<<"$ci")"
-    if grep -v '^[[:space:]]*#' <<<"$job_block" | grep -qF 'bash scripts/check-native-bindings.sh'; then
+    job_executable="$(grep -v '^[[:space:]]*#' <<<"$job_block" || true)"
+    if grep -qF 'bash scripts/check-native-bindings.sh' <<<"$job_executable"; then
       pass "ci.yml job ${job} invokes the native-bindings gate"
     else
       fail "ci.yml job ${job} does not invoke scripts/check-native-bindings.sh — gate unwired"
@@ -237,7 +251,8 @@ if [ -f "$CI_YML" ]; then
   #     the non-zero exit and pass the job on a dropped binding. Windowed to
   #     the invocation lines so legitimate continue-on-error elsewhere in
   #     ci.yml does not false-positive.
-  if grep -v '^[[:space:]]*#' <<<"$ci" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' | grep -q 'continue-on-error'; then
+  native_windows="$(grep -v '^[[:space:]]*#' <<<"$ci" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' || true)"
+  if grep -q 'continue-on-error' <<<"$native_windows"; then
     fail "a ci.yml native-bindings gate step has continue-on-error — gate exit code would be ignored"
   else
     pass "no continue-on-error shadows any native-bindings gate invocation"

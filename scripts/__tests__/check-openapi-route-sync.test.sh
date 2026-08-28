@@ -412,7 +412,8 @@ if [ -f "$CI_YML" ]; then
   # introduction time. Strip full-comment lines first (the gate's doc comment in
   # ci.yml legitimately names the seams); an attacker's `env:` wiring is a
   # non-comment line and is still caught.
-  if grep -v '^[[:space:]]*#' <<<"$oa_block" | grep -qE 'OPENAPI_SPEC|OPENAPI_ALLOWLIST|OPENAPI_API_DIR'; then
+  oa_executable="$(grep -v '^[[:space:]]*#' <<<"$oa_block" || true)"
+  if grep -qE 'OPENAPI_SPEC|OPENAPI_ALLOWLIST|OPENAPI_API_DIR' <<<"$oa_executable"; then
     fail "openapi-route-sync job exposes an OPENAPI_* test seam in an executable line — gate can be no-op'd into a false pass"
   else
     pass "openapi-route-sync job does not wire the OPENAPI_* test seams (gate cannot be bypassed via job env)"
