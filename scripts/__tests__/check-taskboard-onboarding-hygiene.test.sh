@@ -266,11 +266,18 @@ rm -rf "$root"
 # =============================================================================
 echo "== structural wiring: tripwire is a required, self-defending CI gate =="
 if [ -f "$CI_YML" ]; then
-  if grep -q "check-taskboard-onboarding-hygiene.sh" "$CI_YML"; then
+  onboarding_job_block="$(awk '/^  taskboard-onboarding-guard:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' "$CI_YML")"
+  if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-taskboard-onboarding-hygiene\.sh[[:space:]]*$' <<<"$onboarding_job_block"; then
     ok "ci.yml invokes the tripwire"
   else
     bad "ci.yml does not invoke check-taskboard-onboarding-hygiene.sh"
   fi
+  onboarding_neutered="$(sed -E 's|^([[:space:]]*run:)[[:space:]]+bash scripts/check-taskboard-onboarding-hygiene\.sh[[:space:]]*$|\1 true|' "$CI_YML")"
+  onboarding_neutered_block="$(awk '/^  taskboard-onboarding-guard:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' <<<"$onboarding_neutered")"
+  if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-taskboard-onboarding-hygiene\.sh[[:space:]]*$' <<<"$onboarding_neutered_block"; then bad "a neutered run step still looks wired"; else ok "run: true mutation is detected despite prose mentions"; fi
+  onboarding_without_prose="$(sed '/^[[:space:]]*#.*check-taskboard-onboarding-hygiene\.sh/d' "$CI_YML")"
+  onboarding_without_prose_block="$(awk '/^  taskboard-onboarding-guard:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' <<<"$onboarding_without_prose")"
+  if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-taskboard-onboarding-hygiene\.sh[[:space:]]*$' <<<"$onboarding_without_prose_block"; then ok "deleting prose leaves the real invocation wired"; else bad "prose deletion hid the real invocation"; fi
   if grep -Eq "taskboard-onboarding-guard" "$CI_YML"; then
     ok "ci.yml defines the taskboard-onboarding-guard job"
   else
