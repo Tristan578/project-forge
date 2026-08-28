@@ -3,7 +3,11 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { reserveTokenBudget } from '@/lib/tokens/budget';
+import {
+  recordStepUsage,
+  releaseUnusedBudget,
+  reserveTokenBudget,
+} from '@/lib/tokens/budget';
 
 vi.mock('@/lib/api/middleware');
 vi.mock('@/lib/tokens/budget');
@@ -217,6 +221,20 @@ describe('PF-675: Negative cases for /api/game/pipeline', () => {
   });
 
   describe('release action — validation', () => {
+    it('returns 400 for invalid UUID in reservationId without releasing', async () => {
+      const { POST } = await import('./route');
+      const res = await POST(makeReq(JSON.stringify({
+        action: 'release',
+        reservationId: 'not-a-uuid',
+        actualUsed: 50,
+      })));
+      const body = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(body.error).toBe('validation_error');
+      expect(releaseUnusedBudget).not.toHaveBeenCalled();
+    });
+
     it('returns 400 for missing reservationId', async () => {
       const { POST } = await import('./route');
       const res = await POST(makeReq(JSON.stringify({
@@ -247,6 +265,74 @@ describe('PF-675: Negative cases for /api/game/pipeline', () => {
       })));
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('happy-path action wiring', () => {
+    const MOCK_BALANCE = {
+      monthlyRemaining: 900,
+      monthlyTotal: 1000,
+      addon: 0,
+      total: 900,
+      nextRefillDate: null,
+    };
+    const RESERVATION_ID = '11111111-1111-4111-8111-111111111111';
+
+    it('returns a reservation and uses the authenticated user id', async () => {
+      vi.mocked(reserveTokenBudget).mockResolvedValue({
+        success: true,
+        reservationId: 'res-abc-123',
+        remaining: MOCK_BALANCE,
+      });
+
+      const { POST } = await import('./route');
+      const res = await POST(makeReq(JSON.stringify({ action: 'reserve', estimatedTotal: 100 })));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        reservationId: 'res-abc-123',
+        remaining: MOCK_BALANCE,
+      });
+      expect(reserveTokenBudget).toHaveBeenCalledWith('user_1', 100);
+    });
+
+    it('returns a release result and uses the authenticated user id', async () => {
+      vi.mocked(releaseUnusedBudget).mockResolvedValue({
+        refunded: 40,
+        remaining: MOCK_BALANCE,
+      });
+
+      const { POST } = await import('./route');
+      const res = await POST(makeReq(JSON.stringify({
+        action: 'release',
+        reservationId: RESERVATION_ID,
+        actualUsed: 60,
+      })));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ refunded: 40, remaining: MOCK_BALANCE });
+      expect(releaseUnusedBudget).toHaveBeenCalledWith('user_1', RESERVATION_ID, 60);
+    });
+
+    it('records step usage with the authenticated user id', async () => {
+      vi.mocked(recordStepUsage).mockResolvedValue(undefined);
+
+      const { POST } = await import('./route');
+      const res = await POST(makeReq(JSON.stringify({
+        action: 'record_step',
+        reservationId: RESERVATION_ID,
+        stepId: 'step-1',
+        tokensUsed: 25,
+      })));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      expect(recordStepUsage).toHaveBeenCalledWith(
+        'user_1',
+        RESERVATION_ID,
+        'step-1',
+        25,
+      );
     });
   });
 });
