@@ -11,6 +11,9 @@
  * pull in the editor's engine graph.
  */
 
+import { withTimeout } from '@/lib/async/withTimeout';
+import { GPU_INIT_TIMEOUT_MS } from '@/lib/config/timeouts';
+
 /** The subset of the wasm-bindgen surface `/play` actually calls. */
 export interface PlayEngineRuntime {
   init_engine: (canvasId: string) => void;
@@ -24,15 +27,28 @@ export interface PlayEngineRuntime {
  * The glue and the binary MUST come from the same origin — wasm-bindgen bakes
  * the import path into the glue, so a split origin fails to instantiate.
  *
- * Note this selects the backend with a bare `'gpu' in navigator` check rather
- * than the editor's hardened `probeWebGPU()` adapter request. A browser that
- * exposes `navigator.gpu` but fails to hand out an adapter will pick the
- * `webgpu` build and fail at init — bounded by the caller's deadline, but a
- * fallback would be better. Tracked in #9127 (PF-1078).
+ * Request a real adapter before selecting WebGPU. Browsers may expose
+ * `navigator.gpu` while denying an adapter because of the driver, blocklist,
+ * or runtime environment; those browsers must use the WebGL2 build.
  */
+export async function selectPlayEngineBackend(): Promise<'webgpu' | 'webgl2'> {
+  if (typeof navigator === 'undefined' || !('gpu' in navigator)) return 'webgl2';
+
+  try {
+    const adapter = await withTimeout(
+      navigator.gpu.requestAdapter(),
+      GPU_INIT_TIMEOUT_MS,
+      'WebGPU adapter request',
+    );
+    return adapter ? 'webgpu' : 'webgl2';
+  } catch {
+    return 'webgl2';
+  }
+}
+
 async function instantiate(): Promise<PlayEngineRuntime> {
-  const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
-  const basePath = `/engine-pkg-${hasWebGPU ? 'webgpu' : 'webgl2'}/`;
+  const backend = await selectPlayEngineBackend();
+  const basePath = `/engine-pkg-${backend}/`;
 
   const wasm = await import(
     /* webpackIgnore: true */ `${basePath}forge_engine.js`

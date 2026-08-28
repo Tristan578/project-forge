@@ -63,3 +63,53 @@ describe('loadPlayEngine', () => {
     }
   });
 });
+
+describe('selectPlayEngineBackend', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it('falls back to webgl2 when WebGPU exposes no adapter', async () => {
+    const requestAdapter = vi.fn().mockResolvedValue(null);
+    vi.stubGlobal('navigator', { gpu: { requestAdapter } });
+    const { selectPlayEngineBackend } = await import('../loadPlayEngine');
+
+    await expect(selectPlayEngineBackend()).resolves.toBe('webgl2');
+    expect(requestAdapter).toHaveBeenCalledOnce();
+  });
+
+  it('selects webgpu only after obtaining an adapter', async () => {
+    const adapter = {};
+    const requestAdapter = vi.fn().mockResolvedValue(adapter);
+    vi.stubGlobal('navigator', { gpu: { requestAdapter } });
+    const { selectPlayEngineBackend } = await import('../loadPlayEngine');
+
+    await expect(selectPlayEngineBackend()).resolves.toBe('webgpu');
+  });
+
+  it('falls back to webgl2 when the adapter request rejects', async () => {
+    vi.stubGlobal('navigator', {
+      gpu: { requestAdapter: vi.fn().mockRejectedValue(new Error('blocked GPU')) },
+    });
+    const { selectPlayEngineBackend } = await import('../loadPlayEngine');
+
+    await expect(selectPlayEngineBackend()).resolves.toBe('webgl2');
+  });
+
+  it('falls back to webgl2 when the adapter request never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('navigator', {
+        gpu: { requestAdapter: vi.fn(() => new Promise(() => {})) },
+      });
+      const { selectPlayEngineBackend } = await import('../loadPlayEngine');
+
+      const selection = selectPlayEngineBackend();
+      await vi.runAllTimersAsync();
+      await expect(selection).resolves.toBe('webgl2');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
