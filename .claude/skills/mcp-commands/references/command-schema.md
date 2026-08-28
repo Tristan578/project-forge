@@ -94,7 +94,7 @@ custom_shader     leaderboard       localization      cutscene
 quest
 ```
 
-When adding a new category, also update `validCategories` in
+When adding a new category, also update `EXPECTED_CATEGORIES` in
 `mcp-server/src/manifest.test.ts`.
 
 ## Both Manifest Files Must Stay in Sync
