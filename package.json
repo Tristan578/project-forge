@@ -57,7 +57,8 @@
   "scripts": {
     "changeset": "changeset",
     "changeset:version": "bash scripts/changeset-version.sh",
-    "changeset:publish": "changeset publish"
+    "changeset:publish": "changeset publish",
+    "check:manifest-sync": "npx tsx apps/docs/scripts/check-manifest-sync.ts"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.0",
