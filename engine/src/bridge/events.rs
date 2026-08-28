@@ -321,17 +321,28 @@ pub fn emit_audio_changed(entity_id: &str, audio_data: Option<&crate::core::audi
 }
 
 /// Emit an audio playback event.
-pub fn emit_audio_playback(entity_id: &str, action: &str) {
+pub fn emit_audio_playback(
+    entity_id: &str,
+    action: &str,
+    volume: Option<f32>,
+    pitch: Option<f32>,
+) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct AudioPlaybackPayload<'a> {
         entity_id: &'a str,
         action: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        volume: Option<f32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pitch: Option<f32>,
     }
 
     emit_event("AUDIO_PLAYBACK", &AudioPlaybackPayload {
         entity_id,
         action,
+        volume,
+        pitch,
     });
 }
 
