@@ -58,6 +58,11 @@ const OPTIONAL_VARS: OptionalVar[] = [
     defaultValue: '',
   },
   {
+    key: 'DB_RATE_LIMIT_PER_SECOND',
+    description: 'Maximum database operations per second across instances',
+    defaultValue: '80',
+  },
+  {
     key: 'SENTRY_DSN',
     description: 'Sentry DSN for server-side error monitoring',
     defaultValue: '',

@@ -94,6 +94,7 @@ describe('validateEnv', () => {
       vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test');
       vi.stubEnv('ASSET_R2_ACCOUNT_ID', '0b949ff499d179e24dde841f71d6134f');
       vi.stubEnv('ADMIN_USER_IDS', 'user_abc123');
+      vi.stubEnv('DB_RATE_LIMIT_PER_SECOND', '80');
 
       const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
@@ -272,6 +273,7 @@ describe('validateEnv', () => {
       expect(keys).toContain('NEXT_PUBLIC_POSTHOG_KEY');
       expect(keys).toContain('ASSET_R2_ACCOUNT_ID');
       expect(keys).toContain('ANTHROPIC_API_KEY');
+      expect(keys).toContain('DB_RATE_LIMIT_PER_SECOND');
     });
 
     it('exports OPTIONAL_VARS with defaults', async () => {
@@ -279,6 +281,9 @@ describe('validateEnv', () => {
       const appUrl = OPTIONAL_VARS.find((v) => v.key === 'NEXT_PUBLIC_APP_URL');
       expect(appUrl).toBeDefined();
       expect(appUrl!.defaultValue).toBe('http://localhost:3000');
+
+      const dbRateLimit = OPTIONAL_VARS.find((v) => v.key === 'DB_RATE_LIMIT_PER_SECOND');
+      expect(dbRateLimit?.defaultValue).toBe('80');
     });
   });
 });
