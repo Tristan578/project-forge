@@ -22,19 +22,24 @@ echo "=== Ticket Validation: ${TICKET_ID} ==="
 echo "Taskboard: ${BASE_URL}"
 echo ""
 
-TICKET_JSON=$(curl -s --max-time 5 "${BASE_URL}/tickets/${TICKET_ID}" 2>/dev/null || echo "")
+TICKET_FILE=$(mktemp)
+trap 'rm -f "$TICKET_FILE"' EXIT
+HTTP_CODE=$(curl -sS --max-time 5 -o "$TICKET_FILE" -w '%{http_code}' \
+  "${BASE_URL}/tickets/${TICKET_ID}" 2>/dev/null) || HTTP_CODE="000"
+TICKET_JSON=$(cat "$TICKET_FILE")
 
-if [ -z "${TICKET_JSON}" ] || echo "${TICKET_JSON}" | grep -q '"error"\|"not found"\|404'; then
+if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || [ -z "${TICKET_JSON}" ]; then
   echo "ERROR: Could not fetch ticket '${TICKET_ID}' — check the ID and ensure taskboard is running."
+  echo "  HTTP status: ${HTTP_CODE}"
   echo "  Start taskboard: taskboard start --port 3010"
   exit 0
 fi
 
 # Run validation in Python (more reliable string matching)
-echo "${TICKET_JSON}" | python3 << 'PYEOF'
-import json, sys, re
+TICKET_JSON="${TICKET_JSON}" python3 << 'PYEOF'
+import json, os, re
 
-data = json.load(sys.stdin)
+data = json.loads(os.environ["TICKET_JSON"])
 
 title = data.get("title", "")
 description = data.get("description", "") or ""
@@ -79,11 +84,15 @@ check("Description has technical context (>100 chars)",
       has_description,
       f"{len(description)} chars" if description else "EMPTY")
 
-# 4. Given/When/Then acceptance criteria (at least 2 occurrences of "Given")
-gwt_count = len(re.findall(r'\bGiven\b', description, re.IGNORECASE))
-check("Acceptance Criteria (min 2 Given/When/Then scenarios)",
-      gwt_count >= 2,
-      f"{gwt_count} 'Given' scenarios found (need at least 2)")
+# 4. Given/When/Then acceptance criteria (at least 3 complete scenarios)
+gwt_count = len(re.findall(
+    r'\bGiven\b.*?\bWhen\b.*?\bThen\b',
+    description,
+    re.IGNORECASE | re.DOTALL,
+))
+check("Acceptance Criteria (min 3 complete Given/When/Then scenarios)",
+      gwt_count >= 3,
+      f"{gwt_count} complete scenario(s) found (need at least 3)")
 
 # 5. Priority set
 valid_priorities = {"urgent", "high", "medium", "low"}
@@ -111,7 +120,7 @@ print("")
 failures = []
 if not has_user_story: failures.append("user story")
 if not has_description: failures.append("description")
-if gwt_count < 2: failures.append("acceptance criteria")
+if gwt_count < 3: failures.append("acceptance criteria")
 if not priority: failures.append("priority")
 if not team: failures.append("team")
 
