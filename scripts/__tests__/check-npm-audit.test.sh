@@ -3000,6 +3000,7 @@ OUTPUTS_EOF
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
+            scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
@@ -3489,6 +3490,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
+            scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
@@ -3520,6 +3522,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-actions-pinned.test.sh
       - name: Run native-bindings gate test suite
         run: bash scripts/__tests__/check-native-bindings.test.sh
+      - name: Run bundle-size wiring test suite
+        run: bash scripts/__tests__/check-bundle-size-wiring.test.sh
       - name: Run Vercel deployment-drift test suite
         run: bash scripts/__tests__/check-vercel-deployment-drift.test.sh
       - name: Run coverage-ratchet script test suite
