@@ -790,6 +790,11 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   else
     fail "verifier anti-tamper map lost its design-internal-gate/needs-design entry"
   fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "docs-internal-gate"[[:space:]]+"needs-docs"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers docs-internal-gate <-> needs-docs"
+  else
+    fail "verifier anti-tamper map lost its docs-internal-gate/needs-docs entry"
+  fi
   if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "quality-gates"[[:space:]]+"needs-any-code"')" -ge 1 ]; then
     pass "verifier anti-tamper map covers quality-gates <-> needs-any-code"
   else
