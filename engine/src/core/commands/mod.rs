@@ -338,6 +338,10 @@ pub fn dispatch_batch(batch: serde_json::Value) -> Vec<CommandResponse> {
                 "Batch too large ({} items, limit {})",
                 count, MAX_COMMAND_BATCH_ITEMS
             );
+            // The oversized fast path deliberately runs before the structural
+            // guard, so it must also take responsibility for tearing down a
+            // hostile deeply nested value without recursive `Value::drop`.
+            crate::core::json_guard::drop_without_recursing(batch);
             return (0..count)
                 .map(|_| CommandResponse::err(error.clone()))
                 .collect();
@@ -1482,6 +1486,23 @@ mod tests {
                 "response {index} did not preserve its refusal position"
             );
         }
+    }
+
+    #[test]
+    fn dispatch_batch_drops_an_oversized_deep_payload_iteratively() {
+        let count = MAX_COMMAND_BATCH_ITEMS + 1;
+        let mut items: Vec<_> = (0..count - 1)
+            .map(|_| json!({"command": "play"}))
+            .collect();
+        let mut deep_item = serde_json::Map::new();
+        deep_item.insert("command".to_string(), serde_json::Value::from("play"));
+        deep_item.insert("payload".to_string(), nested(100_000));
+        items.push(serde_json::Value::Object(deep_item));
+
+        let result = dispatch_batch(serde_json::Value::Array(items));
+
+        assert_eq!(result.len(), count);
+        assert!(result.iter().all(|response| !response.success));
     }
 
     #[test]
