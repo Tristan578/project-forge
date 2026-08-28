@@ -1,43 +1,33 @@
 import { describe, it, expect } from 'vitest';
+import { isTable } from 'drizzle-orm';
 import * as schema from '../schema';
 
-/**
- * Drizzle table objects have a Symbol(drizzle:Name) symbol property that
- * identifies the table name, and an object-type value. We verify both
- * existence and structural shape rather than just toBeDefined().
- */
-function isTableObject(value: unknown): boolean {
-  if (!value || typeof value !== 'object') return false;
-  // Drizzle tables have a getSQL method or column sub-properties
-  return Object.keys(value as object).length > 0;
-}
+const EXPECTED_TABLE_NAMES = [
+  'users', 'apiKeys', 'providerKeys', 'tokenUsage', 'tokenPurchases',
+  'projects', 'tokenConfig', 'tierConfig', 'costLog', 'creditTransactions',
+  'publishedGames', 'gameRatings', 'gameComments', 'gameLikes', 'userFollows',
+  'gameTags', 'gameForks', 'featuredGames', 'marketplaceAssets',
+  'assetPurchases', 'assetReviews', 'sellerProfiles', 'feedback', 'generationJobs',
+  'webhookEvents', 'leaderboards', 'leaderboardEntries', 'moderationAppeals',
+  'waitlistSignups', 'graphNodes', 'graphEdges',
+] as const;
 
 describe('database schema', () => {
   it('exports all expected tables as Drizzle table objects', () => {
-    const tables = [
-      'users', 'apiKeys', 'providerKeys', 'tokenUsage', 'tokenPurchases',
-      'projects', 'tokenConfig', 'tierConfig', 'costLog', 'creditTransactions',
-      'publishedGames', 'gameRatings', 'gameComments', 'gameLikes', 'userFollows',
-      'gameTags', 'gameForks', 'featuredGames', 'marketplaceAssets',
-      'assetPurchases', 'assetReviews', 'sellerProfiles', 'feedback', 'generationJobs',
-    ] as const;
-
-    for (const name of tables) {
+    for (const name of EXPECTED_TABLE_NAMES) {
       const table = schema[name];
       expect(table, `${name} should be exported`).not.toBeUndefined();
-      expect(isTableObject(table), `${name} should be a Drizzle table object`).toBe(true);
+      expect(isTable(table), `${name} should be a Drizzle table object`).toBe(true);
     }
   });
 
   it('exports exactly the expected number of tables', () => {
-    const tables = [
-      'users', 'apiKeys', 'providerKeys', 'tokenUsage', 'tokenPurchases',
-      'projects', 'tokenConfig', 'tierConfig', 'costLog', 'creditTransactions',
-      'publishedGames', 'gameRatings', 'gameComments', 'gameLikes', 'userFollows',
-      'gameTags', 'gameForks', 'featuredGames', 'marketplaceAssets',
-      'assetPurchases', 'assetReviews', 'sellerProfiles', 'feedback', 'generationJobs',
-    ];
-    expect(tables.length).toBe(24);
+    const actualTableNames = Object.entries(schema)
+      .filter(([, value]) => isTable(value))
+      .map(([name]) => name)
+      .sort();
+
+    expect(actualTableNames).toEqual([...EXPECTED_TABLE_NAMES].sort());
   });
 
   it('exports enums as non-null objects', () => {

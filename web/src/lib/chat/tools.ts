@@ -3,7 +3,7 @@
  *
  * Sourced from mcp-server/manifest/commands.json via web/src/data/commands.json.
  * Only public-visibility commands are exposed. Run `npm run check:manifest-sync`
- * to verify both copies are identical.
+ * from the repo root to verify both copies are identical.
  */
 
 // Sourced from mcp-server/manifest/commands.json — keep in sync when adding MCP commands

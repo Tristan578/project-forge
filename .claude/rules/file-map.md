@@ -149,7 +149,7 @@ One file per panel/inspector — `ls web/src/components/editor/` for the current
 
 ### MCP Server (`mcp-server/`)
 - `manifest/commands.json` — 351 commands across 41 categories (measured: `bash .claude/tools/validate-mcp.sh sync`)
-- `src/manifest.test.ts` — Schema validation (update `validCategories` when adding categories)
+- `src/manifest.test.ts` — Schema validation (update `EXPECTED_CATEGORIES` in this file when adding/removing a category)
 - `src/docs/` — Doc loader, BM25 search, MCP resource/tool registration
 
 ## Design System (`packages/ui/`)
