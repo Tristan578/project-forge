@@ -119,6 +119,9 @@ check_triggered "actions-pin-check"         "needs-ci"
 # caller's own `if:` (ci.yml), so this entry is one-armed by construction, and a
 # docs-only PR leaves it unfired rather than false-positive. PF-1010.
 check_triggered "quality-gates"             "needs-any-code"
+# The docs gate is the only required PR proof that the docs Vitest suite,
+# internal-command MDX gate, and manifest sync ran for docs changes.
+check_triggered "docs-internal-gate"        "needs-docs"
 # The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
 # unit suite for a packages/ui-only PR — quality-gates' test-web runs that suite
 # only when web/ci changed, so a UI-only PR relies entirely on this gate for its

@@ -94,7 +94,7 @@ mk() {
     --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
     --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
@@ -586,6 +586,25 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "design-internal-gate failure fails (exit 1)"; else fail "design-internal-gate failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "design-internal-gate"; then pass "the failing design-internal-gate is named"; else fail "failing design-internal-gate not named"; fi
+
+# --- 50a. TAMPER: docs-internal-gate skipped while needs-docs=true → exit 1 ----
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-docs" = "true" | ."docs-internal-gate".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "docs-internal-gate skipped while needs-docs=true fails (exit 1)"; else fail "tamper (docs-internal-gate) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring" && echo "$out" | grep -q "docs-internal-gate"; then pass "docs gate tamper is named as possible unwiring"; else fail "docs gate tamper diagnostic missing"; fi
+
+# --- 50b. docs-internal-gate legit-skip while needs-docs=false → exit 0 --------
+needs="$(mk true true success success success | jq -c '."docs-internal-gate".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "docs-internal-gate legit-skip passes (exit 0)"; else fail "docs gate legit skip should exit 0, got $rc"; fi
+
+# --- 50c. docs-internal-gate failure while triggered → exit 1 -----------------
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-docs" = "true" | ."docs-internal-gate".result = "failure"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ] && echo "$out" | grep -q "docs-internal-gate"; then pass "failing triggered docs gate fails and is named"; else fail "failing docs gate was not reported"; fi
 
 # --- 51. CONFIG DRIFT: mapped trigger output ABSENT from ci-gate outputs → 1 ----
 # `.outputs[$t] // empty` reads a RENAMED/REMOVED ci-gate output as "did not
