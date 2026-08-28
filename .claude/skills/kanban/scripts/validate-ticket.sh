@@ -88,7 +88,7 @@ check("Description has technical context (>100 chars)",
 gwt_count = len(re.findall(
     r'\bGiven\b.*?\bWhen\b.*?\bThen\b',
     description,
-    re.IGNORECASE | re.DOTALL,
+    re.DOTALL,
 ))
 check("Acceptance Criteria (min 3 complete Given/When/Then scenarios)",
       gwt_count >= 3,
