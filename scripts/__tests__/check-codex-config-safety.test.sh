@@ -304,11 +304,18 @@ if [ "$rc" -eq 0 ]; then ok "guard passes against the repo's committed HEAD conf
 # =============================================================================
 echo "== structural wiring: guard is a required, self-defending CI gate =="
 if [ -f "$CI_YML" ]; then
-  if grep -q "check-codex-config-safety.sh" "$CI_YML"; then
+  codex_job_block="$(awk '/^  codex-config-guard:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' "$CI_YML")"
+  if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-codex-config-safety\.sh[[:space:]]*$' <<<"$codex_job_block"; then
     ok "ci.yml invokes the guard"
   else
     bad "ci.yml does not invoke check-codex-config-safety.sh"
   fi
+  codex_neutered="$(sed -E 's|^([[:space:]]*run:)[[:space:]]+bash scripts/check-codex-config-safety\.sh[[:space:]]*$|\1 true|' "$CI_YML")"
+  codex_neutered_block="$(awk '/^  codex-config-guard:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' <<<"$codex_neutered")"
+  if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-codex-config-safety\.sh[[:space:]]*$' <<<"$codex_neutered_block"; then bad "a neutered run step still looks wired"; else ok "run: true mutation is detected despite prose mentions"; fi
+  codex_without_prose="$(sed '/^[[:space:]]*#.*check-codex-config-safety\.sh/d' "$CI_YML")"
+  codex_without_prose_block="$(awk '/^  codex-config-guard:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' <<<"$codex_without_prose")"
+  if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-codex-config-safety\.sh[[:space:]]*$' <<<"$codex_without_prose_block"; then ok "deleting prose leaves the real invocation wired"; else bad "prose deletion hid the real invocation"; fi
   if grep -Eq "codex-config-guard" "$CI_YML"; then
     ok "ci.yml defines the codex-config-guard job"
   else

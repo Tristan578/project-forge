@@ -402,7 +402,16 @@ fi
 rm -rf "$ROOT"
 
 echo "== structural: gate is wired into required CI (anti-unwiring) =="
-if grep -q "check-agentic-sync.sh" "$CI_YML"; then ok "ci.yml runs check-agentic-sync.sh"; else bad "ci.yml does not run the gate"; fi
+agentic_job_block="$(awk '/^  agentic-sync:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' "$CI_YML")"
+if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-agentic-sync\.sh[[:space:]]*$' <<<"$agentic_job_block"; then ok "ci.yml runs check-agentic-sync.sh"; else bad "ci.yml does not run the gate"; fi
+# Measured anti-regressions: prose and shellcheck mentions must not satisfy the
+# assertion, while deleting prose alone must not hide the real run step.
+agentic_neutered="$(sed -E 's|^([[:space:]]*run:)[[:space:]]+bash scripts/check-agentic-sync\.sh[[:space:]]*$|\1 true|' "$CI_YML")"
+agentic_neutered_block="$(awk '/^  agentic-sync:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' <<<"$agentic_neutered")"
+if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-agentic-sync\.sh[[:space:]]*$' <<<"$agentic_neutered_block"; then bad "a neutered run step still looks wired"; else ok "run: true mutation is detected despite prose mentions"; fi
+agentic_without_prose="$(sed '/^[[:space:]]*#.*check-agentic-sync\.sh/d' "$CI_YML")"
+agentic_without_prose_block="$(awk '/^  agentic-sync:/{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{exit} f' <<<"$agentic_without_prose")"
+if grep -qE '^[[:space:]]*run:[[:space:]]+bash scripts/check-agentic-sync\.sh[[:space:]]*$' <<<"$agentic_without_prose_block"; then ok "deleting prose leaves the real invocation wired"; else bad "prose deletion hid the real invocation"; fi
 if grep -q "agentic-sync" "$CI_YML"; then ok "ci.yml defines an agentic-sync job"; else bad "ci.yml missing agentic-sync job"; fi
 # It must ride the required ci-success aggregate, not be a standalone advisory.
 if awk '/^  ci-success:/{f=1} f&&/agentic-sync/{found=1} END{exit !found}' "$CI_YML"; then
