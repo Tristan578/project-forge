@@ -6,7 +6,13 @@ import type {
   JsonSchemaValidator,
 } from '@modelcontextprotocol/sdk/validation/types.js';
 import { z } from 'zod';
-import { startHttpTransport, MissingTokenError, InMemoryRateLimiter, type RunningHttpServer } from '../http.js';
+import {
+  startHttpTransport,
+  MissingTokenError,
+  InMemoryRateLimiter,
+  resolveHttpRateLimit,
+  type RunningHttpServer,
+} from '../http.js';
 
 const TEST_TOKEN = 'test-token-deadbeef';
 
@@ -495,4 +501,27 @@ describe('InMemoryRateLimiter', () => {
     const limiter = new InMemoryRateLimiter(60_000, 10, false);
     expect(() => limiter.stop()).not.toThrow();
   });
+});
+
+describe('resolveHttpRateLimit', () => {
+  it('uses positive integer environment overrides', () => {
+    expect(resolveHttpRateLimit({
+      MCP_HTTP_RATE_LIMIT_WINDOW_MS: '60000',
+      MCP_HTTP_RATE_LIMIT_MAX: '500',
+    })).toEqual({ windowMs: 60_000, max: 500 });
+  });
+
+  it('retains production defaults when overrides are unset', () => {
+    expect(resolveHttpRateLimit({})).toEqual({ windowMs: 300_000, max: 30 });
+  });
+
+  it.each(['0', '-1', 'NaN', 'Infinity', '1.5', '', '   '])(
+    'ignores invalid override %j',
+    value => {
+      expect(resolveHttpRateLimit({
+        MCP_HTTP_RATE_LIMIT_WINDOW_MS: value,
+        MCP_HTTP_RATE_LIMIT_MAX: value,
+      })).toEqual({ windowMs: 300_000, max: 30 });
+    },
+  );
 });
