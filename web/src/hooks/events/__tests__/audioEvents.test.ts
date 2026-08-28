@@ -19,6 +19,8 @@ vi.mock('@/lib/audio/audioManager', () => ({
     stop: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
+    setVolume: vi.fn(),
+    setPitch: vi.fn(),
   },
 }));
 
@@ -461,8 +463,8 @@ describe('handleAudioEvent', () => {
   });
 
   describe('AUDIO_PLAYBACK', () => {
-    it('returns true for play action', () => {
-      const payload = { entityId: 'entity-1', action: 'play' };
+    it('applies transient overrides before playing', async () => {
+      const payload = { entityId: 'entity-1', action: 'play', volume: 0.4, pitch: 1.5 };
 
       const result = handleAudioEvent(
         'AUDIO_PLAYBACK',
@@ -472,6 +474,33 @@ describe('handleAudioEvent', () => {
       );
 
       expect(result).toBe(true);
+      const { audioManager } = await import('@/lib/audio/audioManager');
+      await vi.waitFor(() => {
+        expect(audioManager.setVolume).toHaveBeenCalledWith('entity-1', 0.4);
+        expect(audioManager.setPitch).toHaveBeenCalledWith('entity-1', 1.5);
+        expect(audioManager.play).toHaveBeenCalledWith('entity-1');
+      });
+    });
+
+    it('resets omitted overrides from authored audio before playing', async () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        entityAudio: { 'entity-1': { volume: 0.7, pitch: 0.9 } },
+      } as unknown as StoreState);
+
+      handleAudioEvent(
+        'AUDIO_PLAYBACK',
+        { entityId: 'entity-1', action: 'play' },
+        mockSetGet.set,
+        mockSetGet.get,
+      );
+
+      const { audioManager } = await import('@/lib/audio/audioManager');
+      await vi.waitFor(() => {
+        expect(audioManager.setVolume).toHaveBeenCalledWith('entity-1', 0.7);
+        expect(audioManager.setPitch).toHaveBeenCalledWith('entity-1', 0.9);
+        expect(audioManager.play).toHaveBeenCalledWith('entity-1');
+      });
     });
 
     it('returns true for stop action', () => {

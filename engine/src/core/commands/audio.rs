@@ -119,18 +119,26 @@ fn handle_remove_audio(payload: serde_json::Value) -> super::CommandResult {
 
 /// Handle play_audio command.
 fn handle_play_audio(payload: serde_json::Value) -> super::CommandResult {
-    let entity_id = payload.get("entityId")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing entityId")?
-        .to_string();
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PlayAudioPayload {
+        entity_id: String,
+        volume: Option<f32>,
+        pitch: Option<f32>,
+    }
+
+    let data: PlayAudioPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid play_audio payload: {}", e))?;
 
     let playback = AudioPlayback {
-        entity_id: entity_id.clone(),
+        entity_id: data.entity_id.clone(),
         action: "play".to_string(),
+        volume: data.volume,
+        pitch: data.pitch,
     };
 
     if queue_audio_playback_from_bridge(playback) {
-        tracing::info!("Queued audio play for entity: {}", entity_id);
+        tracing::info!("Queued audio play for entity: {}", data.entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -147,6 +155,8 @@ fn handle_stop_audio(payload: serde_json::Value) -> super::CommandResult {
     let playback = AudioPlayback {
         entity_id: entity_id.clone(),
         action: "stop".to_string(),
+        volume: None,
+        pitch: None,
     };
 
     if queue_audio_playback_from_bridge(playback) {
@@ -167,6 +177,8 @@ fn handle_pause_audio(payload: serde_json::Value) -> super::CommandResult {
     let playback = AudioPlayback {
         entity_id: entity_id.clone(),
         action: "pause".to_string(),
+        volume: None,
+        pitch: None,
     };
 
     if queue_audio_playback_from_bridge(playback) {
@@ -374,5 +386,55 @@ fn handle_remove_reverb_zone(payload: serde_json::Value) -> super::CommandResult
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    struct PendingGuard;
+
+    impl Drop for PendingGuard {
+        fn drop(&mut self) {
+            crate::core::pending::unregister_pending_commands();
+        }
+    }
+
+    fn run_with_queue(
+        command: &str,
+        payload: serde_json::Value,
+    ) -> crate::core::pending::PendingCommands {
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let _guard = PendingGuard;
+        let result = dispatch(command, &payload).expect("known audio command");
+        assert!(result.is_ok(), "audio command failed: {:?}", result);
+        pending
+    }
+
+    #[test]
+    fn play_audio_queues_transient_volume_and_pitch() {
+        let pending = run_with_queue(
+            "play_audio",
+            json!({"entityId": "music", "volume": 0.4, "pitch": 1.5}),
+        );
+
+        assert_eq!(pending.audio_playback.len(), 1);
+        let playback = &pending.audio_playback[0];
+        assert_eq!(playback.entity_id, "music");
+        assert_eq!(playback.action, "play");
+        assert_eq!(playback.volume, Some(0.4));
+        assert_eq!(playback.pitch, Some(1.5));
+    }
+
+    #[test]
+    fn play_audio_leaves_absent_overrides_unset() {
+        let pending = run_with_queue("play_audio", json!({"entityId": "music"}));
+        let playback = &pending.audio_playback[0];
+
+        assert_eq!(playback.volume, None);
+        assert_eq!(playback.pitch, None);
     }
 }

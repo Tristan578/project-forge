@@ -132,10 +132,24 @@ export function handleAudioEvent(
     }
 
     case 'AUDIO_PLAYBACK': {
-      const payload = castPayload<{ entityId: string; action: 'play' | 'stop' | 'pause' | 'resume' }>(data);
+      const payload = castPayload<{
+        entityId: string;
+        action: 'play' | 'stop' | 'pause' | 'resume';
+        volume?: number;
+        pitch?: number;
+      }>(data);
       // Import audioManager and route playback
       import('@/lib/audio/audioManager').then(({ audioManager }) => {
-        if (payload.action === 'play') audioManager.play(payload.entityId);
+        if (payload.action === 'play') {
+          // Reset omitted values from the authored component so a previous
+          // cutscene override cannot leak into a later ordinary play.
+          const authored = useEditorStore.getState().entityAudio[payload.entityId];
+          const volume = payload.volume ?? authored?.volume;
+          const pitch = payload.pitch ?? authored?.pitch;
+          if (volume !== undefined) audioManager.setVolume(payload.entityId, volume);
+          if (pitch !== undefined) audioManager.setPitch(payload.entityId, pitch);
+          audioManager.play(payload.entityId);
+        }
         else if (payload.action === 'stop') audioManager.stop(payload.entityId);
         else if (payload.action === 'pause') audioManager.pause(payload.entityId);
         else if (payload.action === 'resume') audioManager.resume(payload.entityId);

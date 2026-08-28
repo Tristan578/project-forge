@@ -43,6 +43,8 @@ pub struct AudioRemoval {
 pub struct AudioPlayback {
     pub entity_id: String,
     pub action: String,
+    pub volume: Option<f32>,
+    pub pitch: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
