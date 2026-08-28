@@ -278,13 +278,10 @@ describe('buildCommand', () => {
     expect(buildCommand('dialogue', 'npc1', makeKF(payload), 0)).toBeNull();
   });
 
-  it('audio track sends only the field play_audio reads', () => {
-    // `handle_play_audio` reads `entityId` and stops. The rest of the keyframe
-    // payload used to be spread onto the command and dropped by the engine with
-    // no error — a payload that looked like it configured playback.
-    const cmd = buildCommand('audio', 'sfx1', makeKF({ volume: 0.8, fadeIn: 2 }), 0);
+  it('audio track sends transient volume and pitch overrides', () => {
+    const cmd = buildCommand('audio', 'sfx1', makeKF({ volume: 0.8, pitch: 1.2, fadeIn: 2 }), 0);
     expect(cmd?.command).toBe('play_audio');
-    expect(cmd?.payload).toEqual({ entityId: 'sfx1' });
+    expect(cmd?.payload).toEqual({ entityId: 'sfx1', volume: 0.8, pitch: 1.2 });
   });
 
   it('audio track cannot be made to address a different entity', () => {
@@ -304,7 +301,7 @@ describe('buildCommand', () => {
       }),
       0,
     );
-    expect(cmd?.payload).toEqual({ entityId: 'sfx1' });
+    expect(cmd?.payload).toEqual({ entityId: 'sfx1', volume: 0.8, pitch: 1.2 });
   });
 
   it('audio track returns null when entityId is null', () => {

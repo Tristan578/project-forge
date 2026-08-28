@@ -133,11 +133,8 @@ const TRACK_PAYLOAD_FIELDS: Record<CutsceneTrackType, Record<string, FieldReader
   // Ranges are the audio graph's own, read off `audioManager`: it clamps volume
   // to 0–1 (`audioManager.ts:387`) and pitch — a `playbackRate` — to 0.25–4
   // (`:397`). Neither the engine's `AudioData` nor `handle_set_audio` bounds
-  // either field, so this is the only place they are checked. Nothing dispatches
-  // these two yet (see the audio arm of `buildCommand` for why); they are
-  // authored onto the keyframe and consumed when PF-1155 wires entity audio
-  // through to the graph, and bounding them here is what keeps that wiring from
-  // inheriting an unbounded field.
+  // either field, so this is where cutscene playback bounds its transient
+  // overrides before they reach the Web Audio graph.
   audio: {
     volume: readNumberInRange(0, 1),
     pitch: readNumberInRange(0.25, 4),
@@ -181,10 +178,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * That is a guarantee about INVENTED keys, and only that. It is NOT a licence to
  * spread the result into an engine command: every surviving key is one this track
  * type accepts, not necessarily one the receiving command reads. The audio
- * vocabulary is the live example — `volume` and `pitch` are legitimate authored
- * fields that `handle_play_audio` does not read, so spreading a sanitized audio
- * payload into `play_audio` reintroduces exactly the PF-1123 "fields the receiver
- * never reads" defect. Callers pick per command; see `buildCommand`.
+ * Callers still pick per command rather than spreading this object blindly; see
+ * `buildCommand`.
  *
  * An unusable payload yields `{}` rather than a throw. A keyframe whose payload
  * the model got wrong is one dud beat in a timeline; failing the parse would

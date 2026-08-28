@@ -103,7 +103,12 @@ pub(super) fn apply_audio_playback(
 ) {
     for playback in pending.audio_playback.drain(..) {
         // Emit playback event to JS (Web Audio API handles actual playback)
-        events::emit_audio_playback(&playback.entity_id, &playback.action);
+        events::emit_audio_playback(
+            &playback.entity_id,
+            &playback.action,
+            playback.volume,
+            playback.pitch,
+        );
     }
 }
 

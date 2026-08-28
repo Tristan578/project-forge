@@ -8,10 +8,8 @@
  *
  * Dialogue does not: `start_dialogue` has no engine arm, so `./dispatch.ts`
  * intercepts it and drives the dialogue store instead. Audio reaches the engine
- * but only as far as `entityId` — `handle_play_audio` reads nothing else, so the
- * `volume`/`pitch` a keyframe carries are deliberately not sent rather than sent
- * and dropped. This header used to claim all four tracks worked end to end,
- * which is the only reason those gaps survived as long as they did.
+ * with transient `volume`/`pitch` overrides carried by the playback event, so a
+ * cutscene can shape a sound without rewriting the entity's authored component.
  *
  * A keyframe that throws costs that keyframe, not the playback — see
  * `fireKeyframesSafely`.
@@ -309,31 +307,12 @@ export function buildCommand(
     }
     case 'audio': {
       if (!entityId) return null;
-      // `volume` and `pitch` are read off the keyframe (see
-      // `keyframePayload.ts`) and deliberately NOT dispatched. `handle_play_audio`
-      // reads `entityId` and nothing else, so they reach nothing here — but the
-      // obvious fix, prepending a `set_audio` with the two fields, is worse than
-      // the gap it closes, for two independent reasons:
-      //
-      //   1. It would not be audible. Nothing in the web app ever creates an
-      //      entity audio instance: `audioManager.createInstance` and
-      //      `.setVolume` — the only places a gain node is assigned — have no
-      //      production call site, so `audioManager.play(entityId)` (the one
-      //      consumer of the engine's AUDIO_PLAYBACK event) always takes its
-      //      `if (!instance)` branch and warns. Volume set engine-side reaches
-      //      ECS state and stops there.
-      //   2. It would mutate the project. `bridge/audio.rs:51-58` merges the
-      //      partial into the entity's persisted `AudioData`, inserts
-      //      `AudioEnabled`, and pushes an `UndoableAction::AudioChange` onto the
-      //      editor `HistoryStack` — during playback. Ctrl-Z after watching a
-      //      cutscene would undo the cutscene's writes instead of the user's last
-      //      edit, and the volume the cutscene asked for would outlive it in the
-      //      saved scene.
-      //
-      // So the audio track plays the sound and does not pretend to set its level.
-      // Wiring entity audio through to the Web Audio graph, and giving playback a
-      // command that is not scene-mutating, is PF-1155.
-      return { command: 'play_audio', payload: { entityId } };
+      // These are transient playback overrides. Sending them on `play_audio`
+      // keeps cutscene playback out of the persisted AudioData and undo history.
+      const audioPayload: Record<string, unknown> = { entityId };
+      if (payload.volume !== undefined) audioPayload.volume = payload.volume;
+      if (payload.pitch !== undefined) audioPayload.pitch = payload.pitch;
+      return { command: 'play_audio', payload: audioPayload };
     }
     case 'wait':
       return null;
