@@ -312,6 +312,9 @@ fn handle_mode_change(request: ModeChangeRequest) -> CommandResult {
     }
 }
 
+/// Maximum number of commands accepted in one bridge batch.
+pub const MAX_COMMAND_BATCH_ITEMS: usize = 256;
+
 /// Dispatch a batch of commands from a JSON array.
 ///
 /// Accepts a `serde_json::Value` that must be an array of objects, each with
@@ -328,6 +331,18 @@ pub fn dispatch_batch(batch: serde_json::Value) -> Vec<CommandResponse> {
     // in order to dismantle it iteratively on rejection. `as_array().len()` is
     // O(1) and touches no child, so it is safe on a value nothing has vetted.
     let item_count = batch.as_array().map(|items| items.len());
+
+    if let Some(count) = item_count {
+        if count > MAX_COMMAND_BATCH_ITEMS {
+            let error = format!(
+                "Batch too large ({} items, limit {})",
+                count, MAX_COMMAND_BATCH_ITEMS
+            );
+            return (0..count)
+                .map(|_| CommandResponse::err(error.clone()))
+                .collect();
+        }
+    }
 
     let batch = match crate::core::json_guard::check_command_batch(batch) {
         Ok(batch) => batch,
@@ -1446,6 +1461,26 @@ mod tests {
             assert!(!resp.success);
             let err = resp.error.as_deref().unwrap_or("");
             assert!(err.contains("nested too deeply"), "unexpected error: {}", err);
+        }
+    }
+
+    #[test]
+    fn dispatch_batch_answers_one_result_per_item_when_oversized() {
+        let count = MAX_COMMAND_BATCH_ITEMS + 1;
+        let items = (0..count)
+            .map(|index| json!({"command": "play", "payload": {"index": index}}))
+            .collect();
+
+        let result = dispatch_batch(serde_json::Value::Array(items));
+
+        assert_eq!(result.len(), count);
+        for (index, response) in result.iter().enumerate() {
+            assert!(!response.success, "response {index} unexpectedly succeeded");
+            assert_eq!(
+                response.error.as_deref(),
+                Some("Batch too large (257 items, limit 256)"),
+                "response {index} did not preserve its refusal position"
+            );
         }
     }
 

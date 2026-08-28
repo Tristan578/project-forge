@@ -274,18 +274,6 @@ pub fn handle_command_batch(batch: JsValue) -> Result<JsValue, JsValue> {
     let batch_value: serde_json::Value = serde_wasm_bindgen::from_value(batch)
         .unwrap_or(serde_json::Value::Null);
 
-    // Reject oversized batches before dispatching
-    if let Some(arr) = batch_value.as_array() {
-        if arr.len() > 256 {
-            use core::commands::CommandResponse;
-            let responses: Vec<CommandResponse> = vec![CommandResponse::err(format!(
-                "Batch too large ({} items, limit 256)", arr.len()
-            ))];
-            return responses.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-                .map_err(|e| JsValue::from_str(&e.to_string()));
-        }
-    }
-
     let responses = core::commands::dispatch_batch(batch_value);
 
     responses.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
