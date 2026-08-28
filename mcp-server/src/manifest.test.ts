@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import manifest from '../manifest/commands.json';
 
+const EXPECTED_CATEGORIES = [
+  'animation', 'asset', 'audio', 'camera', 'compound', 'cutscene', 'dialogue',
+  'docs', 'economy', 'editor', 'environment', 'export', 'game_cameras',
+  'game_components', 'generation', 'history', 'lighting', 'localization',
+  'materials', 'mesh', 'modeling', 'particles', 'performance', 'physics2d',
+  'prefab', 'publishing', 'query', 'rendering', 'runtime', 'scene', 'scripting',
+  'security', 'shaders', 'skeleton2d', 'sprite', 'sprite_animation', 'templates',
+  'terrain', 'tilemap', 'ui', 'world_building',
+];
+
 describe('command manifest', () => {
   it('has a version field', () => {
     expect(manifest.version).toBe('1.0');
@@ -46,20 +56,14 @@ describe('command manifest', () => {
   });
 
   it('category set has not changed unexpectedly (snapshot guard)', () => {
-    // Derive the canonical category set from the manifest itself at test time.
-    // This test prevents accidental category additions/removals — any change
-    // requires a deliberate update to this assertion.
-    const knownCategories = [...new Set(manifest.commands.map((c: { category: string }) => c.category))].sort();
-    // Verify every command's category is in the derived known set (redundant but explicit)
-    for (const cmd of manifest.commands) {
-      expect(
-        knownCategories.includes(cmd.category),
-        `${cmd.name}: category '${cmd.category}' not in known category set`,
-      ).toBe(true);
-    }
-    // Guard against silent category count drift: if categories change,
-    // this test signals that the change was intentional.
-    expect(knownCategories.length, 'Category count changed — update this test if intentional').toBeGreaterThan(0);
+    const actualCategories = [...new Set(
+      manifest.commands.map((c: { category: string }) => c.category),
+    )].sort();
+
+    expect(
+      actualCategories,
+      'Manifest category set changed — update EXPECTED_CATEGORIES if intentional',
+    ).toEqual(EXPECTED_CATEGORIES);
   });
 
   it('scene edit commands have zero token cost', () => {

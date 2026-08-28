@@ -151,4 +151,4 @@ Before declaring MCP work complete:
 2. Chat handler test exists with arg validation and dispatch verification
 3. ToolCallCard has a display label
 4. Command description is specific enough for AI to use correctly without examples
-5. If adding a new category, update `validCategories` in `mcp-server/src/manifest.test.ts`
+5. If adding a new category, update `EXPECTED_CATEGORIES` in `mcp-server/src/manifest.test.ts`
