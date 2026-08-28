@@ -96,4 +96,20 @@ describe('selectPlayEngineBackend', () => {
 
     await expect(selectPlayEngineBackend()).resolves.toBe('webgl2');
   });
+
+  it('falls back to webgl2 when the adapter request never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('navigator', {
+        gpu: { requestAdapter: vi.fn(() => new Promise(() => {})) },
+      });
+      const { selectPlayEngineBackend } = await import('../loadPlayEngine');
+
+      const selection = selectPlayEngineBackend();
+      await vi.runAllTimersAsync();
+      await expect(selection).resolves.toBe('webgl2');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

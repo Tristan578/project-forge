@@ -11,6 +11,9 @@
  * pull in the editor's engine graph.
  */
 
+import { withTimeout } from '@/lib/async/withTimeout';
+import { GPU_INIT_TIMEOUT_MS } from '@/lib/config/timeouts';
+
 /** The subset of the wasm-bindgen surface `/play` actually calls. */
 export interface PlayEngineRuntime {
   init_engine: (canvasId: string) => void;
@@ -32,7 +35,11 @@ export async function selectPlayEngineBackend(): Promise<'webgpu' | 'webgl2'> {
   if (typeof navigator === 'undefined' || !('gpu' in navigator)) return 'webgl2';
 
   try {
-    const adapter = await navigator.gpu.requestAdapter();
+    const adapter = await withTimeout(
+      navigator.gpu.requestAdapter(),
+      GPU_INIT_TIMEOUT_MS,
+      'WebGPU adapter request',
+    );
     return adapter ? 'webgpu' : 'webgl2';
   } catch {
     return 'webgl2';
