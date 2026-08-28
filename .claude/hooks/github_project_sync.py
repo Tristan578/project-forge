@@ -27,6 +27,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -109,6 +110,83 @@ def _find_taskboard_db() -> Path:
 
 
 DB_PATH = _find_taskboard_db()
+
+# ---------------------------------------------------------------------------
+# Kill switch
+# ---------------------------------------------------------------------------
+# Sync runs unattended from the Stop hook after EVERY assistant response. When
+# it misbehaves there is no interactive moment in which to stop it, and the only
+# lever anyone had was to hold the flock from a detached process and remember to
+# kill that pid later. Both wrapper scripts and this module check the same two
+# signals so the switch works from any entry point.
+DISABLE_MARKER = _MAIN_HOOKS / ".sync-disabled"
+DISABLE_ENV = "SPAWNFORGE_SYNC_DISABLED"
+
+
+def sync_disabled_reason():
+    """Return a human-readable reason the sync is switched off, else None."""
+    env = os.environ.get(DISABLE_ENV, "")
+    if env and env != "0":
+        return f"{DISABLE_ENV}={env}"
+    if DISABLE_MARKER.exists():
+        try:
+            note = DISABLE_MARKER.read_text().strip()
+        except OSError:
+            note = ""
+        return f"{DISABLE_MARKER.name} present" + (f" ({note})" if note else "")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Projects v2 node ids
+# ---------------------------------------------------------------------------
+# A Projects v2 item id is an opaque GraphQL global node id (`PVTI_...`). pull()
+# used to synthesize `issue-<number>` as a stand-in so its own reverse lookup
+# had a key, and push() then fed that stand-in straight to
+# `gh project item-edit --id`, which can only ever answer "Could not resolve to
+# a node with the global id of 'issue-N'". The raise aborted the ticket's update
+# block BEFORE its memo fields were written, so the change detector fired again
+# on the next run — 922 tickets, once per Stop hook, forever. Anything that is
+# not a real node id must never reach a GraphQL mutation.
+_SYNTHETIC_ITEM_ID_RE = re.compile(r"^issue-\d+$")
+
+
+def is_real_project_item_id(value):
+    """True only for an id GitHub can resolve as a Projects v2 item node."""
+    if not value or not isinstance(value, str):
+        return False
+    if _SYNTHETIC_ITEM_ID_RE.match(value):
+        return False
+    # Global node ids are opaque, but every Projects v2 item id GitHub has ever
+    # issued carries the typename prefix. Requiring it keeps this a whitelist:
+    # an unrecognised shape is refused rather than forwarded to a mutation.
+    return value.startswith("PVTI_")
+
+
+# Wall-clock ceiling for one push. The Stop hook fires per response, so a push
+# that overruns is not merely slow — it holds the lock across the next several
+# turns and starves every later run. Stopping early is safe: push is
+# incremental and idempotent, so the remainder is simply picked up next turn.
+def _budget_from_env(name, default):
+    """Read a seconds budget from the environment, falling back on nonsense.
+
+    These are read at import time on the Stop-hook path, so a typo'd value must
+    not raise there: the sync would then fail before it could even report why.
+    """
+    try:
+        value = float(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+PUSH_TIME_BUDGET_SECONDS = _budget_from_env("SPAWNFORGE_SYNC_PUSH_BUDGET", 120.0)
+RECONCILE_TIME_BUDGET_SECONDS = _budget_from_env(
+    "SPAWNFORGE_SYNC_RECONCILE_BUDGET", 300.0
+)
+# How many project-field (GraphQL mutation) failures a single run tolerates
+# before it stops issuing them altogether.
+PROJECT_FIELD_FAILURE_LIMIT = 3
 
 
 def load_config():
@@ -194,13 +272,35 @@ def load_map():
     if MAP_PATH.exists():
         try:
             with open(MAP_PATH) as f:
-                return json.load(f)
+                return _strip_synthetic_item_ids(json.load(f))
         except (json.JSONDecodeError, IOError):
             pass
     return {"lastSync": None, "tickets": {}}
 
 
+def _strip_synthetic_item_ids(mapping):
+    """Drop `githubItemId` values GitHub cannot resolve.
+
+    The map on disk is a cache, so the 922 `issue-<number>` stand-ins already
+    written into it are load-bearing only in the sense that push keeps feeding
+    them to a mutation that always fails. Removing them on load is the
+    migration: an entry with no item id takes the "resolve it, or skip the
+    field update" path instead.
+    """
+    for entry in (mapping.get("tickets") or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        if "githubItemId" in entry and not is_real_project_item_id(entry["githubItemId"]):
+            entry.pop("githubItemId", None)
+    return mapping
+
+
 def save_map(mapping):
+    # Strip on the way out as well as in. pull() writes `githubItemId` from four
+    # branches and normalizes REST issues into board-item shape to do it, so a
+    # guard at any one of those sites is one refactor away from being bypassed.
+    # The two serialization choke points cannot be.
+    _strip_synthetic_item_ids(mapping)
     mapping["lastSync"] = datetime.now(timezone.utc).isoformat()
     with open(MAP_PATH, "w") as f:
         json.dump(mapping, f, indent=2)
@@ -710,7 +810,13 @@ def gh_create_issue_and_add_to_project(config, title, body="", labels=None):
 
 
 def gh_set_status(config, item_id, local_status):
-    if not is_project_item_node_id(item_id):
+    # Refusing here rather than at the call site makes the guard unbypassable:
+    # every path into the Status mutation goes through this function, and a
+    # synthetic id reaching GitHub costs a billed request that cannot succeed.
+    # A refusal is reported as False, never raised — raising is what aborted the
+    # ticket's update block before its memo fields were written, which is how
+    # one failing mutation came back on every subsequent run.
+    if not is_real_project_item_id(item_id):
         return False
     option_id = config["statusOptions"].get(local_status)
     if not option_id:
@@ -726,14 +832,67 @@ def gh_set_status(config, item_id, local_status):
 
 
 def is_project_item_node_id(item_id):
-    """Return whether an ID can be passed to Projects v2 field mutations.
+    """Whether an ID can be passed to Projects v2 field mutations (#9429 name).
 
     Pull uses ``issue-<number>`` as a local correlation key for REST results.
     That value is deliberately not a GitHub node ID and must never reach
     ``gh project item-edit``. Tickets without a mapped project item still sync
     their issue body/state; only the project status-field mutation is skipped.
+
+    Delegates to :func:`is_real_project_item_id`, which whitelists the ``PVTI_``
+    typename prefix instead of blacklisting the one synthetic shape we happen to
+    mint today — an unrecognised shape is refused rather than forwarded.
     """
-    return isinstance(item_id, str) and bool(item_id) and not item_id.startswith("issue-")
+    return is_real_project_item_id(item_id)
+
+
+_ITEM_ID_QUERY = """
+query($owner:String!, $repo:String!, $number:Int!) {
+  repository(owner:$owner, name:$repo) {
+    issue(number:$number) {
+      projectItems(first: 20) { nodes { id project { id } } }
+    }
+  }
+}
+"""
+
+
+def gh_resolve_project_item_id(config, issue_number):
+    """Return the real Projects v2 item id for an issue, or None.
+
+    None is a legitimate answer, not an error: an issue that was never added to
+    the project has no item, and the Status field simply does not apply to it.
+
+    This is a GraphQL *query* against one issue, not the `gh project item-list`
+    fetch the rest of this module avoids — that one pages ~8000 board items and
+    costs ~1000 points. It runs only when a ticket's status actually changed and
+    the map has no cached id, so a converged board issues none at all.
+    """
+    try:
+        out = gh_run([
+            "gh", "api", "graphql",
+            "-f", f"query={_ITEM_ID_QUERY}",
+            # -f keeps a value a string; -F infers a type. owner/repo must stay
+            # strings (a numeric-looking repo name would otherwise be sent as an
+            # Int and fail the schema), and `number` must be an Int.
+            "-f", f"owner={config['owner']}",
+            "-f", f"repo={config['repo']}",
+            "-F", f"number={int(issue_number)}",
+        ], timeout=30)
+    except Exception:
+        return None
+    try:
+        nodes = (
+            json.loads(out)["data"]["repository"]["issue"]["projectItems"]["nodes"]
+        )
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+    for node in nodes or []:
+        if (node.get("project") or {}).get("id") == config["projectId"]:
+            candidate = node.get("id")
+            if is_real_project_item_id(candidate):
+                return candidate
+    return None
 
 
 def gh_get_issue_state(config, issue_number):
@@ -823,6 +982,134 @@ def github_to_local(config, github_status):
 # PUSH: local taskboard → GitHub Project
 # ---------------------------------------------------------------------------
 
+class BoundedErrorLog:
+    """Print the first few errors of a kind, then just count the rest.
+
+    A run that fails once per ticket used to emit one stderr line per ticket —
+    894 of them, which is how a systemic failure came to look like ordinary
+    noise in `.sync.log` for weeks. The first few lines carry the diagnosis; the
+    count carries the scale.
+    """
+
+    def __init__(self, limit=5):
+        self.limit = limit
+        self.count = 0
+
+    def add(self, message):
+        self.count += 1
+        if self.count <= self.limit:
+            print(f"  ! {message}", file=sys.stderr)
+        elif self.count == self.limit + 1:
+            print("  ! (further errors suppressed — see the run summary)",
+                  file=sys.stderr)
+
+    def summary(self, label):
+        if self.count > self.limit:
+            return f"{self.count} {label} (first {self.limit} shown)"
+        return f"{self.count} {label}" if self.count else ""
+
+
+class ProjectFieldSync:
+    """Best-effort Projects v2 Status writes, with a per-run circuit breaker.
+
+    The board's Status field is a MIRROR of the ticket status; the issue's
+    open/closed state (verified by gh_sync_issue_state) is the load-bearing
+    signal. So a failure here must never abort the ticket's update block — that
+    is precisely what latched the change detector and made every push replay the
+    whole board. It is counted, capped, and reported instead.
+    """
+
+    def __init__(self, limit=PROJECT_FIELD_FAILURE_LIMIT):
+        self.limit = limit
+        self.failures = 0
+        self.applied = 0
+        self.unmapped = 0
+        self.tripped = False
+
+    def _trip(self, reason):
+        if not self.tripped:
+            self.tripped = True
+            print(f"  [project-field] disabled for this run: {reason}",
+                  file=sys.stderr)
+
+    def apply(self, config, entry, issue_number, status, display):
+        """Mirror `status` onto the board. Never raises."""
+        if self.tripped:
+            return
+        item_id = entry.get("githubItemId")
+        if not is_real_project_item_id(item_id):
+            item_id = gh_resolve_project_item_id(config, issue_number) if issue_number else None
+            if not item_id:
+                # The issue is not on the board (or could not be read). There is
+                # no field to write, so this is not an error — it is a no-op we
+                # record once so the summary can show it.
+                self.unmapped += 1
+                entry.pop("githubItemId", None)
+                return
+            entry["githubItemId"] = item_id
+        try:
+            if not gh_set_status(config, item_id, status):
+                # The id we resolved is not one GitHub can act on after all, or
+                # the status has no board option. Nothing was spent; record it
+                # the same way an issue that is not on the board is recorded.
+                self.unmapped += 1
+                entry.pop("githubItemId", None)
+                return
+            self.applied += 1
+        except Exception as e:
+            self.failures += 1
+            text = str(e)
+            if "Could not resolve to a node" in text:
+                # Systemic: the ids we hold are not ids GitHub knows. Retrying
+                # per ticket only spends quota, so stop after the first one.
+                entry.pop("githubItemId", None)
+                self._trip(f"unresolvable project item id ({text[:120]})")
+                return
+            print(f"  ! Board status failed {display}: {text}", file=sys.stderr)
+            if self.failures >= self.limit:
+                self._trip(f"{self.failures} consecutive failures")
+
+    def summary(self):
+        parts = []
+        if self.applied:
+            parts.append(f"{self.applied} board-status")
+        if self.unmapped:
+            parts.append(f"{self.unmapped} not on board")
+        if self.failures:
+            parts.append(f"{self.failures} board-status failed")
+        return parts
+
+
+LOCK_PATH = _MAIN_HOOKS / ".sync-push.lock"
+LOCK_WANTED_PATH = _MAIN_HOOKS / ".sync-lock-wanted"
+# How recently another run must have asked for the lock for the holder to yield.
+LOCK_WANTED_TTL_SECONDS = 300
+
+
+def request_sync_lock():
+    """Record that a run wanted the lock but could not get it."""
+    try:
+        LOCK_WANTED_PATH.write_text(str(time.time()))
+    except OSError:
+        pass
+
+
+def sync_lock_wanted():
+    """True if another run asked for the lock recently and is still waiting."""
+    try:
+        stamp = float(LOCK_WANTED_PATH.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return 0 <= (time.time() - stamp) <= LOCK_WANTED_TTL_SECONDS
+
+
+def clear_sync_lock_request():
+    try:
+        LOCK_WANTED_PATH.unlink()
+    except OSError:
+        pass
+
+
 def with_sync_lock(label, fn):
     """Run `fn` under the exclusive sync lock, or skip if another run holds it.
 
@@ -830,15 +1117,22 @@ def with_sync_lock(label, fn):
     reconcile decides from a snapshot of GitHub state that a concurrent push is
     busy invalidating. Shared rather than duplicated because reconcile now runs
     detached from session start, which is what makes the overlap reachable.
+
+    A skipped run leaves a note behind. The holder is the long reconcile sweep
+    over every issue in the repo; without the note it has no way to learn that
+    the interactive push it is blocking has come and gone, and the Stop hook
+    fires often enough that the sweep could starve several turns' worth of them
+    in a row.
     """
-    lock_path = _MAIN_HOOKS / ".sync-push.lock"
-    lock_fd = open(lock_path, "w")
+    lock_fd = open(LOCK_PATH, "w")
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except (IOError, OSError):
         print(f"[SYNC] Another sync is already running — skipping {label}")
+        request_sync_lock()
         lock_fd.close()
         return
+    clear_sync_lock_request()
     try:
         return fn()
     finally:
@@ -872,9 +1166,19 @@ def _push_inner(include_done=False):
     updated = 0
     skipped = 0
     filtered = 0
-    errors = 0
+    field_sync = ProjectFieldSync()
+    errlog = BoundedErrorLog()
+    started = time.monotonic()
+    budget_hit = 0
 
-    for ticket in tickets:
+    for index, ticket in enumerate(tickets):
+        if time.monotonic() - started > PUSH_TIME_BUDGET_SECONDS:
+            # Stop rather than run past the next Stop hook. push is incremental
+            # and idempotent, so whatever is left is simply the next run's work;
+            # overrunning instead holds the lock across turns and starves it.
+            budget_hit = len(tickets) - index
+            break
+
         tid = ticket["id"]
         status = ticket.get("status", "todo")
         title = ticket.get("title", "Untitled")
@@ -917,9 +1221,7 @@ def _push_inner(include_done=False):
                     try:
                         gh_sync_issue_state(config, gh_num, "done")
                     except Exception as e:
-                        errors += 1
-                        print(f"  ! State sync failed {display}: {e}",
-                              file=sys.stderr)
+                        errlog.add(f"State sync failed {display}: {e}")
                 skipped += 1
                 continue
 
@@ -985,7 +1287,15 @@ def _push_inner(include_done=False):
                 # the missing map entry and re-syncs status and body.
                 db_set_github_issue_number(tid, new_gh_num)
 
-                gh_set_status(config, item_id, status)
+                # Best-effort, like every other board-status write: item-add
+                # just returned this id, but if the mutation still fails the
+                # ticket's memo must still be written or the next run replays it.
+                try:
+                    gh_set_status(config, item_id, status)
+                    field_sync.applied += 1
+                except Exception as e:
+                    field_sync.failures += 1
+                    errlog.add(f"Board status failed {display}: {e}")
                 # Close the issue immediately if created as done
                 if status == "done":
                     gh_sync_issue_state(config, new_gh_num, status)
@@ -1004,8 +1314,7 @@ def _push_inner(include_done=False):
                 created += 1
                 print(f"  + {display} [{status}] -> #{new_gh_num}")
             except Exception as e:
-                errors += 1
-                print(f"  ! Create failed {display}: {e}", file=sys.stderr)
+                errlog.add(f"Create failed {display}: {e}")
 
         elif gh_issue_num is not None:
             # --- Existing ticket: check for changes ---
@@ -1041,8 +1350,7 @@ def _push_inner(include_done=False):
                 gh_update_issue(config, gh_issue_num, body=body)
 
                 if status_changed:
-                    item_id = entry.get("githubItemId")
-                    gh_set_status(config, item_id, status)
+                    field_sync.apply(config, entry, gh_issue_num, status, display)
                     # Close/reopen the GitHub issue to match local status
                     gh_sync_issue_state(config, gh_issue_num, status,
                                         prev_status=entry.get("lastLocalStatus"))
@@ -1063,8 +1371,7 @@ def _push_inner(include_done=False):
                     reasons.append("subtasks")
                 print(f"  ~ {display} [{', '.join(reasons)}]")
             except Exception as e:
-                errors += 1
-                print(f"  ! Update failed {display}: {e}", file=sys.stderr)
+                errlog.add(f"Update failed {display}: {e}")
 
         else:
             # tid in tmap but no github_issue_number in DB — legacy entry
@@ -1080,15 +1387,23 @@ def _push_inner(include_done=False):
     if filtered:
         print(f"  [filter] {filtered} tickets skipped (wrong sync_repo)")
 
-    if created or updated or errors:
-        parts = []
-        if created:
-            parts.append(f"{created} created")
-        if updated:
-            parts.append(f"{updated} updated")
-        if errors:
-            parts.append(f"{errors} errors")
-        print(f"[SYNC->GH] {', '.join(parts)}")
+    if budget_hit:
+        print(
+            f"  [budget] stopped after {PUSH_TIME_BUDGET_SECONDS:.0f}s with "
+            f"{budget_hit} tickets unvisited — they are picked up next run"
+        )
+
+    parts = []
+    if created:
+        parts.append(f"{created} created")
+    if updated:
+        parts.append(f"{updated} updated")
+    parts.extend(field_sync.summary())
+    error_part = errlog.summary("errors")
+    if error_part:
+        parts.append(error_part)
+    if parts:
+        print(f"[SYNC->GH] {', '.join(parts)} ({time.monotonic() - started:.1f}s)")
 
 
 # ---------------------------------------------------------------------------
@@ -1125,6 +1440,11 @@ def pull():
 
     # Normalize repo issues into the same shape as project board items
     # so the rest of the pull logic works unchanged.
+    #
+    # `id` here is a LOCAL matching key, not a GitHub node id — these issues came
+    # from the REST endpoint, which does not know the board item they belong to.
+    # save_map() drops it rather than persisting a stand-in that push would
+    # later feed to a GraphQL mutation GitHub can only reject.
     items = []
     for issue in repo_issues:
         items.append({
@@ -2023,8 +2343,25 @@ def _reconcile_inner(apply_changes=False):
         return
 
     fixed = 0
-    errors = 0
+    errlog = BoundedErrorLog()
+    deferred = 0
+    started = time.monotonic()
+
+    # This sweep runs detached from SessionStart and holds the same exclusive
+    # lock push takes, so every second it spends is a Stop-hook push that
+    # skipped. Give it a ceiling, and let a waiting push cut it short: the
+    # sweep is state-based and idempotent, so an early stop costs nothing but
+    # the remainder, which the next sweep recomputes from scratch.
+    def _should_stop():
+        return (
+            time.monotonic() - started > RECONCILE_TIME_BUDGET_SECONDS
+            or sync_lock_wanted()
+        )
+
     for t, num in to_done:
+        if _should_stop():
+            deferred += 1
+            continue
         try:
             tb_post(f"/tickets/{t['id']}/move", {"status": "done"})
             e = tmap.setdefault(t["id"], {})
@@ -2032,10 +2369,12 @@ def _reconcile_inner(apply_changes=False):
             e["lastGithubStatus"] = local_to_github(config, "done")
             fixed += 1
         except Exception as exc:
-            errors += 1
-            print(f"  ! PF-{t['number']} -> done failed: {exc}", file=sys.stderr)
+            errlog.add(f"PF-{t['number']} -> done failed: {exc}")
 
     for t, num in to_close:
+        if _should_stop():
+            deferred += 1
+            continue
         try:
             gh_sync_issue_state(config, num, "done", prev_status="in_progress")
             e = tmap.setdefault(t["id"], {})
@@ -2043,12 +2382,14 @@ def _reconcile_inner(apply_changes=False):
             e["lastGithubStatus"] = local_to_github(config, "done")
             fixed += 1
         except Exception as exc:
-            errors += 1
-            print(f"  ! close #{num} failed: {exc}", file=sys.stderr)
+            errlog.add(f"close #{num} failed: {exc}")
 
     mapping["tickets"] = tmap
     save_map(mapping)
-    print(f"[reconcile] {fixed} reconciled, {errors} errors, {len(unlinked)} unlinked left alone")
+    summary = f"[reconcile] {fixed} reconciled, {errlog.count} errors, {len(unlinked)} unlinked left alone"
+    if deferred:
+        summary += f", {deferred} deferred (yielded to a waiting push)"
+    print(f"{summary} ({time.monotonic() - started:.1f}s)")
 
 
 COMMANDS = {
@@ -2067,6 +2408,15 @@ if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         print(f"Usage: {sys.argv[0]} {{{' | '.join(COMMANDS)}}}")
         sys.exit(1)
+
+    # Checked here as well as in the wrapper scripts: `status` and the manual
+    # commands are run by hand, and a switch that only some entry points honour
+    # is not a switch. Exit 0 — a disabled sync is a deliberate state, not a
+    # failure, and the Stop hook must not surface it as one.
+    _off = sync_disabled_reason()
+    if _off:
+        print(f"[SYNC] disabled ({_off}) — skipping {sys.argv[1]}")
+        sys.exit(0)
 
     try:
         COMMANDS[sys.argv[1]]()

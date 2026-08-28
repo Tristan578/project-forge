@@ -397,6 +397,306 @@ print('persist-first' if ok else 'persist-late')
 ")"
 assert_out "push writes the new issue number down before any call that can raise" "persist-first" "$out"
 
+# ==========================================================================
+# PF-1212 — the sync must not spend GraphQL quota on requests that cannot
+# succeed. pull() synthesized `issue-<number>` as a Projects v2 item id, push()
+# fed it straight to `gh project item-edit --id`, and GitHub answered "Could not
+# resolve to a node" every time. The raise aborted the ticket's update block
+# BEFORE its memo fields were written, so the change detector fired again next
+# run: 922 tickets x one failing billed mutation each, once per Stop hook.
+# ==========================================================================
+
+# ------------------------------------------------- is_real_project_item_id
+out="$(run_py "
+cases = ['PVTI_lADOAA', 'issue-9340', 'issue-1', '', None, 0, 'I_kwDOROP26c', 'PVT_kwDO']
+print(' '.join(str(m.is_real_project_item_id(c)) for c in cases))
+")"
+assert_out "only PVTI_-prefixed node ids are accepted as project item ids" \
+  "True False False False False False False False" "$out"
+
+# The guard lives INSIDE gh_set_status, not at its call sites: every path into
+# the Status mutation goes through it, so a future caller cannot route around
+# the check. Proven by observing that `gh` is never invoked.
+#
+# The refusal is a False return, NOT a raise (#9429). Raising here is what
+# aborted the ticket's update block before its memo fields were written, so the
+# change detector fired again on the very next run and replayed the whole board.
+out="$(run_py "
+calls = []
+m.gh_run = lambda *a, **k: calls.append(a)
+cfg = {'statusOptions': {'todo': 'opt1'}, 'projectId': 'PVT_x', 'statusFieldId': 'F_x'}
+try:
+    result = m.gh_set_status(cfg, 'issue-9340', 'todo')
+    print('refused-without-calling-gh' if result is False and not calls else 'leaked')
+except Exception:
+    print('raised')
+")"
+assert_out "gh_set_status refuses a synthetic item id without spending a request" \
+  "refused-without-calling-gh" "$out"
+
+out="$(run_py "
+calls = []
+m.gh_run = lambda *a, **k: calls.append(a)
+cfg = {'statusOptions': {'todo': 'opt1'}, 'projectId': 'PVT_x', 'statusFieldId': 'F_x'}
+m.gh_set_status(cfg, 'PVTI_real', 'todo')
+print(len(calls))
+")"
+assert_out "gh_set_status still issues the mutation for a real node id" "1" "$out"
+
+# ------------------------------------------- map serialization strips them
+# The map is a cache, so the 922 stand-ins already on disk are purged by
+# loading it. Stripping on BOTH load and save is deliberate: pull() writes
+# githubItemId from four separate branches, and a guard at any one of them is
+# one refactor away from being bypassed — the serialization boundary is not.
+out="$(run_py "
+import json, tempfile, pathlib
+tmp = pathlib.Path(tempfile.mkdtemp()) / 'map.json'
+tmp.write_text(json.dumps({'tickets': {
+    'a': {'githubItemId': 'issue-1', 'githubIssueNumber': 1},
+    'b': {'githubItemId': 'PVTI_keep', 'githubIssueNumber': 2},
+}}))
+m.MAP_PATH = tmp
+loaded = m.load_map()
+print('githubItemId' not in loaded['tickets']['a'], loaded['tickets']['b']['githubItemId'])
+")"
+assert_out "load_map drops synthetic item ids and keeps real ones" "True PVTI_keep" "$out"
+
+out="$(run_py "
+import json, tempfile, pathlib
+tmp = pathlib.Path(tempfile.mkdtemp()) / 'map.json'
+m.MAP_PATH = tmp
+m.save_map({'tickets': {'a': {'githubItemId': 'issue-7'}, 'b': {'githubItemId': 'PVTI_keep'}}})
+back = json.loads(tmp.read_text())
+print('githubItemId' in back['tickets']['a'], back['tickets']['b']['githubItemId'])
+")"
+assert_out "save_map refuses to persist a synthetic item id" "False PVTI_keep" "$out"
+
+# ------------------------------------------------------- ProjectFieldSync
+# The board Status field MIRRORS the ticket status; the issue open/closed state
+# is the load-bearing signal and is verified separately. So a field failure must
+# be counted, never raised — raising is what aborted the update block before the
+# memo was written and latched the whole board into replaying every run.
+out="$(run_py "
+import io, contextlib
+fs = m.ProjectFieldSync()
+def boom(*a, **k):
+    raise RuntimeError('GraphQL: Could not resolve to a node with the global id of \'issue-42\'')
+m.gh_set_status = boom
+entry = {'githubItemId': 'PVTI_stale'}
+with contextlib.redirect_stderr(io.StringIO()):
+    fs.apply({'projectId': 'PVT_x'}, entry, 42, 'todo', 'PF-1')
+print('no-raise', fs.tripped, fs.failures, 'githubItemId' in entry)
+")"
+assert_out "an unresolvable-node failure trips the breaker on the FIRST occurrence" \
+  "no-raise True 1 False" "$out"
+
+# Once tripped, the rest of the run issues no further field mutations at all.
+out="$(run_py "
+import io, contextlib
+fs = m.ProjectFieldSync()
+calls = []
+def boom(*a, **k):
+    calls.append(a)
+    raise RuntimeError('GraphQL: Could not resolve to a node with the global id')
+m.gh_set_status = boom
+with contextlib.redirect_stderr(io.StringIO()):
+    for i in range(50):
+        fs.apply({'projectId': 'PVT_x'}, {'githubItemId': 'PVTI_stale'}, i, 'todo', 'PF-%d' % i)
+print(len(calls))
+")"
+assert_out "a tripped breaker stops every later field mutation in the run" "1" "$out"
+
+# An ordinary (non-systemic) failure gets a small budget rather than one shot.
+out="$(run_py "
+import io, contextlib
+fs = m.ProjectFieldSync()
+calls = []
+def boom(*a, **k):
+    calls.append(a)
+    raise RuntimeError('HTTP 502 bad gateway')
+m.gh_set_status = boom
+with contextlib.redirect_stderr(io.StringIO()):
+    for i in range(50):
+        fs.apply({'projectId': 'PVT_x'}, {'githubItemId': 'PVTI_x'}, i, 'todo', 'PF-%d' % i)
+print(len(calls) == m.PROJECT_FIELD_FAILURE_LIMIT, fs.tripped)
+")"
+assert_out "a transient failure trips only after the per-run failure limit" "True True" "$out"
+
+# An issue that was never added to the board has no field to write. That is a
+# no-op, not an error — counting it as one would make a clean run look broken.
+out="$(run_py "
+fs = m.ProjectFieldSync()
+m.gh_resolve_project_item_id = lambda *a, **k: None
+def never(*a, **k):
+    raise AssertionError('must not be called')
+m.gh_set_status = never
+entry = {}
+fs.apply({'projectId': 'PVT_x'}, entry, 42, 'todo', 'PF-1')
+print(fs.unmapped, fs.failures, entry)
+")"
+assert_out "an issue that is not on the board is a no-op, not an error" "1 0 {}" "$out"
+
+# A resolved id is cached on the entry so the next status change costs no query.
+out="$(run_py "
+fs = m.ProjectFieldSync()
+resolved = []
+def resolve(*a, **k):
+    resolved.append(a)
+    return 'PVTI_resolved'
+m.gh_resolve_project_item_id = resolve
+m.gh_set_status = lambda *a, **k: True
+entry = {}
+fs.apply({'projectId': 'PVT_x'}, entry, 42, 'todo', 'PF-1')
+fs.apply({'projectId': 'PVT_x'}, entry, 42, 'done', 'PF-1')
+print(len(resolved), entry['githubItemId'], fs.applied)
+")"
+assert_out "a resolved item id is cached on the map entry" "1 PVTI_resolved 2" "$out"
+
+# --- the update path must not be able to latch on a field failure ---------
+# gh_set_status raises by design for an id GitHub cannot resolve, and the update
+# block's memo writes come after it. Routing the status mirror through
+# ProjectFieldSync.apply (which never raises) is what stops one board failure
+# from replaying the ticket on every push forever. The single remaining direct
+# call is the create path, where item-add has just returned a real id.
+out="$(run_py "
+import inspect
+src = inspect.getsource(m._push_inner)
+routed = 'field_sync.apply(config, entry, gh_issue_num, status, display)' in src
+print('routed' if routed and src.count('gh_set_status(') == 1 else 'direct')
+")"
+assert_out "push mirrors board status through the non-raising helper" "routed" "$out"
+
+# ------------------------------------------------------------ run budgets
+out="$(run_py "
+import inspect
+src = inspect.getsource(m._push_inner)
+i_loop = src.find('for index, ticket in enumerate(tickets):')
+i_budget = src.find('PUSH_TIME_BUDGET_SECONDS', i_loop)
+i_work = src.find('tid = ticket[', i_loop)
+print('bounded' if -1 not in (i_loop, i_budget, i_work) and i_budget < i_work else 'unbounded')
+")"
+assert_out "push checks its wall-clock budget before each ticket's work" "bounded" "$out"
+
+out="$(run_py "
+import inspect
+src = inspect.getsource(m._reconcile_inner)
+print('yields' if 'sync_lock_wanted()' in src and 'RECONCILE_TIME_BUDGET_SECONDS' in src else 'starves')
+")"
+assert_out "reconcile yields to a waiting push and bounds its own wall clock" "yields" "$out"
+
+# The note a skipped run leaves behind is what lets the long detached sweep
+# learn that it is blocking an interactive push. Without it the sweep has no
+# way to see the Stop-hook pushes it starves, one per assistant response.
+out="$(run_py "
+import inspect
+print('notes' if 'request_sync_lock()' in inspect.getsource(m.with_sync_lock) else 'silent')
+")"
+assert_out "a run that cannot take the lock records that it wanted it" "notes" "$out"
+
+out="$(run_py "
+import tempfile, pathlib
+m.LOCK_WANTED_PATH = pathlib.Path(tempfile.mkdtemp()) / 'wanted'
+print(m.sync_lock_wanted(), end=' ')
+m.request_sync_lock()
+print(m.sync_lock_wanted(), end=' ')
+m.clear_sync_lock_request()
+print(m.sync_lock_wanted())
+")"
+assert_out "the lock-wanted note is set and cleared" "False True False" "$out"
+
+# A stale note must not make every future sweep yield instantly forever.
+out="$(run_py "
+import tempfile, pathlib, time
+p = pathlib.Path(tempfile.mkdtemp()) / 'wanted'
+m.LOCK_WANTED_PATH = p
+p.write_text(str(time.time() - m.LOCK_WANTED_TTL_SECONDS - 60))
+print(m.sync_lock_wanted())
+")"
+assert_out "a note older than its TTL stops forcing a yield" "False" "$out"
+
+# ---------------------------------------------------------- BoundedErrorLog
+# 894 identical stderr lines is how a systemic failure came to read as ordinary
+# log noise for weeks. The first few carry the diagnosis, the count the scale.
+out="$(run_py "
+import io, contextlib
+log = m.BoundedErrorLog(limit=3)
+buf = io.StringIO()
+with contextlib.redirect_stderr(buf):
+    for i in range(100):
+        log.add('failure %d' % i)
+lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+print(len(lines), log.count, log.summary('errors'))
+")"
+assert_out "an error log prints a bounded head and counts the tail" \
+  "4 100 100 errors (first 3 shown)" "$out"
+
+out="$(run_py "print(repr(m.BoundedErrorLog().summary('errors')))")"
+assert_out "a clean run contributes no error text to the summary" "''" "$out"
+
+# -------------------------------------------------------------- kill switch
+out="$(run_py "
+import os, tempfile, pathlib
+os.environ.pop('SPAWNFORGE_SYNC_DISABLED', None)
+m.DISABLE_MARKER = pathlib.Path(tempfile.mkdtemp()) / '.sync-disabled'
+print(m.sync_disabled_reason())
+")"
+assert_out "sync is enabled by default" "None" "$out"
+
+out="$(run_py "
+import os, tempfile, pathlib
+m.DISABLE_MARKER = pathlib.Path(tempfile.mkdtemp()) / '.sync-disabled'
+os.environ['SPAWNFORGE_SYNC_DISABLED'] = '1'
+print(m.sync_disabled_reason() is not None, end=' ')
+os.environ['SPAWNFORGE_SYNC_DISABLED'] = '0'
+print(m.sync_disabled_reason())
+")"
+assert_out "the env kill switch honours an explicit 0 as 'not disabled'" "True None" "$out"
+
+out="$(run_py "
+import os, tempfile, pathlib
+os.environ.pop('SPAWNFORGE_SYNC_DISABLED', None)
+marker = pathlib.Path(tempfile.mkdtemp()) / '.sync-disabled'
+marker.write_text('PF-1212 investigation')
+m.DISABLE_MARKER = marker
+print('PF-1212 investigation' in m.sync_disabled_reason())
+")"
+assert_out "the marker file kill switch reports the note written into it" "True" "$out"
+
+# The switch must be honoured by every entry point, not just the Stop hook.
+# A switch some paths ignore is not a switch.
+for wrapper in sync-to-github.sh sync-from-github.sh; do
+  script="$HOOKS_DIR/$wrapper"
+  # Comment-stripped: a mention in prose is not a check.
+  body="$(sed 's/#.*//' "$script")"
+  if grep -q '\.sync-disabled' <<<"$body" && grep -q 'SPAWNFORGE_SYNC_DISABLED' <<<"$body"; then
+    echo "ok   - $wrapper honours both kill-switch signals"
+  else
+    echo "FAIL - $wrapper does not check both kill-switch signals"
+    FAILURES=$((FAILURES + 1))
+  fi
+  # ...and it must come first: probing gh/curl before the switch means a
+  # disabled sync still shells out on every assistant response.
+  i_switch="$(grep -n 'sync-disabled' <<<"$body" | head -1 | cut -d: -f1)"
+  i_gh="$(grep -n 'command -v gh' <<<"$body" | head -1 | cut -d: -f1)"
+  if [ -n "$i_switch" ] && [ -n "$i_gh" ] && [ "$i_switch" -lt "$i_gh" ]; then
+    echo "ok   - $wrapper checks the kill switch before doing any work"
+  else
+    echo "FAIL - $wrapper checks the kill switch too late (switch=$i_switch gh=$i_gh)"
+    FAILURES=$((FAILURES + 1))
+  fi
+done
+
+# End to end through the real script: a disabled pull must announce itself and
+# exit clean without touching gh or the taskboard.
+out="$(SPAWNFORGE_SYNC_DISABLED=1 bash "$HOOKS_DIR/sync-from-github.sh" 2>&1)"
+rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'disabled' <<<"$out"; then
+  echo "ok   - a disabled sync-from-github.sh exits 0 and says so"
+else
+  echo "FAIL - a disabled sync-from-github.sh (rc=$rc) did not report the switch: $out"
+  FAILURES=$((FAILURES + 1))
+fi
+
 if [ "$FAILURES" -eq 0 ]; then
   echo "All github_project_sync tests passed."
   exit 0

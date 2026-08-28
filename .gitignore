@@ -35,6 +35,8 @@ secrets.json
 # Generated sync state — not for version control
 .claude/hooks/github-project-map.json
 .claude/hooks/.sync-push.lock
+.claude/hooks/.sync-lock-wanted
+.claude/hooks/.sync-disabled
 .claude/hooks/.sync.log
 
 # ----- Windsurf / AI Tooling -----

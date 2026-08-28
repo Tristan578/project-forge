@@ -11,6 +11,19 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Kill switch. This script is fired by the Stop hook after EVERY assistant
+# response, so when the sync misbehaves there is no interactive moment in which
+# to stop it — the only lever anyone had was to hold its flock from a detached
+# process and remember to kill that pid later. Checked here (before gh, curl or
+# python3 are even probed) and again inside github_project_sync.py, so it works
+# from every entry point.
+#   Disable: touch .claude/hooks/.sync-disabled   (or export SPAWNFORGE_SYNC_DISABLED=1)
+#   Enable:  rm .claude/hooks/.sync-disabled
+if [ -f "$SCRIPT_DIR/.sync-disabled" ] ||
+    { [ -n "${SPAWNFORGE_SYNC_DISABLED:-}" ] && [ "${SPAWNFORGE_SYNC_DISABLED}" != "0" ]; }; then
+    exit 0
+fi
+
 # Bail if gh CLI is not available or not authenticated
 if ! command -v gh &>/dev/null; then
     exit 0
