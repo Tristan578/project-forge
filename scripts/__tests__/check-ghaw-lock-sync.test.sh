@@ -487,9 +487,10 @@ if [ -f "$CI_YML" ]; then
   #
   # COMMENT-STRIP: strip full-comment lines first so a doc comment that legitimately
   # names the seam does not trip the check; an attacker's `env:` wiring is a
-  # non-comment line and is still caught. ghaw_block is one job block (well under
-  # the pipe buffer), so the inner grep|grep pipe carries no SIGPIPE risk.
-  if grep -v '^[[:space:]]*#' <<<"$ghaw_block" | grep -q 'GHAW_COMPILE_CMD'; then
+  # non-comment line and is still caught. Capture before testing so `grep -q`
+  # cannot SIGPIPE the comment stripper under `set -o pipefail`.
+  ghaw_executable="$(grep -v '^[[:space:]]*#' <<<"$ghaw_block" || true)"
+  if grep -q 'GHAW_COMPILE_CMD' <<<"$ghaw_executable"; then
     fail "ghaw-lock-sync job exposes the GHAW_COMPILE_CMD test seam in an executable line — gate can be no-op'd into a false pass"
   else
     pass "ghaw-lock-sync job does not wire the GHAW_COMPILE_CMD test seam (gate cannot be bypassed via job env)"
