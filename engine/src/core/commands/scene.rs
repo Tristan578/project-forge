@@ -286,6 +286,7 @@ fn handle_delete_asset(payload: serde_json::Value) -> super::CommandResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportAudioPayload {
+    data_base64: String,
     name: String,
 }
 
@@ -296,7 +297,7 @@ fn handle_import_audio(payload: serde_json::Value) -> super::CommandResult {
         .map_err(|e| format!("Invalid import_audio payload: {}", e))?;
 
     let request = AudioImportRequest {
-        data_base64: String::new(), // Audio data stays JS-side; engine only tracks metadata
+        data_base64: data.data_base64,
         name: data.name.clone(),
     };
 
@@ -672,6 +673,19 @@ mod tests {
             pending.gltf_import_requests[0].target_entity_id, None,
             "absent targetEntityId must normalize to None (new-root fallback)"
         );
+    }
+
+    #[test]
+    fn import_audio_queues_payload_for_metadata_size() {
+        let pending = run_with_queue("import_audio", json!({
+            "dataBase64": "U3Bhd25Gb3JnZQ==",
+            "name": "theme.ogg"
+        }));
+
+        assert_eq!(pending.audio_import_requests.len(), 1);
+        let request = &pending.audio_import_requests[0];
+        assert_eq!(request.data_base64, "U3Bhd25Gb3JnZQ==");
+        assert_eq!(request.name, "theme.ogg");
     }
 
     #[test]

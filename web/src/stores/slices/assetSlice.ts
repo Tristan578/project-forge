@@ -49,9 +49,9 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
     if (dispatchCommand) dispatchCommand('remove_texture', { entityId, slot });
   },
   importAudio: (dataBase64, name) => {
-    // The engine drops `dataBase64` — `ImportAudioPayload` declares only `name` —
-    // so these bytes are the ONLY copy the Web Audio graph will ever see. Hold
-    // them until `ASSET_IMPORTED` names the asset id the engine minted, then
+    // The engine receives `dataBase64` to validate the payload and record its
+    // decoded size, while playback remains JS-side. Hold the bytes until
+    // `ASSET_IMPORTED` names the asset id the engine minted, then
     // `ingestImportedAudioAsset` decodes them under that id.
     //
     // Queued only when the dispatch actually happens: the queue is drained by

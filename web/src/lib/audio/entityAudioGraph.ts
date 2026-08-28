@@ -11,13 +11,12 @@
  *
  * TWO ID PROBLEMS MAKE THIS MORE THAN A FUNCTION CALL.
  *
- * 1. The engine does not echo the bytes back, and it does not let JS choose the
- *    asset id. `import_audio` carries `dataBase64`, but `ImportAudioPayload`
- *    declares only `name` (`engine/src/core/commands/scene.rs`), so the bytes
- *    are dropped on the floor and `apply_audio_import` mints a fresh
- *    `Uuid::new_v4()`. The only thing correlating the import with the resulting
- *    `ASSET_IMPORTED` event is the name the engine echoes back — hence the
- *    name-keyed queue below rather than a plain `Map<assetId, bytes>`.
+ * 1. The engine accepts the bytes for validation and metadata sizing, but it
+ *    does not echo them back or let JS choose the asset id. Instead,
+ *    `apply_audio_import` mints a fresh `Uuid::new_v4()`. The only thing
+ *    correlating the import with the resulting `ASSET_IMPORTED` event is the
+ *    name the engine echoes back — hence the name-keyed queue below rather
+ *    than a plain `Map<assetId, bytes>`.
  *
  * 2. `assetId` on an entity is not always an asset id. The generation handlers
  *    call `importAudio(base64, assetName)` and then `setAudio(entityId, {
