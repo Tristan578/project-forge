@@ -52,4 +52,44 @@ describe('DELETE /api/publish/[id]', () => {
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
   });
+
+  it('should scope the update to the authenticated user', async () => {
+    const whereMock = vi.fn().mockResolvedValue(undefined);
+    const mockDb = {
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnThis(),
+        where: whereMock,
+      }),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { DELETE } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/publish/pub-1', { method: 'DELETE' });
+    const res = await DELETE(req, { params: Promise.resolve({ id: 'pub-1' }) });
+
+    // The soft-delete route does not inspect affected-row count, so its security
+    // boundary is the authenticated user id embedded in the update predicate.
+    expect(res.status).toBe(200);
+    expect(whereMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(whereMock.mock.calls[0][0])).toContain('user_1');
+  });
+
+  it('should combine the target id and authenticated user id in the update predicate', async () => {
+    const whereMock = vi.fn().mockResolvedValue(undefined);
+    const mockDb = {
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnThis(),
+        where: whereMock,
+      }),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { DELETE } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/publish/pub-1', { method: 'DELETE' });
+    await DELETE(req, { params: Promise.resolve({ id: 'pub-1' }) });
+
+    const serializedPredicate = JSON.stringify(whereMock.mock.calls[0][0]);
+    expect(serializedPredicate).toContain('pub-1');
+    expect(serializedPredicate).toContain('user_1');
+  });
 });
