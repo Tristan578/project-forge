@@ -79,3 +79,71 @@ impl Default for GltfMemoryDir {
         Self(bevy::asset::io::memory::Dir::default())
     }
 }
+
+/// Return the decoded byte length of a padded standard-base64 payload without
+/// allocating the decoded bytes. Accepts either raw base64 or a data URL.
+pub fn decoded_base64_size(data: &str) -> Option<u64> {
+    fn sextet(byte: u8) -> Option<u8> {
+        match byte {
+            b'A'..=b'Z' => Some(byte - b'A'),
+            b'a'..=b'z' => Some(byte - b'a' + 26),
+            b'0'..=b'9' => Some(byte - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    let payload = data.split_once(',').map_or(data, |(_, payload)| payload);
+    let bytes = payload.as_bytes();
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
+
+    let padding = bytes.iter().rev().take_while(|&&byte| byte == b'=').count();
+    if padding > 2 {
+        return None;
+    }
+    let content_len = bytes.len().saturating_sub(padding);
+    if !bytes[..content_len].iter().all(|&byte| sextet(byte).is_some())
+        || bytes[content_len..].iter().any(|&byte| byte != b'=')
+    {
+        return None;
+    }
+    if (padding == 2 && sextet(bytes[content_len - 1])? & 0x0f != 0)
+        || (padding == 1 && sextet(bytes[content_len - 1])? & 0x03 != 0)
+    {
+        return None;
+    }
+
+    let decoded_len = bytes
+        .len()
+        .checked_div(4)?
+        .checked_mul(3)?
+        .checked_sub(padding)?;
+    u64::try_from(decoded_len).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decoded_base64_size;
+
+    #[test]
+    fn decoded_base64_size_reports_payload_bytes() {
+        assert_eq!(decoded_base64_size("AQIDBA=="), Some(4));
+        assert_eq!(
+            decoded_base64_size("data:audio/wav;base64,AQIDBA=="),
+            Some(4)
+        );
+        assert_eq!(decoded_base64_size("AQI="), Some(2));
+        assert_eq!(decoded_base64_size(""), Some(0));
+    }
+
+    #[test]
+    fn decoded_base64_size_rejects_invalid_payloads() {
+        assert_eq!(decoded_base64_size("not base64"), None);
+        assert_eq!(decoded_base64_size("data:audio/wav;base64,%%%"), None);
+        assert_eq!(decoded_base64_size("A===-"), None);
+        assert_eq!(decoded_base64_size("AB=="), None);
+    }
+}

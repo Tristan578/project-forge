@@ -905,17 +905,28 @@ pub(super) fn apply_audio_import(
     use crate::core::asset_manager::{AssetKind, AssetMetadata, AssetSource};
 
     for request in pending.audio_import_requests.drain(..) {
+        let Some(file_size) =
+            crate::core::asset_manager::decoded_base64_size(&request.data_base64)
+        else {
+            tracing::error!("Audio import rejected: invalid base64 payload");
+            continue;
+        };
         let asset_id = uuid::Uuid::new_v4().to_string();
 
-        asset_registry.assets.insert(asset_id.clone(), AssetMetadata {
-            id: asset_id.clone(),
-            name: request.name.clone(),
-            kind: AssetKind::Audio,
-            file_size: 0, // Audio data stays JS-side
-            source: AssetSource::Upload { filename: request.name.clone() },
-        });
+        asset_registry.assets.insert(
+            asset_id.clone(),
+            AssetMetadata {
+                id: asset_id.clone(),
+                name: request.name.clone(),
+                kind: AssetKind::Audio,
+                file_size,
+                source: AssetSource::Upload {
+                    filename: request.name.clone(),
+                },
+            },
+        );
 
-        events::emit_asset_imported(&asset_id, &request.name, "audio", 0);
+        events::emit_asset_imported(&asset_id, &request.name, "audio", file_size);
         tracing::info!("Registered audio asset: {} ({})", request.name, asset_id);
     }
 }
