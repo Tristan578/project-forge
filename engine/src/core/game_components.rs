@@ -676,8 +676,12 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
                     _ => WinConditionType::Score,
                 };
             }
-            if let Some(v) = prop_u32(&props, "targetScore", u32::MAX) {
-                data.target_score = Some(v);
+            if let Some(value) = props.get("targetScore") {
+                if value.is_null() {
+                    data.target_score = None;
+                } else if let Some(v) = prop_u32(&props, "targetScore", u32::MAX) {
+                    data.target_score = Some(v);
+                }
             }
             if let Some(v) = prop_string(&props, "targetEntityId") {
                 data.target_entity_id = Some(v);
@@ -2612,6 +2616,31 @@ mod build_game_component_tests {
         };
         assert!(matches!(data.condition_type, WinConditionType::Score));
         assert_eq!(data.target_score, Some(42));
+    }
+
+    #[test]
+    fn an_omitted_target_score_keeps_the_default() {
+        let built = build_game_component("win_condition", r#"{"conditionType":"score"}"#)
+            .expect("builds");
+        let GameComponentData::WinCondition(data) = built else {
+            panic!("wrong variant")
+        };
+
+        assert_eq!(data.target_score, Some(10));
+    }
+
+    #[test]
+    fn an_explicit_null_target_score_clears_the_default() {
+        let built = build_game_component(
+            "win_condition",
+            r#"{"conditionType":"reachGoal","targetScore":null}"#,
+        )
+        .expect("builds");
+        let GameComponentData::WinCondition(data) = built else {
+            panic!("wrong variant")
+        };
+
+        assert_eq!(data.target_score, None);
     }
 
     /// The two things that ARE errors: a component type the engine has no systems
