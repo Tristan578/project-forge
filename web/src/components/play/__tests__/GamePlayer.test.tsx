@@ -67,12 +67,15 @@ describe('GamePlayer', () => {
     global.fetch = vi.fn().mockImplementation(() => new Promise(() => {})); // never resolves
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
     expect(screen.getByText('Loading game...')).toBeDefined();
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).not.toBe('');
   });
 
   it('shows loader icon while loading', () => {
     global.fetch = vi.fn().mockImplementation(() => new Promise(() => {}));
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
-    expect(screen.getByTestId('loader-icon')).toBeDefined();
+    expect(screen.getByTestId('loader-icon')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('renders game title after successful fetch', async () => {
@@ -84,6 +87,7 @@ describe('GamePlayer', () => {
     await waitFor(() => {
       expect(screen.getByText('My Awesome Game')).toBeDefined();
     });
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
   it('renders creator name after successful fetch', async () => {
@@ -117,6 +121,9 @@ describe('GamePlayer', () => {
     await waitFor(() => {
       expect(screen.getByText('Game Not Found')).toBeDefined();
     });
+    expect(screen.getByRole('alert')).toHaveAttribute('aria-live', 'assertive');
+    expect(screen.getByText(':(')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
   it('shows error message on failed fetch', async () => {

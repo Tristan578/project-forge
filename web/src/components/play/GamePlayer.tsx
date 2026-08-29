@@ -269,9 +269,13 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // --- Error State ---
   if (error && !loading) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center bg-zinc-950 px-4">
+      <div
+        role="alert"
+        aria-live="assertive"
+        className="flex min-h-dvh flex-col items-center justify-center bg-zinc-950 px-4"
+      >
         <div className="max-w-md text-center">
-          <div className="mb-4 text-6xl">:(</div>
+          <div aria-hidden="true" className="mb-4 text-6xl">:(</div>
           <h1 className="mb-2 text-xl font-semibold text-zinc-200">
             {error === 'Game not found' || error === 'This game is not currently published'
               ? 'Game Not Found'
@@ -304,9 +308,14 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // --- Loading State ---
   if (loading) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-zinc-950">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex min-h-dvh items-center justify-center bg-zinc-950"
+      >
         <div className="flex flex-col items-center gap-3">
-          <Loader2 size={32} className="animate-spin text-zinc-400" />
+          <Loader2 aria-hidden="true" size={32} className="animate-spin text-zinc-400" />
+          <h1 className="sr-only">Loading published game</h1>
           <p className="text-sm text-zinc-400">Loading game...</p>
         </div>
       </div>
