@@ -84,6 +84,13 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      Defaults false so every fixture that does not touch apps/design or
 #      packages/ui keeps the design gate's success/skip as a legitimate
 #      path-filter skip; set true to exercise the design anti-tamper arm.
+#
+# `needs-mcp`, `needs-docs` and `needs-any-code` are hardcoded in the object below
+# rather than parameterised — they are constant for essentially every fixture, and
+# mk's positional list is already 26 long. Flip them with a jq post-filter (see the
+# docs-internal-gate and quality-gates cases) instead of adding a 27th arg.
+# `command-parity`, `build-nextjs` and `test-e2e-ui` are hardcoded to success for
+# the same reason and overridden with jq in the #9437 cases at the end.
 mk() {
   local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}"
   jq -nc \
@@ -94,7 +101,7 @@ mk() {
     --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
     --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
@@ -694,6 +701,168 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "quality-gates failure fails (exit 1)"; else fail "quality-gates failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "quality-gates"; then pass "the failing quality-gates job is named"; else fail "failing quality-gates job not named"; fi
 
+# ============================================================================
+# #9437 — the three jobs that sat in ci-success's `needs:` with NO anti-tamper
+# map entry: command-parity, build-nextjs, test-e2e-ui. Each was a live
+# single-line `if: false` vector: the job still EXISTS so ci-success's `needs:`
+# resolves, the job merely SKIPS, and this verifier fails only on
+# failure/cancelled — so the unwiring certified green. Every case below sets the
+# job under test to `skipped` while its OWN trigger is true; the map entry is
+# the only thing that turns that into exit 1.
+#
+# These use a jq post-filter over `mk` rather than new positional args: mk is
+# already 26 args wide and these three results are constant-success in every
+# other fixture (see the mk header note).
+# ============================================================================
+
+# --- 58. TAMPER: command-parity skipped while needs-web=true → exit 1 ----------
+# command-parity is the ONLY per-PR proof that the three commands.json copies
+# (mcp-server/manifest, web/src/data, apps/docs/data — one per deploy root) stay
+# in sync and that every MCP command has a handler. A web-touching PR sets
+# needs-web=true, so the job SHOULD run. Every other gate runs+succeeds here, so
+# the skipped command-parity job is the SOLE tamper.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."command-parity".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "command-parity skipped while needs-web=true fails (exit 1)"; else fail "tamper (command-parity via web arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "command-parity tamper is flagged as a possible unwiring"; else fail "command-parity tamper message missing"; fi
+if echo "$out" | grep -q "command-parity ("; then pass "the unwired command-parity gate is named (web arm)"; else fail "unwired command-parity gate not named (web arm)"; fi
+
+# --- 59. TAMPER via the needs-mcp arm in ISOLATION: command-parity skipped -----
+#         while ONLY needs-mcp=true (needs-web=false) → exit 1.
+# command-parity's `if:` is `needs-web || needs-mcp` (ci.yml). An mcp-server-only
+# PR — a manifest edit, precisely the change parity exists to catch — sets
+# needs-mcp=true with needs-web=false. Mapping only the needs-web arm would leave
+# THAT PR's `if: false` skip certified green, so the needs-mcp arm must be
+# independently load-bearing. needs-web stays false here (mk's default), so no
+# other gate can raise a competing tamper: command-parity is the SOLE one.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-mcp" = "true" | ."command-parity".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "command-parity skipped while ONLY needs-mcp=true fails (exit 1)"; else fail "tamper (command-parity via mcp arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "command-parity ("; then pass "the unwired command-parity gate is named (mcp arm)"; else fail "unwired command-parity gate not named (mcp arm)"; fi
+
+# --- 60. command-parity legit-skips (needs-web=false AND needs-mcp=false) → 0 ---
+# A PR touching neither web/ nor mcp-server/ legitimately skips command-parity;
+# that must NOT trip the anti-tamper check (proves neither new arm false-positives
+# on an unrelated PR).
+needs="$(mk true true success success success | jq -c '."command-parity".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "command-parity legit-skip (web+mcp false) passes (exit 0)"; else fail "command-parity legit skip should exit 0, got $rc"; fi
+if echo "$out" | grep -q "All required gates passed"; then pass "command-parity legit-skip prints the all-passed line"; else fail "command-parity legit-skip all-passed line missing"; fi
+
+# --- 61. command-parity FAILED while triggered → exit 1 (hard-failure path) -----
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-mcp" = "true" | ."command-parity".result = "failure"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "command-parity failure fails (exit 1)"; else fail "command-parity failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "command-parity"; then pass "the failing command-parity gate is named"; else fail "failing command-parity gate not named"; fi
+
+# --- 62. command-parity job ABSENT from needs while triggered → exit 1 ----------
+# The other one-line unwiring: dropping `- command-parity` from ci-success's
+# `needs:` list. Valid YAML, no dangling reference, the job still runs — the
+# aggregate simply stops observing it. `.result // "absent"` reads that as
+# absent != success → tamper, but ONLY for jobs the map lists, which is exactly
+# what the new entry buys.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-mcp" = "true" | del(."command-parity")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "command-parity absent from needs while triggered fails (exit 1)"; else fail "absent command-parity should exit 1, got $rc"; fi
+if echo "$out" | grep -q "result=absent"; then pass "the absent command-parity job reports result=absent"; else fail "command-parity result=absent missing"; fi
+
+# --- 63. CONFIG DRIFT: needs-mcp renamed/removed from ci-gate outputs → exit 1 --
+# `.outputs[$t] // empty` reads a RENAMED or REMOVED output as "did not fire",
+# which would silently disarm command-parity's mcp arm while every fixture above
+# stayed green (they all carry the key). needs-mcp is newly referenced by the map,
+# so pin its fail-closed drift path the way case 51 pins needs-design's.
+# command-parity is left `skipped` so the ONLY reason to exit non-zero is the
+# missing key itself.
+needs="$(mk true true success success success | jq -c '."command-parity".result = "skipped" | del(."ci-gate".outputs."needs-mcp")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "absent needs-mcp output fails closed (exit 1)"; else fail "absent needs-mcp output should exit 1 (config drift), got $rc"; fi
+if echo "$out" | grep -q "missing from ci-gate outputs"; then pass "needs-mcp drift names the missing-output condition"; else fail "needs-mcp config-drift message missing"; fi
+if echo "$out" | grep -q "needs-mcp"; then pass "config drift names the missing trigger (needs-mcp)"; else fail "missing needs-mcp trigger not named"; fi
+
+# --- 64. TAMPER: build-nextjs skipped while needs-web=true → exit 1 -------------
+# build-nextjs is the ONLY per-PR job that compiles the app — the Next.js
+# production build, the native-swc-binding assertion
+# (scripts/check-native-bindings.sh) and bundle-size enforcement run there and
+# nowhere else on the PR path. A web-touching PR sets needs-web=true, so it SHOULD
+# run; an `if: false` skip would let a PR that does not even build merge with
+# every required check green.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."build-nextjs".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "build-nextjs skipped while needs-web=true fails (exit 1)"; else fail "tamper (build-nextjs) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "build-nextjs tamper is flagged as a possible unwiring"; else fail "build-nextjs tamper message missing"; fi
+if echo "$out" | grep -q "build-nextjs ("; then pass "the unwired build-nextjs gate is named"; else fail "unwired build-nextjs gate not named"; fi
+
+# --- 65. build-nextjs legit-skips (needs-web=false) → exit 0 -------------------
+needs="$(mk true true success success success | jq -c '."build-nextjs".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "build-nextjs legit-skip (needs-web=false) passes (exit 0)"; else fail "build-nextjs legit skip should exit 0, got $rc"; fi
+
+# --- 66. build-nextjs FAILED while triggered → exit 1 (hard-failure path) -------
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."build-nextjs".result = "failure"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "build-nextjs failure fails (exit 1)"; else fail "build-nextjs failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "build-nextjs"; then pass "the failing build-nextjs gate is named"; else fail "failing build-nextjs gate not named"; fi
+
+# --- 67. build-nextjs job ABSENT from needs while triggered → exit 1 ------------
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | del(."build-nextjs")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "build-nextjs absent from needs while triggered fails (exit 1)"; else fail "absent build-nextjs should exit 1, got $rc"; fi
+if echo "$out" | grep -q "result=absent"; then pass "the absent build-nextjs job reports result=absent"; else fail "build-nextjs result=absent missing"; fi
+
+# --- 68. TAMPER: test-e2e-ui skipped while needs-web=true → exit 1 -------------
+# test-e2e-ui is the ONLY per-PR run of the 3-shard Playwright UI suite (@ui
+# specs). A web-touching PR sets needs-web=true, so it SHOULD run; an `if: false`
+# skip is the same single-line unwiring vector guarded for every other gate.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."test-e2e-ui".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "test-e2e-ui skipped while needs-web=true fails (exit 1)"; else fail "tamper (test-e2e-ui) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "test-e2e-ui tamper is flagged as a possible unwiring"; else fail "test-e2e-ui tamper message missing"; fi
+if echo "$out" | grep -q "test-e2e-ui ("; then pass "the unwired test-e2e-ui gate is named"; else fail "unwired test-e2e-ui gate not named"; fi
+
+# --- 69. test-e2e-ui legit-skips (needs-web=false) → exit 0 -------------------
+needs="$(mk true true success success success | jq -c '."test-e2e-ui".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "test-e2e-ui legit-skip (needs-web=false) passes (exit 0)"; else fail "test-e2e-ui legit skip should exit 0, got $rc"; fi
+
+# --- 70. test-e2e-ui FAILED while triggered → exit 1 (hard-failure path) -------
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."test-e2e-ui".result = "failure"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "test-e2e-ui failure fails (exit 1)"; else fail "test-e2e-ui failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-ui"; then pass "the failing test-e2e-ui gate is named"; else fail "failing test-e2e-ui gate not named"; fi
+
+# --- 71. test-e2e-ui job ABSENT from needs while triggered → exit 1 ------------
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | del(."test-e2e-ui")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "test-e2e-ui absent from needs while triggered fails (exit 1)"; else fail "absent test-e2e-ui should exit 1, got $rc"; fi
+if echo "$out" | grep -q "result=absent"; then pass "the absent test-e2e-ui job reports result=absent"; else fail "test-e2e-ui result=absent missing"; fi
+
+# --- 72. ci-gate itself skipped → exit 1 via the drift branch ------------------
+# ci-gate is the ONE job in ci-success's `needs:` that the anti-tamper map
+# deliberately does not list (it is the SOURCE of the trigger outputs, not a gate
+# with an `if:` of its own — mapping it would be circular). That exemption is only
+# safe because ci-gate fails CLOSED: a skipped ci-gate publishes no outputs, so
+# every mapped trigger goes missing and the drift branch refuses to certify.
+# Pin that, so the map-completeness assertion's ci-gate exemption stays justified.
+needs="$(mk true true success success success | jq -c '."ci-gate" = { result: "skipped", outputs: {} }')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "a skipped ci-gate (no outputs) fails closed (exit 1)"; else fail "skipped ci-gate should exit 1, got $rc"; fi
+if echo "$out" | grep -q "missing from ci-gate outputs"; then pass "skipped ci-gate is reported as config drift"; else fail "skipped ci-gate drift message missing"; fi
+
 # --- Structural: the REAL workflow wiring (not hermetic fixtures) ---------------
 # The hermetic cases above prove this verifier's decision logic against synthetic
 # NEEDS_JSON; none of them can catch a PR that reworks the real wiring the logic
@@ -800,6 +969,117 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   else
     fail "verifier anti-tamper map lost its quality-gates/needs-any-code entry — a skipped or dropped quality-gates job is certified green again, and the npm audits stop being observed on the PR path"
   fi
+  # --- MAP COMPLETENESS (#9437) — closes the drift CLASS, not three instances -
+  # The anti-tamper map is hand-maintained against ci-success's `needs:` list,
+  # which is exactly how command-parity, build-nextjs and test-e2e-ui came to sit
+  # in that list with no entry: three live `if: false` vectors that no fixture
+  # above could see, because a fixture only exists for a job someone remembered
+  # to map. Adding those three entries fixes the instances. This assertion fixes
+  # the class: EVERY job ci-success waits on must be mapped, so the next job added
+  # to `needs:` cannot land unmapped and silently unprotected.
+  #
+  # ci-gate is the single documented exemption and it is NOT a hole. It is the
+  # SOURCE of the trigger outputs, not a gate with an `if:` of its own, so there
+  # is no trigger to map it to; and it fails CLOSED anyway — a skipped or absent
+  # ci-gate publishes no outputs, sending every mapped trigger down the verifier's
+  # `drift` branch (pinned hermetically by case 72 above). The exemption list is
+  # spelled out here rather than inferred, so widening it is a visible diff.
+  CI_SUCCESS_MAP_EXEMPT="ci-gate"
+  ci_success_blk="$(awk '/^  ci-success:/{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && !/^  ci-success:/{exit}' "$CI_YML")"
+  # Cut the `needs:` block list: the 4-space `needs:` key, then its 6-space `- x`
+  # items, stopping at the first line that is not one. Trailing comments stripped.
+  ci_success_needs="$(awk '
+    /^    ["'"'"']?needs["'"'"']?[[:space:]]*:[[:space:]]*$/ {n=1; next}
+    n && /^      -[[:space:]]/ { sub(/^      -[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, ""); sub(/[[:space:]]+$/, ""); gsub(/["'"'"']/, ""); if ($0 != "") print; next }
+    n && /^[[:space:]]*$/ { next }
+    n {exit}
+  ' <<<"$ci_success_blk")"
+  ci_success_needs_count="$(printf '%s\n' "$ci_success_needs" | grep -c . || true)"
+  # Vacuity guard: an awk cut that reads nothing would make every assertion below
+  # pass by iterating an empty list — the precise way a structural pin fails
+  # green. Require a plausible list that contains the two jobs we know are there.
+  if [ "$ci_success_needs_count" -lt 15 ]; then
+    fail "could not parse ci-success's needs: list from ci.yml (got $ci_success_needs_count entries, expected >= 15) — the map-completeness assertions below would pass vacuously"
+  elif ! grep -qx 'ci-gate' <<<"$ci_success_needs" || ! grep -qx 'quality-gates' <<<"$ci_success_needs"; then
+    fail "parsed ci-success needs: list is missing known jobs (ci-gate / quality-gates) — the cut is wrong, so the map-completeness assertions below are unreliable"
+  else
+    pass "parsed ci-success's needs: list from ci.yml ($ci_success_needs_count jobs)"
+    map_jobs="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Eo '^check_triggered[[:space:]]+"[^"]+"' | sed -E 's/^check_triggered[[:space:]]+"([^"]+)"$/\1/')"
+    unmapped=""
+    while IFS= read -r job; do
+      [ -n "$job" ] || continue
+      case " $CI_SUCCESS_MAP_EXEMPT " in *" $job "*) continue ;; esac
+      grep -qx -- "$job" <<<"$map_jobs" || unmapped="$unmapped $job"
+    done <<<"$ci_success_needs"
+    if [ -n "$unmapped" ]; then
+      fail "job(s) in ci-success's needs: list have NO check_triggered entry in $SCRIPT —$unmapped. Each is a silent \`if: false\` vector: the job skips, ci-success's needs: still resolves, and the verifier fails only on failure/cancelled, so the unwiring certifies green. Add a check_triggered entry naming EVERY arm of the job's own if:."
+    else
+      pass "every job in ci-success's needs: list is covered by the anti-tamper map (exempt: $CI_SUCCESS_MAP_EXEMPT)"
+    fi
+    # Reverse direction: an entry for a job ci-success does not wait on is
+    # decorative — the job's result never reaches NEEDS_JSON, so `result=absent`
+    # would fire on every run (or, worse, the entry is silently dead after a
+    # rename). Keeps the two lists in genuine lockstep rather than one-way.
+    stale=""
+    while IFS= read -r job; do
+      [ -n "$job" ] || continue
+      grep -qx -- "$job" <<<"$ci_success_needs" || stale="$stale $job"
+    done <<<"$map_jobs"
+    if [ -n "$stale" ]; then
+      fail "anti-tamper map entr(ies) name job(s) absent from ci-success's needs: list —$stale. The verifier never sees their result, so the entry protects nothing (renamed or removed job?)."
+    else
+      pass "every anti-tamper map entry names a job ci-success actually waits on"
+    fi
+  fi
+  # Pin the three #9437 entries by name AND trigger, the way the design/docs/
+  # quality-gates entries above are pinned: completeness alone would accept
+  # `check_triggered "command-parity" "needs-hooks"` — mapped, but to a trigger
+  # that never fires with the job, which is decorative. `grep -c` (not -q) for the
+  # pipefail/SIGPIPE reason noted above.
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "command-parity"[[:space:]]+"needs-web"[[:space:]]+"needs-mcp"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers command-parity <-> needs-web + needs-mcp (both if: arms)"
+  else
+    fail "verifier anti-tamper map lost its command-parity entry, or stopped naming BOTH arms of its if: (needs-web, needs-mcp) — an mcp-server-only PR could skip the manifest-parity check with every required gate green"
+  fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "build-nextjs"[[:space:]]+"needs-web"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers build-nextjs <-> needs-web"
+  else
+    fail "verifier anti-tamper map lost its build-nextjs/needs-web entry — the only per-PR Next.js production build, native-swc-binding assertion and bundle-size check stop being observed"
+  fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-ui"[[:space:]]+"needs-web"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-ui <-> needs-web"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-ui/needs-web entry — the only per-PR run of the Playwright UI shards stops being observed"
+  fi
+  # And pin the real `if:` each new entry is paired with, matching the
+  # quality-gates caller pin below: a map entry paired with a trigger that no
+  # longer gates the job is decorative. Whole expression, on the `if:` line only,
+  # comments stripped — so `!= 'true'` inversion and trailing-comment survival
+  # both fail (the three vectors documented at the quality-gates pin).
+  for pair in "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web"; do
+    pj="${pair%%:*}"; ptrigs="${pair#*:}"
+    pblk="$(awk -v j="  $pj:" '$0==j{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && $0!=j{exit}' "$CI_YML")"
+    pif="$(grep -v '^[[:space:]]*#' <<<"$pblk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"
+    pif_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$pblk" || true)"
+    if [ -z "$pblk" ]; then
+      fail "ci.yml has no $pj job block — the map entry above is paired with a job that no longer exists"
+    elif [ "$pif_count" -ne 1 ]; then
+      # Last-key-wins: an appended second job-level `if: false` unwires the job
+      # while the original trigger line stays byte-present for the pin below.
+      fail "ci.yml $pj has $pif_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the job while the original if: line still greps as present)"
+    else
+      pmissing=""
+      while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        grep -qF "needs.ci-gate.outputs.$t == 'true'" <<<"$pif" || pmissing="$pmissing $t"
+      done <<<"$(tr ':' '\n' <<<"$ptrigs")"
+      if [ -n "$pmissing" ]; then
+        fail "ci.yml $pj's if: no longer contains \"needs.ci-gate.outputs.<t> == 'true'\" for:$pmissing — the map entry above is paired with a trigger that no longer gates the job (renamed, inverted to != 'true', or dropped)"
+      else
+        pass "ci.yml $pj's if: is gated on $(tr ':' ' ' <<<"$ptrigs") (matches the map entry)"
+      fi
+    fi
+  done
   # The trigger named in the map must be the one the caller's own `if:` is gated
   # on, or the arm is mapped to an output that never fires with the job and the
   # entry above is decorative. Cut the caller job block and pin the pairing.

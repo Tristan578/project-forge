@@ -94,8 +94,20 @@ check_triggered() {
 # always()`), so every entry is evaluated on EVERY PR — it is NOT scoped to the
 # lockfile-sync-tests job (that job only runs the *unit test* of this script). The
 # lockfile-sync-tests ENTRY needs four triggers because its job `if:` has four arms
-# (see lines 23-29); the others, including hook-tests, each name the single trigger
-# their job is gated on (hook-tests <-> needs-hooks, ci.yml hook-tests `if:`).
+# (see lines 23-29); the multi-arm entries below (test-e2e-engine-smoke,
+# command-parity) name every arm of their job's `if:`; the rest, including
+# hook-tests, name the single trigger their job is gated on (hook-tests <->
+# needs-hooks, ci.yml hook-tests `if:`).
+#
+# EVERY job in ci-success's `needs:` list must appear here, with ci-gate the sole
+# exemption — it is the SOURCE of these trigger outputs, not a gate with an `if:`
+# of its own, and it fails closed anyway: a skipped or absent ci-gate leaves
+# `.ci-gate.outputs` empty, which sends every mapped trigger down the `drift`
+# branch below. This map is hand-maintained and it HAS drifted behind the `needs:`
+# list before (#9437 — command-parity, build-nextjs and test-e2e-ui each sat in
+# `needs:` with no entry here, i.e. three silent `if: false` vectors). The suite
+# now asserts the map covers the real `needs:` list, so a newly added job that is
+# never mapped fails check-ci-success.test.sh instead of shipping as a hole.
 check_triggered "lockfile-sync"             "needs-deps"
 check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding" "needs-codex"
 check_triggered "agentic-sync"              "needs-agentic"
@@ -139,6 +151,24 @@ check_triggered "test-e2e-journey"          "needs-web"
 # are mapped — guarding only one would leave the other as a silent `if: false`
 # skip vector. Protect it from unwiring like the other self-defending gates.
 check_triggered "test-e2e-engine-smoke"     "needs-web" "needs-engine"
+# command-parity is the ONLY per-PR proof that the three commands.json copies stay
+# in sync and that every MCP command has a handler (web/scripts/check-command-parity.js
+# over mcp-server/manifest, web/src/data and apps/docs/data — one manifest per
+# deploy root). It fires on `needs-web || needs-mcp` (an mcp-server-only PR must
+# still run it), so BOTH arms are mapped — guarding only one would leave the other
+# as a silent `if: false` skip vector, exactly as for test-e2e-engine-smoke above.
+check_triggered "command-parity"            "needs-web" "needs-mcp"
+# build-nextjs is the ONLY per-PR job that compiles the app: the Next.js production
+# build, the native-swc-binding assertion (scripts/check-native-bindings.sh) and
+# bundle-size enforcement all run there and NOWHERE else on the PR path. A silent
+# `if: false` skip would ship an app that does not build with every required check
+# green. needs-web is the single trigger in its own `if:` (ci.yml build-nextjs).
+check_triggered "build-nextjs"              "needs-web"
+# test-e2e-ui is the ONLY per-PR run of the Playwright UI suite (the @ui specs,
+# sharded 3 ways — the engine-dependent @engine specs are covered separately by
+# test-e2e-engine-smoke). Protect it from a silent `if: false` skip like the gates
+# above. needs-web is the single trigger in its own `if:` (ci.yml test-e2e-ui).
+check_triggered "test-e2e-ui"               "needs-web"
 if [ -n "$drift" ]; then
   echo "::error::Anti-tamper trigger output(s) missing from ci-gate outputs (map/workflow drift — renamed or removed trigger?):"
   echo "$drift"
