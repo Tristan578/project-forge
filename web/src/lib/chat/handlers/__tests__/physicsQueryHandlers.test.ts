@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { physicsJointHandlers } from '../physicsJointHandlers';
-import { queryHandlers } from '../queryHandlers';
+import { handlerRegistry as queryHandlers } from '../../executor';
 import type { PhysicsData } from '@/stores/editorStore';
 
 // ---------------------------------------------------------------------------
@@ -658,8 +658,7 @@ describe('get_physics2d — edge cases', () => {
     );
 
     expect(result.success).toBe(true);
-    const data = result.result as { data: typeof physicsData };
-    expect(data.data).toEqual(physicsData);
+    expect(result.result).toEqual(physicsData);
   });
 
   it('returns error when entity exists but has no 2D physics', async () => {
@@ -699,8 +698,8 @@ describe('get_physics2d — edge cases', () => {
       { physics2d: { 'sprite-A': dataA, 'sprite-B': dataB } }
     );
 
-    expect((resultA.result as { data: typeof dataA }).data.bodyType).toBe('dynamic');
-    expect((resultB.result as { data: typeof dataB }).data.bodyType).toBe('static');
-    expect((resultB.result as { data: typeof dataB }).data.oneWayPlatform).toBe(true);
+    expect((resultA.result as typeof dataA).bodyType).toBe('dynamic');
+    expect((resultB.result as typeof dataB).bodyType).toBe('static');
+    expect((resultB.result as typeof dataB).oneWayPlatform).toBe(true);
   });
 });

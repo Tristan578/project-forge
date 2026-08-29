@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
-import { queryHandlers } from '../queryHandlers';
+import { handlerRegistry as queryHandlers } from '../../executor';
 
 // ---------------------------------------------------------------------------
 // get_scene_graph
@@ -909,7 +909,7 @@ describe('get_sprite', () => {
     const { result } = await invokeHandler(
       queryHandlers,
       'get_sprite',
-      { entity_id: 'ent1' },
+      { entityId: 'ent1' },
       { sprites: {} }
     );
     expect(result.success).toBe(false);
@@ -930,7 +930,7 @@ describe('get_sprite', () => {
     const { result } = await invokeHandler(
       queryHandlers,
       'get_sprite',
-      { entity_id: 'spr1' },
+      { entityId: 'spr1' },
       { sprites: { spr1: spriteData } }
     );
     expect(result.success).toBe(true);
@@ -978,8 +978,7 @@ describe('get_physics2d', () => {
       { physics2d: { ent1: physicsData } }
     );
     expect(result.success).toBe(true);
-    const data = result.result as { data: unknown };
-    expect(data.data).toEqual(physicsData);
+    expect(result.result).toEqual(physicsData);
   });
 });
 
