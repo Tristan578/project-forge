@@ -792,6 +792,10 @@ jobs:
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
+            scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
+            scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
+            scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
@@ -845,6 +849,21 @@ jobs:
 
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+
+      - name: Run WASM-manifest generator test suite
+        run: bash scripts/__tests__/generate-wasm-manifests.test.sh
+
+      - name: Run changeset-version wrapper test suite
+        run: bash scripts/__tests__/changeset-version.test.sh
+
+      - name: Run PR work-item check test suite
+        run: bash scripts/__tests__/pr-workitem-check.test.sh
+
+      - name: Run suite-wiring gate test suite
+        run: bash scripts/__tests__/check-suite-wiring.test.sh
+
+      - name: Run suite-wiring gate
+        run: bash scripts/check-suite-wiring.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without

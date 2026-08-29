@@ -3002,6 +3002,10 @@ OUTPUTS_EOF
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
+            scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
+            scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
+            scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
@@ -3180,7 +3184,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=487
+readonly SELF_EXEC_EXPECTED_DROP=501
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3492,6 +3496,10 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
+            scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
+            scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
+            scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
       - name: Run lockfile gate test suite
@@ -3528,6 +3536,16 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-vercel-deployment-drift.test.sh
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+      - name: Run WASM-manifest generator test suite
+        run: bash scripts/__tests__/generate-wasm-manifests.test.sh
+      - name: Run changeset-version wrapper test suite
+        run: bash scripts/__tests__/changeset-version.test.sh
+      - name: Run PR work-item check test suite
+        run: bash scripts/__tests__/pr-workitem-check.test.sh
+      - name: Run suite-wiring gate test suite
+        run: bash scripts/__tests__/check-suite-wiring.test.sh
+      - name: Run suite-wiring gate
+        run: bash scripts/check-suite-wiring.sh
 STEPS_EOF
 readonly expected_steps_3
 assert_steps_block "${lst_block:-}" "ci.yml lockfile-sync-tests job steps:" "${expected_steps_3%$'\n'}"
