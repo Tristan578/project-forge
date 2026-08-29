@@ -166,6 +166,7 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   // the rows carrying the R2 URLs are about to be deleted. Capped at half the
   // sweep ceiling because each asset contributes at most two keys (preview +
   // file), so this can never produce more keys than one sweep will attempt.
+  const sellerAssetLimit = Math.floor(MAX_R2_SWEEP_KEYS / 2);
   const sellerAssets = await queryWithResilience(() =>
     getDb()
       .select({
@@ -175,8 +176,14 @@ export async function deleteUserAccount(userId: string): Promise<void> {
       })
       .from(marketplaceAssets)
       .where(eq(marketplaceAssets.sellerId, userId))
-      .limit(Math.floor(MAX_R2_SWEEP_KEYS / 2))
+      .limit(sellerAssetLimit)
   );
+
+  // The LIMIT above is the cap that can actually bite: a seller at or past it
+  // has assets whose objects this sweep will never see, and because they never
+  // enter the key list, deleteManyFromR2's own `truncated` flag stays false.
+  // Say so explicitly rather than let the tail vanish silently.
+  const assetReadTruncated = sellerAssets.length >= sellerAssetLimit;
 
   // Only keys under this user's own assets/{userId}/{assetId}/ prefix are
   // eligible: previewUrl/assetFileUrl are seller-writable through the asset
@@ -284,14 +291,24 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   // useful for the caller to retry. Failures are logged with their keys so an
   // operator can reconcile them (keys stay enumerable by the assets/{userId}/
   // prefix).
-  await deleteUserStorageObjects(userId, storageKeys);
+  await deleteUserStorageObjects(userId, storageKeys, assetReadTruncated);
 }
 
 /**
  * Best-effort removal of a deleted user's R2 objects. Never throws.
  * See the ordering and failure-mode notes at the call site above.
  */
-async function deleteUserStorageObjects(userId: string, keys: string[]): Promise<void> {
+async function deleteUserStorageObjects(
+  userId: string,
+  keys: string[],
+  assetReadTruncated: boolean
+): Promise<void> {
+  if (assetReadTruncated) {
+    const message = `Account deletion read only the first ${Math.floor(MAX_R2_SWEEP_KEYS / 2)} marketplace assets for user ${userId}; objects under assets/${userId}/ beyond that need reconciliation`;
+    console.error(message);
+    captureMessage(message, 'error');
+  }
+
   if (keys.length === 0) return;
 
   try {

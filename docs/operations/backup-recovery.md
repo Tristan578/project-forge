@@ -133,9 +133,11 @@ thumbnails are data URLs stored in Postgres, not R2 objects.
 - **Reconciliation.** Every orphan is enumerable by its `assets/{userId}/`
   prefix:
   `wrangler r2 object list spawnforge-assets --prefix "assets/<userId>/" --remote`,
-  then `wrangler r2 object delete spawnforge-assets/<key> --remote`. A sweep
-  larger than 5000 keys is truncated and logs a "truncated" error to Sentry
-  naming the prefix that still needs this treatment.
+  then `wrangler r2 object delete spawnforge-assets/<key> --remote`. Two caps
+  can leave work behind, and both report to Sentry naming the prefix to sweep
+  by hand: the asset read stops at 2500 assets ("read only the first 2500
+  marketplace assets"), and the delete sweep itself stops at 5000 keys
+  ("truncated"). Neither is silent.
 - **Superseded objects.** Re-uploading an asset file under a new filename
   deletes the object the row previously referenced (same best-effort rules). A
   re-upload under the same filename overwrites in place and deletes nothing.

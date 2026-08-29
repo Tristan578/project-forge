@@ -650,4 +650,46 @@ describe('deleteUserAccount', () => {
       'error',
     );
   });
+
+  it('reports when the asset read itself hit its LIMIT', async () => {
+    // The LIMIT on the marketplaceAssets select is the cap that can actually
+    // bite. Rows past it never become keys, so deleteManyFromR2's own
+    // `truncated` flag stays false and the tail would otherwise vanish with no
+    // signal at all — the one thing an operator needs to reconcile the orphans.
+    const ASSET_READ_LIMIT = 2500; // Math.floor(MAX_R2_SWEEP_KEYS / 2)
+    stubSelects(
+      Array.from({ length: ASSET_READ_LIMIT }, (_, i) => ({
+        id: `asset-${i}`,
+        previewUrl: null,
+        assetFileUrl: `https://cdn.spawnforge.ai/assets/user-uuid-1/asset-${i}/file/m.glb`,
+      }))
+    );
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      expect.stringContaining(`read only the first ${ASSET_READ_LIMIT} marketplace assets`),
+      'error',
+    );
+    // The keys it did see are still swept — the cap reports, it does not skip.
+    expect(mockDeleteManyFromR2).toHaveBeenCalledTimes(1);
+    expect(mockDeleteManyFromR2.mock.calls[0][0]).toHaveLength(ASSET_READ_LIMIT);
+  });
+
+  it('stays silent about the asset read when it came back under the LIMIT', async () => {
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: null,
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/model.glb',
+      },
+    ]);
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockCaptureMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('read only the first'),
+      'error',
+    );
+  });
 });
