@@ -4,7 +4,7 @@ import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
 import { PixelArtClient } from '@/lib/generate/pixelArtClient';
-import type { PixelArtStyle, PixelArtProvider } from '@/lib/generate/pixelArtClient';
+import type { PixelArtStyle } from '@/lib/generate/pixelArtClient';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { TOKEN_COSTS as PRICING } from '@/lib/tokens/pricing';
 import {
@@ -16,7 +16,7 @@ import {
 const VALID_SIZES: number[] = [...PIXEL_ART_SIZES];
 const VALID_DITHERING: string[] = [...PIXEL_ART_DITHERING_MODES];
 const VALID_STYLES: string[] = [...PIXEL_ART_STYLES];
-const VALID_PROVIDERS = ['auto', 'openai', 'replicate'];
+const VALID_PROVIDERS = ['auto', 'replicate'];
 const PALETTE_IDS = Object.keys(PALETTES) as PaletteId[];
 
 function resolveProviderSize(targetSize: number): 512 | 1024 {
@@ -31,7 +31,7 @@ interface PixelArtParams {
   dithering: string;
   ditheringIntensity: number;
   style: string;
-  resolvedProvider: PixelArtProvider;
+  resolvedProvider: 'replicate';
 }
 
 export const POST = createGenerationHandler<
@@ -40,25 +40,21 @@ export const POST = createGenerationHandler<
     status: string;
     jobId: string;
     usageId: string | undefined;
-    provider: PixelArtProvider;
+    provider: 'replicate';
     tokenCost: number;
     palette: string;
     targetSize: number;
     dithering: string;
     ditheringIntensity: number;
     style: string;
-    base64?: string;
   }
 >({
   route: '/api/generate/pixel-art',
-  provider: (params) => params.resolvedProvider as 'replicate' | 'openai',
+  provider: () => 'replicate',
   operation: 'pixel_art_generation',
   rateLimitKey: 'gen-pixel-art',
   successStatus: 201,
-  tokenCost: (params) =>
-    params.resolvedProvider === 'openai'
-      ? PRICING.pixel_art_openai
-      : PRICING.pixel_art_replicate,
+  tokenCost: () => PRICING.pixel_art_replicate,
   validate: (body) => {
     const { prompt, targetSize, palette, customPalette, dithering, ditheringIntensity, style, provider } = body;
 
@@ -93,9 +89,6 @@ export const POST = createGenerationHandler<
       return { ok: false, error: `Invalid provider. Must be one of: ${VALID_PROVIDERS.join(', ')}`, status: 400 };
     }
 
-    const resolvedProvider: PixelArtProvider =
-      (!provider || provider === 'auto' || provider === 'replicate') ? 'replicate' : 'openai';
-
     return {
       ok: true,
       params: {
@@ -106,7 +99,11 @@ export const POST = createGenerationHandler<
         dithering: (dithering as string) ?? 'none',
         ditheringIntensity: (ditheringIntensity as number) ?? 0,
         style: (style as string) ?? 'character',
-        resolvedProvider,
+        // Replicate is the only supported pixel-art delivery path. OpenAI
+        // returns an inline base64 image, but no UI or MCP caller consumes or
+        // persists that field; accepting it charged the user for an artifact
+        // that immediately became unreachable (PF-1074 / #9119).
+        resolvedProvider: 'replicate',
       },
     };
   },
@@ -125,35 +122,11 @@ export const POST = createGenerationHandler<
       signal: ctx.abortSignal,
     });
 
-    // Completion is derived from the artifact we are actually holding, never
-    // from the ABSENCE of a prediction id. The old `result.predictionId ? … : …`
-    // pair read a replicate response with no `id` as an OpenAI success: it
-    // fabricated a `pxart-openai-<timestamp>` jobId, reported `completed`, and
-    // returned 201 with the tokens charged and nothing delivered — the exact
-    // "users paid but received nothing" regression PF-837 exists to prevent.
-    //
-    // The client validates both fields too, so these throws are the backstop
-    // rather than the primary guard. That is deliberate: this branch is where
-    // the status was WRONGLY derived, so it is where correctness has to hold
-    // even if a future client stops validating.
-    let status: string;
-    let jobId: string;
-    if (params.resolvedProvider === 'replicate') {
-      if (!result.predictionId) throw new EmptyArtifactError('Pixel art', 'image');
-      status = 'pending';
-      jobId = result.predictionId;
-    } else {
-      if (!result.base64) throw new EmptyArtifactError('Pixel art', 'image');
-      status = 'completed';
-      // OpenAI answers inline — there is no provider job to poll, so this id
-      // exists only as a client-side key. randomUUID, not Date.now(): two
-      // submissions in the same millisecond would otherwise collide.
-      jobId = `pxart-openai-${crypto.randomUUID()}`;
-    }
+    if (!result.predictionId) throw new EmptyArtifactError('Pixel art', 'image');
 
     return {
-      status,
-      jobId,
+      status: 'pending',
+      jobId: result.predictionId,
       usageId: ctx.usageId,
       provider: params.resolvedProvider,
       tokenCost: ctx.tokenCost,
@@ -162,7 +135,6 @@ export const POST = createGenerationHandler<
       dithering: params.dithering,
       ditheringIntensity: params.ditheringIntensity,
       style: params.style,
-      ...(result.base64 ? { base64: result.base64 } : {}),
     };
   },
 });
