@@ -10,6 +10,17 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Kill switch — same signals sync-to-github.sh and github_project_sync.py honour.
+# See the comment there; this path additionally starts the detached reconcile
+# sweep, which is the run most worth being able to stop.
+#   Disable: touch .claude/hooks/.sync-disabled   (or export SPAWNFORGE_SYNC_DISABLED=1)
+#   Enable:  rm .claude/hooks/.sync-disabled
+if [ -f "$SCRIPT_DIR/.sync-disabled" ] ||
+    { [ -n "${SPAWNFORGE_SYNC_DISABLED:-}" ] && [ "${SPAWNFORGE_SYNC_DISABLED}" != "0" ]; }; then
+    echo "[SYNC] disabled (.sync-disabled / SPAWNFORGE_SYNC_DISABLED) — skipping GitHub pull"
+    exit 0
+fi
+
 # Bail if gh CLI is not available or not authenticated
 if ! command -v gh &>/dev/null; then
     echo "[SYNC] gh CLI not found — skipping GitHub pull"
