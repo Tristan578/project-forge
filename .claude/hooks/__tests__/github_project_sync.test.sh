@@ -300,17 +300,36 @@ assert_out "reconcile wires the database resolver into classify_drift" "wired" "
 # Redirect _MAIN_HOOKS to a temp dir first: taking the REAL lock here fails
 # with BlockingIOError whenever a live sync (or a session that parks the lock)
 # already holds it, turning an unrelated background process into a red suite.
+#
+# The lock is held by a genuine CHILD PROCESS, not by a second descriptor in
+# this one. flock(2) only specifies that a same-process conflict on a second
+# open file description "may be denied" — the kernels disagree, and taking the
+# lock in-process passed on macOS while reporting 'ran-anyway' on the Linux CI
+# runner. A second process is also the situation the lock exists to handle.
 out="$(run_py "
-import fcntl, pathlib, tempfile
+import pathlib, subprocess, sys, tempfile
 m._MAIN_HOOKS = pathlib.Path(tempfile.mkdtemp())
-lock = open(m._MAIN_HOOKS / '.sync-push.lock', 'w')
-fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+child_src = (
+    'import fcntl, os, sys\n'
+    'fd = os.open(sys.argv[1], os.O_CREAT | os.O_WRONLY)\n'
+    'fcntl.flock(fd, fcntl.LOCK_EX)\n'
+    'sys.stdout.write(\'locked\')\n'
+    'sys.stdout.flush()\n'
+    'sys.stdin.readline()\n'
+)
+child = subprocess.Popen(
+    [sys.executable, '-c', child_src, str(m._MAIN_HOOKS / '.sync-push.lock')],
+    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 ran = []
 m._reconcile_inner = lambda *a, **k: ran.append(1)
-m.reconcile(apply_changes=True)
-fcntl.flock(lock, fcntl.LOCK_UN)
-lock.close()
-print('ran-anyway' if ran else 'skipped')
+if child.stdout.read(6) != 'locked':
+    print('child-never-locked')
+else:
+    m.reconcile(apply_changes=True)
+    print('ran-anyway' if ran else 'skipped')
+child.stdin.write('go')
+child.stdin.close()
+child.wait(timeout=10)
 " | tail -1)"
 assert_out "reconcile skips while another sync holds the lock" "skipped" "$out"
 
