@@ -84,6 +84,13 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      Defaults false so every fixture that does not touch apps/design or
 #      packages/ui keeps the design gate's success/skip as a legitimate
 #      path-filter skip; set true to exercise the design anti-tamper arm.
+#
+# `needs-mcp`, `needs-docs` and `needs-any-code` are hardcoded in the object below
+# rather than parameterised — they are constant for essentially every fixture, and
+# mk's positional list is already 26 long. Flip them with a jq post-filter (see the
+# docs-internal-gate and quality-gates cases) instead of adding a 27th arg.
+# `command-parity`, `build-nextjs` and `test-e2e-ui` are hardcoded to success for
+# the same reason and overridden with jq in the #9437 cases at the end.
 mk() {
   local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}"
   jq -nc \
@@ -94,7 +101,7 @@ mk() {
     --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
     --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
       "build-nextjs":         { result: "success" },
