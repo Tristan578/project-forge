@@ -14,6 +14,7 @@ import {
   isRecurrenceComment,
   markerFor,
   normalizeClass,
+  recordsRun,
   recurrenceMarkerFor,
   reportFailure,
 } from './pitr-report-failure.mjs';
@@ -156,6 +157,27 @@ describe('CLASS_SPECS', () => {
   test('config class points at the configuration runbook, not the recovery one', () => {
     assert.match(CLASS_SPECS.config.runbook, /#triage-configuration-fault$/);
     assert.doesNotMatch(CLASS_SPECS.config.runbook, /pitr-restore/);
+  });
+});
+
+describe('recordsRun', () => {
+  const body = buildIssueBody({ cls: 'config', runUrl: RUN_URL, hoursAgo: '24', date: TODAY });
+
+  test('finds the run the body was opened for', () => {
+    assert.equal(recordsRun(body, RUN_URL), true);
+  });
+
+  test('does not match a different run', () => {
+    assert.equal(recordsRun(body, 'https://github.com/o/r/actions/runs/1'), false);
+  });
+
+  test('matches the whole entry, so runs/99 is not found inside runs/999', () => {
+    assert.equal(recordsRun(body, `${RUN_URL.slice(0, -1)}`), false);
+  });
+
+  test('tolerates a missing body', () => {
+    assert.equal(recordsRun(undefined, RUN_URL), false);
+    assert.equal(recordsRun(null, RUN_URL), false);
   });
 });
 
@@ -547,6 +569,49 @@ describe('reportFailure — dedupe', () => {
     );
     assert.equal(gh.of('PATCH', /\/issues\/comments\/\d+$/).length, 0);
     assert.equal(gh.of('POST', /\/issues\/47\/comments$/).length, 0);
+  });
+
+  test('re-running for the run that OPENED the issue does not add a comment', async () => {
+    // The creating run is recorded in the issue body, never in a comment, so a
+    // re-run before anyone comments finds an empty comment list. Without the
+    // body check it falls through and files a recurrence for a run the body
+    // already names.
+    const gh = makeGithub({
+      issues: [
+        issue({
+          number: 48,
+          state: 'open',
+          body: buildIssueBody({ cls: 'config', runUrl: RUN_URL, hoursAgo: '24', date: TODAY }),
+        }),
+      ],
+      comments: { 48: [] },
+    });
+    const res = await reportFailure({ fetchFn: gh.fetchFn, env: makeEnv(), now: NOW });
+    assert.equal(res.action, 'noop');
+    assert.equal(gh.of('POST', /\/issues\/48\/comments$/).length, 0, 'must not duplicate the body entry');
+    assert.equal(gh.of('POST', /\/issues$/).length, 0);
+    assert.equal(gh.of('PATCH', /\/issues\/48$/).length, 0, 'must not reopen for a no-op');
+  });
+
+  test('a run the body does NOT name still files a recurrence comment', async () => {
+    const gh = makeGithub({
+      issues: [
+        issue({
+          number: 49,
+          state: 'open',
+          body: buildIssueBody({
+            cls: 'config',
+            runUrl: 'https://github.com/Tristan578/project-forge/actions/runs/1',
+            hoursAgo: '24',
+            date: '2026-08-01',
+          }),
+        }),
+      ],
+      comments: { 49: [] },
+    });
+    const res = await reportFailure({ fetchFn: gh.fetchFn, env: makeEnv(), now: NOW });
+    assert.equal(res.action, 'commented');
+    assert.equal(gh.of('POST', /\/issues\/49\/comments$/).length, 1);
   });
 
   test('looks issues up by the shared label, including closed ones', async () => {

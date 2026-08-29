@@ -211,6 +211,22 @@ export function isRecurrenceComment(comment, cls) {
 }
 
 /**
+ * Does `body` already carry a run-list entry for `runUrl`?
+ *
+ * Match the whole entry, not a substring: run URLs differ only by a trailing
+ * numeric id, so `.includes()` treats `.../runs/99` as already recorded once
+ * `.../runs/999` is present and silently drops a real recurrence.
+ *
+ * Shared by `appendRecurrence` and the issue-body idempotency check in
+ * `reportFailure`, so both use exactly one definition of "already recorded".
+ */
+export function recordsRun(body, runUrl) {
+  return String(body ?? '')
+    .split('\n')
+    .some(l => l.startsWith('- ') && l.endsWith(` \u2014 ${runUrl}`));
+}
+
+/**
  * Append one run to an existing recurrence comment, keeping the newest
  * `cap` entries. Idempotent: re-reporting the same run URL is a no-op, so a
  * re-run of the reporting step cannot double-log.
@@ -226,10 +242,7 @@ export function appendRecurrence(existingBody, { runUrl, date, cap = RECURRENCE_
   const head = lines.slice(0, idx + 1);
   const rest = lines.slice(idx + 1);
   const runLines = rest.filter(l => l.startsWith('- '));
-  // Match the whole entry, not a substring: run URLs differ only by a trailing
-  // numeric id, so `.includes()` treats `.../runs/99` as already recorded once
-  // `.../runs/999` is present and silently drops a real recurrence.
-  if (runLines.some(l => l.endsWith(` \u2014 ${runUrl}`))) return body;
+  if (recordsRun(body, runUrl)) return body;
   const kept = [...runLines, entry].slice(-cap);
   return [...head, ...kept].join('\n');
 }
@@ -378,7 +391,15 @@ export async function reportFailure({ fetchFn, env, now, log = () => {}, maxPage
   // manual re-run of the reporting step for a run that is already recorded must
   // be a true no-op: reopening first would flip a triaged issue back to open and
   // notify its subscribers for a report that adds nothing.
-  if (updated !== null && updated === last.body) {
+  //
+  // Two places can already record the run. `updated === last.body` covers the
+  // recurrence comment. The issue body covers the case with no recurrence
+  // comment yet: `buildIssueBody` ends with the same run list, so a re-run for
+  // the run that opened the issue would otherwise fall through and post a
+  // recurrence comment for a run the body already names.
+  const alreadyRecorded =
+    (updated !== null && updated === last.body) || recordsRun(match.body, runUrl);
+  if (alreadyRecorded) {
     log(`#${match.number} already records run ${runId}; nothing to do`);
     return { action: 'noop', cls, number: match.number, reopened: false };
   }
