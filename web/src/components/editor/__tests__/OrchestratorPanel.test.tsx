@@ -5,7 +5,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@/test/utils/componentTestUtils';
-import { OrchestratorPanel } from '../OrchestratorPanel';
+import { OrchestratorPanel, STEP_LABELS } from '../OrchestratorPanel';
 import { useEditorStore } from '@/stores/editorStore';
 import {
   claimQuickStartGate,
@@ -35,6 +35,16 @@ const mockResolveGate = vi.fn();
 const mockCancelPipeline = vi.fn();
 const mockRunPipelineFromPlan = vi.fn();
 const mockResetOrchestrator = vi.fn();
+
+describe('STEP_LABELS contract', () => {
+  it('provides a distinct, non-empty user-facing label for every executor', () => {
+    const labels = Object.values(STEP_LABELS);
+
+    expect(labels).not.toHaveLength(0);
+    expect(labels.every(label => label.trim().length > 0)).toBe(true);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+});
 
 function makeState(overrides: Record<string, unknown> = {}) {
   return {

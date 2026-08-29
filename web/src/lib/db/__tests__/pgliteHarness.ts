@@ -45,15 +45,12 @@
  * PGlite with native JS parameter values. The real `@neondatabase/serverless`
  * driver stringifies params for its text-over-HTTP wire protocol; PGlite infers
  * types from native values instead. The fidelity concern is the *composition*
- * (SQL text + parameter order + `$N` placeholder numbering): this adapter mirrors
- * neon's documented composition algorithm, but that equivalence is NOT yet
- * asserted against the live `@neondatabase/serverless` driver in CI. Treat it as
- * "matches neon's documented algorithm", not "proven byte-identical", and
- * re-verify whenever `@neondatabase/serverless` is bumped (pinned `^1.1.0`, so a
- * minor bump can change composition). A committed, repeatable fidelity test —
- * compose representative SUT queries through BOTH this adapter and the real
- * driver's tagged template via a capturing `fetchFunction`, asserting identical
- * `{ query, params }` — is tracked in #8713.
+ * (SQL text + parameter order + `$N` placeholder numbering). That equivalence is
+ * asserted against the live `@neondatabase/serverless` driver in
+ * `pgliteHarness.test.ts`, including fragments, batches, mixed parameter types,
+ * and the non-composable-query guard. The test normalizes the driver's expected
+ * HTTP stringification while preserving `null`, and must remain green whenever
+ * `@neondatabase/serverless` is bumped.
  *
  * CANONICAL SHARED COPY — cross-branch convergence
  * ------------------------------------------------
@@ -201,7 +198,10 @@ export function makeNeonAdapter(pglite: PGlite): NeonSqlAdapter {
 }
 
 // ───────────────────────── schema build (migration replay) ─────────────────────
-const MIGRATIONS_DIR = fileURLToPath(new URL('../../../../drizzle/', import.meta.url));
+const MODULE_PATH = import.meta.url.startsWith('file:')
+  ? fileURLToPath(import.meta.url)
+  : path.resolve(import.meta.url);
+const MIGRATIONS_DIR = path.resolve(path.dirname(MODULE_PATH), '../../../../drizzle/');
 
 async function buildSchema(pglite: PGlite): Promise<void> {
   const files = readdirSync(MIGRATIONS_DIR)

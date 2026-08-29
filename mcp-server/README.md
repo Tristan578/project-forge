@@ -117,5 +117,12 @@ TCP remote address.
 | `MCP_HTTP_PORT`                | `3030`                               | `MCP_TRANSPORT=http`        |
 | `MCP_HTTP_HOST`                | `0.0.0.0`                            | `MCP_TRANSPORT=http`        |
 | `MCP_HTTP_STATELESS`           | unset (stateful)                     | optional                    |
+| `MCP_HTTP_RATE_LIMIT_MAX`      | `30`                                 | optional                    |
+| `MCP_HTTP_RATE_LIMIT_WINDOW_MS`| `300000` (five minutes)              | optional                    |
 | `UPSTASH_REDIS_REST_URL`       | (in-memory limiter)                  | optional                    |
 | `UPSTASH_REDIS_REST_TOKEN`     | (in-memory limiter)                  | optional                    |
+
+Rate-limit overrides must be positive integers. Invalid values retain the safe
+defaults instead of disabling throttling. A loopback-only agentic development
+server can opt into a larger budget, for example
+`MCP_HTTP_HOST=127.0.0.1 MCP_HTTP_RATE_LIMIT_MAX=500`.

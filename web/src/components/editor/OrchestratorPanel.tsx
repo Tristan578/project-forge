@@ -43,7 +43,7 @@ import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
  * a permissive index signature can never catch. Keyed by the union, an added
  * executor fails `tsc` here until it has a label.
  */
-const STEP_LABELS: Record<ExecutorName, string> = {
+export const STEP_LABELS: Record<ExecutorName, string> = {
   plan_present: 'Presenting plan',
   scene_create: 'Creating scene',
   physics_enable: 'Making things solid',
