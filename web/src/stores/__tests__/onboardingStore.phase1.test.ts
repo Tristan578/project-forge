@@ -221,11 +221,17 @@ describe('onboardingStore — Phase 1 additions', () => {
     });
 
     it('autoPromoteVisibilityTier is called automatically by completeTask', () => {
-      const spy = vi.spyOn(useOnboardingStore.getState(), 'autoPromoteVisibilityTier');
-      useOnboardingStore.getState().completeTask('create-entity');
-      // The spy may not capture it due to how Zustand binds actions,
-      // but the side effect (promotion) should still happen when threshold is met
-      spy.mockRestore();
+      // Spying on the bound action is unreliable with how Zustand binds
+      // actions, so assert the actual side effect instead: completing enough
+      // basic tasks promotes the tier WITHOUT ever calling
+      // autoPromoteVisibilityTier directly, proving completeTask calls it.
+      const { completeTask } = useOnboardingStore.getState();
+      completeTask('create-entity');
+      completeTask('create-shader');
+      expect(useOnboardingStore.getState().featureVisibilityTier).toBe('novice');
+
+      completeTask('create-material');
+      expect(useOnboardingStore.getState().featureVisibilityTier).toBe('intermediate');
     });
   });
 
