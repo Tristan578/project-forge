@@ -63,15 +63,25 @@ const MAX_COMMANDS_PER_FRAME = 100;
 
 describe('Script Sandbox Security', () => {
   describe('global shadowing', () => {
-    // Binding proof, one case per shipped name. Reading the identifier back
-    // through onStart's return value is the only surface compileSandboxed
-    // actually exposes — the closures and getError()/getResults() accessors this
-    // block used to define were never returned, so nothing was ever asserted
-    // (#9443). The sentinel makes the case non-tautological: the script can only
-    // read it back if the identifier resolved to the sandbox parameter. Drop a
-    // name from SHADOWED_GLOBALS and this goes red either way — the host global
-    // answers instead (fetch, Reflect, Atomics) or the identifier is a
-    // ReferenceError (importScripts, Worker, window under node).
+    // Binding proof, one case per shipped name, generated from SHADOWED_GLOBALS.
+    // Reading the identifier back through onStart's return value is the only
+    // surface compileSandboxed actually exposes — the closures and
+    // getError()/getResults() accessors this block used to define were never
+    // returned, so nothing was ever asserted (#9443).
+    //
+    // What each case proves: the name is usable as a Function parameter (a
+    // reserved word or malformed identifier would make `new Function` throw
+    // SyntaxError here — `eval` only survives because the sandbox body is
+    // sloppy mode), and inside the script the identifier resolves to that
+    // parameter rather than to the host global, since only the parameter can
+    // hand back the sentinel string.
+    //
+    // What it does NOT prove: that any given name is still in the shipped list.
+    // compileSandboxed builds both the parameter list and the argument list from
+    // SHADOWED_GLOBALS, so removing a name deletes its case rather than failing
+    // it. Removal is caught elsewhere — the length pin below, the hand-written
+    // per-name cases in this block, and the membership + uniqueness pins in
+    // sandboxGlobals.test.ts.
     it.each([...SHADOWED_GLOBALS])(
       'binds %s to the sandbox parameter rather than the host global',
       (name) => {

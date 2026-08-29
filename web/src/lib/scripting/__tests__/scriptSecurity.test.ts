@@ -290,11 +290,19 @@ describe('Script Sandbox Security: Global Shadowing (compile-time)', () => {
 
   // `typeof X` reads 'undefined' both when the shadow works and when the name
   // simply does not exist in the test realm (importScripts, Worker, window under
-  // node), so the check above cannot fail for those names on its own. This one
-  // can: it binds a sentinel to the shadow parameters, and the script can only
-  // read the sentinel back if the identifier resolved to the parameter rather
-  // than to the host global. Drop a name from SHADOWED_GLOBALS and the case goes
-  // red — the host global answers instead, or the identifier is a ReferenceError.
+  // node), so the check above cannot distinguish the two for those names. This
+  // one can: it binds a sentinel to the shadow parameters, and the script can
+  // only read the sentinel back if the identifier resolved to the parameter
+  // rather than to the host global.
+  //
+  // Scope of the proof: each name is a usable Function parameter (a reserved
+  // word or malformed identifier would make `new Function` throw SyntaxError
+  // here) and shadows the host global of the same name. It does NOT prove the
+  // name is still shipped: the cases are generated from SHADOWED_GLOBALS and
+  // compileSandboxed feeds the same array to both the parameter list and the
+  // argument list, so removing a name deletes its case instead of reddening it.
+  // Removal is caught by the length pin below, by the per-name checks in this
+  // file, and by the membership + uniqueness pins in sandboxGlobals.test.ts.
   it.each([...SHADOWED_GLOBALS])(
     'binds %s to the sandbox parameter rather than the host global',
     (name) => {
