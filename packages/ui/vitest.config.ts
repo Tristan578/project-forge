@@ -28,10 +28,10 @@ export default defineConfig({
       // measured, same convention as web/vitest.config.ts: raise these only
       // when a real coverage gain has been made.
       thresholds: {
-        statements: 81, // measured 82.87
-        branches: 73, // measured 74.77
-        functions: 77, // measured 79.32
-        lines: 82, // measured 83.77
+        statements: 83, // measured 84.17
+        branches: 74, // measured 75.45
+        functions: 82, // measured 83.24
+        lines: 84, // measured 85.20
       },
     },
   },
