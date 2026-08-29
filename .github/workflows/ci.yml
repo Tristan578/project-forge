@@ -59,7 +59,15 @@ jobs:
           echo "$CHANGED" | grep -q '^engine/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
+          # The docs gate is what runs apps/docs/scripts/check-manifest-sync.ts,
+          # the ONLY check comparing the canonical MCP manifest against its two
+          # derived copies. The canonical dir and the apps/docs copy were listed;
+          # the WEB copy was not, so a PR editing only web/src/data/commands.json
+          # set needs-web=true, needs-docs=false, and the sync check never ran —
+          # while web/src/lib/chat/tools.ts imports that very copy to build the
+          # tool definitions served to the chat API (#8620). command-parity does
+          # not cover it: it reads only the canonical manifest.
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           # Claude Code hook scripts + their self-contained bash test suites,
           # plus .claude/settings.json (the committed permissions posture, which
@@ -246,9 +254,13 @@ jobs:
         run: node scripts/check-bundle-size.js
 
   # ---- Docs Internal Gate ----
-  # Runs when apps/docs/** or mcp-server/manifest/** changed.
+  # Runs when apps/docs/**, mcp-server/manifest/** or the web copy of the MCP
+  # manifest (web/src/data/commands.json) changed.
   # Verifies that no internal commands appear in generated public MDX and that
-  # the two commands.json copies are in sync.
+  # BOTH derived copies of commands.json — web/src/data/ and apps/docs/data/ —
+  # match the canonical mcp-server/manifest/ one. Every trigger surface of that
+  # check must be in the needs-docs filter above, or the check does not run on
+  # the PR that changed it (#8620).
   # Path-gated so docs-only PRs pay the docs build tax (~2-3 min) but
   # Rust engine PRs that don't touch docs are unaffected.
   docs-internal-gate:
@@ -802,11 +814,13 @@ jobs:
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
+            scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
+            scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
@@ -842,6 +856,9 @@ jobs:
       - name: Run security-alerts gate test suite
         run: bash scripts/__tests__/check-security-alerts.test.sh
 
+      - name: Run workflow-failure notifier test suite
+        run: bash scripts/__tests__/notify-workflow-failure.test.sh
+
       - name: Run cross-provider DX-audit contract test
         run: bash .claude/tools/__tests__/dx-audit.test.sh
 
@@ -865,6 +882,12 @@ jobs:
 
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+
+      # Executes the ci-gate `Detect changed paths` step body extracted from this
+      # very file. Rides needs-ci, which every ci.yml edit sets, so the filters
+      # are tested on the PR that changes them.
+      - name: Run ci-gate path-filter test suite
+        run: bash scripts/__tests__/ci-gate-path-filters.test.sh
 
       - name: Run WASM-manifest generator test suite
         run: bash scripts/__tests__/generate-wasm-manifests.test.sh
