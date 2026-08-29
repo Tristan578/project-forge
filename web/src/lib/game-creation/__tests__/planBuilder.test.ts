@@ -1046,6 +1046,27 @@ describe('buildPlan — the win-condition guarantee', () => {
     expect(verifyStep?.dependsOn).toContain(winStepId);
   });
 
+  it('spawns a component target before planning a rule for it', () => {
+    const gdd = makeGdd({ systems: [makeSystem('movement', 'platformer')] });
+    const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
+
+    const componentIndex = plan.steps.findIndex(
+      step => step.executor === 'game_component' && step.input.type === 'winCondition',
+    );
+    expect(componentIndex).toBeGreaterThanOrEqual(0);
+
+    const entityId = plan.steps[componentIndex].input.entityId;
+    const spawnIndex = plan.steps.findIndex(
+      step => step.executor === 'entity_setup' && step.input.entityId === entityId,
+    );
+
+    // gameComponentExecutor validates against the live scene graph. If this
+    // order reverses, the rule fails ENTITY_NOT_FOUND even though both steps
+    // exist in the plan.
+    expect(spawnIndex).toBeGreaterThanOrEqual(0);
+    expect(spawnIndex).toBeLessThan(componentIndex);
+  });
+
   /**
    * A GDD with no entities anywhere has nothing to carry the component. THIS is
    * a real loss rather than a default, so it speaks — and it must not emit a
