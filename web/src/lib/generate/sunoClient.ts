@@ -53,7 +53,11 @@ export class SunoClient {
     }
 
     const data = await response.json();
-    return { taskId: data.task_id || data.id };
+    const rawTaskId = data?.task_id || data?.id;
+    if (typeof rawTaskId !== 'string' || rawTaskId.trim().length === 0) {
+      throw new Error('Suno response did not include a non-empty music task ID');
+    }
+    return { taskId: rawTaskId };
   }
 
   async getStatus(taskId: string, opts?: { signal?: AbortSignal }): Promise<MusicStatus> {
