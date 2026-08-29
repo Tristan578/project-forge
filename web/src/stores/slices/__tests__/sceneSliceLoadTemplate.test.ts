@@ -13,7 +13,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSceneTestStore, createFakeEngineDispatcher } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
-import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import {
+  stageSceneAudio,
+  takeStagedSceneAudio,
+  clearStagedSceneAudio,
+} from '@/lib/audio/sceneAudioManifest';
 
 type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
 
@@ -125,6 +129,21 @@ describe('sceneSlice.loadTemplate', () => {
       expect(harness.addGameComponent.mock.calls.map(([id]) => id)).not.toContain('camera');
     });
 
+    it('does not let an earlier scene\'s unclaimed audio follow the template in', async () => {
+      // The stash is claimed by the NEXT SCENE_LOADED, whichever scene that is,
+      // so a load that was armed and then refused would hand its sounds to this
+      // template's entity ids. Staging the template's own (empty) audio is what
+      // displaces it.
+      stageSceneAudio(
+        JSON.stringify({ entities: [{ entityId: 'ghost', audioData: { assetId: 'stale' } }] }),
+      );
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+
+      await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(takeStagedSceneAudio()).toEqual({});
+    });
+
     it('applies every shipped template', async () => {
       const { TEMPLATE_REGISTRY } = await import('@/data/templates');
       for (const entry of TEMPLATE_REGISTRY) {
@@ -158,7 +177,7 @@ describe('sceneSlice.loadTemplate', () => {
       expect(harness.store.getState().nodeCount).toBe(0);
     });
 
-    it('surfaces an engine rejection and clears the staged scene audio', async () => {
+    it('surfaces an engine rejection verbatim and attaches nothing', async () => {
       setSceneDispatcher(
         vi.fn<Dispatcher>(() => ({ success: false, error: 'Scene JSON too large' })),
       );
@@ -166,10 +185,9 @@ describe('sceneSlice.loadTemplate', () => {
       const result = await harness.store.getState().loadTemplate('2d-platformer');
 
       expect(result).toEqual({ success: false, error: 'Scene JSON too large' });
-      // A rejected load never emits SCENE_LOADED, so an armed stash would be
-      // claimed by whatever scene loads next.
-      expect(takeStagedSceneAudio()).toEqual({});
       expect(harness.setScript).not.toHaveBeenCalled();
+      expect(harness.addGameComponent).not.toHaveBeenCalled();
+      expect(harness.setInputPreset).not.toHaveBeenCalled();
     });
 
     it('refuses when the engine acknowledges the load but never applies it', async () => {

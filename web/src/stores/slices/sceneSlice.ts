@@ -398,14 +398,15 @@ export const createSceneSlice: StateCreator<
       options?.timeoutMs ?? TEMPLATE_APPLY_TIMEOUT_MS,
     );
 
-    // Staged for the SCENE_LOADED handler, same contract as `loadScene`. The
-    // template's own (empty) audio also displaces anything a previous rejected
-    // load left behind, so this scene cannot adopt another scene's sounds.
+    // Staged for the SCENE_LOADED handler, same contract as `loadScene`.
+    // `stageSceneAudio` REPLACES the stash rather than adding to it, so this
+    // also displaces anything a previous rejected load left armed — the reason
+    // it runs even though no template currently declares audio, and the reason
+    // neither failure path below needs its own clear.
     stageSceneAudio(sceneJson);
     const response = dispatchCommand('load_scene', { json: sceneJson });
     if (response && response.success === false) {
       abandon();
-      clearStagedSceneAudio();
       return {
         success: false,
         error: response.error ?? `The engine refused to load template "${templateId}".`,
@@ -413,7 +414,6 @@ export const createSceneSlice: StateCreator<
     }
 
     if (!(await applied)) {
-      clearStagedSceneAudio();
       return {
         success: false,
         error: `Template "${templateId}" was sent to the engine but no entities appeared. The scene was not changed.`,
