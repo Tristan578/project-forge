@@ -60,6 +60,32 @@ export interface RunningHttpServer {
   close(): Promise<void>;
 }
 
+export const DEFAULT_HTTP_RATE_LIMIT = Object.freeze({
+  windowMs: 5 * 60_000,
+  max: 30,
+});
+
+/** Resolve positive integer overrides without allowing an invalid env value to disable protection. */
+export function resolveHttpRateLimit(
+  env: Partial<
+    Pick<NodeJS.ProcessEnv, 'MCP_HTTP_RATE_LIMIT_WINDOW_MS' | 'MCP_HTTP_RATE_LIMIT_MAX'>
+  >,
+): { windowMs: number; max: number } {
+  const positiveInteger = (value: string | undefined, fallback: number): number => {
+    if (value === undefined || value.trim() === '') return fallback;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+  };
+
+  return {
+    windowMs: positiveInteger(
+      env.MCP_HTTP_RATE_LIMIT_WINDOW_MS,
+      DEFAULT_HTTP_RATE_LIMIT.windowMs,
+    ),
+    max: positiveInteger(env.MCP_HTTP_RATE_LIMIT_MAX, DEFAULT_HTTP_RATE_LIMIT.max),
+  };
+}
+
 export class MissingTokenError extends Error {
   constructor() {
     super('MCP_HTTP_TOKEN is required when MCP_TRANSPORT=http');

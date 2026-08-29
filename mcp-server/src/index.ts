@@ -6,7 +6,11 @@ import { registerTools } from './tools/generated.js';
 import { registerResources } from './resources/index.js';
 import { registerDocs } from './docs/index.js';
 import { EditorBridge } from './transport/websocket.js';
-import { startHttpTransport, MissingTokenError } from './transport/http.js';
+import {
+  startHttpTransport,
+  MissingTokenError,
+  resolveHttpRateLimit,
+} from './transport/http.js';
 import manifest from '../manifest/commands.json' with { type: 'json' };
 
 const SERVER_NAME = 'spawnforge';
@@ -42,10 +46,7 @@ async function main() {
       host,
       token: process.env.MCP_HTTP_TOKEN ?? '',
       stateless,
-      rateLimit: {
-        windowMs: 5 * 60_000,
-        max: 30,
-      },
+      rateLimit: resolveHttpRateLimit(process.env),
       meta: {
         name: SERVER_NAME,
         version: SERVER_VERSION,
