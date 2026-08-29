@@ -135,6 +135,11 @@ export interface OpenApiContract {
   spec: OpenApiDocument;
   /** Validator for a component schema by name, e.g. `'TokenBalance'`. */
   component(name: string): ValidateFunction;
+  /**
+   * The de-referenced, JSON-Schema-ised component schema behind `component()`.
+   * Feed it to {@link diffAgainstSpec} to compare property sets.
+   */
+  componentSchema(name: string): JsonObject;
   /** Validator for one operation's response body, e.g. `('get', '/api/projects', 200)`. */
   operation(method: SpecMethod, routePath: string, status: number): ValidateFunction;
   /**
@@ -199,18 +204,29 @@ export function loadOpenApiContract(): OpenApiContract {
     return resolved;
   }
 
+  function componentSchema(name: string): JsonObject {
+    const key = `component ${name}`;
+    const cached = schemaCache.get(key);
+    if (cached) return cached;
+    const schema = spec.components?.schemas?.[name];
+    if (!schema) throw new Error(`OpenAPI spec has no component schema named "${name}"`);
+    const resolved = prepare(schema);
+    schemaCache.set(key, resolved);
+    return resolved;
+  }
+
   return {
     spec,
 
     component(name: string): ValidateFunction {
       const cached = componentCache.get(name);
       if (cached) return cached;
-      const schema = spec.components?.schemas?.[name];
-      if (!schema) throw new Error(`OpenAPI spec has no component schema named "${name}"`);
-      const validate = ajv.compile(prepare(schema));
+      const validate = ajv.compile(componentSchema(name));
       componentCache.set(name, validate);
       return validate;
     },
+
+    componentSchema,
 
     operation(method: SpecMethod, routePath: string, status: number): ValidateFunction {
       const key = `${method} ${routePath} ${status}`;

@@ -128,6 +128,15 @@ describe('loadOpenApiContract', () => {
     expect(items).not.toHaveProperty('$ref');
   });
 
+  it('exposes the prepared component schema for property-set diffing', () => {
+    const schema = contract.componentSchema('Error');
+    expect(Object.keys(schema.properties as object)).toEqual(['error']);
+    // `code` is what every real error body adds on top — the diff must see it.
+    expect(diffAgainstSpec(schema, { error: 'nope', code: 'BAD_REQUEST' })).toEqual([
+      'undocumented $.code',
+    ]);
+  });
+
   it('rewrites OpenAPI nullable into a JSON Schema null union', () => {
     const validate = contract.operation('get', '/api/tokens/balance', 200);
     expect(
