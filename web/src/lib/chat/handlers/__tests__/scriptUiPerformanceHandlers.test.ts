@@ -430,11 +430,16 @@ describe('scriptLibraryHandlers', () => {
 
   describe('get_visual_script', () => {
     it('returns empty graph', async () => {
-      const { result } = await invokeScript('get_visual_script');
+      const { result } = await invokeScript('get_visual_script', { entityId: 'ent-1' });
       expect(result.success).toBe(true);
       const r = result.result as Record<string, unknown>;
       expect(r.nodes).toEqual([]);
       expect(r.edges).toEqual([]);
+    });
+
+    it('rejects a call missing entityId', async () => {
+      const { result } = await invokeScript('get_visual_script');
+      expect(result.success).toBe(false);
     });
   });
 

@@ -1968,9 +1968,17 @@ describe('handlers2d 2D physics commands', () => {
   // -------------------------------------------------------------------------
   describe('raycast2d', () => {
     it('always returns a failure with informational message about Play mode', async () => {
-      const { result } = await invoke2d('raycast2d', {});
+      const { result } = await invoke2d('raycast2d', {
+        originX: 0, originY: 0, directionX: 1, directionY: 0,
+      });
       expect(result.success).toBe(false);
       expect(result.error).toContain('Play mode');
+    });
+
+    it('rejects a call missing the required ray shape', async () => {
+      const { result } = await invoke2d('raycast2d', {});
+      expect(result.success).toBe(false);
+      expect(result.error).not.toContain('Play mode');
     });
   });
 });
