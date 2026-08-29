@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { trackCommandDispatched } from '@/lib/analytics/events';
 import { addBreadcrumb, captureException } from '@/lib/monitoring/sentry-client';
 import { checkCommandBatch, checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
+import { showError } from '@/lib/toast';
 // Namespace import so partial test mocks of `@/hooks/useEngine` (which omit
 // the snapshot setter) don't throw at module load. We feature-detect the
 // export at runtime instead of relying on the named binding being present.
@@ -190,6 +191,21 @@ export function getRecentCommands(): readonly string[] {
 // stream; the console signal below stays unthrottled.
 const _reportedRejections = new Set<string>();
 
+const REJECTED_ACTION_LABELS: Readonly<Record<string, string>> = {
+  batch: 'apply those changes',
+  export_scene: 'save the scene',
+  load_scene: 'load the scene',
+  new_scene: 'create a new scene',
+  save_scene: 'save the scene',
+  spawn_entity: 'add the entity',
+  delete_entity: 'delete the entity',
+};
+
+function rejectedActionMessage(command: string): string {
+  const action = REJECTED_ACTION_LABELS[command] ?? 'complete that action';
+  return `Couldn't ${action}. The engine rejected the change.`;
+}
+
 /**
  * Surface an engine rejection that no caller can observe.
  *
@@ -205,14 +221,26 @@ const _reportedRejections = new Set<string>();
 function reportCommandRejected(command: string, error: string | undefined): void {
   const engineError = error ?? 'no error message';
   console.error(`Engine rejected command '${command}': ${engineError}`);
+
+  const firstRejection = !_reportedRejections.has(command);
+  if (firstRejection) {
+    _reportedRejections.add(command);
+    try {
+      // Product wording only: neither the internal command vocabulary nor the
+      // raw engine error belongs in a user-visible notification.
+      showError(rejectedActionMessage(command));
+    } catch {
+      /* notifications are best-effort — never let them break dispatch */
+    }
+  }
+
   try {
     addBreadcrumb({
       category: 'engine.command.rejected',
       message: `${command}: ${engineError}`,
       level: 'error',
     });
-    if (!_reportedRejections.has(command)) {
-      _reportedRejections.add(command);
+    if (firstRejection) {
       captureException(new Error(`Engine rejected command '${command}'`), {
         command,
         engineError,
@@ -234,6 +262,10 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
   // Wrap dispatcher to emit Vercel analytics + Sentry breadcrumb for every
   // engine command. Tracking is fire-and-forget and never blocks dispatch.
   const tracked: CommandDispatcher = (command, payload) => {
+    if (command === 'load_scene' || command === 'new_scene') {
+      // A new scene starts a new user session for rejection notifications.
+      _reportedRejections.clear();
+    }
     trackCommandDispatched(command);
     recordCommand(command);
     // Bounded here rather than only in the engine. The Rust guard cannot see a

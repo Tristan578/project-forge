@@ -22,11 +22,16 @@ vi.mock('@/lib/analytics/events', () => ({
   trackCommandDispatched: vi.fn(),
 }));
 
+vi.mock('@/lib/toast', () => ({
+  showError: vi.fn(),
+}));
+
 async function loadStore() {
   vi.resetModules();
   const store = await import('../editorStore');
   const sentry = await import('@/lib/monitoring/sentry-client');
-  return { store, sentry };
+  const notifications = await import('@/lib/toast');
+  return { store, sentry, notifications };
 }
 
 describe('engine command rejection reporting', () => {
@@ -116,6 +121,52 @@ describe('engine command rejection reporting', () => {
 
     expect(console.error).toHaveBeenCalledTimes(3);
     expect(sentry.captureException).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows one product-language error without exposing engine internals', async () => {
+    const { store, notifications } = await loadStore();
+    store.setCommandDispatcher(() => ({
+      success: false,
+      error: 'Not yet implemented: save_scene (internal detail)',
+    }));
+
+    const dispatch = store.getCommandDispatcher();
+    dispatch?.('save_scene', {});
+    dispatch?.('save_scene', {});
+
+    expect(notifications.showError).toHaveBeenCalledTimes(1);
+    expect(notifications.showError).toHaveBeenCalledWith(
+      "Couldn't save the scene. The engine rejected the change.",
+    );
+    const message = vi.mocked(notifications.showError).mock.calls[0][0];
+    expect(message).not.toContain('save_scene');
+    expect(message).not.toContain('Not yet implemented');
+  });
+
+  it('uses safe generic wording for an unmapped internal command', async () => {
+    const { store, notifications } = await loadStore();
+    store.setCommandDispatcher(() => ({ success: false, error: 'secret diagnostic' }));
+
+    store.getCommandDispatcher()?.('internal_future_command', {});
+
+    expect(notifications.showError).toHaveBeenCalledWith(
+      "Couldn't complete that action. The engine rejected the change.",
+    );
+  });
+
+  it('allows the same rejection notification again after a scene load', async () => {
+    const { store, notifications } = await loadStore();
+    store.setCommandDispatcher((command) =>
+      command === 'save_scene' ? { success: false, error: 'nope' } : { success: true },
+    );
+
+    const dispatch = store.getCommandDispatcher();
+    dispatch?.('save_scene', {});
+    dispatch?.('save_scene', {});
+    dispatch?.('load_scene', { json: '{}' });
+    dispatch?.('save_scene', {});
+
+    expect(notifications.showError).toHaveBeenCalledTimes(2);
   });
 
   it('reports each distinct rejected command to Sentry', async () => {
