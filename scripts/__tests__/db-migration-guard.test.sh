@@ -184,6 +184,35 @@ else
   fail "destructive plan does not name the approval route (operator has no next step)"
 fi
 
+# --- 4b. The data-loss marker ALONE, with no regex-matchable statement -------
+# Case 4's fixture drops a column, so DESTRUCTIVE_RE matches it too and either
+# detector alone would produce the same verdict — that fixture cannot tell which
+# one fired. This one isolates the marker: `SET NOT NULL` on a column holding
+# NULLs is data loss that drizzle's own classifier reports and that no pattern in
+# DESTRUCTIVE_RE matches (`SET NOT NULL` is not `SET DATA TYPE`). If the marker
+# match is ever dropped or the drizzle-kit upgrade renames it, this is the
+# assertion that goes red.
+fixture dataloss_marker_only.txt <<'EOF'
+You are about to execute current statements:
+
+ALTER TABLE "projects" ALTER COLUMN "owner_id" SET NOT NULL;
+
+Found data-loss statements:
+· You're about to add a not-null constraint to owner_id in projects table with 118 null values
+Error: Interactive prompts require a TTY terminal. Please run in an interactive terminal.
+    at render (/home/runner/work/node_modules/drizzle-kit/bin.cjs:1449:14)
+EOF
+f_marker_only="$TMPDIR_T/dataloss_marker_only.txt"
+# Guard the guard: if this fixture's statements ever start matching the SQL
+# regex, the case silently stops isolating the marker and quietly becomes a
+# duplicate of case 4.
+if grep -qEi -- 'DROP[[:space:]]+TABLE|DROP[[:space:]]+COLUMN|DROP[[:space:]]+SCHEMA|DROP[[:space:]]+TYPE|DROP[[:space:]]+MATERIALIZED[[:space:]]+VIEW|DROP[[:space:]]+VIEW|SET[[:space:]]+DATA[[:space:]]+TYPE|TRUNCATE' "$f_marker_only"; then
+  fail "the marker-only fixture matches DESTRUCTIVE_RE — it no longer isolates the data-loss marker"
+else
+  pass "the marker-only fixture matches no DESTRUCTIVE_RE pattern (the marker is the only detector left)"
+fi
+assert_verdict "data-loss marker alone, no regex-matchable SQL" plan "$f_marker_only" 2 DESTRUCTIVE_BLOCKED
+
 # --- 5. Destructive via the SQL regex, with NO drizzle data-loss marker ------
 # Belt and braces: the regex is the fallback for anything drizzle's own
 # classifier does not flag (and for a drizzle-kit upgrade that renames the
