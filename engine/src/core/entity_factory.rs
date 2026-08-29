@@ -2021,12 +2021,15 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
-                    let restored = old_physics.clone().unwrap_or_default();
-                    crate::bridge::events::emit_physics2d_changed(
-                        entity_id,
-                        &restored,
-                        *old_enabled,
-                    );
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let restored = old_physics.clone().unwrap_or_default();
+                        crate::bridge::events::emit_physics2d_changed(
+                            entity_id,
+                            &restored,
+                            *old_enabled,
+                        );
+                    }
                     break;
                 }
             }
@@ -2396,12 +2399,15 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
-                    let restored = new_physics.clone().unwrap_or_default();
-                    crate::bridge::events::emit_physics2d_changed(
-                        entity_id,
-                        &restored,
-                        *new_enabled,
-                    );
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let restored = new_physics.clone().unwrap_or_default();
+                        crate::bridge::events::emit_physics2d_changed(
+                            entity_id,
+                            &restored,
+                            *new_enabled,
+                        );
+                    }
                     break;
                 }
             }
