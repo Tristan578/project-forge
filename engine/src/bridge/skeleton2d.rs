@@ -33,11 +33,12 @@ pub(super) fn apply_skeleton2d_creates(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     mut history: ResMut<entity_factory::HistoryStack>,
-    entity_query: Query<(Entity, &EntityId)>,
+    entity_query: Query<(Entity, &EntityId, Option<&SkeletonData2d>)>,
 ) {
     let requests: Vec<_> = pending.create_skeleton2d_requests.drain(..).collect();
     for request in requests {
-        if let Some((entity, _)) = entity_query.iter().find(|(_, eid)| eid.0 == request.entity_id) {
+        if let Some((entity, _, old_skeleton)) = entity_query.iter().find(|(_, eid, _)| eid.0 == request.entity_id) {
+            let old_skeleton = old_skeleton.cloned();
             commands.entity(entity).insert((
                 request.skeleton_data.clone(),
                 SkeletonEnabled2d,
@@ -45,11 +46,36 @@ pub(super) fn apply_skeleton2d_creates(
 
             history.push(UndoableAction::SkeletonChange {
                 entity_id: request.entity_id.clone(),
-                old_skeleton: None,
+                old_skeleton,
                 new_skeleton: Some(request.skeleton_data.clone()),
             });
 
             events::emit_skeleton2d_updated(&request.entity_id, &request.skeleton_data, true);
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_skeleton2d_removes(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut history: ResMut<entity_factory::HistoryStack>,
+    skeleton_query: Query<(Entity, &EntityId, &SkeletonData2d)>,
+) {
+    let requests: Vec<_> = pending.remove_skeleton2d_requests.drain(..).collect();
+    for request in requests {
+        if let Some((entity, _, skeleton_data)) = skeleton_query.iter().find(|(_, eid, _)| eid.0 == request.entity_id) {
+            let old_skeleton = skeleton_data.clone();
+            commands.entity(entity).remove::<SkeletonData2d>();
+            commands.entity(entity).remove::<SkeletonEnabled2d>();
+            commands.entity(entity).remove::<BoneWorldTransforms2d>();
+            commands.entity(entity).remove::<SkinnedMeshInitialized>();
+
+            history.push(UndoableAction::SkeletonChange {
+                entity_id: request.entity_id,
+                old_skeleton: Some(old_skeleton),
+                new_skeleton: None,
+            });
         }
     }
 }
@@ -1034,6 +1060,32 @@ pub(super) fn emit_skeleton2d_on_selection(
 mod tests {
     use super::*;
     use crate::core::skeleton2d::{Bone2dDef, VertexWeights};
+
+    #[test]
+    fn remove_skeleton_clears_engine_components_and_records_undo() {
+        let mut app = App::new();
+        app.insert_resource(PendingCommands::default());
+        app.insert_resource(entity_factory::HistoryStack::default());
+        app.add_systems(Update, apply_skeleton2d_removes);
+
+        let entity = app.world_mut().spawn((
+            EntityId("rig-1".to_string()),
+            SkeletonData2d::default(),
+            SkeletonEnabled2d,
+        )).id();
+        app.world_mut()
+            .resource_mut::<PendingCommands>()
+            .remove_skeleton2d_requests
+            .push(crate::core::pending_commands::RemoveSkeleton2dRequest {
+                entity_id: "rig-1".to_string(),
+            });
+
+        app.update();
+
+        assert!(!app.world().entity(entity).contains::<SkeletonData2d>());
+        assert!(!app.world().entity(entity).contains::<SkeletonEnabled2d>());
+        assert!(app.world().resource::<entity_factory::HistoryStack>().can_undo());
+    }
 
     fn make_bone(name: &str, parent: Option<&str>, pos: [f32; 2], rot: f32, length: f32) -> Bone2dDef {
         Bone2dDef {

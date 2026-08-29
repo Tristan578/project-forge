@@ -89,6 +89,11 @@ pub struct CreateSkeleton2dRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct RemoveSkeleton2dRequest {
+    pub entity_id: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct AddBone2dRequest {
     pub entity_id: String,
     pub bone: crate::core::skeleton2d::Bone2dDef,
@@ -203,6 +208,10 @@ impl PendingCommands {
         self.create_skeleton2d_requests.push(request);
     }
 
+    pub fn queue_remove_skeleton2d(&mut self, request: RemoveSkeleton2dRequest) {
+        self.remove_skeleton2d_requests.push(request);
+    }
+
     pub fn queue_add_bone2d(&mut self, request: AddBone2dRequest) {
         self.add_bone2d_requests.push(request);
     }
@@ -284,6 +293,10 @@ pub fn queue_animation_clip_removal_from_bridge(removal: AnimationClipRemoval) -
 
 pub fn queue_create_skeleton2d_from_bridge(request: CreateSkeleton2dRequest) -> bool {
     super::with_pending(|pc| pc.queue_create_skeleton2d(request)).is_some()
+}
+
+pub fn queue_remove_skeleton2d_from_bridge(request: RemoveSkeleton2dRequest) -> bool {
+    super::with_pending(|pc| pc.queue_remove_skeleton2d(request)).is_some()
 }
 
 pub fn queue_add_bone2d_from_bridge(request: AddBone2dRequest) -> bool {

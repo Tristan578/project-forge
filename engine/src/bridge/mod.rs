@@ -671,6 +671,7 @@ impl Plugin for SelectionPlugin {
                 ))
                 .add_systems(Update, (
                     skeleton2d::apply_skeleton2d_creates,
+                    skeleton2d::apply_skeleton2d_removes,
                     skeleton2d::apply_bone2d_adds,
                     skeleton2d::apply_bone2d_removes,
                     skeleton2d::apply_bone2d_updates,

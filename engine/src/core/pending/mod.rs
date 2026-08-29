@@ -200,6 +200,7 @@ pub struct PendingCommands {
     pub animation_clip_previews: Vec<AnimationClipPreview>,
     pub animation_clip_removals: Vec<AnimationClipRemoval>,
     pub create_skeleton2d_requests: Vec<CreateSkeleton2dRequest>,
+    pub remove_skeleton2d_requests: Vec<RemoveSkeleton2dRequest>,
     pub add_bone2d_requests: Vec<AddBone2dRequest>,
     pub remove_bone2d_requests: Vec<RemoveBone2dRequest>,
     pub update_bone2d_requests: Vec<UpdateBone2dRequest>,
