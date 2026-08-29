@@ -111,3 +111,71 @@ Neon branching allows restoring to any point within the retention window by crea
 - Account deletion endpoint: `DELETE /api/user/delete`
 - Cascading deletes configured via foreign key constraints
 - Published games are unpublished and removed on account deletion
+
+#### Object storage (Cloudflare R2)
+
+The `spawnforge-assets` bucket holds two kinds of user-keyed object:
+
+1. Marketplace asset files and their previews, written by
+   `POST /api/marketplace/seller/assets/[id]/upload` under the key
+   `assets/{sellerId}/{assetId}/{file|preview}/{filename}`.
+2. A `<key>.status.json` validation sidecar per object, written back by the
+   asset post-processing Worker (`infra/asset-postprocess/worker.mjs`). Its R2
+   event-notification source is registered bucket-wide with no prefix filter, so
+   marketplace uploads produce sidecars too. Sidecars sit under the same
+   `assets/{sellerId}/{assetId}/` prefix and are recorded in **no** Postgres
+   row — a sweep driven off DB rows has to derive their keys, which both sweeps
+   below do.
+
+Published-game thumbnails are data URLs stored in Postgres, not R2 objects.
+
+- **Timeline.** Objects are deleted synchronously, immediately after the account
+  deletion transaction commits — not on a nightly job. `deleteUserAccount`
+  (`web/src/lib/auth/user-service.ts`) reads the seller's asset URLs before the
+  transaction, then sweeps the resolved keys with `deleteManyFromR2`.
+- **Scope.** Only keys under the departing user's own
+  `assets/{userId}/{assetId}/` prefix are removed. `previewUrl` /
+  `assetFileUrl` are seller-writable through the asset PATCH route, so a stored
+  URL pointing anywhere else is ignored rather than deleted.
+- **Best-effort by design.** A storage failure never fails the deletion: the
+  user's rows are already gone and there is nothing useful to retry. Failures
+  are logged and reported to Sentry with the affected keys.
+- **Caps.** One cap can leave work behind in practice: the marketplace-asset
+  read stops at 1250 rows (`MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET`, i.e. 5000
+  keys / 4 keys per asset — a preview and a file object, each with its sidecar).
+  A seller past that limit gets a `console.error` and a Sentry `captureMessage`
+  reading "Account deletion read only the first 1250 marketplace assets for user
+  <id>", naming the `assets/{userId}/` prefix to reconcile. The read asks for
+  1251 rows so it can tell "exactly at the cap" (nothing lost, stays quiet) from
+  "past the cap" (reports). `deleteManyFromR2` carries its own 5000-key ceiling
+  and its own "truncated" report; the row cap is sized so account deletion
+  cannot reach it, and that branch exists only so a future change to the key
+  shape degrades to a loud report rather than a silent drop.
+- **Reconciliation.** Every orphan is enumerable by its `assets/{userId}/`
+  prefix. There is no object-listing command in `wrangler` — `wrangler r2 object`
+  offers only `get`, `put`, and `delete` — so listing goes through R2's
+  S3-compatible `ListObjectsV2` API, which is what the app itself uses. Run:
+
+  ```bash
+  ASSET_R2_ACCOUNT_ID=... ASSET_R2_ACCESS_KEY_ID=... \
+  ASSET_R2_SECRET_ACCESS_KEY=... ASSET_BUCKET_NAME=spawnforge-assets \
+  node web/scripts/list-orphaned-r2-keys.ts "assets/<userId>/"
+  ```
+
+  It prints one key per line on stdout (a count on stderr) and follows
+  continuation tokens, so it does not stop at the 1000-key page limit. Credentials
+  are the same four `ASSET_R2_*` / `ASSET_BUCKET_NAME` variables the app reads
+  (`web/src/lib/config/assetStorage.ts`); pull them with `vercel env pull`. The
+  script requires Node 24+ (it runs under Node's built-in TypeScript
+  type-stripping, no tsx needed). Delete what it lists with:
+
+  ```bash
+  npx wrangler r2 object delete "spawnforge-assets/<key>" --remote
+  ```
+
+  Remember each object's `<key>.status.json` sidecar if you are deleting by hand;
+  the script lists sidecars too, so piping its output covers them.
+- **Superseded objects.** Re-uploading an asset file under a new filename
+  deletes the object the row previously referenced, together with that object's
+  `.status.json` sidecar (same best-effort rules). A re-upload under the same
+  filename overwrites in place and deletes nothing.

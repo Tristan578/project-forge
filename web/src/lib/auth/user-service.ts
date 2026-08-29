@@ -4,8 +4,16 @@ import {
   users,
   projects,
   publishedGames,
+  marketplaceAssets,
 } from '../db/schema';
 import type { Tier, User } from '../db/schema';
+import {
+  deleteManyFromR2,
+  resolveOwnedAssetKey,
+  withStatusSidecars,
+  MAX_R2_SWEEP_KEYS,
+} from '../storage/r2';
+import { captureException, captureMessage } from '../monitoring/sentry-server';
 
 /** Find or create a user from Clerk webhook data */
 export async function syncUserFromClerk(clerkData: {
@@ -128,7 +136,35 @@ export async function updateDisplayName(
  *   → projects
  *   → financial / key data
  *   → users
+ *
+ * After the transaction commits, the user's uploaded marketplace objects are
+ * removed from R2 on a best-effort basis (PF-9457) — see the notes at that
+ * call site for why storage runs last and why it can never fail the deletion.
  */
+/**
+ * Upper bound on the number of R2 keys one marketplace asset row can generate:
+ * a preview object, an asset file object, and the `.status.json` sidecar the
+ * asset post-processing Worker writes beside each of them.
+ *
+ * This is what converts the sweep's key ceiling (MAX_R2_SWEEP_KEYS) into a row
+ * ceiling for the read below. Raising it without raising MAX_R2_SWEEP_KEYS
+ * shrinks how many assets a single account deletion can clear; the two move
+ * together on purpose.
+ */
+const R2_KEYS_PER_ASSET = 4;
+
+/**
+ * Marketplace asset rows one account-deletion sweep will read.
+ *
+ * A function, not a module-level `const`: evaluating `MAX_R2_SWEEP_KEYS` at
+ * import time makes every module that transitively imports user-service crash
+ * on load under a `vi.mock('@/lib/storage/r2')` that does not re-export it —
+ * which broke the marketplace download route suite when this was a const.
+ */
+function sellerAssetReadLimit(): number {
+  return Math.floor(MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET);
+}
+
 export async function deleteUserAccount(userId: string): Promise<void> {
   const neonSql = getNeonSql();
 
@@ -150,6 +186,62 @@ export async function deleteUserAccount(userId: string): Promise<void> {
       .where(eq(projects.userId, userId))
   );
   const projectIds = userProjects.map((p) => p.id);
+
+  // Read the seller's uploaded marketplace objects BEFORE the transaction —
+  // the rows carrying the R2 URLs are about to be deleted.
+  //
+  // Row cap: each asset row contributes at most R2_KEYS_PER_ASSET keys, so
+  // reading at most MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET rows guarantees the
+  // key list never exceeds what a single sweep will attempt. We deliberately
+  // ask for one row MORE than the cap: the extra row is the only way to tell
+  // "exactly at the cap" (nothing left behind) from "past the cap" (a tail we
+  // will never see). `.limit(cap)` alone cannot distinguish the two, so a
+  // seller with exactly `cap` assets would be reported as truncated when
+  // nothing was lost — and, worse, the check would have to be `>=`, which is a
+  // false positive on the common boundary.
+  //
+  // A stable ORDER BY makes the rows we do read deterministic. Without it,
+  // Postgres may return any `cap` of the seller's rows, so a truncation report
+  // could not tell an operator which objects were already handled.
+  const sellerAssetLimit = sellerAssetReadLimit();
+  const sellerAssetRows = await queryWithResilience(() =>
+    getDb()
+      .select({
+        id: marketplaceAssets.id,
+        previewUrl: marketplaceAssets.previewUrl,
+        assetFileUrl: marketplaceAssets.assetFileUrl,
+      })
+      .from(marketplaceAssets)
+      .where(eq(marketplaceAssets.sellerId, userId))
+      .orderBy(marketplaceAssets.id)
+      .limit(sellerAssetLimit + 1)
+  );
+
+  // The row cap is the cap that can actually bite. Rows past it never become
+  // keys at all, so deleteManyFromR2's own `truncated` flag stays false and the
+  // tail would vanish with no signal anywhere. Say so explicitly instead.
+  const assetReadTruncated = sellerAssetRows.length > sellerAssetLimit;
+  const sellerAssets = assetReadTruncated
+    ? sellerAssetRows.slice(0, sellerAssetLimit)
+    : sellerAssetRows;
+
+  // Only keys under this user's own assets/{userId}/{assetId}/ prefix are
+  // eligible: previewUrl/assetFileUrl are seller-writable through the asset
+  // PATCH route, so an unvalidated key would let a departing seller take
+  // another seller's objects down with them.
+  //
+  // Each resolved key is expanded to include its `.status.json` sidecar — the
+  // asset post-processing Worker writes one next to every created object and
+  // records it nowhere in Postgres, so a DB-driven sweep that skipped it would
+  // leave per-user JSON in the bucket after the account is gone.
+  const ownedKeys: string[] = [];
+  for (const asset of sellerAssets) {
+    const previewKey = resolveOwnedAssetKey(asset.previewUrl, userId, asset.id);
+    if (previewKey) ownedKeys.push(previewKey);
+    const fileKey = resolveOwnedAssetKey(asset.assetFileUrl, userId, asset.id);
+    if (fileKey) ownedKeys.push(fileKey);
+  }
+  const storageKeys = withStatusSidecars(ownedKeys);
 
   // Build the full list of DELETE statements in dependency order.
   // All statements are sent to Postgres in a single BEGIN/COMMIT batch.
@@ -231,4 +323,67 @@ export async function deleteUserAccount(userId: string): Promise<void> {
 
   // Execute all statements atomically
   await queryWithResilience(() => neonSql.transaction(statements));
+
+  // Object storage last, and best-effort (PF-9457).
+  //
+  // Ordering: the DB transaction commits first. If R2 went first and the
+  // transaction then rolled back, a *live* account would be left pointing at
+  // files we had already destroyed. Running it after means the only failure
+  // mode is an orphaned object, which is recoverable.
+  //
+  // Best-effort: nothing below is allowed to throw. An account deletion that
+  // half-fails because object storage hiccuped is strictly worse than an
+  // orphan — the user's data is already gone from the DB and there is nothing
+  // useful for the caller to retry. Failures are logged with their keys so an
+  // operator can reconcile them (keys stay enumerable by the assets/{userId}/
+  // prefix).
+  await deleteUserStorageObjects(userId, storageKeys, assetReadTruncated);
+}
+
+/**
+ * Best-effort removal of a deleted user's R2 objects. Never throws.
+ * See the ordering and failure-mode notes at the call site above.
+ */
+async function deleteUserStorageObjects(
+  userId: string,
+  keys: string[],
+  assetReadTruncated: boolean
+): Promise<void> {
+  if (assetReadTruncated) {
+    const message = `Account deletion read only the first ${sellerAssetReadLimit()} marketplace assets for user ${userId}; objects under assets/${userId}/ beyond that need reconciliation`;
+    console.error(message);
+    captureMessage(message, 'error');
+  }
+
+  if (keys.length === 0) return;
+
+  try {
+    const sweep = await deleteManyFromR2(keys);
+
+    if (sweep.failedKeys.length > 0) {
+      const message = `Account deletion left ${sweep.failedKeys.length} orphaned R2 object(s) for user ${userId}`;
+      console.error(message, {
+        userId,
+        failedKeys: sweep.failedKeys,
+        errors: sweep.errors,
+      });
+      captureMessage(message, 'error');
+    }
+
+    // Defensive second net. The row cap above is sized so this call site can
+    // never overflow the sweep's own key ceiling, so in production the read cap
+    // is what fires. This branch exists so that changing R2_KEYS_PER_ASSET (or
+    // the key shape) without re-deriving the row cap degrades to a loud report
+    // rather than a silent drop.
+    if (sweep.truncated) {
+      const message = `Account deletion R2 sweep truncated at ${MAX_R2_SWEEP_KEYS} keys for user ${userId}; remaining objects under assets/${userId}/ need reconciliation`;
+      console.error(message);
+      captureMessage(message, 'error');
+    }
+  } catch (error) {
+    // deleteManyFromR2 is documented not to throw; this is belt-and-braces so
+    // an unexpected failure can never surface as a failed account deletion.
+    console.error('R2 cleanup failed during account deletion', error);
+    captureException(error, { scope: 'deleteUserAccount.r2Cleanup', userId, keyCount: keys.length });
+  }
 }

@@ -20,9 +20,15 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 const mockGetSignedDownloadUrl = vi.fn();
-vi.mock('@/lib/storage/r2', () => ({
-  getSignedDownloadUrl: (...args: unknown[]) => mockGetSignedDownloadUrl(...args),
-}));
+// resolveOwnedAssetKey stays REAL: the route relies on its host check and its
+// owner-prefix check as a security boundary, so stubbing it would test nothing.
+vi.mock('@/lib/storage/r2', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/storage/r2')>();
+  return {
+    resolveOwnedAssetKey: actual.resolveOwnedAssetKey,
+    getSignedDownloadUrl: (...args: unknown[]) => mockGetSignedDownloadUrl(...args),
+  };
+});
 
 // The route runs the real withApiMiddleware, which applies an in-memory
 // rate limit keyed on the (single) authenticated user. Without stubbing it,
@@ -158,6 +164,39 @@ describe('GET /api/marketplace/assets/[id]/download', () => {
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toContain('signed.r2.example.com');
     expect(mockGetSignedDownloadUrl).toHaveBeenCalledWith('assets/user_1/a1/file/model.glb');
+  });
+
+  it('never signs a CDN key belonging to another seller (PF-9457)', async () => {
+    // assetFileUrl is seller-writable via PATCH /api/marketplace/seller/assets/[id].
+    // A seller pointing their own asset at another seller's key must not get a
+    // signed URL for that paid file.
+    process.env.CDN_URL = 'cdn.spawnforge.ai';
+    process.env.ASSET_CDN_HOSTS = 'cdn.example.com';
+    const assetChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{
+        id: 'a1',
+        sellerId: 'user_1',
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/victim_seller/a9/file/paid.glb',
+      }]),
+    };
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(getDb).mockReturnValue({
+      select: vi.fn().mockReturnValue(assetChain),
+      update: vi.fn().mockReturnValue(updateChain),
+    } as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/download');
+    const res = await GET(req, { params: Promise.resolve({ id: 'a1' }) });
+
+    expect(mockGetSignedDownloadUrl).not.toHaveBeenCalled();
+    // Falls through to open-redirect validation, which rejects the CDN host.
+    expect(res.status).toBe(400);
   });
 
   it('should redirect to asset URL for allowed non-CDN hosts', async () => {

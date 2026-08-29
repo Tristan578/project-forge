@@ -86,6 +86,16 @@ const OPTIONAL_VARS: OptionalVar[] = [
     defaultValue: '',
   },
   {
+    // Optional, not required: R2 asset storage powers the marketplace only, so a
+    // missing CDN_URL must not take the whole app down at boot. It is listed
+    // here so an unset value is at least announced — without it, the only
+    // symptom is `resolveOwnedAssetKey` returning null and asset cleanup
+    // deleting nothing, which is invisible until the bucket fills with orphans.
+    key: 'CDN_URL',
+    description: 'Public host serving R2 marketplace assets (bare hostname; a scheme is tolerated)',
+    defaultValue: '',
+  },
+  {
     key: 'ADMIN_USER_IDS',
     description: 'Comma-separated Clerk user IDs for admin access (admin panel, economics)',
     defaultValue: '',

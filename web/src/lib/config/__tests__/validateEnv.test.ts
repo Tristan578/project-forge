@@ -86,17 +86,14 @@ describe('validateEnv', () => {
 
     it('does not warn for optional vars that are set', async () => {
       stubAllRequired();
-      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
-      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://spawnforge.ai');
-      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://cdn.spawnforge.ai');
-      vi.stubEnv('SENTRY_DSN', 'https://xxx@sentry.io/123');
-      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://xxx@sentry.io/123');
-      vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test');
-      vi.stubEnv('ASSET_R2_ACCOUNT_ID', '0b949ff499d179e24dde841f71d6134f');
-      vi.stubEnv('ADMIN_USER_IDS', 'user_abc123');
-      vi.stubEnv('DB_RATE_LIMIT_PER_SECOND', '80');
+      // Driven off OPTIONAL_VARS instead of a hand-copied literal list. The
+      // literal rotted every time a var was added: the "no warnings at all"
+      // assertion below then failed for the newest entry rather than for a real
+      // regression, and the fix was always to paste one more line here.
+      const { OPTIONAL_VARS, validateEnvironment } = await import('../validateEnv');
+      expect(OPTIONAL_VARS.length).toBeGreaterThan(0);
+      for (const v of OPTIONAL_VARS) vi.stubEnv(v.key, 'set-for-test');
 
-      const { validateEnvironment } = await import('../validateEnv');
       const result = validateEnvironment();
 
       expect(result.valid).toBe(true);
