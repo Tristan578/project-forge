@@ -190,10 +190,10 @@ A scheduled GitHub Actions workflow exercises PITR end-to-end on the 1st of each
 - **Workflow:** `.github/workflows/pitr-verify.yml`
 - **Driver:** `scripts/pitr-verify.mjs`
 - **Script:** `scripts/verify-db-backup.sh` (runs against the recovery branch)
-- **Trigger:** `schedule: '0 8 1 * *'` or `workflow_dispatch` with optional `hours_ago` input
+- **Trigger:** `schedule: '0 8 1 * *'` or `workflow_dispatch` with optional `hours_ago` input (clamped to the plan's PITR retention window — 6h today, so the default 24h resolves to ~5.7h)
 - **Required secrets:** `NEON_API_KEY`, `NEON_PROJECT_ID` (both configured in repo settings)
 
-The driver creates a read-only Neon branch from `(now - HOURS_AGO)`, waits for the branch operations to finish, runs `verify-db-backup.sh` against the recovery branch's connection URI, and deletes the branch in a `finally` block regardless of outcome. On a scheduled failure the driver classifies the fault and `scripts/pitr-report-failure.mjs` files it under the matching heading below. The class decides the issue title, its labels and which triage section it links; a repeat failure of the same class comments on the existing issue (reopening it if it was closed) rather than opening a new one, so the four monthly duplicates that predate this behaviour do not recur.
+The driver reads the project's `history_retention_seconds`, clamps `HOURS_AGO` to 95% of that window (the window slides while the create call is in flight, so requesting exactly the retention races the boundary), creates a read-only Neon branch from that point, waits for the branch operations to finish, runs `verify-db-backup.sh` against the recovery branch's connection URI, and deletes the branch in a `finally` block regardless of outcome. On a scheduled failure the driver classifies the fault and `scripts/pitr-report-failure.mjs` files it under the matching heading below. The class decides the issue title, its labels and which triage section it links; a repeat failure of the same class comments on the existing issue (reopening it if it was closed) rather than opening a new one, so the four monthly duplicates that predate this behaviour do not recur.
 
 | Class | Meaning | Issue labels |
 |-------|---------|--------------|
