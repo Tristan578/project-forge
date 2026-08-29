@@ -876,6 +876,22 @@ pub fn emit_tilemap_changed(entity_id: &str, tilemap_data: Option<&crate::core::
     });
 }
 
+/// Emit a skeleton 2D removed event.
+///
+/// `SKELETON2D_UPDATED` cannot express a removal: it requires a `&SkeletonData2d`
+/// that no longer exists, and the browser handler bails on a rig it cannot parse,
+/// so a payload-less update would be silently dropped and one carrying the old rig
+/// would re-add it.
+pub fn emit_skeleton2d_removed(entity_id: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Skeleton2dRemovedPayload<'a> {
+        entity_id: &'a str,
+    }
+
+    emit_event("SKELETON2D_REMOVED", &Skeleton2dRemovedPayload { entity_id });
+}
+
 /// Emit a reverb zone removed event.
 pub fn emit_reverb_zone_removed(entity_id: &str) {
     #[derive(Serialize)]

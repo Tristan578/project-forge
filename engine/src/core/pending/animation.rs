@@ -2,6 +2,7 @@
 
 use super::PendingCommands;
 use crate::core::animation_clip::{AnimationClipData, Interpolation, PlayMode, PropertyTarget};
+use crate::core::skeleton2d::Skeleton2dResync;
 
 // === Animation Request Structs ===
 
@@ -212,6 +213,10 @@ impl PendingCommands {
         self.remove_skeleton2d_requests.push(request);
     }
 
+    pub fn queue_skeleton2d_resync(&mut self, resync: Skeleton2dResync) {
+        self.skeleton2d_resyncs.push(resync);
+    }
+
     pub fn queue_add_bone2d(&mut self, request: AddBone2dRequest) {
         self.add_bone2d_requests.push(request);
     }
@@ -297,6 +302,16 @@ pub fn queue_create_skeleton2d_from_bridge(request: CreateSkeleton2dRequest) -> 
 
 pub fn queue_remove_skeleton2d_from_bridge(request: RemoveSkeleton2dRequest) -> bool {
     super::with_pending(|pc| pc.queue_remove_skeleton2d(request)).is_some()
+}
+
+/// Queue a re-report of skeleton state that changed without a command.
+///
+/// Named for the thread-local it reaches, not for a bridge caller: the only
+/// callers are the undo and redo arms in `core/entity_factory.rs`, which are pure
+/// Rust and cannot emit an event themselves. `with_pending` is a thread-local, so
+/// this is reachable from `core/` and natively testable.
+pub fn queue_skeleton2d_resync_pending(resync: Skeleton2dResync) -> bool {
+    super::with_pending(|pc| pc.queue_skeleton2d_resync(resync)).is_some()
 }
 
 pub fn queue_add_bone2d_from_bridge(request: AddBone2dRequest) -> bool {

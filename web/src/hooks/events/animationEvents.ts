@@ -51,6 +51,16 @@ export function handleAnimationEvent(
       return true;
     }
 
+    // The engine cannot express a removal through `SKELETON2D_UPDATED`: that
+    // payload requires a rig, and the case above drops any payload it cannot
+    // parse. So removals — the `remove_skeleton_2d` command, and undo/redo
+    // through the engine's resync queue — arrive on their own event.
+    case 'SKELETON2D_REMOVED': {
+      const payload = castPayload<{ entityId: string }>(data);
+      useEditorStore.getState().applySkeleton2dRemovedFromEngine(payload.entityId);
+      return true;
+    }
+
     case 'SKELETAL_ANIMATION2D_PLAYING': {
       // Animation playback state could be tracked here if needed
       return true;

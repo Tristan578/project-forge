@@ -212,6 +212,8 @@ pub struct PendingCommands {
     pub get_skeleton2d_requests: Vec<GetSkeleton2dRequest>,
     pub import_skeleton_json_requests: Vec<ImportSkeletonJsonRequest>,
     pub auto_weight_skeleton2d_requests: Vec<AutoWeightSkeleton2dRequest>,
+    /// Undo/redo skeleton re-reports; see `crate::core::skeleton2d::Skeleton2dResync`.
+    pub skeleton2d_resyncs: Vec<crate::core::skeleton2d::Skeleton2dResync>,
     // particles domain
     pub particle_updates: Vec<ParticleUpdate>,
     pub particle_toggles: Vec<ParticleToggle>,

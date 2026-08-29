@@ -110,6 +110,27 @@ describe('handleAnimationEvent', () => {
     expect(actions.applySkeleton2dFromEngine).not.toHaveBeenCalled();
   });
 
+  // `SKELETON2D_UPDATED` cannot carry a removal: its payload requires a rig,
+  // and the handler above drops any payload it cannot parse. Before the engine
+  // grew a removal event, `remove_skeleton_2d` and undo/redo left the browser
+  // holding a rig the engine had dropped, and the next bone edit was authored
+  // against a skeleton that no longer existed.
+  it('SKELETON2D_REMOVED: drops the mirrored rig without dispatching back', () => {
+    const result = handleAnimationEvent(
+      'SKELETON2D_REMOVED',
+      { entityId: 'ent-1' } as never,
+      mockSetGet.set,
+      mockSetGet.get
+    );
+
+    expect(result).toBe(true);
+    expect(actions.applySkeleton2dRemovedFromEngine).toHaveBeenCalledWith('ent-1');
+    // `removeSkeleton2d` dispatches `remove_skeleton_2d` — driving it from an
+    // inbound event echoes the removal straight back at the engine.
+    expect(actions.removeSkeleton2d).not.toHaveBeenCalled();
+    expect(actions.setSkeleton2d).not.toHaveBeenCalled();
+  });
+
   it('SKELETAL_ANIMATION2D_PLAYING: returns true (no-op)', () => {
     const result = handleAnimationEvent('SKELETAL_ANIMATION2D_PLAYING', {}, mockSetGet.set, mockSetGet.get);
     expect(result).toBe(true);

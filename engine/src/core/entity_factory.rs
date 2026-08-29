@@ -2075,6 +2075,18 @@ fn execute_undo(
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
                     }
+                    // This arm is pure `core/` and cannot emit, and the bridge's
+                    // only skeleton emitter is gated on a live rig — so it reaches
+                    // neither a non-selected entity nor this arm's removal branch,
+                    // and the browser's mirror kept a rig the engine had dropped.
+                    // Carry the state written, don't ask for it to be re-read: the
+                    // drain runs in a different system and `Commands` are deferred.
+                    super::pending_commands::queue_skeleton2d_resync_pending(
+                        super::skeleton2d::Skeleton2dResync {
+                            entity_id: entity_id.clone(),
+                            data: old_skeleton.clone(),
+                        },
+                    );
                     break;
                 }
             }
@@ -2448,6 +2460,13 @@ fn execute_redo(
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
                     }
+                    // See the undo arm: `core/` cannot emit, so re-report.
+                    super::pending_commands::queue_skeleton2d_resync_pending(
+                        super::skeleton2d::Skeleton2dResync {
+                            entity_id: entity_id.clone(),
+                            data: new_skeleton.clone(),
+                        },
+                    );
                     break;
                 }
             }
@@ -4966,7 +4985,7 @@ mod tilemap_skeleton2d_history_tests {
 
     use super::{HistoryStack, UndoableAction};
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
-    use crate::core::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
+    use crate::core::skeleton2d::{Skeleton2dResync, SkeletonData2d, SkeletonEnabled2d};
     use crate::core::tilemap::{TilemapData, TilemapEnabled};
     use bevy::prelude::*;
 
@@ -5347,6 +5366,79 @@ mod tilemap_skeleton2d_history_tests {
         assert!(
             !world.entity(entity).contains::<SkeletonEnabled2d>(),
             "the enabled marker must not outlive the data it describes",
+        );
+    }
+
+    // -- the browser has to be told, and only these arms can tell it ---------
+
+    /// Run `body` with a live pending queue registered, and hand back the
+    /// skeleton resyncs it collected.
+    ///
+    /// The registration is not ceremony. `with_pending` reaches a thread-local
+    /// raw pointer that only the bridge's `Startup` system sets in production,
+    /// so an unregistered push is a SILENT no-op — a test that skipped this
+    /// would assert an empty queue and pass no matter what the arms did.
+    fn skeleton_resyncs_from(body: impl FnOnce()) -> Vec<Skeleton2dResync> {
+        struct PendingGuard;
+        impl Drop for PendingGuard {
+            fn drop(&mut self) {
+                crate::core::pending::unregister_pending_commands();
+            }
+        }
+
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let guard = PendingGuard;
+        body();
+        // Clear the pointer before `pending` is moved out of this frame, and
+        // even if `body` unwound.
+        drop(guard);
+        pending.skeleton2d_resyncs
+    }
+
+    /// Undoing a creation is the case no live-rig emitter can ever see: the
+    /// component is GONE, so the only way the browser learns to drop its copy
+    /// is this arm queueing the re-report itself.
+    #[test]
+    fn undoing_a_skeleton_creation_queues_a_removal_resync() {
+        let mut world = base_world();
+        let _ = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        record_skeleton_edit(&mut world, "rig-1", None, Some(skeleton("armor")));
+
+        let queued = skeleton_resyncs_from(|| undo(&mut world));
+
+        assert_eq!(queued.len(), 1, "undo must queue exactly one resync");
+        assert_eq!(queued[0].entity_id, "rig-1");
+        assert!(
+            queued[0].data.is_none(),
+            "undoing a creation wrote NO rig, so the resync must report a removal",
+        );
+    }
+
+    /// Undo carries the pre-state and redo the post-state, and each resync
+    /// carries the data the arm WROTE — never an entity id to be re-read, since
+    /// the drain runs in a different system and `Commands` are deferred.
+    #[test]
+    fn undo_and_redo_of_a_skeleton_removal_queue_the_state_each_one_wrote() {
+        let mut world = base_world();
+        let _ = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), None);
+
+        let undone = skeleton_resyncs_from(|| undo(&mut world));
+        assert_eq!(undone.len(), 1);
+        let restored = undone[0].data.as_ref().expect("undo restored a rig, so it must be carried");
+        assert_eq!(restored.active_skin, "cloth", "the resync must carry the rig the arm wrote");
+        assert_eq!(
+            restored.bones.len(),
+            2,
+            "the resync must carry the recorded struct, not a default one",
+        );
+
+        let redone = skeleton_resyncs_from(|| redo(&mut world));
+        assert_eq!(redone.len(), 1);
+        assert!(
+            redone[0].data.is_none(),
+            "redoing a removal wrote NO rig, so the resync must report a removal",
         );
     }
 }

@@ -222,6 +222,25 @@ pub fn compute_bone_world_positions(bones: &[Bone2dDef]) -> HashMap<String, [f32
     positions
 }
 
+/// A state re-report for one entity whose skeleton changed *without* a command —
+/// undo and redo, whose arms live in `core/` and so cannot emit.
+///
+/// It carries the skeleton the arm WROTE rather than an entity id to be re-read:
+/// `apply_undo_requests` and the skeleton applicator are separate systems in the
+/// same unordered tuple and both write through a deferred `Commands`, so a
+/// re-query in the same frame can still observe pre-undo data.
+///
+/// Enablement is deliberately NOT carried. `SkeletonChange` records only the
+/// data halves, and the restoring arms leave `SkeletonEnabled2d` untouched
+/// whenever they restore a rig — so the marker is never one of the deferred
+/// writes, and the drain reading it live is the only way to report it correctly.
+#[derive(Debug, Clone)]
+pub struct Skeleton2dResync {
+    pub entity_id: String,
+    /// `Some` — the rig that was restored. `None` — the rig was removed.
+    pub data: Option<SkeletonData2d>,
+}
+
 #[cfg(test)]
 mod bone_world_position_tests {
     use super::*;

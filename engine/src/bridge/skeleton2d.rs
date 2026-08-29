@@ -55,16 +55,23 @@ pub(super) fn apply_skeleton2d_creates(
     }
 }
 
+/// Applies `remove_skeleton_2d` commands, and drains `skeleton2d_resyncs` — the
+/// queue the undo and redo arms push to, since those live in `core/` and cannot
+/// emit. A resync applies nothing and records no history: the ECS write and the
+/// history entry are the undo arm's, and only the browser needs telling.
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_skeleton2d_removes(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     mut history: ResMut<entity_factory::HistoryStack>,
-    skeleton_query: Query<(Entity, &EntityId, &SkeletonData2d)>,
+    skeleton_query: Query<(Entity, &EntityId, &SkeletonData2d, Option<&SkeletonEnabled2d>)>,
 ) {
     let requests: Vec<_> = pending.remove_skeleton2d_requests.drain(..).collect();
+    let resyncs: Vec<_> = pending.skeleton2d_resyncs.drain(..).collect();
+    let mut removed: Vec<String> = Vec::new();
+
     for request in requests {
-        if let Some((entity, _, skeleton_data)) = skeleton_query.iter().find(|(_, eid, _)| eid.0 == request.entity_id) {
+        if let Some((entity, _, skeleton_data, _)) = skeleton_query.iter().find(|(_, eid, _, _)| eid.0 == request.entity_id) {
             let old_skeleton = skeleton_data.clone();
             commands.entity(entity).remove::<SkeletonData2d>();
             commands.entity(entity).remove::<SkeletonEnabled2d>();
@@ -72,10 +79,38 @@ pub(super) fn apply_skeleton2d_removes(
             commands.entity(entity).remove::<SkinnedMeshInitialized>();
 
             history.push(UndoableAction::SkeletonChange {
-                entity_id: request.entity_id,
+                entity_id: request.entity_id.clone(),
                 old_skeleton: Some(old_skeleton),
                 new_skeleton: None,
             });
+
+            // Every other skeleton mutator emits; without this one the browser
+            // keeps a rig the engine has dropped, and the next Apply Rig / bone
+            // edit is authored against a skeleton that no longer exists.
+            events::emit_skeleton2d_removed(&request.entity_id);
+            removed.push(request.entity_id);
+        }
+    }
+
+    for resync in resyncs {
+        // A command and a resync for the same entity in one frame is not
+        // producible from the UI — undo is a discrete user action — but if it
+        // ever were, the command is the later truth and already emitted.
+        if removed.iter().any(|id| *id == resync.entity_id) {
+            continue;
+        }
+        match &resync.data {
+            // Enablement is read live rather than carried: the restoring arm
+            // leaves `SkeletonEnabled2d` untouched, so it is never one of the
+            // deferred writes this drain would race.
+            Some(data) => {
+                let enabled = skeleton_query
+                    .iter()
+                    .find(|(_, eid, _, _)| eid.0 == resync.entity_id)
+                    .is_some_and(|(_, _, _, marker)| marker.is_some());
+                events::emit_skeleton2d_updated(&resync.entity_id, data, enabled);
+            }
+            None => events::emit_skeleton2d_removed(&resync.entity_id),
         }
     }
 }
