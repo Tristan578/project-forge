@@ -36,10 +36,12 @@
 //!
 //! ## Empty-parse protection
 //!
-//! Every parser here carries a floor and asserts it. If a producer is rewritten
+//! Every parser here asserts that it read something. If a producer is rewritten
 //! into a shape the scanner cannot read (a struct literal, a builder chain, a
-//! renamed local), the count collapses and the gate FAILS telling you to extend
-//! the parser -- it never quietly passes on nothing.
+//! renamed local), the gate FAILS telling you to extend the parser -- it never
+//! quietly passes on nothing. Above that floor the coverage check does the
+//! diagnosing, because "`tilemap_data` is no longer recorded by
+//! `bridge/procedural.rs`" is a far more useful failure than a count.
 //!
 //! ## Known limitation
 //!
@@ -62,6 +64,15 @@ const SPRITE_SOURCE: &str = include_str!("../bridge/sprite.rs");
 /// floor only guards against the field parser silently reading nothing; it is
 /// never compared against an exemption count.
 const SNAPSHOT_FIELD_FLOOR: usize = 38;
+
+/// A producer block must be seen to assign at least this many snapshot fields.
+///
+/// Deliberately 1, not "however many it assigns today". The only thing this
+/// floor exists to catch is a parser that reads NOTHING. A tight floor would
+/// swallow the more useful diagnosis: deleting one `snap.<field>` line would
+/// then be reported as "extend the parser" when the truth is that a field is no
+/// longer recorded -- which the coverage check reports by name and file.
+const MIN_ASSIGNMENTS_SEEN: usize = 1;
 
 /// Marker for the `EntitySnapshot::new` signature. Unique in `history.rs`.
 const CTOR_MARKER: &str = "pub fn new(";
@@ -100,8 +111,6 @@ struct Delegate {
     source: &'static str,
     marker: &'static str,
     prefix: &'static str,
-    /// Floor on how many fields the delegate must be SEEN to assign.
-    assign_floor: usize,
 }
 
 /// One block of production source that builds an `EntitySnapshot`.
@@ -115,9 +124,6 @@ struct Producer {
     marker: &'static str,
     /// How assignments are written inside the block (`snap.` / `snapshot.`).
     prefix: &'static str,
-    /// Floor on how many fields the parser must be SEEN to assign. Guards
-    /// against a producer rewritten into a shape the scanner cannot read.
-    assign_floor: usize,
     /// Per-field exemptions, composed from one or more lists. Every entry
     /// carries its own reason; there is no catch-all bucket.
     exempt: &'static [&'static [(&'static str, &'static str)]],
@@ -131,33 +137,31 @@ impl Producer {
         let block = block_of(self.source, self.marker);
         let mut found = names_in(&block, self.prefix, fields);
         assert!(
-            found.len() >= self.assign_floor,
-            "{} ({}): parsed only {} `{}<field>` assignments out of the block at \
-             `{}`, expected at least {}. The producer was rewritten into a shape \
-             this scanner cannot read -- extend the parser first, do not lower \
-             the floor.",
+            found.len() >= MIN_ASSIGNMENTS_SEEN,
+            "{} ({}): read {} `{}<field>` assignments out of the block at `{}`. \
+             A producer that assigns nothing is a producer this scanner can no \
+             longer read -- extend the parser first, do not lower the floor: a \
+             gate that sees no assignments reports every field as missing.",
             self.label,
             self.file,
             found.len(),
             self.prefix,
             self.marker,
-            self.assign_floor,
         );
 
         if let Some(d) = &self.delegate {
             let dblock = block_of(d.source, d.marker);
             let dfound = names_in(&dblock, d.prefix, fields);
             assert!(
-                dfound.len() >= d.assign_floor,
-                "{} ({}): delegate `{}` parsed only {} `{}<field>` assignments, \
-                 expected at least {}. The delegate was rewritten into a shape \
-                 this scanner cannot read -- extend the parser first.",
+                dfound.len() >= MIN_ASSIGNMENTS_SEEN,
+                "{} ({}): delegate `{}` read {} `{}<field>` assignments. The \
+                 delegate was rewritten into a shape this scanner cannot read \
+                 -- extend the parser first.",
                 self.label,
                 self.file,
                 d.label,
                 dfound.len(),
                 d.prefix,
-                d.assign_floor,
             );
             for name in dfound {
                 if !found.contains(&name) {
@@ -339,14 +343,12 @@ const SCENE_IO: Producer = Producer {
     source: SCENE_IO_SOURCE,
     marker: "pub(super) fn apply_scene_export(",
     prefix: "snap.",
-    assign_floor: 32,
     exempt: &[SCENE_IO_EXEMPT],
     delegate: Some(Delegate {
         label: "entity_factory::apply_terrain_to_snapshot",
         source: ENTITY_FACTORY_SOURCE,
         marker: "pub fn apply_terrain_to_snapshot(",
         prefix: "snapshot.",
-        assign_floor: 2,
     }),
 };
 
@@ -357,7 +359,6 @@ const ENGINE_MODE: Producer = Producer {
     source: ENGINE_MODE_SOURCE,
     marker: "pub fn snapshot_scene(",
     prefix: "snap.",
-    assign_floor: 33,
     exempt: &[ENGINE_MODE_EXEMPT],
     delegate: None,
 };
@@ -370,7 +371,6 @@ const CSG_SOURCE: Producer = Producer {
     source: PROCEDURAL_SOURCE,
     marker: "let build_snapshot =",
     prefix: "snap.",
-    assign_floor: 33,
     exempt: &[CSG_SOURCE_EXEMPT],
     delegate: None,
 };
@@ -382,7 +382,6 @@ const CSG_RESULT: Producer = Producer {
     source: PROCEDURAL_SOURCE,
     marker: "let result_snapshot = {",
     prefix: "snap.",
-    assign_floor: 2,
     exempt: &[FRESH_SPAWN_EXEMPT, CSG_RESULT_EXEMPT],
     delegate: None,
 };
@@ -393,7 +392,6 @@ const EXTRUDE: Producer = Producer {
     source: PROCEDURAL_SOURCE,
     marker: "history.push(UndoableAction::ExtrudeShape {",
     prefix: "snap.",
-    assign_floor: 2,
     exempt: &[FRESH_SPAWN_EXEMPT, PROCEDURAL_MESH_EXEMPT],
     delegate: None,
 };
@@ -404,7 +402,6 @@ const LATHE: Producer = Producer {
     source: PROCEDURAL_SOURCE,
     marker: "history.push(UndoableAction::LatheShape {",
     prefix: "snap.",
-    assign_floor: 2,
     exempt: &[FRESH_SPAWN_EXEMPT, PROCEDURAL_MESH_EXEMPT],
     delegate: None,
 };
@@ -415,7 +412,6 @@ const SPRITE: Producer = Producer {
     source: SPRITE_SOURCE,
     marker: "pub(super) fn apply_spawn_sprite_requests(",
     prefix: "snapshot.",
-    assign_floor: 1,
     exempt: &[FRESH_SPAWN_EXEMPT, SPRITE_EXEMPT],
     delegate: None,
 };
@@ -526,7 +522,9 @@ fn assert_full_coverage(producer: &Producer) {
         "{} ({}): EntitySnapshot fields {missing:?} are neither assigned in the \
          block at `{}` nor exempted. Either record them on the snapshot or add \
          an exemption with a one-line reason saying why this producer can never \
-         know them.",
+         know them. If nearly every field is listed, the block was probably \
+         rewritten into a shape this scanner cannot read -- extend the parser \
+         first.",
         producer.label,
         producer.file,
         producer.marker,
