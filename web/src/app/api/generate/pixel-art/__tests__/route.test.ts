@@ -167,21 +167,13 @@ describe('POST /api/generate/pixel-art', () => {
     expect(pixelArtClientMock.generate).toHaveBeenCalledTimes(1);
   });
 
-  it('returns base64 and completed status for openai provider (PF-837)', async () => {
-    pixelArtClientMock.generate.mockResolvedValue({ base64: 'aGVsbG8=' });
+  it('rejects the unsupported openai path before resolving a key or charging tokens (PF-1074)', async () => {
     const res = await POST(makeRequest({ ...validBody, provider: 'openai' }));
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.status).toBe('completed');
-    expect(data.base64).toBe('aGVsbG8=');
-    expect(data.provider).toBe('openai');
-    expect(data.tokenCost).toBe(20);
-    // The synthetic id is a client-side key only — OpenAI answers inline, so
-    // there is no provider job to poll. It must be a UUID, not `Date.now()`:
-    // two submissions in the same millisecond would otherwise collide.
-    expect(data.jobId).toMatch(
-      /^pxart-openai-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-    );
+    expect(data.error).toContain('auto, replicate');
+    expect(mockResolveKey).not.toHaveBeenCalled();
+    expect(pixelArtClientMock.generate).not.toHaveBeenCalled();
   });
 
   // The defect this suite's PF-837 tests could not see: completion used to be
@@ -219,17 +211,6 @@ describe('POST /api/generate/pixel-art', () => {
       expect(mockRefundTokens).toHaveBeenCalledWith('user-123', 'usage-abc');
     });
 
-    it('openai: returns 503 when the response carries an empty base64', async () => {
-      pixelArtClientMock.generate.mockResolvedValue({ base64: '' });
-      const res = await POST(makeRequest({ ...validBody, provider: 'openai' }));
-
-      expect(res.status).toBe(503);
-      const data = await res.json();
-      expect(data.error).toBe(EXPECTED);
-      expect(data.code).toBe('SERVICE_UNAVAILABLE');
-      expect(mockRefundTokens).toHaveBeenCalledWith('user-123', 'usage-abc');
-    });
-
     it('still reports the empty artifact to Sentry', async () => {
       pixelArtClientMock.generate.mockResolvedValue({});
       await POST(makeRequest(validBody));
@@ -261,21 +242,12 @@ describe('POST /api/generate/pixel-art', () => {
   });
 
   it('reports provider error to Sentry when provider call fails (PF-837)', async () => {
-    pixelArtClientMock.generate.mockRejectedValue(new Error('OpenAI timeout'));
-    await POST(makeRequest({ ...validBody, provider: 'openai' }));
+    pixelArtClientMock.generate.mockRejectedValue(new Error('Replicate timeout'));
+    await POST(makeRequest(validBody));
     expect(mockCaptureException).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ route: '/api/generate/pixel-art' })
     );
-  });
-
-  it('uses openai provider when specified', async () => {
-    pixelArtClientMock.generate.mockResolvedValue({ base64: 'data' });
-    const res = await POST(makeRequest({ ...validBody, provider: 'openai' }));
-    expect(res.status).toBe(201);
-    const data = await res.json();
-    expect(data.provider).toBe('openai');
-    expect(data.tokenCost).toBe(20);
   });
 
   it('does not refund tokens when no usageId exists on provider error', async () => {

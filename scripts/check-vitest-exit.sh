@@ -3,9 +3,11 @@
 # failure or the known vitest#3077 open-handle false positive.
 #
 # Single source of truth for the exit-code workaround used by BOTH
-# .github/workflows/quality-gates.yml (vitest --coverage, invoked with the
-# --coverage mode flag) and .github/workflows/cd.yml (vitest). Keeping it in
-# one tested script stops the two inline copies from drifting and — the reason
+# .github/workflows/quality-gates.yml and .github/workflows/cd.yml — each runs
+# vitest --coverage and invokes this gate with the --coverage mode flag, and
+# scripts/__tests__/check-vitest-exit.test.sh pins that wiring on both call
+# sites (#8644). Keeping it in one tested script stops the two inline copies
+# from drifting and — the reason
 # this script exists (#8598) — stops a COVERAGE-THRESHOLD failure from being
 # silently swallowed.
 #

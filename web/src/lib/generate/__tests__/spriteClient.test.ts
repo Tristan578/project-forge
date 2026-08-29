@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SpriteClient } from '../spriteClient';
 
@@ -53,6 +54,20 @@ describe('SpriteClient', () => {
       await expect(client.generateSprite({ prompt: 'test', size: '1024x1024' }))
         .rejects.toThrow('DALL-E API error (401): Invalid API Key');
     });
+
+    it.each([undefined, null, '', '   '])(
+      'rejects a successful response with no image URL (%s)',
+      async (url) => {
+        const client = new SpriteClient(mockApiKey, 'dalle3');
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve({ data: [{ url }] }),
+        } as Response);
+
+        await expect(client.generateSprite({ prompt: 'test', size: '512x512' }))
+          .rejects.toThrow('Provider response did not include a non-empty image URL');
+      },
+    );
   });
 
   describe('generateSprite with Replicate', () => {
@@ -78,6 +93,17 @@ describe('SpriteClient', () => {
         })
       );
     });
+
+    it('rejects a successful response with no prediction ID', async () => {
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: '', status: 'starting' }),
+      } as Response);
+
+      await expect(client.generateSprite({ prompt: 'spaceship', size: '512x512' }))
+        .rejects.toThrow('Provider response did not include a non-empty prediction ID');
+    });
   });
 
   it('generateSpriteSheet calculates correct dimensions', async () => {
@@ -100,6 +126,17 @@ describe('SpriteClient', () => {
         body: expect.stringContaining('"width":512')
       })
     );
+  });
+
+  it('generateSpriteSheet rejects a successful response with no prediction ID', async () => {
+    const client = new SpriteClient(mockApiKey, 'sdxl');
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: null, status: 'starting' }),
+    } as Response);
+
+    await expect(client.generateSpriteSheet({ prompt: 'walking', frameCount: 4, size: '64x64' }))
+      .rejects.toThrow('Provider response did not include a non-empty sprite-sheet prediction ID');
   });
 
   it('getReplicateStatus calls status API', async () => {
@@ -164,6 +201,17 @@ describe('SpriteClient', () => {
 
       await expect(client.generateTileset({ prompt: 'test', tileSize: 16, gridSize: '4x4' }))
         .rejects.toThrow('Replicate API error (503)');
+    });
+
+    it('rejects a successful response with no prediction ID', async () => {
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'starting' }),
+      } as Response);
+
+      await expect(client.generateTileset({ prompt: 'test', tileSize: 16, gridSize: '4x4' }))
+        .rejects.toThrow('Provider response did not include a non-empty tileset prediction ID');
     });
   });
 

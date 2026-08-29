@@ -1,10 +1,12 @@
 /**
  * aiSdkAdapter — wraps AI SDK v5 `streamText` and yields `ResolveChatStreamEvent` objects.
  *
- * This is the Phase 1 adapter. It bridges the AI SDK's streaming format to the
- * existing `ResolveChatStreamEvent` envelope used by `resolveChat.ts` and its
- * callers. When the `USE_AI_SDK` feature flag is enabled, `resolveChat()` calls
- * `streamViaSdk()` instead of the hand-rolled streaming functions.
+ * It bridges the AI SDK's streaming format to the existing
+ * `ResolveChatStreamEvent` envelope used by `resolveChat.ts` and its callers.
+ * The migration is complete: `resolveChat()` calls `streamViaSdk()`
+ * unconditionally (`resolveChat.ts:110`) and the hand-rolled streaming
+ * functions are gone. There is no `USE_AI_SDK` feature flag — an earlier
+ * revision of this comment described one, but nothing has ever read it.
  *
  * Architecture notes:
  * - Uses `gateway()` for vercel-gateway, openrouter, and github-models backends

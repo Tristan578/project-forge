@@ -87,15 +87,20 @@ CRITICAL: Read before any infrastructure work. Using the wrong account will depl
 ## Stripe (Payments)
 
 - **Tiers**: starter (free), hobbyist, creator, pro
-- **Env vars**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- **Env vars**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (no publishable key — checkout redirects server-side to a Stripe-hosted page)
 - **Version pin**: `^20.4.1` — v21 has breaking changes (see `changelog-review` skill)
 
 ---
 
-## PostHog (Analytics)
+## PostHog (Analytics + Feature Flags)
 
-- **Env vars**: `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`
-- **Client-side only** — no server-side tracking
+- **Env vars**: `NEXT_PUBLIC_POSTHOG_KEY`, `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_LLM_CAPTURE`
+- There is **no** `NEXT_PUBLIC_POSTHOG_HOST` — nothing in the repo reads one
+- **Not client-side only**: `web/src/lib/analytics/posthog-server.ts` does content-free
+  server-side LLM capture, and `web/src/lib/flags/posthogFlags.ts` evaluates feature flags
+  server-side (including the `provider-kill-switch-<provider>` gates that run before token
+  deduction). Both need `NEXT_PUBLIC_POSTHOG_KEY`; the flag evaluator additionally needs
+  `POSTHOG_PERSONAL_API_KEY`, and server capture additionally needs `POSTHOG_LLM_CAPTURE=true`.
 
 ---
 

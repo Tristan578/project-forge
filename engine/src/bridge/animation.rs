@@ -294,12 +294,17 @@ pub(super) fn apply_animation_requests(
         match request.action {
             AnimationAction::Play { clip_name, crossfade_secs } => {
                 if let Some((node_index, _duration)) = entry.clips.get(&clip_name) {
-                    if crossfade_secs > 0.0 {
+                    // `from_secs_f32` panics on a negative, NaN or over-large
+                    // value, which in wasm takes the engine down. `core` rejects
+                    // those before they get here; fall back to an instant switch
+                    // rather than trusting that from inside the bridge.
+                    let crossfade = std::time::Duration::try_from_secs_f32(crossfade_secs).ok();
+                    if let Some(crossfade) = crossfade.filter(|d| !d.is_zero()) {
                         if let Some(transitions) = transitions_opt.as_mut() {
                             transitions.play(
                                 &mut player,
                                 *node_index,
-                                std::time::Duration::from_secs_f32(crossfade_secs),
+                                crossfade,
                             ).repeat();
                         } else {
                             player.start(*node_index).repeat();

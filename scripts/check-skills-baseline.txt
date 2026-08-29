@@ -21,7 +21,6 @@ babysit-prs
 build
 db-migrate
 developer-experience
-infra-services
 kanban
 testing
 troubleshoot

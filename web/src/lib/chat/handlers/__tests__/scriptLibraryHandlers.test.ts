@@ -588,11 +588,16 @@ describe('set_visual_script', () => {
 
 describe('get_visual_script', () => {
   it('returns success with empty nodes and edges', async () => {
-    const { result } = await invokeHandler(scriptLibraryHandlers, 'get_visual_script', {});
+    const { result } = await invokeHandler(scriptLibraryHandlers, 'get_visual_script', { entityId: 'ent-1' });
     expect(result.success).toBe(true);
     const data = result.result as { nodes: unknown[]; edges: unknown[] };
     expect(data.nodes).toEqual([]);
     expect(data.edges).toEqual([]);
+  });
+
+  it('rejects a call missing entityId', async () => {
+    const { result } = await invokeHandler(scriptLibraryHandlers, 'get_visual_script', {});
+    expect(result.success).toBe(false);
   });
 });
 
@@ -603,7 +608,7 @@ describe('get_visual_script', () => {
 describe('compile_visual_script', () => {
   it('returns code on successful compilation of empty graph', async () => {
     mockCompileGraph.mockReturnValue({ success: true, code: '// empty', errors: [] });
-    const { result } = await invokeHandler(scriptLibraryHandlers, 'compile_visual_script', {});
+    const { result } = await invokeHandler(scriptLibraryHandlers, 'compile_visual_script', { entityId: 'ent-1' });
     expect(result.success).toBe(true);
     const data = result.result as { code: string };
     expect(data.code).toBe('// empty');
@@ -615,9 +620,14 @@ describe('compile_visual_script', () => {
       code: '',
       errors: [{ message: 'Syntax error' }],
     });
-    const { result } = await invokeHandler(scriptLibraryHandlers, 'compile_visual_script', {});
+    const { result } = await invokeHandler(scriptLibraryHandlers, 'compile_visual_script', { entityId: 'ent-1' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('Syntax error');
+  });
+
+  it('rejects a call missing entityId', async () => {
+    const { result } = await invokeHandler(scriptLibraryHandlers, 'compile_visual_script', {});
+    expect(result.success).toBe(false);
   });
 });
 

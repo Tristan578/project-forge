@@ -59,7 +59,15 @@ jobs:
           echo "$CHANGED" | grep -q '^engine/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
+          # The docs gate is what runs apps/docs/scripts/check-manifest-sync.ts,
+          # the ONLY check comparing the canonical MCP manifest against its two
+          # derived copies. The canonical dir and the apps/docs copy were listed;
+          # the WEB copy was not, so a PR editing only web/src/data/commands.json
+          # set needs-web=true, needs-docs=false, and the sync check never ran —
+          # while web/src/lib/chat/tools.ts imports that very copy to build the
+          # tool definitions served to the chat API (#8620). command-parity does
+          # not cover it: it reads only the canonical manifest.
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           # Claude Code hook scripts + their self-contained bash test suites,
           # plus .claude/settings.json (the committed permissions posture, which
@@ -246,9 +254,13 @@ jobs:
         run: node scripts/check-bundle-size.js
 
   # ---- Docs Internal Gate ----
-  # Runs when apps/docs/** or mcp-server/manifest/** changed.
+  # Runs when apps/docs/**, mcp-server/manifest/** or the web copy of the MCP
+  # manifest (web/src/data/commands.json) changed.
   # Verifies that no internal commands appear in generated public MDX and that
-  # the two commands.json copies are in sync.
+  # BOTH derived copies of commands.json — web/src/data/ and apps/docs/data/ —
+  # match the canonical mcp-server/manifest/ one. Every trigger surface of that
+  # check must be in the needs-docs filter above, or the check does not run on
+  # the PR that changed it (#8620).
   # Path-gated so docs-only PRs pay the docs build tax (~2-3 min) but
   # Rust engine PRs that don't touch docs are unaffected.
   docs-internal-gate:
@@ -726,6 +738,22 @@ jobs:
   #   * .claude/tools/dx-audit.sh — the cross-provider DX audit; its contract test
   #     pins that the audit delegates to the agentic gate and covers the secondary
   #     provider surfaces (.codex/AGENTS.md, .windsurf, .agents) instead of drifting.
+  #   * scripts/generate-wasm-manifests.sh — the WASM manifest generator whose
+  #     output the R2 CDN consumes at three points in cd.yml, and
+  #     scripts/changeset-version.sh — the version-script release.yml runs to cut
+  #     versions. Both suites existed on disk but were named in NO workflow until
+  #     PF-9451/#9451, alongside scripts/__tests__/pr-workitem-check.test.sh (which
+  #     covers .github/workflows/pr-workitem-check.yml's closing-reference logic).
+  #   * scripts/check-suite-wiring.sh — the guard that made the three orphans above
+  #     unrepeatable: it fails when any *.test.sh under scripts/__tests__ or
+  #     .claude/tools/__tests__ is referenced by no workflow. This job names its
+  #     suites in explicit steps rather than looping a glob ON PURPOSE — per-suite
+  #     step names are what make a red suite identifiable in the Actions UI and what
+  #     let check-npm-audit.test.sh pin each step's `run:` line-for-line against a
+  #     `run: true` swap — so the recurrence guard is an assertion over the glob,
+  #     not a switch to one. The gate runs here as its own final step, not only as
+  #     a unit suite, so a new orphan fails a required check rather than waiting for
+  #     someone to run it locally.
   # These ride ci-success as a REQUIRED check rather than a standalone advisory
   # workflow: a standalone path-filtered suite can be left out of the required
   # aggregate, which would let a PR that neuters a gate script merge green.
@@ -786,13 +814,21 @@ jobs:
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
+            scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
+            scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
+            scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
+            scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
+            scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
+            scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -822,6 +858,9 @@ jobs:
       - name: Run security-alerts gate test suite
         run: bash scripts/__tests__/check-security-alerts.test.sh
 
+      - name: Run workflow-failure notifier test suite
+        run: bash scripts/__tests__/notify-workflow-failure.test.sh
+
       - name: Run cross-provider DX-audit contract test
         run: bash .claude/tools/__tests__/dx-audit.test.sh
 
@@ -845,6 +884,33 @@ jobs:
 
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+
+      - name: Run production migration-guard test suite
+        run: bash scripts/__tests__/db-migration-guard.test.sh
+
+      - name: Run Neon branch-helper test suite
+        run: bash scripts/__tests__/neon-branch.test.sh
+
+      # Executes the ci-gate `Detect changed paths` step body extracted from this
+      # very file. Rides needs-ci, which every ci.yml edit sets, so the filters
+      # are tested on the PR that changes them.
+      - name: Run ci-gate path-filter test suite
+        run: bash scripts/__tests__/ci-gate-path-filters.test.sh
+
+      - name: Run WASM-manifest generator test suite
+        run: bash scripts/__tests__/generate-wasm-manifests.test.sh
+
+      - name: Run changeset-version wrapper test suite
+        run: bash scripts/__tests__/changeset-version.test.sh
+
+      - name: Run PR work-item check test suite
+        run: bash scripts/__tests__/pr-workitem-check.test.sh
+
+      - name: Run suite-wiring gate test suite
+        run: bash scripts/__tests__/check-suite-wiring.test.sh
+
+      - name: Run suite-wiring gate
+        run: bash scripts/check-suite-wiring.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without

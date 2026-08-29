@@ -7,7 +7,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
-cd "${REPO_ROOT}"
+cd "${REPO_ROOT}" || exit 1
 
 PROJECT="${1:-spawnforge}"
 
@@ -27,7 +27,7 @@ echo ""
 echo "--- Project Inspect ---"
 # Run inspect from the correct directory if we're in a project subdirectory
 if [ -d "${REPO_ROOT}/web" ]; then
-  cd "${REPO_ROOT}/web"
+  cd "${REPO_ROOT}/web" || exit 1
 fi
 
 vercel inspect --scope tnolan 2>/dev/null || echo "Could not inspect project. Ensure you are authenticated: vercel login --scope tnolan"

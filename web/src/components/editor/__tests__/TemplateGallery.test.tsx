@@ -4,9 +4,10 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
 import { TemplateGallery } from '../TemplateGallery';
 import { useEditorStore } from '@/stores/editorStore';
+import { AnalyticsEvent } from '@/lib/analytics/posthog';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -19,6 +20,14 @@ vi.mock('lucide-react', () => ({
   Puzzle: (props: Record<string, unknown>) => <span data-testid="puzzle-icon" {...props} />,
   Compass: (props: Record<string, unknown>) => <span data-testid="compass-icon" {...props} />,
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
+  AlertTriangle: (props: Record<string, unknown>) => <span data-testid="alert-icon" {...props} />,
+  Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
+}));
+
+const mockTrackEvent = vi.fn();
+vi.mock('@/lib/analytics/posthog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/analytics/posthog')>()),
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }));
 
 vi.mock('@/data/templates', () => ({
@@ -37,7 +46,9 @@ vi.mock('@/data/templates', () => ({
 
 describe('TemplateGallery', () => {
   const mockOnClose = vi.fn();
-  const mockLoadTemplate = vi.fn().mockResolvedValue(undefined);
+  const mockLoadTemplate = vi
+    .fn()
+    .mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
   const mockNewScene = vi.fn();
 
   function setupStore() {
@@ -53,6 +64,7 @@ describe('TemplateGallery', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLoadTemplate.mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
     setupStore();
   });
 
@@ -115,5 +127,80 @@ describe('TemplateGallery', () => {
     const backdrop = screen.getByRole('dialog').parentElement!;
     fireEvent.click(backdrop);
     expect(mockOnClose).toHaveBeenCalled();
+  });
+
+  // The gallery used to close and fire TEMPLATE_USED / TEMPLATE_APPLIED for any
+  // outcome, so a failed load looked identical to a successful one: the dialog
+  // went away, the funnel counted an activation, and the canvas stayed empty.
+  describe('when the template load fails', () => {
+    beforeEach(() => {
+      mockLoadTemplate.mockResolvedValue({ success: false, error: 'Engine is not ready yet' });
+    });
+
+    it('stays open and shows the reason', async () => {
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Engine is not ready yet');
+      expect(mockOnClose).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('does not report the template as used or applied', async () => {
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+      await screen.findByRole('alert');
+
+      expect(mockTrackEvent).not.toHaveBeenCalled();
+    });
+
+    it('clears the error when the retry succeeds', async () => {
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+      await screen.findByRole('alert');
+
+      mockLoadTemplate.mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+
+      await waitFor(() => expect(mockOnClose).toHaveBeenCalled());
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+  });
+
+  describe('when the template load succeeds', () => {
+    it('closes and reports the template as used and applied', async () => {
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+
+      await waitFor(() => expect(mockOnClose).toHaveBeenCalled());
+      expect(mockTrackEvent).toHaveBeenCalledWith(AnalyticsEvent.TEMPLATE_USED, {
+        templateId: 'platformer',
+      });
+      expect(mockTrackEvent).toHaveBeenCalledWith(AnalyticsEvent.TEMPLATE_APPLIED, {
+        templateId: 'platformer',
+        source: 'gallery',
+      });
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('blocks a second selection while a load is in flight', async () => {
+      let settle: (value: { success: boolean; entityCount: number; skippedEntityIds: string[] }) => void = () => {};
+      mockLoadTemplate.mockReturnValue(new Promise((resolve) => { settle = resolve; }));
+
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+
+      const card = screen.getByText('Platformer').closest('button')!;
+      await waitFor(() => expect(card).toBeDisabled());
+      expect(card).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getByText('Blank Project').closest('button')!).toBeDisabled();
+
+      settle({ success: true, entityCount: 5, skippedEntityIds: [] });
+      await waitFor(() => expect(mockOnClose).toHaveBeenCalled());
+      expect(mockLoadTemplate).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -1,6 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
 import { sceneManagementHandlers } from '../sceneManagementHandlers';
+import {
+  createSceneTestStore,
+  createFakeEngineDispatcher,
+} from '@/stores/slices/__tests__/sceneSliceTestStore';
+import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
 
 // ---------------------------------------------------------------------------
 // Module mocks for dynamic imports inside the handlers
@@ -61,7 +66,12 @@ const mockTemplateRegistry = [
 
 const mockGetTemplateInfo = vi.fn();
 
-vi.mock('@/data/templates', () => ({
+// `list_templates` and `get_template_info` are asserted against a small fixture
+// registry, but `loadTemplate` must stay real: the load_template tests below run
+// the actual scene slice against a fake engine, and a mocked template would
+// prove nothing about whether a shipped template can be applied.
+vi.mock('@/data/templates', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/data/templates')>()),
   TEMPLATE_REGISTRY: mockTemplateRegistry,
   getTemplateInfo: (...args: unknown[]) => mockGetTemplateInfo(...args),
 }));
@@ -812,16 +822,58 @@ describe('list_templates', () => {
 // ---------------------------------------------------------------------------
 
 describe('load_template', () => {
-  it('calls loadTemplate on the store with the templateId and returns success', async () => {
-    const { result, store } = await invokeHandler(
-      sceneManagementHandlers,
-      'load_template',
-      { templateId: 'platformer' }
-    );
+  // These run the real `sceneSlice.loadTemplate` against a fake engine rather
+  // than a `vi.fn()`, because the bug this handler shipped with was invisible to
+  // a mock: the slice was a stub, and asserting `loadTemplate` had been CALLED
+  // passed against a stub that did nothing. Assert on the scene the user ends
+  // up with instead.
+  function realStore() {
+    const harness = createSceneTestStore();
+    setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+    return harness;
+  }
+
+  afterEach(() => {
+    setSceneDispatcher(null as unknown as Parameters<typeof setSceneDispatcher>[0]);
+  });
+
+  it('leaves the templates entities in the scene graph', async () => {
+    const harness = realStore();
+
+    const { result } = await invokeHandler(sceneManagementHandlers, 'load_template', { templateId: '2d-platformer' }, {
+      loadTemplate: harness.store.getState().loadTemplate,
+    });
 
     expect(result.success).toBe(true);
-    expect((result.result as Record<string, unknown>).message).toContain('platformer');
-    expect(store.loadTemplate).toHaveBeenCalledWith('platformer');
+    const { sceneGraph, nodeCount } = harness.store.getState();
+    expect(nodeCount).toBeGreaterThan(0);
+    expect(Object.keys(sceneGraph.nodes)).toContain('player');
+    expect((result.result as Record<string, unknown>).entityCount).toBe(nodeCount);
+  });
+
+  it('reports failure for a template that does not exist, and spawns nothing', async () => {
+    const harness = realStore();
+
+    const { result } = await invokeHandler(sceneManagementHandlers, 'load_template', { templateId: 'not-a-template' }, {
+      loadTemplate: harness.store.getState().loadTemplate,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not-a-template');
+    expect(harness.store.getState().nodeCount).toBe(0);
+  });
+
+  it('reports failure when the engine never applies the scene it accepted', async () => {
+    const harness = createSceneTestStore();
+    setSceneDispatcher(vi.fn());
+
+    const { result } = await invokeHandler(sceneManagementHandlers, 'load_template', { templateId: '2d-platformer' }, {
+      loadTemplate: (templateId: string) =>
+        harness.store.getState().loadTemplate(templateId, { timeoutMs: 20 }),
+    });
+
+    expect(result.success).toBe(false);
+    expect(harness.store.getState().nodeCount).toBe(0);
   });
 
   it('returns failure when templateId is missing', async () => {

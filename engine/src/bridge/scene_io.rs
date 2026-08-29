@@ -11,6 +11,7 @@ pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
 
 use bevy::prelude::*;
 use crate::core::{
+    animation_clip::AnimationClipData,
     asset_manager::{AssetRef, AssetRegistry},
     audio::{AudioBusConfig, AudioData, AudioEnabled},
     csg::CsgMeshData,
@@ -28,13 +29,19 @@ use crate::core::{
     particles::{ParticleData, ParticleEnabled},
     pending_commands::{self, EntityType, PendingCommands},
     physics::{JointData, PhysicsData, PhysicsEnabled},
+    physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d},
     post_processing::PostProcessingSettings,
     procedural_mesh::ProceduralMeshData,
+    reverb_zone::{ReverbZoneData, ReverbZoneEnabled},
     scene_file::{self, SceneName},
     scripting::ScriptData,
     selection::{Selection, SelectionChangedEvent},
     shader_effects::ShaderEffectData,
+    skeletal_animation2d::SkeletalAnimation2d,
+    skeleton2d::{SkeletonData2d, SkeletonEnabled2d},
+    sprite::SpriteData,
     terrain::{TerrainData, TerrainMeshData},
+    tilemap::{TilemapData, TilemapEnabled},
 };
 
 use super::events;
@@ -64,8 +71,33 @@ pub(super) fn apply_scene_export(
         Option<&PhysicsEnabled>,
         Option<&AssetRef>,
     ), Without<entity_factory::Undeletable>>,
-    script_query: Query<(&EntityId, Option<&ScriptData>)>,
-    audio_export_query: Query<(&EntityId, Option<&AudioData>, Option<&AudioEnabled>)>,
+    // Reverb, animation-clip and the 2D component families ride on these two
+    // existing tuples for the same reason terrain rides on the CSG one below:
+    // the system is at the 16-param ECS limit, while the 15-element tuple limit
+    // leaves room here. Every one of them is restored by `spawn_from_snapshot`
+    // on load, so a component missing from an export tuple is silent data loss
+    // on save — a 2D scene reloaded without its sprites.
+    script_reverb_anim_query: Query<(
+        &EntityId,
+        Option<&ScriptData>,
+        Option<&ReverbZoneData>,
+        Option<&ReverbZoneEnabled>,
+        Option<&AnimationClipData>,
+        Option<&SpriteData>,
+        Option<&Physics2dData>,
+        Option<&Physics2dEnabled>,
+    )>,
+    audio_2d_query: Query<(
+        &EntityId,
+        Option<&AudioData>,
+        Option<&AudioEnabled>,
+        Option<&PhysicsJoint2d>,
+        Option<&TilemapData>,
+        Option<&TilemapEnabled>,
+        Option<&SkeletonData2d>,
+        Option<&SkeletonEnabled2d>,
+        Option<&SkeletalAnimation2d>,
+    )>,
     particle_export_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_lod_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&LodData>)>,
     // Terrain rides on this existing tuple rather than a new query param: this
@@ -105,16 +137,53 @@ pub(super) fn apply_scene_export(
             })
         });
 
-        // Look up script data separately
-        let script_data = script_query.iter()
-            .find(|(script_eid, _)| script_eid.0 == eid.0)
-            .and_then(|(_, sd)| sd.cloned());
+        // Look up script + reverb + animation clip + sprite + 2D physics data
+        let (
+            script_data,
+            reverb_zone_data,
+            reverb_zone_enabled,
+            animation_clip_data,
+            sprite_data,
+            physics2d_data,
+            physics2d_enabled,
+        ) = script_reverb_anim_query.iter()
+            .find(|(script_eid, ..)| script_eid.0 == eid.0)
+            .map(|(_, sd, rzd, rze, acd, spd, p2d, p2e)| (
+                sd.cloned(),
+                rzd.cloned(),
+                rze.is_some(),
+                acd.cloned(),
+                spd.cloned(),
+                p2d.cloned(),
+                p2e.is_some(),
+            ))
+            .unwrap_or((None, None, false, None, None, None, false));
 
-        // Look up audio data separately
-        let (audio_data, audio_enabled) = audio_export_query.iter()
-            .find(|(audio_eid, _, _)| audio_eid.0 == eid.0)
-            .map(|(_, ad, ae)| (ad.cloned(), ae.is_some()))
-            .unwrap_or((None, false));
+        // Look up audio + 2D joint + tilemap + skeleton data
+        let (
+            audio_data,
+            audio_enabled,
+            joint2d_data,
+            tilemap_data,
+            tilemap_enabled,
+            skeleton2d_data,
+            skeleton2d_enabled,
+            skeletal_animations,
+        ) = audio_2d_query.iter()
+            .find(|(audio_eid, ..)| audio_eid.0 == eid.0)
+            .map(|(_, ad, ae, j2d, tmd, tme, skd, ske, sa)| (
+                ad.cloned(),
+                ae.is_some(),
+                j2d.cloned(),
+                tmd.cloned(),
+                tme.is_some(),
+                skd.cloned(),
+                ske.is_some(),
+                // The snapshot field is a Vec but the component is one clip per
+                // entity, matching `core::engine_mode::snapshot_scene`.
+                sa.cloned().map(|a| vec![a]),
+            ))
+            .unwrap_or((None, false, None, None, false, None, false, None));
 
         // Look up particle data separately
         let (particle_data, particle_enabled) = particle_export_query.iter()
@@ -150,6 +219,8 @@ pub(super) fn apply_scene_export(
         snap.script_data = script_data;
         snap.audio_data = audio_data;
         snap.audio_enabled = audio_enabled;
+        snap.reverb_zone_data = reverb_zone_data;
+        snap.reverb_zone_enabled = reverb_zone_enabled;
         snap.particle_data = particle_data;
         snap.particle_enabled = particle_enabled;
         snap.shader_effect_data = shader_effect_data;
@@ -157,8 +228,18 @@ pub(super) fn apply_scene_export(
         snap.procedural_mesh_data = procedural_mesh_data;
         snap.joint_data = joint_data;
         snap.game_components = game_components;
+        snap.animation_clip_data = animation_clip_data;
         snap.game_camera_data = game_camera_data;
         snap.active_game_camera = active_game_camera;
+        snap.sprite_data = sprite_data;
+        snap.physics2d_data = physics2d_data;
+        snap.physics2d_enabled = physics2d_enabled;
+        snap.joint2d_data = joint2d_data;
+        snap.tilemap_data = tilemap_data;
+        snap.tilemap_enabled = tilemap_enabled;
+        snap.skeleton2d_data = skeleton2d_data;
+        snap.skeleton2d_enabled = skeleton2d_enabled;
+        snap.skeletal_animations = skeletal_animations;
 
         // Without BOTH of these a saved terrain reloads as a flat 2x2 plane with no
         // terrain components — see `terrain_snapshot_round_trip_tests` in

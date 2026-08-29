@@ -118,4 +118,19 @@ describe('game templates', () => {
     const template = await loadTemplate('invalid_template');
     expect(template).toBeNull();
   });
+
+  // The MCP `load_template` command constrains templateId with an enum, so a
+  // template missing from the manifest is not merely undocumented — the schema
+  // rejects the call and an AI agent cannot reach it at all. All six 2D
+  // templates were unreachable this way until PF-9446.
+  it('the MCP load_template enum offers every registered template', async () => {
+    const manifest = (await import('@/data/commands.json')) as unknown as {
+      default: { commands: Array<{ name: string; parameters: { properties: Record<string, { enum?: string[] }> } }> };
+    };
+    const command = manifest.default.commands.find((c) => c.name === 'load_template');
+    expect(command).toBeDefined();
+    expect(command!.parameters.properties.templateId.enum).toEqual(
+      TEMPLATE_REGISTRY.map((t) => t.id)
+    );
+  });
 });

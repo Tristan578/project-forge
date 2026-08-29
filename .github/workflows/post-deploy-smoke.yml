@@ -37,6 +37,9 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
+      # Used by the notify step at the end of this job only. Declared at JOB
+      # level, not workflow level, so the workflow-level block stays read-only.
+      issues: write
 
     env:
       # Prefer explicit input (workflow_dispatch / workflow_call); then DEPLOY_URL var; then production.
@@ -178,3 +181,48 @@ jobs:
             echo "**Target:** \`$TARGET_URL\`"
             echo "**Triggered by:** \`$EVENT_NAME\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The workflow_run path fires only after CD SUCCEEDED, so a failure here
+      # means production is broken behind a green deploy — and workflow_run
+      # conclusions are invisible from the CD run's own status. The job summary
+      # above is written into a run nobody is watching, so surface the failure
+      # as an issue instead (PF-1216 / #9438).
+      #
+      # Scoped to workflow_run: workflow_dispatch and workflow_call are the
+      # debugging paths (a deliberately-broken target_url is a normal way to
+      # exercise this file) and must never file issues. The checkout is
+      # conditional for the same reason the happy path has none — this job is
+      # otherwise pure curl.
+      - name: Check out the notifier
+        if: failure() && github.event_name == 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Open or update the production-smoke issue
+        if: failure() && github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTIFY_KEY: post-deploy-smoke
+          NOTIFY_TITLE: 'Production smoke tests are failing after a green deploy'
+          NOTIFY_LABELS: priority-p0,area-infra
+          HEALTH_OUTCOME: ${{ steps.health.outcome }}
+          HOMEPAGE_OUTCOME: ${{ steps.homepage.outcome }}
+          MANIFEST_OUTCOME: ${{ steps.manifest.outcome }}
+          WASM_OUTCOME: ${{ steps.wasm.outcome }}
+        run: |
+          NOTIFY_BODY="Post-deploy smoke tests failed against \`${TARGET_URL}\` after CD reported success.
+          Production is likely broken behind a green deploy.
+
+          | Check | Result |
+          |-------|--------|
+          | /api/health | ${HEALTH_OUTCOME} |
+          | / (homepage) | ${HOMEPAGE_OUTCOME} |
+          | /manifest.json | ${MANIFEST_OUTCOME} |
+          | WASM binary | ${WASM_OUTCOME} |
+
+          **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          **CD run:** ${{ github.event.workflow_run.html_url }}
+
+          See \`docs/production-support.md\` for the rollback procedure. This issue
+          is reused for every subsequent failure — close it once smoke is green."
+          export NOTIFY_BODY
+          bash scripts/notify-workflow-failure.sh

@@ -37,6 +37,13 @@ export interface GenerationResult {
   status: string;
 }
 
+function requireProviderArtifact(value: unknown, artifact: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Provider response did not include a non-empty ${artifact}`);
+  }
+  return value;
+}
+
 export class SpriteClient {
   private baseUrlDalle = 'https://api.openai.com/v1/images/generations';
   private baseUrlReplicate = 'https://api.replicate.com/v1/predictions';
@@ -78,9 +85,10 @@ export class SpriteClient {
     }
 
     const data = await response.json();
+    const imageUrl = requireProviderArtifact(data?.data?.[0]?.url, 'image URL');
     // Return the URL directly as taskId for synchronous completion
     return {
-      taskId: data.data[0].url,
+      taskId: imageUrl,
       status: 'completed',
     };
   }
@@ -114,8 +122,9 @@ export class SpriteClient {
     }
 
     const data = await response.json();
+    const predictionId = requireProviderArtifact(data?.id, 'prediction ID');
     return {
-      taskId: data.id,
+      taskId: predictionId,
       status: data.status,
     };
   }
@@ -165,8 +174,9 @@ export class SpriteClient {
     }
 
     const data = await response.json();
+    const predictionId = requireProviderArtifact(data?.id, 'sprite-sheet prediction ID');
     return {
-      taskId: data.id,
+      taskId: predictionId,
       status: data.status,
     };
   }
@@ -199,8 +209,9 @@ export class SpriteClient {
     }
 
     const data = await response.json();
+    const predictionId = requireProviderArtifact(data?.id, 'tileset prediction ID');
     return {
-      taskId: data.id,
+      taskId: predictionId,
       status: data.status,
     };
   }

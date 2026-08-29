@@ -6,6 +6,7 @@ import { safeAuth } from '@/lib/auth/safe-auth';
 import { createProject } from '@/lib/projects/service';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { quarantineRemixedScripts } from '@/lib/security/remixSanitizer';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,11 @@ export const dynamic = 'force-dynamic';
  * POST /api/play/[userId]/[slug]/remix
  * Clone a published game's scene data into the authenticated user's project list.
  * Records the fork in the gameForks table for attribution.
+ *
+ * The copied scene carries the creator's script source, which the remixer's
+ * editor would otherwise compile with `Function(...)` on open. Scripts are
+ * quarantined (kept, but disabled) on the way across the user boundary — see
+ * `@/lib/security/remixSanitizer` and SEC-2 in CLAUDE.md.
  */
 export async function POST(
   req: NextRequest,
@@ -106,11 +112,15 @@ export async function POST(
       );
     }
 
+    // Disable the creator's scripts before the scene lands in someone else's
+    // project. Source text is preserved; the remixer opts in to running it.
+    const { sceneData, quarantined } = quarantineRemixedScripts(sourceProject.sceneData);
+
     // Create the remixed project (respects tier-based project limits)
     const remixedProject = await createProject(
       remixer.id,
       `${game.title} (Remix)`,
-      sourceProject.sceneData
+      sceneData
     );
 
     // Record the fork for attribution (fire-and-forget)
@@ -126,7 +136,15 @@ export async function POST(
     ).catch(() => {});
 
     return NextResponse.json(
-      { projectId: remixedProject.id, name: remixedProject.name },
+      {
+        projectId: remixedProject.id,
+        name: remixedProject.name,
+        // How many of the creator's scripts were disabled on the way in.
+        // Non-zero means the remix opens with inert scripts, which the remixer
+        // has to re-enable deliberately. Nothing renders this yet — the editor
+        // notice is #9462.
+        quarantinedScripts: quarantined,
+      },
       { status: 201 }
     );
   } catch (error) {

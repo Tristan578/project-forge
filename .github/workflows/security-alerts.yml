@@ -31,6 +31,12 @@ jobs:
     name: Open Security Alerts
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # issues: write is declared at JOB level, not workflow level, and is used by
+    # the notify step below only. The workflow-level block above stays read-only.
+    permissions:
+      security-events: read
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -45,3 +51,28 @@ jobs:
           # passing — a missing/expired PAT is loud, never a vacuous green.
           GH_TOKEN: ${{ secrets.SECURITY_ALERTS_TOKEN || github.token }}
         run: bash scripts/check-security-alerts.sh
+
+      # A red daily cron is silence one level up: nobody is subscribed to it.
+      # Turn the failure into an issue instead (PF-1216 / #9438). Scoped to the
+      # schedule path so workflow_dispatch debugging runs never file anything.
+      # Deduped by key, so a week of red mornings is one issue with seven
+      # comments rather than seven issues.
+      - name: Open or update the alert-debt issue on a scheduled failure
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTIFY_KEY: security-alerts-cron
+          NOTIFY_TITLE: 'Security alert debt: the daily gate is failing'
+          NOTIFY_LABELS: security,area-infra,priority-p1
+          NOTIFY_BODY: |
+            The scheduled `Security Alerts` gate failed, so at least one open
+            Dependabot or code-scanning alert is unremediated (or the
+            `SECURITY_ALERTS_TOKEN` PAT is missing/expired — the gate fails
+            closed on that, deliberately).
+
+            **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Triage in the Security tab. Gate logic and the GHSA allowlist live
+            in `scripts/check-security-alerts.sh`. This issue is reused for
+            every subsequent red run — close it once the run is green.
+        run: bash scripts/notify-workflow-failure.sh

@@ -64,7 +64,7 @@ Triggers: Assign issue labeled `engine` or `rust` to @copilot
 - wasm32-unknown-unknown target constraints (no std::fs, std::net)
 - `// SAFETY:` comment requirement for unsafe blocks
 - Feature flags: webgl2/webgpu conditional compilation
-- WASM binary size threshold (35MB per variant)
+- WASM binary size budgets (per-package, enforced in CI — see docs/operations/wasm-size-budgets.md)
 
 **Value**: The engine has zero tests and several known gaps (safety comments, bridge serialization). This agent can tackle those systematically.
 

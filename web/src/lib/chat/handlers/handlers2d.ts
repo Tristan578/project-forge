@@ -1095,7 +1095,17 @@ const physics2dHandlers: Record<string, ToolHandler> = {
     }
   },
 
-  raycast2d: async (_args, _ctx): Promise<ExecutionResult> => {
+  raycast2d: async (args, _ctx): Promise<ExecutionResult> => {
+    // Stub: validates the documented ray shape but the query itself only
+    // runs at runtime, via forge.physics2d.raycast() in Play mode scripts.
+    const p = parseArgs(z.object({
+      originX: z.number(),
+      originY: z.number(),
+      directionX: z.number(),
+      directionY: z.number(),
+      maxDistance: z.number().optional(),
+    }), args);
+    if (p.error) return p.error;
     return { success: false, error: '2D raycasts are a runtime-only query. Use forge.physics2d.raycast() in scripts during Play mode.' };
   },
 };

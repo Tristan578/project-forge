@@ -8,6 +8,7 @@
  *   import { GPU_INIT_TIMEOUT_MS, PROVIDER_NAMES } from '@/lib/config';
  */
 
+export * from './databaseLimits';
 export * from './timeouts';
 export * from './providers';
 export * from './scopes';

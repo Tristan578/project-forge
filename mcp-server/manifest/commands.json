@@ -2240,6 +2240,10 @@
           "enabled": {
             "type": "boolean",
             "description": "Whether script is active (default: true)"
+          },
+          "template": {
+            "type": "string",
+            "description": "Optional label recording which template (if any) this script originated from"
           }
         },
         "required": [
@@ -2323,11 +2327,16 @@
               "follow_camera"
             ],
             "description": "Template name"
+          },
+          "source": {
+            "type": "string",
+            "description": "TypeScript source to attach for this template application"
           }
         },
         "required": [
           "entityId",
-          "template"
+          "template",
+          "source"
         ]
       },
       "tokenCost": 0,
@@ -5633,6 +5642,10 @@
           "targetEntityId": {
             "type": "string",
             "description": "Entity ID to associate the generated model with"
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to associate the generated model with (alias for targetEntityId)"
           }
         },
         "required": [
@@ -5729,6 +5742,10 @@
               "occlusion"
             ],
             "description": "Specific material slot to apply the texture to (applies all slots when omitted)"
+          },
+          "targetEntityId": {
+            "type": "string",
+            "description": "Canonical alias for entityId; takes precedence when both are set"
           }
         },
         "required": [
@@ -5754,6 +5771,10 @@
             "type": "string",
             "description": "Entity to apply maps to"
           },
+          "targetEntityId": {
+            "type": "string",
+            "description": "Canonical alias for entityId; takes precedence when both are set"
+          },
           "maps": {
             "type": "array",
             "items": {
@@ -5770,9 +5791,7 @@
           }
         },
         "required": [
-          "prompt",
-          "entityId",
-          "maps"
+          "prompt"
         ]
       },
       "tokenCost": 60,
@@ -5832,6 +5851,10 @@
           "entityId": {
             "type": "string",
             "description": "Optional: auto-attach to entity audio"
+          },
+          "speaker": {
+            "type": "string",
+            "description": "Named speaker/character voice preset, blended into voiceStyle"
           }
         },
         "required": [
@@ -6048,6 +6071,10 @@
               "realistic"
             ],
             "description": "Art style preset"
+          },
+          "size": {
+            "type": "string",
+            "description": "Sprite size, e.g. 128x128 (default 128x128)"
           }
         },
         "required": [
@@ -6430,6 +6457,10 @@
           "title": {
             "type": "string",
             "description": "Optional title override for the game concept"
+          },
+          "ideaId": {
+            "type": "string",
+            "description": "ID of a previously generated idea to expand"
           }
         },
         "required": []
@@ -8066,7 +8097,13 @@
               "runner",
               "shooter",
               "puzzle",
-              "explorer"
+              "explorer",
+              "2d-platformer",
+              "2d-topdown",
+              "2d-shmup",
+              "2d-puzzle",
+              "2d-fighter",
+              "2d-metroidvania"
             ],
             "description": "Template ID to load"
           }
@@ -8590,34 +8627,17 @@
     },
     {
       "name": "add_visual_script_node",
-      "description": "Add a node to an entity's visual script graph",
+      "description": "Add a node to the visual script graph (stub: acknowledges the node type but does not yet persist graph state; get_visual_script always returns an empty graph)",
       "category": "scripting",
       "parameters": {
         "type": "object",
         "properties": {
-          "entityId": {
-            "type": "string",
-            "description": "Entity to modify"
-          },
           "nodeType": {
             "type": "string",
             "description": "Node type (e.g., OnUpdate, Translate, Branch)"
-          },
-          "x": {
-            "type": "number",
-            "description": "X position in graph"
-          },
-          "y": {
-            "type": "number",
-            "description": "Y position in graph"
-          },
-          "data": {
-            "type": "object",
-            "description": "Node property values"
           }
         },
         "required": [
-          "entityId",
           "nodeType"
         ]
       },
@@ -8627,15 +8647,11 @@
     },
     {
       "name": "connect_visual_script_nodes",
-      "description": "Connect two nodes in a visual script graph",
+      "description": "Connect two nodes in the visual script graph (stub: validates the connection shape but does not yet persist graph state; get_visual_script always returns an empty graph)",
       "category": "scripting",
       "parameters": {
         "type": "object",
         "properties": {
-          "entityId": {
-            "type": "string",
-            "description": "Entity to modify"
-          },
           "sourceNodeId": {
             "type": "string",
             "description": "Source node ID"
@@ -8654,7 +8670,6 @@
           }
         },
         "required": [
-          "entityId",
           "sourceNodeId",
           "sourcePort",
           "targetNodeId",
@@ -9001,24 +9016,35 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "position": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 2,
-            "maxItems": 3,
-            "description": "[x, y] or [x, y, z] position"
-          },
-          "texture_asset_id": {
+          "entityType": {
             "type": "string",
-            "description": "Asset ID for sprite texture"
+            "enum": [
+              "plane",
+              "cube",
+              "sphere",
+              "cylinder",
+              "capsule"
+            ],
+            "description": "Carrier mesh spawned to hold the sprite (default plane)"
           },
           "name": {
             "type": "string",
             "description": "Entity name"
           },
-          "sorting_layer": {
+          "position": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "[x, y, z] position"
+          },
+          "textureAssetId": {
+            "type": "string",
+            "description": "Asset ID for sprite texture"
+          },
+          "sortingLayer": {
             "type": "string",
             "enum": [
               "Background",
@@ -9028,7 +9054,7 @@
             ],
             "description": "Sorting layer for draw order"
           },
-          "sorting_order": {
+          "sortingOrder": {
             "type": "integer",
             "description": "Order within sorting layer (higher = drawn on top)"
           }
@@ -9046,18 +9072,18 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
+          "entityId": {
             "type": "string",
             "description": "Target entity ID"
           },
-          "texture_asset_id": {
+          "textureAssetId": {
             "type": "string",
             "description": "Asset ID for texture"
           }
         },
         "required": [
-          "entity_id",
-          "texture_asset_id"
+          "entityId",
+          "textureAssetId"
         ]
       },
       "tokenCost": 0,
@@ -9071,22 +9097,17 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
+          "entityId": {
             "type": "string",
             "description": "Target entity ID"
           },
           "color": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            },
-            "minItems": 4,
-            "maxItems": 4,
-            "description": "[r, g, b, a] (0-1 range)"
+            "type": "string",
+            "description": "Hex color string, e.g. #RGB, #RGBA, #RRGGBB, or #RRGGBBAA"
           }
         },
         "required": [
-          "entity_id",
+          "entityId",
           "color"
         ]
       },
@@ -9101,21 +9122,21 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
+          "entityId": {
             "type": "string",
             "description": "Target entity ID"
           },
-          "flip_x": {
+          "flipX": {
             "type": "boolean",
             "description": "Flip horizontally"
           },
-          "flip_y": {
+          "flipY": {
             "type": "boolean",
             "description": "Flip vertically"
           }
         },
         "required": [
-          "entity_id"
+          "entityId"
         ]
       },
       "tokenCost": 0,
@@ -9129,21 +9150,21 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
+          "entityId": {
             "type": "string",
             "description": "Target entity ID"
           },
-          "sorting_layer": {
+          "sortingLayer": {
             "type": "string",
             "description": "Layer name"
           },
-          "sorting_order": {
+          "sortingOrder": {
             "type": "number",
             "description": "Order within layer"
           }
         },
         "required": [
-          "entity_id"
+          "entityId"
         ]
       },
       "tokenCost": 0,
@@ -9157,7 +9178,7 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
+          "entityId": {
             "type": "string",
             "description": "Target entity ID"
           },
@@ -9178,7 +9199,7 @@
           }
         },
         "required": [
-          "entity_id",
+          "entityId",
           "anchor"
         ]
       },
@@ -9193,13 +9214,13 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
+          "entityId": {
             "type": "string",
             "description": "Target entity ID"
           }
         },
         "required": [
-          "entity_id"
+          "entityId"
         ]
       },
       "tokenCost": 0,
@@ -9299,13 +9320,17 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "asset_id": {
+          "entityId": {
+            "type": "string",
+            "description": "Target entity ID"
+          },
+          "assetId": {
             "type": "string",
             "description": "Asset ID of the sprite sheet image"
           },
-          "mode": {
+          "sliceMode": {
             "type": "object",
-            "description": "Slicing mode (grid or manual)",
+            "description": "Slicing mode (grid or manual); omit to slice as a single manual region",
             "properties": {
               "type": {
                 "type": "string",
@@ -9315,67 +9340,59 @@
                 ]
               },
               "columns": {
-                "type": "number",
-                "description": "Number of columns (grid mode)"
+                "type": "integer",
+                "description": "Number of columns (grid mode, default 1)"
               },
               "rows": {
-                "type": "number",
-                "description": "Number of rows (grid mode)"
+                "type": "integer",
+                "description": "Number of rows (grid mode, default 1)"
               },
-              "tile_width": {
-                "type": "number",
-                "description": "Width of each tile in pixels (grid mode)"
-              },
-              "tile_height": {
-                "type": "number",
-                "description": "Height of each tile in pixels (grid mode)"
-              },
-              "padding_x": {
-                "type": "number",
-                "description": "Horizontal padding between tiles (grid mode, default 0)"
-              },
-              "padding_y": {
-                "type": "number",
-                "description": "Vertical padding between tiles (grid mode, default 0)"
-              },
-              "offset_x": {
-                "type": "number",
-                "description": "Horizontal offset from top-left (grid mode, default 0)"
-              },
-              "offset_y": {
-                "type": "number",
-                "description": "Vertical offset from top-left (grid mode, default 0)"
-              },
-              "regions": {
+              "tileSize": {
                 "type": "array",
-                "description": "Manual regions (manual mode)",
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "x": {
-                      "type": "number"
-                    },
-                    "y": {
-                      "type": "number"
-                    },
-                    "width": {
-                      "type": "number"
-                    },
-                    "height": {
-                      "type": "number"
-                    }
-                  }
-                }
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "[width, height] of each tile in pixels (grid mode, default [32, 32])"
               }
             },
             "required": [
               "type"
             ]
+          },
+          "clips": {
+            "type": "array",
+            "description": "Animation clips to create from the sliced frames",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "frames": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                "fps": {
+                  "type": "number"
+                },
+                "looping": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "frames"
+              ]
+            }
           }
         },
         "required": [
-          "asset_id",
-          "mode"
+          "entityId",
+          "assetId"
         ]
       },
       "tokenCost": 1,
@@ -9389,37 +9406,33 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "sprite_sheet_id": {
+          "entityId": {
             "type": "string",
-            "description": "Asset ID of the sprite sheet"
+            "description": "Entity with an existing sprite sheet"
           },
-          "clip_name": {
+          "clipName": {
             "type": "string",
             "description": "Name of the animation clip"
           },
           "frames": {
             "type": "array",
             "items": {
-              "type": "number"
+              "type": "integer"
             },
             "description": "Frame indices to include"
           },
-          "frame_duration": {
+          "fps": {
             "type": "number",
-            "description": "Seconds per frame (uniform mode, default 0.1)"
+            "description": "Frames per second (default 12)"
           },
           "looping": {
             "type": "boolean",
             "description": "Whether to loop the animation (default true)"
-          },
-          "ping_pong": {
-            "type": "boolean",
-            "description": "Whether to play forward then backward (default false)"
           }
         },
         "required": [
-          "sprite_sheet_id",
-          "clip_name",
+          "entityId",
+          "clipName",
           "frames"
         ]
       },
@@ -9434,17 +9447,21 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
-            "type": "number",
-            "description": "Entity ID"
+          "entityId": {
+            "type": "string",
+            "description": "Target entity ID"
           },
-          "sprite_sheet_id": {
+          "spriteSheetId": {
             "type": "string",
             "description": "Sprite sheet asset ID"
           },
-          "current_clip": {
+          "currentClip": {
             "type": "string",
             "description": "Initial clip to play"
+          },
+          "playing": {
+            "type": "boolean",
+            "description": "Whether the animator starts playing immediately (default false)"
           },
           "speed": {
             "type": "number",
@@ -9452,8 +9469,8 @@
           }
         },
         "required": [
-          "entity_id",
-          "sprite_sheet_id"
+          "entityId",
+          "spriteSheetId"
         ]
       },
       "tokenCost": 1,
@@ -9467,22 +9484,18 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
-            "type": "number",
-            "description": "Entity ID"
+          "entityId": {
+            "type": "string",
+            "description": "Entity with an existing sprite animator"
           },
-          "clip_name": {
+          "clipName": {
             "type": "string",
             "description": "Name of clip to play"
-          },
-          "speed": {
-            "type": "number",
-            "description": "Playback speed (default 1.0)"
           }
         },
         "required": [
-          "entity_id",
-          "clip_name"
+          "entityId",
+          "clipName"
         ]
       },
       "tokenCost": 0,
@@ -9496,9 +9509,9 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
-            "type": "number",
-            "description": "Entity ID"
+          "entityId": {
+            "type": "string",
+            "description": "Target entity ID"
           },
           "states": {
             "type": "object",
@@ -9513,29 +9526,32 @@
             "items": {
               "type": "object",
               "properties": {
-                "from": {
+                "fromState": {
                   "type": "string"
                 },
-                "to": {
+                "toState": {
                   "type": "string"
                 },
                 "condition": {
                   "type": "object",
+                  "description": "Discriminated union keyed by type: always | paramBool | paramFloat | paramTrigger",
                   "properties": {
                     "type": {
                       "type": "string",
                       "enum": [
                         "always",
-                        "bool",
-                        "float",
-                        "trigger"
+                        "paramBool",
+                        "paramFloat",
+                        "paramTrigger"
                       ]
                     },
-                    "param": {
-                      "type": "string"
+                    "name": {
+                      "type": "string",
+                      "description": "Parameter name (all but 'always')"
                     },
                     "value": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "paramBool only"
                     },
                     "op": {
                       "type": "string",
@@ -9543,25 +9559,49 @@
                         "greater",
                         "less",
                         "equal"
-                      ]
+                      ],
+                      "description": "paramFloat only"
                     },
                     "threshold": {
-                      "type": "number"
+                      "type": "number",
+                      "description": "paramFloat only"
                     }
-                  }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "duration": {
+                  "type": "number",
+                  "description": "Transition blend duration in seconds"
                 }
-              }
+              },
+              "required": [
+                "fromState",
+                "toState",
+                "condition",
+                "duration"
+              ]
             }
           },
-          "initial_state": {
+          "currentState": {
             "type": "string",
             "description": "Starting state name"
+          },
+          "parameters": {
+            "type": "object",
+            "description": "Map of parameter name to a discriminated {type, value} pair (bool | float | trigger)",
+            "additionalProperties": {
+              "type": "object"
+            }
           }
         },
         "required": [
-          "entity_id",
+          "entityId",
           "states",
-          "initial_state"
+          "transitions",
+          "currentState",
+          "parameters"
         ]
       },
       "tokenCost": 2,
@@ -9575,29 +9615,21 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "entity_id": {
-            "type": "number",
-            "description": "Entity ID"
+          "entityId": {
+            "type": "string",
+            "description": "Entity with an existing animation state machine"
           },
-          "param_name": {
+          "paramName": {
             "type": "string",
             "description": "Parameter name"
           },
           "value": {
-            "description": "Parameter value (boolean or number)",
-            "oneOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "number"
-              }
-            ]
+            "description": "Parameter value (boolean or number)"
           }
         },
         "required": [
-          "entity_id",
-          "param_name",
+          "entityId",
+          "paramName",
           "value"
         ]
       },
@@ -9681,6 +9713,27 @@
           "oneWayPlatform": {
             "type": "boolean",
             "description": "Only collide from above (static only)"
+          },
+          "vertices": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Polygon vertices [[x, y], ...] for the convex_polygon collider shape"
+          },
+          "surfaceVelocity": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "Constant surface velocity [x, y] for conveyor-belt-style one-way platforms"
           }
         },
         "required": [
@@ -9738,19 +9791,16 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "gravityX": {
+          "x": {
             "type": "number",
-            "description": "Horizontal gravity"
+            "description": "Horizontal gravity (default 0)"
           },
-          "gravityY": {
+          "y": {
             "type": "number",
-            "description": "Vertical gravity (negative = downward)"
+            "description": "Vertical gravity, negative = downward (default -9.81)"
           }
         },
-        "required": [
-          "gravityX",
-          "gravityY"
-        ]
+        "required": []
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
@@ -9787,19 +9837,28 @@
             "type": "string",
             "description": "Target entity ID"
           },
-          "forceX": {
-            "type": "number",
-            "description": "Horizontal force"
+          "force": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[x, y] force vector"
           },
-          "forceY": {
-            "type": "number",
-            "description": "Vertical force"
+          "point": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[x, y] world-space application point (defaults to center of mass)"
           }
         },
         "required": [
           "entityId",
-          "forceX",
-          "forceY"
+          "force"
         ]
       },
       "tokenCost": 0,
@@ -9817,19 +9876,28 @@
             "type": "string",
             "description": "Target entity ID"
           },
-          "impulseX": {
-            "type": "number",
-            "description": "Horizontal impulse"
+          "impulse": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[x, y] impulse vector"
           },
-          "impulseY": {
-            "type": "number",
-            "description": "Vertical impulse"
+          "point": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[x, y] world-space application point (defaults to center of mass)"
           }
         },
         "required": [
           "entityId",
-          "impulseX",
-          "impulseY"
+          "impulse"
         ]
       },
       "tokenCost": 0,

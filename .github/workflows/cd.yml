@@ -33,6 +33,11 @@ on:
         required: false
         type: string
         default: ''
+      allow_destructive_migration:
+        description: 'Approve a destructive production schema change (DROP TABLE/COLUMN, type change). Leave off unless you have read the diff.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -56,6 +61,8 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      # For the rollback record below. Job-scoped, not workflow-scoped.
+      issues: write
     environment:
       name: production
     steps:
@@ -69,6 +76,7 @@ jobs:
         run: npm i -g vercel@50.34.3
 
       - name: Promote previous deployment to production
+        id: promote-previous
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -79,19 +87,33 @@ jobs:
           vercel promote "$ROLLBACK_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "Rollback complete. Production now at: $ROLLBACK_URL"
 
-      - name: Notify Slack of manual rollback
-        if: ${{ vars.SLACK_WEBHOOK_INCIDENTS != '' }}
+      # Was a Slack post gated on `vars.SLACK_WEBHOOK_INCIDENTS != ''`. That repo
+      # variable has never existed, and an empty-string guard SKIPS rather than
+      # errors, so this step read like working alerting and had never fired.
+      # Replaced with a mechanism that has no escape hatch: a missing input is a
+      # red step, not a skipped one (PF-1216 / #9438).
+      - name: Record the manual rollback
+        if: ${{ !cancelled() }}
         env:
-          SLACK_WEBHOOK: ${{ vars.SLACK_WEBHOOK_INCIDENTS }}
+          GH_TOKEN: ${{ github.token }}
+          NOTIFY_KEY: prod-rollback-manual
+          NOTIFY_TITLE: 'Production was manually rolled back'
+          NOTIFY_LABELS: priority-p0,area-infra
+          ACTOR: ${{ github.actor }}
           ROLLBACK_URL: ${{ github.event.inputs.rollback_production }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          ACTOR: ${{ github.actor }}
+          PROMOTE_OUTCOME: ${{ steps.promote-previous.outcome }}
         run: |
-          payload=$(printf '{"text":"*SpawnForge Production Rollback (Manual)*\n*Triggered by:* %s\n*Promoted URL:* <%s|%s>\n*Workflow run:* <%s|View run>"}' \
-            "$ACTOR" "$ROLLBACK_URL" "$ROLLBACK_URL" "$RUN_URL")
-          curl --silent --fail -X POST "$SLACK_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "$payload" || echo "Slack notification failed (non-fatal)"
+          NOTIFY_BODY="Production was manually rolled back by \`${ACTOR}\`.
+
+          **Promoted URL:** ${ROLLBACK_URL}
+          **\`vercel promote\` outcome:** ${PROMOTE_OUTCOME}
+          **Run:** ${RUN_URL}
+
+          A manual rollback means production was serving something bad. Record the
+          cause here, then close this issue. See \`docs/production-support.md\`."
+          export NOTIFY_BODY
+          bash scripts/notify-workflow-failure.sh
 
   # ---- Quality Gates (must all pass before any deployment) ----
 
@@ -163,26 +185,42 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Run tests
+      - name: Run tests with coverage
         working-directory: web
-        # Timeout safety net: vitest hangs after test completion due to jsdom open
-        # handles (known issue vitest#3077). A non-zero exit (timeout 124, OOM 137,
-        # segfault 139, ...) is swallowed by the gate below ONLY when the captured
-        # output proves a fully passing run -- a run killed mid-tests (or with
-        # test/coverage failures on record) still fails.
+        # Runs --coverage against the standalone web/vitest.config.ts, mirroring
+        # quality-gates.yml. This job is what re-validates a commit that reached
+        # main without the PR gate (direct push, admin merge); without --coverage
+        # that re-validation had a hole exactly the size of the coverage
+        # thresholds. vitest.workspace.ts exists for local dev environment splits
+        # but does not enforce root-level thresholds, which is why CI uses the
+        # standalone config. Threshold values live in that config and are
+        # auto-ratcheted by coverage-ratchet.yml — never hardcode them here.
+        #
+        # Timeout safety net: vitest hangs after test completion due to jsdom/
+        # coverage open handles (known issue vitest#3077). A non-zero exit
+        # (timeout 124, OOM 137, segfault 139, ...) is swallowed by the gate below
+        # ONLY when the captured output shows a green test summary AND (because
+        # this job now runs --coverage) the "Coverage report from" marker — proof
+        # the tests completed and the coverage phase reached report generation. A
+        # run killed mid-tests or before report generation began still fails.
         run: |
           set +e
-          timeout 600 npx vitest run 2>&1 | tee /tmp/vitest-output.txt
+          timeout 600 npx vitest run --coverage 2>&1 | tee /tmp/vitest-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
           # Adjudicate the exit code via the single tested gate
           # (scripts/check-vitest-exit.sh, unit-tested by the CI Self-Defense
           # Tests job) — the same gate quality-gates.yml uses, so the two no
-          # longer drift. It propagates real test failures (and coverage-threshold
-          # failures, though this job runs without --coverage) and swallows only
-          # the vitest#3077 open-handle / timeout false positives. Invoked by
-          # repo-root path because this step runs with working-directory: web.
-          bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt
+          # longer drift. It propagates real test failures AND coverage-threshold
+          # failures (#8598 — a coverage miss has no "Test Files ... failed" line)
+          # and swallows only the vitest#3077 open-handle / timeout false
+          # positives. The --coverage flag must be passed to BOTH the vitest
+          # invocation and the gate: it is what makes the gate additionally
+          # require the "Coverage report from" marker before swallowing, so a
+          # green test summary alone cannot stand in for adjudicated thresholds.
+          # Invoked by repo-root path because this step runs with
+          # working-directory: web.
+          bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt --coverage
 
   test-mcp:
     name: MCP Tests
@@ -744,6 +782,8 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      # For the auto-rollback incident issue below. Job-scoped, not workflow-scoped.
+      issues: write
     environment:
       name: production
       url: ${{ steps.deploy.outputs.url }}
@@ -835,6 +875,151 @@ jobs:
       - name: Install dependencies for migrations
         run: npm ci
 
+      # ---------------------------------------------------------------------
+      # Production schema-migration safety (#9456)
+      #
+      # `drizzle-kit push` mutates the live database before the new code is
+      # deployed, and drizzle-kit 0.31.10 exits 0 even when the apply throws
+      # (see the header of scripts/db-migration-guard.sh for the three verified
+      # hazards). Nothing below trusts drizzle-kit's exit code.
+      #
+      # Order is load-bearing:
+      #   1. snapshot branch      -- a restore point, BEFORE anything mutates prod
+      #   2. throwaway branch     -- a real copy of prod data to rehearse against
+      #   3. dry run + classifier -- emits the diff and blocks destructive SQL
+      #   4. prod pgvector + apply
+      #   5. convergence check    -- proves the apply did not half-fail
+      # ---------------------------------------------------------------------
+      - name: Create pre-migration Neon snapshot branch
+        # Named `db-snapshot` because the suite pins that this step precedes
+        # every production-mutating step by line number.
+        id: db-snapshot
+        # Gated on the union of the two production-mutating steps below
+        # (drizzle-kit push AND the hand-authored SQL migrations), so no code
+        # path can reach the database without a restore point existing first.
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema') || contains(needs.check-changes.outputs.web-changed-files, 'drizzle/')
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        run: |
+          # A Neon branch is a copy-on-write clone of the parent at the instant
+          # it is created -- i.e. a point-in-time snapshot taken for free. No
+          # compute endpoint is attached; it is storage only until someone needs
+          # it. neon-branch.sh exits 2 when the credentials are absent, which
+          # fails this step and therefore the deploy: a production schema change
+          # without a restore point is not permitted.
+          name="db-snapshot-${GITHUB_RUN_ID}-${GITHUB_SHA:0:8}"
+          out="$(bash scripts/neon-branch.sh create "$name")"
+          echo "$out"
+          branch_id="$(printf '%s\n' "$out" | sed -n 's/^branch_id=//p')"
+          if [ -z "$branch_id" ]; then
+            echo "::error::No snapshot branch id was returned -- refusing to migrate production."
+            exit 1
+          fi
+          echo "snapshot_branch_id=${branch_id}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_branch_name=${name}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Pre-migration snapshot branch ${branch_id} (${name})"
+          {
+            echo "### Pre-migration database snapshot"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Snapshot branch id | \`${branch_id}\` |"
+            echo "| Snapshot branch name | \`${name}\` |"
+            echo
+            echo "Restore procedure: [docs/operations/deploy-migration-rollback.md](docs/operations/deploy-migration-rollback.md)"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create throwaway Neon branch for the migration dry run
+        id: db-dryrun-branch
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        run: |
+          # This branch DOES get a read_write compute, because we are about to
+          # run the real migration against it. Its connection URI is written to
+          # a 0600 file rather than stdout, then masked before anything else in
+          # the job can echo it.
+          name="db-dryrun-${GITHUB_RUN_ID}-${GITHUB_SHA:0:8}"
+          uri_file="${RUNNER_TEMP}/dryrun-db-uri"
+          out="$(bash scripts/neon-branch.sh create "$name" --endpoint --uri-out "$uri_file")"
+          echo "$out"
+          branch_id="$(printf '%s\n' "$out" | sed -n 's/^branch_id=//p')"
+          if [ -z "$branch_id" ]; then
+            echo "::error::No dry-run branch id was returned."
+            exit 1
+          fi
+          echo "::add-mask::$(cat "$uri_file")"
+          echo "branch_id=${branch_id}" >> "$GITHUB_OUTPUT"
+          echo "uri_file=${uri_file}" >> "$GITHUB_OUTPUT"
+          echo "Dry-run branch: ${branch_id} (${name})"
+
+      - name: Dry-run the schema migration against the throwaway branch
+        id: db-dryrun
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
+        env:
+          URI_FILE: ${{ steps.db-dryrun-branch.outputs.uri_file }}
+          # drizzle-kit force-enables colour when GITHUB_ACTIONS is set, which
+          # wraps the markers the classifier matches in ANSI escapes. Turning
+          # colour off here is the belt; the classifier also strips escapes.
+          NO_COLOR: '1'
+          FORCE_COLOR: '0'
+        run: |
+          DATABASE_URL="$(cat "$URI_FILE")"
+          export DATABASE_URL
+          # pgvector first, for the same reason as on production: drizzle-kit
+          # emits `vector(1536)` columns but never `CREATE EXTENSION`.
+          ( cd web && node --input-type=module -e "
+            import { neon } from '@neondatabase/serverless';
+            const sql = neon(process.env.DATABASE_URL);
+            await sql('CREATE EXTENSION IF NOT EXISTS vector');
+            console.log('pgvector extension ensured on dry-run branch');
+          " )
+          # NO --force here. Without it drizzle-kit prints its own data-loss
+          # classification, which is the strongest destructive signal we get.
+          # Its exit code is meaningless, so ignore it and classify the text.
+          ( cd web && npx drizzle-kit push --verbose ) > "${RUNNER_TEMP}/dryrun-push.log" 2>&1 || true
+          echo "--- captured dry-run output ---"
+          cat "${RUNNER_TEMP}/dryrun-push.log"
+
+      - name: Gate the migration plan (destructive-diff detector)
+        id: db-gate
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
+        env:
+          # Two deliberate approval routes, both requiring a human act. Each
+          # belongs to ONE trigger and is complete on its own -- they are
+          # alternatives, not a pair of levers that both read on every run:
+          #   * workflow_dispatch: set the allow_destructive_migration input.
+          #     `github.event.head_commit` is null on this trigger, so the
+          #     commit-message half is dead here BY DESIGN; the input is the
+          #     approval.
+          #   * push: a commit message containing [allow-destructive-migration].
+          #     `github.event.inputs` is null on this trigger, so the input half
+          #     is dead here, and the message is the approval.
+          # An unapproved run fails CLOSED: the gate blocks and production is
+          # never touched. There is no combination that silently approves.
+          # The guard demands the exact string "true"; everything else blocks.
+          ALLOW_DESTRUCTIVE_MIGRATION: ${{ github.event.inputs.allow_destructive_migration == 'true' || contains(github.event.head_commit.message, '[allow-destructive-migration]') }}
+        run: |
+          # tee writes the plan to the job summary as it goes, so the diff is
+          # published even when the gate then fails the job. pipefail (on by
+          # default in GitHub's bash) propagates the guard's exit code.
+          bash scripts/db-migration-guard.sh plan "${RUNNER_TEMP}/dryrun-push.log" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete the throwaway dry-run branch
+        # always(): the branch carries a live compute and a full copy of
+        # production data. It must not survive a blocked or failed gate.
+        if: ${{ always() && steps.db-dryrun-branch.outputs.branch_id != '' }}
+        continue-on-error: true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          DRYRUN_BRANCH_ID: ${{ steps.db-dryrun-branch.outputs.branch_id }}
+        run: bash scripts/neon-branch.sh delete "$DRYRUN_BRANCH_ID"
+
       - name: Enable pgvector extension
         # MUST run BEFORE `drizzle-kit push`. drizzle-kit's schema-diff engine
         # emits `graph_nodes.embedding vector(1536)` + an HNSW index but does NOT
@@ -859,19 +1044,50 @@ jobs:
             console.log('pgvector extension ensured');
           "
 
-      - name: Run database migrations
-        # db:push diffs schema.ts against the live DB and applies only what's
-        # needed. This is idempotent — safe to run even if schema was already
-        # pushed manually during development. db:migrate (SQL file based) fails
-        # when migrations were pre-applied via db:push.
-        # DATABASE_URL is supplied as a repository secret (matches the production DB).
-        # Only runs when schema files changed — avoids unnecessary DB round-trips on
-        # non-schema pushes and prevents accidental destructive schema changes.
+      - name: Apply schema migration to production
+        # `push` (not `generate` + `migrate`) is a deliberate, documented choice:
+        # docs/decisions/2026-08-29-drizzle-push-vs-migrate.md. The safety this
+        # step used to lack now comes from the surrounding steps, not from the
+        # command itself.
+        #
+        # --force is load-bearing, NOT a bypass. Without it a data-loss diff
+        # reaches drizzle-kit's interactive prompt, hanji's render() rejects
+        # because CI has no TTY, pgPush swallows the rejection in its catch
+        # block, and the migration is SILENTLY SKIPPED while the deploy proceeds
+        # against the old schema. The destructive gate above has already run and
+        # has already blocked anything that was not explicitly approved, so by
+        # the time we get here there is nothing left for a prompt to protect.
+        #
+        # DATABASE_URL is a repository secret pointing at the production DB.
         if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
         working-directory: web
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npx drizzle-kit push
+          NO_COLOR: '1'
+          FORCE_COLOR: '0'
+        run: |
+          # `|| true`: drizzle-kit exits 0 on failure anyway, so its status
+          # carries no information either way. The verify step below is what
+          # actually decides whether this worked.
+          npx drizzle-kit push --verbose --force > "${RUNNER_TEMP}/prod-push.log" 2>&1 || true
+          cat "${RUNNER_TEMP}/prod-push.log"
+
+      - name: Verify the production schema converged
+        # Closes hazards 1 and 2 from scripts/db-migration-guard.sh: a push that
+        # threw part-way through its untransacted apply loop still exits 0 and
+        # still prints most of a success log. Re-running push is the only honest
+        # test -- a converged schema has nothing left to do.
+        if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
+        working-directory: web
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NO_COLOR: '1'
+          FORCE_COLOR: '0'
+        run: |
+          npx drizzle-kit push --verbose --force > "${RUNNER_TEMP}/verify-push.log" 2>&1 || true
+          cat "${RUNNER_TEMP}/verify-push.log"
+          bash "${GITHUB_WORKSPACE}"/scripts/db-migration-guard.sh verify "${RUNNER_TEMP}/verify-push.log" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Apply custom SQL migrations
         # Drizzle can't model partial unique indexes (WHERE predicates) or
@@ -993,26 +1209,101 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
           NEW_URL: ${{ steps.deploy.outputs.url }}
+          SNAPSHOT_BRANCH_ID: ${{ steps.db-snapshot.outputs.snapshot_branch_id }}
+          SNAPSHOT_BRANCH_NAME: ${{ steps.db-snapshot.outputs.snapshot_branch_name }}
         run: |
           echo "::error::Health check failed -- rolling back production to $PREV_URL"
-          vercel promote "$PREV_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
-          echo "Rollback complete. Production restored to: $PREV_URL"
 
-      - name: Notify Slack of automatic rollback
-        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' && vars.SLACK_WEBHOOK_INCIDENTS != '' }}
+          # The schema caveat is emitted BEFORE `vercel promote`, deliberately.
+          # If the promote itself fails, `set -e` aborts the step -- and the one
+          # message an operator most needs in that exact situation (the code
+          # rollback did NOT happen and the schema is still migrated) would
+          # never be printed. Be explicit about the half of the deploy this
+          # cannot undo: a green "Rollback complete" next to a migrated database
+          # is how an operator ends up debugging old code against a new schema.
+          if [ -n "$SNAPSHOT_BRANCH_ID" ]; then
+            echo "::error::vercel promote reverted the CODE ONLY. It does NOT revert the database schema."
+            echo "::error::A schema migration ran earlier in this job and is STILL APPLIED to production."
+            echo "::error::The restored code is now running against the NEW schema. If they are incompatible, production is still broken."
+            echo "::error::Pre-migration snapshot branch: ${SNAPSHOT_BRANCH_ID} (${SNAPSHOT_BRANCH_NAME})"
+            echo "::error::Restoring the schema is a deliberate human decision and is NOT automated -- it discards every write made since the snapshot."
+            echo "::error::Exact restore command: docs/operations/deploy-migration-rollback.md"
+            {
+              echo "### Rollback: code reverted, schema NOT reverted"
+              echo
+              echo "\`vercel promote\` restored the previous deployment, but it does NOT revert the database schema."
+              echo "The migration applied in this run is still live."
+              echo
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Restored code | ${PREV_URL} |"
+              echo "| Pre-migration snapshot branch | \`${SNAPSHOT_BRANCH_ID}\` (\`${SNAPSHOT_BRANCH_NAME}\`) |"
+              echo
+              echo "Restoring the schema discards every write since the snapshot, so it is a human decision."
+              echo "The exact command is in [docs/operations/deploy-migration-rollback.md](docs/operations/deploy-migration-rollback.md)."
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No schema migration ran in this deploy -- reverting the code is a complete rollback."
+          fi
+
+          vercel promote "$PREV_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          echo "Code rollback complete. Production code restored to: $PREV_URL"
+
+      # Same replacement as the manual-rollback record above: the previous Slack
+      # step's `vars.SLACK_WEBHOOK_INCIDENTS != ''` clause silently skipped it in
+      # every run this repo has ever had (PF-1216 / #9438). The condition below
+      # deliberately keeps only the clauses that describe the ROLLBACK, so this
+      # fires exactly when the rollback step above ran.
+      - name: Open the auto-rollback incident issue
+        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' }}
         env:
-          SLACK_WEBHOOK: ${{ vars.SLACK_WEBHOOK_INCIDENTS }}
+          GH_TOKEN: ${{ github.token }}
+          NOTIFY_KEY: prod-rollback-auto
+          NOTIFY_TITLE: 'Production auto-rollback fired: a deploy failed its health check'
+          NOTIFY_LABELS: priority-p0,area-infra
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
           NEW_URL: ${{ steps.deploy.outputs.url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ github.sha }}
+          HEALTH_OUTCOME: ${{ steps.health-check-production.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke-tests.outcome }}
+          SNAPSHOT_BRANCH_ID: ${{ steps.db-snapshot.outputs.snapshot_branch_id }}
         run: |
-          short_sha="${COMMIT_SHA:0:8}"
-          payload=$(printf '{"text":"*SpawnForge Production Auto-Rollback*\n:rotating_light: Health check failed for commit `%s`.\n*Failed deployment:* <%s|%s>\n*Rolled back to:* <%s|%s>\n*Workflow run:* <%s|View run>"}' \
-            "$short_sha" "$NEW_URL" "$NEW_URL" "$PREV_URL" "$PREV_URL" "$RUN_URL")
-          curl --silent --fail -X POST "$SLACK_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "$payload" || echo "Slack notification failed (non-fatal)"
+          # The incident issue carries the same caveat the job log does: the
+          # rollback is code-only whenever a migration ran, so whoever picks
+          # this up must not assume the schema went back with the code.
+          if [ -n "$SNAPSHOT_BRANCH_ID" ]; then
+            schema_line="**Schema:** :warning: a migration ran in this deploy. The rollback reverted CODE ONLY -- the schema is still applied. Pre-migration snapshot branch: \`${SNAPSHOT_BRANCH_ID}\`. Restore steps: \`docs/operations/deploy-migration-rollback.md\`"
+          else
+            schema_line="**Schema:** no migration ran in this deploy."
+          fi
+          NOTIFY_BODY="CD promoted production back to the previous deployment.
+
+          **Commit:** \`${COMMIT_SHA}\`
+          **Failed deployment:** ${NEW_URL}
+          **Rolled back to:** ${PREV_URL}
+          **Health check:** ${HEALTH_OUTCOME}
+          **Smoke tests:** ${SMOKE_OUTCOME}
+          **Run:** ${RUN_URL}
+          ${schema_line}
+
+          Production is serving the PREVIOUS deployment. The commit above is on
+          \`main\` and undeployed. See \`docs/production-support.md\`."
+          export NOTIFY_BODY
+          bash scripts/notify-workflow-failure.sh
+
+      - name: Prune expired pre-migration snapshot branches
+        # Snapshots are retained for 14 days -- long enough to be useful for a
+        # post-incident restore, short enough that they do not accumulate
+        # storage forever. Housekeeping must never fail a deploy that worked,
+        # hence always() + continue-on-error.
+        if: ${{ always() && steps.db-snapshot.outputs.snapshot_branch_id != '' }}
+        continue-on-error: true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        run: bash scripts/neon-branch.sh prune 'db-snapshot-' 14
 
 
   # ---- Docs Site Deploy ----

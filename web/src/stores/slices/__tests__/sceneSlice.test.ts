@@ -1,17 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
-import { createSceneSlice, setSceneDispatcher, type SceneSlice } from '../sceneSlice';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createMockDispatch } from './sliceTestTemplate';
+import { createSceneTestStore } from './sceneSliceTestStore';
+import { setSceneDispatcher } from '../sceneSlice';
 import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 
 describe('sceneSlice', () => {
-  let store: ReturnType<typeof createSliceStore<SceneSlice>>;
+  let store: ReturnType<typeof createSceneTestStore>['store'];
   let mockDispatch: ReturnType<typeof createMockDispatch>;
 
   beforeEach(() => {
     mockDispatch = createMockDispatch();
     setSceneDispatcher(mockDispatch);
-    store = createSliceStore(createSceneSlice);
+    store = createSceneTestStore().store;
   });
 
   afterEach(() => {
@@ -78,6 +79,19 @@ describe('sceneSlice', () => {
         JSON.stringify({ entities: [{ entityId: 'e1', audioData: { assetId: 'a1' } }] })
       );
       store.getState().newScene();
+
+      expect(takeStagedSceneAudio()).toEqual({});
+    });
+
+    it('drops the stash when the engine refuses the load outright', () => {
+      // Same reasoning as new_scene: a refused load never emits SCENE_LOADED,
+      // so the stash would sit armed and be claimed by the next scene that does.
+      clearStagedSceneAudio();
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      store.getState().loadScene(
+        JSON.stringify({ entities: [{ entityId: 'e1', audioData: { assetId: 'a1' } }] })
+      );
 
       expect(takeStagedSceneAudio()).toEqual({});
     });
@@ -216,7 +230,7 @@ describe('sceneSlice', () => {
     // that every follow-up command targets in vain.
     it('should return undefined and dispatch nothing when the engine is not loaded', () => {
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
-      const detached = createSliceStore(createSceneSlice);
+      const detached = createSceneTestStore().store;
 
       expect(detached.getState().spawnTerrain()).toBeUndefined();
       expect(mockDispatch).not.toHaveBeenCalled();

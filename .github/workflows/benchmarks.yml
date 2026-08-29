@@ -1,0 +1,100 @@
+name: Benchmarks
+
+# Times real product code paths and diffs the result against the committed
+# baseline at benchmarks/baseline.json.
+#
+# NON-BLOCKING BY DESIGN. This job is deliberately not a required check and
+# every reporting step carries `continue-on-error`. Wall-clock timing on a
+# shared GitHub-hosted runner is noisy — the vCPU is shared, frequency scaling
+# is out of our control, and GC can land inside any iteration — so a red
+# required check here would be red for reasons that have nothing to do with the
+# PR, and a check that is red for unrelated reasons is a check people learn to
+# ignore. The regression signal is delivered as a workflow annotation plus a
+# step summary instead, which is visible on the PR without blocking a merge.
+#
+# The harness's own unit tests (scripts/compare-benchmarks.test.mjs) are
+# deterministic and DO fail the job — only the timing comparison is advisory.
+#
+# Ticket: PF-9458 (#9458). Supersedes #6697, which was closed COMPLETED with
+# the comparator wired to nothing.
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/**'
+      - 'scripts/run-benchmarks.sh'
+      - 'scripts/compare-benchmarks.mjs'
+      - 'scripts/compare-benchmarks.test.mjs'
+      - 'web/src/lib/perf/**'
+      - '.github/workflows/benchmarks.yml'
+  schedule:
+    # 06:00 UTC daily — catches drift landing through paths this workflow's
+    # pull_request filter does not watch.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmarks:
+    name: Product-path benchmarks (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Deterministic — no timing involved — so this one is allowed to fail the
+      # job. It is the gate that keeps the comparator itself honest, including
+      # the anti-drift check against the TypeScript twin in
+      # web/src/lib/perf/benchmark.ts.
+      - name: Comparator unit tests
+        run: node --test scripts/compare-benchmarks.test.mjs
+
+      - name: Run benchmarks and compare against baseline
+        id: bench
+        continue-on-error: true
+        run: bash scripts/run-benchmarks.sh --output benchmarks/current.json
+
+      - name: Upload benchmark report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-report-${{ github.run_id }}
+          path: benchmarks/current.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Report outcome
+        if: always()
+        continue-on-error: true
+        env:
+          OUTCOME: ${{ steps.bench.outcome }}
+        run: |
+          {
+            echo ""
+            echo "Benchmark comparison outcome: **${OUTCOME}**"
+            echo ""
+            echo "This job is advisory and never blocks a merge. A regression"
+            echo "here means: reproduce locally with \`bash scripts/run-benchmarks.sh\`."
+            echo "If the new timing is intentional, re-record with"
+            echo "\`bash scripts/run-benchmarks.sh --update-baseline\` and say why in"
+            echo "the commit message. See benchmarks/README.md."
+          } >> "$GITHUB_STEP_SUMMARY"

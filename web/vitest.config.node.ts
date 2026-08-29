@@ -54,7 +54,7 @@ export default defineConfig({
       // (PF-996) — do not edit by hand.
       thresholds: {
         statements: 83,
-        branches: 74,
+        branches: 75,
         functions: 77,
         lines: 84,
       },

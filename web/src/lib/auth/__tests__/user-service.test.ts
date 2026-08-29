@@ -38,6 +38,8 @@ function buildSelectChain(rows: Partial<User>[]): unknown {
   const chain: Record<string, unknown> = {
     from: vi.fn().mockReturnThis(),
     limit: vi.fn().mockResolvedValue(rows),
+    // deleteUserAccount orders the marketplace-asset read for determinism.
+    orderBy: vi.fn(),
     // then/catch/finally make the object thenable — awaiting the chain directly
     // resolves to rows without calling .limit()
     then: (resolve: (value: unknown) => void, reject: (err: unknown) => void) =>
@@ -45,8 +47,9 @@ function buildSelectChain(rows: Partial<User>[]): unknown {
     catch: (reject: (err: unknown) => void) => resolvedPromise.catch(reject),
     finally: (fn: () => void) => resolvedPromise.finally(fn),
   };
-  // .where() returns the same chain so subsequent calls (.limit) still work
+  // .where()/.orderBy() return the same chain so subsequent calls (.limit) work
   chain.where = vi.fn().mockReturnValue(chain);
+  chain.orderBy = vi.fn().mockReturnValue(chain);
   return chain;
 }
 const mockSelect = vi.fn().mockImplementation(() => buildSelectChain(mockUser ? [mockUser] : []));
@@ -85,13 +88,37 @@ vi.mock('@/lib/db/schema', () => ({
   userFollows: { followerId: 'followerId', followingId: 'followingId' },
   assetReviews: { userId: 'userId' },
   assetPurchases: { buyerId: 'buyerId' },
-  marketplaceAssets: { sellerId: 'sellerId' },
+  marketplaceAssets: {
+    id: 'id',
+    sellerId: 'sellerId',
+    previewUrl: 'previewUrl',
+    assetFileUrl: 'assetFileUrl',
+  },
   sellerProfiles: { userId: 'userId' },
   generationJobs: { userId: 'userId' },
 }));
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((_col: unknown, _val: unknown) => 'WHERE_CLAUSE'),
+}));
+
+// R2 is mocked at the transport boundary only — resolveOwnedAssetKey is the
+// real implementation so the tests below prove the *exact keys* handed to the
+// sweep, not just that a sweep happened.
+const mockDeleteManyFromR2 = vi.fn();
+vi.mock('@/lib/storage/r2', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/storage/r2')>();
+  return {
+    ...actual,
+    deleteManyFromR2: (...args: unknown[]) => mockDeleteManyFromR2(...args),
+  };
+});
+
+const mockCaptureMessage = vi.fn();
+const mockCaptureException = vi.fn();
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureMessage: (...args: unknown[]) => mockCaptureMessage(...args),
+  captureException: (...args: unknown[]) => mockCaptureException(...args),
 }));
 
 import {
@@ -392,6 +419,14 @@ describe('updateDisplayName', () => {
 describe('deleteUserAccount', () => {
   beforeEach(() => {
     mockNeonSql.transaction.mockResolvedValue(undefined);
+    process.env.CDN_URL = 'cdn.spawnforge.ai';
+    mockDeleteManyFromR2.mockResolvedValue({
+      requested: 0,
+      deleted: 0,
+      failedKeys: [],
+      errors: [],
+      truncated: false,
+    });
   });
 
   it('runs all deletes in a single neon transaction (PF-976)', async () => {
@@ -448,5 +483,262 @@ describe('deleteUserAccount', () => {
     const statements = mockNeonSql.transaction.mock.calls[0][0];
     // Last statement should be the user deletion
     expect(statements.length).toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // R2 object storage cleanup (PF-9457)
+  // -------------------------------------------------------------------------
+
+  /**
+   * deleteUserAccount issues three selects in order:
+   *   1. published games   2. projects   3. marketplace assets
+   */
+  function stubSelects(assets: Record<string, unknown>[]): void {
+    let call = 0;
+    mockSelect.mockImplementation(() => {
+      call++;
+      if (call === 3) return buildSelectChain(assets as never);
+      return buildSelectChain([]);
+    });
+  }
+
+  it('deletes the exact R2 keys for assets the user uploaded', async () => {
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/preview/thumb.png',
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/model.glb',
+      },
+      {
+        id: 'asset-2',
+        previewUrl: null,
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-2/file/sound.wav',
+      },
+    ]);
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockDeleteManyFromR2).toHaveBeenCalledTimes(1);
+    // Each object is swept together with the `.status.json` sidecar the asset
+    // post-processing Worker writes beside it. The sidecar is keyed to this
+    // user, lives in the same bucket, and exists in no DB row — nothing else
+    // would ever remove it.
+    expect(mockDeleteManyFromR2).toHaveBeenCalledWith([
+      'assets/user-uuid-1/asset-1/preview/thumb.png',
+      'assets/user-uuid-1/asset-1/preview/thumb.png.status.json',
+      'assets/user-uuid-1/asset-1/file/model.glb',
+      'assets/user-uuid-1/asset-1/file/model.glb.status.json',
+      'assets/user-uuid-1/asset-2/file/sound.wav',
+      'assets/user-uuid-1/asset-2/file/sound.wav.status.json',
+    ]);
+  });
+
+  it('never touches R2 when the user uploaded nothing', async () => {
+    stubSelects([]);
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockDeleteManyFromR2).not.toHaveBeenCalled();
+  });
+
+  it('skips keys outside the assets/{userId}/{assetId}/ prefix owned by this user', async () => {
+    // previewUrl/assetFileUrl are seller-writable via the asset PATCH route, so
+    // a departing seller must not be able to take another seller's object down.
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: 'https://cdn.spawnforge.ai/assets/victim-user/asset-9/preview/paid.png',
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/mine.glb',
+      },
+    ]);
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockDeleteManyFromR2).toHaveBeenCalledWith([
+      'assets/user-uuid-1/asset-1/file/mine.glb',
+      'assets/user-uuid-1/asset-1/file/mine.glb.status.json',
+    ]);
+  });
+
+  it('skips keys hosted somewhere other than the CDN', async () => {
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: 'https://evil-cdn.spawnforge.ai/assets/user-uuid-1/asset-1/preview/t.png',
+        assetFileUrl: 'not-a-url',
+      },
+    ]);
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockDeleteManyFromR2).not.toHaveBeenCalled();
+  });
+
+  it('deletes storage only AFTER the DB transaction commits', async () => {
+    const order: string[] = [];
+    mockNeonSql.transaction.mockImplementation(async () => {
+      order.push('transaction');
+    });
+    mockDeleteManyFromR2.mockImplementation(async () => {
+      order.push('r2');
+      return { requested: 1, deleted: 1, failedKeys: [], errors: [], truncated: false };
+    });
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: null,
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/model.glb',
+      },
+    ]);
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(order).toEqual(['transaction', 'r2']);
+  });
+
+  it('does not fail the account deletion when the R2 sweep reports failures', async () => {
+    mockDeleteManyFromR2.mockResolvedValue({
+      requested: 1,
+      deleted: 0,
+      failedKeys: ['assets/user-uuid-1/asset-1/file/model.glb'],
+      errors: ['R2 unavailable'],
+      truncated: false,
+    });
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: null,
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/model.glb',
+      },
+    ]);
+
+    await expect(deleteUserAccount('user-uuid-1')).resolves.toBeUndefined();
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    // The orphan is surfaced to monitoring rather than swallowed.
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      expect.stringContaining('orphaned R2 object'),
+      'error',
+    );
+  });
+
+  it('does not fail the account deletion when the R2 sweep itself throws', async () => {
+    mockDeleteManyFromR2.mockRejectedValue(new Error('unexpected R2 explosion'));
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: null,
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/model.glb',
+      },
+    ]);
+
+    await expect(deleteUserAccount('user-uuid-1')).resolves.toBeUndefined();
+    expect(mockCaptureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ scope: 'deleteUserAccount.r2Cleanup', userId: 'user-uuid-1' }),
+    );
+  });
+
+  it('reports a truncated sweep so the leftovers can be reconciled', async () => {
+    mockDeleteManyFromR2.mockResolvedValue({
+      requested: 5000,
+      deleted: 5000,
+      failedKeys: [],
+      errors: [],
+      truncated: true,
+    });
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: null,
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/model.glb',
+      },
+    ]);
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      expect.stringContaining('truncated'),
+      'error',
+    );
+  });
+
+  // Math.floor(MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET) = floor(5000 / 4).
+  // The read asks for LIMIT + 1 rows so it can tell "exactly at the cap" from
+  // "past the cap"; only the latter is a truncation.
+  const ASSET_READ_LIMIT = 1250;
+
+  function assetRows(count: number): Record<string, unknown>[] {
+    return Array.from({ length: count }, (_, i) => ({
+      id: `asset-${i}`,
+      previewUrl: null,
+      assetFileUrl: `https://cdn.spawnforge.ai/assets/user-uuid-1/asset-${i}/file/m.glb`,
+    }));
+  }
+
+  it('reports when the asset read ran past its LIMIT', async () => {
+    // The LIMIT on the marketplaceAssets select is the cap that can actually
+    // bite. Rows past it never become keys, so deleteManyFromR2's own
+    // `truncated` flag stays false and the tail would otherwise vanish with no
+    // signal at all — the one thing an operator needs to reconcile the orphans.
+    stubSelects(assetRows(ASSET_READ_LIMIT + 1));
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      expect.stringContaining(`read only the first ${ASSET_READ_LIMIT} marketplace assets`),
+      'error',
+    );
+    // The keys it did see are still swept — the cap reports, it does not skip.
+    // One file key + its sidecar per row, and the overflow row is dropped.
+    expect(mockDeleteManyFromR2).toHaveBeenCalledTimes(1);
+    expect(mockDeleteManyFromR2.mock.calls[0][0]).toHaveLength(ASSET_READ_LIMIT * 2);
+  });
+
+  it('stays silent when the asset read landed exactly on the LIMIT', async () => {
+    // Boundary: `cap` rows means nothing was left behind. Reporting here would
+    // be a false positive that sends an operator hunting for orphans that do
+    // not exist, which is why the read asks for cap + 1 rather than testing >=.
+    stubSelects(assetRows(ASSET_READ_LIMIT));
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockCaptureMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('read only the first'),
+      'error',
+    );
+    expect(mockDeleteManyFromR2.mock.calls[0][0]).toHaveLength(ASSET_READ_LIMIT * 2);
+  });
+
+  it('never hands the sweep more keys than its own ceiling', async () => {
+    // The row cap exists to keep this call site inside MAX_R2_SWEEP_KEYS. Every
+    // row contributes its maximum (preview + file + a sidecar each).
+    stubSelects(
+      Array.from({ length: ASSET_READ_LIMIT + 1 }, (_, i) => ({
+        id: `asset-${i}`,
+        previewUrl: `https://cdn.spawnforge.ai/assets/user-uuid-1/asset-${i}/preview/p.png`,
+        assetFileUrl: `https://cdn.spawnforge.ai/assets/user-uuid-1/asset-${i}/file/m.glb`,
+      }))
+    );
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockDeleteManyFromR2.mock.calls[0][0]).toHaveLength(5000);
+  });
+
+  it('stays silent about the asset read when it came back under the LIMIT', async () => {
+    stubSelects([
+      {
+        id: 'asset-1',
+        previewUrl: null,
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/model.glb',
+      },
+    ]);
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockCaptureMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('read only the first'),
+      'error',
+    );
   });
 });

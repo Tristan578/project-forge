@@ -215,15 +215,17 @@ describe('onEngineRecovered', () => {
     // (we can't trigger signalRecoveryComplete directly, but unsubscribe is testable)
   });
 
-  it('accepts multiple listeners', () => {
-    const listener1 = vi.fn();
-    const listener2 = vi.fn();
-    const unsub1 = onEngineRecovered(listener1);
-    const unsub2 = onEngineRecovered(listener2);
-    // Clean up
-    unsub1();
-    unsub2();
-  });
+  // A former 'accepts multiple listeners' test here only subscribed and
+  // unsubscribed two listeners without ever asserting they were invoked
+  // (PF-9448 / #9448). It was deleted rather than fixed: signalRecoveryComplete
+  // is module-private and only reachable via recoverEngine()'s success path,
+  // which requires loadWasm() to resolve — an ESM dynamic import behind a
+  // computed URL plus a fetch/manifest/timeout pipeline (see loadWasmFromPath
+  // above) that no test in this suite mocks end-to-end; every recoverEngine
+  // test here asserts `false` for exactly this reason. Reaching the success
+  // path would need a test-only production export with no other caller,
+  // which is disproportionate for what this test covered. If that pipeline
+  // ever gets an injectable seam, restore multi-listener coverage then.
 });
 
 describe('fetchWasmManifest', () => {

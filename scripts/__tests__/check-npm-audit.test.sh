@@ -1963,6 +1963,11 @@ on:
         required: false
         type: string
         default: ''
+      allow_destructive_migration:
+        description: 'Approve a destructive production schema change (DROP TABLE/COLUMN, type change). Leave off unless you have read the diff.'
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -2996,13 +3001,21 @@ OUTPUTS_EOF
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
+            scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
+            scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
+            scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
+            scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
+            scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
+            scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
       fail "self-defense shellcheck step carries a step-level if: — lint coverage can be skipped while its needle still greps as present"
@@ -3180,7 +3193,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=487
+readonly SELF_EXEC_EXPECTED_DROP=518
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3486,13 +3499,21 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
+            scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
+            scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
+            scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
+            scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
+            scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
+            scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
@@ -3512,6 +3533,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-npm-audit.test.sh
       - name: Run security-alerts gate test suite
         run: bash scripts/__tests__/check-security-alerts.test.sh
+      - name: Run workflow-failure notifier test suite
+        run: bash scripts/__tests__/notify-workflow-failure.test.sh
       - name: Run cross-provider DX-audit contract test
         run: bash .claude/tools/__tests__/dx-audit.test.sh
       - name: Run OpenAPI route-sync gate test suite
@@ -3528,6 +3551,22 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-vercel-deployment-drift.test.sh
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+      - name: Run production migration-guard test suite
+        run: bash scripts/__tests__/db-migration-guard.test.sh
+      - name: Run Neon branch-helper test suite
+        run: bash scripts/__tests__/neon-branch.test.sh
+      - name: Run ci-gate path-filter test suite
+        run: bash scripts/__tests__/ci-gate-path-filters.test.sh
+      - name: Run WASM-manifest generator test suite
+        run: bash scripts/__tests__/generate-wasm-manifests.test.sh
+      - name: Run changeset-version wrapper test suite
+        run: bash scripts/__tests__/changeset-version.test.sh
+      - name: Run PR work-item check test suite
+        run: bash scripts/__tests__/pr-workitem-check.test.sh
+      - name: Run suite-wiring gate test suite
+        run: bash scripts/__tests__/check-suite-wiring.test.sh
+      - name: Run suite-wiring gate
+        run: bash scripts/check-suite-wiring.sh
 STEPS_EOF
 readonly expected_steps_3
 assert_steps_block "${lst_block:-}" "ci.yml lockfile-sync-tests job steps:" "${expected_steps_3%$'\n'}"
@@ -3563,7 +3602,7 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
           echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$|^scripts/check-lockfile-sync\.sh$' && deps=true

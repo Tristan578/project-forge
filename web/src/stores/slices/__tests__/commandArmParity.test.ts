@@ -62,12 +62,6 @@ const ALLOWED_UNROUTED: Record<string, string> = {
   // `Missing entityId`. One side has to give first.
   set_tileset: 'PF-1179 — entity-keyed engine arm vs asset-keyed caller',
   remove_tileset: 'PF-1179 — entity-keyed engine arm vs asset-keyed caller',
-
-  // PF-1176 / PF-1177: no arm under any spelling, and no removal infrastructure
-  // either — each needs a pending-queue field and an apply system before an arm
-  // can do anything. Not a rename, so deliberately not fixed alongside the four
-  // renames in PF-1170.
-  remove_game_camera: 'PF-1177 — needs pending field + apply system + arm',
 };
 
 /**

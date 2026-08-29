@@ -2,9 +2,10 @@
 # Unit tests for scripts/check-vitest-exit.sh — the vitest exit-code gate.
 #
 # This gate is the single source of truth for the vitest#3077 open-handle
-# workaround used by BOTH .github/workflows/quality-gates.yml (with --coverage)
-# and .github/workflows/cd.yml (without). The workaround swallows a non-zero
-# vitest exit when no tests actually failed (open handles after a green run).
+# workaround used by BOTH .github/workflows/quality-gates.yml and
+# .github/workflows/cd.yml, each with --coverage. The workaround swallows a
+# non-zero vitest exit when no tests actually failed (open handles after a
+# green run).
 #
 # The bugs this suite locks down:
 #   - #8598 / F06: a COVERAGE-THRESHOLD failure also exits non-zero with NO
@@ -345,6 +346,54 @@ if [ "$rc" = "1" ]; then pass "--coverage: threshold miss → gate 1 (mode does 
 f="$(mkfile badflag.txt "$PASS_OUTPUT")"
 bash "$GATE" 1 "$f" "--coverag" >/dev/null 2>&1; rc=$?
 if [ "$rc" = "2" ]; then pass "unknown third arg → exit 2 (usage)"; else fail "unknown third arg → expected 2, got $rc"; fi
+
+# --- Call-site wiring pins -------------------------------------------------
+#
+# Cases 1-31 prove the gate adjudicates correctly when it is CALLED correctly.
+# They say nothing about whether the workflows call it correctly, and that is
+# where this gate has actually been defeated before: cd.yml ran `npx vitest run`
+# with no --coverage at all, so the deploy path — the one that re-validates a
+# commit which reached main WITHOUT the PR gate — never adjudicated a coverage
+# threshold (F52 / #8644). The gate was fine; nothing invoked it in the mode
+# that matters.
+#
+# The two flags are a matched pair and must be pinned together. Passing
+# --coverage only to vitest leaves the gate willing to swallow a kill that
+# happened before report generation; passing it only to the gate makes the gate
+# demand a "Coverage report from" marker that a non-coverage run never prints,
+# turning every #3077 false positive into a hard red. Either half alone is a
+# silent misconfiguration, so assert both, in both workflows.
+echo ""
+echo "=== workflow wiring ==="
+
+pin_coverage_wiring() {
+  local wf="$1" label="$2" body
+  if [ ! -f "$wf" ]; then
+    fail "$label: workflow file not found at $wf"
+    return
+  fi
+  # Strip comments before matching: the prose around these steps discusses
+  # --coverage at length, and a commented-out invocation must not satisfy a pin.
+  body="$(grep -v '^[[:space:]]*#' "$wf" || true)"
+  if [ -z "$body" ]; then
+    fail "$label: comment-strip produced no output — wiring cannot be verified"
+    return
+  fi
+  if grep -Eq 'timeout 600 npx vitest run --coverage ' <<<"$body"; then
+    pass "$label: runs vitest with --coverage"
+  else
+    fail "$label: no uncommented 'npx vitest run --coverage' invocation"
+  fi
+  # shellcheck disable=SC2016  # $EXIT_CODE is literal workflow text, not a shell expansion
+  if grep -Eq 'check-vitest-exit\.sh" "\$EXIT_CODE" /tmp/vitest-output\.txt --coverage' <<<"$body"; then
+    pass "$label: passes --coverage through to the gate"
+  else
+    fail "$label: gate invoked without the --coverage mode flag"
+  fi
+}
+
+pin_coverage_wiring "$HERE/../../.github/workflows/quality-gates.yml" "quality-gates.yml"
+pin_coverage_wiring "$HERE/../../.github/workflows/cd.yml" "cd.yml"
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

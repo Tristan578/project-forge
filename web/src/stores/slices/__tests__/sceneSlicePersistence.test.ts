@@ -9,8 +9,8 @@
 // `export_scene` → `forge:scene-exported` round trip, and `src/stores/**` runs
 // under the node environment by default.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createSliceStore } from './sliceTestTemplate';
-import { createSceneSlice, setSceneDispatcher, type SceneSlice } from '../sceneSlice';
+import { createSceneTestStore } from './sceneSliceTestStore';
+import { setSceneDispatcher } from '../sceneSlice';
 import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 import { SCENE_EXPORTED_EVENT, SCENE_CAPTURE_TIMEOUT_MS } from '@/lib/scenes/captureScene';
 
@@ -37,7 +37,7 @@ function answeringDispatcher() {
 }
 
 describe('sceneSlice scene persistence', () => {
-  let store: ReturnType<typeof createSliceStore<SceneSlice>>;
+  let store: ReturnType<typeof createSceneTestStore>['store'];
 
   beforeEach(() => {
     localStorage.clear();
@@ -46,7 +46,7 @@ describe('sceneSlice scene persistence', () => {
     // initial project is written down. Seed it, or every assertion here would be
     // comparing against a scene that no later call has ever heard of.
     saveProjectScenes(loadProjectScenes());
-    store = createSliceStore(createSceneSlice);
+    store = createSceneTestStore().store;
   });
 
   afterEach(() => {

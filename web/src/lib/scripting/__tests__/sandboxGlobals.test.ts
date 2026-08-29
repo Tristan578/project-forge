@@ -28,6 +28,17 @@ describe('scripting/sandboxGlobals', () => {
     expect(names).toContain('location');
   });
 
+  it('shadows nested worker constructors', () => {
+    // Worker and SharedWorker were the only two shipped names with no
+    // membership pin: dropping either was caught solely by the count pins in
+    // scriptSandbox.test.ts / scriptSecurity.test.ts, and swapping one for a
+    // new name kept the count and so was caught by nothing. An escaped script
+    // that can name Worker spawns a fresh, network-capable global.
+    const names = [...SHADOWED_GLOBALS];
+    expect(names).toContain('Worker');
+    expect(names).toContain('SharedWorker');
+  });
+
   it('shadows global scope access', () => {
     const names = [...SHADOWED_GLOBALS];
     expect(names).toContain('self');

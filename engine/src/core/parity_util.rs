@@ -168,32 +168,8 @@ fn find_block_comment_end(b: &[u8], from: usize) -> usize {
 /// unbalance the count.
 pub fn block_of(source: &str, marker: &str) -> String {
     let stripped = strip_comments(source);
-    let hits = stripped.matches(marker).count();
-    assert_eq!(
-        hits, 1,
-        "parity marker `{marker}` occurs {hits} times — a marker that is not \
-         unique cannot identify a block"
-    );
-    let start = stripped.find(marker).unwrap();
-    let rest = &stripped[start..];
-    let open = rest
-        .find('{')
-        .unwrap_or_else(|| panic!("stale parity marker: no opening brace after {marker}"));
-    let bytes = rest.as_bytes();
-    let mut depth = 0usize;
-    for (i, c) in bytes.iter().enumerate().skip(open) {
-        match c {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return rest[..=i].to_string();
-                }
-            }
-            _ => {}
-        }
-    }
-    panic!("stale parity marker: unbalanced braces after {marker}");
+    let (start, end) = block_span(&stripped, marker);
+    stripped[start..end].to_string()
 }
 
 /// Names from `fields` mentioned as `<prefix><name>` inside `block`.
@@ -233,6 +209,176 @@ pub fn fields_of(source: &str, marker: &str) -> Vec<String> {
             Some(name.to_string())
         })
         .collect()
+}
+
+/// Byte range `start..end` of the brace-balanced block introduced by `marker`,
+/// as offsets into `stripped`, which MUST be the output of [`strip_comments`].
+///
+/// Offsets rather than a slice because [`strip_comments`] preserves byte length:
+/// the same range indexes the ORIGINAL source unchanged. That is what lets
+/// [`quoted_arm_names`] locate arms in a comment-free view and then read their
+/// real spelling back out of the untouched text — the stripper blanks string
+/// CONTENTS, so the comment-free view knows where the names are but not what
+/// they say.
+pub fn block_span(stripped: &str, marker: &str) -> (usize, usize) {
+    let hits = stripped.matches(marker).count();
+    assert_eq!(
+        hits, 1,
+        "parity marker `{marker}` occurs {hits} times — a marker that is not \
+         unique cannot identify a block"
+    );
+    let start = stripped.find(marker).unwrap();
+    let rest = &stripped[start..];
+    let open = rest
+        .find('{')
+        .unwrap_or_else(|| panic!("stale parity marker: no opening brace after {marker}"));
+    let bytes = rest.as_bytes();
+    let mut depth = 0usize;
+    for (i, c) in bytes.iter().enumerate().skip(open) {
+        match c {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return (start, start + i + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("stale parity marker: unbalanced braces after {marker}");
+}
+
+/// Quoted lower-snake names in match-arm position (`"x" =>` / `"x" |`) inside
+/// the brace-balanced block `marker` introduces.
+///
+/// The point of reading the block out of `include_str!`-ed PRODUCTION source is
+/// that the answer cannot be satisfied by a literal sitting next to the
+/// assertion. Two lists declared in the same test file agree by construction and
+/// prove nothing; this one disagrees the moment the module's `match` changes.
+///
+/// Both failure modes shout rather than pass quietly:
+///
+/// * a marker that is missing or ambiguous — the shape the scanner keys on has
+///   changed, so it can no longer read the module at all;
+/// * a block that yields zero arms — the same failure one step later.
+///
+/// Either would otherwise report "every arm is covered" for a module the
+/// scanner never actually read, which is the exact false pass these gates exist
+/// to prevent. Fix the parser; do not relax the assertions.
+pub fn quoted_arm_names(source: &str, marker: &str) -> Vec<String> {
+    let stripped = strip_comments(source);
+    let hits = stripped.matches(marker).count();
+    assert_eq!(
+        hits, 1,
+        "arm scanner: marker `{marker}` occurs {hits} times, expected exactly \
+         once — the match shape changed and this scanner can no longer read it. \
+         Extend the parser first; do NOT relax this assertion."
+    );
+
+    let (start, end) = block_span(&stripped, marker);
+    // Same offsets, two views: `masked` has comments and string CONTENTS blanked
+    // (so a name written in prose cannot be mistaken for an arm), `raw` still
+    // spells the names out.
+    let masked = &stripped[start..end];
+    let raw = &source[start..end];
+
+    let bytes = masked.as_bytes();
+    let mut names: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        let open = i + 1;
+        let Some(offset) = masked[open..].find('"') else { break };
+        let close = open + offset;
+        let mut after = close + 1;
+        while after < bytes.len() && bytes[after].is_ascii_whitespace() {
+            after += 1;
+        }
+        let name = &raw[open..close];
+        let in_arm_position = masked[after..].starts_with("=>") || masked[after..].starts_with('|');
+        let is_identifier = !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        if in_arm_position && is_identifier {
+            names.push(name.to_string());
+        }
+        i = close + 1;
+    }
+
+    assert!(
+        !names.is_empty(),
+        "arm scanner: parsed ZERO arms out of `{marker}` — the match shape \
+         changed and this scanner can no longer read it. Extend the parser \
+         first; do NOT relax this assertion."
+    );
+    names
+}
+
+/// Assert the commands a module's `match` dispatches and the commands its tests
+/// claim to cover are the same set, in BOTH directions.
+///
+/// * an arm with no test fails, naming the arm — new vocabulary cannot ship
+///   untested;
+/// * a tested name that is no longer an arm fails, naming it — a deleted or
+///   renamed command cannot leave a test passing against nothing.
+///
+/// `min_arms` is a scanner tripwire, not a coverage figure: it is set well below
+/// the real arm count so that deleting an arm is caught by the *first* check
+/// (which names the arm) rather than here, while a parser that silently starts
+/// returning almost nothing still fails loudly.
+pub fn assert_arm_coverage(
+    module: &str,
+    source: &str,
+    marker: &str,
+    tested: &[&str],
+    min_arms: usize,
+) {
+    let mut seen: Vec<&str> = Vec::new();
+    for name in tested {
+        assert!(
+            !seen.contains(name),
+            "{module}: TESTED_ARMS lists `{name}` twice — a duplicate inflates \
+             the list without covering anything"
+        );
+        seen.push(name);
+    }
+
+    let arms = quoted_arm_names(source, marker);
+    assert!(
+        arms.len() >= min_arms,
+        "{module}: parsed only {} arms out of `{marker}` (expected at least \
+         {min_arms}) — the scanner has broken and would report the module as \
+         fully covered. Extend the parser first.",
+        arms.len()
+    );
+
+    let untested: Vec<&str> = arms
+        .iter()
+        .map(|a| a.as_str())
+        .filter(|a| !tested.contains(a))
+        .collect();
+    assert!(
+        untested.is_empty(),
+        "{module}: dispatch arms with no test: {untested:?} — every command the \
+         module answers must be exercised, or an unhandled arm ships as \
+         \"the AI said it did it and nothing happened\""
+    );
+
+    let stale: Vec<&str> = tested
+        .iter()
+        .copied()
+        .filter(|t| !arms.iter().any(|a| a == t))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "{module}: TESTED_ARMS names commands `{marker}` no longer dispatches: \
+         {stale:?} — the tests are passing against vocabulary the engine dropped"
+    );
 }
 
 #[cfg(test)]
@@ -420,6 +566,136 @@ pub struct Thing {
             fields_of(src, "pub struct Thing {"),
             fields(&["audio_data", "audio_enabled"]),
             "a commented-out declaration is not a field"
+        );
+    }
+
+    /// A miniature `dispatch` in the shape the four command modules use.
+    const SAMPLE: &str = "\
+//! \"fake_command\" => in a doc comment is not an arm.
+pub fn dispatch(command: &str, payload: &Value) -> Option<CommandResult> {
+    match command {
+        \"set_lod\" => Some(handle_set_lod(payload)),
+        \"play_particle\" | \"stop_particle\" => Some(handle_playback(payload)),
+        // \"commented_out\" => Some(handle_gone()),
+        \"get_particle\" => {
+            let id = payload.get(\"entityId\");
+            Some(handle_query(id))
+        },
+        _ => None,
+    }
+}
+
+fn handle_set_lod(payload: &Value) -> CommandResult {
+    let _ = payload.get(\"lodDistances\");
+    Ok(())
+}
+";
+
+    const SAMPLE_MARKER: &str = "pub fn dispatch(command: &str, payload: &Value)";
+
+    #[test]
+    fn quoted_arm_names_reads_every_arm_including_or_groups() {
+        assert_eq!(
+            quoted_arm_names(SAMPLE, SAMPLE_MARKER),
+            vec![
+                "set_lod".to_string(),
+                "play_particle".to_string(),
+                "stop_particle".to_string(),
+                "get_particle".to_string(),
+            ]
+        );
+    }
+
+    /// The false-pass direction: a payload KEY read inside an arm body is not a
+    /// command name, and neither is a name parked in a comment. Counting either
+    /// would let an untested arm hide behind a coincidence.
+    #[test]
+    fn quoted_arm_names_ignores_payload_keys_and_commented_out_arms() {
+        let names = quoted_arm_names(SAMPLE, SAMPLE_MARKER);
+        assert!(!names.iter().any(|n| n == "entityId"));
+        assert!(!names.iter().any(|n| n == "commented_out"));
+        assert!(!names.iter().any(|n| n == "fake_command"));
+    }
+
+    /// Handlers sit after `dispatch` in every command module; the scan must stop
+    /// at the function's own closing brace or it starts reading their string
+    /// literals as arms.
+    #[test]
+    fn quoted_arm_names_stops_at_the_end_of_the_dispatch_block() {
+        assert!(!quoted_arm_names(SAMPLE, SAMPLE_MARKER)
+            .iter()
+            .any(|n| n == "lodDistances"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Extend the parser first")]
+    fn quoted_arm_names_shouts_when_the_marker_is_gone() {
+        quoted_arm_names(SAMPLE, "pub fn route(command: &str)");
+    }
+
+    #[test]
+    #[should_panic(expected = "Extend the parser first")]
+    fn quoted_arm_names_shouts_when_the_block_holds_no_arms() {
+        let armless = "pub fn dispatch(command: &str, payload: &Value) -> Option<CommandResult> {\n    None\n}\n";
+        quoted_arm_names(armless, SAMPLE_MARKER);
+    }
+
+    #[test]
+    fn assert_arm_coverage_accepts_an_exact_match() {
+        assert_arm_coverage(
+            "sample",
+            SAMPLE,
+            SAMPLE_MARKER,
+            &["set_lod", "play_particle", "stop_particle", "get_particle"],
+            4,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "dispatch arms with no test")]
+    fn assert_arm_coverage_fails_on_an_arm_nothing_tests() {
+        assert_arm_coverage(
+            "sample",
+            SAMPLE,
+            SAMPLE_MARKER,
+            &["set_lod", "play_particle", "stop_particle"],
+            3,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "no longer dispatches")]
+    fn assert_arm_coverage_fails_on_a_tested_name_that_is_no_longer_an_arm() {
+        assert_arm_coverage(
+            "sample",
+            SAMPLE,
+            SAMPLE_MARKER,
+            &[
+                "set_lod",
+                "play_particle",
+                "stop_particle",
+                "get_particle",
+                "deleted_command",
+            ],
+            4,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "twice")]
+    fn assert_arm_coverage_fails_on_a_duplicated_tested_name() {
+        assert_arm_coverage(
+            "sample",
+            SAMPLE,
+            SAMPLE_MARKER,
+            &[
+                "set_lod",
+                "set_lod",
+                "play_particle",
+                "stop_particle",
+                "get_particle",
+            ],
+            4,
         );
     }
 }

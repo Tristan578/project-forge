@@ -74,13 +74,19 @@ impl PendingCommands {
 }
 
 // === Bridge Functions ===
+//
+// Each returns whether the request was actually queued. They used to return
+// `()` and drop `with_pending`'s `Option` on the floor, so with no
+// `PendingCommands` registered the request vanished and the command still
+// reported success — the one failure every other domain reports as
+// "PendingCommands resource not initialized".
 
 pub fn bridge_set_lod(
     entity_id: String,
     lod_distances: [f32; 3],
     auto_generate: bool,
     lod_ratios: [f32; 3],
-) {
+) -> bool {
     super::with_pending(|pc| {
         pc.queue_set_lod(SetLodRequest {
             entity_id,
@@ -88,13 +94,15 @@ pub fn bridge_set_lod(
             auto_generate,
             lod_ratios,
         });
-    });
+    })
+    .is_some()
 }
 
-pub fn bridge_generate_lods(entity_id: String) {
+pub fn bridge_generate_lods(entity_id: String) -> bool {
     super::with_pending(|pc| {
         pc.queue_generate_lods(GenerateLodsRequest { entity_id });
-    });
+    })
+    .is_some()
 }
 
 pub fn bridge_set_performance_budget(
@@ -102,7 +110,7 @@ pub fn bridge_set_performance_budget(
     max_draw_calls: u32,
     target_fps: f32,
     warning_threshold: f32,
-) {
+) -> bool {
     super::with_pending(|pc| {
         pc.queue_set_performance_budget(SetPerformanceBudgetRequest {
             max_triangles,
@@ -110,29 +118,34 @@ pub fn bridge_set_performance_budget(
             target_fps,
             warning_threshold,
         });
-    });
+    })
+    .is_some()
 }
 
-pub fn bridge_get_performance_stats() {
+pub fn bridge_get_performance_stats() -> bool {
     super::with_pending(|pc| {
         pc.queue_get_performance_stats(GetPerformanceStatsRequest);
-    });
+    })
+    .is_some()
 }
 
-pub fn bridge_optimize_scene() {
+pub fn bridge_optimize_scene() -> bool {
     super::with_pending(|pc| {
         pc.queue_optimize_scene(OptimizeSceneRequest);
-    });
+    })
+    .is_some()
 }
 
-pub fn bridge_set_lod_distances(distances: [f32; 3]) {
+pub fn bridge_set_lod_distances(distances: [f32; 3]) -> bool {
     super::with_pending(|pc| {
         pc.queue_set_lod_distances(SetLodDistancesRequest { distances });
-    });
+    })
+    .is_some()
 }
 
-pub fn bridge_set_simplification_backend(backend_name: String) {
+pub fn bridge_set_simplification_backend(backend_name: String) -> bool {
     super::with_pending(|pc| {
         pc.queue_set_simplification_backend(SetSimplificationBackendRequest { backend_name });
-    });
+    })
+    .is_some()
 }

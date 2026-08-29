@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Gamepad2, Zap, Crosshair, Puzzle, Compass, X } from 'lucide-react';
+import { Gamepad2, Zap, Crosshair, Puzzle, Compass, X, AlertTriangle, Loader2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import type { TemplateRegistryEntry } from '@/data/templates';
@@ -21,6 +21,8 @@ const ICON_MAP = {
 
 export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
   const [templates, setTemplates] = useState<TemplateRegistryEntry[]>([]);
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const loadTemplate = useEditorStore((s) => s.loadTemplate);
   const newScene = useEditorStore((s) => s.newScene);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -72,12 +74,27 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
       // Blank project
       newScene();
       trackEvent(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
-    } else {
-      // Load template
-      await loadTemplate(templateId);
-      trackEvent(AnalyticsEvent.TEMPLATE_USED, { templateId });
-      trackEvent(AnalyticsEvent.TEMPLATE_APPLIED, { templateId, source: 'gallery' });
+      onClose();
+      return;
     }
+
+    // A template load can fail in ways that leave the editor empty: the engine
+    // may not be attached yet, or it may accept the scene and never apply it.
+    // Closing the dialog and firing TEMPLATE_USED / TEMPLATE_APPLIED regardless
+    // told the user (and the funnel) that a game had been created when the
+    // canvas was still blank. Stay open and say what went wrong instead.
+    setPendingTemplateId(templateId);
+    setError(null);
+    const result = await loadTemplate(templateId);
+    setPendingTemplateId(null);
+
+    if (!result?.success) {
+      setError(result?.error ?? `Could not load "${templateId}". Please try again.`);
+      return;
+    }
+
+    trackEvent(AnalyticsEvent.TEMPLATE_USED, { templateId });
+    trackEvent(AnalyticsEvent.TEMPLATE_APPLIED, { templateId, source: 'gallery' });
     onClose();
   };
 
@@ -108,6 +125,16 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
           </button>
         </div>
 
+        {error !== null && (
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-2 rounded border border-red-800 bg-red-950/60 p-3 text-sm text-red-200"
+          >
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {/* Blank Project Card */}
           <TemplateCard
@@ -121,6 +148,8 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
             entityCount={1}
             tags={['empty', 'custom']}
             onSelect={handleSelectTemplate}
+            busy={false}
+            disabled={pendingTemplateId !== null}
           />
 
           {/* Template Cards */}
@@ -137,6 +166,8 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
               entityCount={entry.entityCount}
               tags={entry.tags}
               onSelect={handleSelectTemplate}
+              busy={pendingTemplateId === entry.id}
+              disabled={pendingTemplateId !== null}
             />
           ))}
         </div>
@@ -156,6 +187,10 @@ interface TemplateCardProps {
   entityCount: number;
   tags: string[];
   onSelect: (id: string | null) => void;
+  /** This card's template is the one currently being applied. */
+  busy: boolean;
+  /** Some template is being applied — a second click would race the first. */
+  disabled: boolean;
 }
 
 function TemplateCard({
@@ -169,13 +204,17 @@ function TemplateCard({
   entityCount,
   tags,
   onSelect,
+  busy,
+  disabled,
 }: TemplateCardProps) {
   const IconComponent = ICON_MAP[icon as keyof typeof ICON_MAP] || Compass;
 
   return (
     <button
       onClick={() => onSelect(id)}
-      className="group relative flex flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-800 text-left transition-all hover:scale-105 hover:border-zinc-600 hover:shadow-xl"
+      disabled={disabled}
+      aria-busy={busy}
+      className="group relative flex flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-800 text-left transition-all hover:scale-105 hover:border-zinc-600 hover:shadow-xl disabled:cursor-wait disabled:opacity-60 disabled:hover:scale-100"
       style={{
         borderColor: accentColor + '40',
       }}
@@ -185,7 +224,11 @@ function TemplateCard({
         className="flex h-24 items-center justify-center"
         style={{ background: gradient }}
       >
-        <IconComponent size={48} className="text-white drop-shadow-lg" />
+        {busy ? (
+          <Loader2 size={48} className="animate-spin text-white drop-shadow-lg" aria-hidden="true" />
+        ) : (
+          <IconComponent size={48} className="text-white drop-shadow-lg" />
+        )}
       </div>
 
       {/* Content */}

@@ -157,9 +157,10 @@ describe('compressTexture', () => {
     expect(result.ratio).toBe(1);
   });
 
-  it('returns passthrough in Node.js environment (no canvas)', async () => {
-    // In Node test env, there's no OffscreenCanvas or document.createElement('canvas')
-    // The function should gracefully passthrough
+  it('returns passthrough when neither OffscreenCanvas nor document is available', async () => {
+    // The no-canvas branch is only reachable once the bitmap has decoded, so
+    // stub createImageBitmap and remove BOTH canvas hosts. jsdom supplies
+    // `document`, so without the stub this branch never runs.
     const data = new Blob([new Uint8Array(800)], { type: 'image/png' });
     const config: CompressionConfig = {
       format: 'webp',
@@ -168,13 +169,22 @@ describe('compressTexture', () => {
       maxHeight: 2048,
       generateMipmaps: false,
     };
+    const close = vi.fn();
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 64, height: 64, close })));
+    vi.stubGlobal('OffscreenCanvas', undefined);
+    vi.stubGlobal('document', undefined);
 
-    // createImageBitmap is not available in Node — should throw
-    // We verify the function handles this gracefully
     try {
-      await compressTexture(data, config);
-    } catch {
-      // Expected in Node — createImageBitmap not available
+      const result = await compressTexture(data, config);
+      expect(result.data).toBe(data);
+      expect(result.format).toBe('image/webp');
+      expect(result.originalSize).toBe(800);
+      expect(result.compressedSize).toBe(800);
+      expect(result.ratio).toBe(1);
+      // The decoded bitmap is released even on the passthrough return.
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

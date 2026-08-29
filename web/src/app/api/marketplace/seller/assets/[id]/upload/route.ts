@@ -3,8 +3,14 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { uploadToR2, buildAssetKey } from '@/lib/storage/r2';
-import { captureException } from '@/lib/monitoring/sentry-server';
+import {
+  uploadToR2,
+  buildAssetKey,
+  deleteManyFromR2,
+  resolveOwnedAssetKey,
+  withStatusSidecars,
+} from '@/lib/storage/r2';
+import { captureException, captureMessage } from '@/lib/monitoring/sentry-server';
 
 const ALLOWED_PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_ASSET_TYPES = [
@@ -85,6 +91,14 @@ export async function POST(
       updatedAt?: Date;
     } = { updatedAt: new Date() };
 
+    // Keys the row currently points at. A re-upload under a *different*
+    // filename leaves the old object live forever unless we remove it, so
+    // collect the superseded keys and sweep them once the row no longer
+    // references them (PF-9457). Only keys under this asset's own
+    // assets/{sellerId}/{assetId}/ prefix qualify — previewUrl/assetFileUrl are
+    // seller-writable via the asset PATCH route.
+    const supersededKeys: string[] = [];
+
     if (previewFile) {
       const key = buildAssetKey(user.id, assetId, previewFile.name, 'preview');
       const body = typeof previewFile.stream === 'function'
@@ -92,6 +106,11 @@ export async function POST(
         : Buffer.from(await previewFile.arrayBuffer());
       const { url } = await uploadToR2(key, body, previewFile.type);
       updates.previewUrl = url;
+
+      const previousKey = resolveOwnedAssetKey(asset.previewUrl, user.id, assetId);
+      // Same key means the PUT above overwrote the object in place — deleting
+      // it would destroy the upload we just made.
+      if (previousKey && previousKey !== key) supersededKeys.push(previousKey);
     }
 
     if (assetFile) {
@@ -102,6 +121,9 @@ export async function POST(
       const { url } = await uploadToR2(key, body, assetFile.type);
       updates.assetFileUrl = url;
       updates.assetFileSize = assetFile.size;
+
+      const previousKey = resolveOwnedAssetKey(asset.assetFileUrl, user.id, assetId);
+      if (previousKey && previousKey !== key) supersededKeys.push(previousKey);
     }
 
     // NOTE: If the DB update below fails after R2 upload succeeds, the uploaded objects become
@@ -113,6 +135,28 @@ export async function POST(
       .set(updates)
       .where(eq(marketplaceAssets.id, assetId))
       .returning());
+
+    // Best-effort, after the row stops referencing them: a storage failure here
+    // must not fail an upload that already succeeded. deleteManyFromR2 never
+    // throws; it reports what it could not remove so we can log it.
+    if (supersededKeys.length > 0) {
+      // Each superseded object has a `.status.json` sidecar written back by the
+      // asset post-processing Worker. It is keyed off the object, not recorded
+      // in Postgres, and nothing else ever removes it — so it goes with the
+      // object it describes or it outlives it forever.
+      const sweep = await deleteManyFromR2(withStatusSidecars(supersededKeys));
+      if (sweep.failedKeys.length > 0) {
+        console.error('Failed to delete superseded marketplace asset objects', {
+          assetId,
+          failedKeys: sweep.failedKeys,
+          errors: sweep.errors,
+        });
+        captureMessage(
+          `Superseded R2 object(s) orphaned for asset ${assetId}: ${sweep.failedKeys.join(', ')}`,
+          'error',
+        );
+      }
+    }
 
     return NextResponse.json({
       uploaded: {
