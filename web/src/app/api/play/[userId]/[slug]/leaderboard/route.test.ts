@@ -3,6 +3,8 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { getDb, getNeonSql } from '@/lib/db/client';
+import { LEADERBOARD_METADATA_MAX_BYTES } from '@/lib/config/databaseLimits';
+import { MAX_COMMAND_PAYLOAD_DEPTH } from '@/lib/engine/commandPayloadGuard';
 
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/rateLimit', () => ({
@@ -524,5 +526,250 @@ describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
     const data = await res.json();
     // Mocked insert returns 1500 — just verify success
     expect(data.success).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // PF-9447 — input bounds enforced before any DB access
+  //
+  // `score` lands in an int4 column and `metadata` in a jsonb column, on an
+  // unauthenticated route. Every test below asserts the status AND that the
+  // handler never reached the database: a guard that runs after the board
+  // lookup still lets a malformed request cost a query, and one that runs
+  // after the INSERT turns a 400 into a captureException plus a 500, which is
+  // the defect being fixed. `getDb` and `getNeonSql` are given fully working
+  // mocks in the rejection tests on purpose — so the only thing that can
+  // produce a 400 is the guard, not an incidental mock failure.
+  // -------------------------------------------------------------------------
+
+  /** Mount a DB + neonSql pair that would succeed if the handler reached it. */
+  function mountWorkingDb(board = BOARD_DESC) {
+    vi.mocked(getDb).mockReturnValue(makePostDb(board) as never);
+    const neon = makeNeonSqlFn();
+    vi.mocked(getNeonSql).mockReturnValue(neon as never);
+    return neon;
+  }
+
+  function postScore(body: Record<string, unknown>) {
+    return new NextRequest('http://localhost/api/play/clerk_1/mygame', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'highscore', playerName: 'Alice', ...body }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const PARAMS = { params: Promise.resolve({ userId: 'clerk_1', slug: 'mygame' }) };
+
+  /** Assert the handler bailed out before touching the database. */
+  async function expectNoDbAccess() {
+    const { captureException } = await import('@/lib/monitoring/sentry-server');
+    expect(getDb).not.toHaveBeenCalled();
+    expect(getNeonSql).not.toHaveBeenCalled();
+    expect(captureException).not.toHaveBeenCalled();
+  }
+
+  it('accepts a score of exactly 2147483647 (int4 max)', async () => {
+    mountWorkingDb();
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 2147483647 }), PARAMS);
+
+    expect(res.status).toBe(201);
+  });
+
+  it('accepts a score of exactly -2147483648 (int4 min)', async () => {
+    mountWorkingDb();
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: -2147483648 }), PARAMS);
+
+    expect(res.status).toBe(201);
+  });
+
+  it('returns 400 for a score of 2147483648, one past int4 max', async () => {
+    mountWorkingDb();
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 2147483648 }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toBe('score must be between -2147483648 and 2147483647');
+    await expectNoDbAccess();
+  });
+
+  it('returns 400 for a score of -2147483649, one past int4 min', async () => {
+    mountWorkingDb();
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: -2147483649 }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toBe('score must be between -2147483648 and 2147483647');
+    await expectNoDbAccess();
+  });
+
+  it('returns 400 for score 3000000000 on a board with no minScore/maxScore', async () => {
+    // BOARD_DESC leaves both bounds null — the case the per-board check cannot
+    // catch, and the exact shape that used to reach Postgres and 500.
+    expect(BOARD_DESC.minScore).toBeNull();
+    expect(BOARD_DESC.maxScore).toBeNull();
+    mountWorkingDb();
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 3000000000 }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toContain('2147483647');
+    await expectNoDbAccess();
+  });
+
+  it('returns 400 for score -3000000000 on a board with no minScore/maxScore', async () => {
+    mountWorkingDb();
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: -3000000000 }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toContain('-2147483648');
+    await expectNoDbAccess();
+  });
+
+  it('returns 400 for score 3000000000 even when the board sets a wide minScore/maxScore', async () => {
+    // The int4 bound is a property of the column, not of the board, so it must
+    // hold whether or not the board configured its own range.
+    mountWorkingDb({ ...BOARD_DESC, minScore: -100000, maxScore: 100000 });
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 3000000000 }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toContain('2147483647');
+    // Refused before the board was even fetched, so the board's own bounds
+    // played no part in the decision.
+    await expectNoDbAccess();
+  });
+
+  it('rounds a float at the int4 boundary rather than rejecting it', async () => {
+    // 2147483647.4 rounds down to exactly int4 max — the guard runs on the
+    // rounded value, which is what actually gets inserted.
+    const neon = mountWorkingDb();
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 2147483647.4 }), PARAMS);
+
+    expect(res.status).toBe(201);
+    expect(neon.mock.calls[0].slice(1)).toContain(2147483647);
+  });
+
+  // ---- metadata bounds --------------------------------------------------
+
+  /** Build `{ pad: '…' }` whose JSON serialization is exactly `bytes` long. */
+  function metadataOfBytes(bytes: number) {
+    const envelope = JSON.stringify({ pad: '' }).length; // 10
+    return { pad: 'a'.repeat(bytes - envelope) };
+  }
+
+  it('documents the metadata byte cap as 4 KiB', () => {
+    // The cap is quoted in the 400 message and in the route's docs; pin it so a
+    // silent change has to be a deliberate one.
+    expect(LEADERBOARD_METADATA_MAX_BYTES).toBe(4096);
+  });
+
+  it('accepts metadata whose serialization is exactly at the byte cap', async () => {
+    const neon = mountWorkingDb();
+    const metadata = metadataOfBytes(LEADERBOARD_METADATA_MAX_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(metadata), 'utf8')).toBe(LEADERBOARD_METADATA_MAX_BYTES);
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 1500, metadata }), PARAMS);
+
+    expect(res.status).toBe(201);
+    // The at-cap blob is the one actually handed to the INSERT — not silently
+    // dropped on the way through.
+    expect(neon.mock.calls[0].slice(1)).toContain(JSON.stringify(metadata));
+  });
+
+  it('returns 400 for metadata one byte over the cap', async () => {
+    mountWorkingDb();
+    const metadata = metadataOfBytes(LEADERBOARD_METADATA_MAX_BYTES + 1);
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 1500, metadata }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toBe(
+      `metadata is too large (${LEADERBOARD_METADATA_MAX_BYTES + 1} bytes; limit is ${LEADERBOARD_METADATA_MAX_BYTES} bytes)`
+    );
+    await expectNoDbAccess();
+  });
+
+  it('counts the metadata cap in UTF-8 bytes, not UTF-16 code units', async () => {
+    // A 3-byte character costs 3 against the cap even though `String.length`
+    // counts it as 1 — the column stores bytes.
+    mountWorkingDb();
+    const chars = LEADERBOARD_METADATA_MAX_BYTES; // well under the cap by .length
+    const metadata = { pad: '中'.repeat(Math.ceil(chars / 3)) };
+    expect(JSON.stringify(metadata).length).toBeLessThanOrEqual(LEADERBOARD_METADATA_MAX_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(metadata), 'utf8')).toBeGreaterThan(
+      LEADERBOARD_METADATA_MAX_BYTES
+    );
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 1500, metadata }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toContain('too large');
+    await expectNoDbAccess();
+  });
+
+  it('returns 400 for metadata nested past the payload-guard depth limit', async () => {
+    mountWorkingDb();
+
+    // Well past MAX_COMMAND_PAYLOAD_DEPTH (32) but only a few hundred bytes, so
+    // a pass here proves the depth guard fired and not the size guard.
+    let deep: Record<string, unknown> = { leaf: 1 };
+    for (let i = 0; i < 40; i += 1) deep = { nested: deep };
+    expect(Buffer.byteLength(JSON.stringify(deep), 'utf8')).toBeLessThan(
+      LEADERBOARD_METADATA_MAX_BYTES
+    );
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 1500, metadata: deep }), PARAMS);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toContain('nested too deeply');
+    await expectNoDbAccess();
+  });
+
+  it('accepts metadata nested up to the payload-guard depth limit', async () => {
+    mountWorkingDb();
+
+    // Depth is 1-based: the outer object is level 1, so 31 wrappers around a
+    // scalar leaf reaches exactly MAX_COMMAND_PAYLOAD_DEPTH.
+    let shallow: Record<string, unknown> = { leaf: 1 };
+    for (let i = 0; i < MAX_COMMAND_PAYLOAD_DEPTH - 2; i += 1) shallow = { nested: shallow };
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 1500, metadata: shallow }), PARAMS);
+
+    expect(res.status).toBe(201);
+  });
+
+  it('accepts a submission with metadata omitted and stores SQL NULL', async () => {
+    const neon = mountWorkingDb();
+
+    const { POST } = await import('./route');
+    const res = await POST(postScore({ score: 1500 }), PARAMS);
+
+    expect(res.status).toBe(201);
+    // The metadata bind value is null — nothing is invented for the jsonb cast.
+    expect(neon.mock.calls[0].slice(1)).toContain(null);
   });
 });

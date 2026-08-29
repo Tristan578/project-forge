@@ -5,6 +5,12 @@ import { publishedGames, users, leaderboards, leaderboardEntries } from '@/lib/d
 import { eq, and, desc, asc, gt, count, lt } from 'drizzle-orm';
 import { rateLimitPublicRoute, getClientIp } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
+import {
+  PG_INT4_MIN,
+  PG_INT4_MAX,
+  LEADERBOARD_METADATA_MAX_BYTES,
+} from '@/lib/config/databaseLimits';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +52,62 @@ function hashIp(ip: string): string {
   const daySalt = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   const key = ip === 'unknown' ? `nonce:${Math.random().toString(36).slice(2)}` : ip;
   return createHash('sha256').update(`${key}:${daySalt}`).digest('hex').slice(0, 32);
+}
+
+/**
+ * Outcome of validating the optional `metadata` field on a score submission.
+ *
+ * `serialized` is the exact JSON text that will be written to the `jsonb`
+ * column, or `null` when there is nothing to store — so the byte count that was
+ * checked and the bytes that are stored are the same string, not two
+ * independent `JSON.stringify` calls that could disagree.
+ */
+type MetadataCheck =
+  | { ok: true; serialized: string | null }
+  | { ok: false; reason: string };
+
+/**
+ * Bound the free-form `metadata` object a player may attach to a score.
+ *
+ * This is the one unauthenticated free-form JSON write path in the app, and
+ * whatever it stores is read back by every fetch of the board. Three things are
+ * enforced, in this order:
+ *
+ *  1. A value that is present but is not a plain object (a string, a number, an
+ *     array) is dropped, not refused. That is this route's long-standing
+ *     behaviour and existing callers rely on it.
+ *  2. Depth and container count, via `checkCommandPayload` — the guard this
+ *     repo already uses for untrusted JSON, reused rather than re-derived.
+ *  3. Serialized size, against `LEADERBOARD_METADATA_MAX_BYTES`.
+ *
+ * The structural check deliberately runs *before* `JSON.stringify`.
+ * `checkCommandPayload` walks with its own explicit stack and so cannot itself
+ * overflow on hostile input, whereas `JSON.stringify` recurses; running it
+ * second means it only ever sees a value already known to be shallow.
+ */
+function validateMetadata(raw: unknown): MetadataCheck {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: true, serialized: null };
+  }
+
+  const structural = checkCommandPayload('metadata', raw);
+  if (structural) return { ok: false, reason: structural };
+
+  const serialized = JSON.stringify(raw);
+  // `JSON.stringify` yields undefined for a value with no JSON representation.
+  // A body parsed by `req.json()` cannot produce one, but treat it as "nothing
+  // to store" rather than interpolating the string "undefined" into the SQL.
+  if (serialized === undefined) return { ok: true, serialized: null };
+
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  if (bytes > LEADERBOARD_METADATA_MAX_BYTES) {
+    return {
+      ok: false,
+      reason: `metadata is too large (${bytes} bytes; limit is ${LEADERBOARD_METADATA_MAX_BYTES} bytes)`,
+    };
+  }
+
+  return { ok: true, serialized };
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +230,27 @@ export async function POST(
     // Coerce to integer
     const scoreInt = Math.round(score);
 
+    // The `score` column is int4. A value outside that range is not something
+    // the per-board min/max can catch — those are nullable and null on every
+    // board that did not set them — so without this check an out-of-range score
+    // reaches the INSERT, Postgres refuses it, and the driver error surfaces as
+    // a captureException plus a generic 500. On an unauthenticated route that
+    // is a free way to manufacture Sentry noise, so refuse it here (PF-9447).
+    if (scoreInt < PG_INT4_MIN || scoreInt > PG_INT4_MAX) {
+      return NextResponse.json(
+        { error: `score must be between ${PG_INT4_MIN} and ${PG_INT4_MAX}` },
+        { status: 400 }
+      );
+    }
+
+    // Validate metadata before any DB access, for the same reason: an oversized
+    // or pathologically nested blob must be a 400, never a failed insert.
+    const metadataCheck = validateMetadata(body.metadata);
+    if (!metadataCheck.ok) {
+      return NextResponse.json({ error: metadataCheck.reason }, { status: 400 });
+    }
+    const metadataJson = metadataCheck.serialized;
+
     const game = await resolvePublishedGame(clerkId, slug);
     if (!game) {
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
@@ -201,15 +284,6 @@ export async function POST(
     const ipHash = hashIp(getClientIp(req));
     const oneSecondAgo = new Date(Date.now() - 1000);
 
-    // Validate metadata is a plain object if provided
-    const metadata =
-      body.metadata !== undefined &&
-      body.metadata !== null &&
-      typeof body.metadata === 'object' &&
-      !Array.isArray(body.metadata)
-        ? (body.metadata as Record<string, unknown>)
-        : null;
-
     // PF-213: Atomic dedup + insert using a single SQL statement.
     // The CTE checks for recent submissions from the same IP and only
     // inserts if none exist, eliminating the TOCTOU race condition.
@@ -223,7 +297,7 @@ export async function POST(
         LIMIT 1
       )
       INSERT INTO leaderboard_entries (leaderboard_id, player_name, score, metadata, ip_hash)
-      SELECT ${board.id}, ${playerName}, ${scoreInt}, ${metadata ? JSON.stringify(metadata) : null}::jsonb, ${ipHash}
+      SELECT ${board.id}, ${playerName}, ${scoreInt}, ${metadataJson}::jsonb, ${ipHash}
       WHERE NOT EXISTS (SELECT 1 FROM dedup)
       RETURNING id, player_name, score, created_at
     `;
