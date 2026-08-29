@@ -501,6 +501,42 @@ pub fn restore_scene(
             } else {
                 commands.entity(entity).remove::<LodData>();
             }
+            // `terrain_data`, `terrain_mesh_data` and `animation_clip_data` come
+            // from the same `tilemap_skeleton2d_query` row as everything above and
+            // are written into the snapshot by `snapshot_scene`, but nothing read
+            // them back — so a terrain sculpted away during Play stayed away, and
+            // an animation clip added during Play leaked into the editor scene.
+            // `insert_aux_components` already carries all three on the sibling
+            // rebuild path, which is what made the omission here invisible.
+            //
+            // Paired insert/remove for the same reason as the components above:
+            // the query requires only `EntityId`, so every forge entity is in the
+            // map and a `None` means "had none", never "was not captured".
+            //
+            // `TerrainMeshData` is restored after `TerrainData` because terrain
+            // regenerates its heightmap mesh whenever `TerrainData` changes; the
+            // snapshot's mesh is the authored one and must win.
+            if let Some(ref td) = snap.terrain_data {
+                commands.entity(entity).insert(td.clone());
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<super::terrain::TerrainData>();
+            }
+            if let Some(ref tmd) = snap.terrain_mesh_data {
+                commands.entity(entity).insert(tmd.clone());
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<super::terrain::TerrainMeshData>();
+            }
+            if let Some(ref acd) = snap.animation_clip_data {
+                commands.entity(entity).insert(acd.clone());
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<super::animation_clip::AnimationClipData>();
+            }
             if snap.physics_enabled {
                 commands.entity(entity).insert(PhysicsEnabled);
             } else {

@@ -31,6 +31,7 @@ mod restore_scene_removal_tests {
     //! `bridge::core_systems::apply_mode_change_requests` passes at the real
     //! call site.
 
+    use crate::core::animation_clip::{AnimationClipData, PlayMode};
     use crate::core::asset_manager::AssetRef;
     use crate::core::audio::{AudioData, AudioEnabled};
     use crate::core::csg::CsgMeshData;
@@ -54,6 +55,7 @@ mod restore_scene_removal_tests {
     use crate::core::skeletal_animation2d::SkeletalAnimation2d;
     use crate::core::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
     use crate::core::sprite::SpriteData;
+    use crate::core::terrain::{TerrainData, TerrainMeshData};
     use crate::core::tilemap::{TilemapData, TilemapEnabled};
     use bevy::prelude::*;
 
@@ -257,6 +259,33 @@ mod restore_scene_removal_tests {
     // Fixtures — every value below is off its type's Default on purpose, so a
     // regression that inserts a blank struct cannot satisfy an assertion.
     // ---------------------------------------------------------------------
+
+    fn authored_terrain() -> TerrainData {
+        TerrainData {
+            octaves: 7,
+            seed: 1337,
+            height_scale: 33.5,
+            resolution: 32,
+            ..Default::default()
+        }
+    }
+
+    fn authored_terrain_mesh() -> TerrainMeshData {
+        TerrainMeshData {
+            heights: vec![1.5, 2.5, 3.5, 4.5],
+            resolution: 2,
+            size: 12.5,
+        }
+    }
+
+    fn authored_animation_clip() -> AnimationClipData {
+        AnimationClipData {
+            duration: 7.5,
+            speed: 2.25,
+            play_mode: PlayMode::PingPong,
+            ..Default::default()
+        }
+    }
 
     fn authored_script() -> ScriptData {
         ScriptData {
@@ -605,5 +634,75 @@ mod restore_scene_removal_tests {
         press_stop(&mut world);
         let restored = get::<PhysicsData>(&world, entity).expect("PhysicsData vanished on Stop");
         assert_eq!(restored, authored_physics());
+    }
+
+    // ---------------------------------------------------------------------
+    // `terrain_data`, `terrain_mesh_data` and `animation_clip_data` are captured
+    // by `snapshot_scene` from the same query row as tilemap/skeleton/lod, but
+    // `restore_scene` never read them back. Both directions were broken.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn terrain_created_during_play_does_not_survive_stop() {
+        assert!(
+            !survives_stop(authored_terrain()),
+            "TerrainData created during Play leaked into the edit scene"
+        );
+    }
+
+    #[test]
+    fn a_terrain_mesh_created_during_play_does_not_survive_stop() {
+        assert!(
+            !survives_stop(authored_terrain_mesh()),
+            "TerrainMeshData created during Play leaked into the edit scene"
+        );
+    }
+
+    #[test]
+    fn an_animation_clip_created_during_play_does_not_survive_stop() {
+        assert!(
+            !survives_stop(authored_animation_clip()),
+            "AnimationClipData created during Play leaked into the edit scene"
+        );
+    }
+
+    #[test]
+    fn terrain_deleted_during_play_is_restored_on_stop() {
+        let restored = restored_after_loss(authored_terrain())
+            .expect("TerrainData was not restored on Stop");
+        assert_eq!(restored, authored_terrain());
+    }
+
+    #[test]
+    fn a_terrain_mesh_deleted_during_play_is_restored_on_stop() {
+        let restored = restored_after_loss(authored_terrain_mesh())
+            .expect("TerrainMeshData was not restored on Stop");
+        assert_eq!(restored, authored_terrain_mesh());
+    }
+
+    #[test]
+    fn an_animation_clip_deleted_during_play_is_restored_on_stop() {
+        // AnimationClipData derives no PartialEq, so assert the three fields the
+        // fixture deliberately holds off their defaults.
+        let restored = restored_after_loss(authored_animation_clip())
+            .expect("AnimationClipData was not restored on Stop");
+        assert_eq!(restored.duration, authored_animation_clip().duration);
+        assert_eq!(restored.speed, authored_animation_clip().speed);
+        assert!(matches!(restored.play_mode, PlayMode::PingPong));
+    }
+
+    #[test]
+    fn terrain_edited_during_play_is_rolled_back_on_stop() {
+        let mut world = test_world();
+        let entity = spawn_bare(&mut world);
+        world.entity_mut(entity).insert(authored_terrain());
+        press_play(&mut world);
+        world.entity_mut(entity).insert(TerrainData {
+            seed: 9,
+            ..Default::default()
+        });
+        press_stop(&mut world);
+        let restored = get::<TerrainData>(&world, entity).expect("TerrainData vanished on Stop");
+        assert_eq!(restored, authored_terrain());
     }
 }
