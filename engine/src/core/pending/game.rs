@@ -49,6 +49,11 @@ pub struct SetGameCameraRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct RemoveGameCameraRequest {
+    pub entity_id: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SetActiveGameCameraRequest {
     pub entity_id: String,
 }
@@ -96,6 +101,10 @@ impl PendingCommands {
         self.set_game_camera_requests.push(request);
     }
 
+    pub fn queue_remove_game_camera(&mut self, request: RemoveGameCameraRequest) {
+        self.remove_game_camera_requests.push(request);
+    }
+
     pub fn queue_set_active_game_camera(&mut self, request: SetActiveGameCameraRequest) {
         self.set_active_game_camera_requests.push(request);
     }
@@ -137,6 +146,10 @@ pub fn queue_game_component_removal_from_bridge(request: GameComponentRemovalReq
 
 pub fn queue_set_game_camera_from_bridge(request: SetGameCameraRequest) -> bool {
     super::with_pending(|pc| pc.queue_set_game_camera(request)).is_some()
+}
+
+pub fn queue_remove_game_camera_from_bridge(request: RemoveGameCameraRequest) -> bool {
+    super::with_pending(|pc| pc.queue_remove_game_camera(request)).is_some()
 }
 
 pub fn queue_set_active_game_camera_from_bridge(request: SetActiveGameCameraRequest) -> bool {

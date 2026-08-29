@@ -68,7 +68,6 @@ const ALLOWED_UNROUTED: Record<string, string> = {
   // can do anything. Not a rename, so deliberately not fixed alongside the four
   // renames in PF-1170.
   remove_skeleton_2d: 'PF-1176 — needs pending field + apply system + arm',
-  remove_game_camera: 'PF-1177 — needs pending field + apply system + arm',
 };
 
 /**

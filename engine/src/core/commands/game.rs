@@ -3,10 +3,11 @@
 use crate::core::pending_commands::{
     queue_game_component_add_from_bridge, queue_game_component_update_from_bridge,
     queue_game_component_removal_from_bridge, queue_set_game_camera_from_bridge,
+    queue_remove_game_camera_from_bridge,
     queue_set_active_game_camera_from_bridge, queue_camera_shake_from_bridge,
     queue_mouse_delta_from_bridge,
     GameComponentAddRequest, GameComponentUpdateRequest, GameComponentRemovalRequest,
-    SetGameCameraRequest, SetActiveGameCameraRequest, CameraShakeRequest, QueryRequest,
+    SetGameCameraRequest, RemoveGameCameraRequest, SetActiveGameCameraRequest, CameraShakeRequest, QueryRequest,
 };
 
 /// Handle add_game_component command.
@@ -153,6 +154,20 @@ fn handle_set_game_camera(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
+fn handle_remove_game_camera(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .or_else(|| payload.get("entity_id"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_remove_game_camera_from_bridge(RemoveGameCameraRequest { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 /// Handle set_active_game_camera command.
 /// Payload: { entity_id }
 fn handle_set_active_game_camera(payload: serde_json::Value) -> super::CommandResult {
@@ -230,6 +245,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         }
         "list_game_component_types" => Some(handle_list_game_component_types(payload.clone())),
         "set_game_camera" => Some(handle_set_game_camera(payload.clone())),
+        "remove_game_camera" => Some(handle_remove_game_camera(payload.clone())),
         "set_active_game_camera" => Some(handle_set_active_game_camera(payload.clone())),
         "camera_shake" => Some(handle_camera_shake(payload.clone())),
         "mouse_delta" => Some(handle_mouse_delta(payload.clone())),
@@ -441,6 +457,22 @@ mod tests {
         let result = run("set_game_camera", json!({"entityId": "camera-1"}));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing mode"));
+    }
+
+    #[test]
+    fn remove_game_camera_accepts_camel_and_snake_case_entity_ids() {
+        for payload in [json!({"entityId": "camera-1"}), json!({"entity_id": "camera-1"})] {
+            let result = run("remove_game_camera", payload);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("not initialized"));
+        }
+    }
+
+    #[test]
+    fn remove_game_camera_rejects_missing_entity_id() {
+        let result = run("remove_game_camera", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing entityId"));
     }
 
     // === set_active_game_camera ===
