@@ -53,10 +53,25 @@ assert_mutation_rejected() {
   fi
 }
 
+assert_append_rejected() {
+  local name="$1"
+  local inserted="$2"
+  local mutated="$tmp/${name// /-}.yml"
+  awk -v inserted="$inserted" '
+    { print }
+    /^        run: node scripts\/check-bundle-size\.js$/ { print inserted }
+  ' "$CI_FILE" > "$mutated"
+  if validate_wiring "$mutated"; then
+    fail "$name was not rejected"
+  else
+    pass "$name is rejected"
+  fi
+}
+
 assert_mutation_rejected 'removed invocation' '/^        run: node scripts\/check-bundle-size\.js$/d'
-assert_mutation_rejected 'duplicate run key' '/^        run: node scripts\/check-bundle-size\.js$/a\        run: echo bypassed'
-assert_mutation_rejected 'continue-on-error bypass' '/^        run: node scripts\/check-bundle-size\.js$/a\        continue-on-error: true'
-assert_mutation_rejected 'step-level false condition' '/^        run: node scripts\/check-bundle-size\.js$/a\        if: false'
+assert_append_rejected 'duplicate run key' '        run: echo bypassed'
+assert_append_rejected 'continue-on-error bypass' '        continue-on-error: true'
+assert_append_rejected 'step-level false condition' '        if: false'
 assert_mutation_rejected 'wrong working directory' 's/^        working-directory: web$/        working-directory: scripts/'
 
 if [ "$FAILURES" -ne 0 ]; then
