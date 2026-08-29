@@ -223,6 +223,32 @@ describe('findMatchingIssue', () => {
     assert.equal(findMatchingIssue([older, newer], 'config').number, 12);
   });
 
+  test('sorts an issue with an unparseable updated_at last, not unpredictably', () => {
+    const dated = issue({
+      number: 21,
+      state: 'closed',
+      body: markerFor('config'),
+      updated_at: '2026-01-01T00:00:00Z',
+    });
+    const undated = issue({
+      number: 22,
+      state: 'closed',
+      body: markerFor('config'),
+      updated_at: 'not-a-date',
+    });
+    const missing = issue({
+      number: 23,
+      state: 'closed',
+      body: markerFor('config'),
+      updated_at: undefined,
+    });
+    // Both argument orders must agree: a NaN comparator would not guarantee that.
+    assert.equal(findMatchingIssue([undated, dated], 'config').number, 21);
+    assert.equal(findMatchingIssue([dated, undated], 'config').number, 21);
+    assert.equal(findMatchingIssue([missing, dated], 'config').number, 21);
+    assert.equal(findMatchingIssue([dated, missing], 'config').number, 21);
+  });
+
   test('does not match a different failure class', () => {
     const other = issue({ number: 13, body: markerFor('pitr') });
     assert.equal(findMatchingIssue([other], 'config'), null);

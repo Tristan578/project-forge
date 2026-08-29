@@ -240,6 +240,16 @@ function isIssue(item) {
 }
 
 /**
+ * `Date.parse` returns NaN for a missing or malformed timestamp, and a
+ * comparator that returns NaN leaves the sort order unspecified. Treat an
+ * unparseable `updated_at` as the epoch so it sorts last deterministically.
+ */
+function updatedAtMs(issue) {
+  const ms = Date.parse(issue?.updated_at ?? '');
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
  * Find the report already tracking this failure class. Prefers an open issue;
  * otherwise returns the most recently updated closed one so the caller can
  * reopen it rather than mint a duplicate.
@@ -253,7 +263,7 @@ export function findMatchingIssue(issues, cls) {
   if (open) return open;
   const closed = candidates
     .filter(i => i.state === 'closed')
-    .sort((a, b) => Date.parse(b.updated_at ?? 0) - Date.parse(a.updated_at ?? 0));
+    .sort((a, b) => updatedAtMs(b) - updatedAtMs(a));
   return closed[0] ?? null;
 }
 
