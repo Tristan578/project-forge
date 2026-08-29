@@ -2,3 +2,13 @@
 # scripts/run-benchmarks.sh and should not be committed to version control.
 # Upload them as CI artifacts instead.
 *.json
+
+# ...except the baseline, which is the entire point of the harness. A
+# regression is only detectable against a recorded reference, and a reference
+# that is not committed does not exist as far as CI is concerned. This one
+# file is deliberately tracked.
+#
+# Re-record it with:
+#   bash scripts/run-benchmarks.sh --update-baseline
+# and say in the commit message why the numbers moved. See README.md here.
+!baseline.json

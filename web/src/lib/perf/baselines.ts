@@ -53,9 +53,32 @@ export const PERFORMANCE_BASELINES: Record<string, PerformanceBaseline> = {
   // Target: Zustand store update visible to subscribers in < 5 ms
   // ---------------------------------------------------------------------------
   'store-update-propagation': {
-    description: 'Zustand store update propagation time (set → subscriber notified)',
+    description:
+      'Zustand store update propagation (set → subscriber notified), 1024 updates per measured iteration',
     p95Ms: 5,
     avgMs: 1,
+  },
+
+  // ---------------------------------------------------------------------------
+  // Store hydration (scene load)
+  // Target: replace the whole scene graph for 100 entities in < 5 ms
+  // ---------------------------------------------------------------------------
+  'store-hydrate-scene-graph-100-entities': {
+    description:
+      'sceneGraphSlice.setFullGraph() hydration of a 100-entity scene, 128 hydrations per measured iteration',
+    p95Ms: 5,
+    avgMs: 1,
+  },
+
+  // ---------------------------------------------------------------------------
+  // Visual script compilation
+  // Target: compile a 44-node visual script graph to TypeScript in < 10 ms
+  // ---------------------------------------------------------------------------
+  'visual-script-compile-44-nodes': {
+    description:
+      'compileGraph() over a 44-node visual script (4 handlers x 10 actions), 4 compiles per measured iteration',
+    p95Ms: 10,
+    avgMs: 3,
   },
 
   // ---------------------------------------------------------------------------
@@ -63,7 +86,8 @@ export const PERFORMANCE_BASELINES: Record<string, PerformanceBaseline> = {
   // Target: rebuild the scene hierarchy for 100 nodes in < 20 ms
   // ---------------------------------------------------------------------------
   'scene-graph-rebuild-100-nodes': {
-    description: 'Rebuild scene graph hierarchy for 100 nodes',
+    description:
+      'Rebuild scene graph hierarchy for 100 nodes, 8 rebuilds per measured iteration',
     p95Ms: 20,
     avgMs: 8,
   },
@@ -73,7 +97,8 @@ export const PERFORMANCE_BASELINES: Record<string, PerformanceBaseline> = {
   // Target: parse and apply a 100-entity .forge file in < 100 ms
   // ---------------------------------------------------------------------------
   'scene-deserialize-100-entities': {
-    description: 'Deserialize and validate a 100-entity .forge JSON scene',
+    description:
+      'Deserialize and validate a 100-entity .forge JSON scene, 2 loads per measured iteration',
     p95Ms: 100,
     avgMs: 40,
   },
@@ -83,7 +108,8 @@ export const PERFORMANCE_BASELINES: Record<string, PerformanceBaseline> = {
   // Target: find a preset by name from 56-item catalogue in < 1 ms
   // ---------------------------------------------------------------------------
   'material-preset-lookup': {
-    description: 'Look up a material preset by name from the full catalogue',
+    description:
+      'Look up a material preset by name from the full catalogue, 128 full-catalogue sweeps per measured iteration',
     p95Ms: 1,
     avgMs: 0.1,
   },
@@ -93,7 +119,8 @@ export const PERFORMANCE_BASELINES: Record<string, PerformanceBaseline> = {
   // Target: filter a 500-node hierarchy by search term in < 10 ms
   // ---------------------------------------------------------------------------
   'hierarchy-filter-500-nodes': {
-    description: 'Filter a 500-node scene hierarchy by a search string',
+    description:
+      'Filter a 500-node scene hierarchy by a search string, 4 filters per measured iteration',
     p95Ms: 10,
     avgMs: 3,
   },
