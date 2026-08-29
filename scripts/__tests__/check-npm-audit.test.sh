@@ -3180,7 +3180,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=484
+readonly SELF_EXEC_EXPECTED_DROP=487
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
