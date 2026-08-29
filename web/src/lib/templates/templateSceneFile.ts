@@ -41,6 +41,8 @@ import {
   buildLightFromPartial,
   buildPhysicsFromPartial,
 } from '@/lib/chat/handlers/helpers';
+import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
+import type { GameComponentData } from '@/stores/slices/types';
 
 /**
  * Template `entityType` spelling → the engine's snake_case `EntityType`.
@@ -187,4 +189,33 @@ export function buildTemplateSceneFile(template: GameTemplate): TemplateSceneFil
   };
 
   return { sceneJson: JSON.stringify(sceneFile), entityCount: entities.length, skippedEntityIds };
+}
+
+/**
+ * Shape a template entity's `gameComponents` into complete store components.
+ *
+ * Templates use two spellings for the same thing — the 3D templates put the
+ * fields directly on the entry (`{ type: 'health', maxHp: 3 }`) while the 2D
+ * ones nest them under the type name (`{ type: 'health', health: { maxHp: 3 } }`).
+ * Both are partial: `HealthData` has six fields and no template writes all six.
+ * `buildStoreComponent` fills the rest with the same values the Rust `Default`
+ * impls use, so the store's copy and the engine's copy are the same component.
+ *
+ * An entry whose `type` names no known component is dropped — dispatching it
+ * would be rejected by `build_game_component` with nothing applied.
+ */
+export function buildTemplateGameComponents(entity: EntitySnapshotData): GameComponentData[] {
+  const components: GameComponentData[] = [];
+  for (const entry of entity.gameComponents ?? []) {
+    const nested = entry[entry.type];
+    const props =
+      nested !== null && typeof nested === 'object' && !Array.isArray(nested)
+        ? (nested as Record<string, unknown>)
+        : (Object.fromEntries(
+            Object.entries(entry).filter(([key]) => key !== 'type'),
+          ) as Record<string, unknown>);
+    const built = buildStoreComponent(entry.type, props);
+    if (built) components.push(built);
+  }
+  return components;
 }

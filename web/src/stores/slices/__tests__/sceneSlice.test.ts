@@ -1,17 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
-import { createSceneSlice, setSceneDispatcher, type SceneSlice } from '../sceneSlice';
+import { createMockDispatch } from './sliceTestTemplate';
+import { createSceneTestStore } from './sceneSliceTestStore';
+import { setSceneDispatcher } from '../sceneSlice';
 import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 
 describe('sceneSlice', () => {
-  let store: ReturnType<typeof createSliceStore<SceneSlice>>;
+  let store: ReturnType<typeof createSceneTestStore>['store'];
   let mockDispatch: ReturnType<typeof createMockDispatch>;
 
   beforeEach(() => {
     mockDispatch = createMockDispatch();
     setSceneDispatcher(mockDispatch);
-    store = createSliceStore(createSceneSlice);
+    store = createSceneTestStore().store;
   });
 
   afterEach(() => {
@@ -216,7 +217,7 @@ describe('sceneSlice', () => {
     // that every follow-up command targets in vain.
     it('should return undefined and dispatch nothing when the engine is not loaded', () => {
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
-      const detached = createSliceStore(createSceneSlice);
+      const detached = createSceneTestStore().store;
 
       expect(detached.getState().spawnTerrain()).toBeUndefined();
       expect(mockDispatch).not.toHaveBeenCalled();

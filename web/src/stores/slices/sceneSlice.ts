@@ -2,8 +2,8 @@
  * Scene slice - manages scene file state, multi-scene, export, cloud state, terrain, and scene transitions.
  */
 
-import { StateCreator } from 'zustand';
-import type { SceneTransitionConfig, TerrainDataState } from './types';
+import { StateCreator, StoreApi } from 'zustand';
+import type { GameComponentData, SceneGraph, SceneTransitionConfig, TerrainDataState } from './types';
 import { DEFAULT_TRANSITION } from './types';
 import {
   loadProjectScenes,
@@ -17,6 +17,10 @@ import {
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import {
+  buildTemplateSceneFile,
+  buildTemplateGameComponents,
+} from '@/lib/templates/templateSceneFile';
 
 /** Project scenes reduced to the shape the store mirrors for the Scene Browser. */
 function toSceneList(project: ProjectScenes) {
@@ -88,7 +92,17 @@ export interface SceneSlice {
   setCloudSaveStatus: (status: 'idle' | 'saving' | 'saved' | 'error') => void;
   /** Set the ISO-8601 timestamp of the most recent successful cloud save (PF-540). */
   setLastCloudSave: (timestamp: string) => void;
-  loadTemplate: (templateId: string) => Promise<void>;
+  /**
+   * Apply a built-in game template to the live scene.
+   *
+   * Resolves only once the entities are actually in `sceneGraph`, so a caller
+   * that reports success is reporting something that happened. `load_scene` is
+   * queued and applied a frame later, and `apply_scene_load` returns silently
+   * on a payload it cannot deserialize — a resolved promise on its own proves
+   * nothing, which is what let the gallery and the chat handler both claim a
+   * success the stub never achieved.
+   */
+  loadTemplate: (templateId: string, options?: { timeoutMs?: number }) => Promise<TemplateLoadResult>;
   /**
    * Persist the live scene, then activate `sceneId`. Async because the scene
    * has to be read back out of the engine first — resolves once the switch has
@@ -101,10 +115,87 @@ export interface SceneSlice {
   duplicateScene: (sceneId: string) => Promise<void>;
 }
 
-let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
+/**
+ * What a dispatch can answer with. Structurally identical to `CommandResponse`
+ * in `@/hooks/useEngine`, restated here so a store slice does not import a hook
+ * module (which imports the store back). Only an explicit `success: false` is a
+ * rejection — every test double and every pre-PF-1098 caller returns nothing.
+ */
+type DispatchResult = { success: boolean; error?: string } | void;
 
-export function setSceneDispatcher(dispatcher: (command: string, payload: unknown) => void): void {
+let dispatchCommand: ((command: string, payload: unknown) => DispatchResult) | null = null;
+
+export function setSceneDispatcher(
+  dispatcher: (command: string, payload: unknown) => DispatchResult,
+): void {
   dispatchCommand = dispatcher;
+}
+
+/** Outcome of {@link SceneSlice.loadTemplate}. */
+export type TemplateLoadResult =
+  | { success: true; entityCount: number; skippedEntityIds: string[] }
+  | { success: false; error: string };
+
+/**
+ * How long to wait for `load_scene` to show up as entities in `sceneGraph`.
+ *
+ * The engine acknowledges a load synchronously and applies it in a later frame,
+ * so there is no response to await — only the resulting state. Overridable per
+ * call so tests do not have to sit through the real budget.
+ */
+export const TEMPLATE_APPLY_TIMEOUT_MS = 10_000;
+
+/**
+ * State `loadTemplate` reads and writes across slice boundaries.
+ *
+ * Widening the generic is how a slice reaches a neighbour without depending on
+ * its whole interface — `createScriptSlice` does the same for `primaryId`.
+ */
+export type TemplateApplyDeps = {
+  sceneGraph: SceneGraph;
+  nodeCount: number;
+  setScript: (entityId: string, source: string, enabled: boolean, template?: string) => void;
+  setInputPreset: (preset: 'fps' | 'platformer' | 'topdown' | 'racing') => void;
+  addGameComponent: (entityId: string, component: GameComponentData) => void;
+};
+
+const INPUT_PRESETS = ['fps', 'platformer', 'topdown', 'racing'] as const;
+
+/**
+ * Resolve `true` once a scene load has visibly landed, `false` on timeout.
+ *
+ * The watch is armed BEFORE the command goes out, because a synchronous
+ * dispatcher (the test doubles, and a same-frame engine) can finish the load
+ * before `dispatchCommand` returns. `sceneGraph` identity is part of the
+ * predicate so a scene that already had entities cannot satisfy it instantly.
+ */
+function watchForSceneApplied(
+  api: StoreApi<SceneSlice & TemplateApplyDeps>,
+  timeoutMs: number,
+): { applied: Promise<boolean>; abandon: () => void } {
+  const previousGraph = api.getState().sceneGraph;
+  let settle: ((value: boolean) => void) | null = null;
+  let unsubscribe: (() => void) | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const finish = (value: boolean) => {
+    if (!settle) return;
+    const resolve = settle;
+    settle = null;
+    unsubscribe?.();
+    if (timer !== null) clearTimeout(timer);
+    resolve(value);
+  };
+
+  const applied = new Promise<boolean>((resolve) => {
+    settle = resolve;
+    unsubscribe = api.subscribe((state) => {
+      if (state.sceneGraph !== previousGraph && state.nodeCount > 0) finish(true);
+    });
+    timer = setTimeout(() => finish(false), timeoutMs);
+  });
+
+  return { applied, abandon: () => finish(false) };
 }
 
 /**
@@ -131,7 +222,12 @@ function withCapturedScene(project: ProjectScenes, capture: SceneCapture): Proje
   return saveCurrentSceneData(project, capture.data);
 }
 
-export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (set, get) => ({
+export const createSceneSlice: StateCreator<
+  SceneSlice & TemplateApplyDeps,
+  [],
+  [],
+  SceneSlice
+> = (set, get, api) => ({
   sceneName: 'Untitled',
   sceneModified: false,
   autoSaveEnabled: true,
@@ -164,7 +260,12 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
     // the dispatch keeps the stash and the pending load a single fact.
     if (dispatchCommand) {
       stageSceneAudio(json);
-      dispatchCommand('load_scene', { json });
+      // A rejected load never emits SCENE_LOADED, so a stash left armed here
+      // waits for the NEXT scene's SCENE_LOADED and attaches this scene's
+      // sounds to it. `new_scene` already clears for the same reason; a
+      // rejection is the other way the stash outlives its load.
+      const response = dispatchCommand('load_scene', { json });
+      if (response && response.success === false) clearStagedSceneAudio();
     }
   },
   newScene: () => {
@@ -261,9 +362,88 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   },
   setCloudSaveStatus: (status) => set({ cloudSaveStatus: status }),
   setLastCloudSave: (timestamp) => set({ lastCloudSave: timestamp }),
-  loadTemplate: async (_templateId) => {
-    // Not yet implemented — log warning instead of throwing to avoid crashing callers
-    console.warn('loadTemplate: not yet implemented');
+  loadTemplate: async (templateId, options) => {
+    if (!dispatchCommand) {
+      return { success: false, error: 'The engine is not ready yet — try again in a moment.' };
+    }
+
+    // Dynamic so the registry and its eleven lazily-imported scene files stay
+    // out of the store bundle, and so nothing in `@/data/templates` is reachable
+    // from a module an API route pulls in.
+    const { loadTemplate: readTemplate } = await import('@/data/templates');
+    let template;
+    try {
+      template = await readTemplate(templateId);
+    } catch (error) {
+      return {
+        success: false,
+        error: `Could not read template "${templateId}": ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    // A registry miss returns null. Reporting that as success is exactly the
+    // bug this action had: the gallery closed and the chat handler said
+    // "Loaded template" for an id that names nothing.
+    if (!template) return { success: false, error: `Unknown template: ${templateId}` };
+
+    const { sceneJson, entityCount, skippedEntityIds } = buildTemplateSceneFile(template);
+    if (entityCount === 0) {
+      return {
+        success: false,
+        error: `Template "${templateId}" contains no entities the engine can spawn.`,
+      };
+    }
+
+    const { applied, abandon } = watchForSceneApplied(
+      api,
+      options?.timeoutMs ?? TEMPLATE_APPLY_TIMEOUT_MS,
+    );
+
+    // Staged for the SCENE_LOADED handler, same contract as `loadScene`. The
+    // template's own (empty) audio also displaces anything a previous rejected
+    // load left behind, so this scene cannot adopt another scene's sounds.
+    stageSceneAudio(sceneJson);
+    const response = dispatchCommand('load_scene', { json: sceneJson });
+    if (response && response.success === false) {
+      abandon();
+      clearStagedSceneAudio();
+      return {
+        success: false,
+        error: response.error ?? `The engine refused to load template "${templateId}".`,
+      };
+    }
+
+    if (!(await applied)) {
+      clearStagedSceneAudio();
+      return {
+        success: false,
+        error: `Template "${templateId}" was sent to the engine but no entities appeared. The scene was not changed.`,
+      };
+    }
+
+    // Only now that the entities exist can anything be attached to them.
+    // Scripts and game components go through the store's own actions rather
+    // than riding inside the scene JSON: the engine only re-emits either one
+    // for the SELECTED entity, so a template applied through the file alone
+    // would leave `allScripts` empty — and that map, not the engine, is what
+    // the script worker runs in Play mode.
+    const skipped = new Set(skippedEntityIds);
+    const state = get();
+    for (const entity of template.sceneData.entities) {
+      if (skipped.has(entity.entityId)) continue;
+      for (const component of buildTemplateGameComponents(entity)) {
+        state.addGameComponent(entity.entityId, component);
+      }
+    }
+    for (const [entityId, script] of Object.entries(template.scripts)) {
+      if (skipped.has(entityId)) continue;
+      state.setScript(entityId, script.source, script.enabled);
+    }
+    const preset = template.inputPreset;
+    if (preset !== undefined && (INPUT_PRESETS as readonly string[]).includes(preset)) {
+      state.setInputPreset(preset as (typeof INPUT_PRESETS)[number]);
+    }
+
+    return { success: true, entityCount, skippedEntityIds };
   },
   // PF-1097: these four used to dispatch `switch_scene` / `create_scene` /
   // `delete_scene` / `duplicate_scene`. The engine rejects all four by design —
