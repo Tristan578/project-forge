@@ -429,10 +429,13 @@ pub(super) fn apply_physics2d_toggles(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     query: Query<(Entity, &EntityId, Option<&Physics2dData>, Option<&Physics2dEnabled>)>,
+    mut history: ResMut<HistoryStack>,
 ) {
     for toggle in pending.physics2d_toggles.drain(..) {
         for (entity, entity_id, physics_data, phys2d_enabled) in query.iter() {
             if entity_id.0 == toggle.entity_id {
+                let old_physics = physics_data.cloned();
+                let old_enabled = phys2d_enabled.is_some();
                 if toggle.enabled {
                     // Enable physics: add Physics2dEnabled marker and Physics2dData if missing
                     if phys2d_enabled.is_none() {
@@ -443,6 +446,15 @@ pub(super) fn apply_physics2d_toggles(
                     }
                     let data = physics_data.cloned().unwrap_or_default();
                     events::emit_physics2d_changed(&toggle.entity_id, &data, true);
+                    if !old_enabled || old_physics.is_none() {
+                        history.push(crate::core::history::UndoableAction::Physics2dToggle {
+                            entity_id: toggle.entity_id.clone(),
+                            old_physics,
+                            new_physics: Some(data),
+                            old_enabled,
+                            new_enabled: true,
+                        });
+                    }
                 } else {
                     // Disable physics: remove Physics2dEnabled marker
                     if phys2d_enabled.is_some() {
@@ -450,6 +462,15 @@ pub(super) fn apply_physics2d_toggles(
                     }
                     if let Some(data) = physics_data {
                         events::emit_physics2d_changed(&toggle.entity_id, data, false);
+                    }
+                    if old_enabled {
+                        history.push(crate::core::history::UndoableAction::Physics2dToggle {
+                            entity_id: toggle.entity_id.clone(),
+                            old_physics: old_physics.clone(),
+                            new_physics: old_physics,
+                            old_enabled,
+                            new_enabled: false,
+                        });
                     }
                 }
                 break;

@@ -421,6 +421,17 @@ pub enum UndoableAction {
         new_physics: Option<Physics2dData>,
     },
 
+    /// 2D Physics enablement was toggled. Unlike `Physics2dChange`, this action
+    /// owns both the data and marker state because enabling a fresh body creates
+    /// default data as part of the same user operation.
+    Physics2dToggle {
+        entity_id: String,
+        old_physics: Option<Physics2dData>,
+        new_physics: Option<Physics2dData>,
+        old_enabled: bool,
+        new_enabled: bool,
+    },
+
     /// 2D Joint configuration changed
     Joint2dChange {
         entity_id: String,
@@ -491,6 +502,7 @@ impl UndoableAction {
             UndoableAction::ReverbZoneChange { .. } => "Reverb Zone Change".to_string(),
             UndoableAction::SpriteChange { .. } => "Sprite Change".to_string(),
             UndoableAction::Physics2dChange { .. } => "2D Physics Change".to_string(),
+            UndoableAction::Physics2dToggle { .. } => "Toggle 2D Physics".to_string(),
             UndoableAction::Joint2dChange { .. } => "2D Joint Change".to_string(),
             UndoableAction::TilemapChange { .. } => "Tilemap Change".to_string(),
             UndoableAction::SkeletonChange { .. } => "Skeleton 2D Change".to_string(),
