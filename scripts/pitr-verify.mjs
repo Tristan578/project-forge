@@ -4,7 +4,8 @@
  *
  * Drives a full Neon Point-in-Time-Recovery verification end-to-end:
  *
- *   1. Creates a read-only Neon branch from (now - HOURS_AGO hours).
+ *   1. Creates a read-only Neon branch from (now - HOURS_AGO hours), clamped
+ *      to the project's actual PITR retention window.
  *   2. Waits for the branch's create_branch operation to finish.
  *   3. Runs scripts/verify-db-backup.sh against the branch connection URI.
  *   4. Deletes the branch in a finally block — always, even on failure.
@@ -81,9 +82,16 @@ export class PitrError extends Error {
  *
  * 401/403 — the API key is missing, revoked, or scoped wrong.
  * 404     — the project id does not resolve. This is the #9036 case.
- * 400/422 — Neon accepted our credentials and rejected the REQUEST: the restore
- *           point is outside the retention window, or the branch spec is bad.
- *           That is a real PITR finding, not a configuration one.
+ * 400/422 — Neon accepted our credentials and rejected the REQUEST: the branch
+ *           spec is bad, or the restore point is one Neon will not serve. That
+ *           is a real PITR finding, not a configuration one.
+ *
+ *           The one case that is NOT a finding — a restore point older than the
+ *           plan's retention window — no longer reaches here: the lookback is
+ *           clamped to the window before the request is built. See
+ *           `resolveLookbackHours`. Left unclamped it produced a `pitr`-classed
+ *           failure ("the backups are broken") every single month on a plan
+ *           whose backups were fine.
  * 408/429/5xx — upstream is unhappy right now; retry next month.
  */
 export function classifyHttpStatus(status) {
@@ -145,6 +153,73 @@ export function computeParentTimestamp(now, hoursAgo) {
   }
   const ts = new Date(now.getTime() - offset * 60 * 60 * 1000);
   return ts.toISOString();
+}
+
+/**
+ * The project's PITR retention window, in seconds, or null if Neon did not
+ * report one. Null means "do not clamp" — an unreported window must not be
+ * read as a zero-length one.
+ */
+export function parseRetentionSeconds(json) {
+  const raw = json?.project?.history_retention_seconds;
+  return Number.isFinite(raw) && raw > 0 ? raw : null;
+}
+
+/**
+ * How far back this project can actually be restored from, in hours.
+ *
+ * The monthly run asked for a fixed 24h. This project's plan retains 6h, so
+ * Neon rejected every scheduled run with `timestamp is before retention
+ * window` — and `classifyHttpStatus` files that 400 as a PITR fault, i.e.
+ * "the backups are broken", which is the opposite of true. The backups were
+ * never exercised at all. Three "PITR verification failed" issues on the board
+ * are this and nothing else.
+ *
+ * So ask the project what it retains and clamp to it. Restoring from the
+ * oldest point still inside the window is the strongest test the plan allows,
+ * and it is a real test — far better than a monthly false alarm. The clamp is
+ * logged, never silent: a shrinking window is itself worth seeing.
+ *
+ * SAFETY_MARGIN keeps the restore point clear of the trailing edge. The window
+ * slides while the request is in flight, so asking for exactly `retention`
+ * races the boundary and fails intermittently.
+ */
+export const RETENTION_SAFETY_MARGIN = 0.95;
+
+/**
+ * The requested lookback as a positive number of hours, or a config fault.
+ *
+ * Called at the top of `main`, before any API call: a bad HOURS_AGO is the
+ * caller's mistake and must not cost a round-trip to Neon to discover.
+ */
+export function assertPositiveHours(hoursAgo) {
+  const hours = Number(hoursAgo);
+  if (!Number.isFinite(hours) || hours <= 0) {
+    throw new PitrError(
+      `HOURS_AGO must be a positive number, got: ${hoursAgo}`,
+      2,
+      FAILURE_CLASS.CONFIG,
+    );
+  }
+  return hours;
+}
+
+export function resolveLookbackHours({ requestedHours, retentionSeconds, log }) {
+  const requested = assertPositiveHours(requestedHours);
+  if (retentionSeconds === null) {
+    log?.(
+      'Neon did not report history_retention_seconds; using the requested lookback unclamped.',
+    );
+    return requested;
+  }
+  const usable = (retentionSeconds / 3600) * RETENTION_SAFETY_MARGIN;
+  if (requested <= usable) return requested;
+  log?.(
+    `WARN: requested lookback ${requested}h exceeds this project's ${(retentionSeconds / 3600).toFixed(2)}h ` +
+      `PITR retention window. Clamping to ${usable.toFixed(2)}h (${RETENTION_SAFETY_MARGIN} of the window). ` +
+      'This is a plan limit, not a backup fault.',
+  );
+  return usable;
 }
 
 export function buildBranchPayload({ parentTimestamp, branchName }) {
@@ -254,9 +329,29 @@ export async function main({ env, fetchFn, spawnFn, sleepFn, now, log, scriptPat
   if (!apiKey) throw new PitrError('NEON_API_KEY is required', 2, FAILURE_CLASS.CONFIG);
   if (!projectId) throw new PitrError('NEON_PROJECT_ID is required', 2, FAILURE_CLASS.CONFIG);
 
-  const parentTimestamp = computeParentTimestamp(new Date(now()), hoursAgo);
+  // Reject a bad HOURS_AGO before spending an API call on it.
+  assertPositiveHours(hoursAgo);
+
+  // Fetch the project BEFORE creating anything. Two reasons: it yields the
+  // retention window the lookback has to fit inside, and a wrong project id
+  // surfaces here as a clean 404 (classified `config`) instead of as a 400 on
+  // branch creation, which would be classified `pitr` and read as a backup
+  // fault. That misclassification is the #9036 case.
+  const projectJson = await neonFetch(fetchFn, {
+    method: 'GET',
+    path: `/projects/${projectId}`,
+    apiKey,
+  });
+  const retentionSeconds = parseRetentionSeconds(projectJson);
+  const lookbackHours = resolveLookbackHours({
+    requestedHours: hoursAgo,
+    retentionSeconds,
+    log,
+  });
+
+  const parentTimestamp = computeParentTimestamp(new Date(now()), lookbackHours);
   const branchName = formatBranchName(new Date(now()));
-  log(`Creating recovery branch "${branchName}" from ${parentTimestamp}`);
+  log(`Creating recovery branch "${branchName}" from ${parentTimestamp} (${lookbackHours}h ago)`);
 
   const createJson = await neonFetch(fetchFn, {
     method: 'POST',

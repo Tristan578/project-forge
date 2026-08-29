@@ -12,6 +12,9 @@ import {
   computeParentTimestamp,
   buildBranchPayload,
   parseCreateResponse,
+  parseRetentionSeconds,
+  RETENTION_SAFETY_MARGIN,
+  resolveLookbackHours,
   isOperationDone,
   waitForOperation,
   runVerifyScript,
@@ -149,9 +152,33 @@ describe('isOperationDone', () => {
   });
 });
 
-function makeFetch(responses) {
+/** 24h of retention: enough that the default 24h lookback is never clamped. */
+const DEFAULT_PROJECT_RESPONSE = Object.freeze({
+  ok: true,
+  body: JSON.stringify({ project: { history_retention_seconds: 24 * 60 * 60 } }),
+});
+
+/**
+ * `responses` is an ordered queue for the branch lifecycle (create → poll →
+ * delete). The project lookup `main` does first is ambient setup — it exists
+ * only to read the retention window — so it is served from its own slot and
+ * recorded in `projectCalls`, leaving the queue and every index assertion
+ * built on it about the branch lifecycle alone. Tests that care about the
+ * lookup pass a `project` override and assert on `projectCalls`.
+ */
+function makeFetch(responses, { project = DEFAULT_PROJECT_RESPONSE } = {}) {
   const calls = [];
+  const projectCalls = [];
   const fetchFn = async (url, init) => {
+    if ((init?.method ?? 'GET') === 'GET' && /\/projects\/[^/]+$/.test(url)) {
+      projectCalls.push({ url, init });
+      return {
+        ok: project.ok,
+        status: project.status ?? (project.ok ? 200 : 500),
+        statusText: project.statusText ?? '',
+        text: async () => project.body ?? '',
+      };
+    }
     calls.push({ url, init });
     const next = responses.shift();
     if (!next) throw new Error(`no more mocked responses for ${url}`);
@@ -162,7 +189,7 @@ function makeFetch(responses) {
       text: async () => next.body ?? '',
     };
   };
-  return { fetchFn, calls };
+  return { fetchFn, calls, projectCalls };
 }
 
 describe('waitForOperation', () => {
@@ -346,6 +373,97 @@ function makeEnv(overrides = {}) {
     NEON_PROJECT_ID: 'proj_test',
     HOURS_AGO: '24',
     ...overrides,
+  };
+}
+
+describe('parseRetentionSeconds', () => {
+  test('reads a positive window', () => {
+    assert.equal(parseRetentionSeconds({ project: { history_retention_seconds: 21600 } }), 21600);
+  });
+
+  test('an absent window is null, NOT zero', () => {
+    // Zero would clamp every lookback to 0h and turn a missing field into a
+    // guaranteed failure. Null means "do not clamp".
+    assert.equal(parseRetentionSeconds({ project: {} }), null);
+    assert.equal(parseRetentionSeconds({}), null);
+    assert.equal(parseRetentionSeconds(null), null);
+  });
+
+  test('a non-numeric or non-positive window is null', () => {
+    assert.equal(parseRetentionSeconds({ project: { history_retention_seconds: '21600' } }), null);
+    assert.equal(parseRetentionSeconds({ project: { history_retention_seconds: 0 } }), null);
+    assert.equal(parseRetentionSeconds({ project: { history_retention_seconds: -1 } }), null);
+    assert.equal(parseRetentionSeconds({ project: { history_retention_seconds: NaN } }), null);
+  });
+});
+
+describe('resolveLookbackHours', () => {
+  test('a lookback inside the window is used unchanged', () => {
+    assert.equal(resolveLookbackHours({ requestedHours: '4', retentionSeconds: 21600 }), 4);
+  });
+
+  test('a lookback beyond the window is clamped, not passed through', () => {
+    // The live case: 24h requested against a 6h plan. Neon rejected this with
+    // 400 every month, which classifyHttpStatus files as a PITR fault.
+    const lines = [];
+    const got = resolveLookbackHours({
+      requestedHours: '24',
+      retentionSeconds: 6 * 60 * 60,
+      log: m => lines.push(m),
+    });
+    assert.equal(got, 6 * RETENTION_SAFETY_MARGIN);
+    assert.ok(got < 6, 'must stay clear of the trailing edge');
+    assert.equal(lines.length, 1, 'the clamp is never silent');
+    assert.match(lines[0], /exceeds/);
+    assert.match(lines[0], /not a backup fault/);
+  });
+
+  test('an unreported window leaves the request unclamped', () => {
+    const lines = [];
+    assert.equal(
+      resolveLookbackHours({ requestedHours: '24', retentionSeconds: null, log: m => lines.push(m) }),
+      24,
+    );
+    assert.equal(lines.length, 1);
+  });
+
+  test('a lookback exactly at the window is still clamped clear of the edge', () => {
+    // The window slides while the create request is in flight, so asking for
+    // exactly `retention` races the boundary.
+    const got = resolveLookbackHours({ requestedHours: '6', retentionSeconds: 6 * 60 * 60 });
+    assert.ok(got < 6);
+    assert.equal(got, 6 * RETENTION_SAFETY_MARGIN);
+  });
+
+  test('a non-numeric lookback is a config fault, not a clamp', () => {
+    assert.throws(
+      () => resolveLookbackHours({ requestedHours: 'soon', retentionSeconds: 21600 }),
+      err => err.failureClass === 'config' && err.exitCode === 2,
+    );
+  });
+
+  test('a zero or negative lookback is a config fault', () => {
+    for (const bad of ['0', '-3']) {
+      assert.throws(
+        () => resolveLookbackHours({ requestedHours: bad, retentionSeconds: 21600 }),
+        err => err.failureClass === 'config',
+      );
+    }
+  });
+});
+
+/** A spawnFn whose child exits with `code`. */
+function okSpawn(code) {
+  return () => {
+    const listeners = {};
+    const child = {
+      on: (event, fn) => {
+        listeners[event] = fn;
+        return child;
+      },
+    };
+    setImmediate(() => listeners.exit?.(code));
+    return child;
   };
 }
 
@@ -561,6 +679,60 @@ describe('main', () => {
       assert.equal(e.exitCode, 2);
       assert.match(e.message, /NEON_PROJECT_ID/);
     }
+  });
+
+  test('the restore point is clamped to the project retention window', async () => {
+    // End to end for the live failure: HOURS_AGO=24 against a 6h plan. Before
+    // the clamp this reached Neon as a 24h-old timestamp and came back 400
+    // "timestamp is before retention window", classified as a PITR fault.
+    const createBody = JSON.stringify({
+      branch: { id: 'br_clamp' },
+      connection_uris: [{ connection_uri: 'postgres://host/db' }],
+      operations: [],
+    });
+    const { fetchFn, calls, projectCalls } = makeFetch(
+      [{ ok: true, body: createBody }, { ok: true, body: '{}' }],
+      { project: { ok: true, body: JSON.stringify({ project: { history_retention_seconds: 6 * 60 * 60 } }) } },
+    );
+    const nowMs = Date.parse('2026-09-01T12:00:00Z');
+    await main({
+      env: { NEON_API_KEY: 'k', NEON_PROJECT_ID: 'proj_test', HOURS_AGO: '24' },
+      fetchFn,
+      spawnFn: okSpawn(0),
+      sleepFn: async () => {},
+      now: () => nowMs,
+      log: () => {},
+      scriptPath: 's.sh',
+    });
+
+    assert.equal(projectCalls.length, 1, 'the retention window is read exactly once');
+    assert.match(projectCalls[0].url, /\/projects\/proj_test$/);
+
+    const sent = Date.parse(JSON.parse(calls[0].init.body).branch.parent_timestamp);
+    const hoursBack = (nowMs - sent) / 3600000;
+    assert.ok(hoursBack < 6, `restore point must be inside the 6h window, got ${hoursBack}h`);
+    assert.ok(hoursBack > 5, `and should use most of it, got ${hoursBack}h`);
+  });
+
+  test('a 404 on the project lookup is a config fault, before any branch is made', async () => {
+    // The #9036 case surfaces here now rather than as a 400 on branch create,
+    // which classifyHttpStatus would have filed as a PITR fault.
+    const { fetchFn, calls } = makeFetch([], {
+      project: { ok: false, status: 404, statusText: 'Not Found', body: '{"message":"project not found"}' },
+    });
+    await assert.rejects(
+      main({
+        env: { NEON_API_KEY: 'k', NEON_PROJECT_ID: 'proj_gone', HOURS_AGO: '4' },
+        fetchFn,
+        spawnFn: okSpawn(0),
+        sleepFn: async () => {},
+        now: () => Date.now(),
+        log: () => {},
+        scriptPath: 's.sh',
+      }),
+      err => err.failureClass === 'config',
+    );
+    assert.equal(calls.length, 0, 'no branch may be created against an unresolvable project');
   });
 
   test('sends parent_timestamp hours before now', async () => {

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       hours_ago:
-        description: 'How far back to recover from (hours)'
+        description: 'How far back to recover from (hours). Clamped to the project PITR retention window.'
         required: false
         default: '24'
 
@@ -57,7 +57,7 @@ jobs:
             echo "# PITR Verification"
             echo ""
             echo "- Result: **${OUTCOME}**"
-            echo "- Recovered from: ${HOURS_AGO}h ago"
+            echo "- Requested lookback: ${HOURS_AGO}h (clamped to the project retention window; see the run log for the point actually used)"
             echo "- Run: ${RUN_ID}"
             if [ -n "${FAILURE_CLASS}" ]; then
               echo "- Failure class: **${FAILURE_CLASS}**"
