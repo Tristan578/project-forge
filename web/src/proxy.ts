@@ -195,48 +195,73 @@ export function passthroughMiddleware(req: NextRequest): NextResponse {
 export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): string[] {
   const publicRoutes = [
     '/',
-    '/sign-in(.*)',
-    '/sign-up(.*)',
-    '/api/auth/webhook(.*)',
-    '/api/stripe/webhook(.*)',
+    '/sign-in',
+    '/sign-in/(.*)',
+    '/sign-up',
+    '/sign-up/(.*)',
+    '/api/auth/webhook',
+    '/api/auth/webhook/(.*)',
+    '/api/stripe/webhook',
+    '/api/stripe/webhook/(.*)',
     // Two patterns rather than a bare `/pricing`: the segment also owns
     // `/pricing/opengraph-image`, which crawlers and link unfurlers fetch
     // without a session. See the note on the `/docs` entry below for why this
     // is `'/pricing' + '/pricing/(.*)'` and not `'/pricing(.*)'`.
     '/pricing',
     '/pricing/(.*)',
-    '/play(.*)',
-    '/terms(.*)',
-    '/privacy(.*)',
-    '/community(.*)',
-    '/api/community(.*)',
+    '/play',
+    '/play/(.*)',
+    '/terms',
+    '/terms/(.*)',
+    '/privacy',
+    '/privacy/(.*)',
+    '/community',
+    '/community/(.*)',
+    '/api/community',
+    '/api/community/(.*)',
     // Public waitlist capture: the /sign-up page's form posts here WITHOUT a
     // Clerk session — the page exists precisely for unauthenticated visitors.
     // The route self-enforces its abuse controls (IP rate limit + honeypot +
     // idempotent insert), none of which are reachable if the proxy 401s the
     // request first (#8730).
-    '/api/waitlist(.*)',
-    '/api/docs(.*)',
-    '/api-docs(.*)',
-    '/api/openapi(.*)',
-    '/api/health(.*)',
-    '/api/status(.*)',
+    '/api/waitlist',
+    '/api/waitlist/(.*)',
+    '/api/docs',
+    '/api/docs/(.*)',
+    '/api-docs',
+    '/api-docs/(.*)',
+    '/api/openapi',
+    '/api/openapi/(.*)',
+    '/api/health',
+    '/api/health/(.*)',
+    '/api/status',
+    '/api/status/(.*)',
     // Vercel Cron jobs (e.g. /api/cron/health-monitor, vercel.json crons) carry
     // only a CRON_SECRET bearer token, no Clerk session. The routes enforce that
     // secret themselves (see the cron-self-enforcement guard in proxy.test.ts),
     // so they must bypass the Clerk proxy or the scheduled call 401s before its
     // own auth check runs (#8605).
-    '/api/cron(.*)',
-    '/api/sentry(.*)',
-    '/monitoring(.*)',
+    '/api/cron',
+    '/api/cron/(.*)',
+    '/api/sentry',
+    '/api/sentry/(.*)',
+    // Sentry's Next.js tunnelRoute is configured to this path in next.config.ts.
+    '/monitoring',
+    '/monitoring/(.*)',
     '/llms.txt',
     '/llms-full.txt',
-    '/faq(.*)',
-    '/about(.*)',
-    '/compare(.*)',
-    '/use-cases(.*)',
-    '/changelog(.*)',
-    '/blog(.*)',
+    '/faq',
+    '/faq/(.*)',
+    '/about',
+    '/about/(.*)',
+    '/compare',
+    '/compare/(.*)',
+    '/use-cases',
+    '/use-cases/(.*)',
+    '/changelog',
+    '/changelog/(.*)',
+    '/blog',
+    '/blog/(.*)',
     // Public PAGE routes that shipped without a matching entry here (#9060).
     // Each one renders for anonymous visitors by design, and each was being
     // bounced to /sign-in instead.
@@ -267,7 +292,7 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
     '/opengraph-image/(.*)',
   ];
   if (includeDev) {
-    publicRoutes.push('/dev(.*)');
+    publicRoutes.push('/dev', '/dev/(.*)');
   }
   return publicRoutes;
 }
