@@ -190,12 +190,63 @@ A scheduled GitHub Actions workflow exercises PITR end-to-end on the 1st of each
 - **Workflow:** `.github/workflows/pitr-verify.yml`
 - **Driver:** `scripts/pitr-verify.mjs`
 - **Script:** `scripts/verify-db-backup.sh` (runs against the recovery branch)
-- **Trigger:** `schedule: '0 8 1 * *'` or `workflow_dispatch` with optional `hours_ago` input
+- **Trigger:** `schedule: '0 8 1 * *'` or `workflow_dispatch` with optional `hours_ago` input (clamped to the plan's PITR retention window — 6h today, so the default 24h resolves to ~5.7h)
 - **Required secrets:** `NEON_API_KEY`, `NEON_PROJECT_ID` (both configured in repo settings)
 
-The driver creates a read-only Neon branch from `(now - HOURS_AGO)`, waits for the branch operations to finish, runs `verify-db-backup.sh` against the recovery branch's connection URI, and deletes the branch in a `finally` block regardless of outcome. On scheduled failures the workflow opens a P0 issue tagged `priority-p0, area-infra, disaster-recovery`.
+The driver reads the project's `history_retention_seconds`, clamps `HOURS_AGO` to 95% of that window (the window slides while the create call is in flight, so requesting exactly the retention races the boundary), creates a read-only Neon branch from that point, waits for the branch operations to finish, runs `verify-db-backup.sh` against the recovery branch's connection URI, and deletes the branch in a `finally` block regardless of outcome. On a scheduled failure the driver classifies the fault and `scripts/pitr-report-failure.mjs` files it under the matching heading below. The class decides the issue title, its labels and which triage section it links; a repeat failure of the same class comments on the existing issue (reopening it if it was closed) rather than opening a new one, so the four monthly duplicates that predate this behaviour do not recur.
+
+| Class | Meaning | Issue labels |
+|-------|---------|--------------|
+| `config` | The workflow could not reach the Neon project at all — credentials or project id are wrong. **No backup was tested.** | `priority-p0`, `area-infra` |
+| `pitr` | The recovery branch was created but could not be restored or verified. **A real backup failure.** | `priority-p0`, `area-infra`, `disaster-recovery` |
+| `infra` | Timeout, rate limit or a 5xx from the Neon API. | `area-infra` |
+| `unknown` | The driver stopped for a reason it could not classify — treat as unproven, not as benign. | `area-infra` |
+
+Only `pitr` carries the `disaster-recovery` label. A `config` failure explicitly instructs the reader **not** to run the recovery procedure: nothing indicates data loss, and running a restore in response to a stale secret would be an unforced production change.
 
 Run it manually at any time from the Actions tab → **PITR Verification** → **Run workflow**.
+
+#### Triage: configuration fault
+
+The workflow never exercised the backup. The Neon API rejected the request with 401, 403 or 404, or a required environment variable was absent.
+
+**Do NOT run the restore procedure in section 3.** There is no evidence of data loss; this is a broken pipeline, not a broken backup.
+
+1. Confirm the secrets exist: `gh secret list` (names only — values are never printed).
+2. Open the Neon console and copy the project id from the project's **Settings → General** page.
+3. Compare it with the `NEON_PROJECT_ID` repository secret. A 404 with `{"message":"project not found"}` means the stored id does not name a project this API key can see — the project was recreated, renamed into a different org, or the id was mistyped.
+4. A 401 or 403 instead means `NEON_API_KEY` is expired or was minted in an org that cannot see the project. Reissue it from **Neon console → Account settings → API keys**.
+5. Update the secret, then re-run the workflow manually (Actions → **PITR Verification** → **Run workflow**) to confirm green before closing the issue.
+
+Until this passes, the backup is **unverified**: treat the last green run as the most recent evidence that PITR works.
+
+#### Triage: PITR restore fault
+
+The recovery branch was created, so credentials and project id are correct — the restore or the data check failed. This is a genuine backup failure.
+
+1. Open the run log and note which stage failed: a Neon branch operation ending `failed`/`cancelled`, or `verify-db-backup.sh` exiting non-zero.
+2. If a branch operation failed, check the Neon status page and the project's **Operations** tab for the same window.
+3. If `verify-db-backup.sh` failed, the branch came up but its data did not match expectations — read the script's output for the failing assertion.
+4. Reproduce manually with section 3, Phase 1 and Phase 2, using the same `hours_ago`.
+5. If the data is genuinely unrecoverable at that timestamp, escalate per section 9 and treat the retention window in section 1 as unreliable until proven otherwise.
+
+#### Triage: infrastructure or transient fault
+
+A timeout, rate limit or 5xx from the Neon API. The backup itself is unproven for this cycle, not known-bad.
+
+1. Re-run the workflow manually. A single clean run closes it out.
+2. If it fails the same way twice, check the Neon status page and open a Neon support ticket; do not simply keep re-running.
+3. A poll timeout (exit code 4) means branch operations did not settle within the driver's budget — note the branch id from the log and confirm in the Neon console that no orphaned `pitr-verify-*` branch was left behind.
+
+#### Triage: unclassified failure
+
+The driver stopped for a reason it does not recognise, most often a bug in `scripts/pitr-verify.mjs` itself (exit code 5).
+
+1. Read the `FATAL` line in the run log — an unclassified failure prints the raw error.
+2. If it is a driver bug, fix it and add the failing case to `scripts/pitr-verify.test.mjs`.
+3. If it is a Neon behaviour the classifier does not cover yet, add the status or condition to `classifyHttpStatus` / the relevant throw site so the next occurrence lands in the right bucket.
+
+Do not downgrade this to "transient" without evidence. An unclassified failure means the backup is unproven for this cycle.
 
 ### Manual Checklist (optional backstop)
 
