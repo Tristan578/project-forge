@@ -97,6 +97,17 @@ function writeRouteManifest(
   );
 }
 
+/** Write an arbitrary value for a route, including malformed schema fixtures. */
+function writeRawRouteManifest(routeDir: string, routeKey: string, manifest: unknown): void {
+  const dir = path.join(buildDir, 'server', 'app', routeDir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'page_client-reference-manifest.js'),
+    `self.__RSC_MANIFEST = self.__RSC_MANIFEST || {};\n` +
+      `self.__RSC_MANIFEST[${JSON.stringify(routeKey)}] = ${JSON.stringify(manifest)};\n`
+  );
+}
+
 beforeEach(() => {
   buildDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bundle-gate-'));
 });
@@ -156,7 +167,7 @@ describe('computeRouteFirstLoad', () => {
     });
   });
 
-  it('excludes --metadata entries', () => {
+  it('includes --metadata entries recorded in the client manifest', () => {
     const root = writeChunk('root.js', 1000);
     const page = writeChunk('page.js', 100);
     const meta = writeChunk('meta.js', 900_000);
@@ -166,7 +177,11 @@ describe('computeRouteFirstLoad', () => {
       'app/foo/icon--metadata': [meta],
     });
 
-    expect(gate.computeRouteFirstLoad(buildDir)[0].bytes).toBe(1100);
+    expect(gate.computeRouteFirstLoad(buildDir)[0]).toEqual({
+      route: '/foo/page',
+      bytes: 901_100,
+      chunkCount: 3,
+    });
   });
 
   it('ranks routes heaviest first', () => {
@@ -256,6 +271,18 @@ describe('fail-closed tooling errors', () => {
     const { log, text } = makeLog();
     expect(gate.main(buildDir, log)).toBe(2);
     expect(text()).toContain('Expected exactly 1 route key');
+  });
+
+  it.each([
+    ['missing', {}],
+    ['null', { entryJSFiles: null }],
+    ['an array', { entryJSFiles: [] }],
+  ])('exits 2 when entryJSFiles is %s', (_label, manifest) => {
+    writeBuildManifest({ rootMainFiles: [writeChunk('root.js', 10)] });
+    writeRawRouteManifest('foo', '/foo/page', manifest);
+    const { log, text } = makeLog();
+    expect(gate.main(buildDir, log)).toBe(2);
+    expect(text()).toContain('missing or invalid entryJSFiles');
   });
 
   it('exits 2 when a route manifest assigns no route key at all', () => {
