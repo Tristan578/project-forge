@@ -111,3 +111,31 @@ Neon branching allows restoring to any point within the retention window by crea
 - Account deletion endpoint: `DELETE /api/user/delete`
 - Cascading deletes configured via foreign key constraints
 - Published games are unpublished and removed on account deletion
+
+#### Object storage (Cloudflare R2)
+
+The only user-uploaded objects R2 holds are marketplace asset files and their
+previews, written by `POST /api/marketplace/seller/assets/[id]/upload` under the
+key `assets/{sellerId}/{assetId}/{file|preview}/{filename}`. Published-game
+thumbnails are data URLs stored in Postgres, not R2 objects.
+
+- **Timeline.** Objects are deleted synchronously, immediately after the account
+  deletion transaction commits — not on a nightly job. `deleteUserAccount`
+  (`web/src/lib/auth/user-service.ts`) reads the seller's asset URLs before the
+  transaction, then sweeps the resolved keys with `deleteManyFromR2`.
+- **Scope.** Only keys under the departing user's own
+  `assets/{userId}/{assetId}/` prefix are removed. `previewUrl` /
+  `assetFileUrl` are seller-writable through the asset PATCH route, so a stored
+  URL pointing anywhere else is ignored rather than deleted.
+- **Best-effort by design.** A storage failure never fails the deletion: the
+  user's rows are already gone and there is nothing useful to retry. Failures
+  are logged and reported to Sentry with the affected keys.
+- **Reconciliation.** Every orphan is enumerable by its `assets/{userId}/`
+  prefix:
+  `wrangler r2 object list spawnforge-assets --prefix "assets/<userId>/" --remote`,
+  then `wrangler r2 object delete spawnforge-assets/<key> --remote`. A sweep
+  larger than 5000 keys is truncated and logs a "truncated" error to Sentry
+  naming the prefix that still needs this treatment.
+- **Superseded objects.** Re-uploading an asset file under a new filename
+  deletes the object the row previously referenced (same best-effort rules). A
+  re-upload under the same filename overwrites in place and deletes nothing.
