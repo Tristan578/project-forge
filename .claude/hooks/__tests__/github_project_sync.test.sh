@@ -297,25 +297,35 @@ assert_out "reconcile wires the database resolver into classify_drift" "wired" "
 # reconcile now runs detached from session start, so it can overlap a push.
 # They write the same two systems, and reconcile decides from a snapshot of
 # GitHub state that a concurrent push is busy invalidating.
-# Redirect _MAIN_HOOKS to a temp dir first: taking the REAL lock here fails
-# with BlockingIOError whenever a live sync (or a session that parks the lock)
-# already holds it, turning an unrelated background process into a red suite.
+# Redirect the lock paths to a temp dir first: taking the REAL lock here fails
+# whenever a live sync (or a session that parks the lock) already holds it,
+# turning an unrelated background process into a red suite.
+#
+# Patch LOCK_PATH / LOCK_WANTED_PATH, NOT _MAIN_HOOKS. Both are module-level
+# constants resolved from _MAIN_HOOKS at IMPORT time, so reassigning
+# _MAIN_HOOKS afterwards is inert — the module goes on using the real
+# .claude/hooks paths. That mistake did not fail: it passed on a machine whose
+# session was parking the real lock and reported 'ran-anyway' on CI, i.e. it
+# graded the developer's environment rather than the code.
 #
 # The lock is held by a genuine CHILD PROCESS, not by a second descriptor in
 # this one. flock(2) only specifies that a same-process conflict on a second
-# open file description "may be denied" — the kernels disagree, and taking the
-# lock in-process passed on macOS while reporting 'ran-anyway' on the Linux CI
-# runner. A second process is also the situation the lock exists to handle.
+# open file description "may be denied" — the kernels disagree, and a second
+# process is also the situation the lock exists to handle.
 #
-# The verdict carries two witnesses alongside it so this can never pass (or
-# fail) vacuously: 'locked' proves the child really acquired the lock before
-# reconcile was called, and 'denied' proves THIS process is refused the same
-# lock — i.e. the platform honours cross-process flock at all. Without them a
-# green result is indistinguishable from a lock nobody was holding.
+# Three witnesses ship alongside the verdict so it can never pass vacuously:
+# 'locked' proves the child really holds the lock before reconcile is called,
+# 'denied' proves THIS process is refused that same lock (so the platform
+# honours cross-process flock at all, and the path under test is the one the
+# module uses), and 'noted' proves the skip left the lock-wanted note behind —
+# the note is what stops the long reconcile sweep from starving the Stop-hook
+# push it is blocking.
 out="$(run_py "
 import fcntl, pathlib, subprocess, sys, tempfile
-m._MAIN_HOOKS = pathlib.Path(tempfile.mkdtemp())
-lock_path = str(m._MAIN_HOOKS / '.sync-push.lock')
+tmp = pathlib.Path(tempfile.mkdtemp())
+m.LOCK_PATH = tmp / '.sync-push.lock'
+m.LOCK_WANTED_PATH = tmp / '.sync-lock-wanted'
+lock_path = str(m.LOCK_PATH)
 child_src = (
     'import fcntl, os, sys\n'
     'fd = os.open(sys.argv[1], os.O_CREAT | os.O_WRONLY)\n'
@@ -342,9 +352,13 @@ m.reconcile(apply_changes=True)
 child.stdin.write('go')
 child.stdin.close()
 child.wait(timeout=10)
-print('%s+%s+%s' % (handshake, probe, 'ran-anyway' if ran else 'skipped'))
+print('%s+%s+%s+%s' % (
+    handshake,
+    probe,
+    'ran-anyway' if ran else 'skipped',
+    'noted' if m.LOCK_WANTED_PATH.exists() else 'no-note'))
 " | tail -1)"
-assert_out "reconcile skips while another sync holds the lock" "locked+denied+skipped" "$out"
+assert_out "reconcile skips while another sync holds the lock" "locked+denied+skipped+noted" "$out"
 
 # --- session start does not block on the full-repo listing ----------------
 # reconcile lists every issue in the repo (~8k). Run inline it delayed every
