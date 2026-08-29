@@ -61,6 +61,14 @@ pub mod selection;
 pub mod skeletal_animation2d;
 pub mod skeleton2d;
 pub mod snap;
+/// Source-parity gates for every `EntitySnapshot` producer, including the four
+/// under `bridge/` that `cargo test` never compiles.
+///
+/// The file carries its own `#![cfg(test)]`, which is what keeps it out of the
+/// wasm build; repeating the attribute here would be a `duplicated_attribute`
+/// warning, and the inner form is the stronger of the two because it travels
+/// with the file rather than with this declaration.
+mod snapshot_producer_parity_tests;
 pub mod sprite;
 pub mod terrain;
 pub mod tilemap;
