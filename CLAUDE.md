@@ -67,9 +67,15 @@ correct** — do not annotate it as a false positive.
 **Trust model.** Script source is untrusted. It is not only self-authored:
 `ScriptData.source` is serialized into the exported scene JSON
 (`engine/src/bridge/scene_io.rs:150` → `build_scene_file`) and therefore into
-`projects.sceneData`, which `/api/play/[userId]/[slug]/remix` copies verbatim
-into a *different* user's project. A published game's script text can reach a
-stranger's editor and compile there. Tracked at #9455.
+`projects.sceneData`, which `/api/play/[userId]/[slug]/remix` copies into a
+*different* user's project. That copy now passes through
+`quarantineRemixedScripts()` (`web/src/lib/security/remixSanitizer.ts`, #9455),
+which forces every `scriptData.enabled` to `false` — the source text is kept so
+the remixer can read and adapt it, but nothing compiles until they turn it on
+deliberately. **Any new path that moves `sceneData` across a user boundary must
+call that function**; it is the only thing standing between a published game's
+script and a stranger's `Function(...)`. Playing a published game still runs the
+creator's scripts by design — the sandbox below is the only control there.
 
 **Layers that exist today** (defence in depth — NOT a security boundary):
 

