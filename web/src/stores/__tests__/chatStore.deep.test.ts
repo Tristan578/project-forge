@@ -481,9 +481,13 @@ describe('chatStore deep tests', () => {
     it('does nothing for message without tool calls', () => {
       const msg = makeAssistantMessage({ id: 'msg1', toolCalls: undefined });
       useChatStore.setState({ messages: [msg] });
+      const messagesBefore = useChatStore.getState().messages;
 
-      // Should not throw
       useChatStore.getState().batchUndoMessage('msg1');
+
+      // No state update was ever issued — same array reference, untouched.
+      expect(useChatStore.getState().messages).toBe(messagesBefore);
+      expect(useChatStore.getState().messages[0]).toBe(msg);
     });
 
     it('does nothing for message with no undoable completed tools', () => {
