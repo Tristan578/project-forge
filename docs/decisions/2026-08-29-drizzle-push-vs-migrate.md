@@ -64,6 +64,15 @@ either does not exist or does not reflect reality. `migrate` would attempt to ap
 `0000` onward against a database that already has every object, failing on the first
 `CREATE TABLE`.
 
+### 4. This was already learned the hard way
+
+`memory/project_lessons_learned.md` #51 ("Use drizzle-kit push (not migrate) in CD
+when dev uses db:push") records a production deploy that failed at
+`drizzle-kit migrate` — the spinner hung and the step exited 1, because the
+migrations table had no record of schema that `push` had applied. Its prescribed
+fix is exactly the `drizzle-kit push --force` this pipeline uses. Switching to
+`migrate` now would re-open that incident.
+
 ## What we accept by keeping `push`
 
 `push` is a schema-diff tool with three properties that make it unsafe *unsupervised*
