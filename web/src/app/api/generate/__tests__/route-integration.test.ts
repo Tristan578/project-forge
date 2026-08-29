@@ -801,3 +801,124 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     }
   });
 });
+
+// ===========================================================================
+// Response contracts: real handler bodies vs docs/api/openapi.json (#8621)
+// ===========================================================================
+//
+// The suite above asserts individual fields (`data.jobId === 'suno-1'`), which
+// says nothing about the fields it does not name — a route could add, drop or
+// rename anything else and stay green. These tests take the SAME real handler
+// responses and compare their whole property set against the published spec,
+// so the documented shape of every async generate route is enforced here.
+//
+// `diffAgainstSpec` is the load-bearing half: `GenerationJob` declares no
+// `required` and no `additionalProperties: false`, so ajv alone accepts `{}`.
+
+import { diffAgainstSpec, loadOpenApiContract } from '@/test/utils/openApiContract';
+
+describe('generate routes match the published OpenAPI response contract', () => {
+  const contract = loadOpenApiContract();
+
+  /**
+   * @param expectedDivergences Property-set differences this route has TODAY,
+   *   as `missing $.x` / `undocumented $.x`. Asserted with `toEqual`, so both a
+   *   new drift and a fixed drift fail here rather than shipping unnoticed.
+   */
+  function expectContract(
+    routePath: string,
+    status: number,
+    body: unknown,
+    expectedDivergences: string[] = [],
+  ): void {
+    const validate = contract.operation('post', routePath, status);
+    expect(
+      validate(body),
+      `POST ${routePath} ${status} body ${JSON.stringify(body)} `
+        + `violates the spec: ${JSON.stringify(validate.errors)}`,
+    ).toBe(true);
+    expect(
+      diffAgainstSpec(contract.operationSchema('post', routePath, status), body),
+    ).toEqual(expectedDivergences);
+  }
+
+  it('POST /api/generate/music 201 matches GenerationJob', async () => {
+    const { POST } = await import('@/app/api/generate/music/route');
+    const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
+    expect(res.status).toBe(201);
+    expectContract('/api/generate/music', 201, await res.json());
+  });
+
+  it('POST /api/generate/skybox 201 matches GenerationJob', async () => {
+    const { POST } = await import('@/app/api/generate/skybox/route');
+    const res = await POST(makeRequest('http://test/api/generate/skybox', { prompt: 'sunset clouds' }));
+    expect(res.status).toBe(201);
+    expectContract('/api/generate/skybox', 201, await res.json());
+  });
+
+  it('POST /api/generate/texture 201 matches GenerationJob', async () => {
+    const { POST } = await import('@/app/api/generate/texture/route');
+    const res = await POST(makeRequest('http://test/api/generate/texture', { prompt: 'brick wall' }));
+    expect(res.status).toBe(201);
+    expectContract('/api/generate/texture', 201, await res.json());
+  });
+
+  it('POST /api/generate/model 201 matches GenerationJob', async () => {
+    const { POST } = await import('@/app/api/generate/model/route');
+    const res = await POST(makeRequest('http://test/api/generate/model', { prompt: 'red cube', mode: 'text-to-3d' }));
+    expect(res.status).toBe(201);
+    expectContract('/api/generate/model', 201, await res.json());
+  });
+
+  it('POST /api/generate/sprite 201 matches GenerationJob', async () => {
+    const { POST } = await import('@/app/api/generate/sprite/route');
+    const res = await POST(makeRequest('http://test/api/generate/sprite', {
+      prompt: 'hero character', size: '64x64', removeBackground: true,
+    }));
+    expect(res.status).toBe(201);
+    expectContract('/api/generate/sprite', 201, await res.json());
+  });
+
+  it('POST /api/generate/sprite-sheet 201 matches GenerationJob', async () => {
+    const { POST } = await import('@/app/api/generate/sprite-sheet/route');
+    const res = await POST(makeRequest('http://test/api/generate/sprite-sheet', {
+      prompt: 'walk cycle', frameCount: 4, size: '64x64',
+    }));
+    expect(res.status).toBe(201);
+    expectContract('/api/generate/sprite-sheet', 201, await res.json());
+  });
+
+  it('POST /api/generate/tileset-gen 201 matches GenerationJob', async () => {
+    const { POST } = await import('@/app/api/generate/tileset-gen/route');
+    const res = await POST(makeRequest('http://test/api/generate/tileset-gen', {
+      prompt: 'forest floor', tileSize: 32, gridSize: '8x8',
+    }));
+    expect(res.status).toBe(201);
+    expectContract('/api/generate/tileset-gen', 201, await res.json());
+  });
+
+  it('POST /api/generate/sfx 200 matches the documented audio body', async () => {
+    const { POST } = await import('@/app/api/generate/sfx/route');
+    const res = await POST(makeRequest('http://test/api/generate/sfx', { prompt: 'explosion', durationSeconds: 3 }));
+    expect(res.status).toBe(200);
+    expectContract('/api/generate/sfx', 200, await res.json());
+  });
+
+  it('POST /api/generate/voice 200 matches the documented audio body', async () => {
+    const { POST } = await import('@/app/api/generate/voice/route');
+    const res = await POST(makeRequest('http://test/api/generate/voice', { text: 'Hello world' }));
+    expect(res.status).toBe(200);
+    expectContract('/api/generate/voice', 200, await res.json());
+  });
+
+  it('POST /api/generate/model 201 FAILS the contract when the route renames jobId', async () => {
+    // Non-vacuity proof: GenerationJob has no `required` and no
+    // `additionalProperties: false`, so ajv alone passes `{}` and every
+    // assertion above would be a tautology without the property-set diff.
+    const renamed = { id: 'meshy-1', provider: 'meshy', status: 'pending', estimatedSeconds: 60, usageId: 'usage-int' };
+    expect(contract.operation('post', '/api/generate/model', 201)(renamed)).toBe(true);
+    expect(
+      diffAgainstSpec(contract.operationSchema('post', '/api/generate/model', 201), renamed),
+    ).toEqual(['missing $.jobId', 'undocumented $.id']);
+  });
+});
