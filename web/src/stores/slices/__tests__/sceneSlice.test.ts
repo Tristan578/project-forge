@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockDispatch } from './sliceTestTemplate';
 import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
@@ -79,6 +79,19 @@ describe('sceneSlice', () => {
         JSON.stringify({ entities: [{ entityId: 'e1', audioData: { assetId: 'a1' } }] })
       );
       store.getState().newScene();
+
+      expect(takeStagedSceneAudio()).toEqual({});
+    });
+
+    it('drops the stash when the engine refuses the load outright', () => {
+      // Same reasoning as new_scene: a refused load never emits SCENE_LOADED,
+      // so the stash would sit armed and be claimed by the next scene that does.
+      clearStagedSceneAudio();
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      store.getState().loadScene(
+        JSON.stringify({ entities: [{ entityId: 'e1', audioData: { assetId: 'a1' } }] })
+      );
 
       expect(takeStagedSceneAudio()).toEqual({});
     });
