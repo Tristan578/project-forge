@@ -142,14 +142,71 @@ pub(super) fn apply_particle_preset_requests(
     }
 }
 
+/// Burst count used when `burst_particle` arrives without one. Matches the
+/// count the particle inspector's Burst button sends
+/// (`web/src/components/editor/ParticleInspector.tsx`), so an unnumbered burst
+/// from the chat surface behaves like the button.
+const DEFAULT_BURST_COUNT: u32 = 100;
+
 /// System that applies pending particle playback actions (always-active).
-/// Playback is controlled via ParticleEnabled toggle on both platforms.
+///
+/// Playback is expressed as the `ParticleEnabled` marker plus, for a burst, a
+/// one-shot `SpawnerMode`. `sync_hanabi_effects` (WebGPU) watches both and
+/// rebuilds the effect; on WebGL2 the marker is the whole story.
+///
+/// This system used to `clear()` the queue without reading `action`, so
+/// `play_particle`, `stop_particle` and `burst_particle` all answered `Ok` and
+/// did nothing. `core::commands::particles`'
+/// `the_bridge_actually_reads_the_playback_action` fails if it regresses to a
+/// drain — `bridge/` is wasm-only and has no native test to catch it.
 pub(super) fn apply_particle_playback(
     mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(Entity, &EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
 ) {
-    // Playback (play/stop/burst) is handled by toggling ParticleEnabled.
-    // The sync_hanabi_effects system (WebGPU) watches for component changes.
-    pending.particle_playback.clear();
+    for playback in pending.particle_playback.drain(..) {
+        for (entity, entity_id, particle_data, part_enabled) in query.iter() {
+            if entity_id.0 != playback.entity_id {
+                continue;
+            }
+
+            match playback.action.as_str() {
+                "play" => {
+                    // An entity can be asked to play before it has any config;
+                    // give it the default rather than silently doing nothing.
+                    let data = particle_data.cloned().unwrap_or_default();
+                    if particle_data.is_none() {
+                        commands.entity(entity).insert(data.clone());
+                    }
+                    if part_enabled.is_none() {
+                        commands.entity(entity).insert(ParticleEnabled);
+                    }
+                    events::emit_particle_changed(&playback.entity_id, Some(&data), true);
+                }
+                "stop" => {
+                    if part_enabled.is_some() {
+                        commands.entity(entity).remove::<ParticleEnabled>();
+                    }
+                    events::emit_particle_changed(&playback.entity_id, particle_data, false);
+                }
+                "burst" => {
+                    let mut data = particle_data.cloned().unwrap_or_default();
+                    data.spawner_mode = crate::core::particles::SpawnerMode::Burst {
+                        count: playback.burst_count.unwrap_or(DEFAULT_BURST_COUNT),
+                    };
+                    commands
+                        .entity(entity)
+                        .insert(data.clone())
+                        .insert(ParticleEnabled);
+                    events::emit_particle_changed(&playback.entity_id, Some(&data), true);
+                }
+                other => {
+                    tracing::warn!("Unknown particle playback action: {}", other);
+                }
+            }
+            break;
+        }
+    }
 }
 
 /// Emit particle changed events on selection changes and particle data changes.
