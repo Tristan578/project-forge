@@ -74,6 +74,51 @@ describe('R2 storage client', () => {
       // Should fail fast — no upload attempt when CDN_URL is missing
       expect(mockSend).not.toHaveBeenCalled();
     });
+
+    it('does not double the scheme when CDN_URL already carries one', async () => {
+      // The old code prepended `https://` unconditionally, minting
+      // `https://https://cdn.test.com/<key>`. That URL parses, but its host is
+      // `https`, so resolveOwnedAssetKey could never match it back to a key.
+      process.env.CDN_URL = 'https://cdn.test.com';
+      mockSend.mockResolvedValue({});
+      const { uploadToR2 } = await import('../r2');
+
+      const result = await uploadToR2('test/key.png', Buffer.from('data'), 'image/png');
+
+      expect(result.url).toBe('https://cdn.test.com/test/key.png');
+      expect(result.url).not.toContain('https://https');
+    });
+
+    it('throws when CDN_URL is set but unparseable', async () => {
+      process.env.CDN_URL = 'http://[not a host]';
+      mockSend.mockResolvedValue({});
+      const { uploadToR2 } = await import('../r2');
+
+      await expect(uploadToR2('test/key.png', Buffer.from('data'), 'image/png')).rejects.toThrow(
+        'CDN_URL not configured'
+      );
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('uploadToR2 <-> resolveOwnedAssetKey round trip', () => {
+    // The two halves have to agree on how CDN_URL is read. When they disagreed,
+    // every cleanup for an affected asset no-opped and the object was orphaned
+    // in R2 with nothing logged. These assert the agreement directly, for both
+    // spellings of CDN_URL, instead of testing each half against a fixture.
+    it.each(['cdn.test.com', 'https://cdn.test.com'])(
+      'resolves the key back out of a minted URL when CDN_URL is %s',
+      async (cdn) => {
+        process.env.CDN_URL = cdn;
+        mockSend.mockResolvedValue({});
+        const { uploadToR2, buildAssetKey, resolveOwnedAssetKey } = await import('../r2');
+
+        const key = buildAssetKey('s1', 'a1', 'model.glb', 'file');
+        const { url } = await uploadToR2(key, Buffer.from('data'), 'model/gltf-binary');
+
+        expect(resolveOwnedAssetKey(url, 's1', 'a1')).toBe(key);
+      }
+    );
   });
 
   describe('withStatusSidecars', () => {
@@ -295,13 +340,30 @@ describe('R2 storage client', () => {
       expect(resolveOwnedAssetKey(undefined, 's1', 'a1')).toBeNull();
     });
 
-    it('returns null when CDN_URL is not configured', async () => {
+    it('returns null AND warns when CDN_URL is not configured', async () => {
+      // A URL that does not match is normal input; an unconfigured CDN is our
+      // own fault and disables cleanup for every seller at once. Only the second
+      // one is worth a log line, so silence there is the actual defect.
       delete process.env.CDN_URL;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { resolveOwnedAssetKey } = await import('../r2');
 
       expect(
         resolveOwnedAssetKey('https://cdn.test.com/assets/s1/a1/file/x.glb', 's1', 'a1')
       ).toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('CDN_URL'));
+      warn.mockRestore();
+    });
+
+    it('does not warn for a URL that simply belongs to another host', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { resolveOwnedAssetKey } = await import('../r2');
+
+      expect(
+        resolveOwnedAssetKey('https://evil-cdn.test.com/assets/s1/a1/file/x.glb', 's1', 'a1')
+      ).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
     });
   });
 

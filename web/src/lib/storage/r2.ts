@@ -38,8 +38,27 @@ function getBucket(): string {
   return bucket;
 }
 
-function getCdnUrl(): string {
-  return process.env.CDN_URL ?? '';
+/**
+ * The CDN host for asset URLs, with any configured scheme normalised away.
+ *
+ * `CDN_URL` is documented as a bare hostname, and both sides of this module have
+ * to agree on that. They did not: `uploadToR2` unconditionally prepended
+ * `https://`, so a value like `https://cdn.example.com` minted
+ * `https://https://cdn.example.com/<key>`. That URL still parses, but its host
+ * is `https`, so `resolveOwnedAssetKey` could never match it back to a key and
+ * every later cleanup for that asset silently no-opped, orphaning the object in
+ * R2. Normalising in one place is what keeps the mint and the match symmetric.
+ *
+ * Returns '' when unset or unparseable; callers treat that as "not configured".
+ */
+function getCdnHost(): string {
+  const raw = (process.env.CDN_URL ?? '').trim();
+  if (!raw) return '';
+  try {
+    return new URL(raw.includes('://') ? raw : `https://${raw}`).host;
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -55,10 +74,10 @@ export async function uploadToR2(
   const r2 = getR2Client();
   const bucket = getBucket();
 
-  const cdn = getCdnUrl();
+  const cdn = getCdnHost();
   if (!cdn) {
     throw new Error(
-      'CDN_URL not configured. Cannot produce a valid asset URL without it.'
+      'CDN_URL not configured, or not a parseable host. Cannot produce a valid asset URL without it.'
     );
   }
 
@@ -202,21 +221,27 @@ export function resolveOwnedAssetKey(
 ): string | null {
   if (!url || !sellerId || !assetId) return null;
 
-  const cdn = getCdnUrl();
-  if (!cdn) return null;
+  const cdnHost = getCdnHost();
+  if (!cdnHost) {
+    // Distinct from a URL that merely fails to match: this is a fault on our
+    // side, and it makes cleanup no-op for every asset of every seller. Staying
+    // silent here is what turns one bad env var into unbounded orphaned objects.
+    console.warn(
+      '[r2] CDN_URL is unset or unparseable — cannot resolve owned asset keys, so asset cleanup will delete nothing.'
+    );
+    return null;
+  }
 
-  let assetHostname: string;
-  let cdnHostname: string;
+  let parsed: URL;
   try {
-    assetHostname = new URL(url).hostname;
-    cdnHostname = new URL(cdn.includes('://') ? cdn : `https://${cdn}`).hostname;
+    parsed = new URL(url);
   } catch {
     return null;
   }
-  if (!assetHostname || assetHostname !== cdnHostname) return null;
+  if (!parsed.host || parsed.host !== cdnHost) return null;
 
   // `new URL()` already normalises away any `..` segments in the path.
-  const key = new URL(url).pathname.replace(/^\/+/, '');
+  const key = parsed.pathname.replace(/^\/+/, '');
   if (!key.startsWith(`assets/${sellerId}/${assetId}/`)) return null;
 
   return key;
