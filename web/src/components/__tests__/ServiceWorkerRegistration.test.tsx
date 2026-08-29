@@ -32,14 +32,25 @@ describe('ServiceWorkerRegistration', () => {
   });
 
   it('does not register SW when serviceWorker is not in navigator', () => {
+    // Must run under production — otherwise the NODE_ENV guard alone would
+    // short-circuit the effect and this test wouldn't exercise the
+    // serviceWorker-presence guard it claims to test.
+    vi.stubEnv('NODE_ENV', 'production');
+
     const originalDescriptor = Object.getOwnPropertyDescriptor(navigator, 'serviceWorker');
+    // A real unsupported browser has no `serviceWorker` key at all — setting
+    // the value to `undefined` alone leaves `'serviceWorker' in navigator`
+    // true, so the property must actually be deleted to simulate that.
     Object.defineProperty(navigator, 'serviceWorker', {
       value: undefined,
       configurable: true,
     });
+    delete (navigator as { serviceWorker?: unknown }).serviceWorker;
 
-    render(<ServiceWorkerRegistration />);
-    // No crash — component guards against missing serviceWorker API
+    // Without the `"serviceWorker" in navigator` guard, this would throw
+    // synchronously inside the effect (`Cannot read properties of undefined
+    // (reading 'register')`).
+    expect(() => render(<ServiceWorkerRegistration />)).not.toThrow();
 
     // Restore
     if (originalDescriptor) {
