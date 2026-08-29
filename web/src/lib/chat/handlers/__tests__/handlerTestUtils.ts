@@ -125,7 +125,7 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
     setScenes: vi.fn(),
     startSceneTransition: vi.fn().mockResolvedValue(undefined),
     setDefaultTransition: vi.fn(),
-    loadTemplate: vi.fn().mockResolvedValue(undefined),
+    loadTemplate: vi.fn().mockResolvedValue({ success: true, entityCount: 0, skippedEntityIds: [] }),
 
     // Input
     inputBindings: [],

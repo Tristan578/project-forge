@@ -317,8 +317,26 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   load_template: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ templateId: z.string().min(1) }), args);
     if (p.error) return p.error;
-    await ctx.store.loadTemplate(p.data.templateId);
-    return { success: true, result: { message: `Loaded template: ${p.data.templateId}` } };
+    // `loadTemplate` resolves only once the entities are in the scene graph, and
+    // reports the ways a load can fail silently: an unknown id, an engine that
+    // is not attached yet, and a scene the engine acknowledged but never
+    // applied. Anything short of an explicit success is a failure here — this
+    // handler used to discard the result and report success unconditionally.
+    const result = await ctx.store.loadTemplate(p.data.templateId);
+    if (!result?.success) {
+      return { success: false, error: result?.error ?? `Failed to load template: ${p.data.templateId}` };
+    }
+    const skipped = result.skippedEntityIds.length;
+    return {
+      success: true,
+      result: {
+        message: `Loaded template: ${p.data.templateId} (${result.entityCount} entities${
+          skipped > 0 ? `, ${skipped} unsupported entities skipped` : ''
+        })`,
+        entityCount: result.entityCount,
+        skippedEntityIds: result.skippedEntityIds,
+      },
+    };
   },
 
   get_template_info: async (args, _ctx): Promise<ExecutionResult> => {

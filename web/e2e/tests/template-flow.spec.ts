@@ -16,8 +16,10 @@ import {
  * Tagged @ui — these tests do not require the WASM engine build. They use editor.loadPage() with
  * __SKIP_ENGINE and verify UI state + Zustand store population.
  *
- * Template loading (loadTemplate) is a no-op in the current stub implementation, so tests that
- * rely on sceneGraph population from a real load are marked with test.skip() until the stub is wired.
+ * `loadTemplate` needs a live engine to put entities in the scene, so the two halves are split:
+ * the @ui @dev tests below run with __SKIP_ENGINE and assert the gallery's behaviour when no
+ * engine is attached (it must report the failure, not close), and the @engine describe at the
+ * bottom loads real WASM and asserts the scene graph actually fills up.
  */
 test.describe('Template Gallery @ui @dev', () => {
   test('template gallery renders with available templates', async ({ page }) => {
@@ -307,7 +309,11 @@ test.describe('Template selection flow @ui @dev', () => {
     await expect(welcomeModal).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
-  test('selecting a named template closes the gallery', async ({ page }) => {
+  test('selecting a template with no engine attached reports the failure instead of closing', async ({ page }) => {
+    // These specs run with __SKIP_ENGINE, so no dispatcher is ever attached and
+    // the load genuinely cannot happen. The gallery used to close anyway and
+    // fire TEMPLATE_USED / TEMPLATE_APPLIED, leaving the user on an empty canvas
+    // with no indication anything had gone wrong.
     await openTemplateGallery(page);
 
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
@@ -327,58 +333,94 @@ test.describe('Template selection flow @ui @dev', () => {
     const templateName = await firstTemplate.locator('h3').textContent();
     await firstTemplate.click();
 
-    // Both modals should close after selection
-    await expect(galleryDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
-    const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
-    await expect(welcomeModal).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await expect(galleryDialog.getByRole('alert')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await expect(galleryDialog).toBeVisible();
 
     // The selected template name should be non-empty (guards against empty card bug)
     expect(templateName?.trim().length).toBeGreaterThan(0);
   });
 
-  test('selecting a template populates the store (requires loadTemplate wiring)', async ({ page }) => {
-    // loadTemplate is currently a no-op stub in sceneSlice.ts (line 169).
-    // This test exercises the store interaction path and will pass once the stub is wired
-    // to dispatch actual scene commands. Skip until then.
+  test('the gallery stays usable after a failed load so the user can retry', async ({ page }) => {
     await openTemplateGallery(page);
 
     const galleryDialog = page.locator('[role="dialog"][aria-labelledby="template-gallery-title"]');
     const templateCards = galleryDialog.locator('button').filter({ has: page.locator('h3') });
-    const count = await templateCards.count();
 
-    if (count < 2) {
+    if ((await templateCards.count()) < 2) {
       test.skip(true, 'Template cards not available');
       return;
     }
 
-    const firstTemplate = templateCards.nth(1);
-    await firstTemplate.click();
+    await templateCards.nth(1).click();
+    await expect(galleryDialog.getByRole('alert')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
-    // Wait for gallery to close
-    await expect(galleryDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    // Not a dead end: the cards are re-enabled once the attempt settles, and the
+    // gallery can still be dismissed.
+    await expect(templateCards.nth(1)).toBeEnabled({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await page.keyboard.press('Escape');
+    await expect(galleryDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
+  });
+});
 
-    // Wait for store then read sceneGraph node count
+test.describe('Template application @engine', () => {
+  // The @ui specs above run without WASM, so they can only prove the failure
+  // path. This one needs the real engine: `loadTemplate` translates the template
+  // into an engine scene file, issues one `load_scene`, and resolves only once
+  // the entities come back through SCENE_GRAPH_UPDATE. Anything short of that —
+  // a scene the engine accepts and silently discards, most of all — must not
+  // report success.
+  test('loading a template fills the scene graph', async ({ page, editor }) => {
+    await editor.load();
+
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => !!(window as any).__EDITOR_STORE,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
-    const nodeCount = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
-      const state = store?.getState();
-      return state ? Object.keys(state.sceneGraph.nodes).length : 0;
+      return await store.getState().loadTemplate('2d-platformer');
     });
 
-    // loadTemplate is a no-op stub — until wired, node count will be 0 or 1 (camera only).
-    // Once wired to real scene load, this should be > 1.
-    // For now we document the expected eventual value.
-    if (nodeCount <= 1) {
-      test.skip(true, 'loadTemplate stub not yet wired — sceneGraph not populated (PF ticket: wire loadTemplate in sceneSlice)');
-    } else {
-      expect(nodeCount).toBeGreaterThan(1);
-    }
+    expect(result).toMatchObject({ success: true });
+
+    const nodeCount = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const state = (window as any).__EDITOR_STORE.getState();
+      return Object.keys(state.sceneGraph.nodes).length;
+    });
+    expect(nodeCount).toBeGreaterThan(1);
+    expect(nodeCount).toBe((result as { entityCount: number }).entityCount);
+  });
+
+  test('an unknown template id fails without touching the scene', async ({ page, editor }) => {
+    await editor.load();
+
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => !!(window as any).__EDITOR_STORE,
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
+    );
+
+    const before = await page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Object.keys((window as any).__EDITOR_STORE.getState().sceneGraph.nodes).length,
+    );
+
+    const result = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await (window as any).__EDITOR_STORE.getState().loadTemplate('not-a-real-template');
+    });
+
+    expect(result).toMatchObject({ success: false });
+
+    const after = await page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Object.keys((window as any).__EDITOR_STORE.getState().sceneGraph.nodes).length,
+    );
+    expect(after).toBe(before);
   });
 });
 

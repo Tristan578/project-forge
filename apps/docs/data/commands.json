@@ -8066,7 +8066,13 @@
               "runner",
               "shooter",
               "puzzle",
-              "explorer"
+              "explorer",
+              "2d-platformer",
+              "2d-topdown",
+              "2d-shmup",
+              "2d-puzzle",
+              "2d-fighter",
+              "2d-metroidvania"
             ],
             "description": "Template ID to load"
           }
