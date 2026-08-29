@@ -511,15 +511,14 @@ describe('Script Sandbox Security', () => {
     });
 
     it('should pass dt to onUpdate', () => {
+      // dt is read back through the hook's return value. The previous version
+      // wrote it into a closure the harness never returns and then asserted only
+      // that onUpdate was defined, so it never checked dt at all (#9443).
       const result = compileSandboxed(`
-        let dt_value = 0;
-        function onUpdate(dt) { dt_value = dt; }
+        function onUpdate(dt) { return dt; }
       `, {});
-      // onUpdate receives dt from the tick message
-      if (result.onUpdate) {
-        result.onUpdate(0.016);
-      }
-      expect(result.onUpdate).toBeDefined();
+      expect(result.onUpdate).toBeTypeOf('function');
+      expect(result.onUpdate(0.016)).toBe(0.016);
     });
   });
 
@@ -657,18 +656,21 @@ describe('Script Sandbox Security', () => {
       };
 
       const result = compileSandboxed(`
-        let errorCaught = false;
         function onStart() {
           try {
             forge.nonExistentApi.doSomething();
-          } catch (_e) {
-            errorCaught = true;
+            return 'NO-THROW';
+          } catch (e) {
+            return e.constructor.name;
           }
         }
       `, mockForge);
 
-      // Should not throw at compilation or execution — error is caught in script
+      // Should not throw at compilation or execution — the error is a TypeError
+      // the script itself catches, which is what the closure flag used to record
+      // without anyone reading it (#9443).
       expect(() => result.onStart()).not.toThrow();
+      expect(result.onStart()).toBe('TypeError');
     });
 
     it('should not leak forge API between scripts', () => {
