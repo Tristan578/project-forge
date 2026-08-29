@@ -9,6 +9,14 @@ import {
   type WasmLoadMetric,
 } from '@/lib/monitoring/cdnAnalytics';
 
+// `reportWasmLoadMetric` is called from inside `fetchWasmWithMetrics` via a
+// same-module reference, so a namespace spy cannot intercept it. Its one
+// observable effect outside development is the Vercel Analytics `track` call,
+// which is what lets these tests assert the value the production code actually
+// computed rather than recomputing the expression themselves.
+const track = vi.fn();
+vi.mock('@vercel/analytics', () => ({ track: (...args: unknown[]) => track(...args) }));
+
 // ---------------------------------------------------------------------------
 // readCfCacheStatus
 // ---------------------------------------------------------------------------
@@ -194,6 +202,7 @@ describe('fetchWasmWithMetrics', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    track.mockClear();
     fetchSpy = vi.spyOn(globalThis, 'fetch');
     // Provide a minimal performance.now stub since vitest/node doesn't always have it
     if (!globalThis.performance) {
@@ -236,26 +245,27 @@ describe('fetchWasmWithMetrics', () => {
     );
   });
 
-  it('computes cdnEnabled=true for external CDN URLs', async () => {
+  it('reports cdnEnabled=true for an external CDN URL', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('ok', { status: 200 }));
-    // External URL doesn't start with '/' or window.location.origin
     const result = await fetchWasmWithMetrics('https://cdn.example.com/engine.wasm', 'webgpu', 0);
     expect(result.status).toBe(200);
-    // The cdnEnabled logic: !url.startsWith('/') && !url.startsWith(window.location.origin)
-    // For 'https://cdn.example.com/...' => cdnEnabled = true
-    // We verify indirectly via the metric — the key assertion is that the function
-    // correctly classifies external URLs. Direct assertion via URL check:
-    const url = 'https://cdn.example.com/engine.wasm';
-    expect(!url.startsWith('/') && !url.startsWith(window.location.origin)).toBe(true);
+    await vi.waitFor(() => expect(track).toHaveBeenCalledTimes(1));
+    expect(track).toHaveBeenCalledWith('wasm-load', expect.objectContaining({ cdnEnabled: true }));
   });
 
-  it('computes cdnEnabled=false for same-origin paths', async () => {
+  it('reports cdnEnabled=false for a same-origin path', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('ok', { status: 200 }));
     const result = await fetchWasmWithMetrics('/engine-pkg-webgpu/engine_bg.wasm', 'webgpu', 0);
     expect(result.status).toBe(200);
-    // Same-origin URL starts with '/' => cdnEnabled = false
-    const url = '/engine-pkg-webgpu/engine_bg.wasm';
-    expect(!url.startsWith('/') && !url.startsWith(window.location.origin)).toBe(false);
+    await vi.waitFor(() => expect(track).toHaveBeenCalledTimes(1));
+    expect(track).toHaveBeenCalledWith('wasm-load', expect.objectContaining({ cdnEnabled: false }));
+  });
+
+  it('reports cdnEnabled=false for an absolute URL on the page origin', async () => {
+    fetchSpy.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    await fetchWasmWithMetrics(`${window.location.origin}/engine_bg.wasm`, 'webgl2', 0);
+    await vi.waitFor(() => expect(track).toHaveBeenCalledTimes(1));
+    expect(track).toHaveBeenCalledWith('wasm-load', expect.objectContaining({ cdnEnabled: false }));
   });
 
   describe('cache status detection', () => {
