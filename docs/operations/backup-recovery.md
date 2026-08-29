@@ -83,7 +83,7 @@ Neon branching allows restoring to any point within the retention window by crea
 
 | Test | Frequency | Procedure |
 |------|-----------|-----------|
-| PITR branch creation | Quarterly | Create a Neon branch from 24h ago, verify data integrity, drop branch |
+| PITR branch creation | Monthly (automated, `pitr-verify.yml`) | Create a Neon branch from the oldest point still inside the plan's PITR retention window (6h today), verify data integrity, drop branch |
 | WASM rebuild from source | Quarterly | Run `build_wasm.ps1`, verify all 4 variants build successfully |
 | Vercel rollback | Quarterly | Promote a previous deployment, verify functionality, re-promote current |
 | Full DR drill | Annually | Simulate complete DB failure, execute PITR, verify RTO < 4 hours |
