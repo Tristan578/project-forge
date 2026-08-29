@@ -791,11 +791,13 @@ mod tests {
     #[test]
     fn every_dispatch_arm_is_covered() {
         assert_arm_coverage(
-            "animation",
+            "core/commands/animation.rs",
             MODULE_SOURCE,
             DISPATCH_MARKER,
             &tested_arms(),
-            21,
+            // A tripwire, not the arm count: a deleted arm has to be caught by
+            // the stale-name check below, which names it.
+            15,
         );
     }
 }

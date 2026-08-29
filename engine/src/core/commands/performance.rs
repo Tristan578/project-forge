@@ -528,11 +528,13 @@ mod tests {
     #[test]
     fn every_dispatch_arm_is_covered() {
         assert_arm_coverage(
-            "performance",
+            "core/commands/performance.rs",
             MODULE_SOURCE,
             DISPATCH_MARKER,
             TESTED_ARMS,
-            7,
+            // A tripwire, not the arm count: a deleted arm has to be caught by
+            // the stale-name check below, which names it.
+            5,
         );
     }
 
