@@ -152,10 +152,17 @@ nothing to roll back. Either:
 
 - change the schema so the diff is non-destructive (add a new column, backfill,
   drop the old one in a later deploy), or
-- approve it deliberately:
-  - re-run the workflow via **Run workflow** with
-    `allow_destructive_migration = true`, or
-  - push a commit whose message contains `[allow-destructive-migration]`.
+- approve it deliberately. Pick the route that matches how the run starts —
+  each approval is read only on its own trigger, so they are alternatives, not
+  two levers you can mix:
+  - **Run workflow** (`workflow_dispatch`) with
+    `allow_destructive_migration = true`. Use this to re-approve a run that
+    already blocked. The commit-message marker is *not* read on this trigger.
+  - **push** a commit to `main` whose message contains
+    `[allow-destructive-migration]`. The input is not read on this trigger.
+
+  Either way an unapproved run fails closed — the gate blocks and production is
+  never touched.
 
 Approving means accepting that the snapshot branch is the only way back.
 

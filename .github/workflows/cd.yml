@@ -969,9 +969,18 @@ jobs:
         id: db-gate
         if: contains(needs.check-changes.outputs.web-changed-files, 'db/schema')
         env:
-          # Two deliberate approval routes, both requiring a human act:
-          #   * re-run the workflow with the allow_destructive_migration input
-          #   * push a commit whose message contains [allow-destructive-migration]
+          # Two deliberate approval routes, both requiring a human act. Each
+          # belongs to ONE trigger and is complete on its own -- they are
+          # alternatives, not a pair of levers that both read on every run:
+          #   * workflow_dispatch: set the allow_destructive_migration input.
+          #     `github.event.head_commit` is null on this trigger, so the
+          #     commit-message half is dead here BY DESIGN; the input is the
+          #     approval.
+          #   * push: a commit message containing [allow-destructive-migration].
+          #     `github.event.inputs` is null on this trigger, so the input half
+          #     is dead here, and the message is the approval.
+          # An unapproved run fails CLOSED: the gate blocks and production is
+          # never touched. There is no combination that silently approves.
           # The guard demands the exact string "true"; everything else blocks.
           ALLOW_DESTRUCTIVE_MIGRATION: ${{ github.event.inputs.allow_destructive_migration == 'true' || contains(github.event.head_commit.message, '[allow-destructive-migration]') }}
         run: |
