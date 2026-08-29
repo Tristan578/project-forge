@@ -1335,39 +1335,37 @@ describe('buildPlan — the deferred feel pass (PF-1226)', () => {
    * silence. DEPENDSON is what makes a failed enablement stop the pass instead
    * of half-tuning the scene; it only gates, it never reorders.
    */
-  function expectFeelPassAfterEveryEnable(
-    plan: { steps: PlanStep[] },
-    expectedEnableCount: number,
-    expectedFeelCount: number,
-  ) {
+  function feelPassShape(plan: { steps: PlanStep[] }) {
     const enableIndices = indicesOf(plan, 'physics_enable');
     const feelIndices = indicesOf(plan, 'physics_profile');
     const enableSteps = stepsOf(plan, 'physics_enable');
-
-    // Fail closed: a plan that stopped planning either step would satisfy
-    // "every profile is after every enable" vacuously.
-    expect(enableIndices).toHaveLength(expectedEnableCount);
-    expect(feelIndices).toHaveLength(expectedFeelCount);
-
-    for (let f = 0; f < feelIndices.length; f += 1) {
-      for (let e = 0; e < enableIndices.length; e += 1) {
-        expect(
-          feelIndices[f],
-          `physics_profile at ${feelIndices[f]} runs before physics_enable at ${enableIndices[e]}`,
-        ).toBeGreaterThan(enableIndices[e]);
-      }
-    }
-
     const feelSteps = stepsOf(plan, 'physics_profile');
-    for (let f = 0; f < feelSteps.length; f += 1) {
-      for (let e = 0; e < enableSteps.length; e += 1) {
-        expect(
-          feelSteps[f].dependsOn,
-          'physics_profile is not gated on every physics_enable',
-        ).toContain(enableSteps[e].id);
-      }
-    }
+
+    return {
+      // Fail closed: a plan that stopped planning either step would satisfy
+      // "every profile is after every enable" vacuously, so the counts are
+      // part of the asserted shape rather than a separate precondition.
+      enableCount: enableIndices.length,
+      feelCount: feelIndices.length,
+      // `runPipeline` executes in array order, so a profile step sitting
+      // before an enablement step resolves nothing for it and that geometry
+      // keeps default friction in silence.
+      feelStepsRunningBeforeAnEnable: feelSteps
+        .filter((_, f) => enableIndices.some((e) => feelIndices[f] < e))
+        .map((step) => step.id),
+      // dependsOn is what makes a failed enablement stop the pass instead of
+      // half-tuning the scene; it only gates, it never reorders.
+      feelStepsNotGatedOnEveryEnable: feelSteps
+        .filter((step) => enableSteps.some((enable) => !step.dependsOn.includes(enable.id)))
+        .map((step) => step.id),
+    };
   }
+
+  /** The shape a correct plan has, whatever the step counts are. */
+  const feelPassIsCorrect = {
+    feelStepsRunningBeforeAnEnable: [],
+    feelStepsNotGatedOnEveryEnable: [],
+  };
 
   it('holds when the GDD lists world BEFORE movement', () => {
     const gdd = makeGdd({
@@ -1376,7 +1374,7 @@ describe('buildPlan — the deferred feel pass (PF-1226)', () => {
     const plan = buildPlan(gdd, 'proj-1', 'creator', 10000);
 
     // Two enablement steps: the Phase 2.5 cast, and the geometry `world` mints.
-    expectFeelPassAfterEveryEnable(plan, 2, 1);
+    expect(feelPassShape(plan)).toEqual({ enableCount: 2, feelCount: 1, ...feelPassIsCorrect });
   });
 
   it('holds when the GDD lists movement BEFORE world', () => {
@@ -1387,7 +1385,7 @@ describe('buildPlan — the deferred feel pass (PF-1226)', () => {
 
     // The shape the `crystalRun3d()` fixture happens to have, asserted here so
     // the pair is visible: the invariant must not depend on GDD listing order.
-    expectFeelPassAfterEveryEnable(plan, 2, 1);
+    expect(feelPassShape(plan)).toEqual({ enableCount: 2, feelCount: 1, ...feelPassIsCorrect });
   });
 
   it('holds when there is no world system at all', () => {
@@ -1397,7 +1395,7 @@ describe('buildPlan — the deferred feel pass (PF-1226)', () => {
     // Only the Phase 2.5 enablement exists. The deferral must still apply —
     // an implementation that deferred only when a second enablement was
     // present would pass every other case here.
-    expectFeelPassAfterEveryEnable(plan, 1, 1);
+    expect(feelPassShape(plan)).toEqual({ enableCount: 1, feelCount: 1, ...feelPassIsCorrect });
   });
 
   it('holds for every feel pass when the GDD declares several movement systems', () => {
@@ -1413,7 +1411,7 @@ describe('buildPlan — the deferred feel pass (PF-1226)', () => {
     // An LLM-authored GDD can name the category twice, and each one plans its
     // own feel pass. Deferring the first and inlining the rest would leave the
     // second tuning geometry that has not been enabled yet.
-    expectFeelPassAfterEveryEnable(plan, 2, 2);
+    expect(feelPassShape(plan)).toEqual({ enableCount: 2, feelCount: 2, ...feelPassIsCorrect });
   });
 
   it('runs the feel pass after the character rig it now merges onto', () => {

@@ -538,8 +538,15 @@ describe('audioManager - Advanced', () => {
     });
 
     it('stopAdaptiveMusic is safe for unknown track', () => {
-      // Should not throw
-      audioManager.stopAdaptiveMusic('nonexistent');
+      audioManager.setAdaptiveMusic('battle', [
+        { name: 'drums', assetId: 'drums-asset' },
+      ], { initialIntensity: 0.4 });
+
+      expect(() => audioManager.stopAdaptiveMusic('nonexistent')).not.toThrow();
+
+      // The `if (!track) return` guard means the registered track is untouched.
+      expect(getInternal().adaptiveTracks.has('battle')).toBe(true);
+      expect(audioManager.getMusicIntensity('battle')).toBe(0.4);
     });
 
     it('replaces existing track with same ID', () => {
@@ -775,8 +782,14 @@ describe('audioManager - Advanced', () => {
     });
 
     it('deleteBus does nothing for non-existent bus', () => {
-      // Should not throw
-      audioManager.deleteBus('nonexistent');
+      audioManager.createBus('keep', 0.6);
+      const busesBefore = Array.from(getInternal().buses.keys()).sort();
+
+      expect(() => audioManager.deleteBus('nonexistent')).not.toThrow();
+
+      // "Does nothing" means the bus map is byte-for-byte the same afterwards.
+      expect(Array.from(getInternal().buses.keys()).sort()).toEqual(busesBefore);
+      expect(audioManager.getBusVolume('keep')).toBe(0.6);
     });
 
     it('deleteBus removes bus from internal map', () => {
@@ -839,8 +852,13 @@ describe('audioManager - Advanced', () => {
     });
 
     it('cancelOneShot is safe for nonexistent ID', () => {
-      // Should not throw
-      audioManager.cancelOneShot('nonexistent');
+      const live = audioManager.playOneShot('shot-asset');
+
+      expect(() => audioManager.cancelOneShot('nonexistent')).not.toThrow();
+
+      // An unknown id must not disturb the one-shots that ARE playing.
+      expect(getInternal().oneShotInstances.has(live)).toBe(true);
+      expect(getInternal().oneShotInstances.size).toBe(1);
     });
 
     it('cancelAllOneShots clears all', () => {

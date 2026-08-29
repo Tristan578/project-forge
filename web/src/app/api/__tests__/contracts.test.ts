@@ -74,22 +74,35 @@ vi.mock('@/lib/logging/logger', () => ({
   },
 }));
 
+// Every response minted by the mocked auth gate carries this header. A route
+// cannot invent it, so seeing it on the handler's return value proves the
+// route SHORT-CIRCUITED on the gate rather than falling through and answering
+// the request itself. That short-circuit is the production behaviour these
+// tests can actually observe — the 401 body below is the mock's stand-in, so
+// asserting its shape alone would only be asserting this literal.
+const AUTH_GATE_MARKER = 'x-test-auth-gate';
+const authGateResponse = () =>
+  new Response(JSON.stringify({ error: 'Unauthorized' }), {
+    status: 401,
+    headers: { [AUTH_GATE_MARKER]: '1' },
+  });
+
 vi.mock('@/lib/auth/api-auth', () => ({
   // Use mockImplementation to return a fresh Response each call (body stream is single-read)
   authenticateRequest: vi.fn().mockImplementation(async () => ({
     ok: false,
-    response: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+    response: authGateResponse(),
   })),
   authenticateClerkSession: vi.fn().mockImplementation(async () => ({
     ok: false,
-    response: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+    response: authGateResponse(),
   })),
 }));
 
 vi.mock('@/lib/api/middleware', () => ({
   withApiMiddleware: vi.fn().mockImplementation(async () => ({
     // Return a fresh Response each time so the body stream is not exhausted
-    error: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+    error: authGateResponse(),
     authContext: null,
   })),
 }));
@@ -613,9 +626,12 @@ describe('Auth-gated routes return Error schema on 401', () => {
   });
 
   /**
-   * Helper: call a route handler, assert 401 status and Error schema compliance.
+   * Call a route handler unauthenticated and REPORT what it did. Every
+   * assertion lives at the call site so each `it` carries its own — a helper
+   * that asserts internally leaves the test body empty, and an accidentally
+   * un-awaited call would then pass with nothing checked.
    */
-  async function assert401ErrorSchema(
+  async function callUnauthenticated(
     importPath: string,
     method: 'GET' | 'POST',
     url: string,
@@ -623,62 +639,97 @@ describe('Auth-gated routes return Error schema on 401', () => {
   ) {
     const mod = await import(importPath);
     const handler = mod[method];
-    expect(handler).toBeDefined();
+    if (typeof handler !== 'function') {
+      return { handlerExported: false, status: null, nonConformantBody: null };
+    }
 
     const req = method === 'GET'
       ? makeGetRequest(url)
       : makePostRequest(url, body ?? {});
     const res = await handler(req);
 
-    expect(res.status).toBe(401);
     const json = await res.json() as Record<string, unknown>;
-    const valid = errorValidator(json);
-    expect(valid, `Response ${JSON.stringify(json)} does not match Error schema`).toBe(true);
+    return {
+      handlerExported: true,
+      // The load-bearing fact: the route handed back the gate's own response.
+      // Without this a route could drop `if (mid.error) return mid.error` and
+      // still be graded on a status the test itself supplied.
+      shortCircuitedOnAuthGate: res.headers.get(AUTH_GATE_MARKER) === '1',
+      status: res.status as number | null,
+      // null when the body matches the Error schema; the offending body
+      // otherwise, so a failure diff shows what the route actually returned.
+      nonConformantBody: errorValidator(json) ? null : json,
+    };
   }
 
+  /** What an auth-gated route must do for an unauthenticated caller. */
+  const REJECTED_WITH_ERROR_SCHEMA = {
+    handlerExported: true,
+    shortCircuitedOnAuthGate: true,
+    status: 401,
+    nonConformantBody: null,
+  };
+
   it('GET /api/projects returns 401 with Error schema', async () => {
-    await assert401ErrorSchema('@/app/api/projects/route', 'GET', 'http://localhost/api/projects');
+    expect(await callUnauthenticated('@/app/api/projects/route', 'GET', 'http://localhost/api/projects')).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('POST /api/projects returns 401 with Error schema', async () => {
-    await assert401ErrorSchema('@/app/api/projects/route', 'POST', 'http://localhost/api/projects', { name: 'Test' });
+    expect(await callUnauthenticated('@/app/api/projects/route', 'POST', 'http://localhost/api/projects', { name: 'Test' })).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('GET /api/tokens/balance returns 401 with Error schema', async () => {
-    await assert401ErrorSchema('@/app/api/tokens/balance/route', 'GET', 'http://localhost/api/tokens/balance');
+    expect(await callUnauthenticated('@/app/api/tokens/balance/route', 'GET', 'http://localhost/api/tokens/balance')).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('GET /api/tokens/usage returns 401 with Error schema', async () => {
-    await assert401ErrorSchema('@/app/api/tokens/usage/route', 'GET', 'http://localhost/api/tokens/usage');
+    expect(await callUnauthenticated('@/app/api/tokens/usage/route', 'GET', 'http://localhost/api/tokens/usage')).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('GET /api/publish/list returns 401 with Error schema', async () => {
-    await assert401ErrorSchema('@/app/api/publish/list/route', 'GET', 'http://localhost/api/publish/list');
+    expect(await callUnauthenticated('@/app/api/publish/list/route', 'GET', 'http://localhost/api/publish/list')).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('GET /api/keys returns 401 with Error schema', async () => {
-    await assert401ErrorSchema('@/app/api/keys/route', 'GET', 'http://localhost/api/keys');
+    expect(await callUnauthenticated('@/app/api/keys/route', 'GET', 'http://localhost/api/keys')).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('GET /api/keys/api-key returns 401 with Error schema', async () => {
-    await assert401ErrorSchema('@/app/api/keys/api-key/route', 'GET', 'http://localhost/api/keys/api-key');
+    expect(await callUnauthenticated('@/app/api/keys/api-key/route', 'GET', 'http://localhost/api/keys/api-key')).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('POST /api/keys/api-key returns 401 with Error schema', async () => {
-    await assert401ErrorSchema(
+    expect(await callUnauthenticated(
       '@/app/api/keys/api-key/route', 'POST', 'http://localhost/api/keys/api-key',
       { name: 'test-key', scopes: ['read'] },
-    );
+    )).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('POST /api/billing/checkout returns 401 with Error schema', async () => {
-    await assert401ErrorSchema(
+    expect(await callUnauthenticated(
       '@/app/api/billing/checkout/route', 'POST', 'http://localhost/api/billing/checkout',
       { tier: 'pro' },
-    );
+    )).toEqual(REJECTED_WITH_ERROR_SCHEMA);
   });
 
   it('GET /api/marketplace/seller returns 401 with Error schema', async () => {
-    await assert401ErrorSchema('@/app/api/marketplace/seller/route', 'GET', 'http://localhost/api/marketplace/seller');
+    expect(await callUnauthenticated('@/app/api/marketplace/seller/route', 'GET', 'http://localhost/api/marketplace/seller')).toEqual(REJECTED_WITH_ERROR_SCHEMA);
+  });
+
+  /**
+   * The cases above run against a MOCKED auth gate, so the 401 body they
+   * schema-check is the mock's stand-in, not production's. This case closes
+   * that gap: `@/lib/api/errors` is unmocked, so the payload every one of
+   * those routes really returns is validated against the same Error schema.
+   */
+  it('the unauthorized() body production actually returns conforms to the Error schema', async () => {
+    const { unauthorized } = await import('@/lib/api/errors');
+    const res = unauthorized();
+    const json = await res.json() as Record<string, unknown>;
+
+    expect({
+      status: res.status,
+      nonConformantBody: errorValidator(json) ? null : json,
+    }).toEqual({ status: 401, nonConformantBody: null });
   });
 });
