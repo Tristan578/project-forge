@@ -3002,6 +3002,7 @@ OUTPUTS_EOF
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
+            scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
@@ -3497,6 +3498,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
+            scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
@@ -3540,6 +3542,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-vercel-deployment-drift.test.sh
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+      - name: Run ci-gate path-filter test suite
+        run: bash scripts/__tests__/ci-gate-path-filters.test.sh
       - name: Run WASM-manifest generator test suite
         run: bash scripts/__tests__/generate-wasm-manifests.test.sh
       - name: Run changeset-version wrapper test suite
@@ -3585,7 +3589,7 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           echo "$CHANGED" | grep -q '^engine/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
           echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$|^scripts/check-lockfile-sync\.sh$' && deps=true
