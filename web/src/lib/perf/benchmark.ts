@@ -131,43 +131,103 @@ export function buildReport(
 }
 
 /**
- * Compares a new report against a baseline report.
- * Returns a list of regressions where any metric exceeds `thresholdMultiplier` × baseline.
+ * The metrics a regression check can compare.
  *
- * @param current            The freshly-generated report
- * @param baseline           The stored baseline report
- * @param thresholdMultiplier Ratio above which a result is considered a regression (default 2.0 = 2×)
+ * `min` and `p50` are the robust ones. See `DEFAULT_REGRESSION_METRICS` and
+ * `benchmarks/README.md` for the measurements that justify preferring them.
  */
+export type BenchmarkMetric = keyof Pick<
+  BenchmarkResult,
+  'avg' | 'p50' | 'p95' | 'p99' | 'min' | 'max'
+>;
+
 export interface RegressionEntry {
   name: string;
-  metric: keyof Pick<BenchmarkResult, 'avg' | 'p50' | 'p95' | 'p99'>;
+  metric: BenchmarkMetric;
   baselineMs: number;
   currentMs: number;
   ratio: number;
 }
 
+export interface RegressionOptions {
+  /**
+   * Which metrics to compare. Defaults to `DEFAULT_REGRESSION_METRICS`.
+   *
+   * Callers running on shared CI hardware should pass `['min', 'p50']`.
+   * `avg`, `p95` and `p99` are dominated by GC pauses and scheduler
+   * preemption: across five back-to-back runs of identical code on one
+   * machine they swung by up to 5.9x, 10.8x and 79.3x respectively, while
+   * `min` and `p50` stayed within 1.80x and 1.96x.
+   */
+  metrics?: readonly BenchmarkMetric[];
+  /**
+   * Timings at or below this many milliseconds are treated as unmeasurable
+   * noise rather than signal. Defaults to `DEFAULT_NOISE_FLOOR_MS`.
+   *
+   * Two things depend on it:
+   *  - a 0 ms baseline no longer disables the check for that metric (a 0 ms
+   *    baseline against a 500 ms current used to be skipped outright);
+   *  - a 0.001 ms -> 0.004 ms clock-granularity wobble is not reported as a
+   *    4x regression.
+   */
+  noiseFloorMs?: number;
+}
+
+/**
+ * Metrics compared when the caller does not choose. Kept at the historical
+ * four so existing callers keep their behaviour; new callers — including
+ * `scripts/run-benchmarks.sh` — should narrow this to the robust subset.
+ */
+export const DEFAULT_REGRESSION_METRICS: readonly BenchmarkMetric[] = [
+  'avg',
+  'p50',
+  'p95',
+  'p99',
+];
+
+/**
+ * Timings below this are at the resolution limit of the harness itself: one
+ * measured iteration costs an await tick plus two `performance.now()` reads,
+ * which is on the order of a microsecond, and OS timer granularity adds more.
+ * 0.05 ms leaves roughly 50x headroom over that floor.
+ */
+export const DEFAULT_NOISE_FLOOR_MS = 0.05;
+
+/**
+ * Compares a new report against a baseline report.
+ * Returns a list of regressions where a compared metric exceeds
+ * `thresholdMultiplier` × baseline.
+ *
+ * @param current             The freshly-generated report
+ * @param baseline            The stored baseline report
+ * @param thresholdMultiplier Ratio above which a result is a regression (default 2.0 = 2×)
+ * @param options             Metric selection and noise floor
+ */
 export function detectRegressions(
   current: BenchmarkReport,
   baseline: BenchmarkReport,
   thresholdMultiplier = 2.0,
+  options: RegressionOptions = {},
 ): RegressionEntry[] {
   const regressions: RegressionEntry[] = [];
-  const metrics: Array<keyof Pick<BenchmarkResult, 'avg' | 'p50' | 'p95' | 'p99'>> = [
-    'avg',
-    'p50',
-    'p95',
-    'p99',
-  ];
+  const metrics = options.metrics ?? DEFAULT_REGRESSION_METRICS;
+  // `??` not `||`: a caller may legitimately pass 0 to disable the floor.
+  const noiseFloorMs = options.noiseFloorMs ?? DEFAULT_NOISE_FLOOR_MS;
 
   for (const [name, currentResult] of Object.entries(current.results)) {
     const baselineResult = baseline.results[name];
-    if (!baselineResult) continue; // New benchmark — skip regression check
+    if (!baselineResult) continue; // New benchmark — nothing to compare against.
 
     for (const metric of metrics) {
       const baselineMs = baselineResult[metric];
       const currentMs = currentResult[metric];
-      if (baselineMs === 0) continue;
-      const ratio = currentMs / baselineMs;
+
+      // Both sides unmeasurably fast — any ratio between them is clock noise.
+      if (baselineMs <= noiseFloorMs && currentMs <= noiseFloorMs) continue;
+
+      // Divide by the floor, never by zero. A 0 ms baseline paired with a slow
+      // current value now reports a large finite ratio instead of being skipped.
+      const ratio = currentMs / Math.max(baselineMs, noiseFloorMs);
       if (ratio > thresholdMultiplier) {
         regressions.push({ name, metric, baselineMs, currentMs, ratio });
       }
@@ -175,4 +235,32 @@ export function detectRegressions(
   }
 
   return regressions;
+}
+
+export interface BenchmarkNameDiff {
+  /** Present in `current`, absent from `baseline` — never regression-checked. */
+  addedInCurrent: string[];
+  /** Present in `baseline`, absent from `current` — silently stopped running. */
+  missingFromCurrent: string[];
+}
+
+/**
+ * Reports benchmark names that do not appear on both sides of a comparison.
+ *
+ * `detectRegressions()` deliberately skips such names, which means a rename, a
+ * deleted benchmark, or a benchmark that threw before recording its result all
+ * produce zero regressions and a false all-clear. Any caller treating "no
+ * regressions" as a gate must check this too.
+ */
+export function diffBenchmarkNames(
+  current: BenchmarkReport,
+  baseline: BenchmarkReport,
+): BenchmarkNameDiff {
+  const currentNames = new Set(Object.keys(current.results));
+  const baselineNames = new Set(Object.keys(baseline.results));
+
+  return {
+    addedInCurrent: [...currentNames].filter((n) => !baselineNames.has(n)).sort(),
+    missingFromCurrent: [...baselineNames].filter((n) => !currentNames.has(n)).sort(),
+  };
 }

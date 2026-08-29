@@ -53,9 +53,31 @@ export const PERFORMANCE_BASELINES: Record<string, PerformanceBaseline> = {
   // Target: Zustand store update visible to subscribers in < 5 ms
   // ---------------------------------------------------------------------------
   'store-update-propagation': {
-    description: 'Zustand store update propagation time (set → subscriber notified)',
+    description:
+      'Zustand store update propagation (set → subscriber notified), 256 updates per measured iteration',
     p95Ms: 5,
     avgMs: 1,
+  },
+
+  // ---------------------------------------------------------------------------
+  // Store hydration (scene load)
+  // Target: replace the whole scene graph for 100 entities in < 5 ms
+  // ---------------------------------------------------------------------------
+  'store-hydrate-scene-graph-100-entities': {
+    description:
+      'sceneGraphSlice.setFullGraph() hydration of a 100-entity scene, 64 hydrations per measured iteration',
+    p95Ms: 5,
+    avgMs: 1,
+  },
+
+  // ---------------------------------------------------------------------------
+  // Visual script compilation
+  // Target: compile a 44-node visual script graph to TypeScript in < 10 ms
+  // ---------------------------------------------------------------------------
+  'visual-script-compile-44-nodes': {
+    description: 'compileGraph() over a 44-node visual script (4 handlers x 10 actions)',
+    p95Ms: 10,
+    avgMs: 3,
   },
 
   // ---------------------------------------------------------------------------

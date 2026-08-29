@@ -1,8 +1,28 @@
+/**
+ * Unit tests for the benchmark COMPARATOR HELPERS.
+ *
+ * Everything in this file feeds `makeResult()` — hand-written numbers — into
+ * `benchmark()`, `buildReport()` and `detectRegressions()` and asserts on the
+ * arithmetic. No product code is timed here, and no assertion in this file
+ * would notice if a real SpawnForge code path became ten times slower.
+ *
+ * The benchmarks that DO time product code live in `productBenchmarks.test.ts`
+ * and are compared against `benchmarks/baseline.json` by
+ * `scripts/run-benchmarks.sh`. Historically this file was the entire
+ * "benchmark harness", which is how #6697 came to be closed COMPLETED without
+ * a single product path ever having been measured; #9458 added the real
+ * measurements. Both files are worth keeping: these tests pin the comparator
+ * arithmetic that the product benchmarks depend on but never exercise.
+ */
+
 import { describe, it, expect } from 'vitest';
 import {
   benchmark,
   buildReport,
   detectRegressions,
+  diffBenchmarkNames,
+  DEFAULT_NOISE_FLOOR_MS,
+  DEFAULT_REGRESSION_METRICS,
   type BenchmarkResult,
   type BenchmarkReport,
 } from '../benchmark';
@@ -218,14 +238,64 @@ describe('detectRegressions()', () => {
     expect(avgRegression).toBeUndefined();
   });
 
-  it('skips metrics where baseline is zero to avoid division by zero', () => {
+  it('does not divide by zero, and does not go quiet, on a zero baseline', () => {
     const current = makeReport([makeResult('op', { avg: 999, p50: 0, p95: 0, p99: 0 })]);
     const baseline = makeReport([makeResult('op', { avg: 0, p50: 0, p95: 0, p99: 0 })]);
-    // avg regression should still fire (baseline avg=0 skipped), others skipped
     const regressions = detectRegressions(current, baseline);
-    expect(regressions.every(r => r.metric !== 'p50')).toBe(true);
-    expect(regressions.every(r => r.metric !== 'p95')).toBe(true);
-    expect(regressions.every(r => r.metric !== 'p99')).toBe(true);
+
+    // A 0 ms baseline against a 999 ms current is the single most important
+    // case to catch, not to skip: it is what a benchmark that used to be
+    // instantaneous and is now catastrophically slow looks like. The old
+    // `if (baselineMs === 0) continue` swallowed it entirely.
+    const avgRegression = regressions.find((r) => r.metric === 'avg');
+    expect(avgRegression).toBeDefined();
+    expect(Number.isFinite(avgRegression?.ratio)).toBe(true);
+    expect(avgRegression?.ratio).toBeCloseTo(999 / DEFAULT_NOISE_FLOOR_MS);
+
+    // 0 vs 0 is genuinely nothing to report.
+    expect(regressions.every((r) => r.metric !== 'p50')).toBe(true);
+    expect(regressions.every((r) => r.metric !== 'p95')).toBe(true);
+    expect(regressions.every((r) => r.metric !== 'p99')).toBe(true);
+  });
+
+  it('treats sub-noise-floor movement as noise, not as a regression', () => {
+    // 0.001 ms -> 0.004 ms is a 4x ratio and pure clock granularity.
+    const current = makeReport([makeResult('op', { avg: 0.004, p50: 0.004, p95: 0.004, p99: 0.004 })]);
+    const baseline = makeReport([makeResult('op', { avg: 0.001, p50: 0.001, p95: 0.001, p99: 0.001 })]);
+    expect(detectRegressions(current, baseline, 2.0)).toHaveLength(0);
+  });
+
+  it('reports a regression once the current value clears the noise floor', () => {
+    const current = makeReport([makeResult('op', { avg: 1, p50: 1, p95: 1, p99: 1 })]);
+    const baseline = makeReport([makeResult('op', { avg: 0.001, p50: 0.001, p95: 0.001, p99: 0.001 })]);
+    expect(detectRegressions(current, baseline, 2.0).length).toBeGreaterThan(0);
+  });
+
+  it('honours an explicit noiseFloorMs of 0', () => {
+    const current = makeReport([makeResult('op', { avg: 0.004, p50: 0.004, p95: 0.004, p99: 0.004 })]);
+    const baseline = makeReport([makeResult('op', { avg: 0.001, p50: 0.001, p95: 0.001, p99: 0.001 })]);
+    // `??` semantics: 0 must disable the floor, not fall back to the default.
+    const regressions = detectRegressions(current, baseline, 2.0, { noiseFloorMs: 0 });
+    expect(regressions.some((r) => r.metric === 'avg')).toBe(true);
+  });
+
+  it('compares only the requested metrics', () => {
+    const current = makeReport([makeResult('op', { avg: 100, p50: 4, p95: 100, p99: 100, min: 1 })]);
+    const baseline = makeReport([makeResult('op', { avg: 5, p50: 4, p95: 8, p99: 12, min: 1 })]);
+    const regressions = detectRegressions(current, baseline, 2.0, { metrics: ['min', 'p50'] });
+    expect(regressions).toHaveLength(0);
+  });
+
+  it('can compare min, which is not in the default metric set', () => {
+    const current = makeReport([makeResult('op', { min: 10 })]);
+    const baseline = makeReport([makeResult('op', { min: 1 })]);
+    expect(detectRegressions(current, baseline, 2.0)).toHaveLength(0);
+    const explicit = detectRegressions(current, baseline, 2.0, { metrics: ['min'] });
+    expect(explicit.map((r) => r.metric)).toEqual(['min']);
+  });
+
+  it('defaults to the historical four-metric set', () => {
+    expect([...DEFAULT_REGRESSION_METRICS]).toEqual(['avg', 'p50', 'p95', 'p99']);
   });
 
   it('includes benchmark name in regression entry', () => {
@@ -233,6 +303,51 @@ describe('detectRegressions()', () => {
     const baseline = makeReport([makeResult('slow-op', { avg: 5, p50: 4, p95: 8, p99: 10 })]);
     const regressions = detectRegressions(current, baseline);
     expect(regressions.some(r => r.name === 'slow-op')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// diffBenchmarkNames()
+// ---------------------------------------------------------------------------
+
+describe('diffBenchmarkNames()', () => {
+  it('reports nothing when both sides carry the same names', () => {
+    const current = makeReport([makeResult('a'), makeResult('b')]);
+    const baseline = makeReport([makeResult('b'), makeResult('a')]);
+    expect(diffBenchmarkNames(current, baseline)).toEqual({
+      addedInCurrent: [],
+      missingFromCurrent: [],
+    });
+  });
+
+  it('reports a benchmark that disappeared from the current run', () => {
+    // This is the case detectRegressions() reports as "all clear": a renamed,
+    // deleted, or crashed-before-recording benchmark produces zero regressions.
+    const current = makeReport([makeResult('a')]);
+    const baseline = makeReport([makeResult('a'), makeResult('b')]);
+    expect(detectRegressions(current, baseline)).toHaveLength(0);
+    expect(diffBenchmarkNames(current, baseline).missingFromCurrent).toEqual(['b']);
+  });
+
+  it('reports a benchmark that is new in the current run', () => {
+    const current = makeReport([makeResult('a'), makeResult('new')]);
+    const baseline = makeReport([makeResult('a')]);
+    expect(diffBenchmarkNames(current, baseline).addedInCurrent).toEqual(['new']);
+  });
+
+  it('reports both sides of a rename', () => {
+    const current = makeReport([makeResult('after')]);
+    const baseline = makeReport([makeResult('before')]);
+    expect(diffBenchmarkNames(current, baseline)).toEqual({
+      addedInCurrent: ['after'],
+      missingFromCurrent: ['before'],
+    });
+  });
+
+  it('returns names in sorted order', () => {
+    const current = makeReport([makeResult('z'), makeResult('a'), makeResult('m')]);
+    const baseline = makeReport([]);
+    expect(diffBenchmarkNames(current, baseline).addedInCurrent).toEqual(['a', 'm', 'z']);
   });
 });
 
