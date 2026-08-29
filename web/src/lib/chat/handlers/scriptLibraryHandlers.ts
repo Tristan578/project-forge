@@ -167,11 +167,19 @@ export const scriptLibraryHandlers: Record<string, ToolHandler> = {
     return { success: false, error: `Compile errors: ${result.errors.map((e) => e.message).join(', ')}` };
   },
 
-  get_visual_script: async (_args, _ctx) => {
+  get_visual_script: async (args, _ctx) => {
+    // Stub: validates entityId per the documented interface but does not yet
+    // persist per-entity graph state -- always returns an empty graph.
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
     return { success: true, result: { nodes: [], edges: [] } };
   },
 
-  compile_visual_script: async (_args, _ctx) => {
+  compile_visual_script: async (args, _ctx) => {
+    // Stub: validates entityId per the documented interface but does not yet
+    // read per-entity graph state -- always compiles an empty graph.
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
     const { compileGraph } = await import('@/lib/scripting/graphCompiler');
     const result = compileGraph({ nodes: [], edges: [] });
     if (result.success) {
