@@ -27,6 +27,10 @@ vi.mock('@/lib/rateLimit', () => ({
   rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
   getClientIp: vi.fn().mockReturnValue('1.2.3.4'),
   rateLimitResponse: vi.fn(),
+  // `/api/publish/list` gates on `rateLimit()`, not the public-route helper.
+  // A `vi.mock` factory replaces the WHOLE module, so omitting this export
+  // makes the call a TypeError instead of a real contract result (Part 4).
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: 0 }),
 }));
 
 vi.mock('@/lib/monitoring/healthFanoutBudget', () => ({
@@ -97,6 +101,9 @@ vi.mock('@/lib/auth/api-auth', () => ({
     ok: false,
     response: authGateResponse(),
   })),
+  // `POST /api/keys/api-key` gates MCP keys on Creator+ tier. `null` means the
+  // tier is acceptable — the tier gate is not what Part 4 contracts measure.
+  assertTier: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock('@/lib/api/middleware', () => ({
@@ -109,7 +116,14 @@ vi.mock('@/lib/api/middleware', () => ({
 
 vi.mock('@/lib/keys/resolver', () => ({
   resolveApiKey: vi.fn().mockRejectedValue(new Error('No key')),
-  ApiKeyError: class ApiKeyError extends Error {},
+  // Mirrors the real `(code, message)` constructor so Part 4 can drive the
+  // status routes' 402 branch, which reads `err.code` off the caught error.
+  ApiKeyError: class ApiKeyError extends Error {
+    constructor(public code: string, message: string) {
+      super(message);
+      this.name = 'ApiKeyError';
+    }
+  },
 }));
 
 vi.mock('@/lib/tokens/pricing', () => ({
@@ -149,6 +163,39 @@ vi.mock('fs/promises', () => ({
   readdir: vi.fn().mockResolvedValue([]),
   readFile: vi.fn().mockResolvedValue(''),
 }));
+
+// --- Part 4 boundaries -----------------------------------------------------
+// Every mock below is ADDITIVE: the routes Parts 1-3 exercise either return at
+// the auth gate before reaching these modules, or never import them. They exist
+// so Part 4 can drive real handlers down their success paths.
+
+vi.mock('@/lib/db/client', () => ({
+  getDb: vi.fn(),
+  getNeonSql: vi.fn(),
+  // Part 4 stubs this per test with the rows a route's query would return, so
+  // the drizzle query builder inside the callback never runs. Response SHAPING
+  // is what the contract measures; query construction is covered elsewhere.
+  queryWithResilience: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('@/lib/auth/user-service', () => ({
+  getUserByClerkId: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock('@/lib/projects/service', () => ({
+  listProjects: vi.fn().mockResolvedValue([]),
+  createProject: vi.fn(),
+}));
+
+// bcrypt at 12 rounds costs ~250ms per call and hashes a value no assertion
+// reads — the API key contract covers the response shape, not the hash.
+vi.mock('bcryptjs', () => ({
+  default: { hash: vi.fn().mockResolvedValue('bcrypt-hash') },
+}));
+
+vi.mock('@/lib/generate/meshyClient', () => ({ MeshyClient: vi.fn() }));
+vi.mock('@/lib/generate/sunoClient', () => ({ SunoClient: vi.fn() }));
+vi.mock('@/lib/generate/spriteClient', () => ({ SpriteClient: vi.fn() }));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -731,5 +778,616 @@ describe('Auth-gated routes return Error schema on 401', () => {
       status: res.status,
       nonConformantBody: errorValidator(json) ? null : json,
     }).toEqual({ status: 401, nonConformantBody: null });
+  });
+});
+
+// ===========================================================================
+// Part 4: REAL route responses validated against the published OpenAPI spec
+// ===========================================================================
+//
+// Parts 2 and 3 above hand-build objects that already match the schema and
+// then assert the schema accepts them, which is circular — a route could
+// return a completely different shape and those tests stay green (#8621).
+//
+// Part 4 closes that loop: it invokes each route's exported handler with the
+// auth / DB / provider boundaries stubbed, and runs the spec against the body
+// the handler ACTUALLY returned. Two independent checks run on every body:
+//
+//   1. `contract.operation(...)` — ajv, using the operation's own response
+//      schema (envelopes, `allOf` extensions and `$ref`s resolved), so enums,
+//      `format: uuid`, `format: date-time` and `additionalProperties` bite.
+//   2. `diffAgainstSpec(...)` — a property-SET comparison. This is the load
+//      bearing half: only 1 of the spec's 12 component schemas declares
+//      `required` + `additionalProperties: false`, so ajv alone accepts `{}`
+//      for the other 11 and cannot see a renamed or dropped field.
+//
+// Each test states its expected divergence list explicitly. An empty list
+// means the route matches the published contract exactly; a non-empty list is
+// a KNOWN drift, commented with what is wrong, and pinned so that any NEW
+// drift (in either direction) fails here instead of shipping silently.
+// Schemas are never relaxed to make a real response pass.
+
+import { diffAgainstSpec, loadOpenApiContract, type SpecMethod } from '@/test/utils/openApiContract';
+
+describe('OpenAPI contract — real route responses', () => {
+  const contract = loadOpenApiContract();
+
+  const CLERK_ID = 'user_2abcXYZ';
+  const DB_USER_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+  const GAME_ID = '9c858901-8a57-4791-81fe-4c455b099bc9';
+  const ISO = '2026-05-01T00:00:00.000Z';
+  const WHEN = new Date(ISO);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  /**
+   * Assert a real response body against BOTH halves of the contract.
+   *
+   * @param expectedDivergences Property-set differences this route is known to
+   *   have TODAY, as `missing $.x` / `undocumented $.x`. Asserted with
+   *   `toEqual`, so a new drift and a fixed drift both fail.
+   */
+  function expectContract(
+    method: SpecMethod,
+    routePath: string,
+    status: number,
+    body: unknown,
+    expectedDivergences: string[] = [],
+  ): void {
+    const validate = contract.operation(method, routePath, status);
+    expect(
+      validate(body),
+      `${method.toUpperCase()} ${routePath} ${status} body ${JSON.stringify(body)} `
+        + `violates the spec: ${JSON.stringify(validate.errors)}`,
+    ).toBe(true);
+    expect(
+      diffAgainstSpec(contract.operationSchema(method, routePath, status), body),
+    ).toEqual(expectedDivergences);
+  }
+
+  /** Drive the next `withApiMiddleware` call down its authenticated path. */
+  async function authenticateAs(body?: unknown): Promise<void> {
+    const { withApiMiddleware } = await import('@/lib/api/middleware');
+    // The middleware mock is a FACTORY mock and `vi.resetModules()` runs above,
+    // so this import is the instance the route will see — a module-scope import
+    // would patch a stale `vi.fn()` and the route would still 401.
+    vi.mocked(withApiMiddleware).mockResolvedValueOnce({
+      error: undefined,
+      userId: DB_USER_ID,
+      authContext: { user: { id: DB_USER_ID, tier: 'pro' }, clerkId: CLERK_ID },
+      body,
+    } as never);
+  }
+
+  /** Hand the next `resolveApiKey` call a platform key instead of rejecting. */
+  async function resolvePlatformKey(): Promise<void> {
+    const { resolveApiKey } = await import('@/lib/keys/resolver');
+    vi.mocked(resolveApiKey).mockResolvedValueOnce({ key: 'provider-key' } as never);
+  }
+
+  /** Queue the rows successive `queryWithResilience` calls should resolve to. */
+  async function stubQueries(...resultSets: unknown[][]): Promise<void> {
+    const { queryWithResilience } = await import('@/lib/db/client');
+    for (const rows of resultSets) {
+      vi.mocked(queryWithResilience).mockResolvedValueOnce(rows as never);
+    }
+  }
+
+  /**
+   * Give a `vi.fn()`-mocked provider client constructor an implementation.
+   * The status routes do `new Client(...)` then call one method on it; the
+   * factory mocks at the top of this file replace each class with a bare
+   * `vi.fn()`, whose instances have no methods until this runs.
+   */
+  function stubClient(ctor: unknown, instance: Record<string, unknown>): void {
+    // Must be a `function`, not an arrow: the routes call `new Client(...)` and
+    // an arrow implementation is not a constructor. A constructor that returns
+    // an object yields that object, so `new` hands the route the stub.
+    vi.mocked(ctor as (...args: unknown[]) => unknown).mockImplementation(
+      function stubbedClient(this: unknown) {
+        return instance;
+      },
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // GET /api/tokens/balance — the one schema with `required` +
+  // `additionalProperties: false`, so ajv and the differ agree here.
+  // -------------------------------------------------------------------------
+
+  it('GET /api/tokens/balance 200 returns a body matching TokenBalance exactly', async () => {
+    await authenticateAs();
+    const { getTokenBalance } = await import('@/lib/tokens/service');
+    vi.mocked(getTokenBalance).mockResolvedValueOnce({
+      monthlyRemaining: 9500,
+      monthlyTotal: 10000,
+      addon: 0,
+      total: 9500,
+      nextRefillDate: ISO,
+    });
+
+    const { GET } = await import('@/app/api/tokens/balance/route');
+    const res = await GET(makeGetRequest('http://localhost/api/tokens/balance'));
+
+    expect(res.status).toBe(200);
+    expectContract('get', '/api/tokens/balance', 200, await res.json());
+  });
+
+  it('GET /api/tokens/balance 200 FAILS the contract when the route leaks an extra field', async () => {
+    // Non-vacuity proof #1: the assertions above are not tautological — a real
+    // response with one extra property is rejected, by name.
+    await authenticateAs();
+    const { getTokenBalance } = await import('@/lib/tokens/service');
+    vi.mocked(getTokenBalance).mockResolvedValueOnce({
+      monthlyRemaining: 1, monthlyTotal: 1, addon: 0, total: 1, nextRefillDate: null,
+      legacyField: 'x',
+    } as never);
+
+    const { GET } = await import('@/app/api/tokens/balance/route');
+    const res = await GET(makeGetRequest('http://localhost/api/tokens/balance'));
+    const body: unknown = await res.json();
+
+    expect(contract.operation('get', '/api/tokens/balance', 200)(body)).toBe(false);
+    expect(diffAgainstSpec(contract.componentSchema('TokenBalance'), body)).toEqual([
+      'undocumented $.legacyField',
+    ]);
+  });
+
+  it('GET /api/tokens/balance 200 FAILS the contract when the route renames a field', async () => {
+    // Non-vacuity proof #2: a rename is the failure mode ajv alone misses on
+    // the 11 permissive schemas — the differ catches it as a missing/undocumented
+    // pair rather than a silent pass.
+    await authenticateAs();
+    const { getTokenBalance } = await import('@/lib/tokens/service');
+    vi.mocked(getTokenBalance).mockResolvedValueOnce({
+      remaining: 1, monthlyTotal: 1, addon: 0, total: 1, nextRefillDate: null,
+    } as never);
+
+    const { GET } = await import('@/app/api/tokens/balance/route');
+    const res = await GET(makeGetRequest('http://localhost/api/tokens/balance'));
+    const body: unknown = await res.json();
+
+    expect(diffAgainstSpec(contract.componentSchema('TokenBalance'), body)).toEqual([
+      'missing $.monthlyRemaining',
+      'undocumented $.remaining',
+    ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Generation status routes. `error` / `resultUrl` are optional in the spec,
+  // so a success body legitimately omits them — the expected lists below record
+  // which of the documented properties each route actually emits.
+  // -------------------------------------------------------------------------
+
+  it('GET /api/generate/model/status 200 (completed) matches GenerationStatus + thumbnailUrl', async () => {
+    await authenticateAs();
+    await resolvePlatformKey();
+    const { MeshyClient } = await import('@/lib/generate/meshyClient');
+    stubClient(MeshyClient, {
+      getTaskStatus: vi.fn().mockResolvedValue({
+        status: 'SUCCEEDED',
+        progress: 100,
+        modelUrls: { glb: 'https://cdn.example.com/model.glb' },
+        thumbnailUrl: 'https://cdn.example.com/thumb.png',
+      }),
+    });
+
+    const { GET } = await import('@/app/api/generate/model/status/route');
+    const res = await GET(makeGetRequest('http://localhost/api/generate/model/status?jobId=job_1'));
+
+    expect(res.status).toBe(200);
+    // `error` is undefined on the success path and `NextResponse.json` drops it.
+    expectContract('get', '/api/generate/model/status', 200, await res.json(), [
+      'missing $.error',
+    ]);
+  });
+
+  it('GET /api/generate/model/status 200 (succeeded-but-empty) still matches the contract', async () => {
+    await authenticateAs();
+    await resolvePlatformKey();
+    const { MeshyClient } = await import('@/lib/generate/meshyClient');
+    stubClient(MeshyClient, {
+      getTaskStatus: vi.fn().mockResolvedValue({ status: 'SUCCEEDED', progress: 100 }),
+    });
+
+    const { GET } = await import('@/app/api/generate/model/status/route');
+    const res = await GET(makeGetRequest('http://localhost/api/generate/model/status?jobId=job_1'));
+    const body = await res.json() as Record<string, unknown>;
+
+    // #8757: a SUCCEEDED task with no GLB must report `failed`, not `completed`.
+    expect(body.status).toBe('failed');
+    expectContract('get', '/api/generate/model/status', 200, body, [
+      'missing $.resultUrl',
+      'missing $.thumbnailUrl',
+    ]);
+  });
+
+  it('GET /api/generate/texture/status 200 (completed) matches GenerationStatus + maps', async () => {
+    await authenticateAs();
+    await resolvePlatformKey();
+    const { MeshyClient } = await import('@/lib/generate/meshyClient');
+    stubClient(MeshyClient, {
+      getTextureStatus: vi.fn().mockResolvedValue({
+        status: 'SUCCEEDED',
+        progress: 100,
+        maps: { base_color: 'https://cdn.example.com/albedo.png' },
+      }),
+    });
+
+    const { GET } = await import('@/app/api/generate/texture/status/route');
+    const res = await GET(makeGetRequest('http://localhost/api/generate/texture/status?jobId=job_1'));
+
+    expect(res.status).toBe(200);
+    // DRIFT: the spec documents `resultUrl` for this operation (inherited from
+    // GenerationStatus) but the route only ever returns `maps` — a client coded
+    // against the published schema gets `undefined` here on every success.
+    expectContract('get', '/api/generate/texture/status', 200, await res.json(), [
+      'missing $.error',
+      'missing $.resultUrl',
+    ]);
+  });
+
+  it('GET /api/generate/music/status 200 (completed) matches GenerationStatus + durationSeconds', async () => {
+    await authenticateAs();
+    await resolvePlatformKey();
+    const { SunoClient } = await import('@/lib/generate/sunoClient');
+    stubClient(SunoClient, {
+      getStatus: vi.fn().mockResolvedValue({
+        status: 'completed',
+        progress: 100,
+        audioUrl: 'https://cdn.example.com/track.mp3',
+        durationSeconds: 30,
+      }),
+    });
+
+    const { GET } = await import('@/app/api/generate/music/status/route');
+    const res = await GET(makeGetRequest('http://localhost/api/generate/music/status?jobId=job_1'));
+
+    expect(res.status).toBe(200);
+    expectContract('get', '/api/generate/music/status', 200, await res.json(), [
+      'missing $.error',
+    ]);
+  });
+
+  it('GET /api/generate/skybox/status 200 (completed) matches GenerationStatus', async () => {
+    await authenticateAs();
+    await resolvePlatformKey();
+    const { MeshyClient } = await import('@/lib/generate/meshyClient');
+    stubClient(MeshyClient, {
+      getTextureStatus: vi.fn().mockResolvedValue({
+        status: 'SUCCEEDED',
+        progress: 100,
+        maps: { equirect: 'https://cdn.example.com/sky.png' },
+      }),
+    });
+
+    const { GET } = await import('@/app/api/generate/skybox/status/route');
+    const res = await GET(makeGetRequest('http://localhost/api/generate/skybox/status?jobId=job_1'));
+
+    expect(res.status).toBe(200);
+    expectContract('get', '/api/generate/skybox/status', 200, await res.json(), [
+      'missing $.error',
+    ]);
+  });
+
+  it('GET /api/generate/sprite/status 200 (synchronous dalle3 job) matches GenerationStatus', async () => {
+    await authenticateAs();
+
+    // A "dalle3:<url>" jobId short-circuits before key resolution, so this path
+    // exercises the route with no provider client at all.
+    const { GET } = await import('@/app/api/generate/sprite/status/route');
+    const res = await GET(makeGetRequest(
+      'http://localhost/api/generate/sprite/status?jobId=dalle3:https%3A%2F%2Fcdn.example.com%2Fs.png',
+    ));
+
+    expect(res.status).toBe(200);
+    expectContract('get', '/api/generate/sprite/status', 200, await res.json(), [
+      'missing $.error',
+    ]);
+  });
+
+  it('GET /api/generate/model/status 400 (no jobId) returns an Error-shaped body', async () => {
+    await authenticateAs();
+
+    const { GET } = await import('@/app/api/generate/model/status/route');
+    const res = await GET(makeGetRequest('http://localhost/api/generate/model/status'));
+    const body: unknown = await res.json();
+
+    expect(res.status).toBe(400);
+    // The spec declares a 400 for this operation with no body schema, so the
+    // repo-wide `Error` component is the only thing binding it.
+    expect(contract.component('Error')(body)).toBe(true);
+    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([]);
+  });
+
+  it('GET /api/generate/model/status 402 body carries a `code` the Error schema does not document', async () => {
+    await authenticateAs();
+    const { resolveApiKey, ApiKeyError } = await import('@/lib/keys/resolver');
+    vi.mocked(resolveApiKey).mockRejectedValueOnce(
+      new ApiKeyError('NO_KEY_CONFIGURED', 'No API key configured'),
+    );
+
+    const { GET } = await import('@/app/api/generate/model/status/route');
+    const res = await GET(makeGetRequest('http://localhost/api/generate/model/status?jobId=job_1'));
+    const body: unknown = await res.json();
+
+    expect(res.status).toBe(402);
+    // DRIFT (repo-wide): `apiError()` / `createErrorResponse()` always attach a
+    // `code`, and several routes attach `details`, but `components.schemas.Error`
+    // documents `error` alone. Every documented error body in the spec is
+    // therefore narrower than what clients actually receive.
+    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([
+      'undocumented $.code',
+    ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Project routes
+  // -------------------------------------------------------------------------
+
+  it('GET /api/projects 200 returns items narrower than the documented Project', async () => {
+    await authenticateAs();
+    const { listProjects } = await import('@/lib/projects/service');
+    vi.mocked(listProjects).mockResolvedValueOnce([
+      { id: DB_USER_ID, name: 'My Game', thumbnail: null, entityCount: 12, updatedAt: WHEN },
+    ]);
+
+    const { GET } = await import('@/app/api/projects/route');
+    const res = await GET(makeGetRequest('http://localhost/api/projects'));
+
+    expect(res.status).toBe(200);
+    // DRIFT: the spec says each item is a full `Project`, but `listProjects`
+    // selects 5 columns — `sceneData` and `createdAt` are never sent. Callers
+    // reading `project.sceneData` off this list get `undefined`.
+    expectContract('get', '/api/projects', 200, await res.json(), [
+      'missing $[0].createdAt',
+      'missing $[0].sceneData',
+    ]);
+  });
+
+  it('POST /api/projects 201 returns a body matching ProjectSummary exactly', async () => {
+    await authenticateAs({ name: 'My Game', sceneData: {} });
+    const { createProject } = await import('@/lib/projects/service');
+    vi.mocked(createProject).mockResolvedValueOnce({
+      id: GAME_ID,
+      userId: DB_USER_ID,
+      name: 'My Game',
+      sceneData: {},
+      thumbnail: null,
+      entityCount: 0,
+      createdAt: WHEN,
+      updatedAt: WHEN,
+    } as never);
+
+    const { POST } = await import('@/app/api/projects/route');
+    const res = await POST(makePostRequest('http://localhost/api/projects', {
+      name: 'My Game', sceneData: {},
+    }));
+
+    expect(res.status).toBe(201);
+    expectContract('post', '/api/projects', 201, await res.json());
+  });
+
+  it('POST /api/projects 403 body does not match the documented limit-reached shape', async () => {
+    await authenticateAs({ name: 'My Game', sceneData: {} });
+    const { createProject } = await import('@/lib/projects/service');
+    vi.mocked(createProject).mockRejectedValueOnce(
+      Object.assign(new Error('Project limit exceeded'), { limit: 3 }),
+    );
+
+    const { POST } = await import('@/app/api/projects/route');
+    const res = await POST(makePostRequest('http://localhost/api/projects', {
+      name: 'My Game', sceneData: {},
+    }));
+    const body: unknown = await res.json();
+
+    expect(res.status).toBe(403);
+    // DRIFT: the spec documents `{ error, message, limit }`, but the route calls
+    // `apiError(403, msg, 'PROJECT_LIMIT', { limit })`, which emits
+    // `{ error, code, details: { limit } }`. A client reading `body.limit` to
+    // show "you have N of N projects" reads `undefined` — the documented shape
+    // is wrong in all four of its property names.
+    expectContract('post', '/api/projects', 403, body, [
+      'missing $.limit',
+      'missing $.message',
+      'undocumented $.code',
+      'undocumented $.details',
+    ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Publish / community / marketplace
+  // -------------------------------------------------------------------------
+
+  /** Row shape `select()` returns for `published_games`. */
+  function makePublishedRow(status: 'published' | 'unpublished' | 'processing') {
+    return {
+      id: GAME_ID,
+      userId: DB_USER_ID,
+      projectId: DB_USER_ID,
+      slug: 'my-awesome-game',
+      title: 'My Awesome Game',
+      description: 'A game',
+      status,
+      version: 1,
+      cdnUrl: null,
+      thumbnail: null,
+      playCount: 7,
+      createdAt: WHEN,
+      updatedAt: WHEN,
+    };
+  }
+
+  async function authenticateClerk(): Promise<void> {
+    const { authenticateClerkSession } = await import('@/lib/auth/api-auth');
+    vi.mocked(authenticateClerkSession).mockResolvedValueOnce({ ok: true, clerkId: CLERK_ID } as never);
+    const { getUserByClerkId } = await import('@/lib/auth/user-service');
+    vi.mocked(getUserByClerkId).mockResolvedValueOnce({ id: DB_USER_ID } as never);
+  }
+
+  it('GET /api/publish/list 200 leaks four undocumented columns per publication', async () => {
+    await authenticateClerk();
+    await stubQueries([makePublishedRow('published')]);
+
+    const { GET } = await import('@/app/api/publish/list/route');
+    const res = await GET();
+
+    expect(res.status).toBe(200);
+    // DRIFT: the route spreads the whole DB row (`...p`) into the response, so
+    // internal columns ship to the client. `userId` is the one that matters —
+    // it exposes another table's primary key to anyone who calls the endpoint.
+    expectContract('get', '/api/publish/list', 200, await res.json(), [
+      'undocumented $.publications[0].cdnUrl',
+      'undocumented $.publications[0].playCount',
+      'undocumented $.publications[0].thumbnail',
+      'undocumented $.publications[0].userId',
+    ]);
+  });
+
+  it('GET /api/publish/list 200 VIOLATES the Publication schema for a processing publication', async () => {
+    await authenticateClerk();
+    await stubQueries([makePublishedRow('processing')]);
+
+    const { GET } = await import('@/app/api/publish/list/route');
+    const res = await GET();
+    const body: unknown = await res.json();
+
+    // BUG PIN: `publishStatusEnum` (db/schema.ts) is
+    // ['published','unpublished','processing'] and 'processing' is the column
+    // DEFAULT, but the spec's `Publication.status` enum omits it. This route
+    // returns ALL of a user's rows, so a freshly-created publication is served
+    // with a status the published contract forbids. Asserting `false` here
+    // records the bug rather than hiding it: whoever fixes the spec (or the
+    // route) will be sent to this test to remove the pin.
+    const validate = contract.operation('get', '/api/publish/list', 200);
+    expect(validate(body)).toBe(false);
+    expect(JSON.stringify(validate.errors)).toContain('enum');
+  });
+
+  it('GET /api/community/games 200 returns a body matching GameSummary exactly', async () => {
+    await stubQueries(
+      [{
+        id: GAME_ID,
+        title: 'My Awesome Game',
+        description: 'A game',
+        slug: 'my-awesome-game',
+        authorId: DB_USER_ID,
+        authorName: 'Ada',
+        playCount: 7,
+        cdnUrl: null,
+        thumbnail: null,
+        createdAt: WHEN,
+        likeCount: 3,
+        avgRating: 4.5,
+        ratingCount: 2,
+        commentCount: 1,
+      }],
+      [{ gameId: GAME_ID, tag: 'platformer' }],
+    );
+
+    const { GET } = await import('@/app/api/community/games/route');
+    const res = await GET(makeGetRequest('http://localhost/api/community/games'));
+
+    expect(res.status).toBe(200);
+    expectContract('get', '/api/community/games', 200, await res.json());
+  });
+
+  it('GET /api/marketplace/assets 200 returns a body matching MarketplaceAsset exactly', async () => {
+    await stubQueries([{
+      id: GAME_ID,
+      name: 'Crate Pack',
+      description: 'Ten crates',
+      category: 'model_3d',
+      priceTokens: 250,
+      license: 'CC0',
+      previewUrl: 'https://cdn.example.com/preview.png',
+      downloadCount: 12,
+      avgRating: 450,
+      ratingCount: 3,
+      tags: ['props'],
+      aiGenerated: 1,
+      createdAt: WHEN,
+      sellerId: DB_USER_ID,
+      sellerName: 'Ada',
+    }]);
+
+    const { GET } = await import('@/app/api/marketplace/assets/route');
+    const res = await GET(makeGetRequest('http://localhost/api/marketplace/assets'));
+
+    expect(res.status).toBe(200);
+    expectContract('get', '/api/marketplace/assets', 200, await res.json());
+  });
+
+  it('GET /api/marketplace/seller 200 returns a body matching SellerProfile exactly', async () => {
+    await authenticateAs();
+    await stubQueries([{
+      displayName: 'Ada',
+      bio: null,
+      portfolioUrl: null,
+      totalEarnings: 0,
+      totalSales: 0,
+      approved: 1,
+    }]);
+
+    const { GET } = await import('@/app/api/marketplace/seller/route');
+    const res = await GET(makeGetRequest('http://localhost/api/marketplace/seller'));
+
+    expect(res.status).toBe(200);
+    expectContract('get', '/api/marketplace/seller', 200, await res.json());
+  });
+
+  it('GET /api/marketplace/seller 200 returns the documented null profile when none exists', async () => {
+    await authenticateAs();
+    await stubQueries([]);
+
+    const { GET } = await import('@/app/api/marketplace/seller/route');
+    const res = await GET(makeGetRequest('http://localhost/api/marketplace/seller'));
+    const body = await res.json() as Record<string, unknown>;
+
+    expect(body.profile).toBeNull();
+    expectContract('get', '/api/marketplace/seller', 200, body);
+  });
+
+  // -------------------------------------------------------------------------
+  // API keys
+  // -------------------------------------------------------------------------
+
+  it('GET /api/keys/api-key 200 returns a body matching ApiKeyRecord exactly', async () => {
+    await authenticateAs();
+    await stubQueries([{
+      id: GAME_ID,
+      name: 'CI',
+      prefix: 'forge_a1b2',
+      scopes: ['scene:read'],
+      lastUsed: null,
+      createdAt: WHEN,
+    }]);
+
+    const { GET } = await import('@/app/api/keys/api-key/route');
+    const res = await GET(makeGetRequest('http://localhost/api/keys/api-key'));
+
+    expect(res.status).toBe(200);
+    expectContract('get', '/api/keys/api-key', 200, await res.json());
+  });
+
+  it('POST /api/keys/api-key 200 omits the documented lastUsed field', async () => {
+    await authenticateAs({ name: 'CI', scopes: ['scene:read'] });
+    await stubQueries([{ id: GAME_ID, createdAt: WHEN }]);
+
+    const { POST } = await import('@/app/api/keys/api-key/route');
+    const res = await POST(makePostRequest('http://localhost/api/keys/api-key', {
+      name: 'CI', scopes: ['scene:read'],
+    }));
+
+    expect(res.status).toBe(200);
+    // DRIFT: the 200 schema is `allOf: [ApiKeyRecord, { key, warning }]`, so
+    // `lastUsed` is documented; a freshly-minted key has never been used and the
+    // route simply does not send the field.
+    expectContract('post', '/api/keys/api-key', 200, await res.json(), [
+      'missing $.lastUsed',
+    ]);
   });
 });
