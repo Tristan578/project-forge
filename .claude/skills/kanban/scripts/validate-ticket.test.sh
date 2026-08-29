@@ -46,7 +46,7 @@ CURL
 chmod +x "$TMP_DIR/curl"
 
 run_validator() {
-  PATH="$TMP_DIR:$PATH" bash "$SCRIPT_DIR/validate-ticket.sh" "$1"
+  PATH="$TMP_DIR:$PATH" bash "$SCRIPT_DIR/validate-ticket.sh" "$1" 2>&1
 }
 
 good=$(run_validator good)
