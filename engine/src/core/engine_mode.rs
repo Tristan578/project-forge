@@ -309,25 +309,70 @@ pub fn restore_scene(
             // Restore visibility
             visible.0 = snap.visible;
 
-            // Restore material data if present on entity and in snapshot
-            if let (Some(mut mat), Some(ref snap_mat)) = (mat_data, &snap.material_data) {
-                *mat = snap_mat.clone();
+            // `MaterialData` / `LightData` / `PhysicsData` come in as
+            // `Option<&mut …>` from the restore query, so all FOUR cases have to
+            // be handled — an `if let (Some(..), Some(..))` covers only one and
+            // silently no-ops on both asymmetric directions:
+            //   (Some, Some) the entity kept it   -> write the snapshot value in place
+            //   (None, Some) Play REMOVED it      -> insert it back
+            //   (Some, None) Play CREATED it      -> remove it, it is not scene data
+            //   (None, None) never had it         -> nothing to do
+            // The snapshot's `None` is authoritative for the remove: the primary
+            // query in `snapshot_scene` takes each of these as `Option<&…>` and
+            // requires only `EntityId`/`Transform`/`EntityName`/`EntityVisible`,
+            // so any entity captured at all was probed for all three.
+            match (mat_data, &snap.material_data) {
+                (Some(mut mat), Some(snap_mat)) => *mat = snap_mat.clone(),
+                (None, Some(snap_mat)) => {
+                    commands.entity(entity).insert(snap_mat.clone());
+                }
+                (Some(_), None) => {
+                    commands.entity(entity).remove::<MaterialData>();
+                }
+                (None, None) => {}
             }
-            // Restore light data if present on entity and in snapshot
-            if let (Some(mut light), Some(ref snap_light)) = (light_data, &snap.light_data) {
-                *light = snap_light.clone();
+            match (light_data, &snap.light_data) {
+                (Some(mut light), Some(snap_light)) => *light = snap_light.clone(),
+                (None, Some(snap_light)) => {
+                    commands.entity(entity).insert(snap_light.clone());
+                }
+                (Some(_), None) => {
+                    commands.entity(entity).remove::<LightData>();
+                }
+                (None, None) => {}
             }
-            // Restore physics data if present on entity and in snapshot
-            if let (Some(mut phys), Some(ref snap_phys)) = (phys_data, &snap.physics_data) {
-                *phys = snap_phys.clone();
+            match (phys_data, &snap.physics_data) {
+                (Some(mut phys), Some(snap_phys)) => *phys = snap_phys.clone(),
+                (None, Some(snap_phys)) => {
+                    commands.entity(entity).insert(snap_phys.clone());
+                }
+                (Some(_), None) => {
+                    commands.entity(entity).remove::<PhysicsData>();
+                }
+                (None, None) => {}
             }
             // For components not in the query (script, audio, particles, etc.),
             // commands.entity().insert() is used to queue the restore.
+            //
+            // Every one of these is paired with a `remove` on the `None` branch.
+            // An insert-only restore is half a restore: it puts the snapshot
+            // back but keeps whatever Play added, so a component created at
+            // runtime on an entity that had none survives Stop, leaks into the
+            // edit scene and is written to `projects.sceneData` on the next
+            // save. The `None` is safe to act on for the same reason as above —
+            // every secondary query in `snapshot_scene` requires only
+            // `&EntityId` and takes its components as `Option<&…>`, so every
+            // forge entity is present in every materialized map and a `None`
+            // means "had no such component", never "was not captured".
             if let Some(ref snap_script) = snap.script_data {
                 commands.entity(entity).insert(snap_script.clone());
+            } else {
+                commands.entity(entity).remove::<ScriptData>();
             }
             if let Some(ref snap_audio) = snap.audio_data {
                 commands.entity(entity).insert(snap_audio.clone());
+            } else {
+                commands.entity(entity).remove::<AudioData>();
             }
             // The marker is a separate component from the data, so it needs the
             // same insert/remove pair every other marker here uses — an entity
@@ -340,6 +385,8 @@ pub fn restore_scene(
             }
             if let Some(ref snap_particle) = snap.particle_data {
                 commands.entity(entity).insert(snap_particle.clone());
+            } else {
+                commands.entity(entity).remove::<ParticleData>();
             }
             // Restore ParticleEnabled marker (was missing — particles stopped after Play→Stop)
             if snap.particle_enabled {
@@ -349,26 +396,44 @@ pub fn restore_scene(
             }
             if let Some(ref rzd) = snap.reverb_zone_data {
                 commands.entity(entity).insert(rzd.clone());
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<super::reverb_zone::ReverbZoneData>();
             }
             // Restore marker components — insert when enabled, REMOVE when disabled
             // (without remove, components enabled before play but disabled during play
             // would remain enabled after stop, corrupting scene state)
             if snap.reverb_zone_enabled {
-                commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+                commands
+                    .entity(entity)
+                    .insert(super::reverb_zone::ReverbZoneEnabled);
             } else {
-                commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
+                commands
+                    .entity(entity)
+                    .remove::<super::reverb_zone::ReverbZoneEnabled>();
             }
             if let Some(ref sed) = snap.shader_effect_data {
                 commands.entity(entity).insert(sed.clone());
+            } else {
+                commands.entity(entity).remove::<ShaderEffectData>();
             }
             if let Some(ref jd) = snap.joint_data {
                 commands.entity(entity).insert(jd.clone());
+            } else {
+                commands.entity(entity).remove::<JointData>();
             }
             if let Some(ref gc) = snap.game_components {
                 commands.entity(entity).insert(gc.clone());
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<super::game_components::GameComponents>();
             }
             if let Some(ref gcd) = snap.game_camera_data {
                 commands.entity(entity).insert(gcd.clone());
+            } else {
+                commands.entity(entity).remove::<GameCameraData>();
             }
             if snap.active_game_camera {
                 commands.entity(entity).insert(ActiveGameCamera);
@@ -377,9 +442,15 @@ pub fn restore_scene(
             }
             if let Some(ref sd) = snap.sprite_data {
                 commands.entity(entity).insert(sd.clone());
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<super::sprite::SpriteData>();
             }
             if let Some(ref tmd) = snap.tilemap_data {
                 commands.entity(entity).insert(tmd.clone());
+            } else {
+                commands.entity(entity).remove::<TilemapData>();
             }
             if snap.tilemap_enabled {
                 commands.entity(entity).insert(TilemapEnabled);
@@ -388,11 +459,19 @@ pub fn restore_scene(
             }
             if let Some(ref s2d) = snap.skeleton2d_data {
                 commands.entity(entity).insert(s2d.clone());
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<super::skeleton2d::SkeletonData2d>();
             }
             if snap.skeleton2d_enabled {
-                commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+                commands
+                    .entity(entity)
+                    .insert(super::skeleton2d::SkeletonEnabled2d);
             } else {
-                commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                commands
+                    .entity(entity)
+                    .remove::<super::skeleton2d::SkeletonEnabled2d>();
             }
             // `snapshot_scene` captures `skeletal_animations` above, and every
             // other field materialized from the same query row (tilemap_data,
@@ -419,6 +498,8 @@ pub fn restore_scene(
             }
             if let Some(ref ld) = snap.lod_data {
                 commands.entity(entity).insert(ld.clone());
+            } else {
+                commands.entity(entity).remove::<LodData>();
             }
             if snap.physics_enabled {
                 commands.entity(entity).insert(PhysicsEnabled);
@@ -533,6 +614,9 @@ mod scene_round_trip_tests {
             Option<&SkeletonEnabled2d>,
             Option<&SkeletalAnimation2d>,
             Option<&LodData>,
+            Option<&crate::core::terrain::TerrainData>,
+            Option<&crate::core::terrain::TerrainMeshData>,
+            Option<&crate::core::animation_clip::AnimationClipData>,
         )>,
         selection: Res<Selection>,
         mut out: ResMut<SceneSnapshot>,
@@ -1751,3 +1835,7 @@ mod scene_round_trip_tests {
         assert_eq!(EngineMode::default(), EngineMode::Edit);
     }
 }
+
+#[cfg(test)]
+#[path = "engine_mode_tests.rs"]
+mod engine_mode_tests;
