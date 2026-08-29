@@ -11,45 +11,14 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createSceneTestStore } from './sceneSliceTestStore';
+import { createSceneTestStore, createFakeEngineDispatcher } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
-import type { SceneGraph, SceneNode } from '../types';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 
 type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
 
 function detachDispatcher() {
   setSceneDispatcher(null as unknown as Dispatcher);
-}
-
-/**
- * A dispatcher that behaves like the engine: `load_scene` spawns the entities
- * the payload describes and the scene graph appears in the store, exactly as
- * SCENE_GRAPH_UPDATE would deliver it a frame later.
- */
-function engineDispatcher(store: ReturnType<typeof createSceneTestStore>['store']) {
-  return vi.fn<Dispatcher>((command, payload) => {
-    if (command !== 'load_scene') return;
-    const scene = JSON.parse((payload as { json: string }).json) as {
-      entities: Array<{ entityId: string; name: string; parentId: string | null; visible: boolean }>;
-    };
-    const nodes: Record<string, SceneNode> = {};
-    for (const entity of scene.entities) {
-      nodes[entity.entityId] = {
-        entityId: entity.entityId,
-        name: entity.name,
-        parentId: entity.parentId,
-        children: [],
-        visible: entity.visible,
-        components: [],
-      };
-    }
-    const sceneGraph: SceneGraph = {
-      nodes,
-      rootIds: scene.entities.filter((e) => e.parentId === null).map((e) => e.entityId),
-    };
-    store.setState({ sceneGraph, nodeCount: scene.entities.length });
-  });
 }
 
 /** A dispatcher that acknowledges the command but never applies it. */
@@ -72,7 +41,7 @@ describe('sceneSlice.loadTemplate', () => {
 
   describe('applying a real template', () => {
     it('puts the templates entities in sceneGraph before it resolves', async () => {
-      const dispatch = engineDispatcher(harness.store);
+      const dispatch = createFakeEngineDispatcher(harness.store);
       setSceneDispatcher(dispatch);
 
       const result = await harness.store.getState().loadTemplate('2d-platformer');
@@ -85,7 +54,7 @@ describe('sceneSlice.loadTemplate', () => {
     });
 
     it('sends load_scene with JSON the engine can read, not the raw template data', async () => {
-      const dispatch = engineDispatcher(harness.store);
+      const dispatch = createFakeEngineDispatcher(harness.store);
       setSceneDispatcher(dispatch);
 
       await harness.store.getState().loadTemplate('2d-platformer');
@@ -101,7 +70,7 @@ describe('sceneSlice.loadTemplate', () => {
     });
 
     it('attaches the templates scripts through the script slice', async () => {
-      setSceneDispatcher(engineDispatcher(harness.store));
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
 
       await harness.store.getState().loadTemplate('2d-platformer');
 
@@ -116,7 +85,7 @@ describe('sceneSlice.loadTemplate', () => {
     });
 
     it('attaches the templates game components through the game slice', async () => {
-      setSceneDispatcher(engineDispatcher(harness.store));
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
 
       await harness.store.getState().loadTemplate('2d-platformer');
 
@@ -136,7 +105,7 @@ describe('sceneSlice.loadTemplate', () => {
     });
 
     it('applies the templates input preset', async () => {
-      setSceneDispatcher(engineDispatcher(harness.store));
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
 
       await harness.store.getState().loadTemplate('2d-platformer');
 
@@ -144,7 +113,7 @@ describe('sceneSlice.loadTemplate', () => {
     });
 
     it('reports the entities it had to drop and attaches nothing to them', async () => {
-      setSceneDispatcher(engineDispatcher(harness.store));
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
 
       const result = await harness.store.getState().loadTemplate('2d-platformer');
 
@@ -160,7 +129,7 @@ describe('sceneSlice.loadTemplate', () => {
       const { TEMPLATE_REGISTRY } = await import('@/data/templates');
       for (const entry of TEMPLATE_REGISTRY) {
         const local = createSceneTestStore();
-        setSceneDispatcher(engineDispatcher(local.store));
+        setSceneDispatcher(createFakeEngineDispatcher(local.store));
         const result = await local.store.getState().loadTemplate(entry.id);
         expect(result, `template ${entry.id}`).toMatchObject({ success: true });
         expect(local.store.getState().nodeCount, `template ${entry.id}`).toBeGreaterThan(0);
@@ -170,7 +139,7 @@ describe('sceneSlice.loadTemplate', () => {
 
   describe('failures are reported as failures', () => {
     it('refuses an unknown templateId without touching the scene', async () => {
-      const dispatch = engineDispatcher(harness.store);
+      const dispatch = createFakeEngineDispatcher(harness.store);
       setSceneDispatcher(dispatch);
 
       const result = await harness.store.getState().loadTemplate('no-such-template');
