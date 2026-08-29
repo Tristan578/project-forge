@@ -234,6 +234,7 @@ pub struct PendingCommands {
     pub game_component_updates: Vec<GameComponentUpdateRequest>,
     pub game_component_removals: Vec<GameComponentRemovalRequest>,
     pub set_game_camera_requests: Vec<SetGameCameraRequest>,
+    pub remove_game_camera_requests: Vec<RemoveGameCameraRequest>,
     pub set_active_game_camera_requests: Vec<SetActiveGameCameraRequest>,
     pub camera_shake_requests: Vec<CameraShakeRequest>,
     pub mouse_delta_requests: Vec<MouseDeltaRequest>,

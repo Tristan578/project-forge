@@ -497,7 +497,28 @@ impl Plugin for GameCameraPlugin {
                 first_person_mouse_look,
                 game_camera_system,
             ).chain().in_set(PlaySystemSet))
-            .add_systems(Update, update_orbital_angle.in_set(PlaySystemSet));
+            .add_systems(Update, update_orbital_angle.in_set(PlaySystemSet))
+            .add_systems(Update, apply_remove_game_camera_requests);
+    }
+}
+
+/// Remove camera data plus every marker/state component that could keep the
+/// entity driving Play mode after the editor clears its mirror (PF-1177).
+fn apply_remove_game_camera_requests(
+    mut pending: ResMut<PendingCommands>,
+    entity_query: Query<(Entity, &EntityId)>,
+    mut commands: Commands,
+) {
+    let requests: Vec<_> = pending.remove_game_camera_requests.drain(..).collect();
+    for request in requests {
+        if let Some((entity, _)) = entity_query.iter().find(|(_, eid)| eid.0 == request.entity_id) {
+            commands.entity(entity).remove::<(
+                GameCameraData,
+                ActiveGameCamera,
+                FirstPersonState,
+                OrbitalState,
+            )>();
+        }
     }
 }
 
@@ -1485,5 +1506,56 @@ mod configured_tests {
         assert_eq!(next.shake_intensity, 0.0);
         assert_eq!(next.shake_duration, 0.0);
         assert_eq!(next.shake_timer, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod removal_tests {
+    use super::*;
+    use crate::core::pending_commands::RemoveGameCameraRequest;
+
+    fn run_removal(world: &mut World) {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(apply_remove_game_camera_requests);
+        schedule.run(world);
+    }
+
+    #[test]
+    fn removal_clears_configuration_active_marker_and_mode_state() {
+        let mut world = World::new();
+        let mut pending = PendingCommands::default();
+        pending.remove_game_camera_requests.push(RemoveGameCameraRequest {
+            entity_id: "camera-1".into(),
+        });
+        world.insert_resource(pending);
+        let entity = world.spawn((
+            EntityId("camera-1".into()),
+            GameCameraData::default(),
+            ActiveGameCamera,
+            FirstPersonState::default(),
+            OrbitalState::default(),
+        )).id();
+        run_removal(&mut world);
+
+        let entity = world.entity(entity);
+        assert!(!entity.contains::<GameCameraData>());
+        assert!(!entity.contains::<ActiveGameCamera>());
+        assert!(!entity.contains::<FirstPersonState>());
+        assert!(!entity.contains::<OrbitalState>());
+    }
+
+    #[test]
+    fn unknown_id_is_a_safe_no_op_and_the_request_is_drained() {
+        let mut world = World::new();
+        let mut pending = PendingCommands::default();
+        pending.remove_game_camera_requests.push(RemoveGameCameraRequest {
+            entity_id: "missing".into(),
+        });
+        world.insert_resource(pending);
+        let entity = world.spawn((EntityId("camera-1".into()), GameCameraData::default())).id();
+        run_removal(&mut world);
+
+        assert!(world.entity(entity).contains::<GameCameraData>());
+        assert!(world.resource::<PendingCommands>().remove_game_camera_requests.is_empty());
     }
 }

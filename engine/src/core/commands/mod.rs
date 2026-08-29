@@ -167,7 +167,7 @@ fn route_domain(command: &str) -> u8 {
 
         // --- game domain ---
         "add_game_component" | "update_game_component" | "remove_game_component"
-        | "get_game_components" | "list_game_component_types" | "set_game_camera"
+        | "get_game_components" | "list_game_component_types" | "set_game_camera" | "remove_game_camera"
         | "set_active_game_camera" | "camera_shake" | "mouse_delta"
         | "get_game_camera" => 9,
 
