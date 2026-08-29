@@ -129,7 +129,12 @@ pub fn snapshot_scene(
     reverb_particle_shader_query: &Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
     csg_sprite_physics2d_query: &Query<(&EntityId, Option<&CsgMeshData>, Option<&super::sprite::SpriteData>, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&PhysicsJoint2d>)>,
     procedural_joint_gc_camera_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>, Option<&super::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
-    tilemap_skeleton2d_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>, Option<&LodData>)>,
+    // Terrain and the animation clip ride on this tuple rather than new params:
+    // the calling system is one param short of the 16-param ECS limit, and the
+    // 15-element tuple limit leaves room here. Both are restored by
+    // `spawn_from_snapshot`, so omitting them means a terrain or an animated
+    // entity deleted during Play comes back stripped on Stop.
+    tilemap_skeleton2d_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>, Option<&LodData>, Option<&super::terrain::TerrainData>, Option<&super::terrain::TerrainMeshData>, Option<&super::animation_clip::AnimationClipData>)>,
     selection: &Selection,
 ) -> SceneSnapshot {
     use std::collections::HashMap;
@@ -156,9 +161,9 @@ pub fn snapshot_scene(
         .map(|(eid, pmd, jd, gc, gcd, agc)| (eid.0.as_str(), (pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some())))
         .collect();
 
-    type TilemapSkeleton2dRow = (Option<TilemapData>, bool, Option<super::skeleton2d::SkeletonData2d>, bool, Option<Vec<super::skeletal_animation2d::SkeletalAnimation2d>>, Option<LodData>);
+    type TilemapSkeleton2dRow = (Option<TilemapData>, bool, Option<super::skeleton2d::SkeletonData2d>, bool, Option<Vec<super::skeletal_animation2d::SkeletalAnimation2d>>, Option<LodData>, Option<super::terrain::TerrainData>, Option<super::terrain::TerrainMeshData>, Option<super::animation_clip::AnimationClipData>);
     let tilemap_skeleton2d_map: HashMap<&str, TilemapSkeleton2dRow> = tilemap_skeleton2d_query.iter()
-        .map(|(eid, tmd, tme, sd, se, sa, ld)| (eid.0.as_str(), (tmd.cloned(), tme.is_some(), sd.cloned(), se.is_some(), sa.cloned().map(|a| vec![a]), ld.cloned())))
+        .map(|(eid, tmd, tme, sd, se, sa, ld, td, tmesh, acd)| (eid.0.as_str(), (tmd.cloned(), tme.is_some(), sd.cloned(), se.is_some(), sa.cloned().map(|a| vec![a]), ld.cloned(), td.cloned(), tmesh.cloned(), acd.cloned())))
         .collect();
 
     let mut entities = Vec::new();
@@ -196,9 +201,9 @@ pub fn snapshot_scene(
             .map(|(pmd, jd, gc, gcd, agc)| (pmd.clone(), jd.clone(), gc.clone(), gcd.clone(), *agc))
             .unwrap_or((None, None, None, None, false));
 
-        let (tilemap_data, tilemap_enabled, skeleton2d_data, skeleton2d_enabled, skeletal_animations, lod_data) = tilemap_skeleton2d_map.get(eid.0.as_str())
-            .map(|(tmd, tme, sd, se, sa, ld)| (tmd.clone(), *tme, sd.clone(), *se, sa.clone(), ld.clone()))
-            .unwrap_or((None, false, None, false, None, None));
+        let (tilemap_data, tilemap_enabled, skeleton2d_data, skeleton2d_enabled, skeletal_animations, lod_data, terrain_data, terrain_mesh_data, animation_clip_data) = tilemap_skeleton2d_map.get(eid.0.as_str())
+            .map(|(tmd, tme, sd, se, sa, ld, td, tmesh, acd)| (tmd.clone(), *tme, sd.clone(), *se, sa.clone(), ld.clone(), td.clone(), tmesh.clone(), acd.clone()))
+            .unwrap_or((None, false, None, false, None, None, None, None, None));
 
         let mut snap = EntitySnapshot::new(
             eid.0.clone(),
@@ -228,6 +233,7 @@ pub fn snapshot_scene(
         snap.procedural_mesh_data = procedural_mesh_data;
         snap.joint_data = joint_data;
         snap.game_components = game_components;
+        snap.animation_clip_data = animation_clip_data;
         snap.game_camera_data = game_camera_data;
         snap.active_game_camera = active_game_camera;
         snap.sprite_data = sprite_data;
@@ -236,6 +242,8 @@ pub fn snapshot_scene(
         snap.skeleton2d_data = skeleton2d_data;
         snap.skeleton2d_enabled = skeleton2d_enabled;
         snap.skeletal_animations = skeletal_animations;
+        snap.terrain_data = terrain_data;
+        snap.terrain_mesh_data = terrain_mesh_data;
         snap.lod_data = lod_data;
         snap.physics2d_data = physics2d_data_pre;
         snap.physics2d_enabled = physics2d_enabled_pre;

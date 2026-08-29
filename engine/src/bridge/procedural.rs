@@ -4,17 +4,29 @@ use bevy::prelude::*;
 use bevy::mesh::Mesh;
 use crate::core::{
     self,
+    animation_clip::AnimationClipData,
     entity_id::{EntityId, EntityName, EntityVisible},
+    game_camera::{ActiveGameCamera, GameCameraData},
+    game_components::GameComponents,
     history::{EntitySnapshot as HistEntitySnapshot, HistoryStack, TransformSnapshot},
     lighting::LightData,
+    lod::LodData,
     material::MaterialData,
     audio::{AudioData, AudioEnabled},
     particles::{ParticleData, ParticleEnabled},
     pending_commands::{EntityType, PendingCommands},
-    physics::{PhysicsData, PhysicsEnabled},
+    physics::{JointData, PhysicsData, PhysicsEnabled},
+    physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d},
+    procedural_mesh::ProceduralMeshData,
+    reverb_zone::{ReverbZoneData, ReverbZoneEnabled},
     scripting::ScriptData,
     selection::{Selection, SelectionChangedEvent},
     shader_effects::ShaderEffectData,
+    skeletal_animation2d::SkeletalAnimation2d,
+    skeleton2d::{SkeletonData2d, SkeletonEnabled2d},
+    sprite::SpriteData,
+    terrain::{TerrainData, TerrainMeshData},
+    tilemap::{TilemapData, TilemapEnabled},
     asset_manager::AssetRef,
 };
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -45,13 +57,45 @@ pub(super) fn apply_csg_requests(
         Option<&Mesh3d>,
         Option<&AssetRef>,
     )>,
-    // Separate queries for components beyond the 15-tuple limit
-    light_query: Query<(&EntityId, Option<&LightData>)>,
+    // Separate queries for components beyond the 15-tuple limit.
+    //
+    // A source entity is DESPAWNED by a boolean with `delete_sources`, so its
+    // snapshot is the only record undo has. Anything absent from these tuples
+    // is gone for good once the operation runs, which is why they carry every
+    // component `spawn_from_snapshot` can put back rather than only the ones a
+    // mesh "usually" has.
+    light_query: Query<(
+        &EntityId,
+        Option<&LightData>,
+        Option<&ReverbZoneData>,
+        Option<&ReverbZoneEnabled>,
+        Option<&AnimationClipData>,
+        Option<&GameComponents>,
+        Option<&GameCameraData>,
+        Option<&ActiveGameCamera>,
+        Option<&JointData>,
+        Option<&LodData>,
+        Option<&ProceduralMeshData>,
+        Option<&TerrainData>,
+        Option<&TerrainMeshData>,
+    )>,
     physics_query: Query<(&EntityId, Option<&PhysicsData>, Option<&PhysicsEnabled>)>,
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: Query<(&EntityId, Option<&AudioData>, Option<&AudioEnabled>)>,
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    shader_query: Query<(
+        &EntityId,
+        Option<&ShaderEffectData>,
+        Option<&SpriteData>,
+        Option<&Physics2dData>,
+        Option<&Physics2dEnabled>,
+        Option<&PhysicsJoint2d>,
+        Option<&TilemapData>,
+        Option<&TilemapEnabled>,
+        Option<&SkeletonData2d>,
+        Option<&SkeletonEnabled2d>,
+        Option<&SkeletalAnimation2d>,
+    )>,
     csg_data_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
     mut history: ResMut<HistoryStack>,
     mut selection: ResMut<Selection>,
@@ -164,9 +208,36 @@ pub(super) fn apply_csg_requests(
         let build_snapshot = |eid: &EntityId, ename: &EntityName, etransform: &Transform,
                               evisible: &EntityVisible, etype: Option<&EntityType>,
                               emat: Option<&MaterialData>, easset: Option<&AssetRef>| -> core::history::EntitySnapshot {
-            let light_data = light_query.iter()
-                .find(|(lid, _)| lid.0 == eid.0)
-                .and_then(|(_, ld)| ld.cloned());
+            let (
+                light_data,
+                reverb_zone_data,
+                reverb_zone_enabled,
+                animation_clip_data,
+                game_components,
+                game_camera_data,
+                active_game_camera,
+                joint_data,
+                lod_data,
+                procedural_mesh_data,
+                terrain_data,
+                terrain_mesh_data,
+            ) = light_query.iter()
+                .find(|(lid, ..)| lid.0 == eid.0)
+                .map(|(_, ld, rzd, rze, acd, gc, gcd, agc, jd, lodd, pmd, td, tmd)| (
+                    ld.cloned(),
+                    rzd.cloned(),
+                    rze.is_some(),
+                    acd.cloned(),
+                    gc.cloned(),
+                    gcd.cloned(),
+                    agc.is_some(),
+                    jd.cloned(),
+                    lodd.cloned(),
+                    pmd.cloned(),
+                    td.cloned(),
+                    tmd.cloned(),
+                ))
+                .unwrap_or((None, None, false, None, None, None, false, None, None, None, None, None));
 
             let (physics_data, physics_enabled) = physics_query.iter()
                 .find(|(pid, _, _)| pid.0 == eid.0)
@@ -187,9 +258,34 @@ pub(super) fn apply_csg_requests(
                 .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
                 .unwrap_or((None, false));
 
-            let shader_effect_data = shader_query.iter()
-                .find(|(sid, _)| sid.0 == eid.0)
-                .and_then(|(_, sed)| sed.cloned());
+            let (
+                shader_effect_data,
+                sprite_data,
+                physics2d_data,
+                physics2d_enabled,
+                joint2d_data,
+                tilemap_data,
+                tilemap_enabled,
+                skeleton2d_data,
+                skeleton2d_enabled,
+                skeletal_animations,
+            ) = shader_query.iter()
+                .find(|(sid, ..)| sid.0 == eid.0)
+                .map(|(_, sed, spd, p2d, p2e, j2d, tmd, tme, skd, ske, sa)| (
+                    sed.cloned(),
+                    spd.cloned(),
+                    p2d.cloned(),
+                    p2e.is_some(),
+                    j2d.cloned(),
+                    tmd.cloned(),
+                    tme.is_some(),
+                    skd.cloned(),
+                    ske.is_some(),
+                    // One clip per entity, widened to the snapshot's Vec field —
+                    // same shape as `core::engine_mode::snapshot_scene`.
+                    sa.cloned().map(|a| vec![a]),
+                ))
+                .unwrap_or((None, None, None, false, None, None, false, None, false, None));
 
             let csg_mesh_data = csg_data_query.iter()
                 .find(|(cid, _)| cid.0 == eid.0)
@@ -212,10 +308,30 @@ pub(super) fn apply_csg_requests(
             snap.script_data = script_data;
             snap.audio_data = audio_data;
             snap.audio_enabled = audio_enabled;
+            snap.reverb_zone_data = reverb_zone_data;
+            snap.reverb_zone_enabled = reverb_zone_enabled;
             snap.particle_data = particle_data;
             snap.particle_enabled = particle_enabled;
             snap.shader_effect_data = shader_effect_data;
             snap.csg_mesh_data = csg_mesh_data;
+            snap.terrain_data = terrain_data;
+            snap.terrain_mesh_data = terrain_mesh_data;
+            snap.procedural_mesh_data = procedural_mesh_data;
+            snap.joint_data = joint_data;
+            snap.game_components = game_components;
+            snap.animation_clip_data = animation_clip_data;
+            snap.game_camera_data = game_camera_data;
+            snap.active_game_camera = active_game_camera;
+            snap.sprite_data = sprite_data;
+            snap.physics2d_data = physics2d_data;
+            snap.physics2d_enabled = physics2d_enabled;
+            snap.joint2d_data = joint2d_data;
+            snap.tilemap_data = tilemap_data;
+            snap.tilemap_enabled = tilemap_enabled;
+            snap.skeleton2d_data = skeleton2d_data;
+            snap.skeleton2d_enabled = skeleton2d_enabled;
+            snap.skeletal_animations = skeletal_animations;
+            snap.lod_data = lod_data;
             snap
         };
 
