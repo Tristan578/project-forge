@@ -57,6 +57,51 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
     return (pathname: string) => matcher(reqFor(pathname));
   })();
 
+  const boundedPublicSubtrees = [
+    ['/sign-in', '/sign-internal'],
+    ['/sign-up', '/sign-update'],
+    ['/api/auth/webhook', '/api/auth/webhooks-admin'],
+    ['/api/stripe/webhook', '/api/stripe/webhooks-admin'],
+    ['/play', '/playtest'],
+    ['/terms', '/terms-admin'],
+    ['/privacy', '/privacy-center-admin'],
+    ['/community', '/community-admin'],
+    ['/api/community', '/api/community-admin'],
+    ['/api/waitlist', '/api/waitlist-admin'],
+    ['/api/docs', '/api/docs-admin'],
+    ['/api-docs', '/api-docs-admin'],
+    ['/api/openapi', '/api/openapi-admin'],
+    ['/api/health', '/api/health-admin'],
+    ['/api/status', '/api/status-admin'],
+    ['/api/cron', '/api/cron-admin'],
+    ['/api/sentry', '/api/sentry-admin'],
+    ['/monitoring', '/monitoring-admin'],
+    ['/faq', '/faq-admin'],
+    ['/about', '/about-admin'],
+    ['/compare', '/compare-admin'],
+    ['/use-cases', '/use-cases-admin'],
+    ['/changelog', '/changelog-admin'],
+    ['/blog', '/blogadmin'],
+  ] as const;
+
+  it.each(boundedPublicSubtrees)(
+    'bounds public subtree %s at a path-segment boundary',
+    (route, nearMiss) => {
+      expect(isPublic(route)).toBe(true);
+      expect(isPublic(`${route}/__matcher_probe__`)).toBe(true);
+      expect(isPublic(nearMiss), `${nearMiss} must remain protected`).toBe(false);
+    },
+  );
+
+  it('contains no bare suffix-wildcard patterns', () => {
+    for (const includeDev of [false, true]) {
+      const unsafe = buildPublicRoutes({ includeDev }).filter(
+        pattern => pattern.endsWith('(.*)') && !pattern.endsWith('/(.*)'),
+      );
+      expect(unsafe).toEqual([]);
+    }
+  });
+
   it('treats Vercel cron subpaths as public so CRON_SECRET auth can run (#8605)', () => {
     // The whole point of #8605: the *subpath* the scheduler actually calls must
     // match. A bare `/api/cron` pattern (no `(.*)`) fails this assertion even
@@ -170,6 +215,8 @@ describe('proxy public-route matcher (real Clerk matcher)', () => {
     const dev = createRouteMatcher(buildPublicRoutes({ includeDev: true }));
     expect(prod(reqFor('/dev'))).toBe(false);
     expect(dev(reqFor('/dev'))).toBe(true);
+    expect(dev(reqFor('/dev/example'))).toBe(true);
+    expect(dev(reqFor('/developer'))).toBe(false);
   });
 });
 
