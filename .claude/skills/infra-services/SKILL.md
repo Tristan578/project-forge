@@ -31,11 +31,18 @@ Estimated monthly cost: ~$130-150
 
 ## Service Reference
 
+Account IDs, project slugs and DO-NOT-TOUCH rules are canonical in
+[references/service-accounts.md](references/service-accounts.md). If this file and that one
+ever disagree, that one is right — fix this one.
+
 ### Vercel (Hosting + Compute)
 
-- **Project**: spawnforge-ai
-- **Staging env**: spawnforge-staging
-- **CLI commands**: `vercel ls`, `vercel logs`, `vercel env ls/pull`
+- **Project**: `spawnforge` (production, spawnforge.ai) — NOT `spawnforge-ai`, which is the
+  Sentry project slug. Passing `spawnforge-ai` to a Vercel command returns a not-found that
+  is indistinguishable from a permissions failure.
+- **Sibling projects**: `spawnforge-staging`, `spawnforge-docs`, `spawnforge-design`
+- **Scope**: `--scope tnolan` on EVERY Vercel CLI command
+- **CLI commands**: `vercel ls --scope tnolan`, `vercel logs --scope tnolan`, `vercel env ls|pull --scope tnolan`
 - **Config**: `vercel.json` (crons, headers, rewrites)
 - **Key env vars**: `VERCEL_URL`, `NEXT_PUBLIC_SITE_URL`
 - **Gotchas**:
@@ -95,7 +102,7 @@ Estimated monthly cost: ~$130-150
 
 ### Stripe (Payments)
 
-- **Key env vars**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- **Key env vars**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (no publishable key — checkout is a server-side redirect to a Stripe-hosted page, so `web/` never loads Stripe.js)
 - **Webhooks**: `POST /api/webhooks/stripe` — handles checkout, subscription, invoice, charge events
 - **Local testing**: `stripe listen --forward-to http://spawnforge.localhost:1355/api/webhooks/stripe`
 - **Tiers**: starter (free), hobbyist, creator, pro
@@ -116,14 +123,28 @@ Estimated monthly cost: ~$130-150
   - Fingerprinting configured in server + edge configs
   - PR code review via Sentry comments — must reply with commit SHA or false-positive explanation
 
-### PostHog (Analytics)
+### PostHog (Analytics + Feature Flags)
 
-- **Key env vars**: `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`
+- **Key env vars**: `NEXT_PUBLIC_POSTHOG_KEY`, `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_LLM_CAPTURE`
+  (there is no `NEXT_PUBLIC_POSTHOG_HOST` — nothing in the repo reads one)
 - **Tracking**: gated behind cookie consent (GDPR compliance, PF-668)
-- **Provider**: `web/src/components/providers/PostHogProvider.tsx`
+- **Client provider**: `web/src/components/providers/PostHogProvider.tsx`
+- **Server capture**: `web/src/lib/analytics/posthog-server.ts` — content-free `$ai_generation`
+  LLM observability (PF-907). Dependency-free `fetch` to PostHog's capture endpoint; dormant
+  unless `POSTHOG_LLM_CAPTURE === 'true'` AND `NEXT_PUBLIC_POSTHOG_KEY` is set, and a no-op
+  without per-call consent.
+- **Feature flags**: `web/src/lib/flags/posthogFlags.ts` — a local evaluator (PF-971 / #8952),
+  not the PostHog SDK. Requires BOTH `POSTHOG_PERSONAL_API_KEY` and `NEXT_PUBLIC_POSTHOG_KEY`;
+  omit either and `getBooleanFlag()` returns the caller's default with zero network I/O.
+  It supplies:
+  - `deep-generation-tier` — overrides `NEXT_PUBLIC_USE_DEEP_GENERATION`
+  - `provider-kill-switch-<provider>` — checked by `createGenerationHandler` **before token
+    deduction**, so these gate real spend
 - **Gotchas**:
-  - Client-side only — no server-side tracking
-  - Feature flags available via PostHog but not yet wired
+  - Only a safe subset of PostHog targeting is evaluated locally (full rollout, 0% rollout, or
+    a single `tier` exact-match filter); anything else falls back to the default with a one-time
+    warn log
+  - Server capture never carries `$ai_input` / `$ai_output_choices` — do not add them
 
 ### GitHub Actions (CI/CD)
 
@@ -132,7 +153,7 @@ Estimated monthly cost: ~$130-150
 - **WASM caching**: artifacts shared between CI and CD for same SHA
 - **Gotchas**:
   - Path filters can cause gate job to never run (shows "Expected" forever)
-  - CodeQL on push-to-main + weekly schedule only (not on every PR)
+  - CodeQL runs on push-to-main, on every PR targeting main, and weekly (`.github/workflows/codeql.yml`)
   - Action versions must be pinned to SHA (not floating tags)
   - `CRON_SECRET` header required for cron job verification
 
@@ -143,7 +164,18 @@ Estimated monthly cost: ~$130-150
 curl -s http://spawnforge.localhost:1355/api/health | python3 -m json.tool
 ```
 
-The `/api/health` endpoint checks connectivity to Neon, Upstash, Clerk, and Stripe.
+`/api/health` checks **ten** services, not four (`web/src/lib/monitoring/healthChecks.ts`):
+Database (Neon), Clerk, Payments (Stripe), Rate Limiting (Upstash), Engine CDN, Cloudflare R2,
+AI Providers, Generation Factory, Chat Backend, Sentry.
+
+Only **Database and Clerk** failures return HTTP 503; everything else degrades to HTTP 200 with
+a per-service `degraded`/`down` entry. So a green status code is not a green stack — read
+`services[]`.
+
+The `AI Providers` check is the one that reports "outage" when a `PLATFORM_*` key is unset
+rather than wrong (PF-1054). Those names are read through an indirection table
+(`PLATFORM_KEY_ENV` in `web/src/lib/config/providers.ts`), so grepping for them finds nothing —
+see `web/.env.example` before concluding a provider is actually down.
 
 ## Scripts
 
