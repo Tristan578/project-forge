@@ -119,8 +119,27 @@ async function jsonRpcSse(
 
 describe('startHttpTransport', () => {
   let running: RunningHttpServer | null = null;
+  let savedUpstash: { url?: string; token?: string } = {};
+
+  // startHttpTransport switches to a real Upstash Redis limiter whenever
+  // UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN are set, so on any
+  // machine that has those exported (they are ordinary SpawnForge dev vars)
+  // these tests silently stopped exercising InMemoryRateLimiter and instead
+  // talked to production Redis under the shared `mcp:http` prefix. The
+  // per-IP-budget test then failed for everyone whose 127.0.0.1 budget was
+  // already spent. Pin the in-memory path; the Upstash path has no test.
+  beforeEach(() => {
+    savedUpstash = {
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    };
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  });
 
   afterEach(async () => {
+    if (savedUpstash.url !== undefined) process.env.UPSTASH_REDIS_REST_URL = savedUpstash.url;
+    if (savedUpstash.token !== undefined) process.env.UPSTASH_REDIS_REST_TOKEN = savedUpstash.token;
     if (running) {
       await running.close();
       running = null;
