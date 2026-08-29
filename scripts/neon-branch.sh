@@ -23,6 +23,7 @@
 #                                                           compose a URI when
 #                                                           the create response
 #                                                           carried none
+#   GET    /projects/{project_id}/operations/{operation_id}  poll create to done
 # `endpoints` is optional on create ("If omitted, the branch is created without
 # any compute endpoint"); endpoint `type` is `read_write` or `read_only`.
 #
@@ -50,6 +51,9 @@
 #                     when the new branch carries more than one. Only consulted
 #                     on the compose path below.
 #   NEON_ROLE         Optional. Same, for the role.
+#   NEON_POLL_INTERVAL_SECONDS   Optional, default 2. Gap between operation polls.
+#   NEON_POLL_TIMEOUT_SECONDS    Optional, default 120. Give up on an operation
+#                     after this long and exit 4. Matches scripts/pitr-verify.mjs.
 #   NEON_CURL_CMD     TEST-ONLY seam. Overrides the `curl` binary so
 #                     scripts/__tests__/neon-branch.test.sh can exercise every
 #                     branch hermetically. CI NEVER sets this; the suite carries
@@ -60,6 +64,7 @@
 #   0   success
 #   2   missing NEON_API_KEY / NEON_PROJECT_ID
 #   3   Neon API error (non-2xx, unparseable body, or a missing expected field)
+#   4   a branch-creation operation did not finish inside the poll timeout
 #   64  usage error
 set -uo pipefail
 
@@ -76,6 +81,8 @@ CURL="${NEON_CURL_CMD:-curl}"
 : "${NEON_PROJECT_ID:=}"
 : "${NEON_DATABASE:=}"
 : "${NEON_ROLE:=}"
+: "${NEON_POLL_INTERVAL_SECONDS:=2}"
+: "${NEON_POLL_TIMEOUT_SECONDS:=120}"
 if [ -z "$NEON_API_KEY" ] || [ -z "$NEON_PROJECT_ID" ]; then
   echo "::error::NEON_API_KEY and NEON_PROJECT_ID must both be set."
   echo "::error::A production schema migration is not permitted without a pre-migration snapshot."
@@ -124,6 +131,62 @@ neon_api() {
       return 3
       ;;
   esac
+}
+
+# Block until every operation the create-branch response opened has finished.
+#
+# Creating a branch is ASYNCHRONOUS. The 201 means Neon accepted the request,
+# not that the branch -- and in particular its compute endpoint -- exists yet:
+# the response carries an `operations` array (`create_branch`, `start_compute`)
+# whose members are still `running` or `scheduling`. Handing the connection URI
+# straight to drizzle-kit therefore races provisioning, and the loser is a
+# connection error in the migration dry run that reads exactly like a bad
+# migration. That is the worst possible shape for this failure: the dry run is
+# the gate that decides whether a schema change reaches production, so a
+# spurious red here either blocks a good deploy or trains whoever is on the
+# other end to re-run it until it passes.
+#
+# scripts/pitr-verify.mjs already polls the same endpoint with the same
+# semantics (finished / failed|error|cancelled / timeout at exit 4); this is
+# that logic in bash, sharing the interval and timeout defaults so the two
+# agree about how long "too long" is.
+#
+# A response with no `operations` (any list/delete call, and every fixture that
+# predates this) waits for nothing and returns immediately.
+neon_wait_for_operations() {
+  local resp="$1"
+  local ids id waited status op_resp interval timeout
+
+  ids="$(jq -r '(.operations // []) | map(.id // empty) | .[]' <<<"$resp" 2>/dev/null)"
+  [ -n "$ids" ] || return 0
+
+  # A zero or non-numeric interval would spin the loop against the Neon API
+  # without ever advancing `waited`, so the timeout below could never fire.
+  interval="$NEON_POLL_INTERVAL_SECONDS"
+  case "$interval" in ''|*[!0-9]*|0) interval=2 ;; esac
+  timeout="$NEON_POLL_TIMEOUT_SECONDS"
+  case "$timeout" in ''|*[!0-9]*) timeout=120 ;; esac
+
+  while read -r id; do
+    [ -n "$id" ] || continue
+    waited=0
+    while :; do
+      op_resp="$(neon_api GET "/projects/${NEON_PROJECT_ID}/operations/${id}")" || return 3
+      status="$(jq -r '.operation.status // empty' <<<"$op_resp" 2>/dev/null)"
+      case "$status" in
+        finished) break ;;
+        failed|error|cancelled)
+          echo "::error::Neon operation ${id} ended with status '${status}'; the branch is not usable." >&2
+          return 3 ;;
+      esac
+      if [ "$waited" -ge "$timeout" ]; then
+        echo "::error::Neon operation ${id} did not finish within ${timeout}s (last status '${status:-none}')." >&2
+        return 4
+      fi
+      sleep "$interval"
+      waited=$(( waited + interval ))
+    done
+  done <<<"$ids"
 }
 
 # URL-encode one component of a connection URI. A Neon role password is a
@@ -232,6 +295,11 @@ cmd_create() {
     echo "::error::Neon create-branch response carried no branch.id — refusing to continue without a snapshot."
     exit 3
   fi
+
+  # Before anything reads from the branch -- including the reveal_password call
+  # on the compose path below, which can 404 while the branch is still being
+  # created.
+  neon_wait_for_operations "$resp" || exit $?
 
   if [ -n "$uri_out" ]; then
     local uri

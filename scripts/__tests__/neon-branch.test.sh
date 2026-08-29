@@ -127,12 +127,15 @@ run_helper() {
 
 # Same, plus one extra VAR=value on the child only (NEON_DATABASE / NEON_ROLE).
 run_helper_env() {
-  local kv="$1"; shift
+  local envs=()
+  # Leading VAR=value arguments belong to the child's environment; the first
+  # argument that is not one is the subcommand.
+  while [ $# -gt 0 ] && [ "${1#*=}" != "$1" ]; do envs+=("$1"); shift; done
   local out rc
   out="$(NEON_CURL_CMD="$STUB" \
          STUB_DIR="$TMPDIR_T/stub" STUB_LOG="$TMPDIR_T/stub.log" \
          NEON_API_KEY='test-key-not-real' NEON_PROJECT_ID='proj-test' \
-         env "$kv" bash "$SCRIPT" "$@" 2>&1)"
+         env "${envs[@]}" bash "$SCRIPT" "$@" 2>&1)"
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
@@ -401,6 +404,146 @@ if [ ! -s "$TMPDIR_T/nopw.uri" ]; then
   pass "no half-composed URI is left behind for the dry run to pick up"
 else
   fail "a partial URI was written: $(cat "$TMPDIR_T/nopw.uri")"
+fi
+
+# --- 3g. Creation is async: wait for the operations before using the branch --
+# The 201 means Neon ACCEPTED the request, not that the branch exists. The
+# response carries an `operations` array still in `running`/`scheduling`, and
+# handing the URI to drizzle-kit before `start_compute` finishes races
+# provisioning. The dry run would then fail on a connection error that reads
+# exactly like a bad migration -- on the very gate that decides whether a schema
+# change reaches production.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-async-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"}],
+ "roles":[{"name":"forge_owner"}],
+ "operations":[{"id":"op-create","status":"running"}]}
+EOF
+stub_body 2 <<'EOF'
+{"operation":{"id":"op-create","status":"running"}}
+EOF
+stub_body 3 <<'EOF'
+{"operation":{"id":"op-create","status":"finished"}}
+EOF
+stub_body 4 <<'EOF'
+{"password":"pw-async"}
+EOF
+uri_out="$TMPDIR_T/async.uri"
+res="$(run_helper_env NEON_POLL_INTERVAL_SECONDS=1 create dryrun-async --endpoint --uri-out "$uri_out")"
+rc="${res%%|*}"; out="${res#*|}"
+composed="$(cat "$uri_out" 2>/dev/null)"
+if [ "$rc" = "0" ] && [ "$composed" = 'postgresql://forge_owner:pw-async@ep-rw.neon.tech/neondb?sslmode=require' ]; then
+  pass "a still-running create operation is polled to completion, then the URI is produced"
+else
+  fail "async create did not settle: rc=$rc uri='$composed' out=$out"
+fi
+if [ "$(grep -c 'GET .*/operations/op-create' <<<"$(requests)")" = "2" ]; then
+  pass "the poller keeps asking until the operation reports finished (2 polls)"
+else
+  fail "expected 2 operation polls, log: $(requests)"
+fi
+# Order matters, not just presence: revealing a password on a branch whose
+# create operation is still running can 404.
+first_reveal="$(grep -n 'reveal_password' <<<"$(requests)" | head -1 | cut -d: -f1)"
+last_poll="$(grep -n '/operations/op-create' <<<"$(requests)" | tail -1 | cut -d: -f1)"
+if [ -n "$first_reveal" ] && [ -n "$last_poll" ] && [ "$last_poll" -lt "$first_reveal" ]; then
+  pass "every operation poll happens before the branch is read from"
+else
+  fail "the branch was read before provisioning finished (poll line $last_poll, reveal line $first_reveal)"
+fi
+
+# --- 3h. An operation that ends badly must not yield a usable-looking URI ----
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-opfail-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"}],
+ "roles":[{"name":"forge_owner"}],
+ "operations":[{"id":"op-bad","status":"running"}]}
+EOF
+stub_body 2 <<'EOF'
+{"operation":{"id":"op-bad","status":"failed"}}
+EOF
+res="$(run_helper_env NEON_POLL_INTERVAL_SECONDS=1 create dryrun-opfail --endpoint --uri-out "$TMPDIR_T/opfail.uri")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "3" ] && grep -qF 'op-bad' <<<"$out"; then
+  pass "a failed create operation fails the helper (exit 3) and names the operation"
+else
+  fail "a failed operation should exit 3 naming it, got $rc: $out"
+fi
+if [ ! -s "$TMPDIR_T/opfail.uri" ]; then
+  pass "no connection URI is left behind for a branch that failed to provision"
+else
+  fail "a URI was written for a failed branch: $(cat "$TMPDIR_T/opfail.uri")"
+fi
+
+# --- 3i. An operation that never finishes times out, distinctly (exit 4) -----
+# Distinct from exit 3 on purpose: "Neon rejected us" and "Neon is slow" want
+# different responses from whoever reads the job, and pitr-verify.mjs already
+# uses 4 for this.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-slow-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"}],
+ "roles":[{"name":"forge_owner"}],
+ "operations":[{"id":"op-slow","status":"running"}]}
+EOF
+printf '%s' '{"operation":{"id":"op-slow","status":"running"}}' > "$TMPDIR_T/stub/body.default"
+res="$(run_helper_env NEON_POLL_INTERVAL_SECONDS=1 NEON_POLL_TIMEOUT_SECONDS=1 create dryrun-slow --endpoint --uri-out "$TMPDIR_T/slow.uri")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "4" ]; then
+  pass "an operation that never finishes exits 4, not 3"
+else
+  fail "a stuck operation should exit 4, got $rc: $out"
+fi
+if grep -qF 'reveal_password' <<<"$(requests)"; then
+  fail "the helper read from a branch it never saw finish provisioning"
+else
+  pass "nothing is read from a branch whose provisioning timed out"
+fi
+
+# --- 3j. A zero interval must not disable the timeout ------------------------
+# `waited` advances by the interval; a 0 would spin against the Neon API
+# forever without the deadline ever arriving.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-zero-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"}],
+ "roles":[{"name":"forge_owner"}],
+ "operations":[{"id":"op-zero","status":"running"}]}
+EOF
+printf '%s' '{"operation":{"id":"op-zero","status":"running"}}' > "$TMPDIR_T/stub/body.default"
+res="$(run_helper_env NEON_POLL_INTERVAL_SECONDS=0 NEON_POLL_TIMEOUT_SECONDS=2 create dryrun-zero --endpoint --uri-out "$TMPDIR_T/zero.uri")"
+rc="${res%%|*}"
+if [ "$rc" = "4" ]; then
+  pass "a 0 poll interval falls back to the default instead of spinning forever"
+else
+  fail "a 0 interval should still reach the timeout (exit 4), got $rc"
+fi
+
+# --- 3k. A response with no operations waits for nothing ---------------------
+# Every list/delete call, and every fixture predating the poller, must stay a
+# single round trip.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-noop-1"},
+ "connection_uris":[{"connection_uri":"postgresql://u:p@h/db"}]}
+EOF
+res="$(run_helper create dryrun-noop --endpoint --uri-out "$TMPDIR_T/noop.uri")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ] && [ "$(grep -c . <<<"$(requests)")" = "1" ]; then
+  pass "a response carrying no operations makes exactly one API call"
+else
+  fail "expected a single call, got rc=$rc log: $(requests)"
 fi
 
 # --- 4. Response with no branch.id → refuse to continue ----------------------
