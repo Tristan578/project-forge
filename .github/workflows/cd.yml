@@ -56,6 +56,8 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      # For the rollback record below. Job-scoped, not workflow-scoped.
+      issues: write
     environment:
       name: production
     steps:
@@ -69,6 +71,7 @@ jobs:
         run: npm i -g vercel@50.34.3
 
       - name: Promote previous deployment to production
+        id: promote-previous
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -79,19 +82,33 @@ jobs:
           vercel promote "$ROLLBACK_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "Rollback complete. Production now at: $ROLLBACK_URL"
 
-      - name: Notify Slack of manual rollback
-        if: ${{ vars.SLACK_WEBHOOK_INCIDENTS != '' }}
+      # Was a Slack post gated on `vars.SLACK_WEBHOOK_INCIDENTS != ''`. That repo
+      # variable has never existed, and an empty-string guard SKIPS rather than
+      # errors, so this step read like working alerting and had never fired.
+      # Replaced with a mechanism that has no escape hatch: a missing input is a
+      # red step, not a skipped one (PF-1216 / #9438).
+      - name: Record the manual rollback
+        if: ${{ !cancelled() }}
         env:
-          SLACK_WEBHOOK: ${{ vars.SLACK_WEBHOOK_INCIDENTS }}
+          GH_TOKEN: ${{ github.token }}
+          NOTIFY_KEY: prod-rollback-manual
+          NOTIFY_TITLE: 'Production was manually rolled back'
+          NOTIFY_LABELS: priority-p0,area-infra
+          ACTOR: ${{ github.actor }}
           ROLLBACK_URL: ${{ github.event.inputs.rollback_production }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          ACTOR: ${{ github.actor }}
+          PROMOTE_OUTCOME: ${{ steps.promote-previous.outcome }}
         run: |
-          payload=$(printf '{"text":"*SpawnForge Production Rollback (Manual)*\n*Triggered by:* %s\n*Promoted URL:* <%s|%s>\n*Workflow run:* <%s|View run>"}' \
-            "$ACTOR" "$ROLLBACK_URL" "$ROLLBACK_URL" "$RUN_URL")
-          curl --silent --fail -X POST "$SLACK_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "$payload" || echo "Slack notification failed (non-fatal)"
+          NOTIFY_BODY="Production was manually rolled back by \`${ACTOR}\`.
+
+          **Promoted URL:** ${ROLLBACK_URL}
+          **\`vercel promote\` outcome:** ${PROMOTE_OUTCOME}
+          **Run:** ${RUN_URL}
+
+          A manual rollback means production was serving something bad. Record the
+          cause here, then close this issue. See \`docs/production-support.md\`."
+          export NOTIFY_BODY
+          bash scripts/notify-workflow-failure.sh
 
   # ---- Quality Gates (must all pass before any deployment) ----
 
@@ -760,6 +777,8 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      # For the auto-rollback incident issue below. Job-scoped, not workflow-scoped.
+      issues: write
     environment:
       name: production
       url: ${{ steps.deploy.outputs.url }}
@@ -1014,21 +1033,38 @@ jobs:
           vercel promote "$PREV_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "Rollback complete. Production restored to: $PREV_URL"
 
-      - name: Notify Slack of automatic rollback
-        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' && vars.SLACK_WEBHOOK_INCIDENTS != '' }}
+      # Same replacement as the manual-rollback record above: the previous Slack
+      # step's `vars.SLACK_WEBHOOK_INCIDENTS != ''` clause silently skipped it in
+      # every run this repo has ever had (PF-1216 / #9438). The condition below
+      # deliberately keeps only the clauses that describe the ROLLBACK, so this
+      # fires exactly when the rollback step above ran.
+      - name: Open the auto-rollback incident issue
+        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' }}
         env:
-          SLACK_WEBHOOK: ${{ vars.SLACK_WEBHOOK_INCIDENTS }}
+          GH_TOKEN: ${{ github.token }}
+          NOTIFY_KEY: prod-rollback-auto
+          NOTIFY_TITLE: 'Production auto-rollback fired: a deploy failed its health check'
+          NOTIFY_LABELS: priority-p0,area-infra
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
           NEW_URL: ${{ steps.deploy.outputs.url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ github.sha }}
+          HEALTH_OUTCOME: ${{ steps.health-check-production.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke-tests.outcome }}
         run: |
-          short_sha="${COMMIT_SHA:0:8}"
-          payload=$(printf '{"text":"*SpawnForge Production Auto-Rollback*\n:rotating_light: Health check failed for commit `%s`.\n*Failed deployment:* <%s|%s>\n*Rolled back to:* <%s|%s>\n*Workflow run:* <%s|View run>"}' \
-            "$short_sha" "$NEW_URL" "$NEW_URL" "$PREV_URL" "$PREV_URL" "$RUN_URL")
-          curl --silent --fail -X POST "$SLACK_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "$payload" || echo "Slack notification failed (non-fatal)"
+          NOTIFY_BODY="CD promoted production back to the previous deployment.
+
+          **Commit:** \`${COMMIT_SHA}\`
+          **Failed deployment:** ${NEW_URL}
+          **Rolled back to:** ${PREV_URL}
+          **Health check:** ${HEALTH_OUTCOME}
+          **Smoke tests:** ${SMOKE_OUTCOME}
+          **Run:** ${RUN_URL}
+
+          Production is serving the PREVIOUS deployment. The commit above is on
+          \`main\` and undeployed. See \`docs/production-support.md\`."
+          export NOTIFY_BODY
+          bash scripts/notify-workflow-failure.sh
 
 
   # ---- Docs Site Deploy ----

@@ -2996,6 +2996,7 @@ OUTPUTS_EOF
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
+            scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
@@ -3184,7 +3185,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=501
+readonly SELF_EXEC_EXPECTED_DROP=504
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3490,6 +3491,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
+            scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
             scripts/check-changeset-packages.sh scripts/__tests__/check-changeset-packages.test.sh \
             scripts/check-actions-pinned.sh scripts/__tests__/check-actions-pinned.test.sh \
@@ -3520,6 +3522,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-npm-audit.test.sh
       - name: Run security-alerts gate test suite
         run: bash scripts/__tests__/check-security-alerts.test.sh
+      - name: Run workflow-failure notifier test suite
+        run: bash scripts/__tests__/notify-workflow-failure.test.sh
       - name: Run cross-provider DX-audit contract test
         run: bash .claude/tools/__tests__/dx-audit.test.sh
       - name: Run OpenAPI route-sync gate test suite
