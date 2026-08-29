@@ -2008,6 +2008,32 @@ fn execute_undo(
                 }
             }
         }
+        UndoableAction::Physics2dToggle { entity_id, old_physics, old_enabled, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref pd) = old_physics {
+                        commands.entity(entity).insert(pd.clone());
+                    } else {
+                        commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
+                    }
+                    if *old_enabled {
+                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
+                    } else {
+                        commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let restored = old_physics.clone().unwrap_or_default();
+                        crate::bridge::events::emit_physics2d_changed(
+                            entity_id,
+                            &restored,
+                            *old_enabled,
+                        );
+                    }
+                    break;
+                }
+            }
+        }
         UndoableAction::Joint2dChange { entity_id, old_joint, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
@@ -2355,6 +2381,32 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
+                    }
+                    break;
+                }
+            }
+        }
+        UndoableAction::Physics2dToggle { entity_id, new_physics, new_enabled, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref pd) = new_physics {
+                        commands.entity(entity).insert(pd.clone());
+                    } else {
+                        commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
+                    }
+                    if *new_enabled {
+                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
+                    } else {
+                        commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let restored = new_physics.clone().unwrap_or_default();
+                        crate::bridge::events::emit_physics2d_changed(
+                            entity_id,
+                            &restored,
+                            *new_enabled,
+                        );
                     }
                     break;
                 }
@@ -4700,6 +4752,25 @@ mod physics2d_history_tests {
             });
     }
 
+    fn record_toggle(
+        world: &mut World,
+        id: &str,
+        old: Option<Physics2dData>,
+        new: Option<Physics2dData>,
+        old_enabled: bool,
+        new_enabled: bool,
+    ) {
+        world
+            .resource_mut::<HistoryStack>()
+            .push(UndoableAction::Physics2dToggle {
+                entity_id: id.to_string(),
+                old_physics: old,
+                new_physics: new,
+                old_enabled,
+                new_enabled,
+            });
+    }
+
     fn undo(world: &mut World) {
         crate::core::history::queue_undo_from_bridge();
         run_system!(world, super::apply_undo_requests);
@@ -4830,6 +4901,52 @@ mod physics2d_history_tests {
             !is_enabled(&world, entity),
             "the enabled marker must not outlive the data it describes",
         );
+    }
+
+    #[test]
+    fn undoing_first_enable_removes_default_data_and_marker_together() {
+        let mut world = base_world();
+        let entity = spawn_body(&mut world, "sprite-1", Physics2dData::default(), true);
+        record_toggle(
+            &mut world,
+            "sprite-1",
+            None,
+            Some(Physics2dData::default()),
+            false,
+            true,
+        );
+
+        undo(&mut world);
+
+        assert!(world.entity(entity).get::<Physics2dData>().is_none());
+        assert!(!is_enabled(&world, entity));
+
+        redo(&mut world);
+        assert!(world.entity(entity).get::<Physics2dData>().is_some());
+        assert!(is_enabled(&world, entity));
+    }
+
+    #[test]
+    fn undoing_disable_restores_existing_data_and_marker_together() {
+        let mut world = base_world();
+        let recorded = physics(0.73);
+        let entity = spawn_body(&mut world, "sprite-1", recorded.clone(), false);
+        record_toggle(
+            &mut world,
+            "sprite-1",
+            Some(recorded.clone()),
+            Some(recorded),
+            true,
+            false,
+        );
+
+        undo(&mut world);
+        assert_eq!(friction_of(&world, entity), 0.73);
+        assert!(is_enabled(&world, entity));
+
+        redo(&mut world);
+        assert_eq!(friction_of(&world, entity), 0.73);
+        assert!(!is_enabled(&world, entity));
     }
 }
 
