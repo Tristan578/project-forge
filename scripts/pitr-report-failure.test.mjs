@@ -22,6 +22,13 @@ const NOW = () => Date.parse('2026-09-01T08:00:00Z');
 const TODAY = '2026-09-01';
 const RUN_URL = 'https://github.com/Tristan578/project-forge/actions/runs/999';
 
+// Assert on the whole rendered entry line rather than searching the body for a
+// URL substring: an exact line match is the stronger assertion (it pins the
+// date and the separator too) and does not read as URL sanitisation.
+function hasRunEntry(body, date, runUrl) {
+  return String(body).split('\n').includes(`- ${date} \u2014 ${runUrl}`);
+}
+
 function makeEnv(overrides = {}) {
   return {
     GITHUB_TOKEN: 'ghs_test',
@@ -274,7 +281,7 @@ describe('recurrence comments', () => {
   test('buildRecurrenceComment carries the class marker and the run URL', () => {
     const body = buildRecurrenceComment({ cls: 'infra', runUrl: RUN_URL, date: TODAY });
     assert.ok(body.includes(recurrenceMarkerFor('infra')));
-    assert.ok(body.includes(RUN_URL));
+    assert.ok(hasRunEntry(body, TODAY, RUN_URL), 'records the run as a dated entry');
   });
 });
 
@@ -285,8 +292,11 @@ describe('appendRecurrence', () => {
       runUrl: 'https://example.test/runs/1000',
       date: '2026-10-01',
     });
-    assert.ok(next.includes(RUN_URL));
-    assert.ok(next.includes('- 2026-10-01 — https://example.test/runs/1000'));
+    assert.ok(hasRunEntry(next, TODAY, RUN_URL), 'keeps the original entry');
+    assert.ok(
+      hasRunEntry(next, '2026-10-01', 'https://example.test/runs/1000'),
+      'adds the new entry',
+    );
   });
 
   test('is idempotent for a run URL already recorded', () => {
@@ -302,13 +312,22 @@ describe('appendRecurrence', () => {
     const entries = body.split('\n').filter(l => l.startsWith('- '));
     assert.equal(entries.length, RECURRENCE_CAP);
     assert.ok(body.includes(`https://r/${RECURRENCE_CAP + 5}`));
-    assert.ok(!body.includes('https://r/0\n'));
+    assert.ok(!hasRunEntry(body, '2026-01-01', 'https://r/0'), 'evicted the oldest entry');
+  });
+
+  test('does not mistake a run id that is a prefix of a recorded one', () => {
+    const long = 'https://github.com/Tristan578/project-forge/actions/runs/999';
+    const short = 'https://github.com/Tristan578/project-forge/actions/runs/99';
+    const base = buildRecurrenceComment({ cls: 'config', runUrl: long, date: TODAY });
+    const next = appendRecurrence(base, { runUrl: short, date: '2026-10-01' });
+    assert.ok(hasRunEntry(next, TODAY, long), 'keeps the longer run');
+    assert.ok(hasRunEntry(next, '2026-10-01', short), 'records the shorter run too');
   });
 
   test('adds the heading when the body has none', () => {
     const next = appendRecurrence('plain text', { runUrl: RUN_URL, date: TODAY });
     assert.ok(next.includes(RUNS_HEADING));
-    assert.ok(next.includes(RUN_URL));
+    assert.ok(hasRunEntry(next, TODAY, RUN_URL), 'records the run under the new heading');
   });
 });
 

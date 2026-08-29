@@ -226,7 +226,10 @@ export function appendRecurrence(existingBody, { runUrl, date, cap = RECURRENCE_
   const head = lines.slice(0, idx + 1);
   const rest = lines.slice(idx + 1);
   const runLines = rest.filter(l => l.startsWith('- '));
-  if (runLines.some(l => l.includes(runUrl))) return body;
+  // Match the whole entry, not a substring: run URLs differ only by a trailing
+  // numeric id, so `.includes()` treats `.../runs/99` as already recorded once
+  // `.../runs/999` is present and silently drops a real recurrence.
+  if (runLines.some(l => l.endsWith(` \u2014 ${runUrl}`))) return body;
   const kept = [...runLines, entry].slice(-cap);
   return [...head, ...kept].join('\n');
 }
