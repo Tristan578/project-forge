@@ -3,24 +3,8 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
-import { getSignedDownloadUrl } from '@/lib/storage/r2';
+import { getSignedDownloadUrl, resolveOwnedAssetKey } from '@/lib/storage/r2';
 import { captureException } from '@/lib/monitoring/sentry-server';
-
-/**
- * Extract the R2 storage key from a CDN URL.
- * e.g. "https://cdn.spawnforge.ai/assets/seller/asset/file/model.glb"
- *   -> "assets/seller/asset/file/model.glb"
- */
-function extractStorageKey(cdnUrl: string): string | null {
-  try {
-    const url = new URL(cdnUrl);
-    // Strip leading slash from pathname
-    const key = url.pathname.replace(/^\//, '');
-    return key || null;
-  } catch {
-    return null;
-  }
-}
 
 export async function GET(
   req: NextRequest,
@@ -104,23 +88,18 @@ export async function GET(
     }
 
     // If the URL is a CDN URL, generate a signed download URL from R2.
-    // Compare parsed hostnames explicitly to avoid substring false positives
-    // (e.g. "evil-cdn.spawnforge.ai" matching "cdn.spawnforge.ai").
-    const cdnHost = process.env.CDN_URL;
-    if (cdnHost) {
-      try {
-        const assetHostname = new URL(asset.assetFileUrl).hostname;
-        const cdnHostname = cdnHost.includes('://') ? new URL(cdnHost).hostname : cdnHost;
-        if (assetHostname === cdnHostname) {
-          const storageKey = extractStorageKey(asset.assetFileUrl);
-          if (storageKey) {
-            const signedUrl = await getSignedDownloadUrl(storageKey);
-            return NextResponse.redirect(signedUrl);
-          }
-        }
-      } catch {
-        // assetFileUrl is not a valid URL — fall through to validation below
-      }
+    // resolveOwnedAssetKey compares parsed hostnames (no substring false
+    // positives such as "evil-cdn.spawnforge.ai" matching "cdn.spawnforge.ai")
+    // AND requires the key to sit under this asset's own
+    // assets/{sellerId}/{assetId}/ prefix. That prefix check matters: a seller
+    // can PATCH assetFileUrl to any string, so without it a seller could point
+    // their own asset at another seller's key and have us mint a signed URL for
+    // someone else's paid file. Anything that does not resolve falls through to
+    // the open-redirect validation below.
+    const storageKey = resolveOwnedAssetKey(asset.assetFileUrl, asset.sellerId, assetId);
+    if (storageKey) {
+      const signedUrl = await getSignedDownloadUrl(storageKey);
+      return NextResponse.redirect(signedUrl);
     }
 
     // Fallback: validate URL against allowed domains to prevent open redirect
