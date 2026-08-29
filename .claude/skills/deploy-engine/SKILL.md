@@ -15,7 +15,7 @@ Build both WASM variants and upload to the `spawnforge-engine` R2 bucket.
 
 ## Prerequisites
 - Rust stable + `wasm32-unknown-unknown` target
-- `wasm-bindgen-cli` v0.2.108
+- `wasm-bindgen-cli` v0.2.127
 - `wrangler` CLI authenticated to Cloudflare account `0b949ff499d179e24dde841f71d6134f`
 - R2 bucket: `spawnforge-engine`
 

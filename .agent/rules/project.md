@@ -43,7 +43,7 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 - **Event-driven**: Bevy -> bridge -> JS callback -> Zustand store -> React re-render.
 - **Store slices**: Each Zustand concern gets its own slice. Use selectors.
 - **WASM calls**: Only `web/src/hooks/useEngine.ts` may make direct WASM calls.
-- **wasm-bindgen v0.2.108**: Must match Cargo.lock exactly.
+- **wasm-bindgen v0.2.127**: Must match Cargo.lock exactly.
 
 ## Build & Test Commands
 

@@ -148,7 +148,7 @@ if [ "$ISSUES" -gt 0 ]; then
   echo ""
   echo "  Build requirements:"
   echo "    - Rust stable + wasm32-unknown-unknown target"
-  echo "    - wasm-bindgen-cli v0.2.108 (must match Cargo.lock)"
+  echo "    - wasm-bindgen-cli v0.2.127 (must match Cargo.lock)"
   echo "    - Takes 5-10 minutes"
 elif [ "$WARNINGS" -gt 0 ]; then
   echo -e "  ${YELLOW}RESULT: ${WARNINGS} warning(s) — binaries present but may be stale${NC}"

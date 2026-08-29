@@ -19,14 +19,14 @@ Always investigate in this order — later steps often depend on earlier ones be
 ```bash
 # Check if engine-pkg directories exist and are recent
 ls -la web/public/engine-pkg-*/forge_engine_bg.wasm 2>/dev/null
-# Check wasm-bindgen version match (must be 0.2.108)
+# Check wasm-bindgen version match (must be 0.2.127)
 grep 'wasm-bindgen' engine/Cargo.lock | head -5
 # Try a build and capture errors
 powershell -ExecutionPolicy Bypass -File build_wasm.ps1 2>&1 | tail -50
 ```
 
 **Common causes:**
-- `wasm-bindgen` version mismatch (pinned to 0.2.108 — check `Cargo.lock` vs installed CLI)
+- `wasm-bindgen` version mismatch (pinned to 0.2.127 — check `Cargo.lock` vs installed CLI)
 - Missing `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
 - Bevy feature errors: ensure `tonemapping_luts` is enabled (without it, materials render pink)
 - `csgrs` build: needs Windows SDK LIB paths for `doc-image-embed` proc-macro on native. `build_wasm.ps1` handles this

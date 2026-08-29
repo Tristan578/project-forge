@@ -8,7 +8,7 @@ This workflow builds the Rust engine to WASM for both rendering backends.
 
 ## Prerequisites
 - Rust stable with `wasm32-unknown-unknown` target
-- `wasm-bindgen-cli` v0.2.108
+- `wasm-bindgen-cli` v0.2.127
 
 ## Steps
 

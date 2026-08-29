@@ -57,7 +57,7 @@ These two SQLite columns are the SOLE arbiters of sync truth:
 - Bridge isolation: Only `engine/src/bridge/` may import web_sys/js_sys
 - Command-driven: All engine ops via `handle_command()` JSON
 - Zero ESLint warnings enforced
-- wasm-bindgen v0.2.108 pinned
+- wasm-bindgen v0.2.127 pinned
 
 ## Quick Validation
 ```bash

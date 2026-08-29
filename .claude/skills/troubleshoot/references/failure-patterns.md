@@ -88,7 +88,7 @@ powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 ```
 
 **Common build failures:**
-- wasm-bindgen version mismatch: `cargo install wasm-bindgen-cli --version 0.2.108 --force`
+- wasm-bindgen version mismatch: `cargo install wasm-bindgen-cli --version 0.2.127 --force`
 - Missing target: `rustup target add wasm32-unknown-unknown`
 - Missing wasm-opt: `cargo install wasm-opt` or `npm i -g wasm-opt`
 - `tonemapping_luts` feature missing: check `engine/Cargo.toml` Bevy features

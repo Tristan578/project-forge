@@ -84,7 +84,7 @@ Every feature MUST address:
 |------|---------|-------|
 | Bevy | 0.18 | wgpu 27, WebGPU primary |
 | bevy_rapier3d/2d | 0.34 | Physics |
-| wasm-bindgen | 0.2.108 | Pinned — must match Cargo.lock |
+| wasm-bindgen | 0.2.127 | Pinned — must match Cargo.lock |
 | Next.js | 16.x | Turbopack build |
 | React | 19.x | Via Next.js |
 | Zustand | 5.x | Slice-based store |

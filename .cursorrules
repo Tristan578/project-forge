@@ -49,7 +49,7 @@ cd web && npx playwright test
 - **Event-driven**: Bevy -> bridge -> JS callback -> Zustand store -> React re-render
 - **Store slices**: Each Zustand concern gets its own slice. Use selectors.
 - **WASM calls**: Only `web/src/hooks/useEngine.ts` may make direct WASM calls
-- **wasm-bindgen v0.2.108**: Must match Cargo.lock exactly
+- **wasm-bindgen v0.2.127**: Must match Cargo.lock exactly
 
 ## Coding Standards
 
@@ -83,7 +83,7 @@ See `AGENTS.md` for full taskboard setup, required ticket fields, GitHub Project
 - Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.108 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
 **Coverage thresholds (CI-enforced):** statements 83 · branches 74 · functions 77 · lines 84
 

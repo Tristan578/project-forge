@@ -21,7 +21,7 @@ npx vitest run
 cd mcp-server && npm install
 npx vitest run
 
-# WASM engine build (requires Rust stable + wasm32-unknown-unknown target + wasm-bindgen-cli 0.2.108)
+# WASM engine build (requires Rust stable + wasm32-unknown-unknown target + wasm-bindgen-cli 0.2.127)
 cd engine && cargo build --target wasm32-unknown-unknown --release --features webgl2
 cd engine && cargo build --target wasm32-unknown-unknown --release --features webgpu
 ```
@@ -73,7 +73,7 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 - Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.108 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
 **Coverage thresholds (CI-enforced):** statements 83 · branches 74 · functions 77 · lines 84
 

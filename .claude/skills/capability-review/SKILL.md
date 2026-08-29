@@ -172,7 +172,7 @@ Mirrors `changelog-review`'s `.changelog-last-review` timestamp so a future Sess
 - **Recommend, never enact.** No installs, no plan changes, no enabling paid features. Surface and ask. The user decides.
 - **Tickets must be buildable today.** Every implementation ticket cites the provider's current **developer docs** and names the actual files/routes in our architecture where the feature wires in (Step 4b + Step 7). A ticket that says "adopt X" without the integration touch-list is incomplete. Stop at the ticket — do not implement.
 - **Adoption gaps count.** A GA feature we've never wired (not just this month's release) is a legitimate, often higher-ROI opportunity than the newest beta.
-- **Respect existing pins & constraints.** Don't propose an "opportunity" that requires breaking a documented pin (e.g. `wasm-bindgen =0.2.108`) or a blocked upgrade (e.g. `@clerk/nextjs` 7.5.x `baseTheme` removal) without flagging it as blocked and pointing at the migration work.
+- **Respect existing pins & constraints.** Don't propose an "opportunity" that requires breaking a documented pin (e.g. `wasm-bindgen =0.2.127`) or a blocked upgrade (e.g. `@clerk/nextjs` 7.5.x `baseTheme` removal) without flagging it as blocked and pointing at the migration work.
 - **No attribution / no AI-tool mentions** in any ticket, issue, or doc this skill produces (per repo policy).
 - **Scope to the user's intent.** If they ask only about observability, review that domain — don't dump all ten providers.
 

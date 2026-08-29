@@ -2,7 +2,7 @@
 # Build WASM engine variants and upload to Cloudflare R2 CDN.
 # Usage: bash scripts/build-and-upload.sh [webgl2|webgpu|all]
 #
-# Requires: wasm-bindgen-cli =0.2.108, wrangler CLI, R2 bucket spawnforge-engine
+# Requires: wasm-bindgen-cli =0.2.127, wrangler CLI, R2 bucket spawnforge-engine
 
 set -euo pipefail
 
@@ -19,8 +19,8 @@ command -v wasm-bindgen &>/dev/null || { echo "ERROR: wasm-bindgen-cli not found
 command -v wrangler &>/dev/null || { echo "ERROR: wrangler CLI not found"; exit 1; }
 
 WBVER=$(wasm-bindgen --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-if [[ "$WBVER" != "0.2.108" ]]; then
-  echo "ERROR: wasm-bindgen version $WBVER != 0.2.108 (pinned)"
+if [[ "$WBVER" != "0.2.127" ]]; then
+  echo "ERROR: wasm-bindgen version $WBVER != 0.2.127 (pinned)"
   exit 1
 fi
 

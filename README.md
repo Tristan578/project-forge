@@ -128,7 +128,7 @@ The MCP server and the visual editor share the same command interface — there 
 ## Prerequisites
 
 - [Rust](https://rustup.rs/) (stable) with the `wasm32-unknown-unknown` target
-- [wasm-bindgen-cli](https://rustwasm.github.io/wasm-bindgen/reference/cli.html)
+- [wasm-bindgen-cli](https://rustwasm.github.io/wasm-bindgen/reference/cli.html) **0.2.127 exactly** — it must match the `wasm-bindgen` crate pin in `engine/Cargo.toml`, or the build fails on missing exports
 - [Node.js](https://nodejs.org/) 24
 - Bash (macOS/Linux) or PowerShell (Windows) for build scripts
 
@@ -136,7 +136,7 @@ The MCP server and the visual editor share the same command interface — there 
 
 ```bash
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli
+cargo install wasm-bindgen-cli --version 0.2.127
 ```
 
 ## Getting Started
@@ -166,7 +166,7 @@ cd project-forge
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `wasm-bindgen` version mismatch | CLI version differs from the `wasm-bindgen` crate in `Cargo.lock` (pinned to 0.2.108) | `cargo install wasm-bindgen-cli --version 0.2.108` |
+| `wasm-bindgen` version mismatch | CLI version differs from the `wasm-bindgen` crate in `Cargo.lock` (pinned to 0.2.127) | `cargo install wasm-bindgen-cli --version 0.2.127` |
 | `error[E0433]: could not find crate` | Missing the WASM compile target | `rustup target add wasm32-unknown-unknown` |
 | `doc-image-embed` link errors (Windows) | Native proc-macro needs Windows SDK LIB paths | The build script auto-detects; ensure Visual Studio Build Tools are installed |
 | Pink/magenta materials in browser | Missing `tonemapping_luts` Bevy feature | Verify `Cargo.toml` includes `"tonemapping_luts"` in default features |

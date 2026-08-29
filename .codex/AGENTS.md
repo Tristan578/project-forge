@@ -55,7 +55,7 @@ cd project-forge && bash .claude/hooks/post-edit-lint.sh
 - Start: `taskboard start --port 3010`  *(do not pass `--db` — it uses the OS-default DB)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.108 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
 **Coverage thresholds (CI-enforced):** statements 83 · branches 74 · functions 77 · lines 84
 
@@ -163,7 +163,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every PR:
 - **Bridge isolation**: Only `engine/src/bridge/` may import web_sys/js_sys/wasm_bindgen
 - **Command-driven**: All engine ops go through `handle_command()` JSON commands
 - **Zero ESLint warnings**: `npx eslint --max-warnings 0`
-- **wasm-bindgen v0.2.108**: Must match Cargo.lock exactly
+- **wasm-bindgen v0.2.127**: Must match Cargo.lock exactly
 - **No `any` types**: Strict TypeScript mode, use Zod for runtime validation
 - **No secrets in code**: Use environment variables with `.env.local`
 

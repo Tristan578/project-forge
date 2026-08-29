@@ -284,10 +284,10 @@ if [ "$MODE" = "onboard" ]; then
   # Check wasm-bindgen
   if command -v wasm-bindgen > /dev/null 2>&1; then
     WB_VER=$(wasm-bindgen --version 2>/dev/null | head -1)
-    if echo "$WB_VER" | grep -q "0.2.108"; then
-      pass "wasm-bindgen 0.2.108: $WB_VER"
+    if echo "$WB_VER" | grep -q "0.2.127"; then
+      pass "wasm-bindgen 0.2.127: $WB_VER"
     else
-      warn "wasm-bindgen version mismatch: $WB_VER (need 0.2.108)"
+      warn "wasm-bindgen version mismatch: $WB_VER (need 0.2.127)"
     fi
   else
     warn "wasm-bindgen not found (needed for WASM builds)"

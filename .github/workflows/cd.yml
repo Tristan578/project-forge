@@ -338,7 +338,7 @@ jobs:
 
       - name: Install wasm-bindgen-cli
         if: steps.ci-wasm.outcome != 'success'
-        run: cargo install wasm-bindgen-cli --version 0.2.108
+        run: cargo install wasm-bindgen-cli --version 0.2.127
 
       - name: Build WebGL2
         if: steps.ci-wasm.outcome != 'success'

@@ -418,7 +418,7 @@ gh run view <run-id>
 
 # Common failures:
 # - Lint/TypeScript: Fix code, push new commit
-# - WASM build: Check Rust toolchain, wasm-bindgen version (must be 0.2.108)
+# - WASM build: Check Rust toolchain, wasm-bindgen version (must be 0.2.127)
 # - E2E tests: Check Playwright report artifact
 # - Vercel deploy: Check VERCEL_TOKEN, project IDs
 

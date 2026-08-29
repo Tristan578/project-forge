@@ -105,7 +105,7 @@ Categories: animation, asset, audio, camera, compound, cutscene, dialogue, docs,
 
 ## Technology Stack
 
-- Rust, Bevy 0.18, wasm-bindgen 0.2.108
+- Rust, Bevy 0.18, wasm-bindgen 0.2.127
 - React, Next.js 16, TypeScript, Zustand, Tailwind CSS
 - Rapier 3D/2D physics
 - WebGPU (wgpu 27) / WebGL2

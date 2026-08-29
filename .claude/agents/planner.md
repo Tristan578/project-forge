@@ -78,7 +78,7 @@ Performance budgets, browser limitations, version constraints.
 
 ## Version Constraints
 
-All designs must use: Bevy 0.18, Rapier 0.34, wasm-bindgen 0.2.108, Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4.
+All designs must use: Bevy 0.18, Rapier 0.34, wasm-bindgen 0.2.127, Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4.
 
 ## Taskboard Permissions
 

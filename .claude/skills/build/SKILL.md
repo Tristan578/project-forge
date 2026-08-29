@@ -20,7 +20,7 @@ Build the Bevy engine as WebAssembly for the browser. This produces 4 variants:
 Verify these are available before building:
 - `rustc` (stable)
 - `wasm32-unknown-unknown` target installed (`rustup target list --installed`)
-- `wasm-bindgen` CLI v0.2.108 (`wasm-bindgen --version`) — must match Cargo.lock
+- `wasm-bindgen` CLI v0.2.127 (`wasm-bindgen --version`) — must match Cargo.lock
 
 ## Build Steps
 
@@ -61,7 +61,7 @@ ls -la web/public/engine-pkg-webgpu/forge_engine_bg.wasm
 
 ## Common Issues
 
-- **wasm-bindgen version mismatch**: Must be 0.2.108. Install with `cargo install wasm-bindgen-cli --version 0.2.108`
+- **wasm-bindgen version mismatch**: Must be 0.2.127. Install with `cargo install wasm-bindgen-cli --version 0.2.127`
 - **Missing LIB env**: Proc-macro crates (e.g., doc-image-embed) need Windows SDK libs for native host compilation
 - **Build time**: Full build takes ~5-10 minutes depending on hardware
 
