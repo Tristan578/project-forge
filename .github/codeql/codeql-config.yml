@@ -1,9 +1,8 @@
-# CodeQL configuration — suppress known false positives
+# CodeQL configuration
 #
 # scriptWorker.ts uses Function() intentionally as a sandboxed script compiler
 # for user-authored game scripts. Multiple security layers protect against abuse:
 # global shadowing, command whitelist, per-frame command limit, infinite loop
-# watchdog, and rate limiter. See SEC-2 in CLAUDE.md.
-
-paths-ignore:
-  - web/src/lib/scripting/scriptWorker.ts
+# watchdog, and rate limiter. The Function() call site has a scoped
+# codeql[js/code-injection] annotation; the rest of this security-sensitive file
+# must remain under full analysis. See PF-780 (#7148) for the rationale.
