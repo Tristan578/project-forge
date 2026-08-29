@@ -1185,12 +1185,14 @@ jobs:
           SNAPSHOT_BRANCH_NAME: ${{ steps.db-snapshot.outputs.snapshot_branch_name }}
         run: |
           echo "::error::Health check failed -- rolling back production to $PREV_URL"
-          vercel promote "$PREV_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
-          echo "Code rollback complete. Production code restored to: $PREV_URL"
 
-          # Be explicit about the half of the deploy this does NOT undo. A
-          # green "Rollback complete" next to a migrated database is how an
-          # operator ends up debugging old code against a new schema.
+          # The schema caveat is emitted BEFORE `vercel promote`, deliberately.
+          # If the promote itself fails, `set -e` aborts the step -- and the one
+          # message an operator most needs in that exact situation (the code
+          # rollback did NOT happen and the schema is still migrated) would
+          # never be printed. Be explicit about the half of the deploy this
+          # cannot undo: a green "Rollback complete" next to a migrated database
+          # is how an operator ends up debugging old code against a new schema.
           if [ -n "$SNAPSHOT_BRANCH_ID" ]; then
             echo "::error::vercel promote reverted the CODE ONLY. It does NOT revert the database schema."
             echo "::error::A schema migration ran earlier in this job and is STILL APPLIED to production."
@@ -1214,8 +1216,11 @@ jobs:
               echo
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "No schema migration ran in this deploy -- the code rollback is complete on its own."
+            echo "No schema migration ran in this deploy -- reverting the code is a complete rollback."
           fi
+
+          vercel promote "$PREV_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          echo "Code rollback complete. Production code restored to: $PREV_URL"
 
       - name: Notify Slack of automatic rollback
         if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' && vars.SLACK_WEBHOOK_INCIDENTS != '' }}

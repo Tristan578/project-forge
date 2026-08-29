@@ -3012,6 +3012,8 @@ OUTPUTS_EOF
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
+            scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
       fail "self-defense shellcheck step carries a step-level if: — lint coverage can be skipped while its needle still greps as present"
