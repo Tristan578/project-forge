@@ -153,8 +153,17 @@ export async function updateDisplayName(
  */
 const R2_KEYS_PER_ASSET = 4;
 
-/** Marketplace asset rows one account-deletion sweep will read. */
-const SELLER_ASSET_READ_LIMIT = Math.floor(MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET);
+/**
+ * Marketplace asset rows one account-deletion sweep will read.
+ *
+ * A function, not a module-level `const`: evaluating `MAX_R2_SWEEP_KEYS` at
+ * import time makes every module that transitively imports user-service crash
+ * on load under a `vi.mock('@/lib/storage/r2')` that does not re-export it —
+ * which broke the marketplace download route suite when this was a const.
+ */
+function sellerAssetReadLimit(): number {
+  return Math.floor(MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET);
+}
 
 export async function deleteUserAccount(userId: string): Promise<void> {
   const neonSql = getNeonSql();
@@ -194,7 +203,7 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   // A stable ORDER BY makes the rows we do read deterministic. Without it,
   // Postgres may return any `cap` of the seller's rows, so a truncation report
   // could not tell an operator which objects were already handled.
-  const sellerAssetLimit = SELLER_ASSET_READ_LIMIT;
+  const sellerAssetLimit = sellerAssetReadLimit();
   const sellerAssetRows = await queryWithResilience(() =>
     getDb()
       .select({
@@ -341,7 +350,7 @@ async function deleteUserStorageObjects(
   assetReadTruncated: boolean
 ): Promise<void> {
   if (assetReadTruncated) {
-    const message = `Account deletion read only the first ${SELLER_ASSET_READ_LIMIT} marketplace assets for user ${userId}; objects under assets/${userId}/ beyond that need reconciliation`;
+    const message = `Account deletion read only the first ${sellerAssetReadLimit()} marketplace assets for user ${userId}; objects under assets/${userId}/ beyond that need reconciliation`;
     console.error(message);
     captureMessage(message, 'error');
   }
