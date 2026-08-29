@@ -247,6 +247,13 @@ describe('deductTokens', () => {
     if (result.success) {
       expect(result.usageId).toBe('usage-123');
     }
+
+    // monthlyRemaining = 90 >= tokenCost = 30, so the CTE must charge the full
+    // amount to the monthly pool, not addon.
+    const values = mockNeonSql.mock.calls[0].slice(1) as unknown[];
+    expect(values[0]).toBe(30);        // monthlyDeduct
+    expect(values[1]).toBe(0);         // addonDeduct
+    expect(values[9]).toBe('monthly'); // source
   });
 
   it('deducts from addon tokens when monthly depleted', async () => {
@@ -277,6 +284,13 @@ describe('deductTokens', () => {
     if (result.success) {
       expect(result.usageId).toBe('usage-456');
     }
+
+    // monthlyRemaining = 0, so the CTE must charge the full amount to addon,
+    // not monthly.
+    const values = mockNeonSql.mock.calls[0].slice(1) as unknown[];
+    expect(values[0]).toBe(0);       // monthlyDeduct
+    expect(values[1]).toBe(30);      // addonDeduct
+    expect(values[9]).toBe('addon'); // source
   });
 
   it('uses mixed source when partial monthly tokens remain', async () => {
@@ -307,6 +321,15 @@ describe('deductTokens', () => {
     if (result.success) {
       expect(result.usageId).toBe('usage-789');
     }
+
+    // monthlyRemaining = 10 < tokenCost = 30, so the CTE must split the charge:
+    // 10 from monthly, the remaining 20 from addon. A regression that always
+    // deducts addon first would still leave result.success === true, so this
+    // must inspect the raw interpolated values, not just the outcome.
+    const values = mockNeonSql.mock.calls[0].slice(1) as unknown[];
+    expect(values[0]).toBe(10);      // monthlyDeduct
+    expect(values[1]).toBe(20);      // addonDeduct
+    expect(values[9]).toBe('mixed'); // source
   });
 
   it('throws for user not found', async () => {
@@ -320,27 +343,34 @@ describe('deductTokens', () => {
   it('retries on race condition (empty update result) and fails after 3 retries', async () => {
     const { deductTokens } = await import('../service');
 
-    // Each retry reads the user (4 total: initial + 3 retries)
-    for (let i = 0; i < 4; i++) {
+    // Each retry re-reads the user, and the balance SHRINKS between attempts
+    // (monthlyTokensUsed climbs 0/20/40/60 → monthlyRemaining 100/80/60/40) to
+    // prove the retry loop actually re-queries fresh state instead of reusing
+    // the first read. addonTokens stays high and constant (1000) so
+    // totalAvailable >= tokenCost = 90 on every attempt — otherwise the
+    // service.ts:80 pre-check would short-circuit before neonSql is ever
+    // called on the shrunk attempts.
+    const monthlyTokensUsedByAttempt = [0, 20, 40, 60];
+    for (const monthlyTokensUsed of monthlyTokensUsedByAttempt) {
       mockLimit.mockResolvedValueOnce([{
         monthlyTokens: 100,
-        monthlyTokensUsed: 0,
-        addonTokens: 0,
+        monthlyTokensUsed,
+        addonTokens: 1000,
         billingCycleStart: null,
       }]);
-      // neonSql UPDATE returns empty (race condition)
+      // neonSql UPDATE returns empty (race condition) on every attempt.
       mockNeonSqlResults.push([]);
     }
 
-    // Final getTokenBalance after exhausting retries
+    // Final getTokenBalance after exhausting retries (5th read).
     mockLimit.mockResolvedValueOnce([{
       monthlyTokens: 100,
-      monthlyTokensUsed: 0,
-      addonTokens: 0,
+      monthlyTokensUsed: 60,
+      addonTokens: 1000,
       billingCycleStart: null,
     }]);
 
-    const result = await deductTokens('user-1', 'op', 10);
+    const result = await deductTokens('user-1', 'op', 90);
 
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -352,6 +382,14 @@ describe('deductTokens', () => {
     // contract per attempt: a regression back to two writes per attempt would make
     // this 8, not 4 (PF-839).
     expect(mockNeonSql).toHaveBeenCalledTimes(4);
+
+    // The monthlyDeduct interpolated into each attempt's CTE tracks that
+    // attempt's freshly-read balance (90/80/60/40 monthly remaining, capped at
+    // tokenCost=90 on the first attempt). This fails as [90, 90, 90, 90] if a
+    // future regression reuses the first read's balance across retries instead
+    // of calling getDb().select() fresh on each recursive invocation.
+    const monthlyDeducts = mockNeonSql.mock.calls.map((call) => (call.slice(1) as unknown[])[0]);
+    expect(monthlyDeducts).toEqual([90, 80, 60, 40]);
   });
 
   it('handles negative tokenCost as free operation', async () => {
