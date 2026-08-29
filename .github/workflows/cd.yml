@@ -163,26 +163,42 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Run tests
+      - name: Run tests with coverage
         working-directory: web
-        # Timeout safety net: vitest hangs after test completion due to jsdom open
-        # handles (known issue vitest#3077). A non-zero exit (timeout 124, OOM 137,
-        # segfault 139, ...) is swallowed by the gate below ONLY when the captured
-        # output proves a fully passing run -- a run killed mid-tests (or with
-        # test/coverage failures on record) still fails.
+        # Runs --coverage against the standalone web/vitest.config.ts, mirroring
+        # quality-gates.yml. This job is what re-validates a commit that reached
+        # main without the PR gate (direct push, admin merge); without --coverage
+        # that re-validation had a hole exactly the size of the coverage
+        # thresholds. vitest.workspace.ts exists for local dev environment splits
+        # but does not enforce root-level thresholds, which is why CI uses the
+        # standalone config. Threshold values live in that config and are
+        # auto-ratcheted by coverage-ratchet.yml — never hardcode them here.
+        #
+        # Timeout safety net: vitest hangs after test completion due to jsdom/
+        # coverage open handles (known issue vitest#3077). A non-zero exit
+        # (timeout 124, OOM 137, segfault 139, ...) is swallowed by the gate below
+        # ONLY when the captured output shows a green test summary AND (because
+        # this job now runs --coverage) the "Coverage report from" marker — proof
+        # the tests completed and the coverage phase reached report generation. A
+        # run killed mid-tests or before report generation began still fails.
         run: |
           set +e
-          timeout 600 npx vitest run 2>&1 | tee /tmp/vitest-output.txt
+          timeout 600 npx vitest run --coverage 2>&1 | tee /tmp/vitest-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
           # Adjudicate the exit code via the single tested gate
           # (scripts/check-vitest-exit.sh, unit-tested by the CI Self-Defense
           # Tests job) — the same gate quality-gates.yml uses, so the two no
-          # longer drift. It propagates real test failures (and coverage-threshold
-          # failures, though this job runs without --coverage) and swallows only
-          # the vitest#3077 open-handle / timeout false positives. Invoked by
-          # repo-root path because this step runs with working-directory: web.
-          bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt
+          # longer drift. It propagates real test failures AND coverage-threshold
+          # failures (#8598 — a coverage miss has no "Test Files ... failed" line)
+          # and swallows only the vitest#3077 open-handle / timeout false
+          # positives. The --coverage flag must be passed to BOTH the vitest
+          # invocation and the gate: it is what makes the gate additionally
+          # require the "Coverage report from" marker before swallowing, so a
+          # green test summary alone cannot stand in for adjudicated thresholds.
+          # Invoked by repo-root path because this step runs with
+          # working-directory: web.
+          bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt --coverage
 
   test-mcp:
     name: MCP Tests
