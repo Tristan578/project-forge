@@ -271,6 +271,7 @@ describe('GamePlayer', () => {
 
       fireEvent.click(screen.getByText('Click to play'));
       expect(screen.getByText('Starting engine...')).toBeDefined();
+      expect(screen.getByTestId('loader-icon')).toHaveAttribute('aria-hidden', 'true');
 
       await advance(ENGINE_GLOBAL_TIMEOUT_MS);
 

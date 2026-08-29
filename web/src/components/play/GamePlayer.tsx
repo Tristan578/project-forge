@@ -389,7 +389,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         {/* Engine loading overlay */}
         {engineState === 'loading' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950">
-            <Loader2 size={32} className="mb-3 animate-spin text-zinc-400" />
+            <Loader2 aria-hidden="true" size={32} className="mb-3 animate-spin text-zinc-400" />
             <p className="text-sm text-zinc-400">Starting engine...</p>
           </div>
         )}
