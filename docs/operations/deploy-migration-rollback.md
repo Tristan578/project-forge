@@ -168,6 +168,35 @@ Approving means accepting that the snapshot branch is the only way back.
 
 ---
 
+## If the dry-run branch cannot get a connection URI
+
+Neon returns `connection_uris` on a create-branch response **only** when the
+parent branch has exactly one role and one database. From the API reference for
+`POST /projects/{project_id}/branches`:
+
+> When creating a branch from a parent with more than one role or database, the
+> response body does not include a connection URI.
+
+That is a normal shape for a project that has grown a second database (an
+analytics schema, a staging role), not a fault. `scripts/neon-branch.sh` handles
+it by composing the URI itself: the read_write endpoint host, database name and
+role name all come from the same create response, and the password comes from
+`GET /projects/{id}/branches/{branch_id}/roles/{role}/reveal_password`.
+
+Composing needs an unambiguous choice. With one database and one role there is
+nothing to decide. With more than one, the helper **stops** rather than guess —
+rehearsing a migration against the wrong database exercises data nobody asked
+about and still reports a pass. The job log then names what it found:
+
+```
+::error::The new branch carries 2 entries in databases and none was chosen.
+Set NEON_DATABASE to one of: neondb analytics
+```
+
+Fix it by setting `NEON_DATABASE` (and/or `NEON_ROLE`) on the `db-dryrun-branch`
+job in `.github/workflows/cd.yml` to the database the migration targets — the
+same one `DATABASE_URL` points at in production.
+
 ## Related
 
 - `scripts/db-migration-guard.sh` — the classifier, and the full write-up of the

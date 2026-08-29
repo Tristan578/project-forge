@@ -125,6 +125,18 @@ run_helper() {
   printf '%s|%s' "$rc" "$out"
 }
 
+# Same, plus one extra VAR=value on the child only (NEON_DATABASE / NEON_ROLE).
+run_helper_env() {
+  local kv="$1"; shift
+  local out rc
+  out="$(NEON_CURL_CMD="$STUB" \
+         STUB_DIR="$TMPDIR_T/stub" STUB_LOG="$TMPDIR_T/stub.log" \
+         NEON_API_KEY='test-key-not-real' NEON_PROJECT_ID='proj-test' \
+         env "$kv" bash "$SCRIPT" "$@" 2>&1)"
+  rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+
 requests() { cat "$TMPDIR_T/stub.log"; }
 
 echo "=== neon-branch.sh: create (the pre-migration snapshot) ==="
@@ -213,6 +225,183 @@ res="$(run_helper create dryrun-x --endpoint --uri-out "$TMPDIR_T/nouri.uri")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "3" ]; then pass "missing connection_uri fails (exit 3)"; else fail "missing connection_uri should exit 3, got $rc"; fi
 if grep -qF 'connection_uri' <<<"$out"; then pass "the missing-URI error names what was missing"; else fail "the missing-URI error is not specific"; fi
+
+# --- 3a. Multi-database/role parent: compose the URI instead of failing ------
+# Neon omits `connection_uris` from the create response whenever the PARENT
+# branch carries more than one role or database. That is documented behaviour
+# and an ordinary production shape -- so it must NOT be treated as the fault
+# case above. Failing here would hard-block every schema deploy on any project
+# that ever grows a second database, which is exactly when a rehearsed
+# migration matters most.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-multi-1","name":"dryrun-multi"},
+ "endpoints":[{"type":"read_only","host":"ep-ro.us-east-2.aws.neon.tech"},
+              {"type":"read_write","host":"ep-rw.us-east-2.aws.neon.tech"}],
+ "databases":[{"name":"neondb"}],
+ "roles":[{"name":"forge_owner"}]}
+EOF
+stub_status 2 200
+stub_body 2 <<'EOF'
+{"password":"REVEALEDSECRET"}
+EOF
+uri_out="$TMPDIR_T/multi.uri"
+res="$(run_helper create dryrun-multi --endpoint --uri-out "$uri_out")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then
+  pass "a response with no connection_uris composes a URI instead of failing (exit 0)"
+else
+  fail "compose path should exit 0, got $rc ($out)"
+fi
+if grep -qF "GET https://console.neon.tech/api/v2/projects/proj-test/branches/br-multi-1/roles/forge_owner/reveal_password" <<<"$(requests)"; then
+  pass "the compose path reveals the role password via the documented endpoint"
+else
+  fail "no reveal_password call was made; log: $(requests)"
+fi
+composed="$(cat "$uri_out" 2>/dev/null)"
+if [ "$composed" = 'postgresql://forge_owner:REVEALEDSECRET@ep-rw.us-east-2.aws.neon.tech/neondb?sslmode=require' ]; then
+  pass "the composed URI names the read_write host, the role, the database and sslmode"
+else
+  fail "composed URI is '$composed'"
+fi
+# The read_only endpoint is listed FIRST in the fixture on purpose: taking
+# .endpoints[0] blindly would point the migration dry run at a replica, where
+# every write fails for a reason that looks nothing like a bad migration.
+if grep -qF 'ep-ro.' "$uri_out"; then
+  fail "the composed URI points at the read_only endpoint — the dry run cannot write"
+else
+  pass "the composed URI does not pick the read_only endpoint"
+fi
+if grep -qF 'REVEALEDSECRET' <<<"$out"; then
+  fail "the revealed password reached stdout — it would land in the job log verbatim"
+else
+  pass "the revealed password never reaches stdout"
+fi
+mode="$(ls -l "$uri_out" | cut -c1-10)"  # shellcheck disable=SC2012
+if [ "$mode" = "-rw-------" ]; then
+  pass "the composed-URI file is mode 600 (owner-only)"
+else
+  fail "the composed-URI file is $mode, expected -rw-------"
+fi
+
+# --- 3b. A password with URI metacharacters must be percent-encoded ----------
+# An unescaped `@` or `/` in a generated password silently re-points the URI at
+# a different host or path. The dry run would then connect somewhere else, or
+# not at all, and the failure would read as a migration problem.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-esc-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"}],
+ "roles":[{"name":"forge_owner"}]}
+EOF
+stub_status 2 200
+stub_body 2 <<'EOF'
+{"password":"p@ss/w:rd?x#y"}
+EOF
+uri_out="$TMPDIR_T/esc.uri"
+res="$(run_helper create dryrun-esc --endpoint --uri-out "$uri_out")"
+rc="${res%%|*}"
+composed="$(cat "$uri_out" 2>/dev/null)"
+if [ "$rc" = "0" ] && [ "$composed" = 'postgresql://forge_owner:p%40ss%2Fw%3Ard%3Fx%23y@ep-rw.neon.tech/neondb?sslmode=require' ]; then
+  pass "URI metacharacters in the password are percent-encoded"
+else
+  fail "password was not escaped: rc=$rc uri='$composed'"
+fi
+
+# --- 3c. Several databases and no selector → stop, and say what was found ----
+# Guessing is worse than stopping: rehearsing against the wrong database
+# exercises data nobody asked about and still reports a pass.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-ambig-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"},{"name":"analytics"}],
+ "roles":[{"name":"forge_owner"}]}
+EOF
+res="$(run_helper create dryrun-ambig --endpoint --uri-out "$TMPDIR_T/ambig.uri")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "3" ]; then pass "an ambiguous database choice fails (exit 3)"; else fail "ambiguous database should exit 3, got $rc"; fi
+if grep -qF 'NEON_DATABASE' <<<"$out" && grep -qF 'analytics' <<<"$out"; then
+  pass "the ambiguity error names the variable to set and lists the candidates"
+else
+  fail "the ambiguity error is not actionable: $out"
+fi
+if grep -qF 'reveal_password' <<<"$(requests)"; then
+  fail "a password was revealed for a branch we refused to connect to"
+else
+  pass "no password is revealed once the choice is refused"
+fi
+
+# --- 3d. NEON_DATABASE resolves the ambiguity -------------------------------
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-sel-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"},{"name":"analytics"}],
+ "roles":[{"name":"forge_owner"}]}
+EOF
+stub_status 2 200
+stub_body 2 <<'EOF'
+{"password":"pw2"}
+EOF
+uri_out="$TMPDIR_T/sel.uri"
+res="$(run_helper_env NEON_DATABASE=analytics create dryrun-sel --endpoint --uri-out "$uri_out")"
+rc="${res%%|*}"
+composed="$(cat "$uri_out" 2>/dev/null)"
+if [ "$rc" = "0" ] && [ "$composed" = 'postgresql://forge_owner:pw2@ep-rw.neon.tech/analytics?sslmode=require' ]; then
+  pass "NEON_DATABASE selects among several databases"
+else
+  fail "NEON_DATABASE did not select: rc=$rc uri='$composed'"
+fi
+
+# --- 3e. NEON_DATABASE naming a database that does not exist ----------------
+# Silently falling back to some other database would be the ambiguity bug with
+# extra steps.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-bad-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"}],
+ "roles":[{"name":"forge_owner"}]}
+EOF
+res="$(run_helper_env NEON_DATABASE=nope create dryrun-bad --endpoint --uri-out "$TMPDIR_T/bad.uri")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "3" ] && grep -qF "nope" <<<"$out"; then
+  pass "NEON_DATABASE naming a nonexistent database fails, and says so (exit 3)"
+else
+  fail "a bad NEON_DATABASE should exit 3 naming the value, got $rc: $out"
+fi
+
+# --- 3f. reveal_password returning nothing usable → fail closed -------------
+# An empty password would compose a syntactically valid URI that authenticates
+# as nobody; drizzle-kit reports that as a connection error, which the dry-run
+# step can swallow into a rehearsal that never happened.
+stub_reset
+stub_status 1 201
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-nopw-1"},
+ "endpoints":[{"type":"read_write","host":"ep-rw.neon.tech"}],
+ "databases":[{"name":"neondb"}],
+ "roles":[{"name":"forge_owner"}]}
+EOF
+stub_status 2 200
+stub_body 2 <<'EOF'
+{}
+EOF
+res="$(run_helper create dryrun-nopw --endpoint --uri-out "$TMPDIR_T/nopw.uri")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "3" ]; then pass "an unrevealed password fails closed (exit 3)"; else fail "unrevealed password should exit 3, got $rc"; fi
+if [ ! -s "$TMPDIR_T/nopw.uri" ]; then
+  pass "no half-composed URI is left behind for the dry run to pick up"
+else
+  fail "a partial URI was written: $(cat "$TMPDIR_T/nopw.uri")"
+fi
 
 # --- 4. Response with no branch.id → refuse to continue ----------------------
 # This is the fail-closed case that matters most: no id means no snapshot, and

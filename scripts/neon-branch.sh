@@ -19,6 +19,10 @@
 #   POST   /projects/{project_id}/branches                  create
 #   GET    /projects/{project_id}/branches                  list  (prune)
 #   DELETE /projects/{project_id}/branches/{branch_id}      delete
+#   GET    /projects/{project_id}/branches/{branch_id}/roles/{role}/reveal_password
+#                                                           compose a URI when
+#                                                           the create response
+#                                                           carried none
 # `endpoints` is optional on create ("If omitted, the branch is created without
 # any compute endpoint"); endpoint `type` is `read_write` or `read_only`.
 #
@@ -42,6 +46,10 @@
 # ENVIRONMENT
 #   NEON_API_KEY      (required)
 #   NEON_PROJECT_ID   (required)
+#   NEON_DATABASE     Optional. Names which database to connect the dry run to
+#                     when the new branch carries more than one. Only consulted
+#                     on the compose path below.
+#   NEON_ROLE         Optional. Same, for the role.
 #   NEON_CURL_CMD     TEST-ONLY seam. Overrides the `curl` binary so
 #                     scripts/__tests__/neon-branch.test.sh can exercise every
 #                     branch hermetically. CI NEVER sets this; the suite carries
@@ -66,6 +74,8 @@ CURL="${NEON_CURL_CMD:-curl}"
 
 : "${NEON_API_KEY:=}"
 : "${NEON_PROJECT_ID:=}"
+: "${NEON_DATABASE:=}"
+: "${NEON_ROLE:=}"
 if [ -z "$NEON_API_KEY" ] || [ -z "$NEON_PROJECT_ID" ]; then
   echo "::error::NEON_API_KEY and NEON_PROJECT_ID must both be set."
   echo "::error::A production schema migration is not permitted without a pre-migration snapshot."
@@ -116,6 +126,82 @@ neon_api() {
   esac
 }
 
+# URL-encode one component of a connection URI. A Neon role password is a
+# generated string that can legitimately contain `@`, `/`, `#`, `?` or `:` --
+# each of which silently re-parses the URI into a different host, path or query
+# if it is pasted in raw. Percent-encoding is not cosmetic here: an unescaped
+# `@` sends the dry run at a host that is not the branch.
+uri_escape() { jq -rn --arg s "$1" '$s | @uri'; }
+
+# Pick the one database (or role) to connect as, from the arrays the
+# create-branch response already carries.
+#
+# One candidate means there is nothing to decide. Several means there is, and
+# guessing would be worse than stopping: rehearsing the migration against the
+# wrong database exercises data nobody asked about and still reports a pass.
+# $NEON_DATABASE / $NEON_ROLE name the intended one; without them the error
+# lists what was actually found, so the fix is one variable away.
+neon_pick_name() {
+  local resp="$1" field="$2" want="$3" var="$4"
+  local names count
+  names="$(jq -r --arg f "$field" '(.[$f] // []) | map(.name // empty) | .[]' <<<"$resp" 2>/dev/null)"
+  if [ -n "$want" ]; then
+    if grep -qxF -- "$want" <<<"$names"; then printf '%s' "$want"; return 0; fi
+    echo "::error::${var} is set to '${want}', but the new branch carries no such entry in ${field}. Found: $(tr '\n' ' ' <<<"$names")" >&2
+    return 3
+  fi
+  count="$(grep -c . <<<"$names")"
+  case "$count" in
+    1) printf '%s' "$names"; return 0 ;;
+    0) echo "::error::Neon create-branch response carried no ${field}; cannot compose a connection URI." >&2; return 3 ;;
+    *) echo "::error::The new branch carries ${count} entries in ${field} and none was chosen. Set ${var} to one of: $(tr '\n' ' ' <<<"$names")" >&2
+       return 3 ;;
+  esac
+}
+
+# Compose the connection URI when the create response did not carry one, and
+# write it into $dest.
+#
+# Neon omits `connection_uris` entirely whenever the PARENT branch has more than
+# one role or database. That is documented on POST /projects/{id}/branches --
+# "When creating a branch from a parent with more than one role or database, the
+# response body does not include a connection URI" -- and it is an ordinary
+# production shape, not a fault. Treating it as one (the previous behaviour: a
+# bare exit 3) would hard-block every schema deploy on any project that ever
+# grows a second database or role, which is exactly when a rehearsed migration
+# matters most.
+#
+# Everything needed is already in the same response except the password, which
+# is one documented GET away. The result goes straight into the 0600 file that
+# the caller already created: it is never returned on stdout, so it cannot be
+# spliced into a captured value or a job log. No ::add-mask:: is emitted either,
+# deliberately -- that directive is only honoured on a GitHub runner, and
+# printing the password to request masking is the one thing that would leak it
+# anywhere else.
+neon_compose_uri_into() {
+  local dest="$1" resp="$2" branch_id="$3"
+  local host db role pw_resp password
+
+  host="$(jq -r '(.endpoints // []) | (map(select(.type == "read_write")) + .) | .[0].host // empty' <<<"$resp" 2>/dev/null)"
+  if [ -z "$host" ]; then
+    echo "::error::Neon create-branch response carried no connection_uris[0].connection_uri and no compute endpoint host to compose one from." >&2
+    return 3
+  fi
+
+  db="$(neon_pick_name "$resp" databases "$NEON_DATABASE" NEON_DATABASE)" || return 3
+  role="$(neon_pick_name "$resp" roles "$NEON_ROLE" NEON_ROLE)" || return 3
+
+  pw_resp="$(neon_api GET "/projects/${NEON_PROJECT_ID}/branches/${branch_id}/roles/$(uri_escape "$role")/reveal_password")" || return 3
+  password="$(jq -r '.password // empty' <<<"$pw_resp" 2>/dev/null)"
+  if [ -z "$password" ]; then
+    echo "::error::Neon revealed no password for role '${role}' on branch ${branch_id}; cannot compose a connection URI." >&2
+    return 3
+  fi
+
+  printf 'postgresql://%s:%s@%s/%s?sslmode=require' \
+    "$(uri_escape "$role")" "$(uri_escape "$password")" "$host" "$(uri_escape "$db")" > "$dest"
+}
+
 cmd_create() {
   local name="" want_endpoint=0 uri_out=""
   while [ $# -gt 0 ]; do
@@ -150,14 +236,14 @@ cmd_create() {
   if [ -n "$uri_out" ]; then
     local uri
     uri="$(jq -r '.connection_uris[0].connection_uri // empty' <<<"$resp" 2>/dev/null)"
-    if [ -z "$uri" ]; then
-      echo "::error::Neon create-branch response carried no connection_uris[0].connection_uri."
-      exit 3
-    fi
     # Create the file empty-and-private BEFORE writing the secret into it.
     : > "$uri_out"
     chmod 600 "$uri_out"
-    printf '%s' "$uri" > "$uri_out"
+    if [ -n "$uri" ]; then
+      printf '%s' "$uri" > "$uri_out"
+    else
+      neon_compose_uri_into "$uri_out" "$resp" "$branch_id" || exit 3
+    fi
   fi
 
   echo "branch_id=${branch_id}"
