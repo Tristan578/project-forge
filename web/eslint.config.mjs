@@ -59,9 +59,90 @@ const noHardcodedPrimitives = {
   },
 };
 
+// Local plugin: flag it()/test() bodies with no expect() assertion anywhere
+// in their subtree — a test that renders/acts and asserts nothing reports
+// green on behaviour it never exercises (PF-9448 / #9448).
+const TEST_CALL_NAMES = new Set(['it', 'test']);
+
+function calleeIsTestCall(callee) {
+  if (!callee) return false;
+  if (callee.type === 'Identifier') return TEST_CALL_NAMES.has(callee.name);
+  if (callee.type === 'MemberExpression') {
+    // it.only(...), it.skip(...), it.concurrent(...), it.each(...), and
+    // combinations like it.concurrent.only(...).
+    if (callee.object.type === 'Identifier' && TEST_CALL_NAMES.has(callee.object.name)) return true;
+    return calleeIsTestCall(callee.object);
+  }
+  if (callee.type === 'CallExpression') {
+    // it.each([...])('name', fn) — the outer call's callee is the
+    // it.each([...]) CallExpression itself.
+    return calleeIsTestCall(callee.callee);
+  }
+  return false;
+}
+
+function calleeHasModifier(callee, modifier) {
+  if (!callee) return false;
+  if (callee.type === 'MemberExpression') {
+    if (callee.property.type === 'Identifier' && callee.property.name === modifier) return true;
+    return calleeHasModifier(callee.object, modifier);
+  }
+  if (callee.type === 'CallExpression') return calleeHasModifier(callee.callee, modifier);
+  return false;
+}
+
+function containsExpectCall(node, seen) {
+  if (!node || typeof node !== 'object' || seen.has(node)) return false;
+  seen.add(node);
+  if (node.type === 'Identifier' && node.name === 'expect') return true;
+  for (const key in node) {
+    if (key === 'parent' || key === 'loc' || key === 'range') continue;
+    const value = node[key];
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item && typeof item === 'object' && typeof item.type === 'string' && containsExpectCall(item, seen)) {
+          return true;
+        }
+      }
+    } else if (value && typeof value === 'object' && typeof value.type === 'string') {
+      if (containsExpectCall(value, seen)) return true;
+    }
+  }
+  return false;
+}
+
+const noEmptyTestAssertion = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Disallow it()/test() bodies with no expect() assertion (PF-9448)' },
+    schema: [],
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        if (!calleeIsTestCall(node.callee)) return;
+        // .todo(...) tests take no callback — nothing to check.
+        if (calleeHasModifier(node.callee, 'todo')) return;
+        const fn = node.arguments.find(
+          (a) => a.type === 'FunctionExpression' || a.type === 'ArrowFunctionExpression',
+        );
+        if (!fn) return; // dynamic/referenced callback — can't statically analyze
+        if (!containsExpectCall(fn.body, new Set())) {
+          context.report({
+            node,
+            message:
+              'Test has no expect() assertion — it will report green without exercising the behaviour it claims to test. Add an assertion or delete the test (PF-9448).',
+          });
+        }
+      },
+    };
+  },
+};
+
 const localPlugin = {
   rules: {
     'no-hardcoded-primitives': noHardcodedPrimitives,
+    'no-empty-test-assertion': noEmptyTestAssertion,
   },
 };
 
@@ -124,7 +205,39 @@ const eslintConfig = defineConfig([
   },
   {
     files: ['src/**/*.{test,spec}.{ts,tsx,js,jsx}'],
+    // PF-9448 (#9448): 44 pre-existing assertion-free tests exist outside the
+    // five this ticket fixed, across 9 files — enabling the rule repo-wide
+    // would fail every one of them under --max-warnings 0. Following the
+    // no-hardcoded-primitives precedent above (scope a new correctness rule
+    // out of already-violating files rather than bulk-suppressing or silently
+    // weakening it), those 9 files are excluded here so the rule blocks NEW
+    // assertion-free tests everywhere else starting now. Counts as of
+    // 2026-08-29: proxy.test.ts (3), app/api/__tests__/contracts.test.ts (10),
+    // hooks/__tests__/useGenerationPolling.test.ts (1),
+    // lib/audio/audioManager.advanced.test.ts (3),
+    // lib/chat/handlers/__tests__/exportAsset2dHandlers.test.ts (11),
+    // lib/export/__tests__/textureCompression.test.ts (1),
+    // lib/game-creation/__tests__/planBuilder.test.ts (4),
+    // lib/workspace/__tests__/panelRegistry.test.ts (1). A 9th file,
+    // lib/scripting/__tests__/scriptSandbox.test.ts (10), is the SEC-2
+    // sandbox-escape test cluster tracked separately (#8700) and is
+    // deliberately out of scope here too. None of these 9 files were
+    // bulk-suppressed to force a clean gate — each needs its own real fix;
+    // track re-enabling this rule on them in a follow-up ticket.
+    ignores: [
+      'src/__tests__/proxy.test.ts',
+      'src/app/api/__tests__/contracts.test.ts',
+      'src/hooks/__tests__/useGenerationPolling.test.ts',
+      'src/lib/audio/audioManager.advanced.test.ts',
+      'src/lib/chat/handlers/__tests__/exportAsset2dHandlers.test.ts',
+      'src/lib/export/__tests__/textureCompression.test.ts',
+      'src/lib/game-creation/__tests__/planBuilder.test.ts',
+      'src/lib/scripting/__tests__/scriptSandbox.test.ts',
+      'src/lib/workspace/__tests__/panelRegistry.test.ts',
+    ],
+    plugins: { spawnforge: localPlugin },
     rules: {
+      'spawnforge/no-empty-test-assertion': 'error',
       'no-restricted-syntax': [
         'error',
         {
