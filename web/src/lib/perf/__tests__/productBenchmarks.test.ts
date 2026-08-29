@@ -27,23 +27,28 @@
  * ---------------------------------------------------------------------------
  * Wall-clock timing on a shared GitHub-hosted runner is noisy: the vCPU is
  * shared, frequency scaling is out of our control, and V8's GC can land inside
- * any single iteration. Three things absorb that:
+ * any single iteration. Four things absorb that:
  *
  *   1. WARMUP. `BENCH_WARMUP` (default 5) unmeasured calls run first, so JIT
  *      tier-up and first-touch allocation are not charged to iteration 1.
  *   2. ITERATIONS. `BENCH_ITERATIONS` (default 40 locally, 200 in the
  *      benchmark workflow) — the reported metrics are order statistics over
  *      that many samples, so one preempted iteration cannot move the median.
- *   3. THRESHOLD. The comparator flags a benchmark only above 2.0x baseline.
- *      That is deliberately coarse: measured run-to-run spread of the medians
- *      here is well under 1.5x on the same machine, and cross-runner spread on
- *      GitHub's shared runners is commonly ~1.3-1.6x for CPU-bound work. A
- *      1.2x or 1.5x gate would be permanently red and get ignored; 2.0x still
- *      catches the failure mode that matters (an algorithmic regression — a
- *      linear scan turning quadratic — which shows up as 5x-50x, not 1.9x).
- *      The comparator also defaults to comparing `avg` and `p50` only: p95/p99
- *      over 200 samples on a shared runner are dominated by GC pauses and
- *      scheduler preemption and are not a stable regression signal.
+ *   3. BATCHING. Anything whose single call lands under the comparator's
+ *      0.05 ms noise floor is repeated N times inside one measured iteration
+ *      (see the batch constants below). A benchmark under the floor has both
+ *      sides of the comparison skipped, so it silently guards nothing.
+ *   4. METRICS + THRESHOLD. The comparator compares `min` and `p50` only, at a
+ *      3.0x threshold. Both numbers are measured, not guessed: five back-to-
+ *      back runs of *identical* code at 200 iterations on one machine gave
+ *      worst-case run-to-run spreads of min 1.80x, p50 1.96x, avg 5.93x,
+ *      p95 10.79x, p99 79.28x. avg/p95/p99 are therefore useless as a CI
+ *      signal — they are dominated by GC pauses and scheduler preemption —
+ *      while 3.0x sits above the observed 1.96x p50 ceiling with headroom for
+ *      a noisier shared runner. A tighter gate would be permanently red and
+ *      would get ignored; 3.0x still catches the failure mode that matters (an
+ *      algorithmic regression, a linear scan turning quadratic, which shows up
+ *      as 5x-50x rather than 2.9x).
  *
  * Assertions in THIS file are correctness-only, never timing-based, so the
  * everyday `vitest run` stays deterministic. Regression detection lives in
@@ -111,16 +116,32 @@ const OUTPUT_PATH = process.env.SPAWNFORGE_BENCH_OUTPUT;
  * Repetitions performed inside ONE measured iteration, for operations that are
  * individually too cheap to time honestly.
  *
- * `benchmark()` awaits the measured function, so each iteration pays a promise
- * tick plus two `performance.now()` reads — on the order of a microsecond. A
- * single `setFullGraph` costs ~2us and a single `updateNode` ~1us, so an
- * unbatched measurement would be roughly half harness overhead and its ratio to
- * a baseline would be meaningless. Batching lifts each measured iteration to
- * ~0.1-0.2ms, where harness overhead is under 1%. The batch size is part of the
- * benchmark's definition: change it and the baseline must be re-recorded.
+ * Two floors force this. First, `benchmark()` awaits the measured function, so
+ * every iteration pays a promise tick plus two `performance.now()` reads — on
+ * the order of a microsecond. Second, and more important, the comparator
+ * ignores any pair of readings that both sit below its noise floor
+ * (`DEFAULT_NOISE_FLOOR_MS`, 0.05 ms), because the ratio between two
+ * sub-microsecond readings is clock granularity rather than signal. A
+ * benchmark whose median lands under that floor is therefore *silently
+ * unguarded*: it could get three times slower and the comparator would report
+ * nothing.
+ *
+ * So each of these is batched until its median clears roughly 3x the noise
+ * floor (~0.15 ms), measured on the recorded baseline. The batch size is part
+ * of the benchmark's definition — change it and the baseline must be
+ * re-recorded with `--update-baseline`.
  */
-const STORE_HYDRATE_BATCH = 64;
-const STORE_UPDATE_BATCH = 256;
+const SCENE_GRAPH_REBUILD_BATCH = 8;
+const HIERARCHY_FILTER_BATCH = 4;
+// 128, not 16: repeating a hot linear scan over the same 56-item array lets
+// V8's inline caches and branch predictor amortize it, so the per-repetition
+// cost falls as the batch grows. The size was chosen by measuring, not by
+// dividing the noise floor by a single-call timing.
+const MATERIAL_LOOKUP_BATCH = 128;
+const SCENE_DESERIALIZE_BATCH = 2;
+const VISUAL_SCRIPT_COMPILE_BATCH = 4;
+const STORE_HYDRATE_BATCH = 128;
+const STORE_UPDATE_BATCH = 1024;
 
 /**
  * Baseline names in `PERFORMANCE_BASELINES` that this suite deliberately does
@@ -138,19 +159,27 @@ const UNMEASURED_BASELINES: Record<string, string> = {
 
 const collected: BenchmarkResult[] = [];
 
+/** How many times `fn` actually runs inside one measured iteration. */
+function repsFor(batch: number): number {
+  return batch * SLOWDOWN;
+}
+
 /**
  * Time `fn` and record the result under `name`.
  *
- * `SPAWNFORGE_BENCH_SLOWDOWN` repeats `fn` inside a single measured iteration,
- * so a slowdown factor of N multiplies the recorded time by roughly N while
- * still executing genuine product code.
+ * `batch` is the benchmark's own definition (see the batch constants above):
+ * the number of real product calls that make up one measured sample.
+ * `SPAWNFORGE_BENCH_SLOWDOWN` multiplies on top of it, so a slowdown factor of
+ * N multiplies the recorded time by roughly N while still executing genuine
+ * product code — it never fabricates a number.
  */
-async function measure(name: string, fn: () => void): Promise<BenchmarkResult> {
+async function measure(name: string, fn: () => void, batch = 1): Promise<BenchmarkResult> {
+  const reps = repsFor(batch);
   const body =
-    SLOWDOWN === 1
+    reps === 1
       ? fn
       : () => {
-          for (let i = 0; i < SLOWDOWN; i++) fn();
+          for (let i = 0; i < reps; i++) fn();
         };
   const result = await benchmark(name, body, {
     iterations: ITERATIONS,
@@ -178,9 +207,13 @@ describe('product benchmarks (real code paths)', () => {
     const graph = makeSceneGraph(100);
     let index: ReturnType<typeof buildEntityIndex> | null = null;
 
-    await measure('scene-graph-rebuild-100-nodes', () => {
-      index = buildEntityIndex(graph);
-    });
+    await measure(
+      'scene-graph-rebuild-100-nodes',
+      () => {
+        index = buildEntityIndex(graph);
+      },
+      SCENE_GRAPH_REBUILD_BATCH,
+    );
 
     // Correctness — a broken buildEntityIndex must FAIL here, not record a
     // suspiciously fast time.
@@ -196,9 +229,13 @@ describe('product benchmarks (real code paths)', () => {
     const graph = makeSceneGraph(500);
     let result: ReturnType<typeof filterHierarchy> | null = null;
 
-    await measure('hierarchy-filter-500-nodes', () => {
-      result = filterHierarchy(graph, 'coin');
-    });
+    await measure(
+      'hierarchy-filter-500-nodes',
+      () => {
+        result = filterHierarchy(graph, 'coin');
+      },
+      HIERARCHY_FILTER_BATCH,
+    );
 
     expect(result).not.toBeNull();
     expect(result!.matchCount).toBeGreaterThan(0);
@@ -216,12 +253,16 @@ describe('product benchmarks (real code paths)', () => {
     const ids = MATERIAL_PRESETS.map((p) => p.id);
     let found = 0;
 
-    await measure('material-preset-lookup', () => {
-      found = 0;
-      for (const id of ids) {
-        if (getPresetById(id)) found++;
-      }
-    });
+    await measure(
+      'material-preset-lookup',
+      () => {
+        found = 0;
+        for (const id of ids) {
+          if (getPresetById(id)) found++;
+        }
+      },
+      MATERIAL_LOOKUP_BATCH,
+    );
 
     expect(ids.length).toBeGreaterThan(0);
     expect(found).toBe(ids.length);
@@ -260,10 +301,14 @@ describe('product benchmarks (real code paths)', () => {
     const json = makeForgeSceneV1Json(100);
     let migrated: ReturnType<typeof migrateScene> | null = null;
 
-    await measure('scene-deserialize-100-entities', () => {
-      const parsed = JSON.parse(json) as { formatVersion: number } & Record<string, unknown>;
-      migrated = migrateScene(parsed, parsed.formatVersion, CURRENT_FORMAT_VERSION);
-    });
+    await measure(
+      'scene-deserialize-100-entities',
+      () => {
+        const parsed = JSON.parse(json) as { formatVersion: number } & Record<string, unknown>;
+        migrated = migrateScene(parsed, parsed.formatVersion, CURRENT_FORMAT_VERSION);
+      },
+      SCENE_DESERIALIZE_BATCH,
+    );
 
     expect(migrated).not.toBeNull();
     expect(migrated!.formatVersion).toBe(CURRENT_FORMAT_VERSION);
@@ -279,9 +324,13 @@ describe('product benchmarks (real code paths)', () => {
     const graph = makeVisualScriptGraph(4, 10);
     let result: ReturnType<typeof compileGraph> | null = null;
 
-    await measure('visual-script-compile-44-nodes', () => {
-      result = compileGraph(graph);
-    });
+    await measure(
+      'visual-script-compile-44-nodes',
+      () => {
+        result = compileGraph(graph);
+      },
+      VISUAL_SCRIPT_COMPILE_BATCH,
+    );
 
     expect(graph.nodes).toHaveLength(44);
     expect(result).not.toBeNull();
@@ -315,12 +364,14 @@ describe('product benchmarks (real code paths)', () => {
       spawnTerrain: () => undefined,
     }));
 
-    await measure('store-hydrate-scene-graph-100-entities', () => {
-      for (let i = 0; i < STORE_HYDRATE_BATCH; i++) {
+    await measure(
+      'store-hydrate-scene-graph-100-entities',
+      () => {
         store.getState().setFullGraph({ nodes: {}, rootIds: [] });
         store.getState().setFullGraph(graph);
-      }
-    });
+      },
+      STORE_HYDRATE_BATCH,
+    );
 
     expect(store.getState().nodeCount).toBe(100);
     expect(store.getState().sceneGraph.rootIds).toEqual(graph.rootIds);
@@ -358,15 +409,20 @@ describe('product benchmarks (real code paths)', () => {
     });
 
     let tick = 0;
-    await measure('store-update-propagation', () => {
-      for (let i = 0; i < STORE_UPDATE_BATCH; i++) {
+    await measure(
+      'store-update-propagation',
+      () => {
         store.getState().updateNode('e7', { name: `Renamed_${tick++}` });
-      }
-    });
+      },
+      STORE_UPDATE_BATCH,
+    );
 
     unsubscribe();
 
-    expect(notifications).toBe((ITERATIONS + WARMUP) * STORE_UPDATE_BATCH);
+    // Every measured AND warm-up iteration must have propagated. This is the
+    // assertion that catches a store whose subscriber notification silently
+    // stops firing — a "fast" run that measured nothing.
+    expect(notifications).toBe((ITERATIONS + WARMUP) * repsFor(STORE_UPDATE_BATCH));
     expect(observedName).toBe(`Renamed_${tick - 1}`);
     expect(store.getState().nodeCount).toBe(100);
   });
@@ -408,9 +464,27 @@ describe('product benchmark harness', () => {
     }
   });
 
-  it('defaults the slowdown seam to 1 so CI never runs deliberately slowed code', () => {
-    // Guards against SPAWNFORGE_BENCH_SLOWDOWN leaking into a baseline
-    // recording. The benchmark workflow never sets it.
-    expect(intFromEnv('SPAWNFORGE_BENCH_SLOWDOWN_UNSET_PROBE', 1)).toBe(1);
+  it('never records a baseline while the slowdown seam is engaged', () => {
+    // SPAWNFORGE_BENCH_SLOWDOWN exists only to prove the comparator actually
+    // goes red (the PF-9458 mutation matrix). If it ever leaked into a
+    // baseline recording, the baseline would bake in the slowdown and the gate
+    // would be permanently blind. run-benchmarks.sh pins it to 1 on the
+    // recording path; this is the backstop for anyone invoking vitest directly.
+    expect(SLOWDOWN).toBeGreaterThanOrEqual(1);
+    if (SLOWDOWN !== 1) {
+      expect(OUTPUT_PATH ?? '').not.toContain('baseline.json');
+    }
+  });
+
+  it('parses run configuration without treating 0 or NaN as a valid override', () => {
+    // `||` here would swallow a legitimate 0 and silently accept Number('x').
+    process.env.SPAWNFORGE_BENCH_PROBE = '0';
+    expect(intFromEnv('SPAWNFORGE_BENCH_PROBE', 7)).toBe(7);
+    process.env.SPAWNFORGE_BENCH_PROBE = 'not-a-number';
+    expect(intFromEnv('SPAWNFORGE_BENCH_PROBE', 7)).toBe(7);
+    process.env.SPAWNFORGE_BENCH_PROBE = '12.9';
+    expect(intFromEnv('SPAWNFORGE_BENCH_PROBE', 7)).toBe(12);
+    delete process.env.SPAWNFORGE_BENCH_PROBE;
+    expect(intFromEnv('SPAWNFORGE_BENCH_PROBE', 7)).toBe(7);
   });
 });
