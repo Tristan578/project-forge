@@ -10,6 +10,7 @@ import type { Tier, User } from '../db/schema';
 import {
   deleteManyFromR2,
   resolveOwnedAssetKey,
+  withStatusSidecars,
   MAX_R2_SWEEP_KEYS,
 } from '../storage/r2';
 import { captureException, captureMessage } from '../monitoring/sentry-server';
@@ -140,6 +141,21 @@ export async function updateDisplayName(
  * removed from R2 on a best-effort basis (PF-9457) — see the notes at that
  * call site for why storage runs last and why it can never fail the deletion.
  */
+/**
+ * Upper bound on the number of R2 keys one marketplace asset row can generate:
+ * a preview object, an asset file object, and the `.status.json` sidecar the
+ * asset post-processing Worker writes beside each of them.
+ *
+ * This is what converts the sweep's key ceiling (MAX_R2_SWEEP_KEYS) into a row
+ * ceiling for the read below. Raising it without raising MAX_R2_SWEEP_KEYS
+ * shrinks how many assets a single account deletion can clear; the two move
+ * together on purpose.
+ */
+const R2_KEYS_PER_ASSET = 4;
+
+/** Marketplace asset rows one account-deletion sweep will read. */
+const SELLER_ASSET_READ_LIMIT = Math.floor(MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET);
+
 export async function deleteUserAccount(userId: string): Promise<void> {
   const neonSql = getNeonSql();
 
@@ -163,11 +179,23 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   const projectIds = userProjects.map((p) => p.id);
 
   // Read the seller's uploaded marketplace objects BEFORE the transaction —
-  // the rows carrying the R2 URLs are about to be deleted. Capped at half the
-  // sweep ceiling because each asset contributes at most two keys (preview +
-  // file), so this can never produce more keys than one sweep will attempt.
-  const sellerAssetLimit = Math.floor(MAX_R2_SWEEP_KEYS / 2);
-  const sellerAssets = await queryWithResilience(() =>
+  // the rows carrying the R2 URLs are about to be deleted.
+  //
+  // Row cap: each asset row contributes at most R2_KEYS_PER_ASSET keys, so
+  // reading at most MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET rows guarantees the
+  // key list never exceeds what a single sweep will attempt. We deliberately
+  // ask for one row MORE than the cap: the extra row is the only way to tell
+  // "exactly at the cap" (nothing left behind) from "past the cap" (a tail we
+  // will never see). `.limit(cap)` alone cannot distinguish the two, so a
+  // seller with exactly `cap` assets would be reported as truncated when
+  // nothing was lost — and, worse, the check would have to be `>=`, which is a
+  // false positive on the common boundary.
+  //
+  // A stable ORDER BY makes the rows we do read deterministic. Without it,
+  // Postgres may return any `cap` of the seller's rows, so a truncation report
+  // could not tell an operator which objects were already handled.
+  const sellerAssetLimit = SELLER_ASSET_READ_LIMIT;
+  const sellerAssetRows = await queryWithResilience(() =>
     getDb()
       .select({
         id: marketplaceAssets.id,
@@ -176,26 +204,35 @@ export async function deleteUserAccount(userId: string): Promise<void> {
       })
       .from(marketplaceAssets)
       .where(eq(marketplaceAssets.sellerId, userId))
-      .limit(sellerAssetLimit)
+      .orderBy(marketplaceAssets.id)
+      .limit(sellerAssetLimit + 1)
   );
 
-  // The LIMIT above is the cap that can actually bite: a seller at or past it
-  // has assets whose objects this sweep will never see, and because they never
-  // enter the key list, deleteManyFromR2's own `truncated` flag stays false.
-  // Say so explicitly rather than let the tail vanish silently.
-  const assetReadTruncated = sellerAssets.length >= sellerAssetLimit;
+  // The row cap is the cap that can actually bite. Rows past it never become
+  // keys at all, so deleteManyFromR2's own `truncated` flag stays false and the
+  // tail would vanish with no signal anywhere. Say so explicitly instead.
+  const assetReadTruncated = sellerAssetRows.length > sellerAssetLimit;
+  const sellerAssets = assetReadTruncated
+    ? sellerAssetRows.slice(0, sellerAssetLimit)
+    : sellerAssetRows;
 
   // Only keys under this user's own assets/{userId}/{assetId}/ prefix are
   // eligible: previewUrl/assetFileUrl are seller-writable through the asset
   // PATCH route, so an unvalidated key would let a departing seller take
   // another seller's objects down with them.
-  const storageKeys: string[] = [];
+  //
+  // Each resolved key is expanded to include its `.status.json` sidecar — the
+  // asset post-processing Worker writes one next to every created object and
+  // records it nowhere in Postgres, so a DB-driven sweep that skipped it would
+  // leave per-user JSON in the bucket after the account is gone.
+  const ownedKeys: string[] = [];
   for (const asset of sellerAssets) {
     const previewKey = resolveOwnedAssetKey(asset.previewUrl, userId, asset.id);
-    if (previewKey) storageKeys.push(previewKey);
+    if (previewKey) ownedKeys.push(previewKey);
     const fileKey = resolveOwnedAssetKey(asset.assetFileUrl, userId, asset.id);
-    if (fileKey) storageKeys.push(fileKey);
+    if (fileKey) ownedKeys.push(fileKey);
   }
+  const storageKeys = withStatusSidecars(ownedKeys);
 
   // Build the full list of DELETE statements in dependency order.
   // All statements are sent to Postgres in a single BEGIN/COMMIT batch.
@@ -304,7 +341,7 @@ async function deleteUserStorageObjects(
   assetReadTruncated: boolean
 ): Promise<void> {
   if (assetReadTruncated) {
-    const message = `Account deletion read only the first ${Math.floor(MAX_R2_SWEEP_KEYS / 2)} marketplace assets for user ${userId}; objects under assets/${userId}/ beyond that need reconciliation`;
+    const message = `Account deletion read only the first ${SELLER_ASSET_READ_LIMIT} marketplace assets for user ${userId}; objects under assets/${userId}/ beyond that need reconciliation`;
     console.error(message);
     captureMessage(message, 'error');
   }
@@ -324,6 +361,11 @@ async function deleteUserStorageObjects(
       captureMessage(message, 'error');
     }
 
+    // Defensive second net. The row cap above is sized so this call site can
+    // never overflow the sweep's own key ceiling, so in production the read cap
+    // is what fires. This branch exists so that changing R2_KEYS_PER_ASSET (or
+    // the key shape) without re-deriving the row cap degrades to a loud report
+    // rather than a silent drop.
     if (sweep.truncated) {
       const message = `Account deletion R2 sweep truncated at ${MAX_R2_SWEEP_KEYS} keys for user ${userId}; remaining objects under assets/${userId}/ need reconciliation`;
       console.error(message);

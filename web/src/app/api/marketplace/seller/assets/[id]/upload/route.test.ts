@@ -30,6 +30,8 @@ vi.mock('@/lib/storage/r2', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/storage/r2')>();
   return {
     resolveOwnedAssetKey: actual.resolveOwnedAssetKey,
+    // Real too — the sidecar assertions below prove the exact derived keys.
+    withStatusSidecars: actual.withStatusSidecars,
     uploadToR2: (...args: unknown[]) => mockUploadToR2(...args),
     deleteManyFromR2: (...args: unknown[]) => mockDeleteManyFromR2(...args),
     buildAssetKey: vi.fn(
@@ -90,6 +92,16 @@ describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
     const { POST } = await import('./route');
     const formData = new FormData();
     formData.append(field, file);
+    const req = new NextRequest('http://localhost:3000/api/marketplace/seller/assets/a1/upload', {
+      method: 'POST',
+    });
+    vi.spyOn(req, 'formData').mockResolvedValue(formData);
+    return POST(req, { params: Promise.resolve({ id: 'a1' }) });
+  }
+
+  /** Same as postFile, but for a request carrying both file fields. */
+  async function postForm(formData: FormData) {
+    const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/marketplace/seller/assets/a1/upload', {
       method: 'POST',
     });
@@ -305,6 +317,41 @@ describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
       expect(mockDeleteManyFromR2).toHaveBeenCalledTimes(1);
       expect(mockDeleteManyFromR2).toHaveBeenCalledWith([
         'assets/user_1/a1/file/old-model.glb',
+        'assets/user_1/a1/file/old-model.glb.status.json',
+      ]);
+    });
+
+    it("sweeps the superseded object's status sidecar alongside it", async () => {
+      // infra/asset-postprocess/worker.mjs PUTs `<key>.status.json` next to every
+      // created object in the same bucket. It is recorded in no DB row, so it
+      // outlives the object it describes unless this sweep derives it.
+      stubDb({
+        id: 'a1',
+        sellerId: 'user_1',
+        previewUrl: 'https://cdn.spawnforge.ai/assets/user_1/a1/preview/old-thumb.png',
+        assetFileUrl: 'https://cdn.spawnforge.ai/assets/user_1/a1/file/old-model.glb',
+      });
+      mockUploadToR2
+        .mockResolvedValueOnce({
+          url: 'https://cdn.spawnforge.ai/assets/user_1/a1/preview/new-thumb.png',
+          key: 'assets/user_1/a1/preview/new-thumb.png',
+        })
+        .mockResolvedValueOnce({
+          url: 'https://cdn.spawnforge.ai/assets/user_1/a1/file/new-model.glb',
+          key: 'assets/user_1/a1/file/new-model.glb',
+        });
+
+      const form = new FormData();
+      form.set('preview', new File(['imgdata'], 'new-thumb.png', { type: 'image/png' }));
+      form.set('asset', new File(['modeldata'], 'new-model.glb', { type: 'model/gltf-binary' }));
+      const res = await postForm(form);
+
+      expect(res.status).toBe(200);
+      expect(mockDeleteManyFromR2).toHaveBeenCalledWith([
+        'assets/user_1/a1/preview/old-thumb.png',
+        'assets/user_1/a1/preview/old-thumb.png.status.json',
+        'assets/user_1/a1/file/old-model.glb',
+        'assets/user_1/a1/file/old-model.glb.status.json',
       ]);
     });
 

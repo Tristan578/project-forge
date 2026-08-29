@@ -1,7 +1,6 @@
 import {
   S3Client,
   PutObjectCommand,
-  DeleteObjectCommand,
   DeleteObjectsCommand,
   HeadObjectCommand,
 } from '@aws-sdk/client-s3';
@@ -75,21 +74,6 @@ export async function uploadToR2(
   const url = `https://${cdn}/${key}`;
 
   return { url, key };
-}
-
-/**
- * Delete a file from R2 by its storage key.
- */
-export async function deleteFromR2(key: string): Promise<void> {
-  const r2 = getR2Client();
-  const bucket = getBucket();
-
-  await r2.send(
-    new DeleteObjectCommand({
-      Bucket: bucket,
-      Key: key,
-    })
-  );
 }
 
 /**
@@ -236,6 +220,43 @@ export function resolveOwnedAssetKey(
   if (!key.startsWith(`assets/${sellerId}/${assetId}/`)) return null;
 
   return key;
+}
+
+/**
+ * Suffix of the JSON sidecar the asset post-processing Worker writes back beside
+ * every object created in the asset bucket.
+ *
+ * `infra/asset-postprocess/worker.mjs` (`STATUS_SUFFIX`) consumes bucket-wide
+ * R2 object-create notifications for `spawnforge-assets` — the same bucket this
+ * module writes marketplace uploads to — and PUTs a `<key>.status.json` record
+ * next to each artifact it validates. The sidecar therefore:
+ *   - lives under the same `assets/{sellerId}/{assetId}/` prefix as the object,
+ *   - is keyed to the uploading seller, and
+ *   - is recorded nowhere in Postgres.
+ *
+ * So a sweep driven off DB rows has to derive it. Without that, deleting a
+ * marketplace object leaves its sidecar behind forever, and account deletion
+ * leaves per-user JSON in the bucket after the account is gone.
+ */
+export const ASSET_STATUS_SIDECAR_SUFFIX = '.status.json';
+
+/**
+ * Expand object keys to also cover each key's status sidecar.
+ *
+ * Each input key is followed immediately by `<key>.status.json`. A key that is
+ * already a sidecar is passed through unchanged rather than growing a second
+ * suffix. Deleting a sidecar that was never written is a no-op in R2, so it is
+ * always safe to ask for one.
+ */
+export function withStatusSidecars(keys: string[]): string[] {
+  const expanded: string[] = [];
+  for (const key of keys) {
+    expanded.push(key);
+    if (!key.endsWith(ASSET_STATUS_SIDECAR_SUFFIX)) {
+      expanded.push(`${key}${ASSET_STATUS_SIDECAR_SUFFIX}`);
+    }
+  }
+  return expanded;
 }
 
 /**

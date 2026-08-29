@@ -38,6 +38,8 @@ function buildSelectChain(rows: Partial<User>[]): unknown {
   const chain: Record<string, unknown> = {
     from: vi.fn().mockReturnThis(),
     limit: vi.fn().mockResolvedValue(rows),
+    // deleteUserAccount orders the marketplace-asset read for determinism.
+    orderBy: vi.fn(),
     // then/catch/finally make the object thenable — awaiting the chain directly
     // resolves to rows without calling .limit()
     then: (resolve: (value: unknown) => void, reject: (err: unknown) => void) =>
@@ -45,8 +47,9 @@ function buildSelectChain(rows: Partial<User>[]): unknown {
     catch: (reject: (err: unknown) => void) => resolvedPromise.catch(reject),
     finally: (fn: () => void) => resolvedPromise.finally(fn),
   };
-  // .where() returns the same chain so subsequent calls (.limit) still work
+  // .where()/.orderBy() return the same chain so subsequent calls (.limit) work
   chain.where = vi.fn().mockReturnValue(chain);
+  chain.orderBy = vi.fn().mockReturnValue(chain);
   return chain;
 }
 const mockSelect = vi.fn().mockImplementation(() => buildSelectChain(mockUser ? [mockUser] : []));
@@ -516,10 +519,17 @@ describe('deleteUserAccount', () => {
     await deleteUserAccount('user-uuid-1');
 
     expect(mockDeleteManyFromR2).toHaveBeenCalledTimes(1);
+    // Each object is swept together with the `.status.json` sidecar the asset
+    // post-processing Worker writes beside it. The sidecar is keyed to this
+    // user, lives in the same bucket, and exists in no DB row — nothing else
+    // would ever remove it.
     expect(mockDeleteManyFromR2).toHaveBeenCalledWith([
       'assets/user-uuid-1/asset-1/preview/thumb.png',
+      'assets/user-uuid-1/asset-1/preview/thumb.png.status.json',
       'assets/user-uuid-1/asset-1/file/model.glb',
+      'assets/user-uuid-1/asset-1/file/model.glb.status.json',
       'assets/user-uuid-1/asset-2/file/sound.wav',
+      'assets/user-uuid-1/asset-2/file/sound.wav.status.json',
     ]);
   });
 
@@ -546,6 +556,7 @@ describe('deleteUserAccount', () => {
 
     expect(mockDeleteManyFromR2).toHaveBeenCalledWith([
       'assets/user-uuid-1/asset-1/file/mine.glb',
+      'assets/user-uuid-1/asset-1/file/mine.glb.status.json',
     ]);
   });
 
@@ -651,19 +662,25 @@ describe('deleteUserAccount', () => {
     );
   });
 
-  it('reports when the asset read itself hit its LIMIT', async () => {
+  // Math.floor(MAX_R2_SWEEP_KEYS / R2_KEYS_PER_ASSET) = floor(5000 / 4).
+  // The read asks for LIMIT + 1 rows so it can tell "exactly at the cap" from
+  // "past the cap"; only the latter is a truncation.
+  const ASSET_READ_LIMIT = 1250;
+
+  function assetRows(count: number): Record<string, unknown>[] {
+    return Array.from({ length: count }, (_, i) => ({
+      id: `asset-${i}`,
+      previewUrl: null,
+      assetFileUrl: `https://cdn.spawnforge.ai/assets/user-uuid-1/asset-${i}/file/m.glb`,
+    }));
+  }
+
+  it('reports when the asset read ran past its LIMIT', async () => {
     // The LIMIT on the marketplaceAssets select is the cap that can actually
     // bite. Rows past it never become keys, so deleteManyFromR2's own
     // `truncated` flag stays false and the tail would otherwise vanish with no
     // signal at all — the one thing an operator needs to reconcile the orphans.
-    const ASSET_READ_LIMIT = 2500; // Math.floor(MAX_R2_SWEEP_KEYS / 2)
-    stubSelects(
-      Array.from({ length: ASSET_READ_LIMIT }, (_, i) => ({
-        id: `asset-${i}`,
-        previewUrl: null,
-        assetFileUrl: `https://cdn.spawnforge.ai/assets/user-uuid-1/asset-${i}/file/m.glb`,
-      }))
-    );
+    stubSelects(assetRows(ASSET_READ_LIMIT + 1));
 
     await deleteUserAccount('user-uuid-1');
 
@@ -672,8 +689,40 @@ describe('deleteUserAccount', () => {
       'error',
     );
     // The keys it did see are still swept — the cap reports, it does not skip.
+    // One file key + its sidecar per row, and the overflow row is dropped.
     expect(mockDeleteManyFromR2).toHaveBeenCalledTimes(1);
-    expect(mockDeleteManyFromR2.mock.calls[0][0]).toHaveLength(ASSET_READ_LIMIT);
+    expect(mockDeleteManyFromR2.mock.calls[0][0]).toHaveLength(ASSET_READ_LIMIT * 2);
+  });
+
+  it('stays silent when the asset read landed exactly on the LIMIT', async () => {
+    // Boundary: `cap` rows means nothing was left behind. Reporting here would
+    // be a false positive that sends an operator hunting for orphans that do
+    // not exist, which is why the read asks for cap + 1 rather than testing >=.
+    stubSelects(assetRows(ASSET_READ_LIMIT));
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockCaptureMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('read only the first'),
+      'error',
+    );
+    expect(mockDeleteManyFromR2.mock.calls[0][0]).toHaveLength(ASSET_READ_LIMIT * 2);
+  });
+
+  it('never hands the sweep more keys than its own ceiling', async () => {
+    // The row cap exists to keep this call site inside MAX_R2_SWEEP_KEYS. Every
+    // row contributes its maximum (preview + file + a sidecar each).
+    stubSelects(
+      Array.from({ length: ASSET_READ_LIMIT + 1 }, (_, i) => ({
+        id: `asset-${i}`,
+        previewUrl: `https://cdn.spawnforge.ai/assets/user-uuid-1/asset-${i}/preview/p.png`,
+        assetFileUrl: `https://cdn.spawnforge.ai/assets/user-uuid-1/asset-${i}/file/m.glb`,
+      }))
+    );
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockDeleteManyFromR2.mock.calls[0][0]).toHaveLength(5000);
   });
 
   it('stays silent about the asset read when it came back under the LIMIT', async () => {

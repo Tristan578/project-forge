@@ -8,6 +8,7 @@ import {
   buildAssetKey,
   deleteManyFromR2,
   resolveOwnedAssetKey,
+  withStatusSidecars,
 } from '@/lib/storage/r2';
 import { captureException, captureMessage } from '@/lib/monitoring/sentry-server';
 
@@ -139,7 +140,11 @@ export async function POST(
     // must not fail an upload that already succeeded. deleteManyFromR2 never
     // throws; it reports what it could not remove so we can log it.
     if (supersededKeys.length > 0) {
-      const sweep = await deleteManyFromR2(supersededKeys);
+      // Each superseded object has a `.status.json` sidecar written back by the
+      // asset post-processing Worker. It is keyed off the object, not recorded
+      // in Postgres, and nothing else ever removes it — so it goes with the
+      // object it describes or it outlives it forever.
+      const sweep = await deleteManyFromR2(withStatusSidecars(supersededKeys));
       if (sweep.failedKeys.length > 0) {
         console.error('Failed to delete superseded marketplace asset objects', {
           assetId,

@@ -76,13 +76,43 @@ describe('R2 storage client', () => {
     });
   });
 
-  describe('deleteFromR2', () => {
-    it('sends delete command', async () => {
-      mockSend.mockResolvedValue({});
-      const { deleteFromR2 } = await import('../r2');
+  describe('withStatusSidecars', () => {
+    it('pairs every key with the post-processing Worker status sidecar', async () => {
+      const { withStatusSidecars } = await import('../r2');
 
-      await deleteFromR2('test/key.png');
-      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(
+        withStatusSidecars([
+          'assets/s1/a1/file/model.glb',
+          'assets/s1/a1/preview/thumb.png',
+        ])
+      ).toEqual([
+        'assets/s1/a1/file/model.glb',
+        'assets/s1/a1/file/model.glb.status.json',
+        'assets/s1/a1/preview/thumb.png',
+        'assets/s1/a1/preview/thumb.png.status.json',
+      ]);
+    });
+
+    it('does not append a second suffix to a key that is already a sidecar', async () => {
+      const { withStatusSidecars } = await import('../r2');
+
+      expect(withStatusSidecars(['assets/s1/a1/file/model.glb.status.json'])).toEqual([
+        'assets/s1/a1/file/model.glb.status.json',
+      ]);
+    });
+
+    it('returns an empty list for no keys', async () => {
+      const { withStatusSidecars } = await import('../r2');
+
+      expect(withStatusSidecars([])).toEqual([]);
+    });
+  });
+
+  describe('deleteFromR2 (removed)', () => {
+    it('is no longer exported — deleteManyFromR2 is the only delete path', async () => {
+      const r2 = await import('../r2');
+
+      expect('deleteFromR2' in r2).toBe(false);
     });
   });
 
