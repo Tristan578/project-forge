@@ -347,34 +347,71 @@ jobs:
       - name: Check WASM binary sizes
         working-directory: engine
         run: |
-          # Size thresholds in bytes (uncompressed .wasm after wasm-opt -Oz).
-          # wasm-opt typically reduces ~47 MB editor binaries to ~33-38 MB.
-          # Threshold set to 45 MB (post-opt) — increase only when intentionally adding features.
-          # CI fails if size exceeds threshold by more than 10%.
-          WEBGL2_THRESHOLD=47185920   # 45 MB
-          WEBGPU_THRESHOLD=47185920   # 45 MB
-
-          WEBGL2_SIZE=$(stat -c%s pkg-webgl2/forge_engine_bg.wasm)
-          WEBGPU_SIZE=$(stat -c%s pkg-webgpu/forge_engine_bg.wasm)
-
-          echo "=== WASM Binary Sizes (post wasm-opt) ==="
-          echo "WebGL2: $(numfmt --to=iec-i --suffix=B $WEBGL2_SIZE) ($WEBGL2_SIZE bytes)"
-          echo "WebGPU: $(numfmt --to=iec-i --suffix=B $WEBGPU_SIZE) ($WEBGPU_SIZE bytes)"
-          echo "=========================================="
-
+          # Size budget, in bytes, per built package (uncompressed .wasm AFTER
+          # wasm-opt -Oz). All FOUR artifacts of the build matrix are budgeted:
+          # the two editor binaries an authenticated creator downloads, and the
+          # two runtime binaries that are uploaded to R2 and downloaded by every
+          # visitor to a published game. The runtime pair carries the larger
+          # share of real traffic, so budgeting only the editor pair put the
+          # ceiling on the wrong side of the split (#9459).
+          #
+          # Each threshold is the measured post-opt size rounded UP to the next
+          # whole MiB; the job fails when a binary exceeds its threshold by more
+          # than 10%. Measured on main at wasm-bindgen 0.2.127 (runs 33255964959
+          # and 33255044708, ~30 min apart):
+          #
+          #   pkg-webgl2          23,480,588 B  22.4 MiB  -> 23 MiB
+          #   pkg-webgpu          23,903,062 B  22.8 MiB  -> 23 MiB
+          #   pkg-webgl2-runtime                21.0 MiB  -> 22 MiB
+          #   pkg-webgpu-runtime                21.4 MiB  -> 22 MiB
+          #
+          # (the runtime figures come from the wasm-opt log above, which prints
+          # at 0.1 MiB resolution — rounding the threshold up to the next whole
+          # MiB absorbs that uncertainty.) Build-to-build variance between those
+          # two runs was under 6 KB, i.e. 0.03%, so the 10% tolerance is slack
+          # for a real regression rather than for noise.
+          #
+          # Raising any number here is a deliberate, reviewed change. The policy
+          # and the procedure for re-measuring live in
+          # docs/operations/wasm-size-budgets.md.
           FAILED=0
 
-          WEBGL2_LIMIT=$((WEBGL2_THRESHOLD * 110 / 100))
-          if [ "$WEBGL2_SIZE" -gt "$WEBGL2_LIMIT" ]; then
-            echo "::error::WebGL2 WASM binary too large: $(numfmt --to=iec-i --suffix=B $WEBGL2_SIZE) exceeds threshold $(numfmt --to=iec-i --suffix=B $WEBGL2_THRESHOLD) by more than 10%"
-            FAILED=1
-          fi
+          {
+            echo "### WASM binary sizes (post wasm-opt -Oz)"
+            echo
+            echo "| package | size | threshold | limit (+10%) | status |"
+            echo "|---|---:|---:|---:|:--|"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          WEBGPU_LIMIT=$((WEBGPU_THRESHOLD * 110 / 100))
-          if [ "$WEBGPU_SIZE" -gt "$WEBGPU_LIMIT" ]; then
-            echo "::error::WebGPU WASM binary too large: $(numfmt --to=iec-i --suffix=B $WEBGPU_SIZE) exceeds threshold $(numfmt --to=iec-i --suffix=B $WEBGPU_THRESHOLD) by more than 10%"
-            FAILED=1
-          fi
+          echo "=== WASM Binary Sizes (post wasm-opt) ==="
+
+          check_pkg() {
+            PKG="$1"
+            THRESHOLD="$2"
+            SIZE=$(stat -c%s "$PKG/forge_engine_bg.wasm")
+            LIMIT=$((THRESHOLD * 110 / 100))
+            STATUS="ok"
+            if [ "$SIZE" -gt "$LIMIT" ]; then
+              STATUS="OVER BUDGET"
+              echo "::error::$PKG WASM binary too large: $(numfmt --to=iec-i --suffix=B "$SIZE") exceeds threshold $(numfmt --to=iec-i --suffix=B "$THRESHOLD") by more than 10%"
+              FAILED=1
+            fi
+            echo "$PKG: $(numfmt --to=iec-i --suffix=B "$SIZE") ($SIZE bytes) threshold $THRESHOLD limit $LIMIT [$STATUS]"
+            printf '| %s | %s | %s | %s | %s |\n' \
+              "$PKG" \
+              "$(numfmt --to=iec-i --suffix=B "$SIZE")" \
+              "$(numfmt --to=iec-i --suffix=B "$THRESHOLD")" \
+              "$(numfmt --to=iec-i --suffix=B "$LIMIT")" \
+              "$STATUS" >> "$GITHUB_STEP_SUMMARY"
+            return 0
+          }
+
+          check_pkg pkg-webgl2 24117248            # 23 MiB
+          check_pkg pkg-webgpu 24117248            # 23 MiB
+          check_pkg pkg-webgl2-runtime 23068672    # 22 MiB
+          check_pkg pkg-webgpu-runtime 23068672    # 22 MiB
+
+          echo "=========================================="
 
           exit $FAILED
 
