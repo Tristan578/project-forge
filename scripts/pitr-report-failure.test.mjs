@@ -10,6 +10,7 @@ import {
   buildIssueBody,
   buildRecurrenceComment,
   findLegacyIssues,
+  findLastRecurrence,
   findMatchingIssue,
   isRecurrenceComment,
   markerFor,
@@ -102,6 +103,36 @@ function issue(overrides) {
     ...overrides,
   };
 }
+
+describe('findLastRecurrence', () => {
+  const rec = cls => ({ id: 1, body: buildRecurrenceComment({ cls, runUrl: RUN_URL, date: TODAY }) });
+
+  test('returns null when the thread holds no recurrence comment', () => {
+    assert.equal(findLastRecurrence([{ id: 9, body: 'just a human note' }], 'config'), null);
+  });
+
+  test('returns null for an empty thread', () => {
+    assert.equal(findLastRecurrence([], 'config'), null);
+  });
+
+  test('finds the recurrence comment behind a human reply', () => {
+    const target = { ...rec('config'), id: 11 };
+    const found = findLastRecurrence([target, { id: 12, body: 'looking into it' }], 'config');
+    assert.equal(found.id, 11);
+  });
+
+  test('returns the NEWEST recurrence comment when several exist', () => {
+    const found = findLastRecurrence(
+      [{ ...rec('config'), id: 11 }, { id: 12, body: 'note' }, { ...rec('config'), id: 13 }],
+      'config',
+    );
+    assert.equal(found.id, 13);
+  });
+
+  test('ignores a recurrence comment belonging to another class', () => {
+    assert.equal(findLastRecurrence([{ ...rec('infra'), id: 11 }], 'config'), null);
+  });
+});
 
 describe('normalizeClass', () => {
   for (const cls of REPORT_CLASSES) {
@@ -525,21 +556,6 @@ describe('reportFailure — dedupe', () => {
     assert.ok(patch.body.body.includes('actions/runs/999'), 'records this run');
   });
 
-  test('adds a fresh comment when the last comment is a human reply', async () => {
-    const gh = makeGithub({
-      issues: [issue({ number: 45, state: 'open', body: markerFor('config') })],
-      comments: {
-        45: [
-          { id: 900, body: buildRecurrenceComment({ cls: 'config', runUrl: 'x', date: '2026-08-01' }) },
-          { id: 901, body: 'I am looking at the secret now' },
-        ],
-      },
-    });
-    const res = await reportFailure({ fetchFn: gh.fetchFn, env: makeEnv(), now: NOW });
-    assert.equal(res.action, 'commented');
-    assert.equal(gh.of('PATCH', /\/issues\/comments\/\d+$/).length, 0);
-  });
-
   test('re-running the reporting step for the same run changes nothing', async () => {
     const existing = buildRecurrenceComment({ cls: 'config', runUrl: RUN_URL, date: TODAY });
     const gh = makeGithub({
@@ -569,6 +585,94 @@ describe('reportFailure — dedupe', () => {
     );
     assert.equal(gh.of('PATCH', /\/issues\/comments\/\d+$/).length, 0);
     assert.equal(gh.of('POST', /\/issues\/47\/comments$/).length, 0);
+  });
+
+  test('a human reply after the bot comment does not cause a duplicate comment', async () => {
+    // The bot's recurrence comment is no longer last once someone triages the
+    // issue. An end-of-thread-only check stops seeing it and re-reports a run
+    // that is already recorded.
+    const gh = makeGithub({
+      issues: [issue({ number: 51, state: 'open', body: markerFor('config') })],
+      comments: {
+        51: [
+          {
+            id: 900,
+            body: buildRecurrenceComment({ cls: 'config', runUrl: RUN_URL, date: TODAY }),
+          },
+          { id: 901, body: 'Taking a look at this now.' },
+        ],
+      },
+    });
+    const res = await reportFailure({ fetchFn: gh.fetchFn, env: makeEnv(), now: NOW });
+    assert.equal(res.action, 'noop');
+    assert.equal(gh.of('POST', /\/issues\/51\/comments$/).length, 0, 'must not duplicate');
+    assert.equal(gh.of('PATCH', /\/issues\/comments\/\d+$/).length, 0);
+  });
+
+  // Replaces the former 'adds a fresh comment when the last comment is a human
+  // reply', which asserted the defect: a human reply hid the recurrence comment
+  // and every later run opened another one.
+  test('a NEW run appends to the recurrence comment behind a human reply', async () => {
+    const gh = makeGithub({
+      issues: [issue({ number: 52, state: 'open', body: markerFor('config') })],
+      comments: {
+        52: [
+          {
+            id: 900,
+            body: buildRecurrenceComment({
+              cls: 'config',
+              runUrl: 'https://github.com/Tristan578/project-forge/actions/runs/111',
+              date: '2026-08-01',
+            }),
+          },
+          { id: 901, body: 'Taking a look at this now.' },
+        ],
+      },
+    });
+    const res = await reportFailure({ fetchFn: gh.fetchFn, env: makeEnv(), now: NOW });
+    assert.equal(res.action, 'comment-updated');
+    assert.equal(res.commentId, 900, 'must edit the recurrence comment, not the human reply');
+    assert.equal(gh.of('POST', /\/issues\/52\/comments$/).length, 0, 'no new comment');
+    const patch = gh.of('PATCH', /\/issues\/comments\/900$/);
+    assert.equal(patch.length, 1);
+    assert.ok(hasRunEntry(patch[0].body.body, TODAY, RUN_URL), 'new run appended');
+    assert.ok(
+      hasRunEntry(
+        patch[0].body.body,
+        '2026-08-01',
+        'https://github.com/Tristan578/project-forge/actions/runs/111',
+      ),
+      'existing run preserved',
+    );
+  });
+
+  test('a run recorded in an OLDER recurrence comment is still a no-op', async () => {
+    // Issues whose history predates this fix can carry more than one recurrence
+    // comment. Checking only the newest would re-report a run the older one names.
+    const gh = makeGithub({
+      issues: [issue({ number: 53, state: 'open', body: markerFor('config') })],
+      comments: {
+        53: [
+          {
+            id: 900,
+            body: buildRecurrenceComment({ cls: 'config', runUrl: RUN_URL, date: TODAY }),
+          },
+          { id: 901, body: 'note' },
+          {
+            id: 902,
+            body: buildRecurrenceComment({
+              cls: 'config',
+              runUrl: 'https://github.com/Tristan578/project-forge/actions/runs/111',
+              date: '2026-08-01',
+            }),
+          },
+        ],
+      },
+    });
+    const res = await reportFailure({ fetchFn: gh.fetchFn, env: makeEnv(), now: NOW });
+    assert.equal(res.action, 'noop');
+    assert.equal(gh.of('POST', /\/issues\/53\/comments$/).length, 0);
+    assert.equal(gh.of('PATCH', /\/issues\/comments\/\d+$/).length, 0);
   });
 
   test('re-running for the run that OPENED the issue does not add a comment', async () => {

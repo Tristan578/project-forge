@@ -211,6 +211,23 @@ export function isRecurrenceComment(comment, cls) {
 }
 
 /**
+ * The newest recurrence comment for `cls` anywhere in `comments`, or null.
+ *
+ * Scans backwards rather than looking only at the last comment. A human reply
+ * lands after the bot's comment, so an end-only check stops finding it the
+ * moment anyone triages the issue — and every later re-run then opens a NEW
+ * recurrence comment instead of appending. The run history fragments across
+ * comments and RECURRENCE_CAP stops bounding it, because the cap only ever
+ * trims the list inside a single comment.
+ */
+export function findLastRecurrence(comments, cls) {
+  for (let i = comments.length - 1; i >= 0; i -= 1) {
+    if (isRecurrenceComment(comments[i], cls)) return comments[i];
+  }
+  return null;
+}
+
+/**
  * Does `body` already carry a run-list entry for `runUrl`?
  *
  * Match the whole entry, not a substring: run URLs differ only by a trailing
@@ -382,23 +399,24 @@ export async function reportFailure({ fetchFn, env, now, log = () => {}, maxPage
     token,
     maxPages,
   });
-  const last = comments[comments.length - 1];
-  const updated = isRecurrenceComment(last, cls)
-    ? appendRecurrence(last.body, { runUrl, date })
-    : null;
+  const lastRecurrence = findLastRecurrence(comments, cls);
+  const updated =
+    lastRecurrence !== null ? appendRecurrence(lastRecurrence.body, { runUrl, date }) : null;
 
   // Decide whether there is anything to record BEFORE touching issue state. A
   // manual re-run of the reporting step for a run that is already recorded must
   // be a true no-op: reopening first would flip a triaged issue back to open and
   // notify its subscribers for a report that adds nothing.
   //
-  // Two places can already record the run. `updated === last.body` covers the
-  // recurrence comment. The issue body covers the case with no recurrence
-  // comment yet: `buildIssueBody` ends with the same run list, so a re-run for
-  // the run that opened the issue would otherwise fall through and post a
-  // recurrence comment for a run the body already names.
+  // Two kinds of place can already record the run, and both must be searched in
+  // full. The issue body carries the opening run, because `buildIssueBody` ends
+  // with the same run list. Recurrence comments carry every run after that, and
+  // there can be more than one of them on an issue whose history predates this
+  // fix, so checking only the newest would re-report a run recorded in an older
+  // one.
   const alreadyRecorded =
-    (updated !== null && updated === last.body) || recordsRun(match.body, runUrl);
+    recordsRun(match.body, runUrl) ||
+    comments.some(c => isRecurrenceComment(c, cls) && recordsRun(c.body, runUrl));
   if (alreadyRecorded) {
     log(`#${match.number} already records run ${runId}; nothing to do`);
     return { action: 'noop', cls, number: match.number, reopened: false };
@@ -419,12 +437,18 @@ export async function reportFailure({ fetchFn, env, now, log = () => {}, maxPage
   if (updated !== null) {
     await ghFetch(fetchFn, {
       method: 'PATCH',
-      path: `/repos/${repo}/issues/comments/${last.id}`,
+      path: `/repos/${repo}/issues/comments/${lastRecurrence.id}`,
       token,
       body: { body: updated },
     });
-    log(`recorded recurrence on #${match.number} (updated comment ${last.id})`);
-    return { action: 'comment-updated', cls, number: match.number, commentId: last.id, reopened };
+    log(`recorded recurrence on #${match.number} (updated comment ${lastRecurrence.id})`);
+    return {
+      action: 'comment-updated',
+      cls,
+      number: match.number,
+      commentId: lastRecurrence.id,
+      reopened,
+    };
   }
 
   const comment = await ghFetch(fetchFn, {
