@@ -18,23 +18,28 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // The real shipped allowlist, not a copy of it. A local literal here made
 // every allow/deny assertion below tautological (PF-1181).
 import { SCRIPT_ALLOWED_COMMANDS } from '../scriptAllowlist';
+// Same rule, same file, second offence: a local 14-name copy of the shadow list
+// had drifted seven names behind the shipped 21 (Worker, SharedWorker, window,
+// Function, eval, SharedArrayBuffer, Atomics were never exercised here), so this
+// suite could not notice a name being dropped (#9443). Import the shipped array.
+import { SHADOWED_GLOBALS } from '@/lib/scripting/sandboxGlobals';
 
 // ---------------------------------------------------------------------------
 // Sandbox compilation helper — mirrors compileScript() in scriptWorker.ts
 // ---------------------------------------------------------------------------
 
-const SHADOWED_GLOBALS = [
-  'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
-  'indexedDB', 'caches', 'navigator', 'location',
-  'EventSource', 'BroadcastChannel',
-  'self', 'globalThis',
-  'Reflect', 'Proxy',
-] as const;
+/** Bound to the shadow parameters when the test is proving the binding itself. */
+const SHADOW_SENTINEL = '__sandbox-shadow-sentinel__';
+
+/** The shipped list length, pinned so a silently dropped entry fails the suite. */
+const EXPECTED_SHADOWED_GLOBAL_COUNT = 21;
 
 interface ScriptHooks {
-  onStart?: () => void;
-  onUpdate?: (dt: number) => void;
-  onDestroy?: () => void;
+  // `unknown`, not `void`: the shadowing tests read observations back through
+  // the hook's return value, which is the only surface compileSandboxed exposes.
+  onStart?: () => unknown;
+  onUpdate?: (dt: number) => unknown;
+  onDestroy?: () => unknown;
 }
 
 /**
@@ -48,6 +53,7 @@ function compileSandboxed(
   source: string,
   forgeApi: Record<string, unknown> = {},
   entityId = 'test-entity',
+  shadowValue: unknown = undefined,
 ): ScriptHooks {
   const fn = new Function(
     'forge', 'entityId',
@@ -61,7 +67,7 @@ function compileSandboxed(
     };
     `,
   );
-  return fn(forgeApi, entityId, ...SHADOWED_GLOBALS.map(() => undefined)) as ScriptHooks;
+  return fn(forgeApi, entityId, ...SHADOWED_GLOBALS.map(() => shadowValue)) as ScriptHooks;
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +270,7 @@ describe('Script Sandbox Security: Global Shadowing (compile-time)', () => {
     expect(errors[0]).toMatch(/BLOCKED/);
   });
 
-  it('all 14 shadowed globals are undefined inside a single script', () => {
+  it('every shipped shadowed global is undefined inside a single script', () => {
     const typesMap: Record<string, string> = {};
     const checksSource = SHADOWED_GLOBALS
       .map(g => `forge.report('${g}', typeof ${g});`)
@@ -276,13 +282,36 @@ describe('Script Sandbox Security: Global Shadowing (compile-time)', () => {
     );
     result.onStart!();
 
+    expect(Object.keys(typesMap)).toHaveLength(SHADOWED_GLOBALS.length);
     for (const g of SHADOWED_GLOBALS) {
       expect(typesMap[g], `${g} should be undefined inside sandbox`).toBe('undefined');
     }
   });
 
-  it('shadowed globals list has exactly 14 entries', () => {
-    expect(SHADOWED_GLOBALS).toHaveLength(14);
+  // `typeof X` reads 'undefined' both when the shadow works and when the name
+  // simply does not exist in the test realm (importScripts, Worker, window under
+  // node), so the check above cannot fail for those names on its own. This one
+  // can: it binds a sentinel to the shadow parameters, and the script can only
+  // read the sentinel back if the identifier resolved to the parameter rather
+  // than to the host global. Drop a name from SHADOWED_GLOBALS and the case goes
+  // red — the host global answers instead, or the identifier is a ReferenceError.
+  it.each([...SHADOWED_GLOBALS])(
+    'binds %s to the sandbox parameter rather than the host global',
+    (name) => {
+      const result = compileSandboxed(
+        `function onStart() { return ${name}; }`,
+        {},
+        'test-entity',
+        SHADOW_SENTINEL,
+      );
+      expect(result.onStart!()).toBe(SHADOW_SENTINEL);
+    },
+  );
+
+  it('shadowed globals list has exactly the shipped number of entries', () => {
+    // Membership is pinned by sandboxGlobals.test.ts; this pins the count, so a
+    // dropped entry cannot pass as "one fewer it.each case ran".
+    expect(SHADOWED_GLOBALS).toHaveLength(EXPECTED_SHADOWED_GLOBAL_COUNT);
   });
 });
 

