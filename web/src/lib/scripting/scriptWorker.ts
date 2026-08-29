@@ -1179,13 +1179,32 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
       ? guardVarNames.map(v => v + '=0;').join('')
       : '';
     const resetFn = resetBody ? 'function __resetGuards(){' + resetBody + '}' : 'function __resetGuards(){}';
-    // CodeQL: js/code-injection — intentional. This is the script sandbox that executes
-    // user-authored game scripts. Multiple security layers protect against abuse:
-    // global shadowing, command whitelist, per-frame command limit, infinite loop watchdog,
-    // rate limiter. See SEC-2 (Script Sandbox Hardening) in CLAUDE.md.
-    // lgtm[js/code-injection]
-    // Shadow dangerous globals; sandbox compilation is intentional for script isolation.
-    const sandboxCtor = Function; // codeql[js/code-injection]
+    // CodeQL js/code-injection reports here, and the report is CORRECT: `source`
+    // is attacker-reachable (a published game's scriptData.source is copied
+    // verbatim into a remixer's project — see #9455) and reaches a Function()
+    // constructor. This is not a false positive and must not be annotated as
+    // one. The alert is dismissed in the GitHub UI as an accepted risk tracked
+    // at #8700 (Realms-style isolation), NOT here: GitHub does not honour
+    // `lgtm[...]` or `codeql[...]` comments unless the language's
+    // AlertSuppression.ql is run alongside the analysis and its SARIF
+    // `suppressions` fed to dismiss-alerts (github/codeql#11427). Two such
+    // comments sat on these lines for months doing nothing.
+    //
+    // What actually constrains a script today — defence in depth, NOT a
+    // security boundary:
+    //   1. global shadowing        — SHADOWED_GLOBALS, sandboxGlobals.ts
+    //   2. capability revocation   — revokeNetworkGlobalsIfWorker(), above
+    //   3. command allowlist       — scriptAllowlist.ts, enforced main-thread
+    //                                in useScriptRunner.ts
+    //   4. per-frame command cap   — MAX_COMMANDS_PER_FRAME, below
+    //   5. loop watchdog           — injectLoopGuards(), loopGuards.ts
+    //   6. source size cap         — MAX_SCRIPT_SOURCE_BYTES, above
+    // There is no rate limiter; an earlier version of this comment claimed one
+    // as a fifth layer and it has never existed. Shadowing does not survive the
+    // constructor chain — `(0).constructor.constructor('return fetch')()` still
+    // resolves, as sandboxGlobals.ts states and scriptSandbox.test.ts pins.
+    // See SEC-2 (Script Sandbox Hardening) in CLAUDE.md.
+    const sandboxCtor = Function;
     const fn = sandboxCtor(
       'forge', 'entityId', '__loopLimit',
       ...SHADOWED_GLOBALS,
