@@ -43,8 +43,10 @@ export const scriptLibraryHandlers: Record<string, ToolHandler> = {
   get_script: async (args, ctx) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
+    if (!Object.hasOwn(ctx.store.allScripts, p.data.entityId)) {
+      return { success: true, result: { hasScript: false } };
+    }
     const script = ctx.store.allScripts[p.data.entityId];
-    if (!script) return { success: true, result: { hasScript: false } };
     return { success: true, result: { hasScript: true, source: script.source, enabled: script.enabled, template: script.template } };
   },
 

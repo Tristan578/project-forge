@@ -41,25 +41,10 @@ const HANDLER_DIR = path.join(process.cwd(), 'src/lib/chat/handlers');
 const PINNED_CATEGORIES = ['tilemap'] as const;
 
 /**
- * Command names registered by more than one handler module, where the winner is
- * decided purely by spread order in `executor.ts`. Every entry is a latent bug:
- * reordering the spreads silently swaps the implementation. These predate this
- * test and are listed so a NEW one fails instead of joining them unnoticed.
- *
- * `get_tilemap` was removed from this class rather than added to the list --
- * the `queryHandlers` copy read `store.tilemaps[entityId]` bare, so a
- * `'__proto__'` entity id returned `Object.prototype` as tilemap data.
+ * No command may be registered by more than one handler module. Registry
+ * spread order must never decide which implementation production executes.
  */
 const KNOWN_DUPLICATE_REGISTRATIONS = [
-  'get_animation_clip', 'get_animation_graph', 'get_animation_state',
-  'get_audio_buses', 'get_camera_state', 'get_entity_details',
-  'get_export_status', 'get_game_camera', 'get_game_components',
-  'get_input_bindings', 'get_input_state', 'get_joint', 'get_mode',
-  'get_particle', 'get_physics', 'get_physics2d', 'get_quality_settings',
-  'get_scene_graph', 'get_scene_name', 'get_script', 'get_selection',
-  'get_skeleton2d', 'get_sprite', 'get_sprite_generation_status',
-  'get_terrain', 'get_token_balance', 'get_token_pricing', 'list_animations',
-  'list_assets', 'list_game_component_types', 'list_script_templates',
 ] as const;
 
 // ---------------------------------------------------------------------------
