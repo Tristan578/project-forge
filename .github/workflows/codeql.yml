@@ -3,15 +3,62 @@ name: "CodeQL Advanced"
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   schedule:
     - cron: '17 7 * * 3'
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Determine CodeQL Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.compute.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Compute language matrix
+        id: compute
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+            langs='[]'
+            if grep -qE '^\.github/workflows/' <<< "$CHANGED"; then
+              langs=$(jq -c '. + ["actions"]' <<< "$langs")
+            fi
+            if grep -qE '^(web/|mcp-server/)' <<< "$CHANGED"; then
+              langs=$(jq -c '. + ["javascript-typescript"]' <<< "$langs")
+            fi
+            if grep -qE '^(engine/|Cargo\.toml$|Cargo\.lock$)' <<< "$CHANGED"; then
+              langs=$(jq -c '. + ["rust"]' <<< "$langs")
+            fi
+          else
+            langs='["actions","javascript-typescript","rust"]'
+          fi
+          echo "matrix=$langs" >> "$GITHUB_OUTPUT"
+
   analyze:
     name: Analyze (${{ matrix.language }})
+    needs: changes
+    if: ${{ needs.changes.outputs.matrix != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -23,13 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - language: actions
-            build-mode: none
-          - language: javascript-typescript
-            build-mode: none
-          - language: rust
-            build-mode: none
+        language: ${{ fromJSON(needs.changes.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
@@ -39,7 +80,7 @@ jobs:
         uses: github/codeql-action/init@256d634097be96e792d6764f9edaefc4320557b1 # v4
         with:
           languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
+          build-mode: none
           config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
