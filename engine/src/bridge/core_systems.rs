@@ -90,7 +90,7 @@ pub(super) fn apply_mode_change_requests(
     reverb_particle_shader_query: Query<(&EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
     csg_sprite_physics2d_query: Query<(&EntityId, Option<&crate::core::csg::CsgMeshData>, Option<&crate::core::sprite::SpriteData>, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&PhysicsJoint2d>)>,
     procedural_joint_game_query: Query<(&EntityId, Option<&crate::core::procedural_mesh::ProceduralMeshData>, Option<&crate::core::physics::JointData>, Option<&GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
-    tilemap_skeleton2d_query: Query<(&EntityId, Option<&crate::core::tilemap::TilemapData>, Option<&crate::core::tilemap::TilemapEnabled>, Option<&crate::core::skeleton2d::SkeletonData2d>, Option<&crate::core::skeleton2d::SkeletonEnabled2d>, Option<&crate::core::skeletal_animation2d::SkeletalAnimation2d>, Option<&crate::core::lod::LodData>)>,
+    tilemap_skeleton2d_query: Query<(&EntityId, Option<&crate::core::tilemap::TilemapData>, Option<&crate::core::tilemap::TilemapEnabled>, Option<&crate::core::skeleton2d::SkeletonData2d>, Option<&crate::core::skeleton2d::SkeletonEnabled2d>, Option<&crate::core::skeletal_animation2d::SkeletalAnimation2d>, Option<&crate::core::lod::LodData>, Option<&crate::core::terrain::TerrainData>, Option<&crate::core::terrain::TerrainMeshData>, Option<&crate::core::animation_clip::AnimationClipData>)>,
     runtime_query: Query<Entity, With<crate::core::engine_mode::RuntimeEntity>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
