@@ -827,6 +827,8 @@ jobs:
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
+            scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -882,6 +884,12 @@ jobs:
 
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+
+      - name: Run production migration-guard test suite
+        run: bash scripts/__tests__/db-migration-guard.test.sh
+
+      - name: Run Neon branch-helper test suite
+        run: bash scripts/__tests__/neon-branch.test.sh
 
       # Executes the ci-gate `Detect changed paths` step body extracted from this
       # very file. Rides needs-ci, which every ci.yml edit sets, so the filters

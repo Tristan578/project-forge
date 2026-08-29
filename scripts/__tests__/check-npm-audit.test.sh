@@ -1963,6 +1963,11 @@ on:
         required: false
         type: string
         default: ''
+      allow_destructive_migration:
+        description: 'Approve a destructive production schema change (DROP TABLE/COLUMN, type change). Leave off unless you have read the diff.'
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -3009,6 +3014,8 @@ OUTPUTS_EOF
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
+            scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
       fail "self-defense shellcheck step carries a step-level if: — lint coverage can be skipped while its needle still greps as present"
@@ -3186,7 +3193,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=507
+readonly SELF_EXEC_EXPECTED_DROP=518
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3505,6 +3512,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
+            scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
@@ -3542,6 +3551,10 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-vercel-deployment-drift.test.sh
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+      - name: Run production migration-guard test suite
+        run: bash scripts/__tests__/db-migration-guard.test.sh
+      - name: Run Neon branch-helper test suite
+        run: bash scripts/__tests__/neon-branch.test.sh
       - name: Run ci-gate path-filter test suite
         run: bash scripts/__tests__/ci-gate-path-filters.test.sh
       - name: Run WASM-manifest generator test suite
