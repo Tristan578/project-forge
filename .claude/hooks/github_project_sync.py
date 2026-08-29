@@ -710,9 +710,11 @@ def gh_create_issue_and_add_to_project(config, title, body="", labels=None):
 
 
 def gh_set_status(config, item_id, local_status):
+    if not is_project_item_node_id(item_id):
+        return False
     option_id = config["statusOptions"].get(local_status)
     if not option_id:
-        return
+        return False
     gh_run([
         "gh", "project", "item-edit",
         "--project-id", config["projectId"],
@@ -720,6 +722,18 @@ def gh_set_status(config, item_id, local_status):
         "--field-id", config["statusFieldId"],
         "--single-select-option-id", option_id,
     ])
+    return True
+
+
+def is_project_item_node_id(item_id):
+    """Return whether an ID can be passed to Projects v2 field mutations.
+
+    Pull uses ``issue-<number>`` as a local correlation key for REST results.
+    That value is deliberately not a GitHub node ID and must never reach
+    ``gh project item-edit``. Tickets without a mapped project item still sync
+    their issue body/state; only the project status-field mutation is skipped.
+    """
+    return isinstance(item_id, str) and bool(item_id) and not item_id.startswith("issue-")
 
 
 def gh_get_issue_state(config, issue_number):
@@ -1028,8 +1042,7 @@ def _push_inner(include_done=False):
 
                 if status_changed:
                     item_id = entry.get("githubItemId")
-                    if item_id:
-                        gh_set_status(config, item_id, status)
+                    gh_set_status(config, item_id, status)
                     # Close/reopen the GitHub issue to match local status
                     gh_sync_issue_state(config, gh_issue_num, status,
                                         prev_status=entry.get("lastLocalStatus"))

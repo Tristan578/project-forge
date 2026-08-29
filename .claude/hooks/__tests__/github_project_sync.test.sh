@@ -164,6 +164,25 @@ print(len(c) + len(d) + len(u) + len(n))
 ")"
 assert_out "empty map -> nothing to reconcile" "0" "$out"
 
+# ----------------------------------------- Projects v2 item-id discrimination
+# REST pull uses issue-N as a correlation key. It is not a GraphQL node id and
+# passing it to item-edit once per ticket was burning hundreds of requests per
+# Stop hook while every mutation failed.
+out="$(run_py "
+values = ['PVTI_realNodeId', 'issue-9340', '', None, 9340]
+print(','.join('yes' if m.is_project_item_node_id(v) else 'no' for v in values))
+")"
+assert_out "only real project item node ids are mutation-safe" "yes,no,no,no,no" "$out"
+
+out="$(run_py "
+calls = []
+m.gh_run = lambda argv: calls.append(argv)
+cfg = {'statusOptions': {'todo': 'option'}, 'projectId': 'project'}
+result = m.gh_set_status(cfg, 'issue-9340', 'todo')
+print(str(result).lower(), len(calls))
+")"
+assert_out "synthetic issue ids cause zero project mutations" "false 0" "$out"
+
 echo
 # ------------------------------------------------- review findings
 # Everything below guards a defect a reviewer found in the first cut of this
