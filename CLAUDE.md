@@ -58,6 +58,46 @@ Always-on protections & observability (not env-gated):
 - **wasm-bindgen**: Must be 0.2.127 (pinned to Cargo.lock).
 - **Import boundary**: `@spawnforge/ui` is the only allowed external import via `transpilePackages`.
 
+## SEC-2 — Script Sandbox Hardening
+
+`web/src/lib/scripting/scriptWorker.ts` compiles user-authored game scripts with
+`Function(...)`. CodeQL reports this as `js/code-injection` and **the report is
+correct** — do not annotate it as a false positive.
+
+**Trust model.** Script source is untrusted. It is not only self-authored:
+`ScriptData.source` is serialized into the exported scene JSON
+(`engine/src/bridge/scene_io.rs:150` → `build_scene_file`) and therefore into
+`projects.sceneData`, which `/api/play/[userId]/[slug]/remix` copies verbatim
+into a *different* user's project. A published game's script text can reach a
+stranger's editor and compile there. Tracked at #9455.
+
+**Layers that exist today** (defence in depth — NOT a security boundary):
+
+| Layer | Where | Pinned by |
+|---|---|---|
+| Global shadowing (21 names) | `sandboxGlobals.ts` → `SHADOWED_GLOBALS` | `sandboxGlobals.test.ts`, `scriptSandbox.test.ts` |
+| Capability revocation | `revokeNetworkGlobalsIfWorker()` | `revokeNetworkGlobals.test.ts` |
+| Command allowlist (main thread) | `scriptAllowlist.ts`, `useScriptRunner.ts` | `scriptSandbox.test.ts`, `scriptSecurity.test.ts` |
+| Per-frame command cap | `MAX_COMMANDS_PER_FRAME` | `scriptSecurity.test.ts` |
+| Loop watchdog | `loopGuards.ts` | `loopGuards.test.ts`, `loopWatchdog.test.ts` |
+| Source size cap (512 KiB) | `MAX_SCRIPT_SOURCE_BYTES` | `scriptWorker.ts` |
+
+There is **no rate limiter**. Earlier comments claimed one; it has never existed.
+
+**Known escape.** Parameter shadowing does not survive the constructor chain:
+`(0).constructor.constructor('return fetch')()` still resolves. This is stated
+in `sandboxGlobals.ts` and documented (not prevented) by the
+"nested Function constructor limitation" test in `scriptSandbox.test.ts`. Real
+containment requires a different execution substrate — tracked at #8700.
+
+**Suppression.** GitHub does not honour `// lgtm[...]` or `// codeql[...]`
+comments unless the language's `AlertSuppression.ql` runs alongside the analysis
+and its SARIF `suppressions` are fed to `advanced-security/dismiss-alerts`
+(github/codeql#11427). We do neither. Dismiss code-scanning alerts through the
+UI or `PATCH /repos/{owner}/{repo}/code-scanning/alerts/{n}` — never by adding a
+comment. Note that editing lines near the sink re-mints the alert number and
+drops the prior dismissal.
+
 ## Test Conventions
 
 - Vitest workspace splits: `vitest.config.node.ts` (node) and `vitest.config.jsdom.ts` (jsdom)

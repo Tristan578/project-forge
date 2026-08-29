@@ -38,16 +38,39 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          # Match on FILE EXTENSION, not directory prefix. The original
+          # prefix form ('^(web/|mcp-server/)') left every other JS/TS root in
+          # the monorepo — apps/, packages/, scripts/, tools/, infra/,
+          # autoforge/, .claude/ — with no pre-merge CodeQL analysis at all
+          # (#9444). A prefix list has to be remembered on every new top-level
+          # directory; an extension match does not.
+          #
+          # No `python` leg by design. Python ran here from 2026-03-02 to
+          # 2026-03-18 (1090 analyses, zero results) and was removed by
+          # 56a41e41. The repo's Python is agent tooling under .claude/hooks
+          # that shells out with argv lists — no shell=True, eval, or pickle,
+          # and no remote-tainted input path. Re-add it only if that changes;
+          # do not re-litigate it as an oversight.
           if [ "$EVENT_NAME" = "pull_request" ]; then
             CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
             langs='[]'
             if grep -qE '^\.github/workflows/' <<< "$CHANGED"; then
               langs=$(jq -c '. + ["actions"]' <<< "$langs")
             fi
-            if grep -qE '^(web/|mcp-server/)' <<< "$CHANGED"; then
+            if grep -qE '\.(js|jsx|mjs|cjs|ts|tsx)$|(^|/)(package\.json|package-lock\.json|tsconfig[^/]*\.json)$' <<< "$CHANGED"; then
               langs=$(jq -c '. + ["javascript-typescript"]' <<< "$langs")
             fi
-            if grep -qE '^(engine/|Cargo\.toml$|Cargo\.lock$)' <<< "$CHANGED"; then
+            # .transform-gizmo-fork is a vendored upstream crate; changes there
+            # are pulls, not authored code, so they do not warrant a full Rust
+            # analysis on their own.
+            #
+            # Filter into a variable rather than piping into `grep -q`: under
+            # `set -o pipefail`, `grep -q` exits on its first match and SIGPIPEs
+            # the writer, so the pipeline reports failure and the verdict of the
+            # test inverts. `|| true` because `grep -v` exits 1 when the filter
+            # removes every line.
+            AUTHORED=$(grep -vE '^\.transform-gizmo-fork/' <<< "$CHANGED" || true)
+            if grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$' <<< "$AUTHORED"; then
               langs=$(jq -c '. + ["rust"]' <<< "$langs")
             fi
           else
