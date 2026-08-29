@@ -1963,6 +1963,11 @@ on:
         required: false
         type: string
         default: ''
+      allow_destructive_migration:
+        description: 'Approve a destructive production schema change (DROP TABLE/COLUMN, type change). Leave off unless you have read the diff.'
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -3501,6 +3506,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
+            scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
+            scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
@@ -3536,6 +3543,10 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-vercel-deployment-drift.test.sh
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+      - name: Run production migration-guard test suite
+        run: bash scripts/__tests__/db-migration-guard.test.sh
+      - name: Run Neon branch-helper test suite
+        run: bash scripts/__tests__/neon-branch.test.sh
       - name: Run WASM-manifest generator test suite
         run: bash scripts/__tests__/generate-wasm-manifests.test.sh
       - name: Run changeset-version wrapper test suite
