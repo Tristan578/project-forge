@@ -39,7 +39,7 @@ You work exclusively in the `engine/` directory:
 
 ## Binary Size
 
-- WASM binary is ~26MB per variant. CI enforces a 35MB threshold with 10% headroom.
+- WASM binaries are ~22-23 MiB per variant. CI budgets all four (editor + runtime, WebGL2 + WebGPU) with 10% headroom; see `docs/operations/wasm-size-budgets.md`.
 - When adding dependencies, check binary size impact
 - `opt-level = "z"`, LTO, and `strip = true` are already configured in `Cargo.toml`
 - Consider making heavy dependencies feature-gated

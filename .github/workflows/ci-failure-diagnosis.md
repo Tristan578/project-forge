@@ -27,7 +27,7 @@ The CI pipeline (`.github/workflows/ci.yml`) has 8 jobs:
 2. **TypeScript** — `npx tsc --noEmit` (web/)
 3. **Web Tests** — `npx vitest run --coverage` (web/) — 4000+ tests, Vitest + RTL
 4. **MCP Tests** — `npx vitest run` (mcp-server/)
-5. **WASM Build** — Dual Rust build (WebGL2 + WebGPU), binary size check (35MB threshold)
+5. **WASM Build** — Dual Rust build (WebGL2 + WebGPU), binary size check (per-package budgets, all four artifacts)
 6. **Next.js Build** — `npm run build` (web/) production build
 7. **E2E UI Tests** — Playwright chromium `@ui` tests
 8. **Security** — `npm audit` (web/, mcp-server/) + `cargo audit` (engine/)

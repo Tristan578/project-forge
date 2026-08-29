@@ -84,7 +84,7 @@ cd engine && cargo clippy --target wasm32-unknown-unknown --features webgl2 -- -
 
 ## Binary Size
 
-WASM binary ~26MB per variant. CI threshold 35MB. When adding deps, check impact. Heavy deps should be feature-gated.
+WASM binaries ~22-23 MiB per variant. CI budgets all four (editor + runtime, WebGL2 + WebGPU); see `docs/operations/wasm-size-budgets.md`. When adding deps, check impact. Heavy deps should be feature-gated.
 
 ## Taskboard Permissions
 
