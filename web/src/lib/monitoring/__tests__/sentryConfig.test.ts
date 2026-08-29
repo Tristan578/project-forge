@@ -468,6 +468,80 @@ describe('scrubEvent', () => {
   });
 });
 
+describe('scrubEvent — transaction span data', () => {
+  type EventSpan = NonNullable<Event['spans']>[number];
+
+  function spanWith(data: Record<string, unknown>): EventSpan {
+    return { data } as unknown as EventSpan;
+  }
+
+  it('strips query strings from modern and legacy span URL attributes', () => {
+    const event = makeEvent({
+      spans: [
+        spanWith({
+          'url.full': 'https://api.example.com/v1/generate?apiKey=sk-ant-abc123&userId=42',
+        }),
+        spanWith({
+          'http.url': 'https://api.example.com/v1/chat?email=nolantj@live.com',
+        }),
+      ],
+    });
+
+    const out = scrubEvent(event);
+    expect(out.spans?.[0]?.data?.['url.full']).toBe('https://api.example.com/v1/generate');
+    expect(out.spans?.[1]?.data?.['http.url']).toBe('https://api.example.com/v1/chat');
+    expect(JSON.stringify(out)).not.toContain('apiKey=');
+    expect(JSON.stringify(out)).not.toContain('nolantj@live.com');
+  });
+
+  it('redacts PII embedded in a retained URL path', () => {
+    const event = makeEvent({
+      spans: [spanWith({
+        'url.full': 'https://api.example.com/v1/users/nolantj@live.com/generate',
+      })],
+    });
+
+    const value = scrubEvent(event).spans?.[0]?.data?.['url.full'];
+    expect(value).toBe('https://api.example.com/v1/users/[REDACTED_EMAIL]/generate');
+  });
+
+  it('strips query strings from root-span trace data', () => {
+    const event = makeEvent({
+      contexts: {
+        trace: { data: { 'url.full': 'https://api.example.com/root?secret=1#fragment' } },
+      } as unknown as Event['contexts'],
+    });
+
+    const trace = scrubEvent(event).contexts?.trace as unknown as {
+      data: Record<string, unknown>;
+    };
+    expect(trace.data['url.full']).toBe('https://api.example.com/root');
+  });
+
+  it('handles missing and empty span arrays', () => {
+    expect(() => scrubEvent(makeEvent())).not.toThrow();
+    expect(() => scrubEvent(makeEvent({ spans: [] }))).not.toThrow();
+  });
+
+  it('strips query data from relative URL attributes without throwing', () => {
+    const event = makeEvent({
+      spans: [spanWith({ 'url.full': '/relative/path?token=abc#fragment' })],
+    });
+
+    expect(scrubEvent(event).spans?.[0]?.data?.['url.full']).toBe('/relative/path');
+  });
+
+  it('scrubs non-URL span attributes as structured sensitive data', () => {
+    const event = makeEvent({
+      spans: [spanWith({ apiKey: 'plain-secret', statement: 'owner nolantj@live.com' })],
+    });
+
+    const data = scrubEvent(event).spans?.[0]?.data;
+    expect(data?.apiKey).toBe('[REDACTED]');
+    expect(data?.statement).toBe('owner [REDACTED_EMAIL]');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // scrubEvent — hardened coverage (audit review 2026-05-30)
 //

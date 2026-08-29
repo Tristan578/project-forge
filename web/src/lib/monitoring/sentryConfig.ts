@@ -236,6 +236,35 @@ function deepScrub(value: unknown, depth = 0): unknown {
   return value;
 }
 
+/** Strip query/fragment data while preserving a scrubbed URL for grouping. */
+function scrubUrlString(input: string): string {
+  try {
+    const url = new URL(input);
+    url.search = '';
+    url.hash = '';
+    return scrubString(url.toString());
+  } catch {
+    return scrubString(input.replace(/[?#].*$/, ''));
+  }
+}
+
+const URL_SPAN_ATTRIBUTE_KEYS = ['url.full', 'http.url'] as const;
+
+/** Scrub attributes attached to root and non-root transaction spans in place. */
+function scrubSpanData(data: Record<string, unknown> | undefined): void {
+  if (!data) return;
+
+  for (const key of URL_SPAN_ATTRIBUTE_KEYS) {
+    const value = data[key];
+    if (typeof value === 'string') data[key] = scrubUrlString(value);
+  }
+
+  for (const key of Object.keys(data)) {
+    if ((URL_SPAN_ATTRIBUTE_KEYS as readonly string[]).includes(key)) continue;
+    data[key] = SENSITIVE_KEY_RE.test(key) ? REDACTED : deepScrub(data[key]);
+  }
+}
+
 /**
  * Strip local variables (F04 — they can hold decrypted BYOK keys/prompts) and
  * scrub source-context lines from every frame of a stacktrace, mutating in place.
@@ -338,6 +367,18 @@ function scrubEvent<T extends Event>(event: T): T {
   }
   if (event.extra) event.extra = deepScrub(event.extra) as typeof event.extra;
   if (event.contexts) event.contexts = deepScrub(event.contexts) as typeof event.contexts;
+
+  // 5. Non-root HTTP spans carry full URLs outside the context trees above.
+  for (const span of event.spans ?? []) {
+    scrubSpanData(span.data as Record<string, unknown> | undefined);
+  }
+
+  // Root-span attributes live under contexts.trace.data. Apply URL-specific
+  // query stripping after the generic context scrub.
+  const traceData = (
+    event.contexts?.trace as { data?: Record<string, unknown> } | undefined
+  )?.data;
+  scrubSpanData(traceData);
 
   return event;
 }
