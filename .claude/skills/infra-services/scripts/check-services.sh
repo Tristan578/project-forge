@@ -98,14 +98,12 @@ fi
 # --- WASM binaries ---
 echo ""
 echo "--- Engine Binaries ---"
-WASM_FOUND=0
 for variant in engine-pkg-webgpu engine-pkg-webgl2; do
   WASM_PATH="${REPO_ROOT}/web/public/${variant}/forge_engine_bg.wasm"
   if [ -f "${WASM_PATH}" ]; then
     SIZE=$(du -sh "${WASM_PATH}" 2>/dev/null | cut -f1)
     AGE=$(python3 -c "import os,time; mt=os.path.getmtime('${WASM_PATH}'); print(f'{int((time.time()-mt)/3600)}h ago')" 2>/dev/null || echo "?")
     print_result "  ${variant}" "${PASS}" "${SIZE}, modified ${AGE}"
-    WASM_FOUND=$((WASM_FOUND+1))
   else
     print_result "  ${variant}" "${FAIL}" "Missing — run: powershell -File build_wasm.ps1"
   fi
