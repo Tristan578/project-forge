@@ -45,6 +45,22 @@ describe('SunoClient', () => {
       expect(result).toEqual({ taskId: 'suno-alt-id' });
     });
 
+    it.each([
+      {},
+      { task_id: '' },
+      { task_id: '   ' },
+      { task_id: null, id: '' },
+    ])('rejects a successful response with no music task ID: %j', async (payload) => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(payload),
+      } as Response);
+
+      const client = new SunoClient({ apiKey: mockApiKey });
+      await expect(client.createMusic({ prompt: 'ambient' }))
+        .rejects.toThrow('Suno response did not include a non-empty music task ID');
+    });
+
     it('defaults durationSeconds to 30 when not specified', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: true,
