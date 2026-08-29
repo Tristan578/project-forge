@@ -443,10 +443,12 @@ mod scene_round_trip_tests {
     use crate::core::game_components::{
         GameComponentData, GameComponents, HealthData, WinConditionData, WinConditionType,
     };
+    use crate::core::physics::{JointLimits, JointMotor, JointType};
     use crate::core::reverb_zone::{ReverbZoneData, ReverbZoneEnabled};
     use crate::core::skeletal_animation2d::{BoneKeyframe, EasingType2d, SkeletalAnimation2d};
-    use crate::core::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
+    use crate::core::skeleton2d::{Bone2dDef, SkeletonData2d, SkeletonEnabled2d};
     use crate::core::sprite::{SpriteAnchor, SpriteData};
+    use crate::core::tilemap::{TilemapLayer, TilemapOrigin};
     use std::collections::HashMap;
 
     // ---------------------------------------------------------------------
@@ -780,6 +782,83 @@ mod scene_round_trip_tests {
         }
     }
 
+    fn authored_tilemap() -> TilemapData {
+        // `TilemapData::default()` is 32×32 tiles, a 20×15 map, one visible
+        // non-collision "Layer 1" and a TopLeft origin — every field below is
+        // off that, so an `insert(default())` regression fails.
+        TilemapData {
+            tileset_asset_id: "asset-dungeon-tiles".to_string(),
+            tile_size: [48, 24],
+            map_size: [3, 2],
+            layers: vec![TilemapLayer {
+                name: "Collision".to_string(),
+                tiles: vec![Some(7), None, Some(9), None, Some(11), None],
+                visible: false,
+                opacity: 0.65,
+                is_collision: true,
+            }],
+            origin: TilemapOrigin::Center,
+        }
+    }
+
+    fn authored_skeleton2d() -> SkeletonData2d {
+        // The default rig is a single unrotated "root" bone with an "default"
+        // active skin; this one shares neither.
+        SkeletonData2d {
+            bones: vec![Bone2dDef {
+                name: "spine".to_string(),
+                parent_bone: Some("root".to_string()),
+                local_position: [1.0, 2.0, 3.0],
+                local_rotation: 42.5,
+                local_scale: [1.5, 0.75],
+                length: 12.5,
+                color: [0.2, 0.4, 0.6, 0.8],
+            }],
+            slots: vec![],
+            skins: HashMap::new(),
+            active_skin: "battle-damage".to_string(),
+            ik_constraints: vec![],
+        }
+    }
+
+    fn authored_shader_effect() -> ShaderEffectData {
+        ShaderEffectData {
+            shader_type: "hologram".to_string(),
+            custom_color: [0.15, 0.85, 0.35, 0.65],
+            noise_scale: 12.5,
+            emission_strength: 3.25,
+            dissolve_threshold: 0.45,
+            dissolve_edge_width: 0.09,
+            scan_line_frequency: 55.0,
+            scan_line_speed: 7.25,
+            scroll_speed: [0.35, -0.65],
+            distortion_strength: 0.85,
+            toon_bands: 9,
+            fresnel_power: 6.5,
+        }
+    }
+
+    fn authored_joint() -> JointData {
+        // `JointData` has no `Default`, so there is no blank-struct mutant to
+        // dodge here — but the values stay distinctive so a mixed-up field
+        // still reads clearly in a failure message.
+        JointData {
+            joint_type: JointType::Prismatic,
+            connected_entity_id: "lamp".to_string(),
+            anchor_self: [0.5, 1.5, 2.5],
+            anchor_other: [-1.0, -2.0, -3.0],
+            axis: [0.0, 0.0, 1.0],
+            limits: Some(JointLimits {
+                min: -2.5,
+                max: 7.5,
+            }),
+            motor: Some(JointMotor {
+                target_velocity: 3.5,
+                max_force: 22.5,
+            }),
+        }
+    }
+
     /// The full-fat authored entity: everything the round trip is supposed to
     /// carry, on one `EntityType::Cube`.
     fn spawn_hero(world: &mut World) -> Entity {
@@ -812,6 +891,19 @@ mod scene_round_trip_tests {
                     ActiveGameCamera,
                     authored_lod(),
                     authored_skeletal_animation(),
+                ),
+                // The five families whose `restore_scene` arms are otherwise
+                // insert-only with nothing damaging them during Play. They are
+                // deliberately here rather than on a second fixture: a field
+                // captured by `snapshot_scene` and dropped by `restore_scene`
+                // is the exact defect this module exists to catch, and it can
+                // only be caught by an entity that survives Play.
+                (
+                    authored_sprite(),
+                    authored_tilemap(),
+                    authored_skeleton2d(),
+                    authored_shader_effect(),
+                    authored_joint(),
                 ),
             ))
             .id()
@@ -863,6 +955,11 @@ mod scene_round_trip_tests {
             hero_mut.remove::<PhysicsEnabled>();
             hero_mut.remove::<LodData>();
             hero_mut.remove::<SkeletalAnimation2d>();
+            hero_mut.remove::<SpriteData>();
+            hero_mut.remove::<TilemapData>();
+            hero_mut.remove::<SkeletonData2d>();
+            hero_mut.remove::<ShaderEffectData>();
+            hero_mut.remove::<JointData>();
         }
         world
             .entity_mut(lamp)
@@ -959,6 +1056,64 @@ mod scene_round_trip_tests {
         assert_eq!(anim.duration, 2.75);
         assert!(anim.looping);
         assert_eq!(anim.tracks["arm"][0].rotation, Some(1.25));
+
+        // --- The 2D / effect / joint families ---
+        let sprite = get::<SpriteData>(&mut world, "hero").expect("SpriteData must be restored");
+        assert_eq!(sprite.texture_asset_id, authored_sprite().texture_asset_id);
+        assert_eq!(sprite.sorting_layer, authored_sprite().sorting_layer);
+        assert_eq!(sprite.sorting_order, authored_sprite().sorting_order);
+        assert_eq!(sprite.custom_size, authored_sprite().custom_size);
+        assert_eq!(sprite.anchor, SpriteAnchor::TopLeft);
+        assert!(sprite.flip_x);
+
+        let tilemap = get::<TilemapData>(&mut world, "hero").expect("TilemapData must be restored");
+        assert_eq!(
+            tilemap.tileset_asset_id,
+            authored_tilemap().tileset_asset_id
+        );
+        assert_eq!(tilemap.tile_size, authored_tilemap().tile_size);
+        assert_eq!(tilemap.map_size, authored_tilemap().map_size);
+        assert_eq!(tilemap.origin, TilemapOrigin::Center);
+        assert_eq!(tilemap.layers.len(), 1);
+        assert_eq!(tilemap.layers[0].name, "Collision");
+        assert_eq!(tilemap.layers[0].opacity, 0.65);
+        assert!(tilemap.layers[0].is_collision);
+        assert!(!tilemap.layers[0].visible);
+        assert_eq!(tilemap.layers[0].tiles, vec![Some(7), None, Some(9), None, Some(11), None]);
+
+        let skeleton =
+            get::<SkeletonData2d>(&mut world, "hero").expect("SkeletonData2d must be restored");
+        assert_eq!(skeleton.active_skin, "battle-damage");
+        assert_eq!(skeleton.bones.len(), 1);
+        assert_eq!(skeleton.bones[0].name, "spine");
+        assert_eq!(skeleton.bones[0].parent_bone, Some("root".to_string()));
+        assert_eq!(skeleton.bones[0].local_rotation, 42.5);
+        assert_eq!(skeleton.bones[0].local_scale, [1.5, 0.75]);
+
+        let fx =
+            get::<ShaderEffectData>(&mut world, "hero").expect("ShaderEffectData must be restored");
+        assert_eq!(fx.shader_type, "hologram");
+        assert_eq!(fx.toon_bands, 9);
+        assert_eq!(fx.scroll_speed, [0.35, -0.65]);
+        assert_eq!(fx.emission_strength, 3.25);
+        assert_eq!(fx.custom_color, authored_shader_effect().custom_color);
+
+        let joint = get::<JointData>(&mut world, "hero").expect("JointData must be restored");
+        assert!(
+            matches!(joint.joint_type, JointType::Prismatic),
+            "joint type must survive, got {:?}",
+            joint.joint_type
+        );
+        assert_eq!(joint.connected_entity_id, "lamp");
+        assert_eq!(joint.anchor_self, authored_joint().anchor_self);
+        assert_eq!(joint.anchor_other, authored_joint().anchor_other);
+        assert_eq!(joint.axis, authored_joint().axis);
+        let limits = joint.limits.as_ref().expect("joint limits must be restored");
+        assert_eq!(limits.min, -2.5);
+        assert_eq!(limits.max, 7.5);
+        let motor = joint.motor.as_ref().expect("joint motor must be restored");
+        assert_eq!(motor.target_velocity, 3.5);
+        assert_eq!(motor.max_force, 22.5);
     }
 
     /// Isolated regression for the field `restore_scene` captured and dropped.
@@ -1073,7 +1228,10 @@ mod scene_round_trip_tests {
         spawn_hero(&mut world);
         press_play(&mut world);
 
-        // A marked runtime spawn (projectiles, spawner output).
+        // A marked runtime spawn that ALSO carries an `EntityId`. Note this is
+        // the weaker of the two cases: step 3's "not in the snapshot" sweep
+        // would reach it even if step 1 never ran, so it pins step 3, not the
+        // RuntimeEntity loop.
         world.spawn((
             RuntimeEntity,
             EntityType::Sphere,
@@ -1082,6 +1240,12 @@ mod scene_round_trip_tests {
             EntityVisible(true),
             Transform::default(),
         ));
+        // The case ONLY step 1 can clean up: a runtime spawn with no
+        // `EntityId`. Step 3's `entity_query` requires `&EntityId`, so it
+        // cannot see this entity at all — delete the `RuntimeEntity` despawn
+        // loop and this one leaks into Edit mode forever. Bullets, particles
+        // and other spawner output routinely look like this.
+        world.spawn((RuntimeEntity, Transform::default()));
         // An UNmarked spawn — caught only by the "not in the snapshot" sweep.
         world.spawn((
             EntityType::Sphere,
@@ -1096,6 +1260,13 @@ mod scene_round_trip_tests {
         assert!(
             lookup(&mut world, "bullet").is_none(),
             "a RuntimeEntity spawn must be despawned on Stop"
+        );
+        let mut runtime_query = world.query_filtered::<Entity, With<RuntimeEntity>>();
+        assert_eq!(
+            runtime_query.iter(&world).count(),
+            0,
+            "step 1 must despawn EVERY RuntimeEntity, including one carrying no \
+             EntityId — nothing else in restore_scene can reach it"
         );
         assert!(
             lookup(&mut world, "stray").is_none(),
@@ -1189,15 +1360,26 @@ mod scene_round_trip_tests {
         press_play(&mut world);
 
         let muted = find(&mut world, "muted");
-        world.entity_mut(muted).insert((
-            AudioEnabled,
-            ParticleEnabled,
-            PhysicsEnabled,
-            ReverbZoneEnabled,
-            TilemapEnabled,
-            SkeletonEnabled2d,
-            ActiveGameCamera,
-        ));
+        world
+            .entity_mut(muted)
+            // The running game switches every marker ON …
+            .insert((
+                AudioEnabled,
+                ParticleEnabled,
+                PhysicsEnabled,
+                ReverbZoneEnabled,
+                TilemapEnabled,
+                SkeletonEnabled2d,
+                ActiveGameCamera,
+            ))
+            // … and drops the DATA under two of them. Without this the
+            // "data is still restored" assertions below hold whether or not
+            // `restore_scene` re-inserts anything, which makes them worthless
+            // as regression coverage.
+            .remove::<AudioData>()
+            .remove::<ReverbZoneData>();
+        assert!(get::<AudioData>(&mut world, "muted").is_none());
+        assert!(get::<ReverbZoneData>(&mut world, "muted").is_none());
 
         press_stop(&mut world);
 
@@ -1211,15 +1393,17 @@ mod scene_round_trip_tests {
             !has::<ActiveGameCamera>(&mut world, "muted"),
             "active game camera"
         );
-        // The DATA behind each marker is still restored.
-        assert_eq!(
-            get::<AudioData>(&mut world, "muted").unwrap().bus,
-            authored_audio().bus
-        );
-        assert_eq!(
-            get::<ReverbZoneData>(&mut world, "muted").unwrap().preset,
-            "cave"
-        );
+        // The DATA behind each marker is still restored — both components were
+        // removed during Play above, so only `restore_scene` can produce them.
+        let audio = get::<AudioData>(&mut world, "muted")
+            .expect("AudioData removed during Play must be re-inserted on Stop");
+        assert_eq!(audio.bus, authored_audio().bus);
+        assert_eq!(audio.volume, authored_audio().volume);
+        let reverb = get::<ReverbZoneData>(&mut world, "muted")
+            .expect("ReverbZoneData removed during Play must be re-inserted on Stop");
+        assert_eq!(reverb.preset, "cave");
+        assert_eq!(reverb.wet_mix, authored_reverb().wet_mix);
+        assert_eq!(reverb.decay_time, authored_reverb().decay_time);
     }
 
     #[test]
