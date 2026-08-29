@@ -726,6 +726,22 @@ jobs:
   #   * .claude/tools/dx-audit.sh — the cross-provider DX audit; its contract test
   #     pins that the audit delegates to the agentic gate and covers the secondary
   #     provider surfaces (.codex/AGENTS.md, .windsurf, .agents) instead of drifting.
+  #   * scripts/generate-wasm-manifests.sh — the WASM manifest generator whose
+  #     output the R2 CDN consumes at three points in cd.yml, and
+  #     scripts/changeset-version.sh — the version-script release.yml runs to cut
+  #     versions. Both suites existed on disk but were named in NO workflow until
+  #     PF-9451/#9451, alongside scripts/__tests__/pr-workitem-check.test.sh (which
+  #     covers .github/workflows/pr-workitem-check.yml's closing-reference logic).
+  #   * scripts/check-suite-wiring.sh — the guard that made the three orphans above
+  #     unrepeatable: it fails when any *.test.sh under scripts/__tests__ or
+  #     .claude/tools/__tests__ is referenced by no workflow. This job names its
+  #     suites in explicit steps rather than looping a glob ON PURPOSE — per-suite
+  #     step names are what make a red suite identifiable in the Actions UI and what
+  #     let check-npm-audit.test.sh pin each step's `run:` line-for-line against a
+  #     `run: true` swap — so the recurrence guard is an assertion over the glob,
+  #     not a switch to one. The gate runs here as its own final step, not only as
+  #     a unit suite, so a new orphan fails a required check rather than waiting for
+  #     someone to run it locally.
   # These ride ci-success as a REQUIRED check rather than a standalone advisory
   # workflow: a standalone path-filtered suite can be left out of the required
   # aggregate, which would let a PR that neuters a gate script merge green.
@@ -792,6 +808,10 @@ jobs:
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
+            scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
+            scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
+            scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
@@ -845,6 +865,21 @@ jobs:
 
       - name: Run coverage-ratchet script test suite
         run: bash scripts/__tests__/ratchet-coverage.test.sh
+
+      - name: Run WASM-manifest generator test suite
+        run: bash scripts/__tests__/generate-wasm-manifests.test.sh
+
+      - name: Run changeset-version wrapper test suite
+        run: bash scripts/__tests__/changeset-version.test.sh
+
+      - name: Run PR work-item check test suite
+        run: bash scripts/__tests__/pr-workitem-check.test.sh
+
+      - name: Run suite-wiring gate test suite
+        run: bash scripts/__tests__/check-suite-wiring.test.sh
+
+      - name: Run suite-wiring gate
+        run: bash scripts/check-suite-wiring.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without
