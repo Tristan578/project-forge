@@ -281,7 +281,8 @@ if grep -qF 'REVEALEDSECRET' <<<"$out"; then
 else
   pass "the revealed password never reaches stdout"
 fi
-mode="$(ls -l "$uri_out" | cut -c1-10)"  # shellcheck disable=SC2012
+# shellcheck disable=SC2012  # a fixed-width mode string is exactly what is wanted here; find(1) cannot produce one portably.
+mode="$(ls -l "$uri_out" | cut -c1-10)"
 if [ "$mode" = "-rw-------" ]; then
   pass "the composed-URI file is mode 600 (owner-only)"
 else
