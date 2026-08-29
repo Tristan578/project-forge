@@ -31,9 +31,9 @@
  *
  * This gate sums those per route and budgets the HEAVIEST route. Chunks shared
  * between entries are de-duplicated by set membership, so the grouping churn
- * above cannot move the number. `--metadata` entries are excluded (they are
- * server-side metadata routes, not client JS); error/not-found boundaries are
- * included, because they ship with the route.
+ * above cannot move the number. Every client entry recorded for the route is
+ * included, including `--metadata` entries: excluding a manifest entry based
+ * on its name can hide bytes that Next actually associated with the route.
  *
  * Turbopack does not emit `.next/app-build-manifest.json` and prints no
  * Size / First Load JS columns, so there is no upstream number to cross-check.
@@ -165,13 +165,19 @@ function loadRouteManifest(manifestFile) {
       '. The build output is incomplete or stale — re-run npm run build.'
     );
   }
-  delete globalThis.__RSC_MANIFEST;
-  return { routeKey: keys[0], entryJSFiles: manifest.entryJSFiles || {} };
+  const { entryJSFiles } = manifest;
+  if (!entryJSFiles || typeof entryJSFiles !== 'object' || Array.isArray(entryJSFiles)) {
+    throw new BundleToolingError(
+      'Route manifest ' + manifestFile + ' has missing or invalid entryJSFiles' +
+      '. The manifest format changed — update this gate.'
+    );
+  }
+  return { routeKey: keys[0], entryJSFiles };
 }
 
 /**
  * Per-route first-load JS: the root chunks every route loads, plus the chunk
- * files of every non-metadata client entry of that route, de-duplicated.
+ * files of every client entry of that route, de-duplicated.
  */
 function computeRouteFirstLoad(buildDir) {
   const buildManifestPath = path.join(buildDir, 'build-manifest.json');
@@ -220,10 +226,7 @@ function computeRouteFirstLoad(buildDir) {
   for (const manifestFile of manifestFiles) {
     const { routeKey, entryJSFiles } = loadRouteManifest(manifestFile);
     const chunks = new Set(baseFiles);
-    for (const [entry, files] of Object.entries(entryJSFiles)) {
-      // Metadata routes (favicon, opengraph-image, ...) are server-rendered
-      // and never part of a route's client first load.
-      if (entry.endsWith('--metadata')) continue;
+    for (const files of Object.values(entryJSFiles)) {
       for (const file of files || []) chunks.add(file);
     }
     let bytes = 0;
