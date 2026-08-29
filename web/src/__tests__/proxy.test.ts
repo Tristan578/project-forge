@@ -298,7 +298,7 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
   }
 
   /**
-   * Assert a client-supplied header was STRIPPED, not merely unobservable.
+   * Report whether a client-supplied header was STRIPPED, not merely unobservable.
    *
    * Checking `!forwardedHeaders(res).has(name)` alone is vacuous: if the proxy
    * skips the rewrite entirely, there is no override encoding to read, the
@@ -307,13 +307,17 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
    * vulnerable case, so the rewrite must be proven to have HAPPENED first.
    * (Verified by mutation: narrowing CLIENT_SPOOFABLE_HEADERS to `['x-nonce']`
    * passes the naive form of this check and fails this one.)
+   *
+   * Both facts are returned as one object and asserted at the call site with a
+   * single `toEqual`, so neither half can be dropped and neither the "rewrite
+   * happened" precondition nor the strip itself can go unchecked.
    */
-  function expectStripped(res: Response, name: string) {
-    expect(
-      res.headers.get('x-middleware-override-headers'),
-      'proxy did not rewrite the request, so nothing was stripped',
-    ).not.toBeNull();
-    expect(forwardedHeaders(res).has(name)).toBe(false);
+  const STRIPPED = { requestWasRewritten: true, headerForwardedToApp: false };
+  function strippedState(res: Response, name: string) {
+    return {
+      requestWasRewritten: res.headers.get('x-middleware-override-headers') !== null,
+      headerForwardedToApp: forwardedHeaders(res).has(name),
+    };
   }
 
   const play = (init?: { headers?: Record<string, string> }) => {
@@ -387,7 +391,9 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     // Otherwise any page reading `x-nonce` would trust caller-controlled input.
     const req = reqFor('/community/games/1');
     req.headers.set('x-nonce', 'attacker-chosen');
-    expectStripped(await applyAuthDecision(unauthed, req, isPublicRoute), 'x-nonce');
+    expect(
+      strippedState(await applyAuthDecision(unauthed, req, isPublicRoute), 'x-nonce'),
+    ).toEqual(STRIPPED);
   });
 
   it('strips a client-supplied CSP on non-play routes even with no x-nonce', async () => {
@@ -398,10 +404,9 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     // choosing — the exact input Next.js reads to nonce its bootstrap scripts.
     const req = reqFor('/community/games/1');
     req.headers.set('content-security-policy', 'script-src *');
-    expectStripped(
-      await applyAuthDecision(unauthed, req, isPublicRoute),
-      'content-security-policy',
-    );
+    expect(
+      strippedState(await applyAuthDecision(unauthed, req, isPublicRoute), 'content-security-policy'),
+    ).toEqual(STRIPPED);
   });
 
   it('strips a client-supplied report-only CSP, which Next also reads a nonce from', async () => {
@@ -412,10 +417,12 @@ describe('per-request CSP nonce on /play (PF-1018, #9038)', () => {
     // every framework script. Both names must be stripped.
     const req = reqFor('/community/games/1');
     req.headers.set('content-security-policy-report-only', "script-src 'nonce-attacker'");
-    expectStripped(
-      await applyAuthDecision(unauthed, req, isPublicRoute),
-      'content-security-policy-report-only',
-    );
+    expect(
+      strippedState(
+        await applyAuthDecision(unauthed, req, isPublicRoute),
+        'content-security-policy-report-only',
+      ),
+    ).toEqual(STRIPPED);
   });
 
   it('strips a report-only CSP on /play so it cannot shadow the minted nonce', async () => {

@@ -205,36 +205,6 @@ const eslintConfig = defineConfig([
   },
   {
     files: ['src/**/*.{test,spec}.{ts,tsx,js,jsx}'],
-    // PF-9448 (#9448): 44 pre-existing assertion-free tests exist outside the
-    // five this ticket fixed, across 9 files — enabling the rule repo-wide
-    // would fail every one of them under --max-warnings 0. Following the
-    // no-hardcoded-primitives precedent above (scope a new correctness rule
-    // out of already-violating files rather than bulk-suppressing or silently
-    // weakening it), those 9 files are excluded here so the rule blocks NEW
-    // assertion-free tests everywhere else starting now. Counts as of
-    // 2026-08-29: proxy.test.ts (3), app/api/__tests__/contracts.test.ts (10),
-    // hooks/__tests__/useGenerationPolling.test.ts (1),
-    // lib/audio/audioManager.advanced.test.ts (3),
-    // lib/chat/handlers/__tests__/exportAsset2dHandlers.test.ts (11),
-    // lib/export/__tests__/textureCompression.test.ts (1),
-    // lib/game-creation/__tests__/planBuilder.test.ts (4),
-    // lib/workspace/__tests__/panelRegistry.test.ts (1). A 9th file,
-    // lib/scripting/__tests__/scriptSandbox.test.ts (10), is the SEC-2
-    // sandbox-escape test cluster tracked separately (#8700) and is
-    // deliberately out of scope here too. None of these 9 files were
-    // bulk-suppressed to force a clean gate — each needs its own real fix;
-    // track re-enabling this rule on them at #9471.
-    ignores: [
-      'src/__tests__/proxy.test.ts',
-      'src/app/api/__tests__/contracts.test.ts',
-      'src/hooks/__tests__/useGenerationPolling.test.ts',
-      'src/lib/audio/audioManager.advanced.test.ts',
-      'src/lib/chat/handlers/__tests__/exportAsset2dHandlers.test.ts',
-      'src/lib/export/__tests__/textureCompression.test.ts',
-      'src/lib/game-creation/__tests__/planBuilder.test.ts',
-      'src/lib/scripting/__tests__/scriptSandbox.test.ts',
-      'src/lib/workspace/__tests__/panelRegistry.test.ts',
-    ],
     plugins: { spawnforge: localPlugin },
     rules: {
       'spawnforge/no-empty-test-assertion': 'error',

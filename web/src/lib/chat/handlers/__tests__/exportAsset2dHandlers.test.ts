@@ -1999,6 +1999,30 @@ describe('handlers2d skeleton 2D commands', () => {
     ikConstraints: [],
   };
 
+  /**
+   * Rejection facts as DATA, asserted at the call site.
+   *
+   * These three facts always travel together — a handler that returns
+   * `success: false` but has already written the store has still destroyed the
+   * rig — so they are reported as one object and matched with a single
+   * `toEqual`. Asserting them inside a helper instead would leave every `it`
+   * body assertion-free, and an accidentally un-awaited call would then pass
+   * with nothing checked at all (PF-9471 / #9471).
+   */
+  const rejection = (result: ExecutionResult, store: { setSkeleton2d: unknown }) => ({
+    success: result.success,
+    error: result.error,
+    storeWasWritten: vi.isMockFunction(store.setSkeleton2d)
+      ? store.setSkeleton2d.mock.calls.length > 0
+      : true,
+  });
+
+  const rejectedWith = (match: string) => ({
+    success: false,
+    error: expect.stringContaining(match),
+    storeWasWritten: false,
+  });
+
   // -------------------------------------------------------------------------
   // create_skeleton2d
   // -------------------------------------------------------------------------
@@ -2318,16 +2342,6 @@ describe('handlers2d skeleton 2D commands', () => {
     };
 
     /** Every rejection path must say why AND leave the rig untouched. */
-    const expectRejected = (
-      result: ExecutionResult,
-      store: { setSkeleton2d: unknown },
-      match: string,
-    ) => {
-      expect(result.success).toBe(false);
-      expect(result.error).toContain(match);
-      expect(store.setSkeleton2d).not.toHaveBeenCalled();
-    };
-
     it('creates an IK chain from bone hierarchy', async () => {
       const { result, store } = await invoke2d(
         'create_ik_chain2d',
@@ -2469,7 +2483,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { entityId: 'ent-1', name: 'ik', bones: ['root', 'arm'], mix: 1.5 },
         { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'mix');
+      expect(rejection(result, store)).toEqual(rejectedWith('mix'));
     });
 
     it('rejects a bones array past the engine bound', async () => {
@@ -2482,7 +2496,7 @@ describe('handlers2d skeleton 2D commands', () => {
         },
         { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'bones');
+      expect(rejection(result, store)).toEqual(rejectedWith('bones'));
     });
 
     it('rejects an empty bone name at the head of the chain', async () => {
@@ -2493,7 +2507,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { entityId: 'ent-1', name: 'ik', bones: ['', 'arm'] },
         { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'bones');
+      expect(rejection(result, store)).toEqual(rejectedWith('bones'));
     });
 
     it('rejects an empty chain name', async () => {
@@ -2504,7 +2518,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { entityId: 'ent-1', name: '', bones: ['root', 'arm'] },
         { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'name');
+      expect(rejection(result, store)).toEqual(rejectedWith('name'));
     });
 
     it('rejects a single-bone chain the solver would skip', async () => {
@@ -2513,7 +2527,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { entityId: 'ent-1', name: 'ik', bones: ['root'] },
         { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'bones');
+      expect(rejection(result, store)).toEqual(rejectedWith('bones'));
     });
 
     it('reports no path instead of fabricating one when the hierarchy has none', async () => {
@@ -2539,7 +2553,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { entityId: 'ent-1', chainName: 'ik', startBone: 'root', endBone: 'b' },
         { skeletons2d: { 'ent-1': cyclic }, setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'No bone path');
+      expect(rejection(result, store)).toEqual(rejectedWith('No bone path'));
     });
 
     it('returns error when neither bones nor a start/end pair is given', async () => {
@@ -2548,7 +2562,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { entityId: 'ent-1', name: 'ik' },
         { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'startBone');
+      expect(rejection(result, store)).toEqual(rejectedWith('startBone'));
     });
 
     it('returns error when no chain name is given under either spelling', async () => {
@@ -2557,7 +2571,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { entityId: 'ent-1', bones: ['root', 'arm'] },
         { skeletons2d: { 'ent-1': riggedSkeleton }, setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'name');
+      expect(rejection(result, store)).toEqual(rejectedWith('name'));
     });
 
     it('returns error when entityId is missing', async () => {
@@ -2566,7 +2580,7 @@ describe('handlers2d skeleton 2D commands', () => {
         { chainName: 'ik', startBone: 'a', endBone: 'b' },
         { setSkeleton2d: vi.fn() },
       );
-      expectRejected(result, store, 'entityId');
+      expect(rejection(result, store)).toEqual(rejectedWith('entityId'));
     });
   });
 
@@ -2666,15 +2680,13 @@ describe('handlers2d skeleton 2D commands', () => {
     // skeleton and reporting `success: true` therefore destroyed the rig the entity
     // had while telling the caller a rig had been imported — the store is now left
     // untouched and the reason names the field.
-    const rejects = async (label: string, jsonData: string, expected: string) => {
+    const importRejection = async (jsonData: string) => {
       const { result, store } = await invoke2d(
         'import_skeleton_json',
         { entityId: 'ent-1', jsonData },
         { setSkeleton2d: vi.fn() },
       );
-      expect(result.success, label).toBe(false);
-      expect(result.error, label).toContain(expected);
-      expect(store.setSkeleton2d, label).not.toHaveBeenCalled();
+      return rejection(result, store);
     };
 
     it.each([
@@ -2683,7 +2695,7 @@ describe('handlers2d skeleton 2D commands', () => {
       ['a string', '"skeleton"', 'got a string'],
       ['a number', '7', 'got a number'],
     ])('rejects JSON that is %s', async (label, jsonData, expected) => {
-      await rejects(label, jsonData, expected);
+      expect(await importRejection(jsonData), label).toEqual(rejectedWith(expected));
     });
 
     it.each([
@@ -2769,7 +2781,7 @@ describe('handlers2d skeleton 2D commands', () => {
         '`ikConstraints[0].boneChain[1]` names "ghost"',
       ],
     ])('rejects %s without touching the store', async (label, jsonData, expected) => {
-      await rejects(label, jsonData, expected);
+      expect(await importRejection(jsonData), label).toEqual(rejectedWith(expected));
     });
 
     it('accepts an ikConstraint whose chain names real bones', async () => {

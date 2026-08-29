@@ -64,13 +64,20 @@ describe('PANEL_DEFINITIONS', () => {
     for (const [key, def] of Object.entries(PANEL_DEFINITIONS)) {
       const rawDef = def as unknown as Record<string, unknown>;
       for (const [field, value] of Object.entries(rawDef)) {
-        if (value && typeof value === 'object' && !Array.isArray(value) && 'id' in (value as Record<string, unknown>)) {
-          throw new Error(
-            `Panel "${key}" has nested object at field "${field}" that looks like ` +
-            `a panel definition (has "id" property). This is likely a missing closing "},". ` +
-            `Nested id: "${(value as Record<string, unknown>).id}"`
-          );
-        }
+        const looksLikeNestedDefinition =
+          !!value &&
+          typeof value === 'object' &&
+          !Array.isArray(value) &&
+          'id' in (value as Record<string, unknown>);
+        const nestedId = looksLikeNestedDefinition
+          ? String((value as Record<string, unknown>).id)
+          : '';
+        expect(
+          looksLikeNestedDefinition,
+          `Panel "${key}" has nested object at field "${field}" that looks like ` +
+          `a panel definition (has "id" property). This is likely a missing closing "},". ` +
+          `Nested id: "${nestedId}"`
+        ).toBe(false);
       }
     }
   });

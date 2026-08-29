@@ -815,22 +815,27 @@ describe('useGenerationPolling', () => {
 
   it('clears all timers on unmount', async () => {
     mockJobs['u1'] = makeJob('u1');
-    vi.spyOn(globalThis, 'fetch').mockImplementation(
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
       mockFetchResponse({ jobId: 'job-u1', status: 'processing', progress: 10 }),
     );
 
     const { unmount } = renderHook(() => useGenerationPolling());
 
+    // Let the poll loop start so there is a live timer to clear.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(10_000);
     });
+    const pollsBeforeUnmount = fetchSpy.mock.calls.length;
+    expect(pollsBeforeUnmount).toBeGreaterThan(0);
 
     unmount();
 
-    // Advancing timers after unmount should not cause errors
+    // A cleared timer issues no further polls, however far the clock runs.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
+    expect(fetchSpy).toHaveBeenCalledTimes(pollsBeforeUnmount);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   // ---------------------------------------------------------------------------
