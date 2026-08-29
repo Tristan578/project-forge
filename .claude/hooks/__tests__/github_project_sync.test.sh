@@ -306,9 +306,16 @@ assert_out "reconcile wires the database resolver into classify_drift" "wired" "
 # open file description "may be denied" — the kernels disagree, and taking the
 # lock in-process passed on macOS while reporting 'ran-anyway' on the Linux CI
 # runner. A second process is also the situation the lock exists to handle.
+#
+# The verdict carries two witnesses alongside it so this can never pass (or
+# fail) vacuously: 'locked' proves the child really acquired the lock before
+# reconcile was called, and 'denied' proves THIS process is refused the same
+# lock — i.e. the platform honours cross-process flock at all. Without them a
+# green result is indistinguishable from a lock nobody was holding.
 out="$(run_py "
-import pathlib, subprocess, sys, tempfile
+import fcntl, pathlib, subprocess, sys, tempfile
 m._MAIN_HOOKS = pathlib.Path(tempfile.mkdtemp())
+lock_path = str(m._MAIN_HOOKS / '.sync-push.lock')
 child_src = (
     'import fcntl, os, sys\n'
     'fd = os.open(sys.argv[1], os.O_CREAT | os.O_WRONLY)\n'
@@ -318,20 +325,26 @@ child_src = (
     'sys.stdin.readline()\n'
 )
 child = subprocess.Popen(
-    [sys.executable, '-c', child_src, str(m._MAIN_HOOKS / '.sync-push.lock')],
+    [sys.executable, '-c', child_src, lock_path],
     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+handshake = child.stdout.read(6)
+probe = 'granted'
+try:
+    probe_fd = open(lock_path, 'w')
+    fcntl.flock(probe_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    fcntl.flock(probe_fd, fcntl.LOCK_UN)
+    probe_fd.close()
+except (IOError, OSError):
+    probe = 'denied'
 ran = []
 m._reconcile_inner = lambda *a, **k: ran.append(1)
-if child.stdout.read(6) != 'locked':
-    print('child-never-locked')
-else:
-    m.reconcile(apply_changes=True)
-    print('ran-anyway' if ran else 'skipped')
+m.reconcile(apply_changes=True)
 child.stdin.write('go')
 child.stdin.close()
 child.wait(timeout=10)
+print('%s+%s+%s' % (handshake, probe, 'ran-anyway' if ran else 'skipped'))
 " | tail -1)"
-assert_out "reconcile skips while another sync holds the lock" "skipped" "$out"
+assert_out "reconcile skips while another sync holds the lock" "locked+denied+skipped" "$out"
 
 # --- session start does not block on the full-repo listing ----------------
 # reconcile lists every issue in the repo (~8k). Run inline it delayed every
