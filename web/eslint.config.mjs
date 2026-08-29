@@ -223,7 +223,7 @@ const eslintConfig = defineConfig([
     // sandbox-escape test cluster tracked separately (#8700) and is
     // deliberately out of scope here too. None of these 9 files were
     // bulk-suppressed to force a clean gate — each needs its own real fix;
-    // track re-enabling this rule on them in a follow-up ticket.
+    // track re-enabling this rule on them at #9471.
     ignores: [
       'src/__tests__/proxy.test.ts',
       'src/app/api/__tests__/contracts.test.ts',
