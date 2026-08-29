@@ -395,8 +395,19 @@ pub fn restore_scene(
             // `component_carry::insert_aux_components`), including the same
             // "the ECS holds at most one, the snapshot stores a Vec to match
             // the file format" contract.
+            //
+            // Paired with a remove, unlike its sibling data restores above: an
+            // animation created during Play (`create_skeletal_animation2d`) on
+            // an entity that had none must not survive Stop. The snapshot's
+            // `None` here is authoritative — `tilemap_skeleton2d_query` requires
+            // only `EntityId`, so every forge entity is in that map and a `None`
+            // means "had no animation", never "was not captured".
             if let Some(anim) = snap.skeletal_animations.as_ref().and_then(|a| a.first()) {
                 commands.entity(entity).insert(anim.clone());
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<super::skeletal_animation2d::SkeletalAnimation2d>();
             }
             if let Some(ref ld) = snap.lod_data {
                 commands.entity(entity).insert(ld.clone());
@@ -1152,6 +1163,44 @@ mod scene_round_trip_tests {
             .expect("the animation must come back on Stop");
         assert_eq!(anim.name, "wave");
         assert_eq!(anim.tracks["arm"][0].position, Some([3.0, 4.0]));
+    }
+
+    /// The other half of the same restore. An insert-only restore is only half
+    /// a restore: it puts back what was there and keeps whatever Play added.
+    /// `create_skeletal_animation2d` is callable at runtime, so an entity that
+    /// had no animation before Play must not be holding one after Stop —
+    /// otherwise runtime state leaks into the edit scene and gets saved.
+    #[test]
+    fn a_skeletal_animation_created_during_play_does_not_survive_stop() {
+        let mut world = test_world();
+        let mesh = world.resource_mut::<Assets<Mesh>>().add(Cuboid::default());
+        world.spawn((
+            EntityType::Cube,
+            EntityId("bare".to_string()),
+            EntityName::new("Bare"),
+            EntityVisible(true),
+            Transform::default(),
+            Mesh3d(mesh),
+        ));
+
+        press_play(&mut world);
+        assert!(
+            world.resource::<SceneSnapshot>().entities[0]
+                .skeletal_animations
+                .is_none(),
+            "the entity starts with no animation, so the snapshot must record none"
+        );
+
+        let bare = find(&mut world, "bare");
+        world.entity_mut(bare).insert(authored_skeletal_animation());
+        assert!(get::<SkeletalAnimation2d>(&mut world, "bare").is_some());
+
+        press_stop(&mut world);
+
+        assert!(
+            get::<SkeletalAnimation2d>(&mut world, "bare").is_none(),
+            "an animation added during Play must be gone after Stop"
+        );
     }
 
     // ---------------------------------------------------------------------
