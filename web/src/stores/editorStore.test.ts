@@ -6,7 +6,7 @@
  * script logs, and entity CRUD actions.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useEditorStore, setCommandDispatcher } from './editorStore';
 import { setWinnabilityStateReader } from './slices/gameSlice';
 import {
@@ -19,6 +19,30 @@ import {
   makeLightData,
   makePhysicsData,
   } from '@/test/utils/fixtures';
+
+// The store's tracked() wrapper calls trackCommandDispatched(), which calls
+// track() from the bare '@vercel/analytics' specifier. That throws under
+// Node ("please import track from @vercel/analytics/server..."), so the
+// whole module is mocked out here. Every export must be listed or any other
+// call site importing a different export throws "X is not a function".
+vi.mock('@/lib/analytics/events', () => ({
+  trackSignupComplete: vi.fn(),
+  trackFirstSceneCreated: vi.fn(),
+  trackFirstEntitySpawned: vi.fn(),
+  trackTutorialStarted: vi.fn(),
+  trackTutorialCompleted: vi.fn(),
+  trackAIChatMessageSent: vi.fn(),
+  trackAIAssetGenerated: vi.fn(),
+  trackGameExported: vi.fn(),
+  trackGamePublished: vi.fn(),
+  trackTemplateUsed: vi.fn(),
+  trackPlayModeStarted: vi.fn(),
+  trackProjectCreated: vi.fn(),
+  trackBYOKKeyAdded: vi.fn(),
+  trackFeatureUsed: vi.fn(),
+  trackEditorPanelOpened: vi.fn(),
+  trackCommandDispatched: vi.fn(),
+}));
 
 describe('editorStore', () => {
   let mockDispatch: ReturnType<typeof createMockDispatch>;
