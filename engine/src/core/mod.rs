@@ -52,6 +52,11 @@ pub mod project_type;
 pub mod quality;
 pub mod reparent;
 pub mod reverb_zone;
+/// Native `App` schedule smoke test for B0002-class (Res+ResMut of the same
+/// resource) conflicts across the full, really-registered `Update` schedule.
+/// Test-only: never compiled into the wasm build. See its module doc comment.
+#[cfg(test)]
+pub mod schedule_smoke;
 pub mod shader_effects;
 pub mod scene;
 pub mod scene_file;
