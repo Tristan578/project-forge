@@ -695,6 +695,37 @@ gh workflow run cd.yml --ref <good-commit-sha>
 - **Post-deploy smoke tests**: 4 checks run automatically after CD
 - **Env validation**: Startup check for 8 required vars (`validateEnvironment()` in `web/src/lib/config/validateEnv.ts`)
 
+### Where automated failures land
+
+Three failure events used to produce nothing outside the Actions tab. Each one
+now opens (or comments on) a GitHub issue, so this is the list to watch:
+
+| Event | Issue title | Labels | Dedupe key |
+|---|---|---|---|
+| CD auto-rolled production back after a failed health check or smoke test | `Production auto-rollback fired: ...` | `ci-failure`, `priority-p0`, `area-infra` | `prod-rollback-auto` |
+| Someone manually rolled production back (`gh workflow run cd.yml -f rollback_production=...`) | `Production was manually rolled back` | `ci-failure`, `priority-p0`, `area-infra` | `prod-rollback-manual` |
+| The daily `Security Alerts` cron went red (unremediated Dependabot/CodeQL alerts, or a missing `SECURITY_ALERTS_TOKEN`) | `Security alert debt: ...` | `ci-failure`, `security`, `area-infra`, `priority-p1` | `security-alerts-cron` |
+| Post-deploy smoke tests failed on the `workflow_run` path — i.e. production is broken *behind a green deploy* | `Production smoke tests are failing after a green deploy` | `ci-failure`, `priority-p0`, `area-infra` | `post-deploy-smoke` |
+
+Watch `label:ci-failure` — every one of these carries it.
+
+All four go through `scripts/notify-workflow-failure.sh`. Two properties matter
+on-call:
+
+- **Deduped by key.** A recurring failure (the daily cron especially) comments on
+  the issue it already opened rather than filing a new one each time, so the
+  comment count is the recurrence count. **Close the issue once the run is
+  green** — a closed issue is what lets the next occurrence open a fresh one.
+- **No silent skip.** These replaced Slack steps gated on
+  `vars.SLACK_WEBHOOK_INCIDENTS != ''`, a repo variable that never existed. An
+  empty-string guard *skips*, so those steps read like working alerting and had
+  never fired. A missing input now fails the step red instead.
+
+The `workflow_run` path is the one worth understanding: it fires only after CD
+reported **success**, and a `workflow_run` conclusion is invisible from the CD
+run's own status. Before this, a green deploy with broken production looked
+entirely green.
+
 ### Gaps (Addressed by PF-607 through PF-617)
 - No external synthetic monitoring (PF-607)
 - No on-call rotation or paging (PF-608)
@@ -703,7 +734,9 @@ gh workflow run cd.yml --ref <good-commit-sha>
 - No client Web Vitals reporting (PF-611)
 - No AI cost anomaly detection (PF-612)
 - No structured log aggregation (PF-613)
-- No automated rollback (PF-614)
+- ~~No automated rollback (PF-614)~~ — shipped: `cd.yml`'s deploy-production job
+  promotes the previous deployment when the production health check or smoke
+  tests fail, and now files the P0 issue in the table above
 - Duplicate checkAuthentication() function (PF-615)
 - No DB query monitoring (PF-616)
 - No CDN cache metrics (PF-617)
@@ -810,6 +843,9 @@ When paged, follow this sequence:
    - Check `https://spawnforge.ai/api/health`
    - Check Sentry for error spikes
    - Check Vercel deployment status
+   - Check open `label:ci-failure` issues — automated rollbacks, a red
+     security-alerts cron, and post-deploy smoke failures all land there
+     (§11, "Where automated failures land")
 3. **Classify**: P0 (site down), P1 (major feature broken), P2 (degraded performance)
 4. **Mitigate** using the appropriate runbook above
 5. **Communicate** in #incidents with:
