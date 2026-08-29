@@ -364,6 +364,25 @@ export async function reportFailure({ fetchFn, env, now, log = () => {}, maxPage
     return { action: 'created', cls, number: created.number, supersedes };
   }
 
+  const comments = await listPaged(fetchFn, {
+    path: `/repos/${repo}/issues/${match.number}/comments?per_page=100`,
+    token,
+    maxPages,
+  });
+  const last = comments[comments.length - 1];
+  const updated = isRecurrenceComment(last, cls)
+    ? appendRecurrence(last.body, { runUrl, date })
+    : null;
+
+  // Decide whether there is anything to record BEFORE touching issue state. A
+  // manual re-run of the reporting step for a run that is already recorded must
+  // be a true no-op: reopening first would flip a triaged issue back to open and
+  // notify its subscribers for a report that adds nothing.
+  if (updated !== null && updated === last.body) {
+    log(`#${match.number} already records run ${runId}; nothing to do`);
+    return { action: 'noop', cls, number: match.number, reopened: false };
+  }
+
   let reopened = false;
   if (match.state === 'closed') {
     await ghFetch(fetchFn, {
@@ -376,19 +395,7 @@ export async function reportFailure({ fetchFn, env, now, log = () => {}, maxPage
     log(`reopened #${match.number} for class ${cls}`);
   }
 
-  const comments = await listPaged(fetchFn, {
-    path: `/repos/${repo}/issues/${match.number}/comments?per_page=100`,
-    token,
-    maxPages,
-  });
-  const last = comments[comments.length - 1];
-
-  if (isRecurrenceComment(last, cls)) {
-    const updated = appendRecurrence(last.body, { runUrl, date });
-    if (updated === last.body) {
-      log(`#${match.number} already records run ${runId}; nothing to do`);
-      return { action: 'noop', cls, number: match.number, reopened };
-    }
+  if (updated !== null) {
     await ghFetch(fetchFn, {
       method: 'PATCH',
       path: `/repos/${repo}/issues/comments/${last.id}`,

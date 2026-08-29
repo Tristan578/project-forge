@@ -531,6 +531,24 @@ describe('reportFailure — dedupe', () => {
     assert.equal(gh.of('POST', /\/issues$/).length, 0);
   });
 
+  test('re-running against a CLOSED issue that already records the run leaves it closed', async () => {
+    const existing = buildRecurrenceComment({ cls: 'config', runUrl: RUN_URL, date: TODAY });
+    const gh = makeGithub({
+      issues: [issue({ number: 47, state: 'closed', body: markerFor('config') })],
+      comments: { 47: [{ id: 903, body: existing }] },
+    });
+    const res = await reportFailure({ fetchFn: gh.fetchFn, env: makeEnv(), now: NOW });
+    assert.equal(res.action, 'noop');
+    assert.equal(res.reopened, false);
+    assert.equal(
+      gh.of('PATCH', /\/issues\/47$/).length,
+      0,
+      'must not reopen a triaged issue for a report that adds nothing',
+    );
+    assert.equal(gh.of('PATCH', /\/issues\/comments\/\d+$/).length, 0);
+    assert.equal(gh.of('POST', /\/issues\/47\/comments$/).length, 0);
+  });
+
   test('looks issues up by the shared label, including closed ones', async () => {
     const gh = makeGithub({ issues: [] });
     await reportFailure({ fetchFn: gh.fetchFn, env: makeEnv(), now: NOW });
