@@ -34,6 +34,7 @@ import { join } from 'node:path';
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..', '..');
 const ENGINE_COMMANDS_DIR = join(REPO_ROOT, 'engine', 'src', 'core', 'commands');
 const SLICES_DIR = join(__dirname, '..');
+const WEB_SRC_DIR = join(REPO_ROOT, 'web', 'src');
 
 /**
  * Names the store dispatches that no implemented engine arm handles. Each entry
@@ -69,6 +70,45 @@ const ALLOWED_UNROUTED: Record<string, string> = {
   remove_skeleton_2d: 'PF-1176 — needs pending field + apply system + arm',
   remove_game_camera: 'PF-1177 — needs pending field + apply system + arm',
 };
+
+/**
+ * Initial reverse-parity debt captured by PF-1189. These are deliberately a
+ * ratchet, not an assertion that the commands should stay caller-less: wiring
+ * any one makes its waiver stale and fails the suite until the name is removed.
+ */
+const UNDISPATCHED_AT_BASELINE = [
+  'get_animation_state', 'list_animations', 'get_animation_graph',
+  'get_audio', 'update_audio_bus', 'create_audio_bus', 'delete_audio_bus',
+  'get_audio_buses', 'set_bus_effects', 'get_reverb_zone',
+  'enter_edit_mode', 'exit_edit_mode', 'set_selection_mode', 'select_elements',
+  'mesh_operation', 'recalc_normals', 'get_game_components',
+  'list_game_component_types', 'mouse_delta', 'get_game_camera', 'get_shader',
+  'get_post_processing', 'get_mode', 'get_scene_graph', 'get_selection',
+  'get_entity_details', 'get_camera_state', 'get_particle', 'get_physics',
+  'apply_force', 'list_joints', 'set_physics2d', 'update_physics2d',
+  'toggle_physics2d', 'remove_physics2d', 'set_2d_collider_shape',
+  'set_2d_body_type', 'create_2d_joint', 'update_2d_joint', 'remove_2d_joint',
+  'apply_force2d', 'apply_impulse2d', 'raycast2d', 'get_physics2d',
+  'enable_physics_debug', 'disable_physics_debug', 'apply_impulse', 'raycast',
+  'get_joint', 'set_physics_2d_enabled', 'get_physics_2d', 'get_joint_2d',
+  'list_joints_2d', 'apply_force_2d', 'apply_impulse_2d', 'get_terrain',
+  'instantiate_prefab', 'get_quality_settings', 'list_assets', 'get_script',
+  'list_script_templates', 'apply_script_template', 'query_play_state',
+  'export_scene_json', 'import_scene_json', 'list_scene_assets', 'get_sprite',
+  'get_camera_2d', 'add_bone2d', 'remove_bone2d', 'update_bone2d',
+  'create_skeletal_animation2d', 'add_keyframe2d', 'play_skeletal_animation2d',
+  'set_skeleton2d_skin', 'create_ik_chain2d', 'get_skeleton2d',
+  'set_sorting_layers', 'get_sprite_sheet_state', 'get_sprite_animator_state',
+  'paint_tile', 'erase_tile', 'fill_tiles', 'set_grid_2d', 'resize',
+  'despawn_entity', 'orbit_camera', 'get_input_bindings', 'get_input_state',
+] as const;
+
+const ALLOWED_UNDISPATCHED: Record<string, string> = Object.fromEntries(
+  UNDISPATCHED_AT_BASELINE.map((name) => [
+    name,
+    'PF-1189 — implemented and routed, but no literal production browser dispatch at baseline',
+  ]),
+);
 
 /** Text of a brace-balanced block starting at `openIndex` (which must be a `{`). */
 function blockAt(source: string, openIndex: number): string {
@@ -237,10 +277,37 @@ function readStoreDispatches(): StoreDispatches {
   return { names, unreadable, fileCount: files.length };
 }
 
+function productionSources(dir: string): string[] {
+  const sources: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== '__tests__') sources.push(...productionSources(full));
+    } else if (/\.(?:ts|tsx)$/.test(entry.name) && !/\.(?:test|spec)\./.test(entry.name)) {
+      sources.push(readFileSync(full, 'utf8'));
+    }
+  }
+  return sources;
+}
+
+/** Commands passed at a literal browser dispatch call site outside tests. */
+function readBrowserDispatches(): Set<string> {
+  const names = new Set<string>();
+  for (const source of productionSources(WEB_SRC_DIR)) {
+    for (const match of source.matchAll(
+      /\b(?:dispatchCommand|engineDispatch|dispatch)\(\s*['"]([a-z0-9_]+)['"]/g,
+    )) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+
 describe('store command names have engine dispatch arms', () => {
   const arms = readEngineArms();
   const store = readStoreDispatches();
   const storeDispatches = store.names;
+  const browserDispatches = readBrowserDispatches();
 
   describe('the parsers actually parsed something', () => {
     it('read the engine command modules', () => {
@@ -378,5 +445,33 @@ describe('store command names have engine dispatch arms', () => {
       orphaned,
       'No store slice dispatches these any more — delete their ALLOWED_UNROUTED entries.',
     ).toEqual([]);
+  });
+
+  it('every routed engine command has a browser dispatch site or a reasoned waiver', () => {
+    const unreachable = [...arms.implemented]
+      .filter((name) => !browserDispatches.has(name))
+      .filter((name) => !Object.hasOwn(ALLOWED_UNDISPATCHED, name));
+    expect(
+      unreachable,
+      'These implemented, routed engine commands have no literal browser dispatch site. ' +
+        'Wire a caller or add an ALLOWED_UNDISPATCHED entry with a reason and ticket.',
+    ).toEqual([]);
+  });
+
+  it('every reverse-parity waiver carries a reason', () => {
+    const bare = Object.entries(ALLOWED_UNDISPATCHED)
+      .filter(([, reason]) => reason.trim().length < 20)
+      .map(([name]) => name);
+    expect(bare, 'A reverse-parity waiver without a real reason is not a waiver.').toEqual([]);
+  });
+
+  it('no reverse-parity waiver has gained a browser dispatch site', () => {
+    const stale = Object.keys(ALLOWED_UNDISPATCHED).filter((name) => browserDispatches.has(name));
+    expect(stale, 'These commands now have callers — delete their reverse-parity waivers.').toEqual([]);
+  });
+
+  it('no reverse-parity waiver names a command that stopped being implemented', () => {
+    const orphaned = Object.keys(ALLOWED_UNDISPATCHED).filter((name) => !arms.implemented.has(name));
+    expect(orphaned, 'These commands are no longer implemented — delete their waivers.').toEqual([]);
   });
 });
