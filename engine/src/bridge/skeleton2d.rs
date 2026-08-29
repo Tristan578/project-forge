@@ -33,11 +33,11 @@ pub(super) fn apply_skeleton2d_creates(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     mut history: ResMut<entity_factory::HistoryStack>,
-    entity_query: Query<(Entity, &EntityId, Option<&SkeletonData2d>)>,
+    entity_query: Query<(Entity, &EntityId, Option<&SkeletonData2d>, Option<&SkeletonEnabled2d>)>,
 ) {
     let requests: Vec<_> = pending.create_skeleton2d_requests.drain(..).collect();
     for request in requests {
-        if let Some((entity, _, old_skeleton)) = entity_query.iter().find(|(_, eid, _)| eid.0 == request.entity_id) {
+        if let Some((entity, _, old_skeleton, old_enabled)) = entity_query.iter().find(|(_, eid, _, _)| eid.0 == request.entity_id) {
             let old_skeleton = old_skeleton.cloned();
             commands.entity(entity).insert((
                 request.skeleton_data.clone(),
@@ -47,7 +47,9 @@ pub(super) fn apply_skeleton2d_creates(
             history.push(UndoableAction::SkeletonChange {
                 entity_id: request.entity_id.clone(),
                 old_skeleton,
+                old_enabled: old_enabled.is_some(),
                 new_skeleton: Some(request.skeleton_data.clone()),
+                new_enabled: true,
             });
 
             events::emit_skeleton2d_updated(&request.entity_id, &request.skeleton_data, true);
@@ -71,7 +73,7 @@ pub(super) fn apply_skeleton2d_removes(
     let mut removed: Vec<String> = Vec::new();
 
     for request in requests {
-        if let Some((entity, _, skeleton_data, _)) = skeleton_query.iter().find(|(_, eid, _, _)| eid.0 == request.entity_id) {
+        if let Some((entity, _, skeleton_data, enabled)) = skeleton_query.iter().find(|(_, eid, _, _)| eid.0 == request.entity_id) {
             let old_skeleton = skeleton_data.clone();
             commands.entity(entity).remove::<SkeletonData2d>();
             commands.entity(entity).remove::<SkeletonEnabled2d>();
@@ -81,7 +83,9 @@ pub(super) fn apply_skeleton2d_removes(
             history.push(UndoableAction::SkeletonChange {
                 entity_id: request.entity_id.clone(),
                 old_skeleton: Some(old_skeleton),
+                old_enabled: enabled.is_some(),
                 new_skeleton: None,
+                new_enabled: false,
             });
 
             // Every other skeleton mutator emits; without this one the browser
@@ -100,16 +104,7 @@ pub(super) fn apply_skeleton2d_removes(
             continue;
         }
         match &resync.data {
-            // Enablement is read live rather than carried: the restoring arm
-            // leaves `SkeletonEnabled2d` untouched, so it is never one of the
-            // deferred writes this drain would race.
-            Some(data) => {
-                let enabled = skeleton_query
-                    .iter()
-                    .find(|(_, eid, _, _)| eid.0 == resync.entity_id)
-                    .is_some_and(|(_, _, _, marker)| marker.is_some());
-                events::emit_skeleton2d_updated(&resync.entity_id, data, enabled);
-            }
+            Some(data) => events::emit_skeleton2d_updated(&resync.entity_id, data, resync.enabled),
             None => events::emit_skeleton2d_removed(&resync.entity_id),
         }
     }
@@ -134,7 +129,9 @@ pub(super) fn apply_bone2d_adds(
             history.push(UndoableAction::SkeletonChange {
                 entity_id: request.entity_id.clone(),
                 old_skeleton: Some(old_skeleton),
+                old_enabled: enabled.is_some(),
                 new_skeleton: Some(skeleton_data.clone()),
+                new_enabled: enabled.is_some(),
             });
 
             events::emit_skeleton2d_updated(&request.entity_id, &skeleton_data, enabled.is_some());
@@ -163,7 +160,9 @@ pub(super) fn apply_bone2d_removes(
             history.push(UndoableAction::SkeletonChange {
                 entity_id: request.entity_id.clone(),
                 old_skeleton: Some(old_skeleton),
+                old_enabled: enabled.is_some(),
                 new_skeleton: Some(skeleton_data.clone()),
+                new_enabled: enabled.is_some(),
             });
 
             events::emit_skeleton2d_updated(&request.entity_id, &skeleton_data, enabled.is_some());
@@ -203,7 +202,9 @@ pub(super) fn apply_bone2d_updates(
             history.push(UndoableAction::SkeletonChange {
                 entity_id: request.entity_id.clone(),
                 old_skeleton: Some(old_skeleton),
+                old_enabled: enabled.is_some(),
                 new_skeleton: Some(skeleton_data.clone()),
+                new_enabled: enabled.is_some(),
             });
 
             events::emit_skeleton2d_updated(&request.entity_id, &skeleton_data, enabled.is_some());

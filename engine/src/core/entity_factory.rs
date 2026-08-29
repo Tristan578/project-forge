@@ -2065,12 +2065,16 @@ fn execute_undo(
                 }
             }
         }
-        UndoableAction::SkeletonChange { entity_id, old_skeleton, .. } => {
+        UndoableAction::SkeletonChange { entity_id, old_skeleton, old_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref sk) = old_skeleton {
-                        // Data only — same rule as `TilemapChange` above.
                         commands.entity(entity).insert(sk.clone());
+                        if *old_enabled {
+                            commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+                        } else {
+                            commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                        }
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
@@ -2085,6 +2089,7 @@ fn execute_undo(
                         super::skeleton2d::Skeleton2dResync {
                             entity_id: entity_id.clone(),
                             data: old_skeleton.clone(),
+                            enabled: *old_enabled,
                         },
                     );
                     break;
@@ -2450,12 +2455,16 @@ fn execute_redo(
                 }
             }
         }
-        UndoableAction::SkeletonChange { entity_id, new_skeleton, .. } => {
+        UndoableAction::SkeletonChange { entity_id, new_skeleton, new_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref sk) = new_skeleton {
-                        // Data only — see the undo arm.
                         commands.entity(entity).insert(sk.clone());
+                        if *new_enabled {
+                            commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+                        } else {
+                            commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                        }
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
@@ -2465,6 +2474,7 @@ fn execute_redo(
                         super::skeleton2d::Skeleton2dResync {
                             entity_id: entity_id.clone(),
                             data: new_skeleton.clone(),
+                            enabled: *new_enabled,
                         },
                     );
                     break;
@@ -5235,12 +5245,16 @@ mod tilemap_skeleton2d_history_tests {
         world: &mut World,
         id: &str,
         old: Option<SkeletonData2d>,
+        old_enabled: bool,
         new: Option<SkeletonData2d>,
+        new_enabled: bool,
     ) {
         world.resource_mut::<HistoryStack>().push(UndoableAction::SkeletonChange {
             entity_id: id.to_string(),
             old_skeleton: old,
+            old_enabled,
             new_skeleton: new,
+            new_enabled,
         });
     }
 
@@ -5253,7 +5267,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("armor"),
             false,
         );
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), false, Some(skeleton("armor")), false);
 
         undo(&mut world);
 
@@ -5279,7 +5293,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("armor"),
             false,
         );
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), false, Some(skeleton("armor")), false);
 
         undo(&mut world);
         redo(&mut world);
@@ -5305,7 +5319,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("armor"),
             true,
         );
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), true, Some(skeleton("armor")), true);
 
         undo(&mut world);
         assert_eq!(active_skin_of(&world, entity), "cloth");
@@ -5331,7 +5345,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("armor"),
             true,
         );
-        record_skeleton_edit(&mut world, "rig-1", None, Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", None, false, Some(skeleton("armor")), true);
 
         undo(&mut world);
 
@@ -5354,7 +5368,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("cloth"),
             true,
         );
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), None);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), true, None, false);
 
         undo(&mut world);
         redo(&mut world);
@@ -5403,7 +5417,7 @@ mod tilemap_skeleton2d_history_tests {
     fn undoing_a_skeleton_creation_queues_a_removal_resync() {
         let mut world = base_world();
         let _ = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
-        record_skeleton_edit(&mut world, "rig-1", None, Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", None, false, Some(skeleton("armor")), true);
 
         let queued = skeleton_resyncs_from(|| undo(&mut world));
 
@@ -5413,6 +5427,7 @@ mod tilemap_skeleton2d_history_tests {
             queued[0].data.is_none(),
             "undoing a creation wrote NO rig, so the resync must report a removal",
         );
+        assert!(!queued[0].enabled, "a removed rig cannot remain enabled");
     }
 
     /// Undo carries the pre-state and redo the post-state, and each resync
@@ -5422,7 +5437,7 @@ mod tilemap_skeleton2d_history_tests {
     fn undo_and_redo_of_a_skeleton_removal_queue_the_state_each_one_wrote() {
         let mut world = base_world();
         let _ = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), None);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), true, None, false);
 
         let undone = skeleton_resyncs_from(|| undo(&mut world));
         assert_eq!(undone.len(), 1);
@@ -5433,6 +5448,7 @@ mod tilemap_skeleton2d_history_tests {
             2,
             "the resync must carry the recorded struct, not a default one",
         );
+        assert!(undone[0].enabled, "undo must restore the removal's enabled marker");
 
         let redone = skeleton_resyncs_from(|| redo(&mut world));
         assert_eq!(redone.len(), 1);
@@ -5440,6 +5456,7 @@ mod tilemap_skeleton2d_history_tests {
             redone[0].data.is_none(),
             "redoing a removal wrote NO rig, so the resync must report a removal",
         );
+        assert!(!redone[0].enabled, "redoing removal must clear enablement");
     }
 }
 

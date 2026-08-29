@@ -230,15 +230,14 @@ pub fn compute_bone_world_positions(bones: &[Bone2dDef]) -> HashMap<String, [f32
 /// same unordered tuple and both write through a deferred `Commands`, so a
 /// re-query in the same frame can still observe pre-undo data.
 ///
-/// Enablement is deliberately NOT carried. `SkeletonChange` records only the
-/// data halves, and the restoring arms leave `SkeletonEnabled2d` untouched
-/// whenever they restore a rig — so the marker is never one of the deferred
-/// writes, and the drain reading it live is the only way to report it correctly.
 #[derive(Debug, Clone)]
 pub struct Skeleton2dResync {
     pub entity_id: String,
     /// `Some` — the rig that was restored. `None` — the rig was removed.
     pub data: Option<SkeletonData2d>,
+    /// The exact marker state written by undo/redo. Carrying it avoids racing
+    /// the deferred ECS commands when the bridge drains this queue.
+    pub enabled: bool,
 }
 
 #[cfg(test)]
