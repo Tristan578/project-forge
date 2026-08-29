@@ -84,10 +84,45 @@ use super::sprite::SortingLayerConfig;
 use super::terrain::TerrainChangeEvents;
 use super::tilemap::Grid2dConfig;
 
-/// The 16 `core::*` plugins the production bridge registers, plus the
-/// bridge's own `SelectionPlugin`, make 17 — the baseline plugin count this
-/// module's coverage is checked against (see `assert_exclusion_list_is_exhaustive`).
-const TOTAL_PLUGIN_COUNT: usize = 17;
+/// The production plugin roster, read from the real source rather than
+/// restated as a number.
+///
+/// `bridge/mod.rs` is `#[cfg(target_arch = "wasm32")]`-gated at the crate root,
+/// so it is never *compiled* into this native test — but `include_str!` reads
+/// the file regardless of cfg. That is what lets the exhaustiveness assertion
+/// below compare against what production actually registers today instead of
+/// against a hand-maintained count that agrees with itself by construction.
+const BRIDGE_SRC: &str = include_str!("../bridge/mod.rs");
+
+/// Plugins `bridge::init_engine` registers that belong to Bevy or a dependency.
+/// They carry none of our `core::*` systems, so they are not what this module's
+/// coverage is measured against. `DefaultPlugins` is absent on purpose: it is
+/// registered as a builder chain (`DefaultPlugins.set(...)`), not a bare path,
+/// so the parser below never sees it as a candidate at all.
+const THIRD_PARTY_PLUGINS: &[&str] = &["MeshPickingPlugin", "HanabiPlugin"];
+
+/// The first-party plugins `build_full_app` registers for real, spelled the way
+/// `bridge/mod.rs` spells them (this module imports two of them under aliases —
+/// `ForgeMaterialPlugin`, `ForgeInputPlugin` — because `core::material` and
+/// `core::input` shadow Bevy's own types).
+const REGISTERED_PLUGINS: &[&str] = &[
+    "AnimationPlugin",
+    "CameraControlPlugin",
+    "CustomWgslPlugin",
+    "EnvironmentPlugin",
+    "ForgeGizmoPlugin",
+    "GameCameraPlugin",
+    "GameComponentsPlugin",
+    "InputPlugin",
+    "LightingPlugin",
+    "MaterialPlugin",
+    "ObservabilityPlugin",
+    "Physics2dPlugin",
+    "PhysicsPlugin",
+    "PostProcessingPlugin",
+    "ShaderEffectsPlugin",
+    "SnapPlugin",
+];
 
 /// Plugins this native test cannot register, with the one-line reason each.
 /// Every plugin NOT listed here is registered for real below — this list is
@@ -100,15 +135,87 @@ const UNREGISTERED_PLUGINS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Every first-party plugin `bridge/mod.rs` registers, by bare name.
+///
+/// Deliberately conservative: it counts only `add_plugins(<path>)` where the
+/// argument is a single bare path expression, which is the only form the file
+/// uses. A tuple registration would slip past it silently and make the
+/// exhaustiveness check under-count, so that form is rejected outright rather
+/// than quietly tolerated.
+fn production_first_party_plugins() -> Vec<String> {
+    assert!(
+        !BRIDGE_SRC.contains("add_plugins(("),
+        "bridge/mod.rs now registers a plugin TUPLE. This parser only understands \
+         one plugin per `add_plugins` call and would silently under-count, which \
+         would turn the exhaustiveness assertion below into a test that passes \
+         because it looked at nothing. Extend the parser first."
+    );
+
+    let mut found: Vec<String> = Vec::new();
+    for chunk in BRIDGE_SRC.split("add_plugins(").skip(1) {
+        let Some(end) = chunk.find(')') else { continue };
+        let arg = chunk[..end].trim();
+        // Only a bare path is a registration we can attribute. Builder chains
+        // (`DefaultPlugins.set(..)`) and struct literals contain characters
+        // this rejects, so they are skipped rather than misread.
+        if arg.is_empty() || !arg.chars().all(|c| c.is_alphanumeric() || c == '_' || c == ':') {
+            continue;
+        }
+        let name = arg.rsplit("::").next().unwrap_or(arg);
+        if THIRD_PARTY_PLUGINS.contains(&name) {
+            continue;
+        }
+        found.push(name.to_string());
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Fails when production gains or loses a plugin without this module following.
+///
+/// This is the assertion that has to be non-vacuous: the regression it guards
+/// (#8661/PF-837) shipped precisely because the production app changed while a
+/// test kept measuring an older shape. It therefore compares plugin *names*
+/// parsed out of `bridge/mod.rs` against the union of what `build_full_app`
+/// registers and what `UNREGISTERED_PLUGINS` excuses — never a count against a
+/// count.
 #[test]
 fn assert_exclusion_list_is_exhaustive() {
-    // 16 core plugins registered below + the 1 wasm-only plugin listed above
-    // must account for every plugin in the production app.
-    assert_eq!(
-        16 + UNREGISTERED_PLUGINS.len(),
-        TOTAL_PLUGIN_COUNT,
-        "a plugin was added to or removed from the production app without \
-         updating this test's coverage or its UNREGISTERED_PLUGINS reasons"
+    let production = production_first_party_plugins();
+    assert!(
+        !production.is_empty(),
+        "parsed zero plugins out of bridge/mod.rs — the registration shape changed \
+         and this check is now measuring nothing"
+    );
+
+    let mut accounted: Vec<&str> = REGISTERED_PLUGINS.to_vec();
+    accounted.extend(
+        UNREGISTERED_PLUGINS
+            .iter()
+            .map(|(name, _)| name.rsplit("::").next().unwrap_or(name)),
+    );
+
+    let unaccounted: Vec<&String> = production
+        .iter()
+        .filter(|p| !accounted.contains(&p.as_str()))
+        .collect();
+    assert!(
+        unaccounted.is_empty(),
+        "bridge/mod.rs registers {unaccounted:?}, which this test neither builds \
+         into `build_full_app` nor excuses in UNREGISTERED_PLUGINS. Its schedule \
+         is therefore NOT the production schedule. Add the plugin to \
+         `build_full_app` (preferred) or record why it cannot be reached natively."
+    );
+
+    let stale: Vec<&&str> = accounted
+        .iter()
+        .filter(|a| !production.iter().any(|p| p == *a))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "this test still accounts for {stale:?}, which bridge/mod.rs no longer \
+         registers. Drop them so the coverage claim stays true."
     );
 }
 
