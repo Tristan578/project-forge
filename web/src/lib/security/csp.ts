@@ -87,7 +87,12 @@ export interface CspOptions {
   allowUnsafeEval: boolean;
   /** Optional engine CDN origin to allow for `script-src` / `connect-src`. */
   engineCdn?: string;
+  /** Clerk publishable key, used to derive the deployment's exact Clerk host. */
+  clerkPublishableKey?: string;
 }
+
+const FALLBACK_CLERK_ORIGINS =
+  'https://*.clerk.accounts.dev https://clerk.spawnforge.ai';
 
 /**
  * Build the application Content-Security-Policy header value.
@@ -96,9 +101,21 @@ export interface CspOptions {
  * the presence of the `'unsafe-eval'` token in `script-src` — keeping the delta
  * to a single token minimizes the blast radius of per-route scoping.
  */
-export function buildContentSecurityPolicy({ allowUnsafeEval, engineCdn = '' }: CspOptions): string {
+export function buildContentSecurityPolicy({
+  allowUnsafeEval,
+  engineCdn = '',
+  clerkPublishableKey,
+}: CspOptions): string {
   const cdnDirective = engineCdn ? ` ${engineCdn}` : '';
   const evalToken = allowUnsafeEval ? " 'unsafe-eval'" : '';
+  const clerkHost = clerkFrontendApiFromPublishableKey(clerkPublishableKey);
+  // Unlike /play, the global policy must remain usable when configuration is
+  // absent or malformed: static pages can still render Clerk sign-in widgets
+  // from the established development and production origins.
+  const clerkOrigins = clerkHost ? `https://${clerkHost}` : FALLBACK_CLERK_ORIGINS;
+  // Preserve the narrower legacy image fallback: Clerk development assets use
+  // img.clerk.com, so the accounts.dev wildcard is unnecessary in img-src.
+  const clerkImageOrigin = clerkHost ? `https://${clerkHost}` : 'https://clerk.spawnforge.ai';
 
   const directives = [
     "default-src 'self'",
@@ -106,12 +123,12 @@ export function buildContentSecurityPolicy({ allowUnsafeEval, engineCdn = '' }: 
     // required by the same-origin script-sandbox worker's Function() compiler on
     // editor routes, NOT by WASM (WASM uses 'wasm-unsafe-eval'). 'unsafe-inline'
     // is required by Clerk + Next.js inline framework scripts.
-    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com${cdnDirective}`,
+    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' ${clerkOrigins} https://challenges.cloudflare.com${cdnDirective}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://img.clerk.com https://clerk.spawnforge.ai",
+    `img-src 'self' data: blob: https://img.clerk.com ${clerkImageOrigin}`,
     "font-src 'self' data:",
-    `connect-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
-    "frame-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com",
+    `connect-src 'self' ${clerkOrigins} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
+    `frame-src 'self' ${clerkOrigins} https://challenges.cloudflare.com`,
     "worker-src 'self' blob:",
     "media-src 'self' blob:",
     "form-action 'self'",
@@ -350,10 +367,18 @@ export function buildCspRouteRules({
   clerkPublishableKey,
   devUnsafeEval = isDevEvalAllowed(),
 }: Omit<PlayCspOptions, 'nonce'> = {}): CspRouteRule[] {
-  const globalCsp = buildContentSecurityPolicy({ allowUnsafeEval: true, engineCdn });
+  const globalCsp = buildContentSecurityPolicy({
+    allowUnsafeEval: true,
+    engineCdn,
+    clerkPublishableKey,
+  });
   // The eval-free routes drop 'unsafe-eval' in every real build; under the dev
   // server they must keep it or Fast Refresh's eval aborts hydration.
-  const evalFreeCsp = buildContentSecurityPolicy({ allowUnsafeEval: devUnsafeEval, engineCdn });
+  const evalFreeCsp = buildContentSecurityPolicy({
+    allowUnsafeEval: devUnsafeEval,
+    engineCdn,
+    clerkPublishableKey,
+  });
   // No nonce: a static `headers()` rule cannot carry a per-request value. The
   // proxy emits the nonce-bearing policy that supersedes this one on /play.
   const playCsp = buildPlayContentSecurityPolicy({ engineCdn, clerkPublishableKey, devUnsafeEval });
