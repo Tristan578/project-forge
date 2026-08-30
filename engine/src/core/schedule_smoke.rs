@@ -62,6 +62,8 @@ use super::engine_mode::{EngineMode, SceneSnapshot};
 use super::environment::{EnvironmentPlugin, SkyboxHandles};
 use super::game_camera::GameCameraPlugin;
 use super::game_components::GameComponentsPlugin;
+// Editor-only, matching the gate on the `add_plugins` call below.
+#[cfg(not(feature = "runtime"))]
 use super::gizmo::ForgeGizmoPlugin;
 use super::history::HistoryStack;
 use super::input::InputPlugin as ForgeInputPlugin;
@@ -79,6 +81,8 @@ use super::scene_file::SceneName;
 use super::scene_graph::SceneGraphCache;
 use super::selection::{Selection, SelectionChangedEvent};
 use super::shader_effects::ShaderEffectsPlugin;
+// Editor-only, matching the gate on the `add_plugins` call below.
+#[cfg(not(feature = "runtime"))]
 use super::snap::SnapPlugin;
 use super::sprite::SortingLayerConfig;
 use super::terrain::TerrainChangeEvents;

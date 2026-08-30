@@ -5,15 +5,26 @@ use bevy::mesh::Mesh2d;
 use bevy::sprite_render::{ColorMaterial, MeshMaterial2d};
 use crate::core::{
     entity_id::EntityId,
-    entity_factory,
-    pending_commands::{PendingCommands, QueryRequest},
     skeleton2d::{
         SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d, AttachmentData,
         SkinnedMesh2d, BoneWorldTransforms2d, VertexWeights, SkinnedMeshInitialized,
     },
     skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d, EasingType2d, BoneKeyframe},
+};
+
+// Editor-only imports. The rig appliers, the query handler and the selection
+// emit are all `#[cfg(not(feature = "runtime"))]`; what survives in a runtime
+// build is the animation/skinning half (`advance_skeleton_animation`,
+// `init_skinned_meshes_2d`, `compute_bone_world_transforms_2d`,
+// `apply_vertex_skinning_2d`, `solve_ik_constraints_2d`), which touches none of
+// these names.
+#[cfg(not(feature = "runtime"))]
+use crate::core::{
+    entity_factory,
+    pending_commands::{PendingCommands, QueryRequest},
     history::UndoableAction,
 };
+#[cfg(not(feature = "runtime"))]
 use crate::bridge::{events, Selection, SelectionChangedEvent};
 use std::collections::HashMap;
 
@@ -376,6 +387,7 @@ pub(super) fn apply_auto_weight_skeleton2d(
 }
 
 /// Compute distance-based vertex weights with optional smoothing iterations.
+#[cfg(not(feature = "runtime"))]
 fn compute_linear_weights(
     vertices: &[[f32; 2]],
     bones: &[crate::core::skeleton2d::Bone2dDef],
@@ -1102,7 +1114,9 @@ pub(super) fn emit_skeleton2d_on_selection(
     }
 }
 
-#[cfg(test)]
+// Every assertion here drives a `runtime`-gated applier, so the module must
+// carry the same gate or `--all-targets --features ...,runtime` stops compiling.
+#[cfg(all(test, not(feature = "runtime")))]
 mod tests {
     use super::*;
     use crate::core::skeleton2d::{Bone2dDef, VertexWeights};
