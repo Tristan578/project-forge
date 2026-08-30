@@ -161,6 +161,29 @@ describe("call sites", () => {
     ).toMatch(/^assertClerkPublishableKeyShape\(\);$/m);
   });
 
+  it("a fresh copy of .env.example still builds", () => {
+    // README tells newcomers to `cp web/.env.example web/.env.local`. Because
+    // this guard runs in next.config.ts, a placeholder left in that template
+    // would fail `next dev` outright — the quick start would exit before
+    // serving anything. Every other placeholder in the file is inert; this one
+    // is not, so it ships commented out and this test is what keeps it that
+    // way.
+    const example = read(".env.example");
+    const line = example
+      .split(/\r?\n/)
+      .find((l) => /^\s*NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\s*=/.test(l));
+
+    if (line === undefined) return; // absent is a supported state
+
+    const value = line.slice(line.indexOf("=") + 1).trim();
+    expect(
+      () => assertClerkPublishableKeyShape(value),
+      `web/.env.example sets NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${value}, which the ` +
+        "build rejects. Copying the template would break `npm run dev` for every new " +
+        "contributor. Comment the line out, or use a real key.",
+    ).not.toThrow();
+  });
+
   it("layout.tsx gates <ClerkProvider> on the shared predicate", () => {
     const layout = read("src", "app", "layout.tsx");
     const code = layout.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
