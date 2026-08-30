@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { injectWasmPreloadHint } from '@/lib/wasm/preloadHint';
 import dynamic from 'next/dynamic';
 
@@ -14,11 +14,14 @@ import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 import { EditorErrorBoundary } from '@/components/editor/EditorErrorBoundary';
 import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
 import { EngineCrashOverlay } from '@/components/editor/EngineCrashOverlay';
+import { RemixQuarantineNotice } from '@/components/editor/RemixQuarantineNotice';
 
 export default function EditorPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = params.id as string;
+  const quarantinedScripts = Number.parseInt(searchParams.get('quarantinedScripts') ?? '0', 10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const setProjectId = useEditorStore((s) => s.setProjectId);
@@ -71,6 +74,7 @@ export default function EditorPage() {
     <EditorErrorBoundary>
       <WasmErrorBoundary>
         <EngineCrashOverlay />
+        <RemixQuarantineNotice count={quarantinedScripts} />
         <EditorLayout />
       </WasmErrorBoundary>
     </EditorErrorBoundary>
