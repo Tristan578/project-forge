@@ -278,14 +278,23 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
 
   let consoleErrors: string[] = [];
   let pageErrors: string[] = [];
+  /**
+   * Diagnostics only — never asserted on, so it cannot weaken a gate.
+   * The engine answers an unknown entity id at `warn`, not `error`, so
+   * `consoleErrors` alone cannot see the single most useful line when a step
+   * fails with ENTITY_NOT_FOUND.
+   */
+  let consoleWarnings: string[] = [];
 
   test.beforeEach(async ({ page, editor }) => {
     consoleErrors = [];
     pageErrors = [];
+    consoleWarnings = [];
     // Registered before the first navigation, so these cover the whole test
     // including engine boot — see `expectNoEngineRejections`.
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
+      if (msg.type() === 'warning') consoleWarnings.push(msg.text());
     });
     page.on('pageerror', (err) => pageErrors.push(err.message));
     await editor.load();
@@ -338,7 +347,15 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     expect(
       terminalStatus,
       `pipeline did not complete: ${outcome.orchestratorError ?? 'no error recorded'}` +
-        ` / sceneGraph nodes: ${outcome.nodeCount}` +
+        ` / sceneGraph nodes (${outcome.nodeCount}): ${JSON.stringify(outcome.nodeIds)}` +
+        // The engine answers an unknown id by ignoring the command and writing
+        // a line, never by failing the dispatch — so when a step cannot find an
+        // entity, these lines are the only record of the engine's side of it.
+        ` / engine complaints: ${JSON.stringify(
+          [...consoleErrors, ...consoleWarnings]
+            .filter(l => /Engine rejected command|no entity with id|ignored/.test(l))
+            .slice(0, 20)
+        )}` +
         ` / ${JSON.stringify(outcome.steps)}`
     ).toBe('completed');
     expect(outcome.planStatus).toBe('completed');
