@@ -94,7 +94,7 @@ type PipelineState = {
     }>;
   } | null;
   engineMode: string;
-  sceneGraph: { nodes: Record<string, unknown> };
+  sceneGraph: { nodes: Record<string, { name?: string }> };
   startDecomposition: (prompt: string, projectType: string) => Promise<void>;
   runPipelineFromPlan: () => Promise<void>;
   resolveGate: (decision: 'approved' | 'rejected') => void;
@@ -259,11 +259,12 @@ function readOutcome(page: import('@playwright/test').Page) {
         ...(s.error ? { errorCode: s.error.code, errorMessage: s.error.message } : {}),
       })),
       nodeCount: Object.keys(state.sceneGraph?.nodes ?? {}).length,
-      // The ids themselves, because the failure this diagnoses is
-      // `ENTITY_NOT_FOUND` against a NON-empty graph: the count alone
-      // cannot say whether the graph holds the wrong entities or is
-      // merely one short. The fixture spawns single digits of them.
-      nodeIds: Object.keys(state.sceneGraph?.nodes ?? {}),
+      // The NAMES, not the ids, because the failure this diagnoses is
+      // `ENTITY_NOT_FOUND` against a NON-empty graph and every id in the plan
+      // is a runtime-minted UUID: a list of ten UUIDs says only "not this one",
+      // while the names say exactly which of the fourteen planned spawns
+      // reached the engine and which never did.
+      nodeNames: Object.values(state.sceneGraph?.nodes ?? {}).map(n => n?.name ?? '?'),
       engineMode: state.engineMode,
     };
   });
@@ -347,7 +348,7 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     expect(
       terminalStatus,
       `pipeline did not complete: ${outcome.orchestratorError ?? 'no error recorded'}` +
-        ` / sceneGraph nodes (${outcome.nodeCount}): ${JSON.stringify(outcome.nodeIds)}` +
+        ` / sceneGraph nodes (${outcome.nodeCount}): ${JSON.stringify(outcome.nodeNames)}` +
         // The engine answers an unknown id by ignoring the command and writing
         // a line, never by failing the dispatch — so when a step cannot find an
         // entity, these lines are the only record of the engine's side of it.
