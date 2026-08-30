@@ -26,7 +26,12 @@
  * server and in the browser bundle.
  */
 
-import { clerkFrontendApiFromPublishableKey } from "@/lib/security/csp";
+// Relative, NOT the `@/` alias. This module is imported by next.config.ts, and
+// Next loads that config outside the tsconfig path-mapping context — an `@/`
+// specifier there resolves against this file's own directory and the build dies
+// with "Cannot find module './src/lib/security/csp'". next.config.ts itself uses
+// relative specifiers for the same reason.
+import { clerkFrontendApiFromPublishableKey } from "../security/csp";
 
 /** Prefixes Clerk accepts for a publishable key. */
 const VALID_PREFIXES = ["pk_test_", "pk_live_"] as const;
