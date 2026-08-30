@@ -157,6 +157,12 @@ const noEmptyTestAssertion = {
  *  - Test directories and `*.{test,spec}.*` build and index tree maps as
  *    fixtures — the scanner's own corpus deliberately contains the unsafe
  *    shape. The scan skips these by walking around them.
+ *
+ * One asymmetry is deliberate and stated rather than reconciled: the scan also
+ * skips `*.d.ts`, which is NOT exempt here. A declaration file holds no
+ * executable expression, so this rule can never fire in one — the asymmetry is
+ * provably inert, and narrowing the rule to match would only add a glob nobody
+ * can trip.
  */
 const DIALOGUE_TREE_INDEX_EXEMPT = [
   'src/stores/dialogueStore.ts',

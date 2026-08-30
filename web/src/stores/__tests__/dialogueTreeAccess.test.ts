@@ -23,7 +23,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { stripComments } from '@/test/utils/importScanner';
 
@@ -65,6 +66,12 @@ function collectSourceFiles(dir: string): string[] {
     } else if (
       (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))
       && !entry.name.includes('.test.')
+      // `.spec.` is exempt from the lint rule (PF-1151's
+      // `src/**/*.{test,spec}.{ts,tsx}`), so the scan has to skip it too or the
+      // two mechanisms disagree the moment anyone adds a `.spec.` file: policed
+      // here, exempt there. There are none in the tree today, which is exactly
+      // why this was easy to miss.
+      && !entry.name.includes('.spec.')
       && !entry.name.endsWith('.d.ts')
     ) {
       out.push(full);
@@ -264,6 +271,41 @@ describe('dialogue tree access — lint rule / scan agreement', () => {
         + 'the store is skipped explicitly) and update EXPECTED_EXEMPTIONS here — '
         + 'do not just re-pin the number.',
     ).toEqual(EXPECTED_EXEMPTIONS);
+  });
+
+  it('the walk skips every exempt shape, including ones absent from the tree', () => {
+    // Driven against a synthetic corpus rather than the real tree. `src/` has no
+    // `.spec.` file today, so asserting "the walk returned no .spec. files" over
+    // the real tree passes whether or not the filter exists — which is how the
+    // `.spec.` gap got here in the first place: the lint rule exempted it, the
+    // walk did not, and nothing could tell.
+    const root = mkdtempSync(join(tmpdir(), 'dta-'));
+    try {
+      mkdirSync(join(root, '__tests__'));
+      mkdirSync(join(root, 'test'));
+      mkdirSync(join(root, 'nested'));
+      const files = [
+        'keep.ts',
+        'keep.tsx',
+        'nested/keep.ts',
+        'skip.test.ts',
+        'skip.spec.ts',
+        'skip.spec.tsx',
+        'skip.d.ts',
+        'skip.js',
+        '__tests__/skip.ts',
+        'test/skip.ts',
+      ];
+      for (const f of files) writeFileSync(join(root, f), '// fixture\n');
+
+      const walked = collectSourceFiles(root)
+        .map((f) => relative(root, f).replace(/\\/g, '/'))
+        .sort();
+
+      expect(walked).toEqual(['keep.ts', 'keep.tsx', 'nested/keep.ts']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('the scan really does skip everything the rule exempts', () => {
