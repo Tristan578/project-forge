@@ -83,7 +83,15 @@ type PipelineState = {
   pendingGate: { id: string } | null;
   currentPlan: {
     status: string;
-    steps: Array<{ id: string; executor: string; status: string }>;
+    steps: Array<{
+      id: string;
+      executor: string;
+      status: string;
+      // Mirrors `OrchestratorStepError` — only the two fields the
+      // failure message prints, kept optional because a passing step
+      // carries none.
+      error?: { code: string; message: string };
+    }>;
   } | null;
   engineMode: string;
   sceneGraph: { nodes: Record<string, unknown> };
@@ -241,11 +249,21 @@ function readOutcome(page: import('@playwright/test').Page) {
       orchestratorStatus: state.orchestratorStatus,
       orchestratorError: state.orchestratorError,
       planStatus: state.currentPlan?.status ?? null,
+      // `error` is carried, not just `status`: a red gate whose message is
+      // only `{"executor":"game_component","status":"failed"}` names the step
+      // and nothing about why, which cost a full CI cycle per hypothesis. The
+      // executor already recorded a code and a message — print them.
       steps: (state.currentPlan?.steps ?? []).map(s => ({
         executor: s.executor,
         status: s.status,
+        ...(s.error ? { errorCode: s.error.code, errorMessage: s.error.message } : {}),
       })),
       nodeCount: Object.keys(state.sceneGraph?.nodes ?? {}).length,
+      // The ids themselves, because the failure this diagnoses is
+      // `ENTITY_NOT_FOUND` against a NON-empty graph: the count alone
+      // cannot say whether the graph holds the wrong entities or is
+      // merely one short. The fixture spawns single digits of them.
+      nodeIds: Object.keys(state.sceneGraph?.nodes ?? {}),
       engineMode: state.engineMode,
     };
   });
@@ -319,7 +337,9 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     const outcome = await readOutcome(page);
     expect(
       terminalStatus,
-      `pipeline did not complete: ${outcome.orchestratorError ?? 'no error recorded'} / ${JSON.stringify(outcome.steps)}`
+      `pipeline did not complete: ${outcome.orchestratorError ?? 'no error recorded'}` +
+        ` / sceneGraph nodes: ${outcome.nodeCount}` +
+        ` / ${JSON.stringify(outcome.steps)}`
     ).toBe('completed');
     expect(outcome.planStatus).toBe('completed');
 
