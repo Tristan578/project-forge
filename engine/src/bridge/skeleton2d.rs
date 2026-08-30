@@ -1139,9 +1139,10 @@ mod tests {
     /// still leave the ECS alone — the write and the history entry belong to the
     /// undo arm, and a resync that mutated anything would double-apply them.
     ///
-    /// This does not assert the emitted `enabled` flag: `emit_event` needs a JS
-    /// callback and is a no-op natively. What it pins is that reaching the
-    /// enablement marker no longer depends on the rig data being present.
+    /// This does not assert the emitted payload: `emit_event` needs a JS callback
+    /// and is a no-op natively. What it pins is that the drain reports state
+    /// without depending on the raced rig data having landed — the resync now
+    /// carries both halves, so nothing here reads the world to build the event.
     #[test]
     fn a_resync_for_a_rig_not_yet_reinserted_drains_without_touching_the_world() {
         let mut app = App::new();
@@ -1160,6 +1161,7 @@ mod tests {
             .push(crate::core::skeleton2d::Skeleton2dResync {
                 entity_id: "rig-1".to_string(),
                 data: Some(SkeletonData2d::default()),
+                enabled: true,
             });
 
         app.update();
