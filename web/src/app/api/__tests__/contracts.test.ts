@@ -1241,7 +1241,7 @@ describe('OpenAPI contract — real route responses', () => {
     vi.mocked(getUserByClerkId).mockResolvedValueOnce({ id: DB_USER_ID } as never);
   }
 
-  it('GET /api/publish/list 200 leaks four undocumented columns per publication', async () => {
+  it('GET /api/publish/list 200 returns exactly the documented Publication fields', async () => {
     await authenticateClerk();
     await stubQueries([makePublishedRow('published')]);
 
@@ -1249,18 +1249,10 @@ describe('OpenAPI contract — real route responses', () => {
     const res = await GET();
 
     expect(res.status).toBe(200);
-    // DRIFT: the route spreads the whole DB row (`...p`) into the response, so
-    // internal columns ship to the client. `userId` is the one that matters —
-    // it exposes another table's primary key to anyone who calls the endpoint.
-    expectContract('get', '/api/publish/list', 200, await res.json(), [
-      'undocumented $.publications[0].cdnUrl',
-      'undocumented $.publications[0].playCount',
-      'undocumented $.publications[0].thumbnail',
-      'undocumented $.publications[0].userId',
-    ]);
+    expectContract('get', '/api/publish/list', 200, await res.json());
   });
 
-  it('GET /api/publish/list 200 VIOLATES the Publication schema for a processing publication', async () => {
+  it('GET /api/publish/list 200 documents a processing publication', async () => {
     await authenticateClerk();
     await stubQueries([makePublishedRow('processing')]);
 
@@ -1268,16 +1260,8 @@ describe('OpenAPI contract — real route responses', () => {
     const res = await GET();
     const body: unknown = await res.json();
 
-    // BUG PIN: `publishStatusEnum` (db/schema.ts) is
-    // ['published','unpublished','processing'] and 'processing' is the column
-    // DEFAULT, but the spec's `Publication.status` enum omits it. This route
-    // returns ALL of a user's rows, so a freshly-created publication is served
-    // with a status the published contract forbids. Asserting `false` here
-    // records the bug rather than hiding it: whoever fixes the spec (or the
-    // route) will be sent to this test to remove the pin.
     const validate = contract.operation('get', '/api/publish/list', 200);
-    expect(validate(body)).toBe(false);
-    expect(JSON.stringify(validate.errors)).toContain('enum');
+    expect(validate(body)).toBe(true);
   });
 
   it('GET /api/community/games 200 returns a body matching GameSummary exactly', async () => {

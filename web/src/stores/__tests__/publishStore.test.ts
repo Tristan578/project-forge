@@ -8,7 +8,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { usePublishStore, type PublishedGameInfo } from '../publishStore';
+import {
+  usePublishStore,
+  type PublicationListItem,
+  type PublishedGameInfo,
+} from '../publishStore';
 
 // Mock fetch globally
 global.fetch = vi.fn();
@@ -16,12 +20,26 @@ global.fetch = vi.fn();
 describe('publishStore', () => {
   const mockPublication: PublishedGameInfo = {
     id: 'pub-123',
+    projectId: 'proj-1',
     slug: 'my-game',
     title: 'My Game',
     description: 'A test game',
     status: 'published',
     version: 1,
     playCount: 0,
+    url: 'https://forge.example.com/play/my-game',
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+  };
+
+  const mockListPublication: PublicationListItem = {
+    id: 'pub-123',
+    projectId: 'proj-1',
+    slug: 'my-game',
+    title: 'My Game',
+    description: 'A test game',
+    status: 'published',
+    version: 1,
     url: 'https://forge.example.com/play/my-game',
     createdAt: '2024-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
@@ -64,14 +82,15 @@ describe('publishStore', () => {
     it('should fetch and store publications', async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ publications: [mockPublication] }),
+        json: async () => ({ publications: [mockListPublication] }),
       });
 
       const { fetchPublications } = usePublishStore.getState();
       await fetchPublications();
 
       const state = usePublishStore.getState();
-      expect(state.publications).toEqual([mockPublication]);
+      expect(state.publications).toEqual([mockListPublication]);
+      expect(state.publications[0]).not.toHaveProperty('playCount');
       expect(global.fetch).toHaveBeenCalledWith('/api/publish/list');
     });
 
@@ -384,8 +403,8 @@ describe('publishStore', () => {
 
   describe('Edge Cases', () => {
     it('should handle multiple publications', async () => {
-      const pub1 = { ...mockPublication, id: 'pub-1', slug: 'game-1' };
-      const pub2 = { ...mockPublication, id: 'pub-2', slug: 'game-2' };
+      const pub1 = { ...mockListPublication, id: 'pub-1', slug: 'game-1' };
+      const pub2 = { ...mockListPublication, id: 'pub-2', slug: 'game-2' };
 
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
@@ -415,7 +434,7 @@ describe('publishStore', () => {
     });
 
     it('should handle publication with null description', async () => {
-      const pubWithNullDesc = { ...mockPublication, description: null };
+      const pubWithNullDesc = { ...mockListPublication, description: null };
 
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,

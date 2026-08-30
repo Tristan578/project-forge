@@ -1,21 +1,25 @@
 import { create } from 'zustand';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 
-export interface PublishedGameInfo {
+export interface PublicationListItem {
   id: string;
+  projectId: string;
   slug: string;
   title: string;
   description: string | null;
   status: 'published' | 'unpublished' | 'processing';
   version: number;
-  playCount: number;
   url: string;
   createdAt: string;
   updatedAt: string;
 }
 
+export interface PublishedGameInfo extends PublicationListItem {
+  playCount: number;
+}
+
 interface PublishState {
-  publications: PublishedGameInfo[];
+  publications: PublicationListItem[];
   isPublishing: boolean;
   publishError: string | null;
 
@@ -35,7 +39,7 @@ export const usePublishStore = create<PublishState>((set, get) => ({
     try {
       const res = await fetch('/api/publish/list');
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await res.json() as { publications?: PublicationListItem[] };
       set({ publications: data.publications || [] });
     } catch {
       // silently fail

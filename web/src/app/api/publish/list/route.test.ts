@@ -9,7 +9,19 @@ vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/auth/user-service');
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/db/schema', () => ({
-  publishedGames: { userId: 'userId', updatedAt: 'updatedAt' },
+  publishedGames: {
+    id: 'id',
+    userId: 'userId',
+    projectId: 'projectId',
+    slug: 'slug',
+    title: 'title',
+    description: 'description',
+    status: 'status',
+    version: 'version',
+    cdnUrl: 'cdnUrl',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt',
+  },
 }));
 
 describe('GET /api/publish/list', () => {
@@ -50,10 +62,17 @@ describe('GET /api/publish/list', () => {
   it('should return publications list with URLs', async () => {
     const pubsData = [{
       id: 'pub-1',
+      projectId: 'project-1',
       title: 'My Game',
       slug: 'my-game',
-      cdnUrl: null,
+      description: null,
       status: 'published',
+      version: 1,
+      url: null,
+      createdAt: '2026-08-29T00:00:00.000Z',
+      updatedAt: '2026-08-29T00:00:00.000Z',
+      userId: 'internal-user-id',
+      futureInternalColumn: 'must-not-leak',
     }];
     const selectChain = {
       from: vi.fn().mockReturnThis(),
@@ -72,13 +91,44 @@ describe('GET /api/publish/list', () => {
     expect(res.status).toBe(200);
     expect(body.publications).toHaveLength(1);
     expect(body.publications[0].url).toBe('/play/clerk_1/my-game');
+    expect(Object.keys(body.publications[0]).sort()).toEqual([
+      'createdAt',
+      'description',
+      'id',
+      'projectId',
+      'slug',
+      'status',
+      'title',
+      'updatedAt',
+      'url',
+      'version',
+    ]);
+    expect(mockDb.select).toHaveBeenCalledWith({
+      id: 'id',
+      projectId: 'projectId',
+      slug: 'slug',
+      title: 'title',
+      description: 'description',
+      status: 'status',
+      version: 'version',
+      url: 'cdnUrl',
+      createdAt: 'createdAt',
+      updatedAt: 'updatedAt',
+    });
   });
 
   it('should use cdnUrl when available', async () => {
     const pubsData = [{
       id: 'pub-1',
+      projectId: 'project-1',
       slug: 'my-game',
-      cdnUrl: 'https://cdn.example.com/games/my-game',
+      title: 'My Game',
+      description: null,
+      status: 'published',
+      version: 1,
+      url: 'https://cdn.example.com/games/my-game',
+      createdAt: '2026-08-29T00:00:00.000Z',
+      updatedAt: '2026-08-29T00:00:00.000Z',
     }];
     const selectChain = {
       from: vi.fn().mockReturnThis(),
