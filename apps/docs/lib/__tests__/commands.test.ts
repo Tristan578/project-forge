@@ -234,3 +234,150 @@ describe('readCommandsManifest', () => {
     });
   });
 });
+
+/**
+ * `readCommandsByCategory` and `toParameterList` back `/mcp/[category]`, the
+ * route added for #9046 — every category tile on `/mcp` linked to
+ * `/mcp/${category}` while no such route existed.
+ */
+describe('readCommandsByCategory', () => {
+  let fsSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    fsSpy = vi.spyOn(fs, 'readFileSync');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubManifest(commands: object[]): void {
+    const content = makeManifestJson(commands);
+    fsSpy.mockImplementation((filePath: unknown, _enc: unknown) => {
+      if (String(filePath).endsWith('commands.json')) {
+        return content;
+      }
+      throw new Error(`ENOENT: ${String(filePath)}`);
+    });
+  }
+
+  it('returns only the public commands in the requested category', async () => {
+    stubManifest([
+      { name: 'spawn_entity', category: 'scene', visibility: 'public' },
+      { name: 'set_material', category: 'materials', visibility: 'public' },
+      { name: '_scene_debug', category: 'scene', visibility: 'internal' },
+    ]);
+
+    const { readCommandsByCategory } = await import('../commands.js');
+
+    expect((await readCommandsByCategory('scene')).map((c) => c.name)).toEqual([
+      'spawn_entity',
+    ]);
+  });
+
+  it('sorts commands by name so the page order is stable', async () => {
+    stubManifest([
+      { name: 'zoom_camera', category: 'camera', visibility: 'public' },
+      { name: 'aim_camera', category: 'camera', visibility: 'public' },
+      { name: 'move_camera', category: 'camera', visibility: 'public' },
+    ]);
+
+    const { readCommandsByCategory } = await import('../commands.js');
+
+    expect((await readCommandsByCategory('camera')).map((c) => c.name)).toEqual([
+      'aim_camera',
+      'move_camera',
+      'zoom_camera',
+    ]);
+  });
+
+  // The page turns this into notFound(). If it ever returned a non-empty array
+  // for an unknown slug, /mcp/anything would render an empty shell with a 200.
+  it('returns an empty array for an unknown category', async () => {
+    stubManifest([{ name: 'spawn_entity', category: 'scene', visibility: 'public' }]);
+
+    const { readCommandsByCategory } = await import('../commands.js');
+
+    expect(await readCommandsByCategory('no-such-category')).toEqual([]);
+  });
+
+  it('every category readCommandsManifest advertises has at least one command', async () => {
+    stubManifest([
+      { name: 'spawn_entity', category: 'scene', visibility: 'public' },
+      { name: 'set_material', category: 'materials', visibility: 'public' },
+    ]);
+
+    const { readCommandsManifest, readCommandsByCategory } = await import('../commands.js');
+    const { categories } = await readCommandsManifest();
+
+    expect(categories.length).toBeGreaterThan(0);
+    for (const category of categories) {
+      expect((await readCommandsByCategory(category)).length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('toParameterList', () => {
+  it('flattens the JSON Schema properties map into display rows', async () => {
+    const { toParameterList } = await import('../commands.js');
+
+    expect(
+      toParameterList({
+        name: 'spawn_entity',
+        category: 'scene',
+        parameters: {
+          type: 'object',
+          properties: {
+            entityType: { type: 'string', description: 'Type of entity' },
+            name: { type: 'string' },
+          },
+          required: ['entityType'],
+        },
+      }),
+    ).toEqual([
+      { name: 'entityType', type: 'string', required: true, description: 'Type of entity' },
+      { name: 'name', type: 'string', required: false, description: undefined },
+    ]);
+  });
+
+  it('puts required parameters first, then alphabetises within each group', async () => {
+    const { toParameterList } = await import('../commands.js');
+
+    const rows = toParameterList({
+      name: 'x',
+      category: 'scene',
+      parameters: {
+        properties: {
+          zeta: { type: 'string' },
+          alpha: { type: 'string' },
+          omega: { type: 'string' },
+          beta: { type: 'string' },
+        },
+        required: ['omega', 'beta'],
+      },
+    });
+
+    expect(rows.map((r) => r.name)).toEqual(['beta', 'omega', 'alpha', 'zeta']);
+  });
+
+  it('falls back to "unknown" for a property with no declared type', async () => {
+    const { toParameterList } = await import('../commands.js');
+
+    expect(
+      toParameterList({
+        name: 'x',
+        category: 'scene',
+        parameters: { properties: { mystery: {} } },
+      }),
+    ).toEqual([{ name: 'mystery', type: 'unknown', required: false, description: undefined }]);
+  });
+
+  it.each([
+    ['no parameters key', { name: 'x', category: 'scene' }],
+    ['parameters with no properties', { name: 'x', category: 'scene', parameters: {} }],
+  ])('returns an empty list for a command with %s', async (_label, cmd) => {
+    const { toParameterList } = await import('../commands.js');
+    expect(toParameterList(cmd)).toEqual([]);
+  });
+});

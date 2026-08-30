@@ -65,7 +65,8 @@ describe('TokenWarningBanner', () => {
     mockState.tokenBalance = { monthlyRemaining: 100, monthlyTotal: 10000, addon: 0, total: 100, nextRefillDate: null };
     render(<TokenWarningBanner />);
     const link = screen.getByText('Buy Tokens');
-    expect(link.getAttribute('href')).toBe('/settings/billing');
+    // Was '/settings/billing', a route that has never existed (#9046).
+    expect(link.getAttribute('href')).toBe('/settings?tab=billing');
   });
 
   it('dismisses token warning when X is clicked', () => {
@@ -97,7 +98,7 @@ describe('TokenWarningBanner', () => {
     mockState.billingStatus = { tier: 'creator', stripeCustomerId: 'cus_123', billingCycleStart: null, subscriptionStatus: 'past_due' };
     render(<TokenWarningBanner />);
     const link = screen.getByText('Update Payment');
-    expect(link.getAttribute('href')).toBe('/settings/billing');
+    expect(link.getAttribute('href')).toBe('/settings?tab=billing');
   });
 
   it('dismisses payment warning when X is clicked', () => {

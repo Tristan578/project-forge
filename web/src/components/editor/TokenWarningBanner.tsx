@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { X, AlertTriangle, CreditCard } from 'lucide-react';
 import { useUserStore } from '@/stores/userStore';
+import { SETTINGS_BILLING_HREF } from '@/lib/navigation/settingsRoutes';
 
 const DISMISSED_KEY = 'forge-token-warning-dismissed';
 const PAYMENT_DISMISSED_KEY = 'forge-payment-warning-dismissed';
@@ -71,7 +72,7 @@ export function TokenWarningBanner() {
             Your payment method has failed. Please update it to avoid service interruption.
           </span>
           <a
-            href="/settings/billing"
+            href={SETTINGS_BILLING_HREF}
             className="shrink-0 rounded bg-red-700 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-red-600"
           >
             Update Payment
@@ -103,7 +104,7 @@ export function TokenWarningBanner() {
             )}
           </span>
           <a
-            href="/settings/billing"
+            href={SETTINGS_BILLING_HREF}
             className="shrink-0 rounded bg-amber-700 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-amber-600"
           >
             Buy Tokens

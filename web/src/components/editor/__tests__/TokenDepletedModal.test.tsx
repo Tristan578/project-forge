@@ -96,20 +96,37 @@ describe('TokenDepletedModal', () => {
     expect(pushMock).toHaveBeenCalledExactlyOnceWith('/pricing');
   });
 
-  it('navigates to /settings/billing when Buy Token Pack is clicked', () => {
+  // Asserted as a literal, not as SETTINGS_BILLING_HREF: the point of the test
+  // is that the destination is a real, reachable URL, and importing the same
+  // constant the component uses would make it pass for any value.
+  it('navigates to the billing tab on /settings when Buy Token Pack is clicked', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
     fireEvent.click(screen.getByTestId('buy-token-pack-button'));
     expect(mockChatState.setShowTokenDepletedModal).toHaveBeenCalledWith(false);
-    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/settings/billing');
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/settings?tab=billing');
   });
 
-  it('navigates to /settings/api-keys when BYOK is clicked', () => {
+  it('navigates to the API-keys tab on /settings when BYOK is clicked', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
     fireEvent.click(screen.getByTestId('byok-link'));
     expect(mockChatState.setShowTokenDepletedModal).toHaveBeenCalledWith(false);
-    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/settings/api-keys');
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/settings?tab=keys');
+  });
+
+  // The URL alone is not enough here. SettingsPage validates `?tab=` against its
+  // tab ids and silently falls back to Profile for anything else, so the
+  // plausible-looking `?tab=api-keys` would render a working page on the WRONG
+  // tab and still strand the BYOK user. Assert the slug SettingsPage actually
+  // accepts.
+  it('uses the tab slug SettingsPage accepts for BYOK, not the label text', () => {
+    mockChatState.showTokenDepletedModal = true;
+    render(<TokenDepletedModal />);
+    fireEvent.click(screen.getByTestId('byok-link'));
+    const target = new URL(pushMock.mock.calls[0][0] as string, 'https://example.test');
+    expect(target.pathname).toBe('/settings');
+    expect(target.searchParams.get('tab')).toBe('keys');
   });
 
   it('has correct aria-labelledby pointing to the heading', () => {
