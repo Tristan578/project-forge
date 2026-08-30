@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { entitySetupExecutor } from '../entitySetupExecutor';
 import type { ExecutorContext } from '../../types';
 
@@ -8,6 +8,10 @@ import type { ExecutorContext } from '../../types';
  * store through `getStore()`, never a snapshot (PF-1118).
  */
 type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
   const { store = { sceneGraph: { nodes: {} } } as never, ...rest } = overrides;
@@ -44,6 +48,39 @@ describe('entitySetupExecutor', () => {
       entityType: 'capsule',
     });
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', { entityType: 'capsule', name: 'Hero' });
+  });
+
+  it('waits for the engine frame before reporting a spawned entity as ready', async () => {
+    const callbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    }));
+    const ctx = makeCtx();
+    let settled = false;
+
+    const pending = entitySetupExecutor.execute({
+      entity: { name: 'Hero', role: 'player' },
+      scene: 'MainScene',
+      projectType: '3d',
+    }, ctx).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', {
+      entityType: 'capsule',
+      name: 'Hero',
+    });
+    expect(settled).toBe(false);
+
+    callbacks[0](0);
+    await Promise.resolve();
+    expect(settled, 'resolved before the engine advanced a full frame').toBe(false);
+
+    callbacks[1](0);
+    const result = await pending;
+    expect(result.success).toBe(true);
   });
 
   // The engine assigns every entity a random-UUID `EntityId` unless the spawn

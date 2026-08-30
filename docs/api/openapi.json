@@ -29,7 +29,16 @@
         "type": "object",
         "required": ["error"],
         "properties": {
-          "error": { "type": "string" }
+          "error": { "type": "string" },
+          "code": {
+            "type": "string",
+            "description": "Machine-readable error code. This is an open set; clients must tolerate codes they do not recognize."
+          },
+          "details": {
+            "type": "object",
+            "description": "Optional structured context for the error.",
+            "additionalProperties": true
+          }
         }
       },
       "Project": {
