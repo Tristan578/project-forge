@@ -2078,6 +2078,15 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                        // Mirror `apply_skeleton2d_removes`: the two derived
+                        // components have to go with the rig that produced them.
+                        // `SkinnedMeshInitialized` is the one that bites — it is a
+                        // `Without<>` guard on `init_skinned_meshes_2d`, so a stale
+                        // marker does not merely hold old data, it permanently
+                        // suppresses re-initialization for this entity. Restore the
+                        // rig afterwards and the skinned mesh never comes back.
+                        commands.entity(entity).remove::<super::skeleton2d::BoneWorldTransforms2d>();
+                        commands.entity(entity).remove::<super::skeleton2d::SkinnedMeshInitialized>();
                     }
                     // This arm is pure `core/` and cannot emit, and the bridge's
                     // only skeleton emitter is gated on a live rig — so it reaches
@@ -2468,6 +2477,15 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                        // Mirror `apply_skeleton2d_removes`: the two derived
+                        // components have to go with the rig that produced them.
+                        // `SkinnedMeshInitialized` is the one that bites — it is a
+                        // `Without<>` guard on `init_skinned_meshes_2d`, so a stale
+                        // marker does not merely hold old data, it permanently
+                        // suppresses re-initialization for this entity. Restore the
+                        // rig afterwards and the skinned mesh never comes back.
+                        commands.entity(entity).remove::<super::skeleton2d::BoneWorldTransforms2d>();
+                        commands.entity(entity).remove::<super::skeleton2d::SkinnedMeshInitialized>();
                     }
                     // See the undo arm: `core/` cannot emit, so re-report.
                     super::pending_commands::queue_skeleton2d_resync_pending(
@@ -4995,7 +5013,10 @@ mod tilemap_skeleton2d_history_tests {
 
     use super::{HistoryStack, UndoableAction};
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
-    use crate::core::skeleton2d::{Skeleton2dResync, SkeletonData2d, SkeletonEnabled2d};
+    use crate::core::skeleton2d::{
+        BoneWorldTransforms2d, Skeleton2dResync, SkeletonData2d, SkeletonEnabled2d,
+        SkinnedMeshInitialized,
+    };
     use crate::core::tilemap::{TilemapData, TilemapEnabled};
     use bevy::prelude::*;
 
@@ -5333,6 +5354,94 @@ mod tilemap_skeleton2d_history_tests {
         assert!(
             world.entity(entity).contains::<SkeletonEnabled2d>(),
             "an enabled rig must stay enabled across redo",
+        );
+    }
+
+    /// Put an entity in the state a rig that has actually rendered leaves behind:
+    /// the two components `init_skinned_meshes_2d` derives from the rig, not the
+    /// rig data itself. Neither is inserted by `spawn_skeleton`, so without this
+    /// the "did the arm clean them up" assertions would pass vacuously.
+    fn mark_skinned_mesh_initialized(world: &mut World, entity: Entity) {
+        world
+            .entity_mut(entity)
+            .insert(SkinnedMeshInitialized)
+            .insert(BoneWorldTransforms2d { transforms: Vec::new() });
+    }
+
+    /// `SkinnedMeshInitialized` is a `Without<>` guard on `init_skinned_meshes_2d`.
+    /// Leaving it behind when the rig is removed does not just strand old data: it
+    /// permanently suppresses re-initialization, so the NEXT undo restores
+    /// `SkeletonData2d` onto an entity the init system can no longer match, and the
+    /// skinned mesh never renders again. `apply_skeleton2d_removes` clears both
+    /// derived components; these two arms are the other two paths that remove a rig
+    /// and they must agree with it.
+    #[test]
+    fn undoing_to_no_recorded_skeleton_clears_the_derived_skinning_components() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        mark_skinned_mesh_initialized(&mut world, entity);
+        record_skeleton_edit(&mut world, "rig-1", None, false, Some(skeleton("armor")), true);
+
+        undo(&mut world);
+
+        assert!(
+            !world.entity(entity).contains::<SkinnedMeshInitialized>(),
+            "a stale init guard outliving its rig blocks `init_skinned_meshes_2d` \
+             forever — the mesh cannot come back on a later undo",
+        );
+        assert!(
+            !world.entity(entity).contains::<BoneWorldTransforms2d>(),
+            "bone transforms describe a rig that is gone",
+        );
+    }
+
+    #[test]
+    fn redoing_to_no_new_skeleton_clears_the_derived_skinning_components() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(&mut world, "rig-1", skeleton("cloth"), true);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), true, None, false);
+
+        undo(&mut world);
+        mark_skinned_mesh_initialized(&mut world, entity);
+        redo(&mut world);
+
+        assert!(
+            !world.entity(entity).contains::<SkinnedMeshInitialized>(),
+            "redoing a rig removal must clear the init guard, exactly as the \
+             `remove_skeleton_2d` command path does",
+        );
+        assert!(
+            !world.entity(entity).contains::<BoneWorldTransforms2d>(),
+            "bone transforms describe a rig that is gone",
+        );
+    }
+
+    /// The full sequence the guard actually breaks, end to end: remove the rig,
+    /// undo (rig back), redo (rig gone again), undo (rig back again). Only the
+    /// second undo is at risk — the first is fed by `apply_skeleton2d_removes`,
+    /// which already cleaned up. Asserting on the second is what distinguishes a
+    /// fixed redo arm from an unfixed one.
+    #[test]
+    fn a_rig_survives_a_second_undo_after_a_redo_removed_it() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        mark_skinned_mesh_initialized(&mut world, entity);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("armor")), true, None, false);
+
+        undo(&mut world);
+        redo(&mut world);
+        undo(&mut world);
+
+        assert_eq!(
+            active_skin_of(&world, entity),
+            "armor",
+            "the rig itself must come back",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkinnedMeshInitialized>(),
+            "with the guard still set from before the removal, \
+             `init_skinned_meshes_2d` skips this entity and the restored rig \
+             renders nothing",
         );
     }
 
