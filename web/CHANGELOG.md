@@ -1,5 +1,195 @@
 # web
 
+## 0.8.0
+
+### Minor Changes
+
+- [#9394](https://github.com/Tristan578/project-forge/pull/9394) [`9a1545d`](https://github.com/Tristan578/project-forge/commit/9a1545d8e53fe46d928daa129733f70d76045bbe) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a visible "Make me a game" entry point to the editor. The game-creation
+  pipeline was previously reachable only when the AI chat's intent classifier
+  happened to route a message to it; there was no control anywhere in the UI that
+  started it. A quick-start dialog now runs the pipeline end to end, auto-approving
+  only the plan gate (the user already said yes to that by typing a prompt), while
+  `gate_assets` and `gate_final` still ask.
+
+- [#9479](https://github.com/Tristan578/project-forge/pull/9479) [`5a1e705`](https://github.com/Tristan578/project-forge/commit/5a1e7058595091ef97984e64c9ed552e86167254) Thanks [@Tristan578](https://github.com/Tristan578)! - Template Gallery and the `load_template` command now actually apply the template. `sceneSlice.loadTemplate` translates the chosen template into an engine scene file, waits for the entities to appear in the scene graph, and attaches the template's scripts, game components, and input preset. A load that cannot happen — an unknown template id, no engine attached, or a scene the engine accepts and never applies — now reports the failure: the chat command returns an error, the gallery stays open and says why, and the TEMPLATE_USED / TEMPLATE_APPLIED events fire only on a real success. The MCP `load_template` schema also accepts the six 2D templates, which it previously rejected.
+
+### Patch Changes
+
+- [#9425](https://github.com/Tristan578/project-forge/pull/9425) [`ff8e56a`](https://github.com/Tristan578/project-forge/commit/ff8e56aeb0ce36002d54bb1f39e58d02375f30e3) Thanks [@Tristan578](https://github.com/Tristan578)! - Announce published-game loading and failure states to assistive technology.
+
+- [#9398](https://github.com/Tristan578/project-forge/pull/9398) [`f8c3d16`](https://github.com/Tristan578/project-forge/commit/f8c3d16db40c6dfd958ca60fd7e24a828fbc5c8f) Thanks [@Tristan578](https://github.com/Tristan578)! - Audio imports now retain their decoded file size in the engine asset registry
+  and report that size to the editor. Imported audio previously appeared as zero
+  bytes regardless of its actual size, preventing the asset panel from displaying
+  accurate metadata or warning about large files.
+
+- [#9400](https://github.com/Tristan578/project-forge/pull/9400) [`d02e55b`](https://github.com/Tristan578/project-forge/commit/d02e55bdf8cc62beaf88627cc1a3abc7870b4619) Thanks [@Tristan578](https://github.com/Tristan578)! - Return one ordered rejection for every command when an engine command batch exceeds the 256-item limit.
+
+- [#9482](https://github.com/Tristan578/project-forge/pull/9482) [`02a14ad`](https://github.com/Tristan578/project-forge/commit/02a14ad12902a35c5f24ac718e3d203b1275b72c) Thanks [@Tristan578](https://github.com/Tristan578)! - Wire the performance benchmark harness to real product code, a committed baseline, and a CI workflow. Previously the comparator had no caller, no baseline, and the only "benchmark" test measured hand-built fixtures.
+
+- [#9428](https://github.com/Tristan578/project-forge/pull/9428) [`13513da`](https://github.com/Tristan578/project-forge/commit/13513dae86c4911558460fb08520a1906c93361b) Thanks [@Tristan578](https://github.com/Tristan578)! - Restrict public route wildcards to path-segment subtrees so prefix-sharing routes remain authenticated.
+
+- [#9426](https://github.com/Tristan578/project-forge/pull/9426) [`5576425`](https://github.com/Tristan578/project-forge/commit/557642556a39a14714bc06041b3bc51088952ccb) Thanks [@Tristan578](https://github.com/Tristan578)! - Make the bundle-size gate fail closed on malformed route manifests and count every client entry associated with a route.
+
+- [#9511](https://github.com/Tristan578/project-forge/pull/9511) [`23f1a5d`](https://github.com/Tristan578/project-forge/commit/23f1a5d61b3851050c807db6ad020bfd6a53d7a7) Thanks [@Tristan578](https://github.com/Tristan578)! - Wait for entity spawns to reach the engine frame before continuing the game-creation pipeline.
+
+- [#9512](https://github.com/Tristan578/project-forge/pull/9512) [`9858cfc`](https://github.com/Tristan578/project-forge/commit/9858cfc6cbb8f83f4245d349dec785183ad0463e) Thanks [@Tristan578](https://github.com/Tristan578)! - Explain when scripts in a remixed game are disabled and how to re-enable trusted scripts.
+
+- [#9463](https://github.com/Tristan578/project-forge/pull/9463) [`67257d1`](https://github.com/Tristan578/project-forge/commit/67257d176198028bd9482775494d1e3a1a4398bf) Thanks [@Tristan578](https://github.com/Tristan578)! - Fail CI closed when the Next.js build, MCP command-parity, or Playwright UI gate is skipped despite its trigger firing, and assert the anti-tamper map covers every job the CI Success aggregate waits on.
+
+- [#9403](https://github.com/Tristan578/project-forge/pull/9403) [`ce4bad4`](https://github.com/Tristan578/project-forge/commit/ce4bad406aeea865824caa7b7209573cd5dd1686) Thanks [@Tristan578](https://github.com/Tristan578)! - Harden CI self-defense tests so comments cannot masquerade as executable security gate wiring.
+
+- [#9399](https://github.com/Tristan578/project-forge/pull/9399) [`e8fca7e`](https://github.com/Tristan578/project-forge/commit/e8fca7e292634a7d9e3357f90341c7711577f8f3) Thanks [@Tristan578](https://github.com/Tristan578)! - Preserve authored cutscene audio volume and pitch as transient playback overrides without changing persisted entity audio settings.
+
+- [#9414](https://github.com/Tristan578/project-forge/pull/9414) [`222696d`](https://github.com/Tristan578/project-forge/commit/222696d27270ac332bbacc7af5c20924ae185d79) Thanks [@Tristan578](https://github.com/Tristan578)! - Document the configurable database operation rate limit and its default.
+
+- [#9405](https://github.com/Tristan578/project-forge/pull/9405) [`51132be`](https://github.com/Tristan578/project-forge/commit/51132be2b28b5bfe66bee49ccfc062299232ea03) Thanks [@Tristan578](https://github.com/Tristan578)! - Fail CI closed when the required internal docs gate is skipped despite docs changes.
+
+- [#9466](https://github.com/Tristan578/project-forge/pull/9466) [`1f3193f`](https://github.com/Tristan578/project-forge/commit/1f3193fbce62533b67ab099f62be1ea0518b92a1) Thanks [@Tristan578](https://github.com/Tristan578)! - Playing and stopping a scene no longer erases a 2D skeletal animation. `snapshot_scene` captured the animation but `restore_scene` never put it back, so any rigged 2D entity lost its animation the moment the user pressed Stop.
+
+- [#9488](https://github.com/Tristan578/project-forge/pull/9488) [`bf170af`](https://github.com/Tristan578/project-forge/commit/bf170af781f48f58ec3544d5fbf2c91e83233cb5) Thanks [@Tristan578](https://github.com/Tristan578)! - Align 71 MCP manifest entries with the Zod schemas their chat handlers actually validate, so the AI is no longer told about parameters the handler rejects (or left unaware of ones it requires). Covers the sprite, sprite_animation, physics2d, scripting and generation categories, and widens the manifest/schema parity test to catch future drift in both directions.
+
+- [#9406](https://github.com/Tristan578/project-forge/pull/9406) [`7b22185`](https://github.com/Tristan578/project-forge/commit/7b2218535c2ab72a76afdc5ce939fe6d94d31b66) Thanks [@Tristan578](https://github.com/Tristan578)! - Add the documented root command for checking MCP manifest synchronization.
+
+- [#9417](https://github.com/Tristan578/project-forge/pull/9417) [`a5a5a07`](https://github.com/Tristan578/project-forge/commit/a5a5a076c1c556ce6ca024b99dfe27c87ab284a3) Thanks [@Tristan578](https://github.com/Tristan578)! - Add live-driver fidelity coverage for the PGlite Neon query adapter.
+
+- [#9461](https://github.com/Tristan578/project-forge/pull/9461) [`9376a60`](https://github.com/Tristan578/project-forge/commit/9376a60740d6e6373f93a43ff4c1d523217c591e) Thanks [@Tristan578](https://github.com/Tristan578)! - Bump Next.js from 16.3.2 to 16.3.3 to pick up the fix for GHSA-2xp9-vwfh-vxw4 (arbitrary code execution via the AVIF path in Image Optimization). `eslint-config-next` and `@next/bundle-analyzer` move in lockstep so the three stay on one Next release.
+
+- [#9388](https://github.com/Tristan578/project-forge/pull/9388) [`0c0be4a`](https://github.com/Tristan578/project-forge/commit/0c0be4a3fd8f4e7968be7d13ae5ebdc4dcda9d09) Thanks [@Tristan578](https://github.com/Tristan578)! - The build panel now shows the whole story when a step is skipped or a build
+  finishes with warnings, instead of silently dropping that information. A step
+  the runner skipped (because an earlier step made it unnecessary) now renders
+  its skip reason next to it rather than looking identical to a step that never
+  ran; and warnings attached to the plan as a whole now render alongside the
+  per-step ones instead of being invisible.
+  
+  The remediation copy that walks someone through fixing a stuck level by hand
+  now matches what is actually on their screen. A 2D project's Inspector calls
+  the immovable body option "Static" and the bounce field "Bounciness"; a 3D
+  project's calls them "Fixed" and "Restitution" — the copy previously always
+  said the 3D names, so a 2D reader following it was sent looking for an option
+  that was not on their screen. It now names the label that matches the project
+  type when the copy is written at the moment of the failure, and names both
+  spellings where the message is fixed at build time and cannot know which
+  project it will end up describing.
+  
+  Starting a second build while one is still finishing no longer leaves the
+  editor in a state only a page reload recovers from. Cancel now reliably stops
+  the build that is actually running, rather than sometimes reporting a
+  cancellation while the work continued. An approval prompt belonging to a build
+  that has already been superseded no longer replaces the prompt for the live
+  one, so approving does what the panel says it will. And resetting while a
+  build is paused for approval now unwinds that build instead of leaving it
+  parked for the rest of the session, holding on to the tokens it had reserved.
+  
+  Build-panel text and icons are readable in every theme. Several labels sat
+  below the contrast floor in at least one theme — worst case just over 4:1 in
+  Mech and just over 4:1 again on the elevated surface in Rust and Ice — and the
+  callout borders were faint enough to disappear entirely against their own
+  tinted interiors. Step-state icons had no text alternative at all, so a screen
+  reader announced nothing about whether a step had completed, failed or been
+  skipped, and "skipped" was told apart from "pending" by colour alone; the two
+  now use distinct glyphs as well.
+  
+  Editor panels follow the active theme while they load. The panel shell and its
+  loading skeleton were painted with fixed colours that ignored the theme
+  entirely — in the light theme the skeleton rendered as black text on an
+  identical black background, so a panel caught mid-load looked like an empty
+  void rather than something loading.
+
+- [#9389](https://github.com/Tristan578/project-forge/pull/9389) [`7bb7be1`](https://github.com/Tristan578/project-forge/commit/7bb7be12994ffdb364a6ac09601340fde0981327) Thanks [@Tristan578](https://github.com/Tristan578)! - Game-creation pipeline steps now report engine rejections instead of silently
+  claiming success. Camera setup, 2D character rigs, custom scripts and physics
+  profiles route their engine commands through the shared batch dispatcher, and a
+  refused command fails the step that sent it rather than showing a green tick.
+
+- [#9395](https://github.com/Tristan578/project-forge/pull/9395) [`c02f7c5`](https://github.com/Tristan578/project-forge/commit/c02f7c5507a4e2dd33f6f552b913a883fc01da57) Thanks [@sentry](https://github.com/apps/sentry)! - Fix a crash on accepting cookie consent in Android WebViews that have DOM storage disabled. `hasConsented()` guarded only against a missing `window`, so a `window` whose `localStorage` is `null` threw `TypeError: Cannot read properties of null (reading 'getItem')` from PostHogProvider's storage listener. It now reads through `safeGetItem()`, which covers both that case and SSR, and denies consent rather than throwing.
+
+- [#9468](https://github.com/Tristan578/project-forge/pull/9468) [`e81e7ae`](https://github.com/Tristan578/project-forge/commit/e81e7aebf54a3e17cd289aad05327a8c369d5284) Thanks [@Tristan578](https://github.com/Tristan578)! - Leaderboard score submissions are now bounds-checked before they reach the database. A score outside the range a Postgres `integer` column can hold, or a `metadata` object that is larger than 4 KiB or nested more than 32 levels deep, comes back as a `400` with a message naming the limit. Previously those requests were accepted by the handler, refused by the database mid-insert, and returned to the player as a generic `500` — which also filed a spurious error report on every attempt, on a route that needs no sign-in.
+
+- [#9470](https://github.com/Tristan578/project-forge/pull/9470) [`f57395a`](https://github.com/Tristan578/project-forge/commit/f57395ad90fbaa87eb6d4443861712e92e3c3454) Thanks [@Tristan578](https://github.com/Tristan578)! - Actually delete R2 objects on account deletion and asset replacement. Nothing in
+  production ever deleted an R2 object: `deleteFromR2` was exported and never
+  called, so every marketplace preview and asset file uploaded to R2 was orphaned
+  forever — a storage-cost leak and a right-to-erasure gap, since a deleted user's
+  uploads stayed live and publicly fetchable through the CDN. That dead single-key
+  helper is now removed, replaced by a batched `deleteManyFromR2`.
+  
+  `deleteUserAccount` sweeps the departing user's `assets/{userId}/{assetId}/`
+  objects after the deletion transaction commits, and the seller upload route
+  removes the object a re-upload supersedes. Both sweeps also remove each object's
+  `.status.json` sidecar — the asset post-processing Worker writes one into the
+  same bucket for every object it validates, and it is recorded in no database
+  row, so nothing else would ever clean it up.
+  
+  Both paths are best-effort: a storage failure is logged and reported to Sentry
+  with the affected keys but never fails the user-facing operation. Sweeps are
+  de-duplicated, capped at 5000 keys, and issued as batched `DeleteObjects` calls
+  (1000 keys per request) rather than one request per object. The account-deletion
+  asset read is capped at 1250 rows to stay inside that ceiling; it reads one row
+  past the cap so it can distinguish "exactly at the cap" from "past the cap", and
+  reports the latter to Sentry with the prefix to reconcile rather than dropping
+  the tail silently. `web/scripts/list-orphaned-r2-keys.ts` lists what is left
+  under a prefix for reconciliation (`wrangler` has no object-listing command).
+  
+  Also fixes an access-control bug found in the same code path: the marketplace
+  download route derived its R2 key from the raw `assetFileUrl`, which a seller can
+  set to any string via the asset PATCH route, so a seller could point their own
+  asset at another seller's key and be issued a signed URL for someone else's paid
+  file. The key is now derived through an ownership-checked resolver.
+
+- [#9411](https://github.com/Tristan578/project-forge/pull/9411) [`f91c696`](https://github.com/Tristan578/project-forge/commit/f91c6964056f2a649f528daa9eda453c734c237f) Thanks [@Tristan578](https://github.com/Tristan578)! - Add route-level contract coverage for authenticated pipeline budget actions.
+
+- [#9483](https://github.com/Tristan578/project-forge/pull/9483) [`7e57deb`](https://github.com/Tristan578/project-forge/commit/7e57deb87ebdeb69bac8aa35121d8b49d1096ff4) Thanks [@Tristan578](https://github.com/Tristan578)! - Reject the unsupported OpenAI pixel-art path before API-key resolution or token charging, keeping generation on the Replicate job flow that the editor and MCP clients can retrieve.
+
+- [#9402](https://github.com/Tristan578/project-forge/pull/9402) [`78e9712`](https://github.com/Tristan578/project-forge/commit/78e9712925bd1cceb28f3d21a515420f61bf8cfc) Thanks [@Tristan578](https://github.com/Tristan578)! - Fall back to the WebGL2 engine on published game pages when the browser cannot provide a WebGPU adapter.
+
+- [#9513](https://github.com/Tristan578/project-forge/pull/9513) [`6b1766f`](https://github.com/Tristan578/project-forge/commit/6b1766f46616826315b8206257c24569d9811abe) Thanks [@Tristan578](https://github.com/Tristan578)! - Return only documented publication fields from the publish-list API and document the in-flight processing status.
+
+- [#9493](https://github.com/Tristan578/project-forge/pull/9493) [`35f760b`](https://github.com/Tristan578/project-forge/commit/35f760b8ebc2494df6c43db3305b78d31a8310f4) Thanks [@Tristan578](https://github.com/Tristan578)! - Remove deleted 2D skeleton rigs from the engine, preserve overwritten rigs for undo, and tell the editor when a rig is gone. Deleting a rig — or undoing the creation of one — left the editor still showing a skeleton the engine had already dropped, so the next bone edit was authored against a rig that no longer existed.
+
+- [#9391](https://github.com/Tristan578/project-forge/pull/9391) [`231b3a0`](https://github.com/Tristan578/project-forge/commit/231b3a0f1820c007daef33d23c158a50c3fc26d5) Thanks [@Tristan578](https://github.com/Tristan578)! - Upgrade to eslint-plugin-react-hooks 7.1.1 and fix everything its three new rule
+  families found. The user-visible part is the editor Help menu: its arrow-key order
+  came from a ref array indexed by a counter mutated during render, so the order was
+  correct only by accident and would have silently mis-mapped had any item been
+  rendered conditionally. It now follows the menu's real DOM order.
+
+- [#9464](https://github.com/Tristan578/project-forge/pull/9464) [`7b90bf3`](https://github.com/Tristan578/project-forge/commit/7b90bf3cb28e9c4dadc87b024588c9a1ff248d5b) Thanks [@Tristan578](https://github.com/Tristan578)! - Remixing a published game no longer copies the creator's scripts in an enabled state. The source text is preserved so it can be read and adapted, but every script arrives disabled and the remixer chooses when to run it.
+
+- [#9490](https://github.com/Tristan578/project-forge/pull/9490) [`dced86d`](https://github.com/Tristan578/project-forge/commit/dced86d95161f1265703a374f357e045862401c0) Thanks [@Tristan578](https://github.com/Tristan578)! - Make removing a game camera clear the engine camera configuration, active marker, and mode-specific runtime state instead of only clearing the editor store.
+
+- [#9409](https://github.com/Tristan578/project-forge/pull/9409) [`19c2cd7`](https://github.com/Tristan578/project-forge/commit/19c2cd7b5e43065756a08c4202eb1267825c3bf9) Thanks [@Tristan578](https://github.com/Tristan578)! - Add runtime contract coverage between exposed chat tools and their handlers.
+
+- [#9407](https://github.com/Tristan578/project-forge/pull/9407) [`7304f4e`](https://github.com/Tristan578/project-forge/commit/7304f4e5e6e310ebacbba8d90212c55f4a2169cc) Thanks [@Tristan578](https://github.com/Tristan578)! - Strengthen database schema contract tests to detect untracked table additions and removals.
+
+- [#9416](https://github.com/Tristan578/project-forge/pull/9416) [`9e55366`](https://github.com/Tristan578/project-forge/commit/9e5536603337ebbb34f8d7b926dfa61a2658bc35) Thanks [@Tristan578](https://github.com/Tristan578)! - Strip query secrets and path PII from Sentry transaction span URL attributes.
+
+- [#9404](https://github.com/Tristan578/project-forge/pull/9404) [`12009cb`](https://github.com/Tristan578/project-forge/commit/12009cbd446f4300b0dcab2fdbaaf38ad8881b5d) Thanks [@Tristan578](https://github.com/Tristan578)! - Prevent large CI self-defense inputs from inverting comment-strip checks through a pipefail SIGPIPE.
+
+- [#9401](https://github.com/Tristan578/project-forge/pull/9401) [`f2b619c`](https://github.com/Tristan578/project-forge/commit/f2b619c424d05a5a0fce9a19ee42c376e88de5c8) Thanks [@Tristan578](https://github.com/Tristan578)! - Keep the default win-condition score when omitted while allowing an explicit null score target for non-score win conditions.
+
+- [#9510](https://github.com/Tristan578/project-forge/pull/9510) [`20468f0`](https://github.com/Tristan578/project-forge/commit/20468f06c2e0144eb0fccc630038181926b58104) Thanks [@Tristan578](https://github.com/Tristan578)! - Document machine-readable error codes and structured error details in the public OpenAPI contract.
+
+- [#9427](https://github.com/Tristan578/project-forge/pull/9427) [`f2f9135`](https://github.com/Tristan578/project-forge/commit/f2f9135bd6e519176d1c3827c2899be49eab8d1f) Thanks [@Tristan578](https://github.com/Tristan578)! - Remove duplicate query handler registrations so executor ordering cannot silently change behavior.
+
+- [#9410](https://github.com/Tristan578/project-forge/pull/9410) [`ccb70ef`](https://github.com/Tristan578/project-forge/commit/ccb70efcf0c1d0f11583cea83dfdb62d00b58325) Thanks [@Tristan578](https://github.com/Tristan578)! - Add regression coverage for ownership-scoped game unpublishing.
+
+- [#9485](https://github.com/Tristan578/project-forge/pull/9485) [`3d1f047`](https://github.com/Tristan578/project-forge/commit/3d1f047f6ebc9d0bb951884f559ebb1ed17d1560) Thanks [@Tristan578](https://github.com/Tristan578)! - Reject successful sprite, sprite-sheet, tileset, and music provider responses that omit the artifact identifier required to retrieve the generation.
+
+- [#9436](https://github.com/Tristan578/project-forge/pull/9436) [`d6383c1`](https://github.com/Tristan578/project-forge/commit/d6383c19e1e6a52845cabd737895827d81486bea) Thanks [@Tristan578](https://github.com/Tristan578)! - Bump the `wasm-bindgen` pin from `=0.2.108` to `=0.2.127` (PF-DEP / [#9380](https://github.com/Tristan578/project-forge/issues/9380)).
+  
+  The crate version and the installed `wasm-bindgen-cli` must match exactly — a
+  mismatch fails with opaque "missing export" errors that read like engine bugs —
+  so this is a coordinated change across `engine/Cargo.toml`, `engine/Cargo.lock`,
+  every workflow that runs `cargo install wasm-bindgen-cli`, and every agent
+  instruction, skill, and gate script that names the pin. The exact-pin `=` form
+  is kept deliberately; a caret range reintroduces the CLI-mismatch class.
+  
+  `cargo update -p wasm-bindgen` carried `js-sys` 0.3.85 → 0.3.104,
+  `wasm-bindgen-futures` 0.4.58 → 0.4.77, and `web-sys` 0.3.85 → 0.3.104 with it.
+  
+  Bevy 0.19.1's own floor is only `wasm-bindgen ^0.2`, so 0.2.127 satisfies the
+  pending Bevy 0.19 upgrade and does not need a second bump when that lands.
+  
+  All four WASM variants (editor + runtime × WebGL2/WebGPU) build clean on the new
+  toolchain. Historical records (`PR.md`, `docs/audits/`) keep the old version.
+
 ## 0.7.0
 
 ### Minor Changes
