@@ -83,6 +83,24 @@ pub struct EditorApplySet;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EditorEmitSet;
 
+/// Systems that DRAIN a resync queue an undo/redo arm pushes to.
+///
+/// The undo and redo arms in `core/entity_factory.rs` are pure Rust: they
+/// cannot emit, so they push onto `PendingCommands` resync queues and rely on
+/// a bridge system to drain them in the same frame. Those drains are ordinary
+/// `Update` systems in plain (non-`.chain()`ed) tuples, so without an explicit
+/// constraint Bevy is free to schedule a drain BEFORE the arm that fills it,
+/// and the editor mirror goes one frame stale on every undo. Which side wins
+/// is ambiguous and reshuffles whenever an unrelated system is added — see
+/// `feedback-engine-update-order-is-ambiguous`.
+///
+/// Ordering only. This set carries no run condition, so its members keep
+/// running in Play exactly as they did before: it is deliberately NOT a
+/// sub-set of `EditorSystemSet`, whose `in_edit_mode` condition would gate
+/// them to Edit mode and silently stop skeleton removals during Play.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ResyncDrainSet;
+
 /// Systems that should only run during Play (not Paused, not Edit).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlaySystemSet;
