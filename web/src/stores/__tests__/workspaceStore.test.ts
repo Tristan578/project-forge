@@ -300,6 +300,57 @@ describe('workspaceStore', () => {
       expect(mockPanel.api.setActive).toHaveBeenCalled();
     });
 
+    it('places Auto-Iteration within Inspector when Inspector is present (#8933)', () => {
+      const inspector = { id: 'inspector', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'inspector' ? inspector : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('auto-iteration');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'auto-iteration',
+        position: { direction: 'within', referencePanel: inspector },
+      }));
+    });
+
+    it('places Auto-Iteration within an existing right-dock panel when Inspector is absent (#8933)', () => {
+      const rightDockPanel = { id: 'scene-settings', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'scene-settings' ? rightDockPanel : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('auto-iteration');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'auto-iteration',
+        position: { direction: 'within', referencePanel: rightDockPanel },
+      }));
+    });
+
+    it('opens Auto-Iteration without a relative position in an empty workspace (#8933)', () => {
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn(() => undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('auto-iteration');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith({
+        id: 'auto-iteration',
+        component: 'auto-iteration',
+        title: 'Auto-Iteration',
+      });
+    });
+
     it('should get open panel IDs', () => {
       const mockApi = {
         ...createMockApi(),

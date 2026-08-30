@@ -165,8 +165,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const inspector = api.getPanel('inspector');
     const assets = api.getPanel('asset-browser');
 
-    // Right-side panels go with inspector
-    if (['scene-settings', 'ui-builder', 'effect-bindings', 'review', 'auto-iteration'].includes(panelId) && inspector) {
+    const rightSidePanelIds = ['scene-settings', 'ui-builder', 'effect-bindings', 'review', 'auto-iteration'];
+
+    // Auto-Iteration prefers Inspector, then an existing panel in the right
+    // dock group. If neither exists, omit a position so Dockview creates its
+    // normal floating/default group instead of silently placing it in Viewport.
+    if (panelId === 'auto-iteration') {
+      const rightDockTarget = inspector
+        ?? rightSidePanelIds
+          .filter((candidateId) => candidateId !== panelId)
+          .map((candidateId) => api.getPanel(candidateId))
+          .find((panel) => panel !== undefined);
+      api.addPanel({
+        id: panelId,
+        component: def.component,
+        title: def.title,
+        ...(rightDockTarget
+          ? { position: { direction: 'within' as const, referencePanel: rightDockTarget } }
+          : {}),
+      });
+    }
+    // Other right-side panels retain their established Inspector placement.
+    else if (rightSidePanelIds.includes(panelId) && inspector) {
       api.addPanel({
         id: panelId,
         component: def.component,
