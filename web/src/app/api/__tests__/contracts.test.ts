@@ -1100,10 +1100,13 @@ describe('OpenAPI contract — real route responses', () => {
     // The spec declares a 400 for this operation with no body schema, so the
     // repo-wide `Error` component is the only thing binding it.
     expect(contract.component('Error')(body)).toBe(true);
-    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([]);
+    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([
+      'missing $.code',
+      'missing $.details',
+    ]);
   });
 
-  it('GET /api/generate/model/status 402 body carries a `code` the Error schema does not document', async () => {
+  it('GET /api/generate/model/status 402 body matches the shared Error schema', async () => {
     await authenticateAs();
     const { resolveApiKey, ApiKeyError } = await import('@/lib/keys/resolver');
     vi.mocked(resolveApiKey).mockRejectedValueOnce(
@@ -1115,13 +1118,23 @@ describe('OpenAPI contract — real route responses', () => {
     const body: unknown = await res.json();
 
     expect(res.status).toBe(402);
-    // DRIFT (repo-wide): `apiError()` / `createErrorResponse()` always attach a
-    // `code`, and several routes attach `details`, but `components.schemas.Error`
-    // documents `error` alone. Every documented error body in the spec is
-    // therefore narrower than what clients actually receive.
+    expect(contract.component('Error')(body)).toBe(true);
     expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([
-      'undocumented $.code',
+      'missing $.details',
     ]);
+  });
+
+  it('documents structured details and keeps error codes forward-compatible', () => {
+    const errorSchema = contract.componentSchema('Error') as {
+      properties?: Record<string, { type?: string; enum?: unknown; additionalProperties?: boolean }>;
+    };
+
+    expect(errorSchema.properties?.code).toMatchObject({ type: 'string' });
+    expect(errorSchema.properties?.code?.enum).toBeUndefined();
+    expect(errorSchema.properties?.details).toMatchObject({
+      type: 'object',
+      additionalProperties: true,
+    });
   });
 
   // -------------------------------------------------------------------------
