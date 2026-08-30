@@ -67,6 +67,11 @@ try {
     $unknownMergeability.pr.mergeable = $null
     Invoke-Case "unknown-mergeability" $unknownMergeability 1 @("not currently mergeable")
 
+    $unknownMergeState = New-ReadySnapshot
+    $unknownMergeState.pr.mergeable = $true
+    $unknownMergeState.pr.mergeable_state = "unknown"
+    Invoke-Case "unknown-merge-state" $unknownMergeState 1 @("Merge state is 'unknown'")
+
     $oldRequest = New-ReadySnapshot
     $oldRequest.reviews = @(@{ id = 1; state = "CHANGES_REQUESTED"; commit_id = "old-head"; submitted_at = "2026-01-01T00:00:00Z"; user = @{ login = "reviewer" } })
     Invoke-Case "older-change-request" $oldRequest 1 @("Latest review from reviewer requests changes")
