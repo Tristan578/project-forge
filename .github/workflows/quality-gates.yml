@@ -294,6 +294,24 @@ jobs:
         working-directory: engine
         run: cargo test --lib --features bevy/x11
 
+      # `cargo test --lib` above runs the NATIVE target, and `engine/src/lib.rs`
+      # declares `bridge` under `#[cfg(target_arch = "wasm32")]` — so every
+      # `#[cfg(test)]` block under `engine/src/bridge/` is invisible to it. The
+      # WASM build below is `cargo build`, which compiles no test target either.
+      # Between them, bridge test code was never type-checked by any job: a PR
+      # could change a struct the bridge tests construct, land green, and leave
+      # `cargo check --all-targets` broken for everyone working locally (observed
+      # on #9493, where a merged commit added a field to `Skeleton2dResync` and
+      # no gate noticed the bridge test that still built one without it).
+      #
+      # `check`, not `test`: wasm32-unknown-unknown has no test harness, so these
+      # tests still cannot RUN in CI. Type-checking them is the whole win — it is
+      # the difference between "this test is stale" being caught here and being
+      # caught by the next person to run cargo locally.
+      - name: Type-check WASM-only test code
+        working-directory: engine
+        run: cargo check --target wasm32-unknown-unknown --all-targets --features webgl2
+
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.127
 
