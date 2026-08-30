@@ -12,6 +12,8 @@ import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
+const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
+
 const voiceBatchSchema = z.object({
   items: z
     .array(
@@ -77,7 +79,8 @@ export async function POST(request: NextRequest) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
     }
-    throw err;
+    captureException(err, { route: '/api/generate/voice/batch', action: 'resolve_api_key' });
+    return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
   }
 
   const client = new ElevenLabsClient({ apiKey });
