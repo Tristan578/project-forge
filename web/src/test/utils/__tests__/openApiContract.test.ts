@@ -130,10 +130,9 @@ describe('loadOpenApiContract', () => {
 
   it('exposes the prepared component schema for property-set diffing', () => {
     const schema = contract.componentSchema('Error');
-    expect(Object.keys(schema.properties as object)).toEqual(['error']);
-    // `code` is what every real error body adds on top — the diff must see it.
+    expect(Object.keys(schema.properties as object)).toEqual(['error', 'code', 'details']);
     expect(diffAgainstSpec(schema, { error: 'nope', code: 'BAD_REQUEST' })).toEqual([
-      'undocumented $.code',
+      'missing $.details',
     ]);
   });
 
