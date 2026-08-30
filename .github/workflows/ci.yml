@@ -403,6 +403,8 @@ jobs:
             .claude/hooks/auto-approve-safe-commands.sh \
             .claude/hooks/block-main-commits.sh \
             .claude/hooks/inject-lessons-learned.sh \
+            .claude/hooks/check-panel-registry.sh \
+            .claude/hooks/__tests__/check-panel-registry.test.sh \
             .claude/hooks/__tests__/reject-incomplete-review.test.sh \
             .claude/hooks/__tests__/review-quality-gate.test.sh \
             .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
