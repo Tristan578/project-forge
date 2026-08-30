@@ -42,6 +42,7 @@ import { fetchAI } from '@/lib/ai/client';
 import { buildPlan } from '../planBuilder';
 import { runPipeline } from '../pipelineRunner';
 import { EXECUTOR_REGISTRY } from '../executors';
+import { waitForEngineFrame } from '../executors/engineDispatch';
 import { buildDefaultGroundDescriptor } from '../worldGeometry';
 import {
   characterControllerFromProfile,
@@ -79,9 +80,10 @@ interface Recorded {
  * fake, a `toggle_physics` dispatched in the same JS task as its `spawn_entity`
  * still finds the entity, so a step that toggles too early looks perfect.
  *
- * Spawns are therefore queued and drained on an animation frame - the same
- * clock `waitForEngineFrame` yields to, and one tick ahead of it, since that
- * helper nests TWO - and each recorded command carries
+ * Spawns are therefore queued and drained with `waitForEngineFrame` itself.
+ * The fake schedules that wait before the executor schedules its own, so the
+ * engine flush lands first on both the browser and Node clocks. Each recorded
+ * command carries
  * the one fact the ordering contract rests on: whether its target was visible
  * yet. `apply_physics_toggles` `drain(..)`s its queue whether or not the id
  * matched anything, so a toggle for an unflushed entity is consumed and lost
@@ -133,10 +135,14 @@ function attachFakeEngine(harness: TestHarness): Recorded[] {
 
     if (!flushScheduled) {
       flushScheduled = true;
-      // One frame, not a microtask: `runPipeline` awaits every executor, so a
+      // One engine-frame wait, not a microtask: `runPipeline` awaits every executor, so a
       // microtask-scheduled flush would land between two steps on its own and
       // this fake would stop modelling the deferred-`Commands` gap at all.
-      requestAnimationFrame(flush);
+      // Use the production scheduler so this fake follows both clocks that the
+      // code under test supports: nested rAF in browsers and a macrotask in
+      // Node. An unconditional rAF never schedules the deferred flush under
+      // the standalone node Vitest project, making its result pool-dependent.
+      void waitForEngineFrame().then(flush);
     }
   });
 
