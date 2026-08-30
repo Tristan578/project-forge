@@ -25,6 +25,7 @@ SCRIPT="$REPO_ROOT/scripts/resolve-ci-diff-range.sh"
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 RELEASE_YML="$REPO_ROOT/.github/workflows/release.yml"
 RATCHET_YML="$REPO_ROOT/.github/workflows/coverage-ratchet.yml"
+QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
@@ -174,6 +175,46 @@ pin "coverage-ratchet.yml dispatches CI onto the ratchet branch (#9193)" \
   "$RATCHET_YML" 'gh workflow run ci\.yml'
 pin "coverage-ratchet.yml grants the actions: write the dispatch needs" \
   "$RATCHET_YML" '^  actions: write'
+
+# ---- No quality gate may hide behind the event name ------------------------
+#
+# The point of dispatching CI at a bot branch is that "CI Success" means the
+# SAME thing there as on a human PR. A job inside quality-gates.yml that gates
+# on `github.event_name == 'pull_request'` silently skips on the dispatch path
+# while the reusable workflow — and therefore CI Success — still reports green.
+# Two jobs did exactly that (lighthouse-delta, storybook-internal-gate) and both
+# now gate on a path input instead. Reintroducing an event gate anywhere in that
+# file re-opens the hole, so it is refused wholesale rather than named job by
+# job: a future job would not be covered by a per-job pin.
+if [ ! -f "$QG_YML" ]; then
+  fail "quality-gates.yml not found at $QG_YML"
+else
+  qg_exec="$(grep -v '^[[:space:]]*#' "$QG_YML")"
+  if [ -z "$qg_exec" ]; then
+    fail "comment-strip of quality-gates.yml produced no output — the assertions below would pass vacuously"
+  elif grep -qE "github\.event_name" <<<"$qg_exec"; then
+    fail "quality-gates.yml gates on github.event_name — that job skips on the workflow_dispatch path that unblocks bot PRs (#9161) while CI Success still reports green. Gate on a path input (see design-changed / web-changed) instead."
+  else
+    pass "no job in quality-gates.yml gates on github.event_name"
+  fi
+
+  # Same failure in a different shape: a step that READS the pull_request
+  # payload gets empty strings on a dispatch. storybook-internal-gate diffed
+  # two empty SHAs, swallowed the error with `|| echo ""`, and would have
+  # reported success having built nothing.
+  if grep -qE "github\.event\.pull_request" <<<"$qg_exec"; then
+    fail "quality-gates.yml reads github.event.pull_request — empty on a workflow_dispatch run, so the step degrades to a silent no-op rather than failing (#9161)."
+  else
+    pass "no step in quality-gates.yml reads the pull_request payload"
+  fi
+
+  pin "storybook-internal-gate is gated on the design path input" \
+    "$QG_YML" 'if: \$\{\{ inputs\.design-changed \}\}'
+  pin "lighthouse-delta is gated on the web path input" \
+    "$QG_YML" 'if: \$\{\{ inputs\.web-changed \}\}'
+  pin "ci.yml forwards needs-design into quality-gates" \
+    "$CI_YML" 'design-changed: \$\{\{ fromJSON\(needs\.ci-gate\.outputs\.needs-design\) \}\}'
+fi
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
