@@ -3,6 +3,28 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # Token-free unblock for bot-authored PRs (#9161 / #9193 / #9381).
+  #
+  # GitHub's recursion guard: "events triggered by the GITHUB_TOKEN will not
+  # create a new workflow run, with the following exceptions: workflow_dispatch
+  # and repository_dispatch events always create workflow runs" — and, for
+  # `pull_request` opened/synchronize/reopened, runs ARE created but held in an
+  # approval-required state awaiting a human click.
+  #
+  # Both halves of that stranded a bot PR here. The changesets release PR
+  # (changeset-release/main) opened with ZERO Actions checks; the Coverage
+  # Ratchet PR (auto/coverage-ratchet) got checks held at `action_required`.
+  # Either way the required "CI Success" check never reported, the PR was
+  # permanently unmergeable, and every npm version bump and git tag silently
+  # froze behind it.
+  #
+  # `workflow_dispatch` is the documented exception, so release.yml and
+  # coverage-ratchet.yml dispatch THIS workflow against their own branch right
+  # after pushing it. The resulting check runs land on the branch head SHA —
+  # which is the PR head SHA — so "CI Success" reports on the PR with no human
+  # in the loop and no long-lived PAT. The gate itself is unchanged: the same
+  # jobs run and check-ci-success.sh still aggregates them.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -45,11 +67,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The diff range differs by event: a pull_request carries base/head in its
+      # payload, a workflow_dispatch carries neither and has to merge-base
+      # against the default branch. Extracted to a script because the failure
+      # posture is the load-bearing part — an unresolvable range MUST fail the
+      # job, since an empty CHANGED sets all fourteen filters false, skips every
+      # path-gated gate, and check-ci-success.sh tolerates legitimate skips.
+      # That combination would render a green "CI Success" over a CI run that
+      # executed nothing. Tested by scripts/__tests__/resolve-ci-diff-range.test.sh.
+      - name: Resolve diff range
+        id: refs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: bash scripts/resolve-ci-diff-range.sh
+
       - name: Detect changed paths
         id: changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ steps.refs.outputs.base-sha }}
+          HEAD_SHA: ${{ steps.refs.outputs.head-sha }}
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
@@ -821,6 +861,7 @@ jobs:
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/__tests__/ci-gate-path-filters.test.sh \
+            scripts/resolve-ci-diff-range.sh scripts/__tests__/resolve-ci-diff-range.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
@@ -897,6 +938,12 @@ jobs:
       - name: Run ci-gate path-filter test suite
         run: bash scripts/__tests__/ci-gate-path-filters.test.sh
 
+      # Guards the diff-range resolver that feeds those filters, and pins the
+      # workflow_dispatch wiring that lets bot-authored PRs report "CI Success"
+      # at all (#9161 / #9193 / #9381).
+      - name: Run CI diff-range resolver test suite
+        run: bash scripts/__tests__/resolve-ci-diff-range.test.sh
+
       - name: Run WASM-manifest generator test suite
         run: bash scripts/__tests__/generate-wasm-manifests.test.sh
 
@@ -918,12 +965,18 @@ jobs:
   preview-deploy:
     name: Preview Deployment
     needs: [ci-gate, quality-gates]
+    # Gated to `pull_request`: the "Comment preview URL on PR" step below reads
+    # github.event.pull_request.number, which is empty on the workflow_dispatch
+    # runs that unblock bot-authored PRs (#9161). Excluded from ci-success's
+    # needs either way — a deployment does not gate correctness.
+    #
     # Skip for Dependabot PRs — repo secrets (VERCEL_TOKEN, VERCEL_TEAM_ID,
     # VERCEL_STAGING_PROJECT_ID) are not exposed to Dependabot-triggered runs,
     # so `vercel pull` fails with "No existing credentials found". Maintainers
     # who need a preview for a dep bump can rebase the branch onto a
     # maintainer branch or deploy manually via `vercel deploy`.
     if: |
+      github.event_name == 'pull_request' &&
       github.actor != 'dependabot[bot]' &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       needs.quality-gates.result == 'success' &&
