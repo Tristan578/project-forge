@@ -1100,10 +1100,13 @@ describe('OpenAPI contract — real route responses', () => {
     // The spec declares a 400 for this operation with no body schema, so the
     // repo-wide `Error` component is the only thing binding it.
     expect(contract.component('Error')(body)).toBe(true);
-    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([]);
+    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([
+      'missing $.code',
+      'missing $.details',
+    ]);
   });
 
-  it('GET /api/generate/model/status 402 body carries a `code` the Error schema does not document', async () => {
+  it('GET /api/generate/model/status 402 body matches the shared Error schema', async () => {
     await authenticateAs();
     const { resolveApiKey, ApiKeyError } = await import('@/lib/keys/resolver');
     vi.mocked(resolveApiKey).mockRejectedValueOnce(
@@ -1115,13 +1118,23 @@ describe('OpenAPI contract — real route responses', () => {
     const body: unknown = await res.json();
 
     expect(res.status).toBe(402);
-    // DRIFT (repo-wide): `apiError()` / `createErrorResponse()` always attach a
-    // `code`, and several routes attach `details`, but `components.schemas.Error`
-    // documents `error` alone. Every documented error body in the spec is
-    // therefore narrower than what clients actually receive.
+    expect(contract.component('Error')(body)).toBe(true);
     expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([
-      'undocumented $.code',
+      'missing $.details',
     ]);
+  });
+
+  it('documents structured details and keeps error codes forward-compatible', () => {
+    const errorSchema = contract.componentSchema('Error') as {
+      properties?: Record<string, { type?: string; enum?: unknown; additionalProperties?: boolean }>;
+    };
+
+    expect(errorSchema.properties?.code).toMatchObject({ type: 'string' });
+    expect(errorSchema.properties?.code?.enum).toBeUndefined();
+    expect(errorSchema.properties?.details).toMatchObject({
+      type: 'object',
+      additionalProperties: true,
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1228,7 +1241,7 @@ describe('OpenAPI contract — real route responses', () => {
     vi.mocked(getUserByClerkId).mockResolvedValueOnce({ id: DB_USER_ID } as never);
   }
 
-  it('GET /api/publish/list 200 leaks four undocumented columns per publication', async () => {
+  it('GET /api/publish/list 200 returns exactly the documented Publication fields', async () => {
     await authenticateClerk();
     await stubQueries([makePublishedRow('published')]);
 
@@ -1236,18 +1249,10 @@ describe('OpenAPI contract — real route responses', () => {
     const res = await GET();
 
     expect(res.status).toBe(200);
-    // DRIFT: the route spreads the whole DB row (`...p`) into the response, so
-    // internal columns ship to the client. `userId` is the one that matters —
-    // it exposes another table's primary key to anyone who calls the endpoint.
-    expectContract('get', '/api/publish/list', 200, await res.json(), [
-      'undocumented $.publications[0].cdnUrl',
-      'undocumented $.publications[0].playCount',
-      'undocumented $.publications[0].thumbnail',
-      'undocumented $.publications[0].userId',
-    ]);
+    expectContract('get', '/api/publish/list', 200, await res.json());
   });
 
-  it('GET /api/publish/list 200 VIOLATES the Publication schema for a processing publication', async () => {
+  it('GET /api/publish/list 200 documents a processing publication', async () => {
     await authenticateClerk();
     await stubQueries([makePublishedRow('processing')]);
 
@@ -1255,16 +1260,8 @@ describe('OpenAPI contract — real route responses', () => {
     const res = await GET();
     const body: unknown = await res.json();
 
-    // BUG PIN: `publishStatusEnum` (db/schema.ts) is
-    // ['published','unpublished','processing'] and 'processing' is the column
-    // DEFAULT, but the spec's `Publication.status` enum omits it. This route
-    // returns ALL of a user's rows, so a freshly-created publication is served
-    // with a status the published contract forbids. Asserting `false` here
-    // records the bug rather than hiding it: whoever fixes the spec (or the
-    // route) will be sent to this test to remove the pin.
     const validate = contract.operation('get', '/api/publish/list', 200);
-    expect(validate(body)).toBe(false);
-    expect(JSON.stringify(validate.errors)).toContain('enum');
+    expect(validate(body)).toBe(true);
   });
 
   it('GET /api/community/games 200 returns a body matching GameSummary exactly', async () => {

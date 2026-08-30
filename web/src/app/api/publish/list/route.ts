@@ -17,15 +17,34 @@ export async function GET() {
   const user = await getUserByClerkId(clerkId);
   if (!user) return NextResponse.json({ publications: [] });
 
-  const publications = await queryWithResilience(() => getDb().select()
+  const publications = await queryWithResilience(() => getDb().select({
+    id: publishedGames.id,
+    projectId: publishedGames.projectId,
+    slug: publishedGames.slug,
+    title: publishedGames.title,
+    description: publishedGames.description,
+    status: publishedGames.status,
+    version: publishedGames.version,
+    url: publishedGames.cdnUrl,
+    createdAt: publishedGames.createdAt,
+    updatedAt: publishedGames.updatedAt,
+  })
     .from(publishedGames)
     .where(eq(publishedGames.userId, user.id))
     .orderBy(desc(publishedGames.updatedAt)));
 
   return NextResponse.json({
     publications: publications.map(p => ({
-      ...p,
-      url: p.cdnUrl || `/play/${clerkId}/${p.slug}`,
+      id: p.id,
+      projectId: p.projectId,
+      slug: p.slug,
+      title: p.title,
+      description: p.description,
+      status: p.status,
+      version: p.version,
+      url: p.url || `/play/${clerkId}/${p.slug}`,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
     })),
   });
 }

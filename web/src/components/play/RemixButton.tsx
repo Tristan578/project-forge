@@ -32,8 +32,10 @@ export function RemixButton({ userId, slug, isAuthenticated }: RemixButtonProps)
         return;
       }
 
-      // Redirect to the editor with the new project
-      router.push(`/editor?project=${data.projectId}`);
+      const quarantineQuery = data.quarantinedScripts > 0
+        ? `?quarantinedScripts=${encodeURIComponent(data.quarantinedScripts)}`
+        : '';
+      router.push(`/editor/${encodeURIComponent(data.projectId)}${quarantineQuery}`);
     } catch {
       setError('Network error');
       setLoading(false);

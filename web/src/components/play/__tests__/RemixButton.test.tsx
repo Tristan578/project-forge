@@ -7,6 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@/test/utils/componentTestUtils';
 import { RemixButton } from '../RemixButton';
 
+const pushMock = vi.fn();
+
 vi.mock('lucide-react', () => ({
   GitFork: (props: Record<string, unknown>) => <span data-testid="fork-icon" {...props} />,
   Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
@@ -14,7 +16,7 @@ vi.mock('lucide-react', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
-    push: vi.fn(),
+    push: pushMock,
   }),
 }));
 
@@ -46,7 +48,7 @@ describe('RemixButton', () => {
   it('calls remix API when clicked (authenticated)', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ projectId: 'new-proj-id', name: 'Game (Remix)' }),
+      json: () => Promise.resolve({ projectId: 'new-proj-id', name: 'Game (Remix)', quarantinedScripts: 2 }),
     });
 
     render(<RemixButton userId="user-1" slug="my-game" isAuthenticated={true} />);
@@ -58,6 +60,21 @@ describe('RemixButton', () => {
         '/api/play/user-1/my-game/remix',
         expect.objectContaining({ method: 'POST' })
       );
+      expect(pushMock).toHaveBeenCalledWith('/editor/new-proj-id?quarantinedScripts=2');
+    });
+  });
+
+  it('does not add a quarantine notice when no scripts were disabled', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ projectId: 'new-proj-id', name: 'Game (Remix)', quarantinedScripts: 0 }),
+    });
+
+    render(<RemixButton userId="user-1" slug="my-game" isAuthenticated={true} />);
+    fireEvent.click(screen.getByText('Remix'));
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith('/editor/new-proj-id');
     });
   });
 

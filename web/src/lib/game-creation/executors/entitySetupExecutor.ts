@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
-import { engineEntityId, sendCommands } from './engineDispatch';
+import { engineEntityId, sendCommands, waitForEngineFrame } from './engineDispatch';
 import { resolveEntityShape } from '../entityShape';
 
 const entityBlueprintSchema = z.object({
@@ -72,6 +72,11 @@ export const entitySetupExecutor: ExecutorDefinition = {
         makeStepError('COMMAND_FAILED', 'Engine command rejected', this.userFacingErrorMessage),
       );
     }
+
+    // The engine applies spawn requests on its frame loop. Do not let the next
+    // pipeline step observe the pre-spawn scene graph and reject this entity as
+    // missing merely because rendering is slower than the JS pipeline.
+    await waitForEngineFrame();
 
     return successResult({
       entityName: entity.name,
