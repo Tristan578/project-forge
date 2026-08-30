@@ -24,6 +24,14 @@ hooks:
     - matcher: Edit|Write
       command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/post-edit-lint.sh"
       timeout: 15
+    # panelRegistry insertion is the #1 recurring bug in this repo (21 recorded
+    # instances) and the mitigation was prose. Registered HERE rather than in
+    # settings.json because subagents do not inherit settings.json hooks — and
+    # the builder is the agent doing the inserting. Exits 0 on a string compare
+    # for any other path; 60s covers the targeted vitest run (~5-15s) cold.
+    - matcher: Edit|Write
+      command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/check-panel-registry.sh"
+      timeout: 60
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/worktree-safety-commit.sh"
       timeout: 15

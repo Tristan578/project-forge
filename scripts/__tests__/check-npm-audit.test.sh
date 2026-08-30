@@ -1686,6 +1686,10 @@ on:
         description: 'Whether .github/** changed (defaults to true when unset)'
         type: boolean
         default: true
+      design-changed:
+        description: 'Whether apps/design/** or packages/ui/** changed (defaults to true when unset)'
+        type: boolean
+        default: true
       can-commit-ratchet:
         description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
         type: boolean
@@ -2442,6 +2446,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -3008,6 +3013,7 @@ OUTPUTS_EOF
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/__tests__/ci-gate-path-filters.test.sh \
+            scripts/resolve-ci-diff-range.sh scripts/__tests__/resolve-ci-diff-range.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
@@ -3193,7 +3199,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=518
+readonly SELF_EXEC_EXPECTED_DROP=535
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3506,6 +3512,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh \
             scripts/__tests__/check-bundle-size-wiring.test.sh \
             scripts/__tests__/ci-gate-path-filters.test.sh \
+            scripts/resolve-ci-diff-range.sh scripts/__tests__/resolve-ci-diff-range.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
@@ -3557,6 +3564,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/neon-branch.test.sh
       - name: Run ci-gate path-filter test suite
         run: bash scripts/__tests__/ci-gate-path-filters.test.sh
+      - name: Run CI diff-range resolver test suite
+        run: bash scripts/__tests__/resolve-ci-diff-range.test.sh
       - name: Run WASM-manifest generator test suite
         run: bash scripts/__tests__/generate-wasm-manifests.test.sh
       - name: Run changeset-version wrapper test suite
@@ -3590,11 +3599,20 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Resolve diff range
+        id: refs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: bash scripts/resolve-ci-diff-range.sh
       - name: Detect changed paths
         id: changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ steps.refs.outputs.base-sha }}
+          HEAD_SHA: ${{ steps.refs.outputs.head-sha }}
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
           web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false

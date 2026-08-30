@@ -73,6 +73,31 @@ describe('CRON_MONITORS ↔ vercel.json parity', () => {
   it('registry count equals vercel.json cron count', () => {
     expect(CRON_MONITORS.length).toBe(vercelCrons.length);
   });
+
+  // #9531: cadence is a standing dollar cost, not a preference. */5 was 8,640
+  // invocations/month against an endpoint that returns 401 on every call until
+  // CRON_SECRET is set (#9118). This asserts that ticket's acceptance criterion
+  // — "fires at most 4x/hour" — so a quiet return to */5, or worse */1, is a
+  // red build rather than a line item nobody reads. Raise the floor
+  // deliberately, with a reason, if a cron ever genuinely needs to run hotter.
+  const MAX_RUNS_PER_HOUR = 4;
+  const MIN_STEP_MINUTES = 60 / MAX_RUNS_PER_HOUR;
+
+  it(`every vercel.json cron fires at most ${MAX_RUNS_PER_HOUR}x/hour`, () => {
+    for (const cron of vercelCrons) {
+      const minuteField = cron.schedule.trim().split(/\s+/)[0];
+      const step = /^\*\/(\d+)$/.exec(minuteField);
+      expect(
+        step,
+        `cron ${cron.path} has minute field "${minuteField}", which is not a */N step — ` +
+          'its hourly invocation count cannot be bounded by this guard, so review its cost by hand.',
+      ).not.toBeNull();
+      expect(
+        Number(step?.[1]),
+        `cron ${cron.path} runs every ${step?.[1] ?? '?'} minutes, which exceeds ${MAX_RUNS_PER_HOUR}/hour`,
+      ).toBeGreaterThanOrEqual(MIN_STEP_MINUTES);
+    }
+  });
 });
 
 describe('getCronMonitor', () => {
