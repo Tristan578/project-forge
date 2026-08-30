@@ -1,5 +1,13 @@
 # @project-forge/mcp-server
 
+## 0.2.3
+
+### Patch Changes
+
+- [#9420](https://github.com/Tristan578/project-forge/pull/9420) [`d7bb9f3`](https://github.com/Tristan578/project-forge/commit/d7bb9f3123801d2ffe73b6b4411d81f1fecc5aed) Thanks [@Tristan578](https://github.com/Tristan578)! - Allow validated MCP HTTP rate-limit overrides while retaining safe production defaults.
+
+- [#9408](https://github.com/Tristan578/project-forge/pull/9408) [`74ea49f`](https://github.com/Tristan578/project-forge/commit/74ea49f6f98358fccf026fe382b973f54b5197a1) Thanks [@Tristan578](https://github.com/Tristan578)! - Make the manifest category snapshot guard detect unexpected category drift.
+
 ## 0.2.2
 
 ### Patch Changes
