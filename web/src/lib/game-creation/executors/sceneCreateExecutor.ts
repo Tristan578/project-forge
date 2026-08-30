@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
+import { waitForEngineFrame } from './engineDispatch';
 import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 
 /**
@@ -94,6 +95,25 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // geometry `world_build` spawns — that ordering is why the geometry is a
     // separate step rather than part of this one.
     ctx.getStore().newScene();
+
+    // The step must not return until the engine has actually applied the
+    // despawn, because JS step order is not engine frame order. `new_scene` and
+    // every `spawn_entity` dispatched before the next frame land in the SAME
+    // engine frame, and `apply_new_scene` despawns
+    // `Query<Entity, (With<EntityId>, Without<Undeletable>)>` — every entity the
+    // pipeline has spawned so far. Which of the two wins is decided by Bevy's
+    // ambiguous `Update` ordering, so it is not stable across unrelated schedule
+    // changes: adding one system to any unordered `Update` tuple reshuffles it.
+    //
+    // That is not hypothetical. It flipped on #9493 (one system added to the
+    // 13-system `skeleton2d` tuple), and the live engine smoke gate went from
+    // green to a scene graph holding the nine `world_build` entities plus the
+    // engine's `Undeletable` Main Camera and NOTHING ELSE — all five
+    // `entity_setup` spawns despawned, so the first `game_component` step failed
+    // `ENTITY_NOT_FOUND`. `world_build` survived only because
+    // `worldBuildExecutor` already awaits a frame; this await gives the
+    // `entity_setup` cohort the same guarantee.
+    await waitForEngineFrame();
 
     // `pendingCameraConfig` used to be returned here, described as something
     // `auto_polish` would apply "once a camera entity exists". Nothing ever read

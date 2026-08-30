@@ -10,6 +10,8 @@ import { loadProjectScenes } from '@/lib/scenes/sceneManager';
  */
 type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
 
+type FrameCallback = (time: number) => void;
+
 function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
   const {
     store = { setScenes: vi.fn(), newScene: vi.fn(), sceneGraph: { nodes: {} } } as never,
@@ -125,6 +127,49 @@ describe('sceneCreateExecutor', () => {
     expect(ctx.getStore().newScene).toHaveBeenCalled();
     const commands = (ctx.dispatchCommand as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
     expect(commands).toEqual([]);
+  });
+
+  // Regression, PF-1245: `new_scene` and every `spawn_entity` dispatched before
+  // the next engine frame land in the SAME frame, and `apply_new_scene` despawns
+  // every deletable entity carrying an `EntityId`. Returning from this step
+  // without waiting therefore lets the despawn eat the `entity_setup` cohort
+  // that runs immediately after it, and which of the two wins is decided by
+  // Bevy's ambiguous `Update` ordering — it flipped on #9493 from one unrelated
+  // system being added to a 13-system tuple, and the live engine smoke gate
+  // failed with a scene graph holding only `world_build`'s entities plus the
+  // engine's `Undeletable` camera.
+  //
+  // The assertion is on the AWAIT, not on a call count: a version that fired the
+  // frame wait and ignored the promise would still record two rAF calls while
+  // reintroducing the exact race. So the executor must still be pending while
+  // the frame callbacks are held, and must only settle once they have run.
+  it('does not resolve until the engine has applied the scene clear', async () => {
+    const pending: FrameCallback[] = [];
+    const raf = vi.fn((cb: FrameCallback) => { pending.push(cb); return pending.length; });
+    vi.stubGlobal('requestAnimationFrame', raf);
+
+    const ctx = makeCtx();
+    let settled = false;
+    const run = sceneCreateExecutor.execute({ name: 'Arena' }, ctx).then((r) => { settled = true; return r; });
+
+    // The clear is dispatched before the wait, so the engine has the request in
+    // hand while we hold the frame — otherwise waiting would guarantee nothing.
+    await Promise.resolve();
+    expect(ctx.getStore().newScene).toHaveBeenCalled();
+    expect(settled).toBe(false);
+
+    // One tick is not enough: a single rAF can land inside the engine frame that
+    // queued the command, which is why `waitForEngineFrame` nests two.
+    pending.shift()!(0);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    pending.shift()!(0);
+    const result = await run;
+    expect(settled).toBe(true);
+    expect(result.success).toBe(true);
+
+    vi.unstubAllGlobals();
   });
 
   it('aborts before touching persisted scenes', async () => {
