@@ -210,10 +210,26 @@ else
 
   pin "storybook-internal-gate is gated on the design path input" \
     "$QG_YML" 'if: \$\{\{ inputs\.design-changed \}\}'
-  pin "lighthouse-delta is gated on the web path input" \
-    "$QG_YML" 'if: \$\{\{ inputs\.web-changed \}\}'
   pin "ci.yml forwards needs-design into quality-gates" \
     "$CI_YML" 'design-changed: \$\{\{ fromJSON\(needs\.ci-gate\.outputs\.needs-design\) \}\}'
+
+  # lighthouse-delta must carry NO job-level `if:` at all. Gating it on
+  # `inputs.web-changed` looks tempting and is a coverage regression:
+  # `needs-web` is `^web/` only, so a packages/ui change (a runtime dependency
+  # of the web build) or a root lockfile bump would skip the performance gate.
+  # Path-gating it correctly is #9526 and needs an output ci-gate does not emit
+  # yet. Until then, unconditional is the honest posture.
+  lh_block="$(awk '/^  lighthouse-delta:$/{inblk=1; next} inblk && /^  [a-z]/{exit} inblk' "$QG_YML" | grep -v '^[[:space:]]*#')"
+  if [ -z "$lh_block" ]; then
+    fail "could not cut the lighthouse-delta job out of quality-gates.yml — this assertion cannot be verified (fail closed)"
+  elif grep -qE "^    if:" <<<"$lh_block"; then
+    # Four spaces exactly: a JOB-level key. Steps inside this job legitimately
+    # carry their own deeper-indented `if:` (the @spawnforge/ui cache hit), and
+    # matching those would make this assertion unsatisfiable.
+    fail "lighthouse-delta carries a job-level if: — see the comment above it. An event gate skips it on the bot-branch dispatch path (#9161); a web-changed gate misses packages/ui and dependency bumps."
+  else
+    pass "lighthouse-delta has no job-level if: (runs on every quality-gates call)"
+  fi
 fi
 
 echo ""

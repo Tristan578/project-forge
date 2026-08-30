@@ -559,15 +559,25 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-    # Gated on the PATH, not on the event. It used to read
-    # `github.event_name == 'pull_request'`, which meant it ran on every
-    # any-code PR — including mcp-only and engine-only ones that cannot move a
-    # web Lighthouse score — and, once ci.yml gained a workflow_dispatch trigger
-    # for bot-authored branches (#9161), would have silently skipped there while
-    # "CI Success" still went green. This job compares effects-off against
-    # effects-on for the SAME commit and reads no pull_request payload at all,
-    # so the event was never the right axis. (#9526)
-    if: ${{ inputs.web-changed }}
+    # NO `if:` — this job runs whenever quality-gates is called.
+    #
+    # It used to read `github.event_name == 'pull_request'`. That is not a
+    # meaningful axis: the job compares effects-off against effects-on for the
+    # SAME commit and reads no pull_request payload at all. What the condition
+    # actually did was silently skip the job on the workflow_dispatch runs that
+    # unblock bot-authored PRs (#9161), while the reusable workflow — and so
+    # "CI Success" — still reported green. Removing it restores the invariant
+    # the required check depends on: CI Success means the same thing on every
+    # event.
+    #
+    # It is deliberately NOT re-gated on `inputs.web-changed`. That would be a
+    # COVERAGE REGRESSION, not an optimisation: `needs-web` is `^web/` only, so
+    # a `packages/ui/**` change (a runtime dependency of the web build via
+    # @spawnforge/ui) or a root `package-lock.json` bump would skip the
+    # performance gate entirely. Path-gating this job is #9526's work and needs
+    # a signal covering the whole web-build input set — web/, packages/ui/,
+    # package.json at any depth, package-lock.json, .node-version — which
+    # ci-gate does not currently emit as a single output.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
