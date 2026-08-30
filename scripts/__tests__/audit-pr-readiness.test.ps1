@@ -62,6 +62,21 @@ try {
     $external = New-ReadySnapshot
     $external.check_suites += @{ id = 2; status = "queued"; conclusion = $null; latest_check_runs_count = 0; app = @{ name = "external-app" } }
     Invoke-Case "zero-run-external-suite" $external 0
+
+    $unknownMergeability = New-ReadySnapshot
+    $unknownMergeability.pr.mergeable = $null
+    Invoke-Case "unknown-mergeability" $unknownMergeability 1 @("not currently mergeable")
+
+    $oldRequest = New-ReadySnapshot
+    $oldRequest.reviews = @(@{ id = 1; state = "CHANGES_REQUESTED"; commit_id = "old-head"; submitted_at = "2026-01-01T00:00:00Z"; user = @{ login = "reviewer" } })
+    Invoke-Case "older-change-request" $oldRequest 1 @("Latest review from reviewer requests changes")
+
+    $supersededRequest = New-ReadySnapshot
+    $supersededRequest.reviews = @(
+        @{ id = 1; state = "CHANGES_REQUESTED"; commit_id = "old-head"; submitted_at = "2026-01-01T00:00:00Z"; user = @{ login = "reviewer" } },
+        @{ id = 2; state = "APPROVED"; commit_id = "head"; submitted_at = "2026-01-02T00:00:00Z"; user = @{ login = "reviewer" } }
+    )
+    Invoke-Case "superseded-change-request" $supersededRequest 0
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -204,9 +204,13 @@ function Test-Readiness {
             Add-Blocker $blockers "Unresolved review thread: $($thread.id)."
         }
     }
-    foreach ($review in @($Snapshot.reviews)) {
-        if ($review.state -eq "CHANGES_REQUESTED" -and $review.commit_id -eq $pr.head_sha) {
-            Add-Blocker $blockers "Changes requested on current head by $($review.user.login)."
+    $latestDecisiveReviews = @($Snapshot.reviews |
+        Where-Object { $_.state -in @("APPROVED", "CHANGES_REQUESTED", "DISMISSED") } |
+        Group-Object { $_.user.login } |
+        ForEach-Object { $_.Group | Sort-Object submitted_at, id | Select-Object -Last 1 })
+    foreach ($review in $latestDecisiveReviews) {
+        if ($review.state -eq "CHANGES_REQUESTED") {
+            Add-Blocker $blockers "Latest review from $($review.user.login) requests changes."
         }
     }
 
