@@ -51,6 +51,19 @@ describe('internal link integrity (web)', () => {
     expect(report.resolved.length).toBeGreaterThan(15);
   });
 
+  // The repointed links now live in a constants module, so if the checker did
+  // not anchor on the DECLARATION it would be blind to exactly the four links
+  // this ticket exists to fix — a gate that passes over its own subject matter.
+  // Asserting they are SEEN is separate from asserting they are alive: a
+  // resolution failure would show up in `dead` above.
+  it('sees the hoisted settings route constants', () => {
+    const seen = links.filter((l) => l.file === 'lib/navigation/settingsRoutes.ts');
+    expect(seen.map((l) => l.raw).sort()).toEqual([
+      '/settings?tab=billing',
+      '/settings?tab=keys',
+    ]);
+  });
+
   it('has no internal link pointing at a route that does not exist', () => {
     expect(
       report.dead,
@@ -59,8 +72,9 @@ describe('internal link integrity (web)', () => {
     ).toEqual([]);
   });
 
-  // The four #9046 regressions, pinned by name so a revert is unambiguous
-  // rather than showing up as an anonymous count change above.
+  // The three #9046 regressions that lived in web/src, pinned by name so a
+  // revert is unambiguous rather than an anonymous count change above. The
+  // fourth, the docs `/api` link, belongs to the apps/docs suite.
   it.each([
     ['/settings/billing'],
     ['/settings/api-keys'],
@@ -184,6 +198,10 @@ describe('link checker primitives', () => {
     ["router.replace('/a')", '/a'],
     ["redirect('/a')", '/a'],
     ["permanentRedirect('/a')", '/a'],
+    ["window.location.href = '/a'", '/a'],
+    ["location.assign('/a')", '/a'],
+    ["export const SETTINGS_BILLING_HREF = '/a';", '/a'],
+    ["export const FOO_ROUTE: string = '/a';", '/a'],
   ])('recognises %s', (source, expected) => {
     expect(extractLinksFromSource(source, 'f.tsx').map((l) => l.raw)).toEqual([expected]);
   });
