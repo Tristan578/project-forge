@@ -2,6 +2,18 @@
 //!
 //! This module is the ONLY place where web_sys, js_sys, and wasm_bindgen
 //! should be used. It translates between JS and the pure Rust core.
+//!
+//! # Tests in here never RUN in CI — they are only type-checked
+//!
+//! `lib.rs` declares this module `#[cfg(target_arch = "wasm32")]`, and
+//! wasm32-unknown-unknown has no test harness, so the native
+//! `cargo test --lib` job cannot see a single `#[cfg(test)]` block below this
+//! line. Quality Gates' "Type-check WASM-only test code" step
+//! (`cargo check --target wasm32-unknown-unknown --all-targets`) is the only
+//! thing that compiles them; without it a stale bridge test lands green and
+//! breaks `cargo check` for everyone locally. Assertions here are documentation
+//! that the compiler keeps honest, not a suite that gates a merge — put a claim
+//! you need CI to actually execute in `core/`, which the native job does run.
 
 pub mod events;
 mod core_systems;
