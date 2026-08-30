@@ -1114,12 +1114,16 @@ pub(super) fn emit_skeleton2d_on_selection(
     }
 }
 
-// Every assertion here drives a `runtime`-gated applier, so the module must
-// carry the same gate or `--all-targets --features ...,runtime` stops compiling.
+// The appliers these tests drive are `runtime`-gated, so the module carries
+// the same gate or `--all-targets --features ...,runtime` stops compiling.
+//
+// The SKINNING tests live in their own UNGATED module below. Those three
+// functions survive in a runtime build, so folding them in here would have
+// quietly dropped their type-check coverage from exactly the build that ships
+// them — bridge tests never execute, type-checking is the whole of their value.
 #[cfg(all(test, not(feature = "runtime")))]
-mod tests {
+mod applier_tests {
     use super::*;
-    use crate::core::skeleton2d::{Bone2dDef, VertexWeights};
 
     #[test]
     fn remove_skeleton_clears_engine_components_and_records_undo() {
@@ -1200,6 +1204,17 @@ mod tests {
             "the history entry belongs to the undo arm, not to the resync"
         );
     }
+
+}
+
+// Skinning math: `compute_bind_pose_transforms`, `resolve_bone_indices` and
+// `skin_vertices_lbs` are NOT runtime-gated — they are the half of this module
+// a runtime build still compiles and ships, so their tests stay ungated and
+// keep being type-checked under `--features runtime`.
+#[cfg(test)]
+mod skinning_tests {
+    use super::*;
+    use crate::core::skeleton2d::{Bone2dDef, VertexWeights};
 
     fn make_bone(name: &str, parent: Option<&str>, pos: [f32; 2], rot: f32, length: f32) -> Bone2dDef {
         Bone2dDef {
