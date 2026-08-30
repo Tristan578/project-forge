@@ -753,6 +753,11 @@ jobs:
     # Storybook rather than silently skipping the leak check.
     if: ${{ inputs.design-changed }}
     runs-on: ubuntu-latest
+    # The only job in this workflow without one. A hung `build-storybook` would
+    # otherwise sit on a runner for GitHub's 6-hour default with quality-gates —
+    # and therefore the required CI Success check — unable to complete. 15
+    # matches lighthouse-delta, the other build-and-measure job here.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
