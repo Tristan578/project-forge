@@ -1959,13 +1959,23 @@ fn execute_undo(
                     // Carry the state written, don't ask for it to be re-read:
                     // the drain runs in a different system and `Commands` are
                     // deferred.
-                    super::pending_commands::queue_reverb_zone_resync_pending(
+                    // The bool is checked, not discarded: `with_pending` returns
+                    // `None` when the thread-local `PendingCommands` is not
+                    // registered, and dropping that signal would silently defeat
+                    // the very re-report this call exists to make — the mirror
+                    // would keep stale state with nothing in the log to say why.
+                    if !super::pending_commands::queue_reverb_zone_resync_pending(
                         super::reverb_zone::ReverbZoneResync {
                             entity_id: entity_id.clone(),
                             data: old_reverb.clone(),
                             enabled: *old_enabled,
                         },
-                    );
+                    ) {
+                        tracing::warn!(
+                            "undo: could not queue reverb zone resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                            entity_id,
+                        );
+                    }
                     break;
                 }
             }
@@ -2094,13 +2104,23 @@ fn execute_undo(
                     // and the browser's mirror kept a rig the engine had dropped.
                     // Carry the state written, don't ask for it to be re-read: the
                     // drain runs in a different system and `Commands` are deferred.
-                    super::pending_commands::queue_skeleton2d_resync_pending(
+                    // The bool is checked, not discarded: `with_pending` returns
+                    // `None` when the thread-local `PendingCommands` is not
+                    // registered, and dropping that signal would silently defeat
+                    // the very re-report this call exists to make — the mirror
+                    // would keep stale state with nothing in the log to say why.
+                    if !super::pending_commands::queue_skeleton2d_resync_pending(
                         super::skeleton2d::Skeleton2dResync {
                             entity_id: entity_id.clone(),
                             data: old_skeleton.clone(),
                             enabled: *old_enabled,
                         },
-                    );
+                    ) {
+                        tracing::warn!(
+                            "undo: could not queue 2D skeleton resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                            entity_id,
+                        );
+                    }
                     break;
                 }
             }
@@ -2374,13 +2394,23 @@ fn execute_redo(
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
                     // Same re-report as the undo arm, with the post-state.
-                    super::pending_commands::queue_reverb_zone_resync_pending(
+                    // The bool is checked, not discarded: `with_pending` returns
+                    // `None` when the thread-local `PendingCommands` is not
+                    // registered, and dropping that signal would silently defeat
+                    // the very re-report this call exists to make — the mirror
+                    // would keep stale state with nothing in the log to say why.
+                    if !super::pending_commands::queue_reverb_zone_resync_pending(
                         super::reverb_zone::ReverbZoneResync {
                             entity_id: entity_id.clone(),
                             data: new_reverb.clone(),
                             enabled: *new_enabled,
                         },
-                    );
+                    ) {
+                        tracing::warn!(
+                            "redo: could not queue reverb zone resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                            entity_id,
+                        );
+                    }
                     break;
                 }
             }
@@ -2488,13 +2518,23 @@ fn execute_redo(
                         commands.entity(entity).remove::<super::skeleton2d::SkinnedMeshInitialized>();
                     }
                     // See the undo arm: `core/` cannot emit, so re-report.
-                    super::pending_commands::queue_skeleton2d_resync_pending(
+                    // The bool is checked, not discarded: `with_pending` returns
+                    // `None` when the thread-local `PendingCommands` is not
+                    // registered, and dropping that signal would silently defeat
+                    // the very re-report this call exists to make — the mirror
+                    // would keep stale state with nothing in the log to say why.
+                    if !super::pending_commands::queue_skeleton2d_resync_pending(
                         super::skeleton2d::Skeleton2dResync {
                             entity_id: entity_id.clone(),
                             data: new_skeleton.clone(),
                             enabled: *new_enabled,
                         },
-                    );
+                    ) {
+                        tracing::warn!(
+                            "redo: could not queue 2D skeleton resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                            entity_id,
+                        );
+                    }
                     break;
                 }
             }
@@ -5537,6 +5577,31 @@ mod tilemap_skeleton2d_history_tests {
             "undoing a creation wrote NO rig, so the resync must report a removal",
         );
         assert!(!queued[0].enabled, "a removed rig cannot remain enabled");
+    }
+
+    /// The failure branch, which is the one the `if !` guard added for the Seer
+    /// review exists to make visible. With no `PendingCommands` registered the
+    /// queue call returns `false`; the arm must still apply its world mutation
+    /// and must not panic — the resync is a re-report of a change that already
+    /// happened, so losing it may not cancel the change.
+    ///
+    /// Without a registered thread-local there is nothing to assert a warning
+    /// against from a native test, so this pins the two properties that are
+    /// observable: the arm completes, and the world edit lands anyway.
+    #[test]
+    fn undo_still_applies_when_no_pending_commands_are_registered() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        record_skeleton_edit(&mut world, "rig-1", None, false, Some(skeleton("armor")), true);
+
+        // Deliberately NOT wrapped in `skeleton_resyncs_from` — the point is the
+        // unregistered thread-local.
+        undo(&mut world);
+
+        assert!(
+            world.get::<crate::core::skeleton2d::SkeletonData2d>(entity).is_none(),
+            "undo must still remove the rig it undid, even with no queue to report it on",
+        );
     }
 
     /// Undo carries the pre-state and redo the post-state, and each resync
