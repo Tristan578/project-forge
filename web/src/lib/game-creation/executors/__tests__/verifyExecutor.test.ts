@@ -153,8 +153,10 @@ describe('verifyExecutor', () => {
 
   // Carried from the deleted root suite ('is registered'), which was the only
   // case reaching this executor through the registry rather than importing it.
-  // `executors/__tests__/index.test.ts` pins the full key set, but nothing there
-  // pins that THIS name resolves to THIS object.
+  // `executors/__tests__/index.test.ts` already pins the full key set AND that
+  // every entry's `def.name` matches its key. What it cannot pin is object
+  // IDENTITY: that this key resolves to THIS module's export, rather than to
+  // some other definition that happens to carry the same name.
   it('is registered in EXECUTOR_REGISTRY under its own name', () => {
     const registered = EXECUTOR_REGISTRY.get('verify_all_scenes');
     expect(registered).toBeDefined();
