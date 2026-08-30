@@ -11,7 +11,7 @@
   "crons": [
     {
       "path": "/api/cron/health-monitor",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/15 * * * *"
     }
   ]
 }

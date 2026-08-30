@@ -19,7 +19,7 @@ const HEALTH_MONITOR = getCronMonitor('/api/cron/health-monitor')!;
 /**
  * GET /api/cron/health-monitor
  *
- * Runs every 5 minutes via Vercel Cron. Executes all service health checks and
+ * Runs every 15 minutes via Vercel Cron. Executes all service health checks and
  * reports any failures to Sentry as structured exceptions so on-call engineers
  * are alerted without manual polling.
  *
@@ -47,7 +47,7 @@ function isAuthorizedCron(req: NextRequest): boolean {
 
 /**
  * Best-effort maintenance: prune expired webhook-idempotency claim rows so
- * the table does not grow unbounded (#8637). Runs on this existing 5-minute
+ * the table does not grow unbounded (#8637). Runs on this existing 15-minute
  * cron to avoid a dedicated route. Failures are logged but never propagate —
  * a maintenance hiccup must not register as a cron failure (which would make
  * Vercel back off the synthetic monitor).
