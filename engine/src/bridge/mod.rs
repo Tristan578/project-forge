@@ -69,7 +69,7 @@ use crate::core::{
 // NOT editor-only: `apply_reverb_zone_commands` is registered in the
 // always-active block, so this import cannot ride the `runtime`-gated group
 // below. The set carries ordering only, never a run condition.
-use crate::core::engine_mode::ResyncDrainSet;
+use crate::core::engine_mode::{ModeRestoreSet, Physics2dWriteSet, ResyncDrainSet};
 
 // Editor-only imports
 #[cfg(not(feature = "runtime"))]
@@ -402,7 +402,13 @@ impl Plugin for SelectionPlugin {
                 game::emit_character_controller_diagnostics_system
                     .after(crate::core::character_controller::manage_character_controller_lifecycle),
             )
-            .add_systems(Update, core_systems::apply_mode_change_requests)
+            // In `ModeRestoreSet` because it is a BASELINE writer: on Play->Edit
+            // it re-inserts and removes Physics2dData / Physics2dEnabled (among
+            // much else) wholesale from the pre-Play snapshot. The 2D physics
+            // command systems write the same components and are ordered after
+            // this set, so a snapshot restore and a same-frame edit no longer
+            // resolve by topological accident (PF-1172 / #9274).
+            .add_systems(Update, core_systems::apply_mode_change_requests.in_set(ModeRestoreSet))
             .add_systems(Update, scripts::apply_input_binding_updates)
             .add_systems(Update, physics::apply_physics_updates)
             .add_systems(Update, physics::apply_physics_toggles)
@@ -423,10 +429,29 @@ impl Plugin for SelectionPlugin {
             // `set_physics_2d` + enable pair on a fresh entity resolve either way
             // nondeterministically. The 3D pair needs no such ordering because
             // `apply_physics_updates` never inserts.
+            //
+            // `.in_set(Physics2dWriteSet)` closes the SECOND ambiguity on the
+            // same components (PF-1172 / #9274). The chain above makes the pair
+            // deterministic against each other, but
+            // `apply_mode_change_requests` inserts and removes the very same
+            // Physics2dData / Physics2dEnabled on a Play->Edit snapshot restore
+            // and carried no ordering relationship to either — so a mode
+            // transition landing in the same frame as a 2D physics edit was the
+            // same coin flip the `.chain()` was added to remove.
+            //
+            // `Physics2dWriteSet.after(ModeRestoreSet)` is configured below:
+            // restore establishes the baseline, the edit applies on top. The
+            // edge also inserts an `ApplyDeferred`, so the restore's deferred
+            // inserts are flushed before these systems read.
+            // Configured HERE, in the always-active block, not alongside the
+            // editor-only `configure_sets` further down: both sides of this edge
+            // are always-active systems, so the constraint must exist in
+            // `runtime` builds too.
+            .configure_sets(Update, Physics2dWriteSet.after(ModeRestoreSet))
             .add_systems(Update, (
                 physics::apply_physics2d_toggles,
                 physics::apply_physics2d_updates,
-            ).chain())
+            ).chain().in_set(Physics2dWriteSet))
             .add_systems(Update, physics::apply_force_applications2d)
             .add_systems(Update, (
                 physics::apply_impulse_applications2d,
