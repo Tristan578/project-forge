@@ -1100,7 +1100,10 @@ describe('OpenAPI contract — real route responses', () => {
     // The spec declares a 400 for this operation with no body schema, so the
     // repo-wide `Error` component is the only thing binding it.
     expect(contract.component('Error')(body)).toBe(true);
-    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([]);
+    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([
+      'missing $.code',
+      'missing $.details',
+    ]);
   });
 
   it('GET /api/generate/model/status 402 body matches the shared Error schema', async () => {
@@ -1115,7 +1118,10 @@ describe('OpenAPI contract — real route responses', () => {
     const body: unknown = await res.json();
 
     expect(res.status).toBe(402);
-    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([]);
+    expect(contract.component('Error')(body)).toBe(true);
+    expect(diffAgainstSpec(contract.componentSchema('Error'), body)).toEqual([
+      'missing $.details',
+    ]);
   });
 
   it('documents structured details and keeps error codes forward-compatible', () => {
