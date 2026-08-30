@@ -61,10 +61,13 @@ vi.mock('@/lib/tokens/service', () => ({
 // ---------------------------------------------------------------------------
 
 import { resolveApiKey, storeProviderKey, deleteProviderKey, listConfiguredProviders, ApiKeyError } from '@/lib/keys/resolver';
+import * as dbClient from '@/lib/db/client';
 import * as encryption from '@/lib/keys/encryption';
 import * as tokenService from '@/lib/tokens/service';
 
 const mockDeductTokens = vi.mocked(tokenService.deductTokens);
+const mockGetDb = vi.mocked(dbClient.getDb);
+const mockQueryWithResilience = vi.mocked(dbClient.queryWithResilience);
 const mockDecryptProviderKey = vi.mocked(encryption.decryptProviderKey);
 const mockEncryptProviderKey = vi.mocked(encryption.encryptProviderKey);
 
@@ -94,6 +97,34 @@ function wireDb(byokRows: unknown[], userRows?: unknown[]) {
     call++;
     return makeSelectChain(rows);
   });
+}
+
+/**
+ * Full per-test mock isolation.
+ *
+ * Every `beforeEach` in this file MUST call this rather than clearing mocks.
+ *
+ * WHY: clearing only wipes recorded calls -- it does NOT drain the
+ * `mock*Once()` queue. Any value queued by a test that never invokes the mock
+ * stays armed on the module-scoped `deductTokens` stub and is handed to the
+ * NEXT test that does invoke it, shifting every later result one test behind.
+ * `resetAllMocks()` drains that queue.
+ *
+ * `resetAllMocks()` also drops implementations installed via chained
+ * `mockReturnValue`/`mockResolvedValue`/`mockImplementation`, so the defaults
+ * the module-scope `vi.mock` factories rely on are re-installed here
+ * explicitly instead of depending on Vitest's `vi.fn(impl)` restore behaviour.
+ */
+function resetMocks() {
+  vi.resetAllMocks();
+  mockGetDb.mockImplementation(() => mockDbChain as unknown as ReturnType<typeof dbClient.getDb>);
+  mockQueryWithResilience.mockImplementation((fn: () => unknown) => fn() as never);
+  mockDecryptProviderKey.mockImplementation((encKey: string, _iv: string) => `decrypted:${encKey}`);
+  // mockImplementation, not mockReturnValue: the module-scope factory returned a
+  // FRESH object per call. Nothing depends on identity today, but a shared
+  // object is a different contract, and this function is meant to RESTORE the
+  // default rather than quietly redefine it.
+  mockEncryptProviderKey.mockImplementation(() => ({ encrypted: 'enc-abc', iv: 'iv-abc' }));
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +159,7 @@ describe('ApiKeyError', () => {
 
 describe('resolveApiKey - BYOK key', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    resetMocks();
     delete process.env['PLATFORM_MESHY_KEY'];
   });
 
@@ -159,7 +190,7 @@ describe('resolveApiKey - BYOK key', () => {
 
 describe('resolveApiKey - platform key', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    resetMocks();
     process.env['PLATFORM_MESHY_KEY'] = 'platform-meshy-secret';
   });
 
@@ -200,6 +231,7 @@ describe('resolveApiKey - platform key', () => {
     const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
     expect(result.type).toBe('platform');
     expect(result.metered).toBe(true);
+    expect(result.usageId).toBe('u-1');
   });
 
   it('deducts tokens and returns platform key', async () => {
@@ -228,7 +260,10 @@ describe('resolveApiKey - platform key', () => {
   it('throws when platform key env var is not set', async () => {
     delete process.env['PLATFORM_MESHY_KEY'];
     wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null }, usageId: 'u-2' });
+    // No deductTokens result is queued on purpose: getPlatformKey() throws
+    // before deductTokens is ever reached (#8597), so a queued value would sit
+    // unconsumed and be handed to a later test. The sibling test below asserts
+    // that ordering explicitly.
     await expect(resolveApiKey('user-1', 'meshy', 10, 'texture_generation')).rejects.toThrow('Platform key not configured');
   });
 
@@ -254,8 +289,9 @@ describe('resolveApiKey - platform key', () => {
     mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 100, monthlyTotal: 3000, addon: 0, total: 100, nextRefillDate: null }, usageId: 'u-3' });
     process.env['PLATFORM_MESHY_KEY'] = 'key';
     const meta = { quality: 'high', width: 1024 };
-    await resolveApiKey('user-1', 'meshy', 50, 'texture_generation', meta);
+    const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation', meta);
     expect(mockDeductTokens).toHaveBeenCalledWith('user-1', 'texture_generation', 50, 'meshy', meta);
+    expect(result.usageId).toBe('u-3');
   });
 
   it('counts addonTokens in available balance', async () => {
@@ -263,6 +299,7 @@ describe('resolveApiKey - platform key', () => {
     mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 0, monthlyTotal: 100, addon: 200, total: 200, nextRefillDate: null }, usageId: 'u-4' });
     const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
     expect(result.type).toBe('platform');
+    expect(result.usageId).toBe('u-4');
   });
 });
 
@@ -272,7 +309,7 @@ describe('resolveApiKey - platform key', () => {
 
 describe('storeProviderKey', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    resetMocks();
     (mockDbChain.insert as ReturnType<typeof vi.fn>).mockImplementation(() => makeInsertChain());
   });
 
@@ -303,7 +340,7 @@ describe('storeProviderKey', () => {
 
 describe('deleteProviderKey', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    resetMocks();
     (mockDbChain.delete as ReturnType<typeof vi.fn>).mockImplementation(() => makeDeleteChain());
   });
 
@@ -320,7 +357,7 @@ describe('deleteProviderKey', () => {
 // ---------------------------------------------------------------------------
 
 describe('listConfiguredProviders', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => resetMocks());
 
   it('returns list of providers', async () => {
     const keys = [
