@@ -200,6 +200,7 @@ pub struct PendingCommands {
     pub animation_clip_previews: Vec<AnimationClipPreview>,
     pub animation_clip_removals: Vec<AnimationClipRemoval>,
     pub create_skeleton2d_requests: Vec<CreateSkeleton2dRequest>,
+    pub remove_skeleton2d_requests: Vec<RemoveSkeleton2dRequest>,
     pub add_bone2d_requests: Vec<AddBone2dRequest>,
     pub remove_bone2d_requests: Vec<RemoveBone2dRequest>,
     pub update_bone2d_requests: Vec<UpdateBone2dRequest>,
@@ -211,6 +212,8 @@ pub struct PendingCommands {
     pub get_skeleton2d_requests: Vec<GetSkeleton2dRequest>,
     pub import_skeleton_json_requests: Vec<ImportSkeletonJsonRequest>,
     pub auto_weight_skeleton2d_requests: Vec<AutoWeightSkeleton2dRequest>,
+    /// Undo/redo skeleton re-reports; see `crate::core::skeleton2d::Skeleton2dResync`.
+    pub skeleton2d_resyncs: Vec<crate::core::skeleton2d::Skeleton2dResync>,
     // particles domain
     pub particle_updates: Vec<ParticleUpdate>,
     pub particle_toggles: Vec<ParticleToggle>,

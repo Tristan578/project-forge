@@ -373,6 +373,53 @@ describe('animationSlice', () => {
       expect(store.getState().skeletons2d.entity1).toBeUndefined();
       expect(store.getState().skeletons2d.entity2).toEqual(data2);
     });
+
+    it('applySkeleton2dRemovedFromEngine should drop the rig WITHOUT dispatching back', () => {
+      const data = { bones: [] } as unknown as SkeletonData2d;
+      store.getState().setSkeleton2d('entity1', data);
+      mockDispatch.mockClear();
+
+      store.getState().applySkeleton2dRemovedFromEngine('entity1');
+
+      expect(store.getState().skeletons2d.entity1).toBeUndefined();
+      // The engine already removed it; echoing `remove_skeleton_2d` back is the
+      // loop this mirror exists to avoid.
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('applySkeleton2dRemovedFromEngine should leave other entities alone', () => {
+      const data1 = { bones: [] } as unknown as SkeletonData2d;
+      const data2 = { bones: [] } as unknown as SkeletonData2d;
+      store.getState().setSkeleton2d('entity1', data1);
+      store.getState().setSkeleton2d('entity2', data2);
+
+      store.getState().applySkeleton2dRemovedFromEngine('entity1');
+
+      expect(store.getState().skeletons2d.entity1).toBeUndefined();
+      expect(store.getState().skeletons2d.entity2).toEqual(data2);
+    });
+
+    it('applySkeleton2dRemovedFromEngine is a no-op for an entity that has no rig', () => {
+      const data = { bones: [] } as unknown as SkeletonData2d;
+      store.getState().setSkeleton2d('entity1', data);
+      const before = store.getState().skeletons2d;
+
+      store.getState().applySkeleton2dRemovedFromEngine('entity2');
+
+      // Same object identity, so a removal for an unknown entity cannot churn
+      // every skeleton subscriber in the editor.
+      expect(store.getState().skeletons2d).toBe(before);
+    });
+
+    it('applySkeleton2dRemovedFromEngine ignores prototype keys', () => {
+      const data = { bones: [] } as unknown as SkeletonData2d;
+      store.getState().setSkeleton2d('entity1', data);
+
+      store.getState().applySkeleton2dRemovedFromEngine('__proto__');
+
+      expect(store.getState().skeletons2d.entity1).toEqual(data);
+      expect(Object.hasOwn(store.getState().skeletons2d, '__proto__')).toBe(false);
+    });
   });
 
   describe('2D skeletal animations', () => {

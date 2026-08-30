@@ -207,6 +207,21 @@ fn handle_create_skeleton2d(payload: serde_json::Value) -> super::CommandResult 
     }
 }
 
+/// Handle remove_skeleton_2d command.
+/// Payload: { entityId }
+fn handle_remove_skeleton2d(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_remove_skeleton2d_from_bridge(RemoveSkeleton2dRequest { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 /// Handle add_bone2d command.
 /// Payload: { entityId, boneName, parentBone?, positionX, positionY, rotation, length, order? }
 fn handle_add_bone2d(payload: serde_json::Value) -> super::CommandResult {
@@ -991,6 +1006,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "set_animation_state_machine" => Some(handle_set_animation_state_machine(payload.clone())),
         "remove_animation_state_machine" => Some(handle_remove_animation_state_machine(payload.clone())),
         "create_skeleton2d" => Some(handle_create_skeleton2d(payload.clone())),
+        "remove_skeleton_2d" => Some(handle_remove_skeleton2d(payload.clone())),
         "add_bone2d" => Some(handle_add_bone2d(payload.clone())),
         "remove_bone2d" => Some(handle_remove_bone2d(payload.clone())),
         "update_bone2d" => Some(handle_update_bone2d(payload.clone())),
@@ -1251,6 +1267,29 @@ fn handle_set_grid_2d(payload: serde_json::Value) -> super::CommandResult {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+#[cfg(test)]
+mod remove_skeleton2d_tests {
+    use super::dispatch;
+    use serde_json::json;
+
+    #[test]
+    fn routes_the_store_payload_to_the_pending_queue() {
+        let result = dispatch("remove_skeleton_2d", &json!({ "entityId": "rig-1" }))
+            .expect("remove_skeleton_2d must be routed");
+        assert_eq!(
+            result.expect_err("no pending queue is registered in this test"),
+            "PendingCommands resource not initialized"
+        );
+    }
+
+    #[test]
+    fn rejects_a_missing_entity_id_before_queueing() {
+        let result = dispatch("remove_skeleton_2d", &json!({}))
+            .expect("remove_skeleton_2d must be routed");
+        assert_eq!(result.expect_err("missing entityId must fail"), "Missing entityId");
     }
 }
 

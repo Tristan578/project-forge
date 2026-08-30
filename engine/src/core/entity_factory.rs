@@ -1959,13 +1959,23 @@ fn execute_undo(
                     // Carry the state written, don't ask for it to be re-read:
                     // the drain runs in a different system and `Commands` are
                     // deferred.
-                    super::pending_commands::queue_reverb_zone_resync_pending(
+                    // The bool is checked, not discarded: `with_pending` returns
+                    // `None` when the thread-local `PendingCommands` is not
+                    // registered, and dropping that signal would silently defeat
+                    // the very re-report this call exists to make — the mirror
+                    // would keep stale state with nothing in the log to say why.
+                    if !super::pending_commands::queue_reverb_zone_resync_pending(
                         super::reverb_zone::ReverbZoneResync {
                             entity_id: entity_id.clone(),
                             data: old_reverb.clone(),
                             enabled: *old_enabled,
                         },
-                    );
+                    ) {
+                        tracing::warn!(
+                            "undo: could not queue reverb zone resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                            entity_id,
+                        );
+                    }
                     break;
                 }
             }
@@ -2065,15 +2075,51 @@ fn execute_undo(
                 }
             }
         }
-        UndoableAction::SkeletonChange { entity_id, old_skeleton, .. } => {
+        UndoableAction::SkeletonChange { entity_id, old_skeleton, old_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref sk) = old_skeleton {
-                        // Data only — same rule as `TilemapChange` above.
                         commands.entity(entity).insert(sk.clone());
+                        if *old_enabled {
+                            commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+                        } else {
+                            commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                        }
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                        // Mirror `apply_skeleton2d_removes`: the two derived
+                        // components have to go with the rig that produced them.
+                        // `SkinnedMeshInitialized` is the one that bites — it is a
+                        // `Without<>` guard on `init_skinned_meshes_2d`, so a stale
+                        // marker does not merely hold old data, it permanently
+                        // suppresses re-initialization for this entity. Restore the
+                        // rig afterwards and the skinned mesh never comes back.
+                        commands.entity(entity).remove::<super::skeleton2d::BoneWorldTransforms2d>();
+                        commands.entity(entity).remove::<super::skeleton2d::SkinnedMeshInitialized>();
+                    }
+                    // This arm is pure `core/` and cannot emit, and the bridge's
+                    // only skeleton emitter is gated on a live rig — so it reaches
+                    // neither a non-selected entity nor this arm's removal branch,
+                    // and the browser's mirror kept a rig the engine had dropped.
+                    // Carry the state written, don't ask for it to be re-read: the
+                    // drain runs in a different system and `Commands` are deferred.
+                    // The bool is checked, not discarded: `with_pending` returns
+                    // `None` when the thread-local `PendingCommands` is not
+                    // registered, and dropping that signal would silently defeat
+                    // the very re-report this call exists to make — the mirror
+                    // would keep stale state with nothing in the log to say why.
+                    if !super::pending_commands::queue_skeleton2d_resync_pending(
+                        super::skeleton2d::Skeleton2dResync {
+                            entity_id: entity_id.clone(),
+                            data: old_skeleton.clone(),
+                            enabled: *old_enabled,
+                        },
+                    ) {
+                        tracing::warn!(
+                            "undo: could not queue 2D skeleton resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                            entity_id,
+                        );
                     }
                     break;
                 }
@@ -2348,13 +2394,23 @@ fn execute_redo(
                         commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
                     }
                     // Same re-report as the undo arm, with the post-state.
-                    super::pending_commands::queue_reverb_zone_resync_pending(
+                    // The bool is checked, not discarded: `with_pending` returns
+                    // `None` when the thread-local `PendingCommands` is not
+                    // registered, and dropping that signal would silently defeat
+                    // the very re-report this call exists to make — the mirror
+                    // would keep stale state with nothing in the log to say why.
+                    if !super::pending_commands::queue_reverb_zone_resync_pending(
                         super::reverb_zone::ReverbZoneResync {
                             entity_id: entity_id.clone(),
                             data: new_reverb.clone(),
                             enabled: *new_enabled,
                         },
-                    );
+                    ) {
+                        tracing::warn!(
+                            "redo: could not queue reverb zone resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                            entity_id,
+                        );
+                    }
                     break;
                 }
             }
@@ -2438,15 +2494,46 @@ fn execute_redo(
                 }
             }
         }
-        UndoableAction::SkeletonChange { entity_id, new_skeleton, .. } => {
+        UndoableAction::SkeletonChange { entity_id, new_skeleton, new_enabled, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
                 if &eid.0 == entity_id {
                     if let Some(ref sk) = new_skeleton {
-                        // Data only — see the undo arm.
                         commands.entity(entity).insert(sk.clone());
+                        if *new_enabled {
+                            commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+                        } else {
+                            commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                        }
                     } else {
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
                         commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                        // Mirror `apply_skeleton2d_removes`: the two derived
+                        // components have to go with the rig that produced them.
+                        // `SkinnedMeshInitialized` is the one that bites — it is a
+                        // `Without<>` guard on `init_skinned_meshes_2d`, so a stale
+                        // marker does not merely hold old data, it permanently
+                        // suppresses re-initialization for this entity. Restore the
+                        // rig afterwards and the skinned mesh never comes back.
+                        commands.entity(entity).remove::<super::skeleton2d::BoneWorldTransforms2d>();
+                        commands.entity(entity).remove::<super::skeleton2d::SkinnedMeshInitialized>();
+                    }
+                    // See the undo arm: `core/` cannot emit, so re-report.
+                    // The bool is checked, not discarded: `with_pending` returns
+                    // `None` when the thread-local `PendingCommands` is not
+                    // registered, and dropping that signal would silently defeat
+                    // the very re-report this call exists to make — the mirror
+                    // would keep stale state with nothing in the log to say why.
+                    if !super::pending_commands::queue_skeleton2d_resync_pending(
+                        super::skeleton2d::Skeleton2dResync {
+                            entity_id: entity_id.clone(),
+                            data: new_skeleton.clone(),
+                            enabled: *new_enabled,
+                        },
+                    ) {
+                        tracing::warn!(
+                            "redo: could not queue 2D skeleton resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                            entity_id,
+                        );
                     }
                     break;
                 }
@@ -4966,7 +5053,10 @@ mod tilemap_skeleton2d_history_tests {
 
     use super::{HistoryStack, UndoableAction};
     use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
-    use crate::core::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
+    use crate::core::skeleton2d::{
+        BoneWorldTransforms2d, Skeleton2dResync, SkeletonData2d, SkeletonEnabled2d,
+        SkinnedMeshInitialized,
+    };
     use crate::core::tilemap::{TilemapData, TilemapEnabled};
     use bevy::prelude::*;
 
@@ -5216,12 +5306,16 @@ mod tilemap_skeleton2d_history_tests {
         world: &mut World,
         id: &str,
         old: Option<SkeletonData2d>,
+        old_enabled: bool,
         new: Option<SkeletonData2d>,
+        new_enabled: bool,
     ) {
         world.resource_mut::<HistoryStack>().push(UndoableAction::SkeletonChange {
             entity_id: id.to_string(),
             old_skeleton: old,
+            old_enabled,
             new_skeleton: new,
+            new_enabled,
         });
     }
 
@@ -5234,7 +5328,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("armor"),
             false,
         );
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), false, Some(skeleton("armor")), false);
 
         undo(&mut world);
 
@@ -5260,7 +5354,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("armor"),
             false,
         );
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), false, Some(skeleton("armor")), false);
 
         undo(&mut world);
         redo(&mut world);
@@ -5286,7 +5380,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("armor"),
             true,
         );
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), true, Some(skeleton("armor")), true);
 
         undo(&mut world);
         assert_eq!(active_skin_of(&world, entity), "cloth");
@@ -5303,6 +5397,94 @@ mod tilemap_skeleton2d_history_tests {
         );
     }
 
+    /// Put an entity in the state a rig that has actually rendered leaves behind:
+    /// the two components `init_skinned_meshes_2d` derives from the rig, not the
+    /// rig data itself. Neither is inserted by `spawn_skeleton`, so without this
+    /// the "did the arm clean them up" assertions would pass vacuously.
+    fn mark_skinned_mesh_initialized(world: &mut World, entity: Entity) {
+        world
+            .entity_mut(entity)
+            .insert(SkinnedMeshInitialized)
+            .insert(BoneWorldTransforms2d { transforms: Vec::new() });
+    }
+
+    /// `SkinnedMeshInitialized` is a `Without<>` guard on `init_skinned_meshes_2d`.
+    /// Leaving it behind when the rig is removed does not just strand old data: it
+    /// permanently suppresses re-initialization, so the NEXT undo restores
+    /// `SkeletonData2d` onto an entity the init system can no longer match, and the
+    /// skinned mesh never renders again. `apply_skeleton2d_removes` clears both
+    /// derived components; these two arms are the other two paths that remove a rig
+    /// and they must agree with it.
+    #[test]
+    fn undoing_to_no_recorded_skeleton_clears_the_derived_skinning_components() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        mark_skinned_mesh_initialized(&mut world, entity);
+        record_skeleton_edit(&mut world, "rig-1", None, false, Some(skeleton("armor")), true);
+
+        undo(&mut world);
+
+        assert!(
+            !world.entity(entity).contains::<SkinnedMeshInitialized>(),
+            "a stale init guard outliving its rig blocks `init_skinned_meshes_2d` \
+             forever — the mesh cannot come back on a later undo",
+        );
+        assert!(
+            !world.entity(entity).contains::<BoneWorldTransforms2d>(),
+            "bone transforms describe a rig that is gone",
+        );
+    }
+
+    #[test]
+    fn redoing_to_no_new_skeleton_clears_the_derived_skinning_components() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(&mut world, "rig-1", skeleton("cloth"), true);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), true, None, false);
+
+        undo(&mut world);
+        mark_skinned_mesh_initialized(&mut world, entity);
+        redo(&mut world);
+
+        assert!(
+            !world.entity(entity).contains::<SkinnedMeshInitialized>(),
+            "redoing a rig removal must clear the init guard, exactly as the \
+             `remove_skeleton_2d` command path does",
+        );
+        assert!(
+            !world.entity(entity).contains::<BoneWorldTransforms2d>(),
+            "bone transforms describe a rig that is gone",
+        );
+    }
+
+    /// The full sequence the guard actually breaks, end to end: remove the rig,
+    /// undo (rig back), redo (rig gone again), undo (rig back again). Only the
+    /// second undo is at risk — the first is fed by `apply_skeleton2d_removes`,
+    /// which already cleaned up. Asserting on the second is what distinguishes a
+    /// fixed redo arm from an unfixed one.
+    #[test]
+    fn a_rig_survives_a_second_undo_after_a_redo_removed_it() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        mark_skinned_mesh_initialized(&mut world, entity);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("armor")), true, None, false);
+
+        undo(&mut world);
+        redo(&mut world);
+        undo(&mut world);
+
+        assert_eq!(
+            active_skin_of(&world, entity),
+            "armor",
+            "the rig itself must come back",
+        );
+        assert!(
+            !world.entity(entity).contains::<SkinnedMeshInitialized>(),
+            "with the guard still set from before the removal, \
+             `init_skinned_meshes_2d` skips this entity and the restored rig \
+             renders nothing",
+        );
+    }
+
     #[test]
     fn undoing_to_no_recorded_skeleton_clears_both_the_data_and_the_marker() {
         let mut world = base_world();
@@ -5312,7 +5494,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("armor"),
             true,
         );
-        record_skeleton_edit(&mut world, "rig-1", None, Some(skeleton("armor")));
+        record_skeleton_edit(&mut world, "rig-1", None, false, Some(skeleton("armor")), true);
 
         undo(&mut world);
 
@@ -5335,7 +5517,7 @@ mod tilemap_skeleton2d_history_tests {
             skeleton("cloth"),
             true,
         );
-        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), None);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), true, None, false);
 
         undo(&mut world);
         redo(&mut world);
@@ -5348,6 +5530,107 @@ mod tilemap_skeleton2d_history_tests {
             !world.entity(entity).contains::<SkeletonEnabled2d>(),
             "the enabled marker must not outlive the data it describes",
         );
+    }
+
+    // -- the browser has to be told, and only these arms can tell it ---------
+
+    /// Run `body` with a live pending queue registered, and hand back the
+    /// skeleton resyncs it collected.
+    ///
+    /// The registration is not ceremony. `with_pending` reaches a thread-local
+    /// raw pointer that only the bridge's `Startup` system sets in production,
+    /// so an unregistered push is a SILENT no-op — a test that skipped this
+    /// would assert an empty queue and pass no matter what the arms did.
+    fn skeleton_resyncs_from(body: impl FnOnce()) -> Vec<Skeleton2dResync> {
+        struct PendingGuard;
+        impl Drop for PendingGuard {
+            fn drop(&mut self) {
+                crate::core::pending::unregister_pending_commands();
+            }
+        }
+
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let guard = PendingGuard;
+        body();
+        // Clear the pointer before `pending` is moved out of this frame, and
+        // even if `body` unwound.
+        drop(guard);
+        pending.skeleton2d_resyncs
+    }
+
+    /// Undoing a creation is the case no live-rig emitter can ever see: the
+    /// component is GONE, so the only way the browser learns to drop its copy
+    /// is this arm queueing the re-report itself.
+    #[test]
+    fn undoing_a_skeleton_creation_queues_a_removal_resync() {
+        let mut world = base_world();
+        let _ = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        record_skeleton_edit(&mut world, "rig-1", None, false, Some(skeleton("armor")), true);
+
+        let queued = skeleton_resyncs_from(|| undo(&mut world));
+
+        assert_eq!(queued.len(), 1, "undo must queue exactly one resync");
+        assert_eq!(queued[0].entity_id, "rig-1");
+        assert!(
+            queued[0].data.is_none(),
+            "undoing a creation wrote NO rig, so the resync must report a removal",
+        );
+        assert!(!queued[0].enabled, "a removed rig cannot remain enabled");
+    }
+
+    /// The failure branch, which is the one the `if !` guard added for the Seer
+    /// review exists to make visible. With no `PendingCommands` registered the
+    /// queue call returns `false`; the arm must still apply its world mutation
+    /// and must not panic — the resync is a re-report of a change that already
+    /// happened, so losing it may not cancel the change.
+    ///
+    /// Without a registered thread-local there is nothing to assert a warning
+    /// against from a native test, so this pins the two properties that are
+    /// observable: the arm completes, and the world edit lands anyway.
+    #[test]
+    fn undo_still_applies_when_no_pending_commands_are_registered() {
+        let mut world = base_world();
+        let entity = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        record_skeleton_edit(&mut world, "rig-1", None, false, Some(skeleton("armor")), true);
+
+        // Deliberately NOT wrapped in `skeleton_resyncs_from` — the point is the
+        // unregistered thread-local.
+        undo(&mut world);
+
+        assert!(
+            world.get::<crate::core::skeleton2d::SkeletonData2d>(entity).is_none(),
+            "undo must still remove the rig it undid, even with no queue to report it on",
+        );
+    }
+
+    /// Undo carries the pre-state and redo the post-state, and each resync
+    /// carries the data the arm WROTE — never an entity id to be re-read, since
+    /// the drain runs in a different system and `Commands` are deferred.
+    #[test]
+    fn undo_and_redo_of_a_skeleton_removal_queue_the_state_each_one_wrote() {
+        let mut world = base_world();
+        let _ = spawn_skeleton(&mut world, "rig-1", skeleton("armor"), true);
+        record_skeleton_edit(&mut world, "rig-1", Some(skeleton("cloth")), true, None, false);
+
+        let undone = skeleton_resyncs_from(|| undo(&mut world));
+        assert_eq!(undone.len(), 1);
+        let restored = undone[0].data.as_ref().expect("undo restored a rig, so it must be carried");
+        assert_eq!(restored.active_skin, "cloth", "the resync must carry the rig the arm wrote");
+        assert_eq!(
+            restored.bones.len(),
+            2,
+            "the resync must carry the recorded struct, not a default one",
+        );
+        assert!(undone[0].enabled, "undo must restore the removal's enabled marker");
+
+        let redone = skeleton_resyncs_from(|| redo(&mut world));
+        assert_eq!(redone.len(), 1);
+        assert!(
+            redone[0].data.is_none(),
+            "redoing a removal wrote NO rig, so the resync must report a removal",
+        );
+        assert!(!redone[0].enabled, "redoing removal must clear enablement");
     }
 }
 

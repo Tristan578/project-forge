@@ -39,6 +39,12 @@ export interface AnimationSlice {
    * rig — and a full replace built from a misread payload destroys it.
    */
   applySkeleton2dFromEngine: (entityId: string, data: SkeletonData2d) => void;
+  /**
+   * State-only mirror of an engine `SKELETON2D_REMOVED`. Dispatches nothing —
+   * `removeSkeleton2d` sends `remove_skeleton_2d` back, which would echo a
+   * removal command at the engine that just reported one.
+   */
+  applySkeleton2dRemovedFromEngine: (entityId: string) => void;
   removeSkeleton2d: (entityId: string) => void;
   setSkeletalAnimations2d: (entityId: string, animations: SkeletalAnimation2d[]) => void;
   setSelectedBone: (boneName: string | null) => void;
@@ -130,6 +136,14 @@ export const createAnimationSlice: StateCreator<AnimationSlice, [], [], Animatio
   },
   applySkeleton2dFromEngine: (entityId, data) => {
     set(state => ({ skeletons2d: { ...state.skeletons2d, [entityId]: data } }));
+  },
+
+  applySkeleton2dRemovedFromEngine: (entityId) => {
+    set(state => {
+      if (!Object.hasOwn(state.skeletons2d, entityId)) return {};
+      const { [entityId]: _removed, ...rest } = state.skeletons2d;
+      return { skeletons2d: rest };
+    });
   },
   removeSkeleton2d: (entityId) => {
     set(state => {

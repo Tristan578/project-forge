@@ -89,6 +89,8 @@ export function createMockActions() {
     applyCamera2dFromEngine: vi.fn(),
     applyTilemapFromEngine: vi.fn(),
     applySkeleton2dFromEngine: vi.fn(),
+    applySkeleton2dRemovedFromEngine: vi.fn(),
+    removeSkeleton2d: vi.fn(),
     // Particle events
     setPrimaryParticle: vi.fn(),
     setParticleEnabled: vi.fn(),

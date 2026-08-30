@@ -321,3 +321,85 @@ fn full_schedule_has_no_b0002_conflicts() {
     let mut app = build_full_app();
     app.update();
 }
+
+/// Every bridge system that drains a `*_resyncs` queue must be ordered after
+/// the undo/redo arms that fill it.
+///
+/// The arms in `core/entity_factory.rs` are pure Rust and cannot emit, so they
+/// push onto a `PendingCommands` resync queue and depend on a bridge system
+/// draining it *in the same frame*. Those drains sit in plain, non-`.chain()`ed
+/// `Update` tuples, where Bevy is free to schedule the drain ahead of the arm —
+/// and which side wins reshuffles whenever any unrelated system is added
+/// (this is the same ambiguity that took the live engine smoke gate red on
+/// #9493). `ResyncDrainSet.after(EditorApplySet)` is the constraint that
+/// removes the ambiguity; this test is what keeps it attached.
+///
+/// The drain roster is DERIVED from `bridge/` source, not listed here, so a
+/// future resync queue with a new drain system is caught on the commit that
+/// adds it rather than being silently exempt. The directory is read at test
+/// runtime because `include_str!` cannot enumerate a directory; a missing or
+/// unreadable `bridge/` fails the test loudly rather than vacuously passing.
+#[test]
+fn every_resync_drain_is_ordered_after_the_undo_arms() {
+    let bridge_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bridge");
+    let entries = std::fs::read_dir(&bridge_dir)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", bridge_dir.display()));
+
+    let mut drains: Vec<String> = Vec::new();
+    for entry in entries {
+        let path = entry.expect("unreadable dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let mut current_fn: Option<String> = None;
+        for line in src.lines() {
+            // Matches `fn`, `pub fn`, and `pub(super) fn` / `pub(crate) fn` —
+            // the drains use more than one visibility, and a parser that knew
+            // only `pub fn` skipped straight past `apply_reverb_zone_commands`.
+            let trimmed = line.trim_start();
+            let after_vis = trimmed
+                .strip_prefix("pub")
+                .map(|rest| rest.trim_start_matches(|c| c != 'f' && c != '\n'))
+                .unwrap_or(trimmed);
+            if let Some(rest) = after_vis.strip_prefix("fn ") {
+                current_fn = rest.split('(').next().map(|n| n.trim().to_string());
+            }
+            if line.contains("_resyncs.drain(") {
+                let name = current_fn.clone().unwrap_or_else(|| {
+                    panic!("{}: a `_resyncs.drain(` with no enclosing `pub fn`", path.display())
+                });
+                if !drains.contains(&name) {
+                    drains.push(name);
+                }
+            }
+        }
+    }
+
+    // A parser that finds nothing would make every assertion below vacuous.
+    // Two drains exist today (skeleton2d, reverb zones); fewer means the scan
+    // broke, not that the hazard went away.
+    assert!(
+        drains.len() >= 2,
+        "found only {} resync drain(s) in {} — the scan is broken, not the code",
+        drains.len(),
+        bridge_dir.display(),
+    );
+
+    for name in &drains {
+        assert!(
+            BRIDGE_SRC.contains(&format!("{name}.in_set(ResyncDrainSet)")),
+            "`{name}` drains a resync queue but is not registered with \
+             `.in_set(ResyncDrainSet)` in bridge/mod.rs. Without it Bevy may run \
+             the drain before `apply_undo_requests` fills the queue, and the \
+             editor mirror silently lags one frame behind every undo.",
+        );
+    }
+
+    assert!(
+        BRIDGE_SRC.contains("ResyncDrainSet.after(EditorApplySet)"),
+        "bridge/mod.rs no longer orders `ResyncDrainSet` after `EditorApplySet`, \
+         so membership in the set constrains nothing.",
+    );
+}

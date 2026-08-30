@@ -176,7 +176,7 @@ fn route_domain(command: &str) -> u8 {
         | "set_sprite_data" | "remove_sprite" | "get_sprite"
         | "update_camera_2d" | "get_camera_2d" | "set_sprite_sheet"
         | "remove_sprite_sheet" | "set_sprite_animator" | "remove_sprite_animator"
-        | "create_skeleton2d" | "add_bone2d" | "remove_bone2d" | "update_bone2d"
+        | "create_skeleton2d" | "remove_skeleton_2d" | "add_bone2d" | "remove_bone2d" | "update_bone2d"
         | "create_skeletal_animation2d" | "fill_tiles" | "set_sorting_layers"
         // DELETED (PF-1181): seventeen names were routed to this domain with no
         // arm to receive them, so each answered `Unknown sprites command`. Most

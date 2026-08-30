@@ -83,10 +83,18 @@ type PipelineState = {
   pendingGate: { id: string } | null;
   currentPlan: {
     status: string;
-    steps: Array<{ id: string; executor: string; status: string }>;
+    steps: Array<{
+      id: string;
+      executor: string;
+      status: string;
+      // Mirrors `OrchestratorStepError` — only the two fields the
+      // failure message prints, kept optional because a passing step
+      // carries none.
+      error?: { code: string; message: string };
+    }>;
   } | null;
   engineMode: string;
-  sceneGraph: { nodes: Record<string, unknown> };
+  sceneGraph: { nodes: Record<string, { name?: string }> };
   startDecomposition: (prompt: string, projectType: string) => Promise<void>;
   runPipelineFromPlan: () => Promise<void>;
   resolveGate: (decision: 'approved' | 'rejected') => void;
@@ -241,11 +249,22 @@ function readOutcome(page: import('@playwright/test').Page) {
       orchestratorStatus: state.orchestratorStatus,
       orchestratorError: state.orchestratorError,
       planStatus: state.currentPlan?.status ?? null,
+      // `error` is carried, not just `status`: a red gate whose message is
+      // only `{"executor":"game_component","status":"failed"}` names the step
+      // and nothing about why, which cost a full CI cycle per hypothesis. The
+      // executor already recorded a code and a message — print them.
       steps: (state.currentPlan?.steps ?? []).map(s => ({
         executor: s.executor,
         status: s.status,
+        ...(s.error ? { errorCode: s.error.code, errorMessage: s.error.message } : {}),
       })),
       nodeCount: Object.keys(state.sceneGraph?.nodes ?? {}).length,
+      // The NAMES, not the ids, because the failure this diagnoses is
+      // `ENTITY_NOT_FOUND` against a NON-empty graph and every id in the plan
+      // is a runtime-minted UUID: a list of ten UUIDs says only "not this one",
+      // while the names say exactly which of the fourteen planned spawns
+      // reached the engine and which never did.
+      nodeNames: Object.values(state.sceneGraph?.nodes ?? {}).map(n => n?.name ?? '?'),
       engineMode: state.engineMode,
     };
   });
@@ -260,14 +279,23 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
 
   let consoleErrors: string[] = [];
   let pageErrors: string[] = [];
+  /**
+   * Diagnostics only — never asserted on, so it cannot weaken a gate.
+   * The engine answers an unknown entity id at `warn`, not `error`, so
+   * `consoleErrors` alone cannot see the single most useful line when a step
+   * fails with ENTITY_NOT_FOUND.
+   */
+  let consoleWarnings: string[] = [];
 
   test.beforeEach(async ({ page, editor }) => {
     consoleErrors = [];
     pageErrors = [];
+    consoleWarnings = [];
     // Registered before the first navigation, so these cover the whole test
     // including engine boot — see `expectNoEngineRejections`.
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
+      if (msg.type() === 'warning') consoleWarnings.push(msg.text());
     });
     page.on('pageerror', (err) => pageErrors.push(err.message));
     await editor.load();
@@ -319,7 +347,17 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     const outcome = await readOutcome(page);
     expect(
       terminalStatus,
-      `pipeline did not complete: ${outcome.orchestratorError ?? 'no error recorded'} / ${JSON.stringify(outcome.steps)}`
+      `pipeline did not complete: ${outcome.orchestratorError ?? 'no error recorded'}` +
+        ` / sceneGraph nodes (${outcome.nodeCount}): ${JSON.stringify(outcome.nodeNames)}` +
+        // The engine answers an unknown id by ignoring the command and writing
+        // a line, never by failing the dispatch — so when a step cannot find an
+        // entity, these lines are the only record of the engine's side of it.
+        ` / engine complaints: ${JSON.stringify(
+          [...consoleErrors, ...consoleWarnings]
+            .filter(l => /Engine rejected command|no entity with id|ignored/.test(l))
+            .slice(0, 20)
+        )}` +
+        ` / ${JSON.stringify(outcome.steps)}`
     ).toBe('completed');
     expect(outcome.planStatus).toBe('completed');
 

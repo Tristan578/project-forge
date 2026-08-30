@@ -450,7 +450,9 @@ pub enum UndoableAction {
     SkeletonChange {
         entity_id: String,
         old_skeleton: Option<SkeletonData2d>,
+        old_enabled: bool,
         new_skeleton: Option<SkeletonData2d>,
+        new_enabled: bool,
     },
 }
 

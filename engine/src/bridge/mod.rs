@@ -66,6 +66,11 @@ use crate::core::{
     custom_wgsl::CustomWgslPlugin,
 };
 
+// NOT editor-only: `apply_reverb_zone_commands` is registered in the
+// always-active block, so this import cannot ride the `runtime`-gated group
+// below. The set carries ordering only, never a run condition.
+use crate::core::engine_mode::ResyncDrainSet;
+
 // Editor-only imports
 #[cfg(not(feature = "runtime"))]
 use crate::core::{
@@ -442,11 +447,12 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, (
                 audio::apply_audio_playback,
                 audio::apply_audio_bus_updates,
-                // One system for set/toggle/remove — see its doc comment: they
-                // all write the same two components, so as separate systems the
-                // deferred-Commands ordering decided who won.
-                audio::apply_reverb_zone_commands,
             ))
+            // One system for set/toggle/remove — see its doc comment: they
+            // all write the same two components, so as separate systems the
+            // deferred-Commands ordering decided who won. It also drains
+            // `reverb_zone_resyncs`, which is why it is in `ResyncDrainSet`.
+            .add_systems(Update, audio::apply_reverb_zone_commands.in_set(ResyncDrainSet))
             // Audio bus systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 audio::apply_audio_bus_creates,
@@ -560,6 +566,13 @@ impl Plugin for SelectionPlugin {
                 .configure_sets(Update, EditorSystemSet.run_if(in_edit_mode))
                 .configure_sets(Update, EditorApplySet.in_set(EditorSystemSet))
                 .configure_sets(Update, EditorEmitSet.in_set(EditorSystemSet).after(EditorApplySet))
+                // The resync drains must run after the undo/redo arms that fill
+                // their queues (`apply_undo_requests`/`apply_redo_requests` are
+                // in `EditorApplySet`), or the editor mirror lags a frame behind
+                // every undo. Configured here, inside the editor-only block,
+                // because `EditorApplySet` has no members in a `runtime` build —
+                // the drains themselves stay unconditional.
+                .configure_sets(Update, ResyncDrainSet.after(EditorApplySet))
                 .add_systems(Update, (
                     core_systems::apply_pending_transforms,
                     core_systems::apply_pending_renames,
@@ -695,6 +708,10 @@ impl Plugin for SelectionPlugin {
                     skeleton2d::apply_auto_weight_skeleton2d,
                     skeleton2d::apply_add_mesh_attachment_requests,
                 ))
+                // Drains `skeleton2d_resyncs` as well as applying removes, so
+                // it must not be scheduled ahead of the undo/redo arms that
+                // fill that queue.
+                .add_systems(Update, skeleton2d::apply_skeleton2d_removes.in_set(ResyncDrainSet))
                 .add_systems(Update, skeleton2d::render_skeleton_bones)
                 .add_systems(Update, (
                     performance::apply_lod_commands,
