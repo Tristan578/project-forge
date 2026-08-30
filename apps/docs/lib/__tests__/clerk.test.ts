@@ -19,7 +19,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
-import { hasValidClerkKey } from '../clerk';
+import {
+  assertClerkPublishableKeyShape,
+  clerkPublishableKeyProblem,
+  hasValidClerkKey,
+} from '../clerk';
+
+/** The exact value that was live on the docs Vercel project (#9044). */
+const PASTED_ASSIGNMENT =
+  'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_c3Bhd25mb3JnZS5haSQ';
 
 const DOCS_ROOT = resolve(__dirname, '..', '..');
 const read = (...parts: string[]) => readFileSync(join(DOCS_ROOT, ...parts), 'utf-8');
@@ -43,9 +51,78 @@ describe('hasValidClerkKey', () => {
     ['a placeholder', 'your-key-here'],
     ['a secret key pasted by mistake', 'sk_test_deadbeef'],
     ['whitespace-prefixed', ' pk_test_deadbeef'],
+    ['the whole KEY=value assignment pasted as the value', PASTED_ASSIGNMENT],
   ])('rejects %s', (_label, key) => {
     vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', key);
     expect(hasValidClerkKey()).toBe(false);
+  });
+});
+
+describe('clerkPublishableKeyProblem', () => {
+  // MISSING and MALFORMED are different states and the build treats them
+  // differently, so the predicate that separates them is tested directly rather
+  // than only through hasValidClerkKey()'s single boolean (#9044).
+  it.each([
+    ['unset', undefined],
+    ['empty', ''],
+    ['a valid test key', 'pk_test_Zm9vLWJhci5jbGVyay5hY2NvdW50cy5kZXYk'],
+    ['a valid live key', 'pk_live_c3Bhd25mb3JnZS5haSQ'],
+  ])('reports no problem for %s', (_label, key) => {
+    expect(clerkPublishableKeyProblem(key)).toBeNull();
+  });
+
+  it('names the paste-the-whole-assignment mistake specifically', () => {
+    const problem = clerkPublishableKeyProblem(PASTED_ASSIGNMENT);
+    expect(problem).not.toBeNull();
+    // The whole point is that the message says what to fix. A generic
+    // "invalid key" would have been just as useless as the silence it replaces.
+    expect(problem).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...');
+    expect(problem).toContain('pasted in as the VALUE');
+  });
+
+  it('names a secret key without echoing it', () => {
+    const problem = clerkPublishableKeyProblem('sk_live_realsecretvalue');
+    expect(problem).toContain('SECRET key');
+    expect(problem).not.toContain('realsecretvalue');
+  });
+
+  it('distinguishes whitespace from a genuinely wrong value', () => {
+    expect(clerkPublishableKeyProblem(' pk_test_deadbeef ')).toContain('whitespace');
+    expect(clerkPublishableKeyProblem('your-key-here')).toContain('which is not');
+  });
+});
+
+describe('assertClerkPublishableKeyShape', () => {
+  it.each([
+    ['unset', undefined],
+    ['empty', ''],
+    ['a valid live key', 'pk_live_c3Bhd25mb3JnZS5haSQ'],
+  ])('does not throw for %s', (_label, key) => {
+    expect(() => assertClerkPublishableKeyShape(key)).not.toThrow();
+  });
+
+  it('throws on the production paste error, naming the variable', () => {
+    expect(() => assertClerkPublishableKeyShape(PASTED_ASSIGNMENT)).toThrow(
+      /NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable/
+    );
+  });
+
+  it('reads process.env when called with no argument', () => {
+    vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', PASTED_ASSIGNMENT);
+    expect(() => assertClerkPublishableKeyShape()).toThrow(/set but unusable/);
+  });
+
+  it('is wired into the docs build, not just exported', () => {
+    // A guard nobody calls is not a guard. next.config.ts is evaluated by
+    // `next build`, so this is what makes a bad value a red deploy rather than
+    // a silently broken auth surface.
+    const config = read('next.config.ts');
+    expect(config).toMatch(/from '\.\/lib\/clerk'/);
+    expect(
+      config,
+      'next.config.ts imports assertClerkPublishableKeyShape but never calls it — ' +
+        'a malformed key would build clean and ship dead auth again (#9044).'
+    ).toMatch(/^assertClerkPublishableKeyShape\(\);$/m);
   });
 });
 
