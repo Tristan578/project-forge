@@ -26,6 +26,8 @@
  * server and in the browser bundle.
  */
 
+import { clerkFrontendApiFromPublishableKey } from "@/lib/security/csp";
+
 /** Prefixes Clerk accepts for a publishable key. */
 const VALID_PREFIXES = ["pk_test_", "pk_live_"] as const;
 
@@ -43,7 +45,23 @@ const VALID_PREFIXES = ["pk_test_", "pk_live_"] as const;
 export function clerkPublishableKeyProblem(raw: string | undefined): string | null {
   const key = raw ?? "";
   if (key === "") return null;
-  if (VALID_PREFIXES.some((p) => key.startsWith(p))) return null;
+
+  if (VALID_PREFIXES.some((p) => key.startsWith(p))) {
+    // A correct prefix is not enough, and the outage proves why. Clerk encodes
+    // its Frontend API host in the payload as base64 of `<host>$`; a key whose
+    // payload does not decode to a valid hostname yields an EMPTY host, and
+    // that is literally how clerk-js came to be requested from
+    // `https:///npm/...`. The same decode also feeds the /play CSP
+    // (buildPlayContentSecurityPolicy), so an undecodable key silently drops
+    // Clerk's host from the allowlist and its scripts are blocked there too.
+    // Reusing csp.ts's implementation rather than writing a second one: two
+    // copies of a security-relevant validator drift, and this one is already
+    // load-bearing for a header.
+    if (clerkFrontendApiFromPublishableKey(key) === null) {
+      return "its prefix is right but the payload does not decode to a Clerk Frontend API host (Clerk base64-encodes \"<host>$\" there). A key in this shape resolves to an EMPTY host, which is what made clerk-js load from https:///npm/... — check for a truncated copy/paste, and note that placeholders such as pk_test_xxx are rejected here on purpose";
+    }
+    return null;
+  }
 
   if (key.startsWith("sk_")) {
     return "it is a SECRET key (sk_...). Publishable keys start with pk_test_ or pk_live_, and a secret key must never reach a NEXT_PUBLIC_ variable";
@@ -98,7 +116,8 @@ export function assertClerkPublishableKeyShape(
   throw new Error(
     `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable: ${problem}. ` +
       "Authentication would be silently dead on the deployed app (#9044). " +
-      "Fix the value in the Vercel project settings, or unset it to build with " +
-      "authentication disabled.",
+      "Fix the value in the Vercel project settings (or in .env.local for a " +
+      "local build), or remove it entirely to build with authentication " +
+      "disabled — an ABSENT key is a supported state, an unusable one is not.",
   );
 }

@@ -28,8 +28,13 @@ import {
 
 /** The exact shape that was live on the docs Vercel project. */
 const PASTED_ASSIGNMENT = "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_c3Bhd25mb3JnZS5haSQ";
-const VALID_LIVE = "pk_live_c3Bhd25mb3JnZS5haSQ";
-const VALID_TEST = "pk_test_Zm9vLWJhci5jbGVyay5hY2NvdW50cy5kZXYk";
+
+/** `pk_(test|live)_` + base64 of `<host>$` — the real key shape. */
+const keyFor = (host: string, prefix = "pk_test_") =>
+  `${prefix}${Buffer.from(`${host}$`, "utf8").toString("base64")}`;
+
+const VALID_LIVE = keyFor("clerk.spawnforge.ai", "pk_live_");
+const VALID_TEST = keyFor("sunny-cat-42.clerk.accounts.dev");
 
 const WEB_ROOT = resolve(__dirname, "..", "..", "..", "..");
 const read = (...parts: string[]) => readFileSync(join(WEB_ROOT, ...parts), "utf-8");
@@ -66,6 +71,31 @@ describe("clerkPublishableKeyProblem", () => {
   it("distinguishes whitespace from a genuinely wrong value", () => {
     expect(clerkPublishableKeyProblem(` ${VALID_TEST} `)).toContain("whitespace");
     expect(clerkPublishableKeyProblem("your-key-here")).toContain("which is not");
+  });
+
+  // The prefix alone is NOT the contract. Clerk base64-encodes `<host>$` in the
+  // payload and derives its script host from it, so a right-prefix key with a
+  // junk payload resolves to an EMPTY host — which is precisely how clerk-js
+  // came to be fetched from `https:///npm/...`. The same decode feeds the /play
+  // CSP, so such a key also drops Clerk from that allowlist.
+  it.each([
+    ["an empty payload", "pk_test_"],
+    ["a payload that is not valid base64", "pk_live_!!!not-base64!!!"],
+    ["a payload missing Clerk's $ terminator", `pk_test_${Buffer.from("clerk.example.com", "utf8").toString("base64")}`],
+    ["a payload decoding to something that is not a hostname", `pk_test_${Buffer.from("not a host$", "utf8").toString("base64")}`],
+    ["a truncated payload", VALID_LIVE.slice(0, VALID_LIVE.length - 6)],
+    ["the .env.example placeholder", "pk_test_xxx"],
+  ])("rejects %s despite the valid prefix", (_label, key) => {
+    const problem = clerkPublishableKeyProblem(key);
+    expect(problem, `expected ${key} to be rejected`).not.toBeNull();
+    expect(problem).toContain("does not decode to a Clerk Frontend API host");
+  });
+
+  it.each([
+    ["a development instance key", VALID_TEST],
+    ["a production custom-domain key", VALID_LIVE],
+  ])("accepts %s, whose payload decodes to a real host", (_label, key) => {
+    expect(clerkPublishableKeyProblem(key)).toBeNull();
   });
 });
 

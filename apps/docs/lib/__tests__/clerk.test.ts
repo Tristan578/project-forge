@@ -29,6 +29,13 @@ import {
 const PASTED_ASSIGNMENT =
   'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_c3Bhd25mb3JnZS5haSQ';
 
+/** `pk_(test|live)_` + base64 of `<host>$` — the real key shape. */
+const keyFor = (host: string, prefix = 'pk_test_') =>
+  `${prefix}${Buffer.from(`${host}$`, 'utf8').toString('base64')}`;
+
+const VALID_TEST = keyFor('sunny-cat-42.clerk.accounts.dev');
+const VALID_LIVE = keyFor('clerk.spawnforge.ai', 'pk_live_');
+
 const DOCS_ROOT = resolve(__dirname, '..', '..');
 const read = (...parts: string[]) => readFileSync(join(DOCS_ROOT, ...parts), 'utf-8');
 
@@ -37,7 +44,7 @@ afterEach(() => {
 });
 
 describe('hasValidClerkKey', () => {
-  it.each(['pk_test_Zm9vLWJhci5jbGVyay5hY2NvdW50cy5kZXYk', 'pk_live_c3Bhd25mb3JnZS5haSQ'])(
+  it.each([VALID_TEST, VALID_LIVE])(
     'accepts a well-formed key (%s)',
     (key) => {
       vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', key);
@@ -65,8 +72,8 @@ describe('clerkPublishableKeyProblem', () => {
   it.each([
     ['unset', undefined],
     ['empty', ''],
-    ['a valid test key', 'pk_test_Zm9vLWJhci5jbGVyay5hY2NvdW50cy5kZXYk'],
-    ['a valid live key', 'pk_live_c3Bhd25mb3JnZS5haSQ'],
+    ['a valid test key', VALID_TEST],
+    ['a valid live key', VALID_LIVE],
   ])('reports no problem for %s', (_label, key) => {
     expect(clerkPublishableKeyProblem(key)).toBeNull();
   });
@@ -87,8 +94,31 @@ describe('clerkPublishableKeyProblem', () => {
   });
 
   it('distinguishes whitespace from a genuinely wrong value', () => {
-    expect(clerkPublishableKeyProblem(' pk_test_deadbeef ')).toContain('whitespace');
+    expect(clerkPublishableKeyProblem(` ${VALID_TEST} `)).toContain('whitespace');
     expect(clerkPublishableKeyProblem('your-key-here')).toContain('which is not');
+  });
+
+  // The prefix alone is NOT the contract, and this site is the proof. Clerk
+  // base64-encodes `<host>$` in the payload and derives its script host from
+  // it, so a right-prefix key with a junk payload resolves to an EMPTY host —
+  // which is exactly how clerk-js came to be fetched from `https:///npm/...`.
+  it.each([
+    ['an empty payload', 'pk_test_'],
+    ['a payload that is not valid base64', 'pk_live_!!!not-base64!!!'],
+    [
+      "a payload missing Clerk's $ terminator",
+      `pk_test_${Buffer.from('clerk.example.com', 'utf8').toString('base64')}`,
+    ],
+    [
+      'a payload decoding to something that is not a hostname',
+      `pk_test_${Buffer.from('not a host$', 'utf8').toString('base64')}`,
+    ],
+    ['a truncated payload', VALID_LIVE.slice(0, VALID_LIVE.length - 6)],
+    ['the .env.example placeholder', 'pk_test_xxx'],
+  ])('rejects %s despite the valid prefix', (_label, key) => {
+    const problem = clerkPublishableKeyProblem(key);
+    expect(problem, `expected ${key} to be rejected`).not.toBeNull();
+    expect(problem).toContain('does not decode to a Clerk Frontend API host');
   });
 });
 
@@ -96,7 +126,7 @@ describe('assertClerkPublishableKeyShape', () => {
   it.each([
     ['unset', undefined],
     ['empty', ''],
-    ['a valid live key', 'pk_live_c3Bhd25mb3JnZS5haSQ'],
+    ['a valid live key', VALID_LIVE],
   ])('does not throw for %s', (_label, key) => {
     expect(() => assertClerkPublishableKeyShape(key)).not.toThrow();
   });

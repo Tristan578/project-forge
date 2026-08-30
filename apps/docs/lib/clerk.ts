@@ -32,6 +32,38 @@
 const VALID_PREFIXES = ['pk_test_', 'pk_live_'] as const;
 
 /**
+ * Decode the Frontend API host a publishable key encodes, or `null` if it does
+ * not encode one.
+ *
+ * `pk_(test|live)_<b64>` where the payload decodes to `<host>$`. This is the
+ * check that actually catches the outage: a key whose payload does not decode
+ * to a hostname yields an EMPTY host, which is exactly how clerk-js came to be
+ * requested from `https:///npm/...`.
+ *
+ * The hostname regex is a guard, not a formatting nicety — `web/` interpolates
+ * this same decoded value into a CSP header, where a payload decoding to
+ * `evil.com; script-src *` would inject a directive.
+ *
+ * Mirrors `clerkFrontendApiFromPublishableKey` in
+ * `web/src/lib/security/csp.ts`. Duplicated rather than imported because
+ * Next.js production builds cannot import across the `web/` boundary; keep the
+ * two in step.
+ */
+function clerkFrontendApiHost(publishableKey: string): string | null {
+  const payload = /^pk_(?:test|live)_(.+)$/.exec(publishableKey)?.[1];
+  if (!payload) return null;
+  let decoded: string;
+  try {
+    decoded = atob(payload);
+  } catch {
+    return null;
+  }
+  if (!decoded.endsWith('$')) return null;
+  const host = decoded.slice(0, -1);
+  return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(host) ? host : null;
+}
+
+/**
  * Diagnose a configured-but-unusable publishable key.
  *
  * Returns `null` when the key is usable OR absent — absence is not a defect,
@@ -46,7 +78,17 @@ const VALID_PREFIXES = ['pk_test_', 'pk_live_'] as const;
 export function clerkPublishableKeyProblem(raw: string | undefined): string | null {
   const key = raw ?? '';
   if (key === '') return null;
-  if (VALID_PREFIXES.some((p) => key.startsWith(p))) return null;
+
+  if (VALID_PREFIXES.some((p) => key.startsWith(p))) {
+    // A correct prefix is not enough, and this site is the proof. Clerk encodes
+    // its Frontend API host in the payload; a key whose payload does not decode
+    // to a valid hostname yields an EMPTY host, which is what made clerk-js
+    // load from `https:///npm/...` here.
+    if (clerkFrontendApiHost(key) === null) {
+      return 'its prefix is right but the payload does not decode to a Clerk Frontend API host (Clerk base64-encodes "<host>$" there). A key in this shape resolves to an EMPTY host, which is what made clerk-js load from https:///npm/... — check for a truncated copy/paste, and note that placeholders such as pk_test_xxx are rejected here on purpose';
+    }
+    return null;
+  }
 
   if (key.startsWith('sk_')) {
     return 'it is a SECRET key (sk_...). Publishable keys start with pk_test_ or pk_live_, and a secret key must never reach a NEXT_PUBLIC_ variable';
@@ -105,7 +147,9 @@ export function assertClerkPublishableKeyShape(
   throw new Error(
     `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable: ${problem}. ` +
       'Authentication would be silently dead on the deployed docs site (#9044). ' +
-      'Fix the value in the Vercel project settings, or unset it to build the ' +
-      'docs with authentication disabled.',
+      'Fix the value in the Vercel project settings (or in .env.local for a ' +
+      'local build), or remove it entirely to build the docs with ' +
+      'authentication disabled — an ABSENT key is a supported state, an ' +
+      'unusable one is not.',
   );
 }
