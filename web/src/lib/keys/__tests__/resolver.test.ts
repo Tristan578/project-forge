@@ -120,7 +120,11 @@ function resetMocks() {
   mockGetDb.mockImplementation(() => mockDbChain as unknown as ReturnType<typeof dbClient.getDb>);
   mockQueryWithResilience.mockImplementation((fn: () => unknown) => fn() as never);
   mockDecryptProviderKey.mockImplementation((encKey: string, _iv: string) => `decrypted:${encKey}`);
-  mockEncryptProviderKey.mockReturnValue({ encrypted: 'enc-abc', iv: 'iv-abc' });
+  // mockImplementation, not mockReturnValue: the module-scope factory returned a
+  // FRESH object per call. Nothing depends on identity today, but a shared
+  // object is a different contract, and this function is meant to RESTORE the
+  // default rather than quietly redefine it.
+  mockEncryptProviderKey.mockImplementation(() => ({ encrypted: 'enc-abc', iv: 'iv-abc' }));
 }
 
 // ---------------------------------------------------------------------------

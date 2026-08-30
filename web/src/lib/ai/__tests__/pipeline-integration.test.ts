@@ -30,9 +30,12 @@ const _mockFetchResponse = (body: unknown, status = 200): Response => {
 // Consequently each `beforeEach` below must use `vi.resetAllMocks()` rather
 // than `vi.clearAllMocks()`: clearing only wipes recorded calls, while a
 // `mockResolvedValueOnce` that its own test never consumed stays armed on this
-// shared stub and is handed to whichever later test calls fetch next. Tests
-// that queue a response must also await the call they start, so the response
-// is consumed by the test that arranged it.
+// shared stub and is served to some later fetch call. Where the leak comes from
+// an UN-AWAITED call, as it did here, the timing is a race rather than a fixed
+// one-test offset — so the symptom is an intermittent wrong-body failure rather
+// than a reproducible one, which is why it survived this long. Tests that queue
+// a response must therefore also await the call they start, so the response is
+// consumed by the test that arranged it.
 vi.stubGlobal('fetch', vi.fn());
 
 // ---------------------------------------------------------------------------
