@@ -25,6 +25,14 @@ const _mockFetchResponse = (body: unknown, status = 200): Response => {
   });
 };
 
+// NOTE: this stub is created ONCE at module scope and is never restored
+// (`vi.unstubAllGlobals()` is never called), so it outlives every test.
+// Consequently each `beforeEach` below must use `vi.resetAllMocks()` rather
+// than `vi.clearAllMocks()`: clearing only wipes recorded calls, while a
+// `mockResolvedValueOnce` that its own test never consumed stays armed on this
+// shared stub and is handed to whichever later test calls fetch next. Tests
+// that queue a response must also await the call they start, so the response
+// is consumed by the test that arranged it.
 vi.stubGlobal('fetch', vi.fn());
 
 // ---------------------------------------------------------------------------
@@ -55,7 +63,8 @@ function makeStreamingResponse(text: string): Response {
 describe('gddGenerator — generateGDD contract', () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.clearAllMocks();
+    // Drains any *Once queue left on the module-scope fetch stub (see top).
+    vi.resetAllMocks();
   });
 
   it('is exported as an async function', async () => {
@@ -75,6 +84,12 @@ describe('gddGenerator — generateGDD contract', () => {
     vi.mocked(fetch).mockResolvedValueOnce(makeStreamingResponse(JSON.stringify(fakeGdd)));
     const result = mod.generateGDD('A platformer game');
     expect(result).toBeInstanceOf(Promise);
+    // Await the in-flight call before the test ends. Leaving it floating meant
+    // the queued fetch response was still armed at teardown and was consumed at
+    // an unspecified later point -- whichever test called fetch next could get
+    // THIS test's body. Awaiting pins the response to the test that queued it.
+    const gdd = await result;
+    expect(gdd.title).toBe('Test');
   });
 
   it('throws an error when prompt is empty', async () => {
@@ -103,6 +118,7 @@ describe('gddGenerator — generateGDD contract', () => {
     const result = await generateGDD('A ninja platformer game', { genre: 'Platformer', scope: 'small' });
 
     // Verify output shape
+    expect(result.title).toBe('Ninja Dash');
     expect(typeof result.title).toBe('string');
     expect(typeof result.genre).toBe('string');
     expect(typeof result.summary).toBe('string');
@@ -145,7 +161,8 @@ describe('gddGenerator — generateGDD contract', () => {
 describe('levelGenerator — generateLevel contract', () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.clearAllMocks();
+    // Drains any *Once queue left on the module-scope fetch stub (see top).
+    vi.resetAllMocks();
   });
 
   it('is exported as an async function', async () => {
@@ -207,7 +224,8 @@ describe('levelGenerator — generateLevel contract', () => {
 describe('effectSystem — generateEffectBindings contract', () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.clearAllMocks();
+    // Drains any *Once queue left on the module-scope fetch stub (see top).
+    vi.resetAllMocks();
   });
 
   it('is exported as an async function', async () => {
@@ -290,7 +308,8 @@ describe('effectSystem — generateEffectBindings contract', () => {
 describe('gameReviewer — generateReview contract', () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.clearAllMocks();
+    // Drains any *Once queue left on the module-scope fetch stub (see top).
+    vi.resetAllMocks();
   });
 
   it('is exported as an async function', async () => {
@@ -334,6 +353,7 @@ describe('gameReviewer — generateReview contract', () => {
     const result = await generateReview(context);
 
     // Verify output shape
+    expect(result.title).toBe('Space Blaster Review');
     expect(typeof result.title).toBe('string');
     expect(typeof result.summary).toBe('string');
     expect(typeof result.overallRating).toBe('number');
