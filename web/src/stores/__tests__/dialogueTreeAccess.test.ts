@@ -23,7 +23,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { stripComments } from '@/test/utils/importScanner';
 
@@ -65,6 +66,12 @@ function collectSourceFiles(dir: string): string[] {
     } else if (
       (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))
       && !entry.name.includes('.test.')
+      // `.spec.` is exempt from the lint rule (PF-1151's
+      // `src/**/*.{test,spec}.{ts,tsx}`), so the scan has to skip it too or the
+      // two mechanisms disagree the moment anyone adds a `.spec.` file: policed
+      // here, exempt there. There are none in the tree today, which is exactly
+      // why this was easy to miss.
+      && !entry.name.includes('.spec.')
       && !entry.name.endsWith('.d.ts')
     ) {
       out.push(full);
@@ -195,5 +202,127 @@ describe('dialogueTreeAccess scanner', () => {
     const source = "const doc = 'https://x.dev'; const t = dialogueTrees[id];";
 
     expect(bareIndexLines(source)).toEqual([1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The scan and the lint rule must agree about scope.
+//
+// PF-1151 / #9241 added `spawnforge/no-bare-dialogue-tree-index`, which enforces
+// this same boundary against the AST as you type. Two mechanisms enforcing one
+// rule is deliberate — they catch different things, see the rule's own comment —
+// but two independently-maintained EXEMPTION lists is not: the moment they
+// drift, a file is exempt from one and policed by the other, and which one you
+// believe depends on where you happened to look.
+//
+// So the config's list is the single source of truth and these tests pin it.
+// Adding an exemption there without teaching the scan about it fails here.
+// ---------------------------------------------------------------------------
+
+describe('dialogue tree access — lint rule / scan agreement', () => {
+  const CONFIG = readFileSync(join(SRC, '..', 'eslint.config.mjs'), 'utf8');
+
+  /**
+   * The exemptions this scan's own scope corresponds to. Keep in the order the
+   * config declares them; the comparison below is order-sensitive on purpose,
+   * so a reordered list is a deliberate edit rather than a silent one.
+   */
+  const EXPECTED_EXEMPTIONS = [
+    'src/stores/dialogueStore.ts',
+    'src/**/__tests__/**',
+    'src/**/test/**',
+    'src/**/*.{test,spec}.{ts,tsx}',
+  ];
+
+  it('registers the rule in the local plugin', () => {
+    expect(
+      CONFIG,
+      'The rule is defined but never added to localPlugin.rules, so ESLint would '
+        + 'reject the config or silently never run it.',
+    ).toMatch(/'no-bare-dialogue-tree-index':\s*noBareDialogueTreeIndex/);
+  });
+
+  it('enables the rule as an error over src/**', () => {
+    expect(CONFIG).toMatch(/'spawnforge\/no-bare-dialogue-tree-index':\s*'error'/);
+  });
+
+  it('does not enforce the rule through no-restricted-syntax', () => {
+    // Flat config resolves rules by NAME. A third `no-restricted-syntax` block
+    // overlapping `src/**` would REPLACE the getDb block's entry rather than
+    // merge with it, silently disabling that rule — a regression with no
+    // symptom. The dedicated rule name is what avoids it, so it is pinned.
+    expect(
+      CONFIG,
+      'dialogueTrees enforcement moved into a no-restricted-syntax block. That '
+        + 'shadows the getDb rule for every file both blocks match.',
+    ).not.toMatch(/selector:\s*["'][^"']*dialogueTrees/);
+  });
+
+  it('exempts exactly the files this scan also skips', () => {
+    const block = /const DIALOGUE_TREE_INDEX_EXEMPT = \[([\s\S]*?)\];/.exec(CONFIG);
+    expect(block, 'DIALOGUE_TREE_INDEX_EXEMPT not found in eslint.config.mjs').not.toBeNull();
+
+    const declared = [...(block?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+
+    expect(
+      declared,
+      'The lint rule\'s exemption list changed. Reconcile it with this scan\'s '
+        + 'scope (collectSourceFiles skips __tests__/test dirs and *.test.* files; '
+        + 'the store is skipped explicitly) and update EXPECTED_EXEMPTIONS here — '
+        + 'do not just re-pin the number.',
+    ).toEqual(EXPECTED_EXEMPTIONS);
+  });
+
+  it('the walk skips every exempt shape, including ones absent from the tree', () => {
+    // Driven against a synthetic corpus rather than the real tree. `src/` has no
+    // `.spec.` file today, so asserting "the walk returned no .spec. files" over
+    // the real tree passes whether or not the filter exists — which is how the
+    // `.spec.` gap got here in the first place: the lint rule exempted it, the
+    // walk did not, and nothing could tell.
+    const root = mkdtempSync(join(tmpdir(), 'dta-'));
+    try {
+      mkdirSync(join(root, '__tests__'));
+      mkdirSync(join(root, 'test'));
+      mkdirSync(join(root, 'nested'));
+      const files = [
+        'keep.ts',
+        'keep.tsx',
+        'nested/keep.ts',
+        'skip.test.ts',
+        'skip.spec.ts',
+        'skip.spec.tsx',
+        'skip.d.ts',
+        'skip.js',
+        '__tests__/skip.ts',
+        'test/skip.ts',
+      ];
+      for (const f of files) writeFileSync(join(root, f), '// fixture\n');
+
+      const walked = collectSourceFiles(root)
+        .map((f) => relative(root, f).replace(/\\/g, '/'))
+        .sort();
+
+      expect(walked).toEqual(['keep.ts', 'keep.tsx', 'nested/keep.ts']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('the scan really does skip everything the rule exempts', () => {
+    // The pin above compares two lists of strings, which proves nothing on its
+    // own about what the scan does. This drives the scan's actual file walk and
+    // asserts its scope matches the exemptions, so the two cannot agree on
+    // paper while diverging in behaviour.
+    const walked = collectSourceFiles(SRC).map((f) => relative(SRC, f).replace(/\\/g, '/'));
+
+    expect(walked.filter((f) => f.split('/').includes('__tests__'))).toEqual([]);
+    expect(walked.filter((f) => f.split('/').includes('test'))).toEqual([]);
+    expect(walked.filter((f) => /\.(test|spec)\.tsx?$/.test(f))).toEqual([]);
+
+    // The store is the one exemption the walk does NOT implement by skipping the
+    // file — it is collected and then skipped inside the violation loop, so it
+    // stays available for the `Object.hasOwn` pin above. Both mechanisms exempt
+    // it; they just do it in different places, and that is worth stating.
+    expect(walked).toContain('stores/dialogueStore.ts');
   });
 });
