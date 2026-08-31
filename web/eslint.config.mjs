@@ -139,10 +139,97 @@ const noEmptyTestAssertion = {
   },
 };
 
+/**
+ * Files allowed to index the dialogue tree map directly (PF-1151 / #9241).
+ *
+ * SINGLE SOURCE OF TRUTH for this boundary's exemptions. The same rule is
+ * enforced twice — here, against the AST as you type, and by the source scan in
+ * `src/stores/__tests__/dialogueTreeAccess.test.ts`, against text in CI. Two
+ * mechanisms with two independently-maintained exemption lists is precisely how
+ * they come to disagree about what is allowed, so this array is PINNED by that
+ * suite: edit it here and the suite fails until the scan's scope is reconciled
+ * with it.
+ *
+ * Each entry, and why:
+ *  - `dialogueStore.ts` implements `getTree`, which cannot be written in terms
+ *    of itself. Exempt so writing the accessor never trips the rule the
+ *    accessor exists to enforce. (The scan exempts the same file, by path.)
+ *  - Test directories and `*.{test,spec}.*` build and index tree maps as
+ *    fixtures — the scanner's own corpus deliberately contains the unsafe
+ *    shape. The scan skips these by walking around them.
+ *
+ * One asymmetry is deliberate and stated rather than reconciled: the scan also
+ * skips `*.d.ts`, which is NOT exempt here. A declaration file holds no
+ * executable expression, so this rule can never fire in one — the asymmetry is
+ * provably inert, and narrowing the rule to match would only add a glob nobody
+ * can trip.
+ */
+const DIALOGUE_TREE_INDEX_EXEMPT = [
+  'src/stores/dialogueStore.ts',
+  'src/**/__tests__/**',
+  'src/**/test/**',
+  'src/**/*.{test,spec}.{ts,tsx}',
+];
+
+/**
+ * `dialogueTrees` is keyed by ids drawn from persisted JSON, generated content
+ * and the chat handlers, so `"__proto__"`, `"constructor"` and `"toString"` are
+ * all reachable keys. A bare `dialogueTrees[id]` answers with something off
+ * `Object.prototype` for each of them: truthy, so every `if (!tree) return`
+ * guard passes, and then `tree.nodes.find(...)` throws. That took down the
+ * play-mode overlay and the editor panel (PF-1144), and both call sites looked
+ * completely ordinary — which is why review is not a reliable gate for this
+ * shape and a mechanical one is.
+ *
+ * AST rather than the scan's regex, on purpose. It sees `state.dialogueTrees[id]`
+ * and `get().dialogueTrees[id]` as one shape, and — unlike a text match — does
+ * NOT fire on `{ ...state.dialogueTrees, [treeId]: updated }`, where the
+ * computed key belongs to an object literal and is perfectly safe. The two
+ * mechanisms stay complementary rather than redundant: the scan catches the
+ * literal form in every file it walks, including ones ESLint may not lint; this
+ * catches it in the editor, and sees through a member chain the regex cannot.
+ * Neither sees a fully dynamic alias (`const m = trees; m[id]`); the store's own
+ * `Object.hasOwn` guard remains the authority.
+ */
+const noBareDialogueTreeIndex = {
+  meta: {
+    type: 'problem',
+    docs: {
+      description:
+        'Disallow computed reads of the dialogueTrees map; use getTree(trees, id) (PF-1151)',
+    },
+    schema: [],
+  },
+  create(context) {
+    const MESSAGE =
+      'Do not index `dialogueTrees` directly — for the ids "__proto__", "constructor" and '
+      + '"toString" this resolves an INHERITED property, which is truthy, so `if (!tree)` passes '
+      + 'and the next read throws (PF-1144). Use `getTree(trees, id)`, which gates on Object.hasOwn.';
+    return {
+      MemberExpression(node) {
+        if (!node.computed) return;
+        const obj = node.object;
+        // `dialogueTrees[id]`
+        const bare = obj.type === 'Identifier' && obj.name === 'dialogueTrees';
+        // `state.dialogueTrees[id]`, `get().dialogueTrees[id]`, `a.b.dialogueTrees[id]`
+        const throughMember =
+          obj.type === 'MemberExpression'
+          && !obj.computed
+          && obj.property.type === 'Identifier'
+          && obj.property.name === 'dialogueTrees';
+        if (bare || throughMember) {
+          context.report({ node, message: MESSAGE });
+        }
+      },
+    };
+  },
+};
+
 const localPlugin = {
   rules: {
     'no-hardcoded-primitives': noHardcodedPrimitives,
     'no-empty-test-assertion': noEmptyTestAssertion,
+    'no-bare-dialogue-tree-index': noBareDialogueTreeIndex,
   },
 };
 
@@ -180,6 +267,20 @@ const eslintConfig = defineConfig([
           message: 'Use withApiMiddleware from @/lib/api/middleware instead of authenticateRequest directly.',
         }],
       }],
+    },
+  },
+  {
+    // Dialogue tree map access (PF-1151 / #9241). A DEDICATED rule name rather
+    // than another `no-restricted-syntax` entry: flat config resolves rules by
+    // name, so a third `no-restricted-syntax` block overlapping `src/**` would
+    // replace — not merge with — the getDb block's entry below and silently
+    // disable it. `ignores` carries the exemptions; the rule itself needs no
+    // path logic.
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    ignores: DIALOGUE_TREE_INDEX_EXEMPT,
+    plugins: { spawnforge: localPlugin },
+    rules: {
+      'spawnforge/no-bare-dialogue-tree-index': 'error',
     },
   },
   {

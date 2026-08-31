@@ -404,6 +404,67 @@ fn every_resync_drain_is_ordered_after_the_undo_arms() {
     );
 }
 
+/// The scene-graph emit must be ordered after the scene-graph build.
+///
+/// `build_scene_graph` (core) rebuilds `SceneGraphCache::data` and raises
+/// `dirty`; `emit_scene_graph_updates` (bridge) emits when dirty. They are
+/// registered in two SEPARATE `add_systems(PostUpdate, ...)` calls, and
+/// `.chain()` constrains only the tuple it is attached to — so without an
+/// explicit edge between the groups Bevy may run the emit first and hand the
+/// editor the PREVIOUS frame's graph. Which way it falls is decided by the
+/// topological sort, i.e. it can flip when an unrelated system is registered
+/// anywhere in the schedule. That is the same ambiguity class that took the
+/// engine smoke gate red on #9493, and it is why this edge gets a test rather
+/// than a comment (#9509).
+///
+/// The emit group is LOCATED by parsing, not hardcoded by line, so moving the
+/// registration keeps the test honest instead of quietly matching nothing. Both
+/// legal shapes are accepted: an explicit `.after(...)` edge on the emit group,
+/// or the two systems chained inside one tuple with the build first.
+#[test]
+fn scene_graph_emit_is_ordered_after_the_build() {
+    const BUILD: &str = "scene_graph::build_scene_graph";
+    const EMIT: &str = "core_systems::emit_scene_graph_updates";
+
+    // Cut the `add_systems(PostUpdate, ...)` registration that contains the
+    // emit, up to the `;` that ends the statement, so `.after(...)` attached
+    // after the closing paren is inside the slice.
+    let emit_at = BRIDGE_SRC
+        .find(EMIT)
+        .unwrap_or_else(|| panic!("`{EMIT}` is not registered in bridge/mod.rs at all"));
+    let stmt_start = BRIDGE_SRC[..emit_at]
+        .rfind(".add_systems(")
+        .expect("no `.add_systems(` precedes the scene-graph emit");
+    let stmt_len = BRIDGE_SRC[stmt_start..]
+        .find(';')
+        .expect("the scene-graph emit's add_systems call is never terminated");
+    let stmt = &BRIDGE_SRC[stmt_start..stmt_start + stmt_len];
+
+    // Fail closed: a parse that produced a slice too small to hold either shape
+    // would make the assertion below pass on nothing.
+    assert!(
+        stmt.contains(EMIT) && stmt.contains("PostUpdate"),
+        "the parsed registration does not look like the PostUpdate emit group — \
+         extend this parser rather than relaxing the assertion. Got:\n{stmt}",
+    );
+
+    let explicit_edge = stmt.contains(&format!("after({BUILD})"));
+    let chained_together = stmt.contains(BUILD)
+        && stmt.contains(".chain()")
+        && stmt.find(BUILD) < stmt.find(EMIT);
+
+    assert!(
+        explicit_edge || chained_together,
+        "`emit_scene_graph_updates` is no longer ordered after `build_scene_graph`.\n\
+         `.chain()` orders only within its own tuple, and these two are registered in \
+         separate `add_systems(PostUpdate, ...)` calls, so dropping the edge leaves them \
+         AMBIGUOUS: Bevy may emit the previous frame's scene graph, and which way it falls \
+         flips when any unrelated system is registered (#9493 / #9509).\n\
+         Restore `.after({BUILD})` on the emit group, or chain both systems into one tuple \
+         with the build first. Registration found:\n{stmt}",
+    );
+}
+
 /// The 2D physics command systems must be ordered after the mode-restore.
 ///
 /// `apply_physics2d_toggles` and `apply_physics2d_updates` are `.chain()`ed so
