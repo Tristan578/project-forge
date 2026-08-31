@@ -453,6 +453,63 @@ describe('authenticateRequest — edge cases', () => {
     expect(mockSyncUserFromClerk).not.toHaveBeenCalled();
   });
 
+  it('returns 422 ACCOUNT_NOT_SYNCABLE when Clerk has no email, without retrying', async () => {
+    // A Clerk account with no email address cannot be synced, ever —
+    // syncUserFromClerk rejects it outright. Common with GitHub OAuth when the
+    // account's email is private.
+    //
+    // This used to be reported as 503 SERVICE_DEGRADED "temporarily
+    // unavailable. Please retry.", which sent the user into an endless retry
+    // against a condition that never clears, and burned a second attempt plus a
+    // 500ms delay to reach the same answer. Permanent failures need a
+    // permanent answer.
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+    mockClerkClient.mockResolvedValue({
+      users: { getUser: vi.fn().mockResolvedValue({ emailAddresses: [], firstName: 'A', lastName: 'B' }) },
+    });
+    mockSyncUserFromClerk.mockRejectedValue(new Error('No email found in Clerk data'));
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(422);
+      const body = await result.response.json();
+      expect(body.error).toBe('ACCOUNT_NOT_SYNCABLE');
+      // The message must tell the user what to DO. "Please retry" was the
+      // wrong instruction and is what made this indistinguishable from an
+      // outage.
+      expect(body.message).toMatch(/email/i);
+      expect(body.message).not.toMatch(/retry/i);
+    }
+    // Exactly once: a permanent failure must not be retried.
+    expect(mockSyncUserFromClerk).toHaveBeenCalledTimes(1);
+  });
+
+  it('still retries and returns 503 for a transient sync failure', async () => {
+    // The permanent-vs-transient split must not swallow the transient case:
+    // a DB write failure is still retried once and still reports 503.
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+    mockClerkClient.mockResolvedValue({
+      users: {
+        getUser: vi
+          .fn()
+          .mockResolvedValue({ emailAddresses: [{ emailAddress: 'a@b.c' }], firstName: 'A', lastName: 'B' }),
+      },
+    });
+    mockSyncUserFromClerk.mockRejectedValue(new Error('write conflict'));
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(503);
+      const body = await result.response.json();
+      expect(body.error).toBe('SERVICE_DEGRADED');
+    }
+    expect(mockSyncUserFromClerk).toHaveBeenCalledTimes(2);
+  });
+
   it('returns 401 when auth() returns empty object (no userId key)', async () => {
     mockAuth.mockResolvedValue({});
 

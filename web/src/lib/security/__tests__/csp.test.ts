@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  clerkAccountPortalFromFrontendApi,
   buildContentSecurityPolicy,
   buildCspRouteRules,
   buildPlayContentSecurityPolicy,
@@ -488,5 +489,98 @@ describe('playCspOptionsFromEnv — shared by both writers of the /play header',
     expect(proxyCsp.replace(" 'nonce-dGVzdA=='", ' <AUTH>')).toBe(
       (staticCsp as string).replace(" 'unsafe-inline'", ' <AUTH>'),
     );
+  });
+});
+
+describe('Clerk Account Portal host (production sign-in, #9058)', () => {
+  // A Clerk custom domain serves TWO hosts and the publishable key encodes only
+  // the first:
+  //
+  //   Frontend API    clerk.spawnforge.ai       (in the key)
+  //   Account Portal  accounts.spawnforge.ai    (nowhere)
+  //
+  // Allowlisting only the Frontend API broke production sign-in outright.
+  // Unauthenticated /dashboard 307s to
+  // accounts.spawnforge.ai/sign-in?redirect_url=..., and with that host missing
+  // from connect-src the browser refused the redirect:
+  //   "Connecting to 'https://accounts.spawnforge.ai/sign-in?...' violates the
+  //    following Content Security Policy directive"
+  // OAuth completed, the redirect was blocked, the user landed back on home.
+  //
+  // These assert the portal host by NAME in each directive that carries Clerk
+  // sources, because "the policy contains a Clerk host" was already true while
+  // sign-in was broken.
+  describe('derivation', () => {
+    it('maps a production Frontend API host to its portal', () => {
+      expect(clerkAccountPortalFromFrontendApi('clerk.spawnforge.ai')).toBe('accounts.spawnforge.ai');
+    });
+
+    it('maps a development Frontend API host to its portal', () => {
+      // Dev names it differently: the `clerk.` segment is interior, and the
+      // portal drops it rather than gaining an `accounts.` prefix.
+      expect(clerkAccountPortalFromFrontendApi('foo.clerk.accounts.dev')).toBe('foo.accounts.dev');
+    });
+
+    it('returns null rather than guessing at an unrecognised shape', () => {
+      expect(clerkAccountPortalFromFrontendApi('example.com')).toBeNull();
+      expect(clerkAccountPortalFromFrontendApi(null)).toBeNull();
+    });
+  });
+
+  describe('policy output', () => {
+    const clerkDirectives = ['script-src', 'connect-src', 'frame-src'] as const;
+
+    it.each(clerkDirectives)('%s carries the production portal host', (name) => {
+      const csp = buildContentSecurityPolicy({
+        allowUnsafeEval: false,
+        clerkPublishableKey: publishableKeyFor('clerk.spawnforge.ai', 'pk_live_'),
+      });
+      expect(directive(csp, name)).toContain('https://accounts.spawnforge.ai');
+    });
+
+    it('connect-src carries the portal host — the directive that blocked sign-in', () => {
+      const csp = buildContentSecurityPolicy({
+        allowUnsafeEval: false,
+        clerkPublishableKey: publishableKeyFor('clerk.spawnforge.ai', 'pk_live_'),
+      });
+      const connect = directive(csp, 'connect-src');
+      expect(connect).toContain('https://clerk.spawnforge.ai');
+      expect(connect).toContain('https://accounts.spawnforge.ai');
+    });
+
+    it.each(clerkDirectives)('%s carries the development portal host', (name) => {
+      const csp = buildContentSecurityPolicy({
+        allowUnsafeEval: false,
+        clerkPublishableKey: publishableKeyFor('foo.clerk.accounts.dev'),
+      });
+      expect(directive(csp, name)).toContain('https://foo.accounts.dev');
+    });
+
+    it('still allows a portal when the key is absent or malformed', () => {
+      // The fallback exists so a configuration problem degrades to a usable
+      // policy. Before this it degraded to one that could not sign anyone in.
+      for (const key of [undefined, 'pk_live_%%%%']) {
+        const connect = directive(
+          buildContentSecurityPolicy({ allowUnsafeEval: false, clerkPublishableKey: key }),
+          'connect-src',
+        );
+        expect(connect).toContain('https://accounts.spawnforge.ai');
+        expect(connect).toContain('https://*.accounts.dev');
+      }
+    });
+
+    it('does not leak the portal host of a DIFFERENT tenant', () => {
+      // The portal is derived from the key, not hardcoded, so a deployment on
+      // another domain must not carry spawnforge's hosts.
+      const connect = directive(
+        buildContentSecurityPolicy({
+          allowUnsafeEval: false,
+          clerkPublishableKey: publishableKeyFor('clerk.example.com', 'pk_live_'),
+        }),
+        'connect-src',
+      );
+      expect(connect).toContain('https://accounts.example.com');
+      expect(connect).not.toContain('spawnforge');
+    });
   });
 });

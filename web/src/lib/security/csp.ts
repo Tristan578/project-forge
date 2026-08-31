@@ -92,7 +92,8 @@ export interface CspOptions {
 }
 
 const FALLBACK_CLERK_ORIGINS =
-  'https://*.clerk.accounts.dev https://clerk.spawnforge.ai';
+  'https://*.clerk.accounts.dev https://*.accounts.dev ' +
+  'https://clerk.spawnforge.ai https://accounts.spawnforge.ai';
 
 /**
  * Build the application Content-Security-Policy header value.
@@ -112,7 +113,15 @@ export function buildContentSecurityPolicy({
   // Unlike /play, the global policy must remain usable when configuration is
   // absent or malformed: static pages can still render Clerk sign-in widgets
   // from the established development and production origins.
-  const clerkOrigins = clerkHost ? `https://${clerkHost}` : FALLBACK_CLERK_ORIGINS;
+  // BOTH Clerk hosts. The Frontend API alone is not enough: the hosted sign-in
+  // flow redirects to the Account Portal, and omitting it blocked that redirect
+  // in `connect-src` and broke production sign-in entirely.
+  const clerkAccountsHost = clerkAccountPortalFromFrontendApi(clerkHost);
+  const clerkOrigins = clerkHost
+    ? [`https://${clerkHost}`, clerkAccountsHost && `https://${clerkAccountsHost}`]
+        .filter(Boolean)
+        .join(' ')
+    : FALLBACK_CLERK_ORIGINS;
   // Preserve the narrower legacy image fallback: Clerk development assets use
   // img.clerk.com, so the accounts.dev wildcard is unnecessary in img-src.
   const clerkImageOrigin = clerkHost ? `https://${clerkHost}` : 'https://clerk.spawnforge.ai';
@@ -202,6 +211,46 @@ export function clerkFrontendApiFromPublishableKey(publishableKey?: string): str
   if (!decoded.endsWith('$')) return null;
   const host = decoded.slice(0, -1);
   return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(host) ? host : null;
+}
+
+/**
+ * Derive Clerk's **Account Portal** host from its Frontend API host.
+ *
+ * A Clerk custom domain serves TWO hosts, and the publishable key encodes only
+ * the first:
+ *
+ *   Frontend API   clerk.spawnforge.ai         (encoded in the key)
+ *   Account Portal accounts.spawnforge.ai      (NOT encoded anywhere)
+ *
+ * Allowlisting only the Frontend API is what broke production sign-in: an
+ * unauthenticated request to /dashboard 307s to
+ * `accounts.spawnforge.ai/sign-in?redirect_url=...`, and with that host absent
+ * from `connect-src` the browser blocked it outright —
+ * "Connecting to 'https://accounts.spawnforge.ai/sign-in?...' violates the
+ * following Content Security Policy directive". OAuth completed, the redirect
+ * was refused, and the user landed back on the home page signed out.
+ *
+ * The two environments name the portal differently, so both are handled:
+ *
+ *   production   clerk.<domain>              -> accounts.<domain>
+ *   development  <slug>.clerk.accounts.dev   -> <slug>.accounts.dev
+ *
+ * Returns `null` for a host in neither shape rather than guessing — the same
+ * posture as the decoder above, since the result is interpolated into a header.
+ */
+export function clerkAccountPortalFromFrontendApi(frontendApiHost: string | null): string | null {
+  if (!frontendApiHost) return null;
+  // Development: the `clerk.` segment is interior (<slug>.clerk.accounts.dev).
+  // Check this FIRST — the production rule below would otherwise not match it
+  // and a dev instance would silently lose its portal host.
+  if (frontendApiHost.includes('.clerk.')) {
+    return frontendApiHost.replace('.clerk.', '.');
+  }
+  // Production: the `clerk.` segment leads (clerk.<domain>).
+  if (frontendApiHost.startsWith('clerk.')) {
+    return `accounts.${frontendApiHost.slice('clerk.'.length)}`;
+  }
+  return null;
 }
 
 export interface PlayCspOptions {
