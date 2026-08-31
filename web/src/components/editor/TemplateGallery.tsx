@@ -29,12 +29,19 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
 
   useEffect(() => {
     if (isOpen) {
+      // Clear any error from a previous failed load so a successful reopen
+      // doesn't leave a stale banner up.
+      setError(null);
       import('@/data/templates')
         .then(({ TEMPLATE_REGISTRY }) => {
           setTemplates(TEMPLATE_REGISTRY);
         })
         .catch((err: unknown) => {
+          // A failed chunk fetch (mid-session deploy, offline) previously only
+          // logged: the gallery then showed just the Blank Project card with no
+          // explanation. Surface it so the user knows to reopen and retry.
           console.error('Failed to load the template registry:', err);
+          setError('Could not load templates. Close and reopen the gallery to try again.');
         });
     }
   }, [isOpen]);
