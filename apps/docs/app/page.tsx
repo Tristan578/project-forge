@@ -6,8 +6,18 @@ export default function DocsHome() {
         <li>
           <a href="/mcp"><strong>MCP Commands</strong></a> — Control SpawnForge from AI tools. Browse the 350+ commands available to Claude and other MCP clients.
         </li>
+        {/*
+          Deliberately NOT a link. This pointed at `/api`, which has never had a
+          route in this app (#9046). Three things say the page is not meant to
+          exist yet, so the fix is to stop advertising it rather than to stand up
+          a stub: `content/api/index.mdx` says the reference is coming soon,
+          `app/robots.ts` already disallows `/api` for crawlers, and `/api` is an
+          API namespace rather than a docs path. Turn this back into an <a> when
+          the REST reference actually ships — and drop the `/api` entry from
+          robots.ts in the same change.
+        */}
         <li>
-          <a href="/api"><strong>API Reference</strong></a> — REST API for external integrations. Authenticate with your API key and call SpawnForge endpoints directly.
+          <strong>API Reference</strong> — REST API for external integrations. Coming soon: the reference publishes once the API middleware ships with schema validation. Until then, <a href="/mcp">the MCP command reference</a> covers the same capabilities.
         </li>
       </ul>
       <footer>SpawnForge Documentation — Built by Tristan Nolan</footer>

@@ -63,10 +63,11 @@ describe('LockedPanelOverlay', () => {
     expect(vi.mocked(getRequiredTier)).not.toHaveBeenCalled();
   });
 
-  it('shows upgrade link pointing to /settings/billing', () => {
+  it('shows upgrade link pointing to the billing tab on /settings', () => {
     render(<LockedPanelOverlay panelId="physics-feel" />);
     const link = screen.getByRole('link', { name: `Upgrade to ${TIER_LABELS.pro}` });
-    expect(link.getAttribute('href')).toBe('/settings/billing');
+    // Was '/settings/billing', a route that has never existed (#9046).
+    expect(link.getAttribute('href')).toBe('/settings?tab=billing');
   });
 
   it('shows fallback "a higher plan" when no tier is found', () => {
