@@ -49,6 +49,8 @@ if (typeof globalThis.localStorage?.clear !== 'function') {
 // from '@testing-library/jest-dom/vitest' may use a different expect instance.
 import { expect } from 'vitest';
 import * as matchers from '@testing-library/jest-dom/matchers';
+import { configure } from '@testing-library/react';
+import { VITEST_ASYNC_UTIL_TIMEOUT_MS } from './src/lib/config/timeouts';
 expect.extend(matchers);
 
 // Global test isolation — prevent state leaks between tests
@@ -89,3 +91,8 @@ afterEach(() => {
     globalThis.localStorage.clear();
   }
 });
+
+// See VITEST_ASYNC_UTIL_TIMEOUT_MS. Testing Library's 1s default is wall-clock,
+// which a starved worker thread in a ~900-file parallel run can miss even when
+// the component renders instantly.
+configure({ asyncUtilTimeout: VITEST_ASYNC_UTIL_TIMEOUT_MS });
