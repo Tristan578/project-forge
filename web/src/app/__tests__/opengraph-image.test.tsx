@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readdirSync, readFileSync } from 'fs';
-import { join, relative } from 'path';
+import { join, relative, sep } from 'path';
 import { EMOJI_PATTERN } from '@/lib/og/text';
 
 describe('Root OG Image', () => {
@@ -315,12 +315,19 @@ describe('OG sources carry no emoji codepoints', () => {
     ...collectOgSources(OG_LIB_DIR, (n) => /\.(tsx|ts)$/.test(n)),
   ];
 
+  // `path.relative()` answers in the HOST separator; both lists below are
+  // written with '/'. On Windows that failed the pinned-list assertion on
+  // separators alone and, worse, silently emptied the `startsWith('app/')`
+  // filter in the next case so it compared [] against the expected routes.
+  // Normalise once, so both cases compare route identities rather than slashes.
+  const srcRelative = (f: string) => relative(join(__dirname, '..', '..'), f).split(sep).join('/');
+
   it('scans exactly the files it is supposed to scan', () => {
     // Pinned to the list, not to a floor. A floor of 4 against 6 real files let
     // two of them leave the scan silently — a route renamed off the filename
     // pattern above is enough, and the remaining files keep the suite green.
     // Adding an OG route means adding it here, which is the intent.
-    expect(sources.map((f) => relative(join(__dirname, '..', '..'), f)).sort()).toEqual([
+    expect(sources.map(srcRelative).sort()).toEqual([
       'app/community/opengraph-image.tsx',
       'app/opengraph-image.tsx',
       'app/play/[userId]/[slug]/opengraph-image.tsx',
@@ -338,9 +345,12 @@ describe('OG sources carry no emoji codepoints', () => {
     // the play card needs a database, is `ƒ` rather than `○`, and so cannot
     // break the build. It is covered by the mocked cases above instead.
     const exempt = ['app/play/[userId]/[slug]/opengraph-image.tsx'];
-    const routes = sources
-      .map((f) => relative(join(__dirname, '..', '..'), f))
-      .filter((f) => f.startsWith('app/'));
+    const routes = sources.map(srcRelative).filter((f) => f.startsWith('app/'));
+    // Non-vacuity guard: an empty `routes` (a broken prefix filter) or an empty
+    // STATIC_OG_ROUTES would make the equality below pass while comparing
+    // nothing to nothing. Both sides have to actually contain routes.
+    expect(routes.length).toBeGreaterThan(exempt.length);
+    expect(STATIC_OG_ROUTES.length).toBeGreaterThan(0);
     expect(routes.filter((f) => !exempt.includes(f)).sort()).toEqual(
       STATIC_OG_ROUTES.map(([file]) => file).sort()
     );

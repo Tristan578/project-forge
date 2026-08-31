@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { collectMdxPaths } from '../sitemap';
+import { collectMdxPaths, toUrlPath } from '../sitemap';
 
 describe('collectMdxPaths', () => {
   let tmpDir: string;
@@ -71,6 +71,33 @@ describe('collectMdxPaths', () => {
   it('returns empty array for non-existent directory', () => {
     const entries = collectMdxPaths(join(tmpDir, 'nonexistent'), tmpDir);
     expect(entries).toHaveLength(0);
+  });
+});
+
+describe('toUrlPath', () => {
+  // These run the Windows separator explicitly rather than relying on the host,
+  // because on a POSIX runner `sep` is already '/' and the normalisation is a
+  // no-op there — deleting it would still leave every other case in this file
+  // green. Pinning the backslash shape from any host is what makes the fix
+  // regression-proof: a Windows contributor's sitemap advertised `/mcp\overview`
+  // and, because `startsWith('/mcp/')` then matched nothing, silently demoted
+  // every MCP page to the 0.6 priority bucket.
+  it('renders a Windows-separated path as a URL path', () => {
+    expect(toUrlPath('mcp\\overview.mdx', '\\')).toBe('/mcp/overview');
+  });
+
+  it('strips /index through a Windows separator', () => {
+    expect(toUrlPath('guides\\index.mdx', '\\')).toBe('/guides');
+  });
+
+  it('maps a Windows-separated root index to the empty string', () => {
+    expect(toUrlPath('index.mdx', '\\')).toBe('');
+  });
+
+  it('leaves an already-POSIX path unchanged', () => {
+    expect(toUrlPath('mcp/overview.mdx', '/')).toBe('/mcp/overview');
+    expect(toUrlPath('guides/index.mdx', '/')).toBe('/guides');
+    expect(toUrlPath('index.mdx', '/')).toBe('');
   });
 });
 

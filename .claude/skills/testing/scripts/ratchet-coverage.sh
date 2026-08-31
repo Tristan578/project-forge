@@ -100,22 +100,31 @@ if [[ "${HAS_NODE_CONFIG}" == "true" ]]; then
   NODE_THRESHOLD_LINES=$(read_threshold "lines" "${NODE_CONFIG_PATH}")
 fi
 
+# delta <actual> <threshold> — actual minus threshold, one decimal place.
+#
+# awk, not bc: bc is NOT installed by default on Git-for-Windows, on Alpine, or
+# on slim CI images, and it was invoked here without a fallback, so the whole
+# report died with "bc: command not found" before printing a single metric.
+# LC_ALL=C pins the decimal separator so a comma-locale runner cannot turn
+# "1.4" into "1,4" and break the caller's %+.1f.
+delta() { LC_ALL=C awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f", a - b }'; }
+
 echo "=== Coverage Ratchet Report ==="
 echo ""
 echo "Metric         Actual   Threshold   Delta"
 echo "-------------- -------- ----------- -----"
 printf "statements     %6.1f%%  %9s%%  %+.1f%%\n" \
   "${ACTUAL_STATEMENTS}" "${THRESHOLD_STATEMENTS}" \
-  "$(echo "${ACTUAL_STATEMENTS} - ${THRESHOLD_STATEMENTS}" | bc)"
+  "$(delta "${ACTUAL_STATEMENTS}" "${THRESHOLD_STATEMENTS}")"
 printf "branches       %6.1f%%  %9s%%  %+.1f%%\n" \
   "${ACTUAL_BRANCHES}" "${THRESHOLD_BRANCHES}" \
-  "$(echo "${ACTUAL_BRANCHES} - ${THRESHOLD_BRANCHES}" | bc)"
+  "$(delta "${ACTUAL_BRANCHES}" "${THRESHOLD_BRANCHES}")"
 printf "functions      %6.1f%%  %9s%%  %+.1f%%\n" \
   "${ACTUAL_FUNCTIONS}" "${THRESHOLD_FUNCTIONS}" \
-  "$(echo "${ACTUAL_FUNCTIONS} - ${THRESHOLD_FUNCTIONS}" | bc)"
+  "$(delta "${ACTUAL_FUNCTIONS}" "${THRESHOLD_FUNCTIONS}")"
 printf "lines          %6.1f%%  %9s%%  %+.1f%%\n" \
   "${ACTUAL_LINES}" "${THRESHOLD_LINES}" \
-  "$(echo "${ACTUAL_LINES} - ${THRESHOLD_LINES}" | bc)"
+  "$(delta "${ACTUAL_LINES}" "${THRESHOLD_LINES}")"
 echo ""
 
 # ---------------------------------------------------------------------------
