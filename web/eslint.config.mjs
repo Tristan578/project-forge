@@ -256,15 +256,38 @@ const eslintConfig = defineConfig([
     // (see the clipboard, pointer-lock, audio-resume and dynamic-import call
     // sites) -- `void` there would only convert a visible unhandled rejection
     // into an invisible one, which is the bug this rule is meant to catch.
-    //
-    // prefer-nullish-coalescing (the `||` vs `??` half of #8938) is a separate
-    // 245-finding sweep and lands on its own.
     files: ['src/**/*.{ts,tsx}', 'scripts/**/*.ts'],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
+      // prefer-nullish-coalescing is the `||` vs `??` half of #8938: the second
+      // documented recurring bug here was a numeric default written `x || 60`,
+      // where an explicit 0 silently becomes 60.
+      //
+      // Two carve-outs, both measured rather than assumed, both with a ticket:
+      //
+      //   ignorePrimitives.string -- 101 of the 245 first-run findings were
+      //   `someString || fallback`, and for strings that is usually the INTENDED
+      //   semantic: `p.data.title || store.sceneName` should fall back on an
+      //   empty title, and `??` would export a game named "". Enforcing here
+      //   would mean 101 disable comments or 101 behaviour regressions. Auditing
+      //   them individually is #9565.
+      //
+      //   ignoreIfStatements -- 13 findings were `if (!x) x = y` asking to become
+      //   `x ??= y`. Every one was type-checked: none can hold 0/''/false, and
+      //   the five written `x === null` are already nullish checks, so none is a
+      //   latent falsy bug. That is a statement restructure rather than an
+      //   operator swap, and seven wrap multi-line bodies. Also #9565.
+      //
+      // Both carve-outs are narrower than they look: the operator form on
+      // numbers and booleans -- the actual bug class -- is fully enforced.
+      '@typescript-eslint/prefer-nullish-coalescing': ['error', {
+        ignoreConditionalTests: true,
+        ignoreIfStatements: true,
+        ignorePrimitives: { string: true },
+      }],
     },
   },
   {

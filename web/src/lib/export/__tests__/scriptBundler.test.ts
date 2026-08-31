@@ -155,7 +155,7 @@ describe('bundleScripts', () => {
     // The call site must pass the correct number of undefined arguments.
     // Count occurrences of ', undefined' after the __resetGuards argument.
     // There should be exactly SHADOWED_GLOBALS.length of them.
-    const undefinedArgs = (result.code.match(/\bundefined\b/g) || []).length;
+    const undefinedArgs = (result.code.match(/\bundefined\b/g) ?? []).length;
     expect(undefinedArgs).toBeGreaterThanOrEqual(SHADOWED_GLOBALS.length);
   });
 });

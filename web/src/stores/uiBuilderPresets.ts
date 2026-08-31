@@ -21,7 +21,7 @@ export function createWidget(
     width: overrides.width ?? defaults.width,
     height: overrides.height ?? defaults.height,
     anchor: overrides.anchor ?? 'top_left',
-    style: { ...DEFAULT_WIDGET_STYLE, ...defaults.style, ...(overrides.style || {}) } as WidgetStyle,
+    style: { ...DEFAULT_WIDGET_STYLE, ...defaults.style, ...(overrides.style ?? {}) } as WidgetStyle,
     visible: overrides.visible ?? true,
     interactable: overrides.interactable ?? true,
     parentWidgetId: overrides.parentWidgetId ?? null,

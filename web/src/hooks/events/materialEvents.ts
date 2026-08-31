@@ -47,7 +47,7 @@ export function handleMaterialEvent(
 
     case 'SHADER_CHANGED': {
       const payload = castPayload<{ entityId: string; data: import('@/stores/editorStore').ShaderEffectData | null }>(data);
-      useEditorStore.getState().setPrimaryShaderEffect(payload.data || null);
+      useEditorStore.getState().setPrimaryShaderEffect(payload.data ?? null);
       return true;
     }
 

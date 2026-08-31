@@ -147,7 +147,7 @@ export const AnimationClipInspector = memo(function AnimationClipInspector() {
 
   if (!primaryId) return null;
 
-  const usedTargets = new Set(primaryAnimationClip?.tracks.map((t) => t.target) || []);
+  const usedTargets = new Set(primaryAnimationClip?.tracks.map((t) => t.target) ?? []);
   const availableTargets = PROPERTY_TARGETS.filter((t) => !usedTargets.has(t.value));
 
   return (

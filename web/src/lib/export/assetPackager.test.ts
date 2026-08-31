@@ -31,7 +31,7 @@ function createAsset(
     id,
     name,
     kind,
-    fileSize: data?.byteLength || 0,
+    fileSize: data?.byteLength ?? 0,
     source: { type: 'upload', filename: name },
     data,
   };

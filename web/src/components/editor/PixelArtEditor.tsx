@@ -342,7 +342,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const displayGrid = previewGrid || grid;
+    const displayGrid = previewGrid ?? grid;
     const w = canvasSize * zoom;
     const h = canvasSize * zoom;
     canvas.width = w;

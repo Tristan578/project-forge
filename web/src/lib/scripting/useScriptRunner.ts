@@ -530,9 +530,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           elapsed: elapsedRef.current,
           // Send deltas when available, fall back to full state
           entities: entitiesDelta ? undefined : tickData.entities,
-          entitiesDelta: entitiesDelta || undefined,
+          entitiesDelta: entitiesDelta ?? undefined,
           entityInfos: entityInfosDelta ? undefined : tickData.entityInfos,
-          entityInfosDelta: entityInfosDelta || undefined,
+          entityInfosDelta: entityInfosDelta ?? undefined,
           inputState: tickData.inputState,
           audioPlayingStates: audioManager.getPlayingStates(),
           tilemapStates: tickTilemapStates,
