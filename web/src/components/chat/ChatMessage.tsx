@@ -27,7 +27,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
   }
 
   const isUser = message.role === 'user';
-  const toolCalls = message.toolCalls || [];
+  const toolCalls = message.toolCalls ?? [];
   const hasPreviewTools = toolCalls.some((tc) => tc.status === 'preview');
   const successfulUndoable = toolCalls.filter((tc) => tc.status === 'success' && tc.undoable);
   const allToolsDone = toolCalls.length > 0 && toolCalls.every(

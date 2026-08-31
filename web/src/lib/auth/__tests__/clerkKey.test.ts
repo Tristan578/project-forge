@@ -22,6 +22,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   assertClerkPublishableKeyShape,
+  clerkPublishableKeyHasSurroundingWhitespace,
   clerkPublishableKeyProblem,
   hasValidClerkKey,
 } from "../clerkKey";
@@ -68,9 +69,35 @@ describe("clerkPublishableKeyProblem", () => {
     expect(problem).not.toContain("realsecretvalue");
   });
 
-  it("distinguishes whitespace from a genuinely wrong value", () => {
-    expect(clerkPublishableKeyProblem(` ${VALID_TEST} `)).toContain("whitespace");
+  it("reports a genuinely wrong value", () => {
     expect(clerkPublishableKeyProblem("your-key-here")).toContain("which is not");
+  });
+
+  // #9558. Surrounding whitespace is NOT a problem: Clerk trims, and rejecting
+  // it failed the docs production deploy on a key the live site was running on.
+  //
+  // The trailing cases are the ones that bit. `clerkFrontendApiHost` extracts
+  // the payload with /^pk_(?:test|live)_(.+)$/ — no `s` flag — so `.` cannot
+  // cross a newline and the regex matched NOTHING, which surfaced as the
+  // misleading "payload does not decode". #9539's suite only covered LEADING
+  // whitespace, which fails the prefix check and never reaches the decode path.
+  it.each([
+    ["a trailing newline (the deploy-breaking case)", `${VALID_LIVE}\n`],
+    ["a trailing CRLF", `${VALID_LIVE}\r\n`],
+    ["a trailing space", `${VALID_TEST} `],
+    ["a trailing tab", `${VALID_TEST}\t`],
+    ["a leading space", ` ${VALID_TEST}`],
+    ["whitespace on both sides", ` ${VALID_TEST} `],
+  ])("accepts an otherwise-valid key with %s", (_label, key) => {
+    expect(clerkPublishableKeyProblem(key)).toBeNull();
+    expect(hasValidClerkKey(key)).toBe(true);
+    expect(() => assertClerkPublishableKeyShape(key)).not.toThrow();
+  });
+
+  it("still rejects a whitespace-padded key whose payload is genuinely bad", () => {
+    expect(clerkPublishableKeyProblem(" pk_test_xxx \n")).toContain(
+      "does not decode to a Clerk Frontend API host",
+    );
   });
 
   // The prefix alone is NOT the contract. Clerk base64-encodes `<host>$` in the
@@ -109,7 +136,8 @@ describe("hasValidClerkKey", () => {
     ["empty", ""],
     ["a placeholder", "your-key-here"],
     ["a secret key pasted by mistake", "sk_test_deadbeef"],
-    ["whitespace-prefixed", " pk_test_deadbeef"],
+    ["whitespace-prefixed junk", " pk_test_deadbeef"],
+    ["a whitespace-only value", "   "],
     ["the whole KEY=value assignment pasted as the value", PASTED_ASSIGNMENT],
   ])("rejects %s", (_label, key) => {
     expect(hasValidClerkKey(key)).toBe(false);
@@ -120,6 +148,26 @@ describe("hasValidClerkKey", () => {
     expect(hasValidClerkKey()).toBe(true);
     vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", PASTED_ASSIGNMENT);
     expect(hasValidClerkKey()).toBe(false);
+  });
+});
+
+describe("clerkPublishableKeyHasSurroundingWhitespace", () => {
+  // Usable-but-untidy is its own state: it must warn, never fail.
+  it.each([
+    ["a trailing newline", `${VALID_LIVE}\n`],
+    ["a leading space", ` ${VALID_TEST}`],
+  ])("flags %s", (_label, key) => {
+    expect(clerkPublishableKeyHasSurroundingWhitespace(key)).toBe(true);
+  });
+
+  it.each([
+    ["a clean key", VALID_LIVE],
+    ["an absent value", undefined],
+    ["an empty value", ""],
+    ["a whitespace-only value", "   "],
+    ["a padded but genuinely broken key", " pk_test_xxx "],
+  ])("does not flag %s", (_label, key) => {
+    expect(clerkPublishableKeyHasSurroundingWhitespace(key)).toBe(false);
   });
 });
 

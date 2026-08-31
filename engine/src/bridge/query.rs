@@ -6,7 +6,7 @@ use crate::core::{
     entity_id::EntityName,
     material::MaterialData,
     lighting::LightData,
-    physics::{PhysicsData, PhysicsEnabled, JointData},
+    physics::{PhysicsData, PhysicsEnabled},
     scripting::ScriptData,
     audio::{AudioData, AudioBusConfig},
     reverb_zone::{ReverbZoneData, ReverbZoneEnabled},
@@ -22,6 +22,11 @@ use crate::core::{
     post_processing::PostProcessingSettings,
     animation::AnimationRegistry,
 };
+// Split out of the `physics::{..}` group above, whose other two members the
+// always-active `process_query_requests` still needs. `JointData`'s only
+// consumer is the runtime-gated `process_joint_queries`.
+#[cfg(not(feature = "runtime"))]
+use crate::core::physics::JointData;
 use super::{
     events,
     scene_graph::SceneGraphCache,

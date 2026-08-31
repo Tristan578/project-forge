@@ -192,7 +192,7 @@ export function GDDPanel() {
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        handleGenerate();
+        void handleGenerate();
       }
     },
     [handleGenerate],

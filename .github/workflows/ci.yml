@@ -96,7 +96,16 @@ jobs:
           web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
-          echo "$CHANGED" | grep -q '^engine/' && engine=true
+          # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
+          # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
+          # so it compiles into every shipped WASM binary. It is a local patch we
+          # maintain for Bevy 0.18, not merely vendored code. Matching only
+          # '^engine/' meant a PR editing just the fork set engine=false, skipped
+          # Quality Gates / WASM Build entirely, and was first compiled by CD on
+          # main AFTER merge -- so a fork edit that failed to build reddened main
+          # rather than the PR. any_code derives from $engine, so this covers
+          # that too.
+          echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           # The docs gate is what runs apps/docs/scripts/check-manifest-sync.ts,
@@ -172,7 +181,7 @@ jobs:
           # (A skill SCRIPT change also matches `ci` above — editing a script warrants
           # the wider run; a SKILL.md-only change matches neither ci nor hooks, so
           # wiring it here is what makes the linter run on doc-only skill edits.)
-          echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$' && skills=true
+          echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$|^scripts/audit-pr-readiness\.ps1$|^scripts/__tests__/audit-pr-readiness\.test\.ps1$' && skills=true
           # gh-aw lock-drift gate (scripts/check-ghaw-lock-sync.sh). Fires on a
           # gh-aw workflow SOURCE (.github/workflows/*.md), its generated sibling
           # (.github/workflows/*.lock.yml), the SHA-pinned action manifest the
@@ -484,6 +493,9 @@ jobs:
         # hermetically (temp skills tree via the $SKILLS_DIR seam) so a
         # regression in the ratchet fails here, not silently on a real PR.
         run: bash scripts/__tests__/check-skills.test.sh
+
+      - name: Unit-test PR readiness policy
+        run: pwsh -NoProfile -File scripts/__tests__/audit-pr-readiness.test.ps1
 
       - name: Lint all skills
         run: bash scripts/check-skills.sh

@@ -101,6 +101,36 @@ pub struct EditorEmitSet;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ResyncDrainSet;
 
+/// The mode-transition snapshot restore.
+///
+/// `bridge::core_systems::apply_mode_change_requests` puts the world back to its
+/// pre-Play state on Play->Edit, re-inserting and removing components wholesale.
+/// It is a BASELINE writer: everything it touches is being reset to what it was,
+/// not edited.
+///
+/// Ordering only, no run condition. The set exists so that writers of the same
+/// components can declare a precedence against it instead of inheriting whatever
+/// the topological sort happens to produce (PF-1172 / #9274).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModeRestoreSet;
+
+/// Systems that write `Physics2dData` / `Physics2dEnabled` from queued commands.
+///
+/// Ordered AFTER [`ModeRestoreSet`]. The restore establishes the baseline, and a
+/// user edit that arrived in the same frame then applies on top of it. The other
+/// precedence — restore last — silently obliterates a change the user just made,
+/// with no feedback, which is the worse of the two failures.
+///
+/// Membership also buys a sync point. Bevy inserts an `ApplyDeferred` at every
+/// explicit ordering edge (`auto_insert_apply_deferred` is at its default here),
+/// so the restore's deferred inserts are FLUSHED before these systems run: they
+/// see the restored component and patch it, instead of racing a pending insert.
+///
+/// Ordering only, no run condition — these systems are always-active and
+/// metadata-only, and gating them to Edit mode would drop commands during Play.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Physics2dWriteSet;
+
 /// Systems that should only run during Play (not Paused, not Edit).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlaySystemSet;

@@ -38,7 +38,10 @@ function EditorPageContent() {
 
   // Prefetch Monaco editor chunks so the script panel opens instantly
   useEffect(() => {
-    void import('@monaco-editor/react');
+    // A failed prefetch is not fatal — the script panel imports Monaco again on open.
+    import('@monaco-editor/react').catch((err: unknown) => {
+      console.warn('Failed to prefetch the Monaco editor chunk:', err);
+    });
   }, []);
 
   useEffect(() => {
@@ -64,7 +67,7 @@ function EditorPageContent() {
         setLoading(false);
       }
     };
-    fetchProject();
+    void fetchProject();
   }, [projectId, router, setProjectId, loadScene, setSceneName, setLastCloudSave]);
 
   if (loading) return (<div className="flex h-full items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading project...</div></div>);

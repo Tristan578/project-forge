@@ -92,7 +92,7 @@ export async function GET(
 
     const breakdown = [1, 2, 3, 4, 5].map((star) => ({
       rating: star,
-      count: Number(ratingBreakdown.find((r: { rating: number }) => r.rating === star)?.count || 0),
+      count: Number(ratingBreakdown.find((r: { rating: number }) => r.rating === star)?.count ?? 0),
     }));
 
     // Format response

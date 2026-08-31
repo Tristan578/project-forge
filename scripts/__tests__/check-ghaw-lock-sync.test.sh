@@ -70,6 +70,7 @@ make_ghaw_repo() {
     git init -q
     git config user.email t@t.t
     git config user.name t
+    git remote add origin https://github.com/example/project-forge.git
     mkdir -p .github/workflows .github/aw
     printf '# demo source\nname: demo\non: push\n' > .github/workflows/demo.md
     printf '# gh-aw-metadata: {"compiler_version":"v0.53.1"}\nname: demo\non: push\njobs: {}\n' > .github/workflows/demo.lock.yml
@@ -96,6 +97,40 @@ workflows_clean() {
 }
 
 echo "=== check-ghaw-lock-sync.sh tests ==="
+
+# --- repository context: the compiler scatters cron from GitHub owner/repo ---
+repo="$(make_ghaw_repo)"
+git -C "$repo" remote remove origin
+res="$(run_gate "$repo" 'touch compile-ran')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "missing origin fails closed as a tooling error (exit 2)"; else fail "missing origin should exit 2, got $rc"; fi
+if grep -qi "repository context" <<<"$out"; then pass "missing origin names the repository-context cause"; else fail "missing-origin diagnostic does not name repository context"; fi
+if [ ! -e "$repo/compile-ran" ]; then pass "missing-origin preflight stops before compile"; else fail "compile ran without repository context"; fi
+rm -rf "$repo"
+
+repo="$(make_ghaw_repo)"
+git -C "$repo" remote set-url origin file:///tmp/project-forge
+res="$(run_gate "$repo" 'touch compile-ran')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "non-GitHub origin fails closed (exit 2)"; else fail "non-GitHub origin should exit 2, got $rc"; fi
+if grep -qi "GitHub repository" <<<"$out"; then pass "non-GitHub origin has actionable context diagnostic"; else fail "non-GitHub-origin diagnostic is not actionable"; fi
+if [ ! -e "$repo/compile-ran" ]; then pass "non-GitHub-origin preflight stops before compile"; else fail "compile ran with a non-GitHub origin"; fi
+rm -rf "$repo"
+
+repo="$(make_ghaw_repo)"
+git -C "$repo" remote set-url origin git@github.com:example/project-forge.git
+res="$(run_gate "$repo" 'true')"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "GitHub SSH origin supplies valid repository context"; else fail "GitHub SSH origin should pass preflight, got $rc"; fi
+rm -rf "$repo"
+
+repo="$(make_ghaw_repo)"
+res="$(run_gate "$repo" 'printf "Fuzzy schedule scattering without repository context.\n" >&2; printf "\n# partial\n" >> .github/workflows/demo.lock.yml')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "compiler repository-context warning fails closed (exit 2)"; else fail "compiler context warning should exit 2, got $rc"; fi
+if grep -qi "repository context" <<<"$out"; then pass "compiler warning is reported as a repository-context error"; else fail "compiler-warning diagnostic does not name repository context"; fi
+if workflows_clean "$repo"; then pass "compiler-warning path restores partial lock writes"; else fail "compiler-warning path left a partial lock write"; fi
+rm -rf "$repo"
 
 # --- 1. In sync: compile is a no-op → exit 0 + success message ---------------
 repo="$(make_ghaw_repo)"

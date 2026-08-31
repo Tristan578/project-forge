@@ -237,6 +237,60 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    // TYPE-AWARE LINTING (#8938). eslint-config-next/typescript wires the TS
+    // parser but not a program, so type-aware rules were silently inert. Turning
+    // projectService on is what makes the rule below able to see that an
+    // expression is a Promise at all.
+    //
+    // no-floating-promises exists because the single highest-frequency historical
+    // bug in this repo was a missing `await` on `rateLimitPublicRoute()`, which
+    // did not fail, did not log, and simply skipped the rate limit. Nothing
+    // mechanical stopped it recurring; documentation alone had not.
+    //
+    // WHAT `void` MEANS HERE. `void f()` is the deliberate marker for "this
+    // promise is not awaited on purpose". It is only honest when f() CANNOT
+    // reject -- in this codebase that means a store action or fetcher whose
+    // entire body sits inside try/catch and reports failure into state, or a
+    // promise that resolves unconditionally. Every `void` added with this rule
+    // was checked against that bar. If a call CAN reject, attach real handling
+    // (see the clipboard, pointer-lock, audio-resume and dynamic-import call
+    // sites) -- `void` there would only convert a visible unhandled rejection
+    // into an invisible one, which is the bug this rule is meant to catch.
+    files: ['src/**/*.{ts,tsx}', 'scripts/**/*.ts'],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      // prefer-nullish-coalescing is the `||` vs `??` half of #8938: the second
+      // documented recurring bug here was a numeric default written `x || 60`,
+      // where an explicit 0 silently becomes 60.
+      //
+      // Two carve-outs, both measured rather than assumed, both with a ticket:
+      //
+      //   ignorePrimitives.string -- 101 of the 245 first-run findings were
+      //   `someString || fallback`, and for strings that is usually the INTENDED
+      //   semantic: `p.data.title || store.sceneName` should fall back on an
+      //   empty title, and `??` would export a game named "". Enforcing here
+      //   would mean 101 disable comments or 101 behaviour regressions. Auditing
+      //   them individually is #9565.
+      //
+      //   ignoreIfStatements -- 13 findings were `if (!x) x = y` asking to become
+      //   `x ??= y`. Every one was type-checked: none can hold 0/''/false, and
+      //   the five written `x === null` are already nullish checks, so none is a
+      //   latent falsy bug. That is a statement restructure rather than an
+      //   operator swap, and seven wrap multi-line bodies. Also #9565.
+      //
+      // Both carve-outs are narrower than they look: the operator form on
+      // numbers and booleans -- the actual bug class -- is fully enforced.
+      '@typescript-eslint/prefer-nullish-coalescing': ['error', {
+        ignoreConditionalTests: true,
+        ignoreIfStatements: true,
+        ignorePrimitives: { string: true },
+      }],
+    },
+  },
+  {
     rules: {
       '@typescript-eslint/no-unused-vars': ['warn', {
         argsIgnorePattern: '^_',

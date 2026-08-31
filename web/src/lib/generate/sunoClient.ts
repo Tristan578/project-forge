@@ -41,7 +41,7 @@ export class SunoClient {
       },
       body: JSON.stringify({
         prompt: params.prompt,
-        duration_seconds: params.durationSeconds || 30,
+        duration_seconds: params.durationSeconds ?? 30,
         instrumental: params.instrumental ?? true,
       }),
       signal: composeAbortSignal(params.signal, 30000),

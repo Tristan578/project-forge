@@ -47,14 +47,14 @@ export function MarketplacePage() {
   } = useMarketplaceStore();
 
   useEffect(() => {
-    fetchAssets(true);
-    fetchPurchased();
+    void fetchAssets(true);
+    void fetchPurchased();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLoadMore = () => {
     if (!loading && hasMore) {
-      fetchAssets(false);
+      void fetchAssets(false);
     }
   };
 

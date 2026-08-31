@@ -3,12 +3,26 @@
 use bevy::prelude::*;
 use crate::core::{
     entity_id::EntityId,
+    game_components::GameComponentRuntime,
+};
+use crate::bridge::events;
+
+// Editor-only imports. The three systems that survive a `runtime` build
+// (`emit_game_events_system`, `emit_character_grounded_system`,
+// `emit_character_controller_diagnostics_system`) need only `EntityId`,
+// `GameComponentRuntime`, `events` and the character-controller mirrors below;
+// everything here feeds the component/camera appliers and the selection emit,
+// which all carry `#[cfg(not(feature = "runtime"))]`. `log` included — its only
+// two call sites are in `apply_game_component_adds` / `_updates`.
+#[cfg(not(feature = "runtime"))]
+use crate::core::{
     history::{HistoryStack, UndoableAction},
     pending_commands::{PendingCommands, QueryRequest},
     game_camera::{GameCameraData, ActiveGameCamera, FirstPersonState, OrbitalState, GameCameraMode},
-    game_components::{GameComponentRuntime, GameComponents, build_game_component},
+    game_components::{GameComponents, build_game_component},
 };
-use crate::bridge::{events, log, Selection, SelectionChangedEvent};
+#[cfg(not(feature = "runtime"))]
+use crate::bridge::{log, Selection, SelectionChangedEvent};
 use crate::core::character_controller::{
     CharacterControllerDiagnostics, CharacterMotionState, DiagnosticsMirror, GroundedMirror,
 };
@@ -16,6 +30,7 @@ use std::collections::HashMap;
 
 // ---- Game Component Apply Systems ----
 
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_game_component_adds(
     mut pending: ResMut<PendingCommands>,
     mut entity_query: Query<(Entity, &EntityId, Option<&mut GameComponents>)>,
@@ -62,6 +77,7 @@ pub(super) fn apply_game_component_adds(
     }
 }
 
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_game_component_updates(
     mut pending: ResMut<PendingCommands>,
     mut entity_query: Query<(&EntityId, &mut GameComponents)>,
@@ -94,6 +110,7 @@ pub(super) fn apply_game_component_updates(
     }
 }
 
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_game_component_removals(
     mut pending: ResMut<PendingCommands>,
     mut entity_query: Query<(&EntityId, &mut GameComponents)>,
@@ -118,6 +135,7 @@ pub(super) fn apply_game_component_removals(
     }
 }
 
+#[cfg(not(feature = "runtime"))]
 pub(super) fn process_game_component_queries(
     mut pending: ResMut<PendingCommands>,
     gc_query: Query<(&EntityId, Option<&GameComponents>)>,
@@ -146,6 +164,7 @@ pub(super) fn process_game_component_queries(
 /// What `set_game_camera` needs to read off a candidate entity: its id, whatever camera
 /// configuration it already carries (for the runtime state that is not authored), and whether the
 /// per-mode look state exists yet.
+#[cfg(not(feature = "runtime"))]
 type GameCameraRow = (
     Entity,
     &'static EntityId,
@@ -154,6 +173,7 @@ type GameCameraRow = (
     Has<OrbitalState>,
 );
 
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_set_game_camera_requests(
     mut pending: ResMut<PendingCommands>,
     mut entity_query: Query<GameCameraRow>,
@@ -218,6 +238,7 @@ pub(super) fn apply_set_game_camera_requests(
     }
 }
 
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_set_active_game_camera_requests(
     mut pending: ResMut<PendingCommands>,
     entity_query: Query<(Entity, &EntityId)>,
@@ -239,6 +260,7 @@ pub(super) fn apply_set_active_game_camera_requests(
     }
 }
 
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_camera_shake_requests(
     mut pending: ResMut<PendingCommands>,
     mut camera_query: Query<&mut GameCameraData, With<ActiveGameCamera>>,
@@ -253,6 +275,7 @@ pub(super) fn apply_camera_shake_requests(
     }
 }
 
+#[cfg(not(feature = "runtime"))]
 pub(super) fn process_game_camera_queries(
     mut pending: ResMut<PendingCommands>,
     camera_query: Query<(&EntityId, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,

@@ -14,7 +14,9 @@
 # than `.github/aw/actions-lock.json`). The contributor most likely to hit it is
 # a non-Claude one who edits a `.md` and never learns the compiler exists. This
 # gate trips BEFORE merge: it recompiles from the committed sources/pins and
-# fails if the result differs from what is committed.
+# fails if the result differs from what is committed. The compiler also uses the
+# repository identity (GitHub owner/repo) to scatter cron schedules, so that
+# context is validated below as a third deterministic input.
 #
 # FOUR DRIFT VECTORS, all caught via `git status --porcelain`:
 #   1. a tracked `.lock.yml` recompiles to different content (edited source/pin),
@@ -55,6 +57,25 @@ locks=(.github/workflows/*.lock.yml)
 if [ ${#mds[@]} -eq 0 ] && [ ${#locks[@]} -eq 0 ]; then
   echo "✓ gh-aw-lock-sync: no gh-aw workflows to reconcile — pass"
   exit 0
+fi
+
+# gh-aw scatters cron schedules from the GitHub owner/repo. Without that context
+# it only warns, then emits locks that are deterministic for the wrong input and
+# look like contributor-authored cron drift. Require a normal GitHub origin
+# before compiling so the comparison is meaningful. Keep this after the empty
+# repo fast path: a repository with nothing to compile needs no GitHub identity.
+origin_url="$(git remote get-url origin 2>/dev/null || true)"
+repo_identity=""
+case "$origin_url" in
+  https://github.com/*) repo_identity="${origin_url#https://github.com/}" ;;
+  git@github.com:*) repo_identity="${origin_url#git@github.com:}" ;;
+  ssh://git@github.com/*) repo_identity="${origin_url#ssh://git@github.com/}" ;;
+esac
+repo_identity="${repo_identity%.git}"
+if ! [[ "$repo_identity" =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]]; then
+  echo "::error::gh-aw lock sync requires GitHub repository context (owner/repo), but origin is missing or is not a GitHub repository."
+  echo "Configure origin to the repository's GitHub URL before compiling locks."
+  exit 2
 fi
 
 # Single-source the compile command so the human remediation hint printed on
@@ -145,6 +166,15 @@ if ! eval "$COMPILE_CMD" >"$compile_log" 2>&1; then
   echo "--- end compile command output ---"
   # restore_tree runs via the EXIT trap.
   exit 1
+fi
+
+# Defence in depth: if gh-aw changes which remote it consults or accepts a URL
+# that our preflight does not model, do not misclassify its own context warning
+# as source drift. A successful compile can still carry this warning.
+if grep -Fq 'Fuzzy schedule scattering without repository context' "$compile_log"; then
+  echo "::error::gh-aw could not derive GitHub repository context (owner/repo); compiled cron schedules are not comparable to the committed locks."
+  echo "Configure origin to the repository's GitHub URL before compiling locks."
+  exit 2
 fi
 
 # --- detect drift -------------------------------------------------------------

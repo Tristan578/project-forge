@@ -1,15 +1,31 @@
 //! Scene import/export and asset loading systems.
 
+// Payload ceilings for the editor-only import paths. Each is read from exactly
+// one `#[cfg(not(feature = "runtime"))]` system below, so the constants carry
+// the same gate — a `runtime` build never parses a scene, a glTF blob, or a
+// texture blob handed in from the shell.
 /// Maximum size of a scene JSON payload in bytes (50 MB).
+#[cfg(not(feature = "runtime"))]
 pub const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024;
 /// Maximum number of entities permitted in a loaded scene.
+#[cfg(not(feature = "runtime"))]
 pub const MAX_SCENE_ENTITIES: usize = 10_000;
 /// Maximum byte length of a glTF base64 payload (~50 MB decoded, 1.33× overhead).
+#[cfg(not(feature = "runtime"))]
 pub const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
 /// Maximum byte length of a texture base64 payload (~50 MB decoded, 1.33× overhead).
+#[cfg(not(feature = "runtime"))]
 pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
 
 use bevy::prelude::*;
+
+// `apply_gltf_scene_spawn` is the only system in this file that survives a
+// `runtime` build, and `EntityType` is the only name it needs from `core`.
+use crate::core::pending_commands::EntityType;
+
+// Everything else here feeds the editor-only scene/asset I/O systems, all of
+// which already carry `#[cfg(not(feature = "runtime"))]`.
+#[cfg(not(feature = "runtime"))]
 use crate::core::{
     animation_clip::AnimationClipData,
     asset_manager::{AssetRef, AssetRegistry},
@@ -27,7 +43,7 @@ use crate::core::{
     lod::LodData,
     material::MaterialData,
     particles::{ParticleData, ParticleEnabled},
-    pending_commands::{self, EntityType, PendingCommands},
+    pending_commands::{self, PendingCommands},
     physics::{JointData, PhysicsData, PhysicsEnabled},
     physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d},
     post_processing::PostProcessingSettings,
@@ -44,6 +60,7 @@ use crate::core::{
     tilemap::{TilemapData, TilemapEnabled},
 };
 
+#[cfg(not(feature = "runtime"))]
 use super::events;
 
 /// System that processes scene export requests.

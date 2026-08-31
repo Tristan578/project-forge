@@ -304,14 +304,14 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           }
           case 'scene_load': {
             const { sceneName, transition } = msg;
-            useEditorStore.getState().startSceneTransition(sceneName, transition);
+            void useEditorStore.getState().startSceneTransition(sceneName, transition);
             break;
           }
           case 'scene_restart': {
             const store = useEditorStore.getState();
             const currentSceneName = store.scenes.find(s => s.id === store.activeSceneId)?.name;
             if (currentSceneName) {
-              store.startSceneTransition(currentSceneName, { type: 'instant' });
+              void store.startSceneTransition(currentSceneName, { type: 'instant' });
             }
             break;
           }
@@ -530,9 +530,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           elapsed: elapsedRef.current,
           // Send deltas when available, fall back to full state
           entities: entitiesDelta ? undefined : tickData.entities,
-          entitiesDelta: entitiesDelta || undefined,
+          entitiesDelta: entitiesDelta ?? undefined,
           entityInfos: entityInfosDelta ? undefined : tickData.entityInfos,
-          entityInfosDelta: entityInfosDelta || undefined,
+          entityInfosDelta: entityInfosDelta ?? undefined,
           inputState: tickData.inputState,
           audioPlayingStates: audioManager.getPlayingStates(),
           tilemapStates: tickTilemapStates,

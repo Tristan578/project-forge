@@ -60,21 +60,21 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
       }
     };
 
-    fetchGame();
+    void fetchGame();
   }, [gameId]);
 
   const handleLike = () => {
     if (likedGameIds.has(gameId)) {
-      unlikeGame(gameId);
+      void unlikeGame(gameId);
       if (game) setGame({ ...game, likeCount: game.likeCount - 1 });
     } else {
-      likeGame(gameId);
+      void likeGame(gameId);
       if (game) setGame({ ...game, likeCount: game.likeCount + 1 });
     }
   };
 
   const handleRate = (rating: number) => {
-    rateGame(gameId, rating);
+    void rateGame(gameId, rating);
   };
 
   const handleFork = async () => {

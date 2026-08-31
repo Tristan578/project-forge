@@ -193,9 +193,9 @@ async function streamOneTurn(
 
     // Ensure the call is on the message (`tool-input-start` may have created it).
     onUpdate((msg) => {
-      if ((msg.toolCalls || []).some((t) => t.id === id)) return msg;
+      if ((msg.toolCalls ?? []).some((t) => t.id === id)) return msg;
       const tc: ToolCallStatus = { id, name, input: parsedInput, status: 'pending', undoable: true };
-      return { ...msg, toolCalls: [...(msg.toolCalls || []), tc] };
+      return { ...msg, toolCalls: [...(msg.toolCalls ?? []), tc] };
     });
 
     if (deferToolExecution) {
@@ -203,7 +203,7 @@ async function streamOneTurn(
       deferredTools.push({ id, name, input: parsedInput });
       onUpdate((msg) => ({
         ...msg,
-        toolCalls: (msg.toolCalls || []).map((t) => (t.id === id ? { ...t, input: parsedInput } : t)),
+        toolCalls: (msg.toolCalls ?? []).map((t) => (t.id === id ? { ...t, input: parsedInput } : t)),
       }));
       return;
     }
@@ -212,7 +212,7 @@ async function streamOneTurn(
     const result = await executeToolCall(name, parsedInput, currentEditorState);
     onUpdate((msg) => ({
       ...msg,
-      toolCalls: (msg.toolCalls || []).map((t) =>
+      toolCalls: (msg.toolCalls ?? []).map((t) =>
         t.id === id
           ? {
               ...t,
@@ -231,7 +231,7 @@ async function streamOneTurn(
   const readUsage = (meta: unknown) => {
     const usage = (meta as { usage?: { inputTokens?: number; outputTokens?: number } } | undefined)
       ?.usage;
-    if (usage) onUsage(usage.inputTokens || 0, usage.outputTokens || 0);
+    if (usage) onUsage(usage.inputTokens ?? 0, usage.outputTokens ?? 0);
   };
 
   while (true) {
@@ -276,8 +276,8 @@ async function streamOneTurn(
             undoable: true,
           };
           onUpdate((msg) => {
-            if ((msg.toolCalls || []).some((t) => t.id === id)) return msg;
-            return { ...msg, toolCalls: [...(msg.toolCalls || []), tc] };
+            if ((msg.toolCalls ?? []).some((t) => t.id === id)) return msg;
+            return { ...msg, toolCalls: [...(msg.toolCalls ?? []), tc] };
           });
           break;
         }
@@ -301,7 +301,7 @@ async function streamOneTurn(
           const errorText = str(event.errorText) || 'Tool error';
           onUpdate((msg) => ({
             ...msg,
-            toolCalls: (msg.toolCalls || []).map((t) =>
+            toolCalls: (msg.toolCalls ?? []).map((t) =>
               t.id === id ? { ...t, status: 'error' as const, error: errorText } : t,
             ),
           }));
@@ -509,7 +509,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (currentApprovalMode && deferredTools.length > 0) {
           updateAssistant((msg) => ({
             ...msg,
-            toolCalls: (msg.toolCalls || []).map((t) =>
+            toolCalls: (msg.toolCalls ?? []).map((t) =>
               t.status === 'pending' ? { ...t, status: 'preview' as const } : t
             ),
           }));
@@ -653,7 +653,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const existing = tcUpdates.get(u.toolCallId);
             tcUpdates.set(u.toolCallId, existing ? { ...existing, ...u.update } : u.update);
           }
-          const newToolCalls = (msg.toolCalls || []).map((tc) => {
+          const newToolCalls = (msg.toolCalls ?? []).map((tc) => {
             const u = tcUpdates.get(tc.id);
             return u ? { ...tc, ...u } : tc;
           });
@@ -713,7 +713,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const current = msgs[currentIdx];
     msgs[currentIdx] = {
       ...current,
-      toolCalls: (current.toolCalls || []).map((t) => {
+      toolCalls: (current.toolCalls ?? []).map((t) => {
         const r = results.get(t.id);
         return r
           ? {
@@ -736,7 +736,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const msg = msgs[idx];
     msgs[idx] = {
       ...msg,
-      toolCalls: (msg.toolCalls || []).map((tc) =>
+      toolCalls: (msg.toolCalls ?? []).map((tc) =>
         tc.status === 'preview' ? { ...tc, status: 'rejected' as const } : tc
       ),
     };
@@ -785,7 +785,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const msg = msgs[currentIdx];
         msgs[currentIdx] = {
           ...msg,
-          toolCalls: (msg.toolCalls || []).map((tc) =>
+          toolCalls: (msg.toolCalls ?? []).map((tc) =>
             toolIdsToUndo.has(tc.id)
               ? { ...tc, status: 'undone' as const }
               : tc
@@ -793,6 +793,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
         set({ messages: msgs });
       }
+    }).catch((err: unknown) => {
+      console.error('Failed to load editorStore for batch undo:', err);
     });
   },
 

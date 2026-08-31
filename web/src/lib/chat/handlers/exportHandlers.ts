@@ -29,7 +29,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
         mode: 'zip',
         resolution: presetConfig?.resolution || 'responsive',
         bgColor: presetConfig?.loadingScreen.backgroundColor || '#18181b',
-        includeDebug: presetConfig?.includeDebug || false,
+        includeDebug: presetConfig?.includeDebug ?? false,
         preset: presetConfig,
         customLoadingScreen: store.loadingScreenConfig ?? undefined,
       });
@@ -65,7 +65,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
         mode: 'pwa',
         resolution: presetConfig?.resolution || 'responsive',
         bgColor: presetConfig?.loadingScreen.backgroundColor || '#0f172a',
-        includeDebug: presetConfig?.includeDebug || false,
+        includeDebug: presetConfig?.includeDebug ?? false,
         preset: presetConfig,
         customLoadingScreen: store.loadingScreenConfig ?? undefined,
       });
