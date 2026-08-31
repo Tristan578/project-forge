@@ -100,7 +100,14 @@ fi
 # `select(.conclusion == "success")` rather than a negated test: a check that is
 # missing, queued, cancelled or failed all leave the list empty, which is the
 # fail-closed answer without having to enumerate every non-success state.
-if ! CONCLUSIONS="$("$GH" api "repos/${REPO}/commits/${PR_HEAD}/check-runs" \
+# --paginate with per_page=100, and both matter. The endpoint defaults to 30
+# per page: measured on c4ee8fdf that commit carried 40 check-runs, so an
+# unpaginated call sees 30 of them and whether the required check is among
+# those 30 is down to ordering luck. Missing it answers validated=false, which
+# is SAFE -- the full block runs -- but silent: the optimisation would simply
+# stop paying off and nothing would look wrong. gh applies --jq per page and
+# concatenates, so a match still arrives one conclusion per line.
+if ! CONCLUSIONS="$("$GH" api --paginate "repos/${REPO}/commits/${PR_HEAD}/check-runs?per_page=100" \
       --jq ".check_runs[] | select(.name == \"${REQUIRED_CHECK}\") | .conclusion" 2>/dev/null)"; then
   not_validated "could not read check-runs for $PR_HEAD"
 fi

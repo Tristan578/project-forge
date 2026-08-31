@@ -165,6 +165,30 @@ else
 fi
 
 echo ""
+echo "=== the check-runs query must be paginated ==="
+# GitHub's check-runs endpoint returns 30 per page by default. Measured on
+# c4ee8fdf, a PR head in this repo carried 40 check-runs -- so an unpaginated
+# call sees 30 of them and whether "CI Success" is among those 30 is ordering
+# luck. Missing it answers validated=false, which is SAFE (the full block runs)
+# but entirely silent: the optimisation stops paying off and nothing looks
+# wrong. That is not observable from behaviour, so it is pinned structurally.
+CHECK_RUNS_LINE="$(grep -n 'check-runs' "$SCRIPT" | grep -v '^[0-9]*:#' | head -1)"
+if [ -z "$CHECK_RUNS_LINE" ]; then
+  fail "could not find the check-runs query in $SCRIPT"
+else
+  if grep -q 'per_page=100' <<<"$CHECK_RUNS_LINE"; then
+    pass "the check-runs query asks for per_page=100"
+  else
+    fail "the check-runs query does not set per_page: $CHECK_RUNS_LINE"
+  fi
+  if grep -q -- '--paginate' <<<"$CHECK_RUNS_LINE"; then
+    pass "the check-runs query is --paginate'd (a commit here can exceed one page)"
+  else
+    fail "the check-runs query is not paginated: $CHECK_RUNS_LINE"
+  fi
+fi
+
+echo ""
 echo "=== cd.yml wiring ==="
 if [ ! -f "$CD_YML" ]; then
   fail "cd.yml not found at $CD_YML"
