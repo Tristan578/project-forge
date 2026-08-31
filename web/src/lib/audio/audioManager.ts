@@ -129,11 +129,20 @@ class AudioManager {
       // Resume context on first user interaction if suspended
       if (this.ctx.state === 'suspended') {
         const resumeOnInteraction = () => {
-          if (this.ctx?.state === 'suspended') {
-            this.ctx.resume();
+          const detach = () => {
+            document.removeEventListener('click', resumeOnInteraction);
+            document.removeEventListener('keydown', resumeOnInteraction);
+          };
+          if (this.ctx?.state !== 'suspended') {
+            detach();
+            return;
           }
-          document.removeEventListener('click', resumeOnInteraction);
-          document.removeEventListener('keydown', resumeOnInteraction);
+          // Detach only once the context has actually resumed. The listeners
+          // used to be removed unconditionally, so a rejected resume (a gesture
+          // the browser did not accept as one) left audio suspended for the
+          // rest of the session with nothing left to retry it -- and produced
+          // an unhandled rejection on the way.
+          this.ctx.resume().then(detach, () => {});
         };
         document.addEventListener('click', resumeOnInteraction);
         document.addEventListener('keydown', resumeOnInteraction);

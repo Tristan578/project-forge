@@ -70,7 +70,7 @@ export function AssetDetailModal({ assetId, onClose }: AssetDetailModalProps) {
       }
     };
 
-    fetchDetail();
+    void fetchDetail();
   }, [assetId]);
 
   const handlePurchase = async () => {

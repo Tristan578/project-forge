@@ -21,7 +21,7 @@ function TokenBalanceInner() {
 
   useEffect(() => {
     if (isSignedIn) {
-      fetchBalance();
+      void fetchBalance();
     }
   }, [isSignedIn, fetchBalance]);
 

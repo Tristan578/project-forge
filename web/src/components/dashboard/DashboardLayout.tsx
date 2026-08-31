@@ -186,7 +186,7 @@ export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) 
                 {fetchError}
               </p>
               <button
-                onClick={() => { setLoading(true); setFetchError(null); fetchProjects(); }}
+                onClick={() => { setLoading(true); setFetchError(null); void fetchProjects(); }}
                 className="rounded-lg bg-zinc-800 px-6 py-3 text-base font-medium text-white hover:bg-zinc-700"
               >
                 Retry

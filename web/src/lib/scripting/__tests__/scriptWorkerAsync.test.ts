@@ -323,7 +323,7 @@ describe('scriptWorker async protocol', () => {
 
     // Send response with old requestId — should not crash (request map was cleared)
     expect(() => {
-      handler({
+      void handler({
         data: {
           type: 'tick',
           dt: 0.016,

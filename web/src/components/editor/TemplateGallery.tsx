@@ -29,9 +29,13 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
 
   useEffect(() => {
     if (isOpen) {
-      import('@/data/templates').then(({ TEMPLATE_REGISTRY }) => {
-        setTemplates(TEMPLATE_REGISTRY);
-      });
+      import('@/data/templates')
+        .then(({ TEMPLATE_REGISTRY }) => {
+          setTemplates(TEMPLATE_REGISTRY);
+        })
+        .catch((err: unknown) => {
+          console.error('Failed to load the template registry:', err);
+        });
     }
   }, [isOpen]);
 

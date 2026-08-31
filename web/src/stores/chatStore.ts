@@ -793,6 +793,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
         set({ messages: msgs });
       }
+    }).catch((err: unknown) => {
+      console.error('Failed to load editorStore for batch undo:', err);
     });
   },
 

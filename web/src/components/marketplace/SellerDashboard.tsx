@@ -259,7 +259,7 @@ export function SellerDashboard() {
           onClose={() => setShowUpload(false)}
           onSuccess={() => {
             setShowUpload(false);
-            fetchAssets();
+            void fetchAssets();
           }}
         />
       )}

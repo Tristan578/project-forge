@@ -103,22 +103,22 @@ export const useMarketplaceStore = create<MarketplaceState>()((set, get) => ({
 
   setSearchQuery: (q) => {
     set({ searchQuery: q, page: 1 });
-    get().fetchAssets(true);
+    void get().fetchAssets(true);
   },
 
   setCategory: (cat) => {
     set({ category: cat, page: 1 });
-    get().fetchAssets(true);
+    void get().fetchAssets(true);
   },
 
   setSortBy: (sort) => {
     set({ sortBy: sort, page: 1 });
-    get().fetchAssets(true);
+    void get().fetchAssets(true);
   },
 
   setPriceFilter: (filter) => {
     set({ priceFilter: filter, page: 1 });
-    get().fetchAssets(true);
+    void get().fetchAssets(true);
   },
 
   purchaseAsset: async (assetId: string) => {

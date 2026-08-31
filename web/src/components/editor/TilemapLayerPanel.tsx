@@ -153,7 +153,7 @@ export function TilemapLayerPanel() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleRemoveLayer(index);
+                      void handleRemoveLayer(index);
                     }}
                     className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-red-500"
                     title="Delete layer"

@@ -52,7 +52,7 @@ export function ChatInput() {
     const trimmed = text.trim();
     if (!trimmed && images.length === 0) return;
     const refs = Object.keys(pendingEntityRefs).length > 0 ? { ...pendingEntityRefs } : undefined;
-    sendMessage(trimmed, images.length > 0 ? images : undefined, refs);
+    void sendMessage(trimmed, images.length > 0 ? images : undefined, refs);
     setText('');
     setImages([]);
     clearEntityRefs();

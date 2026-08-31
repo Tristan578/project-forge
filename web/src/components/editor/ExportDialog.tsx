@@ -180,12 +180,15 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     }
   }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, compressionPreset, compressionQuality, setExporting, onClose]);
 
-  const handleCopySnippet = useCallback(() => {
+  const handleCopySnippet = useCallback(async () => {
     if (!embedSnippet) return;
-    navigator.clipboard.writeText(embedSnippet).then(() => {
+    try {
+      await navigator.clipboard.writeText(embedSnippet);
       setSnippetCopied(true);
       setTimeout(() => setSnippetCopied(false), 2000);
-    });
+    } catch {
+      // Clipboard API may be unavailable; do not claim the snippet was copied.
+    }
   }, [embedSnippet]);
 
   if (!isOpen) return null;
