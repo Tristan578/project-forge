@@ -510,6 +510,21 @@ print(first, second, entry, adds, deletes)
 assert_out "legacy cleanup retries without adding the existing issue twice" \
   "False True {'githubItemId': 'PVTI_replacement'} 1 2" "$out"
 
+out="$(run_py "
+import inspect
+src = inspect.getsource(m.migrate_drafts)
+i_lookup = src.find('db_get_github_issue_number(tid)')
+i_create = src.find('gh_create_issue_and_add_to_project(')
+i_map = src.find('entry[\"githubIssueNumber\"] = gh_issue_number', i_create)
+i_status = src.find('gh_set_status(config, new_item_id, status)', i_create)
+print(
+    'db-first' if -1 not in (i_lookup, i_create) and i_lookup < i_create else 'create-first',
+    'map-first' if -1 not in (i_map, i_status) and i_map < i_status else 'status-first',
+)
+")"
+assert_out "draft migration recovers the DB link and maps it before status writes" \
+  "db-first map-first" "$out"
+
 # ==========================================================================
 # PF-1212 — the sync must not spend GraphQL quota on requests that cannot
 # succeed. pull() synthesized `issue-<number>` as a Projects v2 item id, push()

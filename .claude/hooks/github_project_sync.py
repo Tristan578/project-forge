@@ -1972,6 +1972,17 @@ def migrate_drafts():
         title = entry.get("title", "Untitled")
         status = entry.get("lastLocalStatus", "todo")
 
+        # The database is the durable deduplication source. A previous process
+        # may have been killed after REST creation persisted this link but before
+        # the map was saved; recover that issue instead of creating another one.
+        existing_issue_number = db_get_github_issue_number(tid)
+        if existing_issue_number is not None:
+            entry["githubIssueNumber"] = existing_issue_number
+            entry["projectAttachmentPending"] = True
+            migrated += 1
+            print(f"  -> {title} -> recovered issue #{existing_issue_number}")
+            continue
+
         full_ticket = tb_get(f"/tickets/{tid}")
         if not full_ticket:
             skipped += 1
@@ -1984,10 +1995,19 @@ def migrate_drafts():
             new_item_id, gh_issue_number = gh_create_issue_and_add_to_project(
                 config, tid, title, body
             )
+            # Record the durable issue link before any best-effort board write.
+            entry["githubIssueNumber"] = gh_issue_number
             if new_item_id:
-                gh_set_status(config, new_item_id, status)
                 entry["githubItemId"] = new_item_id
                 entry.pop("projectAttachmentPending", None)
+                try:
+                    gh_set_status(config, new_item_id, status)
+                except Exception as e:
+                    print(
+                        f"  ! Issue #{gh_issue_number} created, but project "
+                        f"status failed: {e}",
+                        file=sys.stderr,
+                    )
                 if is_real_project_item_id(old_item_id) and old_item_id != new_item_id:
                     entry["legacyProjectItemId"] = old_item_id
                     retry_project_attachment(config, entry, gh_issue_number)
@@ -1995,7 +2015,6 @@ def migrate_drafts():
                 # Preserve the legacy item until a later push successfully adds
                 # the already-created REST issue and can delete the replacement.
                 entry["projectAttachmentPending"] = True
-            entry["githubIssueNumber"] = gh_issue_number
             entry["bodyHash"] = compute_body_hash(full_ticket)
             entry["subtaskHash"] = compute_subtask_hash(full_ticket.get("subtasks", []))
             entry["metadataVersion"] = 3
