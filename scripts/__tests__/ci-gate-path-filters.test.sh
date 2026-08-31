@@ -149,6 +149,16 @@ assert_output "commands.json elsewhere does NOT fire docs" "web/src/other/comman
 # ---- The other thirteen outputs ---------------------------------------------
 echo "--- other filters ---"
 assert_output "engine source fires engine" "engine/src/lib.rs" engine true
+# .transform-gizmo-fork is a PATH DEPENDENCY compiled into every shipped WASM
+# binary (engine/Cargo.toml points at ../.transform-gizmo-fork/crates/...), and
+# it is a local patch we maintain rather than untouched vendored code. It used
+# to match no filter, so a fork-only PR skipped Quality Gates / WASM Build and
+# was first compiled by CD on main after merge. These pin both directions: the
+# fork fires the engine build, and it reaches any-code through it, while an
+# unrelated path still does not.
+assert_output "path-dep fork fires engine" ".transform-gizmo-fork/crates/transform-gizmo-bevy/src/lib.rs" engine true
+assert_output "path-dep fork reaches any-code" ".transform-gizmo-fork/crates/transform-gizmo-bevy/src/lib.rs" any-code true
+assert_output "a similarly-named path does NOT fire engine" "docs/transform-gizmo-fork-notes.md" engine false
 assert_output "mcp-server fires mcp" "mcp-server/src/index.ts" mcp true
 assert_output "workflow edit fires ci" ".github/workflows/ci.yml" ci true
 assert_output "packages/ui fires design" "packages/ui/src/Button.tsx" design true
