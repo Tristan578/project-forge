@@ -121,6 +121,8 @@ jobs:
   # This ensures merges that bypass branch protection are still validated before deploy.
   lint:
     name: Lint
+    needs: [check-validated]
+    if: ${{ needs.check-validated.outputs.validated != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -144,6 +146,8 @@ jobs:
 
   typecheck:
     name: TypeScript
+    needs: [check-validated]
+    if: ${{ needs.check-validated.outputs.validated != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -167,6 +171,8 @@ jobs:
 
   test-web:
     name: Web Tests
+    needs: [check-validated]
+    if: ${{ needs.check-validated.outputs.validated != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -224,6 +230,8 @@ jobs:
 
   test-mcp:
     name: MCP Tests
+    needs: [check-validated]
+    if: ${{ needs.check-validated.outputs.validated != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -240,6 +248,40 @@ jobs:
 
       - run: npx vitest run
         working-directory: mcp-server
+
+  # Is this exact tree already proven by CI? (#9524)
+  #
+  # cd.yml does not CALL quality-gates.yml on a push to main -- quality-gates.yml
+  # says as much in its header -- but it reimplements the same validation as its
+  # own jobs, four of which carried no `if:` at all. Measured on run 33405689634
+  # that was 24.8 of 33.0 job-min re-testing content CI had just tested, and
+  # because the block gates the deploys it was also most of the 17.6 min
+  # merge-to-production latency.
+  #
+  # The gate is a PROOF, not a heuristic: it matches on the TREE hash, so a skip
+  # means "these exact bytes already went green", never "this looks like the same
+  # change". Everything that is not positive proof answers false and the full
+  # block runs -- see scripts/ci-tree-already-validated.sh for the reasoning and
+  # scripts/__tests__/ci-tree-already-validated.test.sh for the sixteen ways it
+  # is required to fail closed.
+  check-validated:
+    name: Check Tree Already Validated
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    outputs:
+      validated: ${{ steps.check.outputs.validated }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Look for a CI run that already validated this tree
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-tree-already-validated.sh
 
   check-changes:
     name: Detect Changed Paths
@@ -443,7 +485,7 @@ jobs:
   e2e:
     name: E2E (UI ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    needs: [build-wasm]
+    needs: [build-wasm, check-validated]
     # `!cancelled()` is load-bearing. An `if:` with no status-check function
     # gets an implicit `success()` prepended, and success() is FALSE when a
     # needed job was skipped -- so the `result == 'skipped'` clause below was
@@ -455,7 +497,7 @@ jobs:
     # timeout on every run, which cancelled the deploy with it (PF-1230 / #9364).
     # This job now mirrors ci.yml's test-e2e-ui (next build + next start via
     # playwright.ci.config.ts, @ui only, 3 shards, ~2.5 min each).
-    if: ${{ !cancelled() && (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.check-validated.outputs.validated != 'true' && (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -718,18 +760,28 @@ jobs:
     timeout-minutes: 15
     # check-changes is intentionally NOT in needs -- path detection only gates
     # build-wasm (slow). Every push to main that passes quality gates must deploy.
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, check-validated]
+    # Each validation job must have SUCCEEDED, or have been skipped *because the
+    # tree was proven already validated* (#9524). The second half is the point:
+    # tolerating 'skipped' on its own would let a bug in check-validated deploy a
+    # tree with none of these having run, and that deploy would look exactly as
+    # green as a real one. build-wasm / upload-wasm-cdn / security keep their
+    # unconditional skip tolerance: the first two are path-gated on engine
+    # changes, and the Rust audit is deliberately left ungated -- the suite
+    # argues (check-npm-audit.test.sh:1849) that a job-level needs: on the audit
+    # lets a skipped dependency cascade-skip it, and at 0.8 of the 24.8 job-min
+    # it is not worth trading that guardrail for.
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       github.event.inputs.promote_to_production != 'true' &&
-      needs.lint.result == 'success' &&
-      needs.typecheck.result == 'success' &&
-      needs.test-web.result == 'success' &&
-      (needs.test-mcp.result == 'success' || needs.test-mcp.result == 'skipped') &&
+      (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.test-web.result == 'success' || (needs.test-web.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.test-mcp.result == 'success' || (needs.test-mcp.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.security.result == 'success' || needs.security.result == 'skipped') &&
+      (needs.e2e.result == 'success' || (needs.e2e.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
-      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
       (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped')
     permissions:
       contents: read

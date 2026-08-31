@@ -1989,6 +1989,7 @@ STEPS_EOF
   typecheck:
   test-web:
   test-mcp:
+  check-validated:
   check-changes:
   check-deployment-drift:
   build-wasm:
@@ -2224,13 +2225,13 @@ STEPS_EOF
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       github.event.inputs.promote_to_production != 'true' &&
-      needs.lint.result == 'success' &&
-      needs.typecheck.result == 'success' &&
-      needs.test-web.result == 'success' &&
-      (needs.test-mcp.result == 'success' || needs.test-mcp.result == 'skipped') &&
+      (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.test-web.result == 'success' || (needs.test-web.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.test-mcp.result == 'success' || (needs.test-mcp.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.security.result == 'success' || needs.security.result == 'skipped') &&
+      (needs.e2e.result == 'success' || (needs.e2e.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
-      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
       (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped')" ;;
       deploy-production) cd_dj_expect="    if: |
       always() &&
@@ -3074,6 +3075,7 @@ OUTPUTS_EOF
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3576,6 +3578,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3638,6 +3641,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/alias-wasm-cdn-version.test.sh
       - name: Run post-deploy health gate test suite
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
+      - name: Run CD tree-validation gate test suite
+        run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
       - name: Run suite-wiring gate
