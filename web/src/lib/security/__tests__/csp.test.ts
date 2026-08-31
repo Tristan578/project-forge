@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  clerkAccountPortalFromFrontendApi,
   buildContentSecurityPolicy,
   buildCspRouteRules,
   buildPlayContentSecurityPolicy,
@@ -18,6 +19,12 @@ function scriptSrc(csp: string): string {
   const directive = csp.split(';').map((d) => d.trim()).find((d) => d.startsWith('script-src '));
   if (!directive) throw new Error('no script-src directive in CSP');
   return directive;
+}
+
+function directive(csp: string, name: string): string {
+  const value = csp.split(';').map((d) => d.trim()).find((d) => d.startsWith(`${name} `));
+  if (!value) throw new Error(`no ${name} directive in CSP`);
+  return value;
 }
 
 describe('buildContentSecurityPolicy (#8612, #8634)', () => {
@@ -73,6 +80,34 @@ describe('buildContentSecurityPolicy (#8612, #8634)', () => {
       // No trailing/double spaces from an empty CDN directive.
       expect(csp).not.toMatch(/\s{2,}/);
     });
+
+    it('derives the deployment Clerk host for every Clerk network directive (#9058)', () => {
+      const host = 'clerk.second-production.example';
+      const csp = buildContentSecurityPolicy({
+        allowUnsafeEval: false,
+        clerkPublishableKey: publishableKeyFor(host, 'pk_live_'),
+      });
+
+      for (const name of ['script-src', 'connect-src', 'frame-src', 'img-src']) {
+        expect(directive(csp, name)).toContain(`https://${host}`);
+      }
+      expect(csp).not.toContain('https://*.clerk.accounts.dev');
+      expect(csp).not.toContain('https://clerk.spawnforge.ai');
+    });
+
+    it.each([undefined, 'pk_live_%%%%'])(
+      'retains the established Clerk origins when the key is absent or malformed (#9058)',
+      (clerkPublishableKey) => {
+        const csp = buildContentSecurityPolicy({ allowUnsafeEval: false, clerkPublishableKey });
+
+        for (const name of ['script-src', 'connect-src', 'frame-src']) {
+          expect(directive(csp, name)).toContain('https://*.clerk.accounts.dev');
+          expect(directive(csp, name)).toContain('https://clerk.spawnforge.ai');
+        }
+        expect(csp).not.toContain('undefined');
+        expect(csp).not.toMatch(/\s{2,}/);
+      },
+    );
   });
 
   describe('EVAL_FREE_ROUTE_SOURCES', () => {
@@ -230,6 +265,18 @@ describe('buildPlayContentSecurityPolicy (PF-1018, #9038)', () => {
     }
   });
 
+  it('keeps the global and play policies aligned on the derived Clerk host (#9058)', () => {
+    const host = 'clerk.alternate.example';
+    const clerkPublishableKey = publishableKeyFor(host, 'pk_live_');
+    const global = buildContentSecurityPolicy({ allowUnsafeEval: false, clerkPublishableKey });
+    const play = buildPlayContentSecurityPolicy({ clerkPublishableKey });
+
+    for (const name of ['script-src', 'connect-src', 'frame-src']) {
+      expect(directive(global, name)).toContain(`https://${host}`);
+      expect(directive(play, name)).toContain(`https://${host}`);
+    }
+  });
+
   it('omits the derived Clerk script host when no publishable key is configured', () => {
     // Without a key Clerk loads no scripts, so allowlisting a Frontend API host
     // would be dead surface rather than a functional requirement. (`img-src`
@@ -314,6 +361,22 @@ describe('buildCspRouteRules — ordering contract (#8612, #8634)', () => {
       expect(rule.headers).toHaveLength(1);
       expect(rule.headers[0].key).toBe('Content-Security-Policy');
       expect(rule.headers[0].value.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('propagates one Clerk key to global, eval-free, and play policies (#9058)', () => {
+    const host = 'clerk.multi-environment.example';
+    const rules = buildCspRouteRules({
+      clerkPublishableKey: publishableKeyFor(host, 'pk_live_'),
+      devUnsafeEval: false,
+    });
+
+    for (const path of ['/editor/project', '/community/game', '/play/user/game']) {
+      const csp = effectiveCspForPath(rules, path);
+      expect(csp).toBeDefined();
+      for (const name of ['script-src', 'connect-src', 'frame-src']) {
+        expect(directive(csp as string, name)).toContain(`https://${host}`);
+      }
     }
   });
 });
@@ -426,5 +489,98 @@ describe('playCspOptionsFromEnv — shared by both writers of the /play header',
     expect(proxyCsp.replace(" 'nonce-dGVzdA=='", ' <AUTH>')).toBe(
       (staticCsp as string).replace(" 'unsafe-inline'", ' <AUTH>'),
     );
+  });
+});
+
+describe('Clerk Account Portal host (production sign-in, #9058)', () => {
+  // A Clerk custom domain serves TWO hosts and the publishable key encodes only
+  // the first:
+  //
+  //   Frontend API    clerk.spawnforge.ai       (in the key)
+  //   Account Portal  accounts.spawnforge.ai    (nowhere)
+  //
+  // Allowlisting only the Frontend API broke production sign-in outright.
+  // Unauthenticated /dashboard 307s to
+  // accounts.spawnforge.ai/sign-in?redirect_url=..., and with that host missing
+  // from connect-src the browser refused the redirect:
+  //   "Connecting to 'https://accounts.spawnforge.ai/sign-in?...' violates the
+  //    following Content Security Policy directive"
+  // OAuth completed, the redirect was blocked, the user landed back on home.
+  //
+  // These assert the portal host by NAME in each directive that carries Clerk
+  // sources, because "the policy contains a Clerk host" was already true while
+  // sign-in was broken.
+  describe('derivation', () => {
+    it('maps a production Frontend API host to its portal', () => {
+      expect(clerkAccountPortalFromFrontendApi('clerk.spawnforge.ai')).toBe('accounts.spawnforge.ai');
+    });
+
+    it('maps a development Frontend API host to its portal', () => {
+      // Dev names it differently: the `clerk.` segment is interior, and the
+      // portal drops it rather than gaining an `accounts.` prefix.
+      expect(clerkAccountPortalFromFrontendApi('foo.clerk.accounts.dev')).toBe('foo.accounts.dev');
+    });
+
+    it('returns null rather than guessing at an unrecognised shape', () => {
+      expect(clerkAccountPortalFromFrontendApi('example.com')).toBeNull();
+      expect(clerkAccountPortalFromFrontendApi(null)).toBeNull();
+    });
+  });
+
+  describe('policy output', () => {
+    const clerkDirectives = ['script-src', 'connect-src', 'frame-src'] as const;
+
+    it.each(clerkDirectives)('%s carries the production portal host', (name) => {
+      const csp = buildContentSecurityPolicy({
+        allowUnsafeEval: false,
+        clerkPublishableKey: publishableKeyFor('clerk.spawnforge.ai', 'pk_live_'),
+      });
+      expect(directive(csp, name)).toContain('https://accounts.spawnforge.ai');
+    });
+
+    it('connect-src carries the portal host — the directive that blocked sign-in', () => {
+      const csp = buildContentSecurityPolicy({
+        allowUnsafeEval: false,
+        clerkPublishableKey: publishableKeyFor('clerk.spawnforge.ai', 'pk_live_'),
+      });
+      const connect = directive(csp, 'connect-src');
+      expect(connect).toContain('https://clerk.spawnforge.ai');
+      expect(connect).toContain('https://accounts.spawnforge.ai');
+    });
+
+    it.each(clerkDirectives)('%s carries the development portal host', (name) => {
+      const csp = buildContentSecurityPolicy({
+        allowUnsafeEval: false,
+        clerkPublishableKey: publishableKeyFor('foo.clerk.accounts.dev'),
+      });
+      expect(directive(csp, name)).toContain('https://foo.accounts.dev');
+    });
+
+    it('still allows a portal when the key is absent or malformed', () => {
+      // The fallback exists so a configuration problem degrades to a usable
+      // policy. Before this it degraded to one that could not sign anyone in.
+      for (const key of [undefined, 'pk_live_%%%%']) {
+        const connect = directive(
+          buildContentSecurityPolicy({ allowUnsafeEval: false, clerkPublishableKey: key }),
+          'connect-src',
+        );
+        expect(connect).toContain('https://accounts.spawnforge.ai');
+        expect(connect).toContain('https://*.accounts.dev');
+      }
+    });
+
+    it('does not leak the portal host of a DIFFERENT tenant', () => {
+      // The portal is derived from the key, not hardcoded, so a deployment on
+      // another domain must not carry spawnforge's hosts.
+      const connect = directive(
+        buildContentSecurityPolicy({
+          allowUnsafeEval: false,
+          clerkPublishableKey: publishableKeyFor('clerk.example.com', 'pk_live_'),
+        }),
+        'connect-src',
+      );
+      expect(connect).toContain('https://accounts.example.com');
+      expect(connect).not.toContain('spawnforge');
+    });
   });
 });
