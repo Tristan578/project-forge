@@ -805,11 +805,6 @@ jobs:
           # SSO-protected deployments reject bypass tokens. Use vercel curl
           # which authenticates via VERCEL_TOKEN (already used for deploy).
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          # Passed so the check resolves the SAME engine url the deployed bundle
-          # will (#9581). Checking a different one is how a 404'ing engine
-          # sailed past a green health check.
-          ENGINE_CDN_URL: ${{ vars.ENGINE_CDN_URL }}
-          ENGINE_VERSION: ${{ github.sha }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
   # ---- Stage 2: Deploy to Production ----
@@ -1244,9 +1239,6 @@ jobs:
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          # Same as staging: resolve the engine url this deploy actually stamped.
-          ENGINE_CDN_URL: ${{ vars.ENGINE_CDN_URL }}
-          ENGINE_VERSION: ${{ github.sha }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
       - name: Install Playwright for smoke tests

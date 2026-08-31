@@ -37,10 +37,15 @@ set -uo pipefail
 
 AWS="${AWS_CLI:-aws}"
 
-# The immutable prefix wants a year-long TTL; latest/ is deliberately short-TTL,
-# so the copy must REPLACE the cache-control it would otherwise inherit rather
-# than propagate an alias's headers onto a pinned path.
-IMMUTABLE_CACHE_CONTROL="${IMMUTABLE_CACHE_CONTROL:-public, max-age=31536000, immutable}"
+# BYTE-FOR-BYTE the value upload-wasm-to-r2.sh writes on the versioned prefix.
+# An aliased prefix must be indistinguishable from an uploaded one, so this
+# string is deliberately not "improved" (no leading `public,`) -- it is copied
+# from the real upload path and must be changed with it.
+#
+# The REPLACE is what makes it apply: latest/ is written with
+# `max-age=60, must-revalidate`, and a plain server-side copy would carry that
+# 60-second TTL onto a prefix whose whole purpose is to be immutable.
+IMMUTABLE_CACHE_CONTROL="${IMMUTABLE_CACHE_CONTROL:-max-age=31536000, immutable}"
 
 SRC="s3://${R2_BUCKET}/latest/"
 DEST="s3://${R2_BUCKET}/${ENGINE_VERSION}/"
