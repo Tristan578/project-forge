@@ -769,42 +769,49 @@ def gh_get_repo_issues(config, state="open", limit=500):
     return json.loads(result.stdout)
 
 
-def gh_create_issue_and_add_to_project(config, title, body="", labels=None):
+def gh_create_issue_and_add_to_project(config, ticket_id, title, body="", labels=None):
     owner = config["owner"]
     repo = config["repo"]
 
     create_args = [
-        "gh", "issue", "create",
-        "--repo", f"{owner}/{repo}",
-        "--title", title,
-        "--body", body or "",
+        "gh", "api", f"repos/{owner}/{repo}/issues",
+        "--method", "POST",
+        "--raw-field", f"title={title}",
+        "--raw-field", f"body={body or ''}",
     ]
     if labels:
         for label in labels:
-            create_args.extend(["--label", label])
+            create_args.extend(["--field", f"labels[]={label}"])
 
-    result = subprocess.run(
-        create_args,
-        capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=30,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Issue creation failed: {result.stderr.strip()}")
+    try:
+        issue_data = json.loads(gh_run(create_args))
+        issue_number = int(issue_data["number"])
+        issue_url = issue_data["html_url"]
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"Issue creation returned an invalid response: {e}") from e
 
-    issue_url = result.stdout.strip()
-    issue_number = int(issue_url.rstrip("/").split("/")[-1])
+    # The REST issue is authoritative and already exists. Persist its number
+    # before the best-effort Projects v2 mutation below so a GraphQL outage (or
+    # a process killed immediately afterwards) cannot make the next push create
+    # the same issue again.
+    db_set_github_issue_number(ticket_id, issue_number)
 
-    add_result = gh_run([
-        "gh", "project", "item-add", str(config["projectNumber"]),
-        "--owner", owner,
-        "--url", issue_url,
-        "--format", "json",
-    ])
-    item_data = json.loads(add_result)
-    item_id = item_data.get("id", "")
-
-    if not item_id:
-        raise RuntimeError(f"Failed to get project item ID for issue #{issue_number}")
+    try:
+        add_result = gh_run([
+            "gh", "project", "item-add", str(config["projectNumber"]),
+            "--owner", owner,
+            "--url", issue_url,
+            "--format", "json",
+        ])
+        item_id = json.loads(add_result).get("id", "")
+        if not is_real_project_item_id(item_id):
+            raise RuntimeError("project item-add returned no usable item ID")
+    except Exception as e:
+        print(
+            f"  ! Issue #{issue_number} created, but project add failed: {e}",
+            file=sys.stderr,
+        )
+        item_id = None
 
     return item_id, issue_number
 
@@ -1269,30 +1276,26 @@ def _push_inner(include_done=False):
             try:
                 body = format_github_body(full_ticket)
                 item_id, new_gh_num = gh_create_issue_and_add_to_project(
-                    config, display, body
+                    config, tid, display, body
                 )
 
-                # Persist the link FIRST, before anything that can raise.
-                # The issue exists on GitHub the moment the call above returns,
-                # so from here on the only way to lose it is to fail before
-                # writing it down. Every later call in this block can raise —
-                # gh_sync_issue_state does so by design when it cannot verify
-                # the state it just set — and the surrounding `except` only
-                # counts the error. An unlinked ticket is then indistinguishable
-                # from a new one on the next run, so push creates a SECOND issue
-                # for it, forever.
+                # The helper persists the REST issue number before attempting
+                # project-add, so every call below can fail without making the
+                # next push mistake this ticket for a new one. In particular,
+                # gh_sync_issue_state raises when it cannot verify the state it
+                # just set, and the surrounding `except` only counts the error.
                 #
                 # With the link written, a later failure falls through to the
                 # "existing ticket" branch below on the next run, which rebuilds
                 # the missing map entry and re-syncs status and body.
-                db_set_github_issue_number(tid, new_gh_num)
-
-                # Best-effort, like every other board-status write: item-add
-                # just returned this id, but if the mutation still fails the
-                # ticket's memo must still be written or the next run replays it.
+                # Best-effort, like every other board-status write. item_id is
+                # absent when project-add failed; that is an unmapped board item,
+                # not a failed authoritative issue create.
                 try:
-                    gh_set_status(config, item_id, status)
-                    field_sync.applied += 1
+                    if gh_set_status(config, item_id, status):
+                        field_sync.applied += 1
+                    else:
+                        field_sync.unmapped += 1
                 except Exception as e:
                     field_sync.failures += 1
                     errlog.add(f"Board status failed {display}: {e}")
@@ -1907,11 +1910,14 @@ def migrate_drafts():
         try:
             body = format_github_body(full_ticket)
             new_item_id, gh_issue_number = gh_create_issue_and_add_to_project(
-                config, title, body
+                config, tid, title, body
             )
             gh_set_status(config, new_item_id, status)
 
-            if old_item_id:
+            # Do not discard the old board item unless its replacement was
+            # actually added. The REST issue link is already durable either
+            # way, so a GraphQL outage can be repaired on a later sync.
+            if old_item_id and new_item_id:
                 try:
                     gh_run([
                         "gh", "project", "item-delete",
@@ -1927,9 +1933,6 @@ def migrate_drafts():
             entry["bodyHash"] = compute_body_hash(full_ticket)
             entry["subtaskHash"] = compute_subtask_hash(full_ticket.get("subtasks", []))
             entry["metadataVersion"] = 3
-
-            # Write to SQLite
-            db_set_github_issue_number(tid, gh_issue_number)
 
             migrated += 1
             print(f"  -> {title} -> Issue #{gh_issue_number}")
