@@ -718,10 +718,27 @@ impl Plugin for SelectionPlugin {
                     performance::apply_performance_budget_commands,
                 ))
                 .add_systems(Update, sprite::render_2d_grid)
+                // `.after(build_scene_graph)` is load-bearing, not tidiness.
+                //
+                // `build_scene_graph` rebuilds `cache.data` and sets
+                // `cache.dirty`; `emit_scene_graph_updates` emits when dirty.
+                // The two live in SEPARATE `add_systems(PostUpdate, ...)` calls
+                // and `.chain()` orders only within its own tuple, so nothing
+                // ordered the groups against each other. Bevy was free to run
+                // the emit first and ship the PREVIOUS frame's graph to the
+                // editor, and which way it fell was decided by the same
+                // topological sort that flipped in #9493 when one unrelated
+                // system joined an unordered tuple. A one-frame-stale scene
+                // graph that reshuffles on an unrelated registration is exactly
+                // the failure class that took the E2E Engine Smoke Gate red.
+                // (#9509)
+                //
+                // Pinned by `core/schedule_smoke.rs`: deleting this edge fails a
+                // native test instead of silently reopening the race.
                 .add_systems(PostUpdate, (
                     core_systems::emit_scene_graph_updates,
                     core_systems::emit_history_updates,
-                ).chain());
+                ).chain().after(scene_graph::build_scene_graph));
         }
     }
 }
