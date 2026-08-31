@@ -9,9 +9,29 @@ FAILURES=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 
+# A temp dir whose path every process in this suite can resolve.
+#
+# These tests interpolate the fixture path into `python3 -c` one-liners. Under
+# Git-for-Windows `mktemp -d` returns an MSYS path (/tmp/tmp.XXXX) that only
+# MSYS-linked programs understand: a NATIVE python3 reads the leading slash as
+# the current drive root and reports ENOENT on a file bash just wrote, so every
+# assertion below collapses. `cygpath -m` renders the same directory as a
+# Windows-absolute path with forward slashes (C:/Users/.../Temp/tmp.XXXX),
+# which bash, python3 and the gate under test all resolve identically. On
+# Linux/macOS cygpath does not exist and the path passes through untouched.
+mktemp_d_native() {
+  local d
+  d=$(mktemp -d)
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$d"
+  else
+    printf '%s\n' "$d"
+  fi
+}
+
 setup_fixture() {
   local tmpdir
-  tmpdir=$(mktemp -d)
+  tmpdir=$(mktemp_d_native)
   local variant_dir="$tmpdir/engine-pkg-webgl2"
   mkdir -p "$variant_dir"
   echo "fake wasm content" > "$variant_dir/forge_engine_bg.wasm"
@@ -26,7 +46,10 @@ echo "=== generate-wasm-manifests.sh tests ==="
 # Test 1: Generates valid JSON manifest
 echo "Test 1: generates manifest with correct fields"
 DIR=$(setup_fixture)
-bash "$SCRIPT" "$DIR" > /dev/null 2>&1
+# Keep the generator's own output: when it aborts (a missing hash tool, an
+# unreadable fixture) the only symptom otherwise is "manifest not created",
+# which says nothing about why.
+GEN_OUT=$(bash "$SCRIPT" "$DIR" 2>&1) || true
 MANIFEST="$DIR/engine-pkg-webgl2/wasm-manifest.json"
 if [ -f "$MANIFEST" ]; then
   # Verify all required fields exist
@@ -39,7 +62,7 @@ print('ok' if not missing else 'missing: ' + ','.join(missing))
 ")
   if [ "$HAS_FIELDS" = "ok" ]; then pass "all fields present"; else fail "fields: $HAS_FIELDS"; fi
 else
-  fail "manifest not created"
+  fail "manifest not created; generator said: ${GEN_OUT:-<no output>}"
 fi
 cleanup "$DIR"
 
@@ -78,7 +101,7 @@ cleanup "$DIR"
 
 # Test 5: exits 1 when no engine-pkg-* dirs exist
 echo "Test 5: exits 1 with no engine-pkg-* directories"
-DIR=$(mktemp -d)
+DIR=$(mktemp_d_native)
 if bash "$SCRIPT" "$DIR" > /dev/null 2>&1; then
   fail "should have exited 1"
 else

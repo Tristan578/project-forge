@@ -27,8 +27,36 @@ if [ ! -d "$BASE_DIR" ]; then
   exit 1
 fi
 
+# SHA-256 tool, resolved once at startup rather than hardcoded.
+#
+# `shasum` is a Perl script that ships with macOS and most Linux images but is
+# ABSENT from Git-for-Windows and from slim/distroless containers, where only
+# `sha256sum` (coreutils) or `openssl` exists. Hardcoding it made this script
+# die with "shasum: command not found" anywhere Perl's shasum is missing. All
+# three implementations emit the same SHA-256 digest in field 1, so the
+# manifests this produces are byte-identical whichever one is selected.
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256_of() { sha256sum "$1"; }
+elif command -v shasum >/dev/null 2>&1; then
+  sha256_of() { shasum -a 256 "$1"; }
+elif command -v openssl >/dev/null 2>&1; then
+  sha256_of() { openssl dgst -sha256 -r "$1"; }
+else
+  echo "ERROR: no SHA-256 tool found (need one of: sha256sum, shasum, openssl)" >&2
+  exit 1
+fi
+
+# First 16 hex chars of the file's SHA-256. Validates the digest before
+# returning it: a truncated or empty hash must abort the build, never end up
+# baked into a manifest that clients then use as a cache key.
 hash16() {
-  shasum -a 256 "$1" | awk '{print substr($1, 1, 16)}'
+  local digest
+  digest="$(sha256_of "$1" | awk '{print $1}')"
+  if ! printf '%s' "$digest" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+    echo "ERROR: could not hash $1 (got '$digest')" >&2
+    exit 1
+  fi
+  printf '%s\n' "${digest:0:16}"
 }
 
 xor_hex() {

@@ -27,10 +27,39 @@ CI_SUCCESS="$REPO_ROOT/scripts/check-ci-success.sh"
 command -v node >/dev/null 2>&1 || { echo "FATAL: node not found on host"; exit 1; }
 command -v mktemp >/dev/null 2>&1 || { echo "FATAL: mktemp not found on host"; exit 1; }
 
+# digest_of <file>... - SHA-256 of the files' concatenated bytes.
+#
+# Used below only to prove a file was (or was not) rewritten. `shasum` is a Perl
+# script that ships with macOS and most Linux images but is ABSENT from
+# Git-for-Windows and from slim containers, so hardcoding it turned every one of
+# these "unchanged?" checks into "shasum: command not found" plus an EMPTY
+# digest - and an empty digest compares equal to the other empty digest, quietly
+# passing the very assertions meant to catch a clobbered file. Resolve the tool
+# once, and refuse to run at all if the host has none.
+if command -v sha256sum >/dev/null 2>&1; then
+  digest_of() { cat "$@" | sha256sum | awk '{print $1}'; }
+elif command -v shasum >/dev/null 2>&1; then
+  digest_of() { cat "$@" | shasum -a 256 | awk '{print $1}'; }
+elif command -v openssl >/dev/null 2>&1; then
+  digest_of() { cat "$@" | openssl dgst -sha256 -r | awk '{print $1}'; }
+else
+  echo "FATAL: no SHA-256 tool found on host (need sha256sum, shasum, or openssl)"; exit 1
+fi
+
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+SKIP=0
+# skip <reason> - a case the HOST cannot represent, not one we chose not to run.
+# Only ever reachable behind a capability PROBE (never an OS-name check), and
+# under CI it is upgraded to a hard failure: coverage may thin out on a
+# developer laptop, never on the runner that gates merges.
+skipped() {
+  echo "  SKIP: $1"
+  SKIP=$((SKIP + 1))
+  if [ "${CI:-}" = "true" ]; then bad "skipped in CI: $1"; fi
+}
 
 # Build a hermetic fixture root that mirrors the generator's expected layout:
 #   <root>/tools/agentic-sync/canonical.json   (source of truth)
@@ -107,9 +136,9 @@ rm -rf "$ROOT"
 echo "== generator: --write is idempotent =="
 ROOT="$(make_fixture)"
 run_gen "$ROOT" --write >/dev/null 2>&1
-sum1="$(cat "$ROOT/AGENTS.md" "$ROOT/sub/copilot.md" | shasum | awk '{print $1}')"
+sum1="$(digest_of "$ROOT/AGENTS.md" "$ROOT/sub/copilot.md")"
 run_gen "$ROOT" --write >/dev/null 2>&1
-sum2="$(cat "$ROOT/AGENTS.md" "$ROOT/sub/copilot.md" | shasum | awk '{print $1}')"
+sum2="$(digest_of "$ROOT/AGENTS.md" "$ROOT/sub/copilot.md")"
 if [ "$sum1" = "$sum2" ]; then ok "second --write leaves files byte-identical"; else bad "--write is not idempotent"; fi
 rm -rf "$ROOT"
 
@@ -292,13 +321,13 @@ cat > "$ESCAPE_ROOT/tools/agentic-sync/canonical.json" <<'JSON'
 }
 JSON
 printf 'secret top\n<!-- AGENTIC-SYNC:START -->\n<!-- AGENTIC-SYNC:END -->\nsecret bottom\n' > "$PARENT/secret.md"
-before_secret="$(shasum "$PARENT/secret.md" | awk '{print $1}')"
+before_secret="$(digest_of "$PARENT/secret.md")"
 if AGENTIC_SYNC_ROOT="$ESCAPE_ROOT" node "$GEN" --write >/dev/null 2>&1; then
   bad "--write with a ../ traversal target must exit non-zero (refuse to escape root)"
 else
   ok "--write refuses a path-traversal target (exit non-zero)"
 fi
-after_secret="$(shasum "$PARENT/secret.md" | awk '{print $1}')"
+after_secret="$(digest_of "$PARENT/secret.md")"
 if [ "$before_secret" = "$after_secret" ]; then ok "out-of-root file left unmodified"; else bad "generator mutated a file outside the repo root"; fi
 rm -rf "$PARENT"
 
@@ -318,15 +347,23 @@ cat > "$SROOT/tools/agentic-sync/canonical.json" <<'JSON'
 }
 JSON
 printf 'secret top\n<!-- AGENTIC-SYNC:START -->\n<!-- AGENTIC-SYNC:END -->\nsecret bottom\n' > "$PARENT/secret.md"
-ln -s "$PARENT/secret.md" "$SROOT/AGENTS.md"
-before_sym="$(shasum "$PARENT/secret.md" | awk '{print $1}')"
-if AGENTIC_SYNC_ROOT="$SROOT" node "$GEN" --write >/dev/null 2>&1; then
-  bad "--write through an out-of-root symlink target must exit non-zero"
+ln -s "$PARENT/secret.md" "$SROOT/AGENTS.md" 2>/dev/null || true
+# PROBE, not an OS check: Git-for-Windows without Developer Mode makes `ln -s`
+# COPY the target and still exit 0, so the fixture silently stops being a
+# symlink and this case would assert nothing while appearing to pass. Confirm
+# the planted file really is a link before trusting the result.
+if [ ! -h "$SROOT/AGENTS.md" ]; then
+  skipped "host cannot create symlinks (ln -s produced a regular file) - symlink-escape case not exercised"
 else
-  ok "--write refuses a symlinked-escape target (exit non-zero)"
+  before_sym="$(digest_of "$PARENT/secret.md")"
+  if AGENTIC_SYNC_ROOT="$SROOT" node "$GEN" --write >/dev/null 2>&1; then
+    bad "--write through an out-of-root symlink target must exit non-zero"
+  else
+    ok "--write refuses a symlinked-escape target (exit non-zero)"
+  fi
+  after_sym="$(digest_of "$PARENT/secret.md")"
+  if [ "$before_sym" = "$after_sym" ]; then ok "symlinked out-of-root file left unmodified"; else bad "generator wrote through a symlink escaping root"; fi
 fi
-after_sym="$(shasum "$PARENT/secret.md" | awk '{print $1}')"
-if [ "$before_sym" = "$after_sym" ]; then ok "symlinked out-of-root file left unmodified"; else bad "generator wrote through a symlink escaping root"; fi
 rm -rf "$PARENT"
 
 echo "== generator: fail-safe on a target resolving to the repo root itself =="
@@ -380,9 +417,9 @@ echo "== wrapper: leaves no mutation behind (it is a check, not a fix) =="
 ROOT="$(make_fixture)"
 run_gen "$ROOT" --write >/dev/null 2>&1
 perl -0pi -e 's/01TESTPROJECTID0000000000/01TAMPERED0000000000000000/' "$ROOT/AGENTS.md"
-before="$(shasum "$ROOT/AGENTS.md" | awk '{print $1}')"
+before="$(digest_of "$ROOT/AGENTS.md")"
 AGENTIC_SYNC_ROOT="$ROOT" bash "$WRAPPER" >/dev/null 2>&1
-after="$(shasum "$ROOT/AGENTS.md" | awk '{print $1}')"
+after="$(digest_of "$ROOT/AGENTS.md")"
 if [ "$before" = "$after" ]; then ok "wrapper did not mutate the drifted file"; else bad "wrapper mutated a file in --check"; fi
 rm -rf "$ROOT"
 
@@ -438,6 +475,6 @@ fi
 
 # =============================================================================
 echo ""
-echo "  PASS=$PASS FAIL=$FAIL"
+echo "  PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
 [ "$FAIL" -eq 0 ] || { echo "SUITE FAILED"; exit 1; }
 echo "SUITE PASSED"

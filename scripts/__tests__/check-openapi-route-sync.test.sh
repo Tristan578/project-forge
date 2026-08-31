@@ -279,6 +279,27 @@ if [ "$rc" = "1" ]; then pass "empty API dir fails closed (exit 1)"; else fail "
 if grep -qi "vacuously" <<<"$out"; then pass "empty-dir message explains the vacuous-pass refusal"; else fail "empty-dir message missing"; fi
 rm -rf "$repo"
 
+# --- 17. CRLF INPUTS: a spec/allowlist with Windows line endings -> exit 0 ----
+# The gate compares paths EXACTLY (sort | comm, string equality), so a stray CR
+# on one side makes "/api/foo" a different string from "/api/foo" and a fully
+# documented tree reads as UNDOCUMENTED. Two real sources feed one in: a JSON
+# file committed or saved with CRLF endings, and jq.exe on Windows, which opens
+# stdout in text mode and appends a CR to every line it emits. The gate strips
+# CR at the single point jq output enters the comparison; this case pins that,
+# so deleting the normalisation turns green back to red here instead of only on
+# one contributor's machine.
+repo="$(make_repo)"
+printf '{\r\n  "paths": {\r\n    "/api/foo": { "get": {} }\r\n  }\r\n}\r\n' > "$repo/spec.json"
+printf '{\r\n  "categories": { "admin": "Admin-only." },\r\n  "routes": { "/api/admin/x": "admin" }\r\n}\r\n' > "$repo/allowlist.json"
+add_route "$repo" "foo"
+add_route "$repo" "admin/x"
+# Prove the fixture really holds CR bytes, so this case cannot quietly decay
+# into a duplicate of case 1 if someone "tidies" the printfs above.
+if grep -qU "$(printf '\r')" "$repo/spec.json"; then pass "CRLF fixture really contains CR bytes"; else fail "CRLF fixture lost its CRs"; fi
+res="$(run_gate "$repo")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "CRLF spec + allowlist still pass (exit 0)"; else fail "CRLF inputs should exit 0, got $rc: $out"; fi
+rm -rf "$repo"
+
 echo ""
 echo "=== ci.yml integration wiring ==="
 # A standalone path-filtered workflow cannot be a SAFE required check: a PR that
