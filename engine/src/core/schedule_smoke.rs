@@ -464,3 +464,101 @@ fn scene_graph_emit_is_ordered_after_the_build() {
          with the build first. Registration found:\n{stmt}",
     );
 }
+
+/// The 2D physics command systems must be ordered after the mode-restore.
+///
+/// `apply_physics2d_toggles` and `apply_physics2d_updates` are `.chain()`ed so
+/// that enabling and configuring a body in the same frame is deterministic. But
+/// `bridge::core_systems::apply_mode_change_requests` inserts and removes the
+/// SAME `Physics2dData` / `Physics2dEnabled` on a Play->Edit snapshot restore,
+/// and carried no ordering relationship to either — so a mode transition landing
+/// in the same frame as a 2D physics edit was exactly the coin flip the
+/// `.chain()` was added to remove (PF-1172 / #9274).
+///
+/// The chosen precedence is restore-then-edit: the snapshot establishes the
+/// baseline and a same-frame user edit applies on top. Restore-last would
+/// silently obliterate a change the user just made, with no feedback.
+///
+/// The 2D writer roster is DERIVED from `bridge/physics.rs` rather than listed
+/// here, so a future `apply_physics2d_*` system that writes these components and
+/// forgets the set is caught on the commit that adds it. Membership is only half
+/// the guarantee — a set nobody orders constrains nothing — so the edge itself is
+/// asserted too.
+#[test]
+fn physics2d_writers_are_ordered_after_the_mode_restore() {
+    assert!(
+        BRIDGE_SRC.contains("configure_sets(Update, Physics2dWriteSet.after(ModeRestoreSet))"),
+        "bridge/mod.rs no longer orders `Physics2dWriteSet` after `ModeRestoreSet`, so \
+         membership in the set constrains nothing and a Play->Edit restore can again \
+         race a same-frame 2D physics edit.",
+    );
+
+    assert!(
+        BRIDGE_SRC.contains("core_systems::apply_mode_change_requests.in_set(ModeRestoreSet)"),
+        "`apply_mode_change_requests` left `ModeRestoreSet`. It is the snapshot restore \
+         the 2D physics writers are ordered against; without membership the edge above \
+         orders nothing.",
+    );
+
+    // Derive the writer roster from the source rather than hardcoding it.
+    let physics_src = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bridge/physics.rs");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+    };
+
+    // A writer is a `apply_physics2d_*` system whose body inserts one of the two
+    // components. The joint/force/raycast 2D systems are deliberately NOT here:
+    // they touch different components and have no stake in this precedence.
+    let mut writers: Vec<String> = Vec::new();
+    let mut current_fn: Option<String> = None;
+    for line in physics_src.lines() {
+        let trimmed = line.trim_start();
+        let after_vis = trimmed
+            .strip_prefix("pub")
+            .map(|rest| rest.trim_start_matches(|c| c != 'f' && c != '\n'))
+            .unwrap_or(trimmed);
+        if let Some(rest) = after_vis.strip_prefix("fn ") {
+            current_fn = rest.split('(').next().map(|n| n.trim().to_string());
+        }
+        let inserts_2d_body = line.contains(".insert(Physics2dData")
+            || line.contains(".insert(Physics2dEnabled")
+            || line.contains(".insert(new_physics");
+        if inserts_2d_body {
+            if let Some(name) = current_fn.clone() {
+                if name.starts_with("apply_physics2d") && !writers.contains(&name) {
+                    writers.push(name);
+                }
+            }
+        }
+    }
+
+    // Fail closed. Two writers exist today; finding fewer means the scan broke,
+    // not that the hazard went away — and an empty roster would make the loop
+    // below assert nothing at all.
+    assert!(
+        writers.len() >= 2,
+        "found only {} `apply_physics2d_*` component writer(s) in bridge/physics.rs — \
+         the scan is broken, not the code. Found: {writers:?}",
+        writers.len(),
+    );
+
+    for name in &writers {
+        assert!(
+            BRIDGE_SRC.contains(name),
+            "`{name}` writes Physics2dData/Physics2dEnabled but is not registered in \
+             bridge/mod.rs at all.",
+        );
+    }
+
+    // Both known writers are registered as one chained tuple carrying the set, so
+    // assert the tuple rather than each name: `.in_set()` applies to the whole
+    // group. A new writer registered OUTSIDE that tuple would be caught by the
+    // roster loop above only if it is also missing from mod.rs, so pin the shape.
+    assert!(
+        BRIDGE_SRC.contains(".chain().in_set(Physics2dWriteSet)"),
+        "the 2D physics writer tuple no longer carries `.in_set(Physics2dWriteSet)`. \
+         Writers found in bridge/physics.rs: {writers:?}. Each must be inside a group \
+         that joins the set, or the mode-restore ordering does not apply to it.",
+    );
+}
