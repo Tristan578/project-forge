@@ -494,7 +494,7 @@ ok = m.retry_project_attachment(
 print(ok, entry, len(calls), calls[0][1:3])
 ")"
 assert_out "second run attaches the existing issue without another REST create" \
-  "True {'githubItemId': 'PVTI_attached'} 1 ['project', 'item-add']" "$out"
+  "True {'githubItemId': 'PVTI_attached', 'projectStatusPending': True} 1 ['project', 'item-add']" "$out"
 
 out="$(run_py "
 import contextlib, io, json
@@ -522,7 +522,7 @@ deletes = sum(args[1:3] == ['project', 'item-delete'] for args in calls)
 print(first, second, entry, adds, deletes)
 ")"
 assert_out "legacy cleanup retries without adding the existing issue twice" \
-  "False True {'githubItemId': 'PVTI_replacement'} 1 2" "$out"
+  "False True {'githubItemId': 'PVTI_replacement', 'projectStatusPending': True} 1 2" "$out"
 
 out="$(run_py "
 entry = {'githubItemId': 'PVTI_new', 'legacyProjectItemId': 'PVTI_gone'}
