@@ -471,6 +471,36 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
+      # Publish the WebGL2 build so CI's engine-smoke gate can restore it
+      # instead of spending ~321s rebuilding an identical binary on every
+      # web-only PR (#9574).
+      #
+      # This has to be saved HERE rather than in ci.yml. A cache written from a
+      # PR branch is visible only to that PR, and ci.yml never runs on a push to
+      # main — so main's entry can only come from this workflow, which does. Once
+      # written, every branch can restore it.
+      #
+      # The key is derived by the same script the restore side uses. If these two
+      # ever computed it differently nothing would break loudly: every restore
+      # would simply miss and engine-smoke would quietly go back to a five-minute
+      # build. scripts/__tests__/engine-wasm-cache-key.test.sh asserts both
+      # workflows call the shared script.
+      #
+      # Unconditional on purpose: pkg-webgl2 exists whether it was built above or
+      # restored by the download step, and both are the same artifact.
+      - name: Resolve the engine build key
+        id: engine-key
+        run: |
+          key="$(bash scripts/engine-wasm-cache-key.sh)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Engine WASM cache key: $key"
+
+      - name: Publish the WebGL2 engine for PR reuse
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: engine/pkg-webgl2
+          key: ${{ steps.engine-key.outputs.key }}
+
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

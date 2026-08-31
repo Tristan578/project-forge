@@ -3083,6 +3083,7 @@ OUTPUTS_EOF
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/__tests__/post-deploy-health-check.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
+            scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3586,6 +3587,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/__tests__/post-deploy-health-check.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
+            scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3650,6 +3652,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
       - name: Run CD tree-validation gate test suite
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
+      - name: Run engine WASM cache-key test suite
+        run: bash scripts/__tests__/engine-wasm-cache-key.test.sh
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
       - name: Run suite-wiring gate
