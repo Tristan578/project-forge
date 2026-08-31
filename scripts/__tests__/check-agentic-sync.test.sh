@@ -37,14 +37,67 @@ command -v mktemp >/dev/null 2>&1 || { echo "FATAL: mktemp not found on host"; e
 # passing the very assertions meant to catch a clobbered file. Resolve the tool
 # once, and refuse to run at all if the host has none.
 if command -v sha256sum >/dev/null 2>&1; then
-  digest_of() { cat "$@" | sha256sum | awk '{print $1}'; }
+  _digest_raw() { cat "$@" | sha256sum; }
 elif command -v shasum >/dev/null 2>&1; then
-  digest_of() { cat "$@" | shasum -a 256 | awk '{print $1}'; }
+  _digest_raw() { cat "$@" | shasum -a 256; }
 elif command -v openssl >/dev/null 2>&1; then
-  digest_of() { cat "$@" | openssl dgst -sha256 -r | awk '{print $1}'; }
+  # `-r` is load-bearing: it selects coreutils "reverse" output (<hash> *stdin),
+  # which puts the digest in field 1 like the other two tools. WITHOUT it
+  # openssl prints "(stdin)= <hash>" and field 1 would be the literal "(stdin)=",
+  # equal for every input -- vacuous comparisons, the exact failure this
+  # resolver exists to prevent.
+  _digest_raw() { cat "$@" | openssl dgst -sha256 -r; }
 else
   echo "FATAL: no SHA-256 tool found on host (need sha256sum, shasum, or openssl)"; exit 1
 fi
+
+# Validate rather than trust the format. A tool too old for the flag above, or
+# any other output shape, would leave field 1 as something constant -- and a
+# constant compares EQUAL to itself, so every "the file was not clobbered" check
+# below would pass while measuring nothing. Refuse to return anything that is
+# not a 64-hex digest.
+# Counter for the failure path below. It lives in a FILE, not a variable: every
+# caller runs digest_of inside a command substitution, and a variable
+# incremented in a subshell is discarded when that subshell ends -- two failed
+# calls would both report "1" and compare equal again.
+_DIGEST_FAIL_COUNTER="$(mktemp)"
+printf '0' > "$_DIGEST_FAIL_COUNTER"
+trap 'rm -f "$_DIGEST_FAIL_COUNTER"' EXIT
+
+digest_of() {
+  local d n
+  d="$(_digest_raw "$@" | awk 'NR==1 {print $1}')"
+  if ! printf '%s' "$d" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+    # NOT `exit 1`: an exit inside a command substitution leaves only the
+    # subshell, and this suite runs under `set -uo pipefail` with no `-e`, so
+    # the caller would simply receive an empty string. Two empty strings compare
+    # EQUAL -- precisely the vacuous "the file was not clobbered" pass being
+    # guarded against. Returning a value that differs on every call makes a
+    # false "unchanged" verdict impossible by construction: a broken digest tool
+    # turns every comparison into a mismatch and reddens the suite instead.
+    n=$(( $(cat "$_DIGEST_FAIL_COUNTER") + 1 ))
+    printf '%s' "$n" > "$_DIGEST_FAIL_COUNTER"
+    echo "ERROR: digest tool produced '$d', not a SHA-256 hex digest" >&2
+    printf 'INVALID-DIGEST-%s' "$n"
+    return 1
+  fi
+  printf '%s' "$d"
+}
+
+# Prove the resolved tool actually discriminates before relying on it: equal
+# bytes must agree, different bytes must not. Without this a digest that is
+# merely constant would satisfy the format check above and still be useless.
+_p1="$(mktemp)"; _p2="$(mktemp)"
+printf 'alpha' > "$_p1"; printf 'beta' > "$_p2"
+if [ "$(digest_of "$_p1")" = "$(digest_of "$_p2")" ]; then
+  echo "FATAL: digest tool returns the same value for different content -- comparisons here would be vacuous"
+  rm -f "$_p1" "$_p2"; exit 1
+fi
+if [ "$(digest_of "$_p1")" != "$(digest_of "$_p1")" ]; then
+  echo "FATAL: digest tool is not deterministic"
+  rm -f "$_p1" "$_p2"; exit 1
+fi
+rm -f "$_p1" "$_p2"
 
 PASS=0
 FAIL=0
