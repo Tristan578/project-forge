@@ -5,9 +5,15 @@ use bevy::mesh::Mesh;
 use crate::core::{
     camera::EditorCamera,
     entity_id::EntityId,
-    lod::{LodData, LodMeshes, PerformanceBudget, PerformanceMetrics, SimplificationBackend},
+    lod::{LodData, LodMeshes, PerformanceMetrics, SimplificationBackend},
     pending::PendingCommands,
 };
+// Split out of the `lod::{..}` group above rather than gating it whole: its
+// other members feed the always-active `update_lod_levels` and
+// `collect_performance_metrics`. `PerformanceBudget`'s only consumer is
+// `apply_performance_budget_commands`, which is already runtime-gated.
+#[cfg(not(feature = "runtime"))]
+use crate::core::lod::PerformanceBudget;
 use crate::bridge::events;
 
 /// Number of frames between expensive metrics collection passes.

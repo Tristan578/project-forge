@@ -11,7 +11,12 @@ use crate::core::{
     scripting::ScriptData,
     engine_mode::EngineMode,
 };
-use crate::bridge::{events, Selection, SelectionChangedEvent};
+use crate::bridge::events;
+// Editor-only: consumed solely by the selection-emit systems below, which
+// already carry `#[cfg(not(feature = "runtime"))]`.
+// `events` stays ungated — `emit_play_tick_system` is always-active.
+#[cfg(not(feature = "runtime"))]
+use crate::bridge::{Selection, SelectionChangedEvent};
 
 /// Per-entity state cached from the previous play-tick frame.
 /// Used to compute deltas so only changed entities are emitted.
