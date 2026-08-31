@@ -515,8 +515,9 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh browsers
 
       # The cache carries browser binaries, not the apt-level libraries they
       # link against, and those do not survive a fresh runner -- so a cache hit
