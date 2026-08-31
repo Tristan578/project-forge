@@ -33,7 +33,12 @@ use crate::core::{
     tilemap::{tile_flat_index, TilemapData, TilemapEnabled, TilemapOrigin, Grid2dConfig},
     tileset::TilesetData,
 };
-use super::{events, Selection, SelectionChangedEvent};
+use super::events;
+// Editor-only: consumed solely by the selection-emit systems below, which
+// already carry `#[cfg(not(feature = "runtime"))]`.
+// `events` stays ungated — the sprite/tilemap query handlers are always-active.
+#[cfg(not(feature = "runtime"))]
+use super::{Selection, SelectionChangedEvent};
 
 /// Marker component for child entities that represent individual tile sprites.
 #[derive(Component)]

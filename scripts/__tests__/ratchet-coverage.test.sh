@@ -12,7 +12,10 @@
 
 set -euo pipefail
 
-for dep in jq bc; do
+# awk, not bc: ratchet-coverage.sh computes its deltas with awk now, so bc is
+# no longer a dependency of the script OR of this suite. Keeping the old guard
+# would refuse to run the suite on hosts the script itself supports fine.
+for dep in jq awk; do
   if ! command -v "$dep" &>/dev/null; then
     echo "SKIP-FAIL: $dep is required to run this suite" >&2
     exit 1

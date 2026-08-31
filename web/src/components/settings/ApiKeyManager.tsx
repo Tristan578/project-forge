@@ -114,11 +114,17 @@ export function ApiKeyManager() {
     }
   };
 
-  const copyKey = () => {
-    if (newMcpKey) {
-      navigator.clipboard.writeText(newMcpKey);
+  const copyKey = async () => {
+    if (!newMcpKey) return;
+    try {
+      await navigator.clipboard.writeText(newMcpKey);
+      // Only claim success AFTER the write resolves. Setting this before meant a
+      // denied or unavailable clipboard still rendered "Copied", and the user
+      // pasted nothing -- with the one-time MCP key already dismissed.
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Could not copy to the clipboard. Select the key and copy it manually.');
     }
   };
 

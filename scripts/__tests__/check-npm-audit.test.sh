@@ -2365,6 +2365,52 @@ STEPS_EOF
     assert_block_lines_exact "$cd_pj_ifblk" "cd.yml ${cd_pj} if: block" "$cd_pj_expect" "the containment pin above proves the security clause is PRESENT; this proves nothing has been appended beside it (a trailing \`|| true\`, or a rewrite of the sibling lint/typecheck clauses) that changes what the one-line expression evaluates to while the pinned clause stays byte-identical"
   done
 
+  # PF-1065 / #9102. This job publishes engine binaries to production R2,
+  # so build-wasm alone cannot authorize it past a red security audit.
+  cd_wasm_job_count="$(grep -cE "^  [\"']?upload-wasm-cdn[\"']?[[:space:]]*:" <<<"$cd_exec" || true)"
+  if [ "$cd_wasm_job_count" -ne 1 ]; then
+    fail "cd.yml defines upload-wasm-cdn $cd_wasm_job_count times (expected exactly 1) — missing or duplicated"
+  else
+    pass "cd.yml defines upload-wasm-cdn exactly once"
+  fi
+  cd_wasm_block="$(awk -v hdr="  upload-wasm-cdn:" -v re="$job_key_re" '$0 == hdr {f=1} f{print} f && $0 ~ re && $0 != hdr {exit}' <<<"$cd_exec")"
+  assert_job_level_keys "$cd_wasm_block" "cd upload-wasm-cdn job" "    name
+    runs-on
+    timeout-minutes
+    needs
+    if
+    permissions
+    steps"
+  if [ -z "$cd_wasm_block" ]; then
+    fail "cd.yml upload-wasm-cdn job block is empty after comment-strip — production CDN gating cannot be verified"
+  fi
+
+  cd_wasm_needs_count="$(grep -cE "^    [\"']?needs[\"']?[[:space:]]*:" <<<"$cd_wasm_block" || true)"
+  cd_wasm_needs_line="$(grep -E "^    [\"']?needs[\"']?[[:space:]]*:" <<<"$cd_wasm_block" || true)"
+  cd_wasm_needs_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_wasm_needs_line")"
+  if [ "$cd_wasm_needs_count" -ne 1 ]; then
+    fail "cd.yml upload-wasm-cdn has $cd_wasm_needs_count needs: lines (expected exactly 1)"
+  elif grep -qE '(\[|,)[[:space:]]*security[[:space:]]*(,|\])' <<<"$cd_wasm_needs_scan"; then
+    pass "cd.yml upload-wasm-cdn needs: lists security as a flow-list element"
+  else
+    fail "cd.yml upload-wasm-cdn needs: does not list security — production WASM can publish without the audit"
+  fi
+
+  cd_wasm_if_count="$(grep -cE "^    [\"']?if[\"']?[[:space:]]*:" <<<"$cd_wasm_block" || true)"
+  cd_wasm_ifblk="$(awk "/^    [\"']?if[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$cd_wasm_block")"
+  readonly cd_wasm_ifblk
+  cd_wasm_if_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_wasm_ifblk")"
+  if [ "$cd_wasm_if_count" -ne 1 ]; then
+    fail "cd.yml upload-wasm-cdn has $cd_wasm_if_count if: keys (expected exactly 1)"
+  elif grep -qE "needs\.security\.result[[:space:]]*==[[:space:]]*'success'" <<<"$cd_wasm_if_scan"; then
+    pass "cd.yml upload-wasm-cdn if: requires needs.security.result == 'success'"
+  else
+    fail "cd.yml upload-wasm-cdn if: lacks the fail-closed security success clause"
+  fi
+  cd_wasm_if_expect="    if: \${{ vars.R2_CDN_ENABLED == 'true' && needs.security.result == 'success' }}"
+  readonly cd_wasm_if_expect
+  assert_block_lines_exact "$cd_wasm_ifblk" "cd.yml upload-wasm-cdn if: block" "$cd_wasm_if_expect" "the containment pin proves presence; this exact line rejects appended || true and != failure rewrites"
+
   # Invocations asserted against the comment-stripped SECURITY JOB block,
   # key-anchored to the whole run: line — a commented-out run: still satisfies
   # a raw-text grep, a relocated one satisfies a file-scoped grep, and a
@@ -3617,7 +3663,7 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
           web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
           echo "$CHANGED" | grep -q '^web/' && web=true
-          echo "$CHANGED" | grep -q '^engine/' && engine=true
+          echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
@@ -3627,7 +3673,7 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$' && agentic=true
           echo "$CHANGED" | grep -qE '^README\.md$|^CONTRIBUTING\.md$|^AGENTS\.md$|^GEMINI\.md$|^\.cursorrules$|^\.claude/|^\.codex/|^\.gemini/|^\.github/|^\.windsurf/|^\.agent/|^\.agents/|^docs/|^tools/agentic-sync/|^scripts/check-taskboard-onboarding-hygiene\.sh$|^scripts/__tests__/check-taskboard-onboarding-hygiene\.test\.sh$' && onboarding=true
           echo "$CHANGED" | grep -qE '^\.codex/config\.toml$|^scripts/check-codex-config-safety\.sh$|^scripts/__tests__/check-codex-config-safety\.test\.sh$' && codex=true
-          echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$' && skills=true
+          echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$|^scripts/audit-pr-readiness\.ps1$|^scripts/__tests__/audit-pr-readiness\.test\.ps1$' && skills=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/get-ghaw-compiler-version\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
           echo "$CHANGED" | grep -qE '^web/src/app/api/|^docs/api/openapi\.json$|^docs/api/openapi-internal-routes\.json$|^scripts/check-openapi-route-sync\.sh$|^scripts/__tests__/check-openapi-route-sync\.test\.sh$' && api=true
           any_code=false
@@ -3705,6 +3751,8 @@ qg_sec
 cd_exec
 expected_preamble_cd
 cd_sec
+cd_wasm_ifblk
+cd_wasm_if_expect
 ci_exec
 expected_preamble_ci
 ci_gate_block

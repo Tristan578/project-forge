@@ -1,16 +1,26 @@
 //! Core editor systems for selection, picking, mode changes, transforms, renaming, and snap settings.
 
 use bevy::prelude::*;
-use bevy::input::ButtonInput;
-use bevy::input::keyboard::KeyCode;
-use bevy::picking::pointer::PointerButton;
-use bevy::picking::events::Press;
 use bevy::ecs::system::ParamSet;
 
+// Editor-only imports: picking, the gizmo-mode applier, the scene-graph emit and
+// the snap applier are all `#[cfg(not(feature = "runtime"))]` below, and these
+// names serve nothing else.
+#[cfg(not(feature = "runtime"))]
+use bevy::input::ButtonInput;
+#[cfg(not(feature = "runtime"))]
+use bevy::input::keyboard::KeyCode;
+#[cfg(not(feature = "runtime"))]
+use bevy::picking::pointer::PointerButton;
+#[cfg(not(feature = "runtime"))]
+use bevy::picking::events::Press;
+
 use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+#[cfg(not(feature = "runtime"))]
 use crate::core::gizmo::ActiveGizmoMode;
 use crate::core::pending::EntityType;
 use crate::core::selection::{Selection, SelectionChangedEvent};
+#[cfg(not(feature = "runtime"))]
 use crate::core::scene_graph::SceneGraphCache;
 use crate::core::history::HistoryStack;
 use crate::core::material::MaterialData;
@@ -19,6 +29,7 @@ use crate::core::physics::{PhysicsData, PhysicsEnabled};
 use crate::core::scripting::ScriptData;
 use crate::core::audio::{AudioData, AudioEnabled};
 use crate::core::engine_mode::{EngineMode, SceneSnapshot, ModeChangeRequest};
+#[cfg(not(feature = "runtime"))]
 use crate::core::snap::SnapSettings;
 use crate::core::pending_commands::PendingCommands;
 use crate::core::asset_manager::AssetRef;

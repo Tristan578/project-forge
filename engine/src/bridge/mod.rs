@@ -25,12 +25,21 @@ mod query;
 mod animation;
 mod particles;
 mod scene_io;
+// Editor-only modules. Every item in each of these three files is reachable
+// only from the `#[cfg(not(feature = "runtime"))]` block in
+// `SelectionPlugin::build()` below, so the whole module is gated rather than
+// each item: `procedural` and `mesh_ops` each hold a `#[wasm_bindgen] extern`
+// console-log shim that only their (editor-only) systems call, and gating
+// item-by-item would leave that shim behind as a fresh dead-code warning.
+#[cfg(not(feature = "runtime"))]
 mod procedural;
+#[cfg(not(feature = "runtime"))]
 mod mesh_ops;
 mod scripts;
 mod game;
 mod skeleton2d;
 mod sprite;
+#[cfg(not(feature = "runtime"))]
 mod edit_mode;
 
 use bevy::prelude::*;
@@ -69,7 +78,7 @@ use crate::core::{
 // NOT editor-only: `apply_reverb_zone_commands` is registered in the
 // always-active block, so this import cannot ride the `runtime`-gated group
 // below. The set carries ordering only, never a run condition.
-use crate::core::engine_mode::ResyncDrainSet;
+use crate::core::engine_mode::{ModeRestoreSet, Physics2dWriteSet, ResyncDrainSet};
 
 // Editor-only imports
 #[cfg(not(feature = "runtime"))]
@@ -402,7 +411,13 @@ impl Plugin for SelectionPlugin {
                 game::emit_character_controller_diagnostics_system
                     .after(crate::core::character_controller::manage_character_controller_lifecycle),
             )
-            .add_systems(Update, core_systems::apply_mode_change_requests)
+            // In `ModeRestoreSet` because it is a BASELINE writer: on Play->Edit
+            // it re-inserts and removes Physics2dData / Physics2dEnabled (among
+            // much else) wholesale from the pre-Play snapshot. The 2D physics
+            // command systems write the same components and are ordered after
+            // this set, so a snapshot restore and a same-frame edit no longer
+            // resolve by topological accident (PF-1172 / #9274).
+            .add_systems(Update, core_systems::apply_mode_change_requests.in_set(ModeRestoreSet))
             .add_systems(Update, scripts::apply_input_binding_updates)
             .add_systems(Update, physics::apply_physics_updates)
             .add_systems(Update, physics::apply_physics_toggles)
@@ -423,10 +438,29 @@ impl Plugin for SelectionPlugin {
             // `set_physics_2d` + enable pair on a fresh entity resolve either way
             // nondeterministically. The 3D pair needs no such ordering because
             // `apply_physics_updates` never inserts.
+            //
+            // `.in_set(Physics2dWriteSet)` closes the SECOND ambiguity on the
+            // same components (PF-1172 / #9274). The chain above makes the pair
+            // deterministic against each other, but
+            // `apply_mode_change_requests` inserts and removes the very same
+            // Physics2dData / Physics2dEnabled on a Play->Edit snapshot restore
+            // and carried no ordering relationship to either — so a mode
+            // transition landing in the same frame as a 2D physics edit was the
+            // same coin flip the `.chain()` was added to remove.
+            //
+            // `Physics2dWriteSet.after(ModeRestoreSet)` is configured below:
+            // restore establishes the baseline, the edit applies on top. The
+            // edge also inserts an `ApplyDeferred`, so the restore's deferred
+            // inserts are flushed before these systems read.
+            // Configured HERE, in the always-active block, not alongside the
+            // editor-only `configure_sets` further down: both sides of this edge
+            // are always-active systems, so the constraint must exist in
+            // `runtime` builds too.
+            .configure_sets(Update, Physics2dWriteSet.after(ModeRestoreSet))
             .add_systems(Update, (
                 physics::apply_physics2d_toggles,
                 physics::apply_physics2d_updates,
-            ).chain())
+            ).chain().in_set(Physics2dWriteSet))
             .add_systems(Update, physics::apply_force_applications2d)
             .add_systems(Update, (
                 physics::apply_impulse_applications2d,
@@ -718,10 +752,27 @@ impl Plugin for SelectionPlugin {
                     performance::apply_performance_budget_commands,
                 ))
                 .add_systems(Update, sprite::render_2d_grid)
+                // `.after(build_scene_graph)` is load-bearing, not tidiness.
+                //
+                // `build_scene_graph` rebuilds `cache.data` and sets
+                // `cache.dirty`; `emit_scene_graph_updates` emits when dirty.
+                // The two live in SEPARATE `add_systems(PostUpdate, ...)` calls
+                // and `.chain()` orders only within its own tuple, so nothing
+                // ordered the groups against each other. Bevy was free to run
+                // the emit first and ship the PREVIOUS frame's graph to the
+                // editor, and which way it fell was decided by the same
+                // topological sort that flipped in #9493 when one unrelated
+                // system joined an unordered tuple. A one-frame-stale scene
+                // graph that reshuffles on an unrelated registration is exactly
+                // the failure class that took the E2E Engine Smoke Gate red.
+                // (#9509)
+                //
+                // Pinned by `core/schedule_smoke.rs`: deleting this edge fails a
+                // native test instead of silently reopening the race.
                 .add_systems(PostUpdate, (
                     core_systems::emit_scene_graph_updates,
                     core_systems::emit_history_updates,
-                ).chain());
+                ).chain().after(scene_graph::build_scene_graph));
         }
     }
 }

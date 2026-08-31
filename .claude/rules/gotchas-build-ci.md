@@ -14,6 +14,7 @@ paths:
 # Gotchas — Build & CI
 
 ## Build & CI
+- **Production WASM publication is audit-gated.** `upload-wasm-cdn` needs both `build-wasm` and `security`, and its `if:` requires `needs.security.result == 'success'` before engine binaries can reach R2. Keep its dedicated ordered-key, needs-element, and exact-if pins in `check-npm-audit.test.sh`; `!= 'failure'` fails open if the dependency disappears.
 - **Verify npm package names with `npm view`** — Hallucinated package names cause silent startup failures.
 - **vitest --coverage needs `--coverage.reporter=json-summary`** — Without it, `coverage-summary.json` is never created.
 - **Node 25.x segfaults** — intermittent V8 JIT crashes in hooks. Investigate, don't bypass with `--no-verify`.

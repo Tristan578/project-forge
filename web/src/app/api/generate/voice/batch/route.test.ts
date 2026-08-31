@@ -249,14 +249,26 @@ describe('POST /api/generate/voice/batch', () => {
     );
   });
 
-  it('rethrows non-ApiKeyError during key resolution', async () => {
+  it('returns an opaque 500 and captures non-ApiKeyError key-resolution failures (#8597 parity)', async () => {
+    const { captureException } = await import('@/lib/monitoring/sentry-server');
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB connection failed'));
+    const sentinel = new Error('DB connection failed');
+    vi.mocked(resolveApiKey).mockRejectedValue(sentinel);
 
-    await expect(
-      POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }))
-    ).rejects.toThrow('DB connection failed');
+    const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+    const data = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(data).toEqual({
+      error: 'Generation failed due to a server error. Please try again later.',
+    });
+    expect(JSON.stringify(data)).not.toContain(sentinel.message);
+    expect(captureException).toHaveBeenCalledTimes(1);
+    expect(captureException).toHaveBeenCalledWith(sentinel, {
+      route: '/api/generate/voice/batch',
+      action: 'resolve_api_key',
+    });
   });
 
   describe('token refunds', () => {

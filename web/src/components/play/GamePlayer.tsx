@@ -136,7 +136,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       }
     }
 
-    fetchGame();
+    void fetchGame();
 
     return () => {
       clearTimeout(deadline);

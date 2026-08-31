@@ -12,15 +12,17 @@ Drive every open PR to GREEN — CI passing, Sentry resolved, conflicts gone —
 
 **Evidence before assertions.** Never claim a PR is green without running the checks. Never assume a cached CI result is current. Never skip a validation domain because "it probably passes." Every claim must have a command output backing it.
 
+The authoritative gate is `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <N> -Json`. Exit `0` means ready, `1` means verified blockers remain, and `2` means the audit failed. Never translate exit `1` or `2` into a green claim. It paginates GitHub evidence and validates the exact current head SHA, current main, metadata, reviews, ownership, overlap, and CI.
+
 ## Pipeline (per PR)
 
 ### Phase 1: Triage
 
-1. `gh pr view <N> --json headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup`
+1. Run the readiness auditor and retain its JSON as the triage baseline.
 2. Check base branch: `gh pr view <N> --json baseRefName --jq .baseRefName` — if wrong, fix with `gh pr edit <N> --base main`
 3. Check merge conflicts: if CONFLICTING, rebase onto the correct base and force-push
 4. Check unreplied Sentry comments — count them
-5. Check CI status — list all failing checks with `gh pr checks <N>`
+5. Use `gh pr checks <N>` only for human-readable follow-up, never as the complete readiness inventory.
 
 Output a triage summary table:
 ```
@@ -117,6 +119,8 @@ If ANY check regresses, go back to Phase 5. Do not push until local validation i
 6. Verify zero unreplied Sentry comments
 7. Final evidence output:
 
+After every push, rebase, branch update, or review submission, discard the old result and rerun the auditor. A result belongs only to its reported `head_sha` and `main_sha`.
+
 ```
 PR #NNNN — GREEN
   CI: All N checks passed (list each)
@@ -152,9 +156,13 @@ Do NOT parallelize. Each PR must be fully GREEN before starting the next. If a f
 
 ## Scripts
 
-- `bash "${CLAUDE_SKILL_DIR}/scripts/pr-status.sh" <pr-number>` — Get full PR status: CI checks, merge conflicts, review decision, Sentry comment count, and Closes link validation
+- `bash "${CLAUDE_SKILL_DIR}/scripts/pr-status.sh" <pr-number>` — Run the fail-closed repository readiness auditor
 - `bash "${CLAUDE_SKILL_DIR}/scripts/fix-common-ci.sh"` — Auto-fix common CI failures: runs `eslint --fix`, then `tsc --noEmit` to surface remaining type errors, then targeted unit tests
 
 ## References
 
 - See [ci-fix-playbook.md](references/ci-fix-playbook.md) for step-by-step fixes for every common CI failure: lint, TypeScript, vitest, E2E, manifest sync, lockfile drift, and 0-second workflow failures
+
+## Hook and agent boundary
+
+Hooks and agents invoke the auditor as a subprocess and consume only its exit code and JSON. They must not duplicate its policy, cache results across changed head/base SHAs, auto-resolve review threads, or mutate branches and Relationships. Pre-push use is advisory because remote CI has not run; post-push and pre-handoff use is mandatory and fail-closed.

@@ -49,7 +49,35 @@ run_lint() {
   echo $?
 }
 
-reset_tree() { rm -rf "$work"; mkdir -p "$work"; BASELINE=""; }
+# The scratch tree is a real git repo, because executability is judged by the
+# git INDEX mode (see is_executable in check-skills.sh) rather than by the
+# working-tree bit: the index mode is what a checkout actually delivers, and it
+# is the only representation a filesystem with no POSIX exec bit still gets
+# right. Initialising here also stops the gate from consulting whatever
+# repository happens to contain $TMPDIR.
+reset_tree() {
+  rm -rf "$work"
+  mkdir -p "$work"
+  ( cd "$work" && git init -q && git config user.email t@t.t && git config user.name t )
+  BASELINE=""
+}
+
+# stage_with_mode <path-under-$work> <+x|-x> — record the file in the index with
+# the given executable mode, and PROVE the index took it. Without that proof a
+# failed staging would fall back to the filesystem bit and the case would
+# quietly assert nothing.
+stage_with_mode() {
+  local rel="$1" want="$2" expect mode
+  if [ "$want" = "+x" ]; then expect=100755; else expect=100644; fi
+  ( cd "$work" && git add -f -- "$rel" >/dev/null 2>&1 \
+      && git update-index --chmod="$want" -- "$rel" >/dev/null 2>&1 )
+  mode="$(cd "$work" && git ls-files -s -- "$rel" | awk 'NR==1 {print $1}')"
+  if [ "$mode" != "$expect" ]; then
+    fail "fixture staging failed: $rel is mode ${mode:-<untracked>}, wanted $expect"
+    return 1
+  fi
+  return 0
+}
 
 # --- 1. A fully valid skill passes (exit 0) -----------------------------------
 reset_tree
@@ -216,6 +244,9 @@ mkskill withscript withscript "A description that is plenty long enough to satis
 mkdir -p "$work/withscript/scripts"
 printf '%s\n' '#!/usr/bin/env bash' 'echo hello' > "$work/withscript/scripts/run.sh"
 chmod -x "$work/withscript/scripts/run.sh" 2>/dev/null
+# chmod alone is not the assertion: NTFS reports every file as executable, so
+# the index mode is what makes this fixture genuinely non-executable everywhere.
+stage_with_mode withscript/scripts/run.sh -x
 rc="$(run_lint withscript)"
 if [ "$rc" = "1" ]; then pass "non-executable skill script fails (exit 1)"; else fail "non-exec script should exit 1, got $rc"; fi
 if grep -q "not executable" "$out"; then pass "not-executable message is emitted"; else fail "not-executable message missing"; fi
@@ -229,6 +260,9 @@ if command -v shellcheck >/dev/null 2>&1; then
   mkdir -p "$work/dirtyscript/scripts"
   printf '%s\n' '#!/usr/bin/env bash' 'cd /tmp' 'unused=42' 'echo done' > "$work/dirtyscript/scripts/bad.sh"
   chmod +x "$work/dirtyscript/scripts/bad.sh"
+  # This case is about shellcheck findings, so the script must be executable in
+  # the index too, or it would fail check #9 first and prove nothing.
+  stage_with_mode dirtyscript/scripts/bad.sh +x
   rc="$(run_lint dirtyscript)"
   if [ "$rc" = "1" ]; then pass "shellcheck-dirty skill script fails (exit 1)"; else fail "dirty script should exit 1, got $rc"; fi
   if grep -q "shellcheck reported findings" "$out"; then pass "shellcheck-findings message is emitted"; else fail "shellcheck-findings message missing"; fi

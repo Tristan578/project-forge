@@ -271,7 +271,7 @@ export function AdminDashboard() {
                     <td className="px-4 py-2 text-center border-b border-zinc-700">
                       <input
                         type="number"
-                        value={config.estimatedCostCents || 0}
+                        value={config.estimatedCostCents ?? 0}
                         onChange={(e) => updateTokenConfig(config.id, 'estimatedCostCents', parseInt(e.target.value) || 0)}
                         className="bg-zinc-800 border border-zinc-700 text-zinc-300 rounded px-2 py-1 text-sm w-20 text-center"
                       />

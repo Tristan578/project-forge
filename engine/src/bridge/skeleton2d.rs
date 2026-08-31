@@ -5,15 +5,26 @@ use bevy::mesh::Mesh2d;
 use bevy::sprite_render::{ColorMaterial, MeshMaterial2d};
 use crate::core::{
     entity_id::EntityId,
-    entity_factory,
-    pending_commands::{PendingCommands, QueryRequest},
     skeleton2d::{
         SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d, AttachmentData,
         SkinnedMesh2d, BoneWorldTransforms2d, VertexWeights, SkinnedMeshInitialized,
     },
     skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d, EasingType2d, BoneKeyframe},
+};
+
+// Editor-only imports. The rig appliers, the query handler and the selection
+// emit are all `#[cfg(not(feature = "runtime"))]`; what survives in a runtime
+// build is the animation/skinning half (`advance_skeleton_animation`,
+// `init_skinned_meshes_2d`, `compute_bone_world_transforms_2d`,
+// `apply_vertex_skinning_2d`, `solve_ik_constraints_2d`), which touches none of
+// these names.
+#[cfg(not(feature = "runtime"))]
+use crate::core::{
+    entity_factory,
+    pending_commands::{PendingCommands, QueryRequest},
     history::UndoableAction,
 };
+#[cfg(not(feature = "runtime"))]
 use crate::bridge::{events, Selection, SelectionChangedEvent};
 use std::collections::HashMap;
 
@@ -376,6 +387,7 @@ pub(super) fn apply_auto_weight_skeleton2d(
 }
 
 /// Compute distance-based vertex weights with optional smoothing iterations.
+#[cfg(not(feature = "runtime"))]
 fn compute_linear_weights(
     vertices: &[[f32; 2]],
     bones: &[crate::core::skeleton2d::Bone2dDef],
@@ -1102,10 +1114,16 @@ pub(super) fn emit_skeleton2d_on_selection(
     }
 }
 
-#[cfg(test)]
-mod tests {
+// The appliers these tests drive are `runtime`-gated, so the module carries
+// the same gate or `--all-targets --features ...,runtime` stops compiling.
+//
+// The SKINNING tests live in their own UNGATED module below. Those three
+// functions survive in a runtime build, so folding them in here would have
+// quietly dropped their type-check coverage from exactly the build that ships
+// them — bridge tests never execute, type-checking is the whole of their value.
+#[cfg(all(test, not(feature = "runtime")))]
+mod applier_tests {
     use super::*;
-    use crate::core::skeleton2d::{Bone2dDef, VertexWeights};
 
     #[test]
     fn remove_skeleton_clears_engine_components_and_records_undo() {
@@ -1186,6 +1204,17 @@ mod tests {
             "the history entry belongs to the undo arm, not to the resync"
         );
     }
+
+}
+
+// Skinning math: `compute_bind_pose_transforms`, `resolve_bone_indices` and
+// `skin_vertices_lbs` are NOT runtime-gated — they are the half of this module
+// a runtime build still compiles and ships, so their tests stay ungated and
+// keep being type-checked under `--features runtime`.
+#[cfg(test)]
+mod skinning_tests {
+    use super::*;
+    use crate::core::skeleton2d::{Bone2dDef, VertexWeights};
 
     fn make_bone(name: &str, parent: Option<&str>, pos: [f32; 2], rot: f32, length: f32) -> Bone2dDef {
         Bone2dDef {

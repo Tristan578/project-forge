@@ -9,6 +9,9 @@ use crate::core::{
 use bevy::animation::{AnimationPlayer, RepeatAnimation, AnimationClip};
 use bevy::animation::graph::AnimationGraph;
 use bevy::animation::transition::AnimationTransitions;
+// Editor-only: consumed solely by the selection-emit systems below, which
+// already carry `#[cfg(not(feature = "runtime"))]`.
+#[cfg(not(feature = "runtime"))]
 use crate::core::selection::{Selection, SelectionChangedEvent};
 use super::events;
 use bevy::gltf::Gltf;

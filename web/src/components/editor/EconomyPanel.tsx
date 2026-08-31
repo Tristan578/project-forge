@@ -160,11 +160,16 @@ export function EconomyPanel() {
     }
   }, []);
 
-  const handleCopyScript = useCallback(() => {
-    navigator.clipboard.writeText(script).then(() => {
+  const handleCopyScript = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(script);
       setScriptCopied(true);
       setTimeout(() => setScriptCopied(false), 2000);
-    });
+    } catch {
+      // Clipboard API may be unavailable (insecure context, denied permission,
+      // unfocused document). Leaving the rejection unhandled meant the user got
+      // no "Copied" feedback AND an unhandled rejection in the console.
+    }
   }, [script]);
 
   const handleDownloadScript = useCallback(() => {

@@ -124,7 +124,7 @@ export function SellerDashboard() {
               <span className="text-sm">Total Earnings</span>
             </div>
             <div className="text-3xl font-bold text-zinc-200">
-              {profile?.totalEarnings || 0} tokens
+              {profile?.totalEarnings ?? 0} tokens
             </div>
           </div>
           <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4">
@@ -132,7 +132,7 @@ export function SellerDashboard() {
               <Eye className="w-4 h-4" />
               <span className="text-sm">Total Sales</span>
             </div>
-            <div className="text-3xl font-bold text-zinc-200">{profile?.totalSales || 0}</div>
+            <div className="text-3xl font-bold text-zinc-200">{profile?.totalSales ?? 0}</div>
           </div>
         </div>
 
@@ -259,7 +259,7 @@ export function SellerDashboard() {
           onClose={() => setShowUpload(false)}
           onSuccess={() => {
             setShowUpload(false);
-            fetchAssets();
+            void fetchAssets();
           }}
         />
       )}

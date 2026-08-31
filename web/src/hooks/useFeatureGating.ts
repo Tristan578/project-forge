@@ -167,7 +167,7 @@ export function useFeatureGating(featureId: FeatureId): FeatureGateResult {
       };
       errorCachedAt = null;
       fetchPromise = null;
-      fetchCapabilities();
+      void fetchCapabilities();
     }
 
     return () => {
@@ -234,7 +234,7 @@ export function useCapabilities() {
       };
       errorCachedAt = null;
       fetchPromise = null;
-      fetchCapabilities();
+      void fetchCapabilities();
     }
 
     return () => {
@@ -259,7 +259,7 @@ export function useCapabilities() {
     };
     errorCachedAt = null;
     notifySubscribers();
-    fetchCapabilities();
+    void fetchCapabilities();
   }, []);
 
   return {

@@ -32,7 +32,11 @@ export function usePointerLock(canvasId: string): void {
 
     const requestLock = () => {
       if (document.pointerLockElement !== canvas) {
-        canvas.requestPointerLock();
+        // Rejects routinely -- an unfocused document, or a previous exit still
+        // settling. The user simply clicks again, so there is nothing to
+        // recover; what matters is not emitting an unhandled rejection on a
+        // path that fires on every click into the viewport.
+        void canvas.requestPointerLock()?.catch(() => {});
       }
     };
 
