@@ -18,6 +18,8 @@ Monitor open pull requests for CI failures and review comments (Sentry, Copilot,
 
 ## Process
 
+Begin and end each PR with `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <number> -Json`. Exit `0` is the only readiness signal. Exit `1` means blockers remain; exit `2` means safety could not be established. Results apply only to their reported head and main SHAs, so rerun after every push, rebase, branch update, or review.
+
 ### Step 1: Discover PRs
 
 If `$ARGUMENTS` is a PR number, check just that PR. If `$ARGUMENTS` is 'all' or empty, check all open PRs:
@@ -36,6 +38,8 @@ Look for:
 - **FAILED** checks → need investigation and fix
 - **IN_PROGRESS** checks → skip, check later
 - **SUCCESS** on all → CI is clean
+
+`gh pr checks` is diagnostic only. The auditor also paginates check suites and verifies currentness, milestone, closing notation, changeset policy, review threads, Relationships, and competing PR overlap.
 
 ### Step 3: For Each PR, Check Review Comments
 
@@ -126,6 +130,8 @@ Before writing ANY reply, scan your draft for these patterns. If present, you MU
 
 ### Step 7: Report
 
+Rerun the auditor immediately before reporting. If it does not exit `0`, report its blockers and do not use “ready,” “green,” or equivalent wording.
+
 After processing all PRs, output a summary table:
 
 ```
@@ -174,6 +180,8 @@ Run these to get an overview before diving into individual PRs:
 
 - `bash "${CLAUDE_SKILL_DIR}/scripts/check-all-prs.sh"` — List all open PRs with CI status (pass/fail/pending), branch name, and last updated time
 - `bash "${CLAUDE_SKILL_DIR}/scripts/get-failure-logs.sh" <PR_NUMBER>` — Fetch the failed CI run logs for a specific PR (last 80 lines)
+
+`check-all-prs.sh` is discovery-only and must never be used as readiness evidence.
 
 ## References
 

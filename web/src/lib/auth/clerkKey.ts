@@ -48,7 +48,14 @@ const VALID_PREFIXES = ["pk_test_", "pk_live_"] as const;
  * diagnoses.
  */
 export function clerkPublishableKeyProblem(raw: string | undefined): string | null {
-  const key = raw ?? "";
+  // TRIMMED FIRST, and that is load-bearing (#9558). Clerk tolerates
+  // surrounding whitespace, so rejecting what Clerk accepts is simply wrong —
+  // and it was worse than wrong: the payload regex has no `s` flag, so a single
+  // trailing newline made it match NOTHING, the key was reported as
+  // "does not decode", and the docs production deploy failed on a key the live
+  // site was already running on. A guard that blocks deploys on a working value
+  // is a worse failure than the silent degradation it was written to prevent.
+  const key = (raw ?? "").trim();
   if (key === "") return null;
 
   if (VALID_PREFIXES.some((p) => key.startsWith(p))) {
@@ -83,11 +90,6 @@ export function clerkPublishableKeyProblem(raw: string | undefined): string | nu
     return `the whole "${name}=..." assignment was pasted in as the VALUE. ${tail}`;
   }
 
-  const trimmed = key.trim();
-  if (trimmed !== key && VALID_PREFIXES.some((p) => trimmed.startsWith(p))) {
-    return "it has leading or trailing whitespace. Clerk compares the key byte-for-byte, so the surrounding whitespace makes it unusable";
-  }
-
   return `it starts with "${key.slice(0, 8)}...", which is not ${VALID_PREFIXES.join(" or ")}`;
 }
 
@@ -101,8 +103,26 @@ export function clerkPublishableKeyProblem(raw: string | undefined): string | nu
 export function hasValidClerkKey(
   raw: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
 ): boolean {
-  const key = raw ?? "";
+  // Trimmed here too. Without it a whitespace-only value ('   ') is non-empty,
+  // clerkPublishableKeyProblem trims it to '' and reports no problem, and
+  // <ClerkProvider> would mount on garbage (#9558).
+  const key = (raw ?? "").trim();
   return key !== "" && clerkPublishableKeyProblem(key) === null;
+}
+
+/**
+ * True when the configured value carries surrounding whitespace but is
+ * otherwise usable.
+ *
+ * Not a failure — Clerk accepts it and the build proceeds — but the variable is
+ * untidy and one edit away from a real problem, so the build says so once.
+ */
+export function clerkPublishableKeyHasSurroundingWhitespace(
+  raw: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+): boolean {
+  const value = raw ?? "";
+  const trimmed = value.trim();
+  return trimmed !== "" && trimmed !== value && clerkPublishableKeyProblem(trimmed) === null;
 }
 
 /**
@@ -117,7 +137,18 @@ export function assertClerkPublishableKeyShape(
   raw: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
 ): void {
   const problem = clerkPublishableKeyProblem(raw);
-  if (problem === null) return;
+  if (problem === null) {
+    // Usable but untidy: surrounding whitespace works (Clerk trims) so it must
+    // not fail the build, but it is worth saying once rather than silently
+    // normalising and letting the value rot (#9558).
+    if (clerkPublishableKeyHasSurroundingWhitespace(raw)) {
+      console.warn(
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY has leading or trailing whitespace. " +
+          "It works — Clerk trims — but the stored value should be the key alone.",
+      );
+    }
+    return;
+  }
   throw new Error(
     `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable: ${problem}. ` +
       "Authentication would be silently dead on the deployed app (#9044). " +
