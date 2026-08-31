@@ -420,28 +420,146 @@ print('wired' if 'syncable_ids=syncable_ids' in inspect.getsource(m._reconcile_i
 ")"
 assert_out "reconcile wires the sync_repo scope into classify_drift" "wired" "$out"
 
-# --- a created issue is written down before anything can fail -------------
-# The issue exists on GitHub the moment gh_create_issue_and_add_to_project
-# returns. Every later call in that block can raise — gh_sync_issue_state does
-# so by design when it cannot verify the state it set — and the surrounding
-# `except` only counts the error. If the link is not persisted first, the
-# ticket looks new on the next run and push mints a SECOND issue for it,
-# forever. Source order IS the invariant here: the calls are wrapped in one
-# try, so nothing but their order decides what survives a failure.
+# --- issue creation is REST and persisted before Projects v2 is touched ----
+# GraphQL quota exhaustion must neither block the authoritative REST create nor
+# make a project-add failure replay that create on the next push.
+out="$(run_py "
+import contextlib, io, json
+events = []
+def fake_gh(args, **kwargs):
+    events.append(('gh', args))
+    if args[:2] == ['gh', 'api']:
+        return json.dumps({'number': 8937, 'html_url': 'https://github.com/o/r/issues/8937'})
+    raise RuntimeError('GraphQL quota exhausted')
+m.gh_run = fake_gh
+m.db_set_github_issue_number = lambda tid, num: events.append(('persist', tid, num))
+with contextlib.redirect_stderr(io.StringIO()) as err:
+    item_id, issue_number = m.gh_create_issue_and_add_to_project(
+        {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, 'ticket-id', 'title', 'body', ['bug'])
+create_args = events[0][1]
+print(
+    create_args[:4] == ['gh', 'api', 'repos/o/r/issues', '--method'],
+    '--raw-field' in create_args,
+    'labels[]=bug' in create_args,
+    events[1] == ('persist', 'ticket-id', 8937),
+    events[2][1][1:3] == ['project', 'item-add'],
+    item_id is None,
+    issue_number,
+    'created, but project add failed' in err.getvalue(),
+)
+")"
+assert_out "REST create is persisted before a non-fatal GraphQL project-add failure" \
+  "True True True True True True 8937 True" "$out"
+
+out="$(run_py "
+import json
+calls = []
+m.gh_run = lambda args, **kwargs: (
+    json.dumps({'number': 42, 'html_url': 'https://github.com/o/r/issues/42'})
+    if args[:2] == ['gh', 'api'] else json.dumps({'id': 'PVTI_real'})
+)
+m.db_set_github_issue_number = lambda tid, num: calls.append((tid, num))
+item_id, issue_number = m.gh_create_issue_and_add_to_project(
+    {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, 'tid', 'title')
+print(item_id, issue_number, calls)
+")"
+assert_out "successful project add still returns its real item id" \
+  "PVTI_real 42 [('tid', 42)]" "$out"
+
+out="$(run_py "
+import json
+writes = []
+urls = []
+m.gh_run = lambda *args, **kwargs: json.dumps({'number': 42})
+m.db_set_github_issue_number = lambda tid, num: writes.append((tid, num))
+m.gh_add_issue_to_project = lambda cfg, url, num: (urls.append(url) or 'PVTI_real')
+result = m.gh_create_issue_and_add_to_project(
+    {'owner': 'o', 'repo': 'r'}, 'tid', 'title')
+print(result, writes, urls)
+")"
+assert_out "issue number is persisted without relying on an html_url response field" \
+  "('PVTI_real', 42) [('tid', 42)] ['https://github.com/o/r/issues/42']" "$out"
+
+out="$(run_py "
+import json
+calls = []
+entry = {'projectAttachmentPending': True}
+def fake_gh(args, **kwargs):
+    calls.append(args)
+    return json.dumps({'id': 'PVTI_attached'})
+m.gh_run = fake_gh
+m.gh_resolve_project_item_id = lambda *args: None
+ok = m.retry_project_attachment(
+    {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, entry, 42)
+print(ok, entry, len(calls), calls[0][1:3])
+")"
+assert_out "second run attaches the existing issue without another REST create" \
+  "True {'githubItemId': 'PVTI_attached', 'projectStatusPending': True} 1 ['project', 'item-add']" "$out"
+
+out="$(run_py "
+import contextlib, io, json
+calls = []
+entry = {'githubItemId': 'PVTI_legacy', 'projectAttachmentPending': True}
+delete_attempts = 0
+def fake_gh(args, **kwargs):
+    global delete_attempts
+    calls.append(args)
+    if args[1:3] == ['project', 'item-add']:
+        return json.dumps({'id': 'PVTI_replacement'})
+    delete_attempts += 1
+    if delete_attempts == 1:
+        raise RuntimeError('temporary delete failure')
+    return ''
+m.gh_run = fake_gh
+m.gh_resolve_project_item_id = lambda *args: None
+with contextlib.redirect_stderr(io.StringIO()):
+    first = m.retry_project_attachment(
+        {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, entry, 42)
+    second = m.retry_project_attachment(
+        {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, entry, 42)
+adds = sum(args[1:3] == ['project', 'item-add'] for args in calls)
+deletes = sum(args[1:3] == ['project', 'item-delete'] for args in calls)
+print(first, second, entry, adds, deletes)
+")"
+assert_out "legacy cleanup retries without adding the existing issue twice" \
+  "False True {'githubItemId': 'PVTI_replacement', 'projectStatusPending': True} 1 2" "$out"
+
+out="$(run_py "
+entry = {'githubItemId': 'PVTI_new', 'legacyProjectItemId': 'PVTI_gone'}
+m.gh_run = lambda *args, **kwargs: (_ for _ in ()).throw(
+    RuntimeError('GraphQL: Could not resolve to a node with the global id'))
+print(m.retry_project_attachment(
+    {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, entry, 42), entry)
+")"
+assert_out "an already-deleted legacy item completes cleanup after a crash" \
+  "True {'githubItemId': 'PVTI_new'}" "$out"
+
+out="$(run_py "
+entry = {'githubItemId': 'PVTI_new', 'projectStatusPending': True}
+fs = m.ProjectFieldSync()
+m.gh_set_status = lambda *args: True
+ok = fs.apply({}, entry, 42, 'todo', 'ticket')
+if ok:
+    entry.pop('projectStatusPending', None)
+print(ok, entry, fs.applied)
+")"
+assert_out "a pending board status is retried and cleared on success" \
+  "True {'githubItemId': 'PVTI_new'} 1" "$out"
+
 out="$(run_py "
 import inspect
-src = inspect.getsource(m._push_inner)
-# Matched as CALLS, not bare names: the comment above them names
-# gh_sync_issue_state in prose, and a bare-name search would score that
-# mention as the call and read the order backwards.
+src = inspect.getsource(m.migrate_drafts)
+i_lookup = src.find('db_get_github_issue_number(tid)')
 i_create = src.find('gh_create_issue_and_add_to_project(')
-i_persist = src.find('db_set_github_issue_number(tid, new_gh_num)', i_create)
-i_status  = src.find('gh_set_status(config, item_id, status)', i_create)
-i_state   = src.find('gh_sync_issue_state(config, new_gh_num, status)', i_create)
-ok = -1 not in (i_create, i_persist, i_status, i_state) and i_create < i_persist < i_status and i_persist < i_state
-print('persist-first' if ok else 'persist-late')
+i_map = src.find('entry[\"githubIssueNumber\"] = gh_issue_number', i_create)
+i_status = src.find('gh_set_status(config, new_item_id, status)', i_create)
+print(
+    'db-first' if -1 not in (i_lookup, i_create) and i_lookup < i_create else 'create-first',
+    'map-first' if -1 not in (i_map, i_status) and i_map < i_status else 'status-first',
+)
 ")"
-assert_out "push writes the new issue number down before any call that can raise" "persist-first" "$out"
+assert_out "draft migration recovers the DB link and maps it before status writes" \
+  "db-first map-first" "$out"
 
 # ==========================================================================
 # PF-1212 — the sync must not spend GraphQL quota on requests that cannot
