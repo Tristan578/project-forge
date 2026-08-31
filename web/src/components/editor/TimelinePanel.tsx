@@ -83,7 +83,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
   const pixelsPerSecond = 100; // Base scale: 100px = 1 second at 1x zoom
 
   // Compute track list from animation clip
-  const tracks = useMemo(() => primaryAnimationClip?.tracks || [], [primaryAnimationClip?.tracks]);
+  const tracks = useMemo(() => primaryAnimationClip?.tracks ?? [], [primaryAnimationClip?.tracks]);
 
   // Helper functions for drawing
   const drawTimeRuler = useCallback(

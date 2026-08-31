@@ -40,7 +40,7 @@ export const usePublishStore = create<PublishState>((set, get) => ({
       const res = await fetch('/api/publish/list');
       if (!res.ok) return;
       const data = await res.json() as { publications?: PublicationListItem[] };
-      set({ publications: data.publications || [] });
+      set({ publications: data.publications ?? [] });
     } catch {
       // silently fail
     }

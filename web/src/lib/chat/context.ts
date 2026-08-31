@@ -348,7 +348,7 @@ export function buildSceneContext(state: EditorSnapshot): string {
 
   // Skeleton 2D Entities
   if (projectType === '2d') {
-    const skeletons2d = (state as { skeletons2d?: Record<string, import('@/stores/editorStore').SkeletonData2d> }).skeletons2d || {};
+    const skeletons2d = (state as { skeletons2d?: Record<string, import('@/stores/editorStore').SkeletonData2d> }).skeletons2d ?? {};
     const skeletonEntries = Object.entries(skeletons2d);
     if (skeletonEntries.length > 0) {
       sections.push('## Skeleton 2D Entities');

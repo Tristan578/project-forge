@@ -289,7 +289,7 @@ export const createSceneSlice: StateCreator<
       return;
     }
 
-    const config = { ...state.defaultTransition, ...(configOverride || {}) };
+    const config = { ...state.defaultTransition, ...(configOverride ?? {}) };
     // Use a per-call ID so concurrent calls don't clobber each other.
     const transitionId = crypto.randomUUID();
     set({ sceneTransition: { active: true, config, targetScene, transitionId } });
@@ -316,7 +316,7 @@ export const createSceneSlice: StateCreator<
     // `id` and `name` stay AFTER the spread on purpose: `terrainData` can carry
     // LLM-authored keys, and an `id` inside it must never be able to override
     // the one generated here (the returned id would then name no entity).
-    dispatchCommand('spawn_terrain', { ...(terrainData || {}), id, name });
+    dispatchCommand('spawn_terrain', { ...(terrainData ?? {}), id, name });
     return id;
   },
   updateTerrain: (entityId, terrainData) => {
