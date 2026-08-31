@@ -21,7 +21,7 @@ export function ProfileTab() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchProfile();
+    void fetchProfile();
   }, [fetchProfile]);
 
   const handleEdit = () => {
@@ -105,7 +105,7 @@ export function ProfileTab() {
               autoFocus
               className="flex-1 rounded border border-zinc-600 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500"
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSave();
+                if (e.key === 'Enter') void handleSave();
                 if (e.key === 'Escape') handleCancel();
               }}
             />

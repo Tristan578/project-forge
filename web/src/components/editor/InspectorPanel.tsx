@@ -124,7 +124,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
   // Copy handlers
   const handleCopyPosition = useCallback(() => {
     if (primaryTransform) {
-      copyTransformProperty('position', primaryTransform.position);
+      void copyTransformProperty('position', primaryTransform.position);
     }
   }, [primaryTransform]);
 
@@ -135,13 +135,13 @@ export const InspectorPanel = memo(function InspectorPanel() {
         radToDeg(primaryTransform.rotation[1]),
         radToDeg(primaryTransform.rotation[2]),
       ];
-      copyTransformProperty('rotation', rotationDeg);
+      void copyTransformProperty('rotation', rotationDeg);
     }
   }, [primaryTransform]);
 
   const handleCopyScale = useCallback(() => {
     if (primaryTransform) {
-      copyTransformProperty('scale', primaryTransform.scale);
+      void copyTransformProperty('scale', primaryTransform.scale);
     }
   }, [primaryTransform]);
 
@@ -152,7 +152,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
         radToDeg(primaryTransform.rotation[1]),
         radToDeg(primaryTransform.rotation[2]),
       ];
-      copyFullTransform(primaryTransform.position, rotationDeg, primaryTransform.scale);
+      void copyFullTransform(primaryTransform.position, rotationDeg, primaryTransform.scale);
     }
   }, [primaryTransform]);
 

@@ -18,7 +18,7 @@ export function TokenDashboard() {
   const [purchasing, setPurchasing] = useState(false);
 
   useEffect(() => {
-    fetchBalance();
+    void fetchBalance();
     fetch('/api/tokens/usage?days=30')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed'))))
       .then((data) => setUsage(data.usage ?? []))

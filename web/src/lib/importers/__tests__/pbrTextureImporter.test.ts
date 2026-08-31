@@ -202,7 +202,7 @@ describe('filesToBase64', () => {
       readAsDataURL(file: File) {
         this.result = `data:image/png;base64,STUB_${file.name}`;
         // Resolve asynchronously without setTimeout
-        Promise.resolve().then(() => {
+        queueMicrotask(() => {
           if (this.onload) this.onload();
         });
       }

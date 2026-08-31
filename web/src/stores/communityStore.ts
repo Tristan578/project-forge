@@ -109,17 +109,17 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
 
   setSearchQuery: (q) => {
     set({ searchQuery: q, page: 1 });
-    get().fetchGames(true);
+    void get().fetchGames(true);
   },
 
   setSortBy: (sort) => {
     set({ sortBy: sort, page: 1 });
-    get().fetchGames(true);
+    void get().fetchGames(true);
   },
 
   setFilterTag: (tag) => {
     set({ filterTag: tag, page: 1 });
-    get().fetchGames(true);
+    void get().fetchGames(true);
   },
 
   likeGame: async (gameId) => {

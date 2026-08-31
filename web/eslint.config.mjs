@@ -237,6 +237,37 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    // TYPE-AWARE LINTING (#8938). eslint-config-next/typescript wires the TS
+    // parser but not a program, so type-aware rules were silently inert. Turning
+    // projectService on is what makes the rule below able to see that an
+    // expression is a Promise at all.
+    //
+    // no-floating-promises exists because the single highest-frequency historical
+    // bug in this repo was a missing `await` on `rateLimitPublicRoute()`, which
+    // did not fail, did not log, and simply skipped the rate limit. Nothing
+    // mechanical stopped it recurring; documentation alone had not.
+    //
+    // WHAT `void` MEANS HERE. `void f()` is the deliberate marker for "this
+    // promise is not awaited on purpose". It is only honest when f() CANNOT
+    // reject -- in this codebase that means a store action or fetcher whose
+    // entire body sits inside try/catch and reports failure into state, or a
+    // promise that resolves unconditionally. Every `void` added with this rule
+    // was checked against that bar. If a call CAN reject, attach real handling
+    // (see the clipboard, pointer-lock, audio-resume and dynamic-import call
+    // sites) -- `void` there would only convert a visible unhandled rejection
+    // into an invisible one, which is the bug this rule is meant to catch.
+    //
+    // prefer-nullish-coalescing (the `||` vs `??` half of #8938) is a separate
+    // 245-finding sweep and lands on its own.
+    files: ['src/**/*.{ts,tsx}', 'scripts/**/*.ts'],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+    },
+  },
+  {
     rules: {
       '@typescript-eslint/no-unused-vars': ['warn', {
         argsIgnorePattern: '^_',

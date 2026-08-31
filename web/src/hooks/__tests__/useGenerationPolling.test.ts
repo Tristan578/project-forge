@@ -727,7 +727,7 @@ describe('useGenerationPolling', () => {
       onload: (() => void) | null = null;
       onerror: (() => void) | null = null;
       set src(_url: string) {
-        Promise.resolve().then(() => this.onload?.());
+        queueMicrotask(() => this.onload?.());
       }
     } as unknown as typeof Image;
 

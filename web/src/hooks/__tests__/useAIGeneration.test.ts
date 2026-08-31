@@ -112,7 +112,7 @@ describe('useAIGeneration', () => {
     const promise = new Promise<void>((_resolve, r) => { reject = r; });
 
     act(() => {
-      result.current.execute(() => promise);
+      void result.current.execute(() => promise);
     });
 
     expect(result.current.isLoading).toBe(true);
@@ -151,7 +151,7 @@ describe('useAIGeneration', () => {
     const { result } = renderHook(() => useAIGeneration());
 
     act(() => {
-      result.current.execute(async (signal) => {
+      void result.current.execute(async (signal) => {
         // Simulate fetch that throws on abort
         return new Promise((_resolve, reject) => {
           signal.addEventListener('abort', () => {
@@ -176,7 +176,7 @@ describe('useAIGeneration', () => {
     const { result, unmount } = renderHook(() => useAIGeneration());
 
     act(() => {
-      result.current.execute(async (signal) => {
+      void result.current.execute(async (signal) => {
         capturedSignal = signal;
         return new Promise(() => {}); // Never resolves
       });

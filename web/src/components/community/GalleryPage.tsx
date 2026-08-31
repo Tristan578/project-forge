@@ -30,8 +30,8 @@ export function GalleryPage() {
   const [localSearch, setLocalSearch] = useState(searchQuery);
 
   useEffect(() => {
-    fetchGames(true);
-    fetchFeaturedGames();
+    void fetchGames(true);
+    void fetchFeaturedGames();
 
     // Fetch popular tags
     const fetchTags = async () => {
@@ -45,7 +45,7 @@ export function GalleryPage() {
       }
     };
 
-    fetchTags();
+    void fetchTags();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -55,7 +55,7 @@ export function GalleryPage() {
   };
 
   const handleLoadMore = () => {
-    fetchGames(false);
+    void fetchGames(false);
   };
 
   const sortOptions = [

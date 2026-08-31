@@ -125,9 +125,13 @@ export function handleAudioEvent(
       const payload = castPayload<{ buses: AudioBusDef[] }>(data);
       useEditorStore.getState().setAudioBuses(payload.buses);
       // Sync to Web Audio API
-      import('@/lib/audio/audioManager').then(({ audioManager }) => {
-        audioManager.applyBusConfig({ buses: payload.buses });
-      });
+      import('@/lib/audio/audioManager')
+        .then(({ audioManager }) => {
+          audioManager.applyBusConfig({ buses: payload.buses });
+        })
+        .catch((err: unknown) => {
+          console.error('Failed to load audioManager for bus config:', err);
+        });
       return true;
     }
 
@@ -153,6 +157,8 @@ export function handleAudioEvent(
         else if (payload.action === 'stop') audioManager.stop(payload.entityId);
         else if (payload.action === 'pause') audioManager.pause(payload.entityId);
         else if (payload.action === 'resume') audioManager.resume(payload.entityId);
+      }).catch((err: unknown) => {
+        console.error('Failed to load audioManager for playback:', err);
       });
       return true;
     }

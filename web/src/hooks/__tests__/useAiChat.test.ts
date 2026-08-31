@@ -86,7 +86,7 @@ describe('useAiChat', () => {
 
     const { result } = renderHook(() => useAiChat());
     act(() => {
-      result.current.stop();
+      void result.current.stop();
     });
     expect(stopFn).toHaveBeenCalledOnce();
   });
@@ -116,7 +116,7 @@ describe('useAiChat', () => {
 
     const { result } = renderHook(() => useAiChat());
     act(() => {
-      result.current.sendMessage({ content: 'Build a platformer' } as unknown as Parameters<typeof result.current.sendMessage>[0]);
+      void result.current.sendMessage({ content: 'Build a platformer' } as unknown as Parameters<typeof result.current.sendMessage>[0]);
     });
     expect(sendMessageFn).toHaveBeenCalledOnce();
   });

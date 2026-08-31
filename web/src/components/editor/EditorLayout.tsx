@@ -419,14 +419,14 @@ export function EditorLayout() {
 
   // Hydrate generation jobs from server on mount
   useEffect(() => {
-    hydrateFromServer();
+    void hydrateFromServer();
   }, [hydrateFromServer]);
 
   // Resolve the user's tier on mount so tier-gated UI (e.g. premium model
   // dropdown in ChatInput) doesn't render the 'starter' default for Pro users.
   const fetchProfile = useUserStore((s) => s.fetchProfile);
   useEffect(() => {
-    fetchProfile();
+    void fetchProfile();
   }, [fetchProfile]);
 
   // Drawer state for compact mode
