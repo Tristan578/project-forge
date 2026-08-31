@@ -120,6 +120,41 @@ BUILD_ID=$(python3 -c "import json; print(json.load(open('$DIR/engine-pkg-webgl2
 if echo "$BUILD_ID" | grep -qE '^[0-9a-f]{16}$'; then pass "high-bit XOR"; else fail "buildId=$BUILD_ID"; fi
 cleanup "$DIR"
 
+# Test 7: a hash tool that returns something that is not a digest must ABORT
+echo "Test 7: a bad digest aborts the whole run, it does not write a manifest"
+# Why this is pinned: hash16 reports the failure and calls `exit 1`, but it is
+# invoked through a command substitution (wasm_hash=$(hash16 ...)), where an
+# exit only leaves the SUBSHELL. What actually stops the script is the `set -e`
+# at the top of it, applied to the failing assignment. That is a real but
+# non-obvious dependency -- drop `set -e`, or wrap the assignment in an `if` or
+# a `||`, and the run would carry on with an EMPTY hash and bake it into a
+# manifest that clients use as a cache key. Rather than leave that resting on a
+# reader noticing `set -e`, the behaviour is asserted here.
+DIR=$(setup_fixture)
+# Plain mktemp, NOT mktemp_d_native: this directory goes on $PATH, which the
+# shell resolves in its own path space -- a Windows-style C:/... entry there
+# is simply never searched, and the stubs below would be silently ignored.
+STUB=$(mktemp -d)
+for tool in sha256sum shasum openssl; do
+  printf '#!/usr/bin/env bash
+echo "not-a-digest  stub"
+' > "$STUB/$tool"
+  chmod +x "$STUB/$tool"
+done
+# `... && RC=0 || RC=$?`, not `...; RC=$?`: this suite runs under `set -e`, so
+# the assignment failing (which is the whole point of the case) would abort
+# the suite before $? was ever read.
+OUT=$(PATH="$STUB:$PATH" bash "$SCRIPT" "$DIR" 2>&1) && RC=0 || RC=$?
+if [ "$RC" -ne 0 ]; then pass "a bad digest exits non-zero (got $RC)"; else fail "a bad digest should exit non-zero, got 0"; fi
+if grep -q "could not hash" <<<"$OUT"; then pass "the failure names the hashing step"; else fail "expected a 'could not hash' message, got: $OUT"; fi
+if [ ! -f "$DIR/engine-pkg-webgl2/wasm-manifest.json" ]; then
+  pass "no manifest is written when the digest is rejected"
+else
+  fail "a manifest was written despite the digest being rejected: $(cat "$DIR/engine-pkg-webgl2/wasm-manifest.json")"
+fi
+rm -rf "$STUB"
+cleanup "$DIR"
+
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
   echo "All tests passed."
