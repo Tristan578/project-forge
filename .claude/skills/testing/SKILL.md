@@ -37,7 +37,7 @@ engine/src/core/mesh_simplify.rs  # Rust unit tests (cargo test)
 ### Vitest Configuration
 - Workspace split: `web/vitest.config.node.ts` (environment: node — lib, stores, API routes) and `web/vitest.config.jsdom.ts` (environment: jsdom — components, hooks)
 - Standalone `web/vitest.config.ts` is what CI uses for coverage thresholds (workspace configs drop thresholds)
-- Coverage: `npx vitest run --coverage`
+- Coverage: `npm run test:coverage` (bounded, 600s timeout — see `scripts/run-vitest-coverage.sh`) or `npm run test:coverage:changed` (fast, changed-files only, for local/nightly iteration). Full-suite coverage-threshold enforcement is CI's job (`.github/workflows/quality-gates.yml` `test-web`).
 - Run specific: `npx vitest run myTestFile`
 
 ### Playwright Configuration
@@ -263,7 +263,7 @@ cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 | `vitest` | `cd web && npx vitest run` |
 | `playwright` | `cd web && npx playwright test` (requires WASM build) |
 | `mcp` | `cd mcp-server && npx vitest run` |
-| `coverage` | `cd web && npx vitest run --coverage` |
+| `coverage` | `cd web && npm run test:coverage` (bounded, 600s timeout) |
 
 ### Targeted (preferred during development — avoid full suite when only a few files changed)
 
@@ -298,7 +298,7 @@ Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX 
 | Hooks | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` |
 | Mocking | `vi.fn()`, `vi.spyOn()`, `vi.mock()`, `vi.resetModules()` |
 | Timers | `vi.useFakeTimers()`, `vi.advanceTimersByTime()` |
-| Coverage | V8 provider: `npx vitest run --coverage` |
+| Coverage | V8 provider: `npm run test:coverage` (bounded) — see `scripts/run-vitest-coverage.sh` |
 
 ### Mock Rules (SpawnForge-specific)
 

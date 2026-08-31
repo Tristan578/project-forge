@@ -3067,6 +3067,7 @@ OUTPUTS_EOF
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
+            scripts/run-vitest-coverage.sh scripts/__tests__/run-vitest-coverage.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
             scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
@@ -3574,6 +3575,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
+            scripts/run-vitest-coverage.sh scripts/__tests__/run-vitest-coverage.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
             scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
@@ -3615,6 +3617,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-ghaw-lock-sync.test.sh
       - name: Run vitest exit-gate test suite
         run: bash scripts/__tests__/check-vitest-exit.test.sh
+      - name: Run bounded coverage-wrapper test suite
+        run: bash scripts/__tests__/run-vitest-coverage.test.sh
       - name: Run npm-audit allowlist gate test suite
         run: bash scripts/__tests__/check-npm-audit.test.sh
       - name: Run security-alerts gate test suite
