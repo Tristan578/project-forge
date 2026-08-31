@@ -64,19 +64,53 @@ if [ -z "$listing" ]; then
   exit 1
 fi
 
-if ! "$AWS" s3 cp "${SRC}" "${DEST}" \
-      --recursive \
-      --metadata-directive REPLACE \
-      --cache-control "${IMMUTABLE_CACHE_CONTROL}"; then
-  echo "::error::alias-wasm-cdn-version: copy from ${SRC} to ${DEST} failed" >&2
-  exit 1
-fi
+# COPY PER CONTENT-TYPE GROUP.
+#
+# `--metadata-directive REPLACE` is mandatory here -- it is the only way to set
+# cache-control on a server-side copy -- but REPLACE DISCARDS EVERY HEADER NOT
+# RESTATED, Content-Type included. The first version of this script restated
+# only cache-control, and the aliased objects were served with no Content-Type
+# at all (#9593). That is not cosmetic:
+#
+#   * useEngine.ts loads the glue with a dynamic ES module import, and browsers
+#     enforce strict MIME checking on module scripts -- an empty type is
+#     REFUSED, so the engine could not load at all. The 404 became a MIME block.
+#   * WebAssembly.instantiateStreaming requires application/wasm and otherwise
+#     falls back to buffering the whole 95 MB module before compiling.
+#
+# So each group restates its own type. The values match what
+# upload-wasm-to-r2.sh produces for the same files (the CLI guesses them from
+# the local extension there; a server-side copy has no local file to guess from).
+copy_group() {
+  local pattern="$1" ctype="$2"
+  if ! "$AWS" s3 cp "${SRC}" "${DEST}"         --recursive         --exclude "*" --include "${pattern}"         --metadata-directive REPLACE         --cache-control "${IMMUTABLE_CACHE_CONTROL}"         --content-type "${ctype}"; then
+    echo "::error::alias-wasm-cdn-version: copying ${pattern} from ${SRC} to ${DEST} failed" >&2
+    return 1
+  fi
+}
 
-# Verify the destination actually has objects. A copy that reports success but
-# writes nothing leaves exactly the 404 this script exists to prevent.
-if [ -z "$("$AWS" s3 ls "${DEST}" --recursive 2>/dev/null)" ]; then
+copy_group '*.wasm' 'application/wasm' || exit 1
+copy_group '*.js'   'text/javascript'  || exit 1
+copy_group '*.json' 'application/json' || exit 1
+
+# PARITY, not merely non-emptiness. The copy above is driven by an explicit list
+# of extensions, so a file type nobody anticipated is not copied at all -- and a
+# destination that merely has SOME objects in it would hide that. Comparing
+# counts turns "a new file type appeared" into a failed deploy instead of an
+# engine that is missing one of its parts.
+src_count="$(printf '%s
+' "$listing" | grep -c . || true)"
+dest_listing="$("$AWS" s3 ls "${DEST}" --recursive 2>/dev/null)"
+dest_count="$(printf '%s
+' "$dest_listing" | grep -c . || true)"
+
+if [ "$dest_count" -eq 0 ]; then
   echo "::error::alias-wasm-cdn-version: ${DEST} is still empty after the copy" >&2
   exit 1
 fi
+if [ "$dest_count" -ne "$src_count" ]; then
+  echo "::error::alias-wasm-cdn-version: copied ${dest_count} of ${src_count} objects — a file whose extension matches none of the content-type groups above was skipped. Add its group rather than relaxing this check; a partially-aliased prefix serves a broken engine." >&2
+  exit 1
+fi
 
-echo "Engine ${ENGINE_VERSION} now resolves on the CDN."
+echo "Engine ${ENGINE_VERSION} now resolves on the CDN (${dest_count} objects, typed)."
