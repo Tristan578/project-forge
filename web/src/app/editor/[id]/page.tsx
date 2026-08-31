@@ -38,7 +38,10 @@ function EditorPageContent() {
 
   // Prefetch Monaco editor chunks so the script panel opens instantly
   useEffect(() => {
-    void import('@monaco-editor/react');
+    // A failed prefetch is not fatal — the script panel imports Monaco again on open.
+    import('@monaco-editor/react').catch((err: unknown) => {
+      console.warn('Failed to prefetch the Monaco editor chunk:', err);
+    });
   }, []);
 
   useEffect(() => {
