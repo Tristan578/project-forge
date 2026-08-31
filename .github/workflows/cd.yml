@@ -407,7 +407,14 @@ jobs:
             exit 0
           fi
 
-          if echo "$CHANGED" | grep -q '^engine/'; then
+          # .transform-gizmo-fork/ is a PATH DEPENDENCY of the engine
+          # (engine/Cargo.toml: path = "../.transform-gizmo-fork/..."), so it
+          # compiles into the binary. Matching only ^engine/ meant a fork-only
+          # change left engine=false, build-wasm skipped, and PRODUCTION kept
+          # the stale engine -- while scripts/engine-wasm-cache-key.sh, which
+          # correctly includes the fork tree, produced a new key and rebuilt.
+          # CI would then test a binary users never received.
+          if echo "$CHANGED" | grep -qE '^engine/|^[.]transform-gizmo-fork/'; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
             echo "Engine files changed -- WASM build required"
           else

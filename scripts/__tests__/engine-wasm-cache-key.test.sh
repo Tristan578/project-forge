@@ -233,20 +233,51 @@ else
 
   if [ -z "$pc_if" ]; then
     fail "publish-engine-cache has no if: — it runs on EVERY push, including the engine-changed pushes where build-wasm is already building and saving the same key, so the engine gets built twice concurrently"
-  elif grep -q "engine-changed != 'true'" <<<"$pc_if" \
-       && grep -q "github.event_name != 'workflow_dispatch'" <<<"$pc_if"; then
-    pass "publish-engine-cache runs only when build-wasm does not (complement of engine-changed + workflow_dispatch)"
+  elif grep -qE "engine-changed != 'true'[[:space:]]*&&[[:space:]]*github[.]event_name != 'workflow_dispatch'" <<<"$pc_if"; then
+    pass "publish-engine-cache runs only when build-wasm does not (operator pinned: != AND !=)"
   else
     fail "publish-engine-cache's if: is not the complement of build-wasm's — got: ${pc_if}"
   fi
 
   # Pin the other half too: if build-wasm's trigger is ever widened, the
   # complement above silently stops being a complement.
-  if grep -q "engine-changed == 'true'" <<<"$bw_if" \
-     && grep -q "github.event_name == 'workflow_dispatch'" <<<"$bw_if"; then
-    pass "build-wasm still triggers on exactly engine-changed + workflow_dispatch"
+  # The OPERATOR is pinned, not just the two operands. Grepping for each clause
+  # separately passes whether they are joined by || or &&, and swapping them
+  # inverts the complement below so that on an engine change NEITHER job runs
+  # and nothing builds or caches the engine at all.
+  if grep -qE "engine-changed == 'true'[[:space:]]*\|\|[[:space:]]*github[.]event_name == 'workflow_dispatch'" <<<"$bw_if"; then
+    pass "build-wasm triggers on engine-changed OR workflow_dispatch (operator pinned)"
   else
-    fail "build-wasm's trigger changed — got: ${bw_if} — publish-engine-cache's complement must be updated in the same commit or both will run"
+    fail "build-wasm's trigger is not 'engine-changed == true || workflow_dispatch' — got: ${bw_if} — publish-engine-cache's complement must be updated in the same commit or the two stop being complements"
+  fi
+fi
+
+# --- the rebuild trigger must cover every input the key does -------------------
+# These two must not disagree. The key is content-addressed over engine/ AND
+# .transform-gizmo-fork/ (a path dependency that compiles into the binary), but
+# cd.yml decides whether to REBUILD from its own path filter. When the filter is
+# narrower than the key, a change to the uncovered path produces a new key --
+# so CI rebuilds and tests a fresh binary -- while build-wasm skips and the CDN
+# keeps serving the old one. Tests pass on a binary users never receive, which
+# is worse than either half failing on its own.
+echo ""
+echo "=== cd.yml rebuilds for every path the cache key is derived from ==="
+if [ ! -f "$CD_YML" ]; then
+  fail "cd.yml not found at $CD_YML"
+else
+  # The line that decides engine=true. Matched on its two stable parts rather
+  # than on the exact regex, which is what this rule is allowed to change.
+  engine_filter="$(grep -E "grep -q" "$CD_YML" | grep -F "engine/" || true)"
+  if [ -z "$engine_filter" ]; then
+    fail "could not find the engine path filter in cd.yml — this rule would pass vacuously"
+  else
+    for path_input in 'engine/' 'transform-gizmo-fork/'; do
+      if grep -qF "$path_input" <<<"$engine_filter"; then
+        pass "cd.yml's engine filter covers '${path_input}' (a cache-key input)"
+      else
+        fail "cd.yml's engine filter does not cover '${path_input}', which engine-wasm-cache-key.sh includes in the key — a change there gives a new key (CI rebuilds) while build-wasm skips (production keeps the stale engine)"
+      fi
+    done
   fi
 fi
 
