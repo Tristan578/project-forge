@@ -59,8 +59,8 @@ export function modelToolSchema(commandName: string, parameters: unknown): Model
     required?: string[];
   };
 
-  const properties = schema.properties || {};
-  const required = schema.required || [];
+  const properties = schema.properties ?? {};
+  const required = schema.required ?? [];
   const excluded = EXCLUDED_TOOL_PROPERTIES[commandName];
 
   return {

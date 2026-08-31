@@ -192,7 +192,7 @@ export function TutorialOverlay() {
           if (state.engineMode === 'play' && prevState.engineMode === 'edit') {
             setActionCompleted(true);
             if (currentStep.autoAdvance) {
-              setTimeout(() => advanceTutorial(), currentStep.delay || 500);
+              setTimeout(() => advanceTutorial(), currentStep.delay ?? 500);
             }
           }
           break;

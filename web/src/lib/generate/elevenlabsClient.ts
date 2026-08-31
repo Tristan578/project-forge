@@ -47,7 +47,7 @@ export class ElevenLabsClient {
       },
       body: JSON.stringify({
         text: params.prompt,
-        duration_seconds: params.durationSeconds || 5,
+        duration_seconds: params.durationSeconds ?? 5,
       }),
       signal: composeAbortSignal(params.signal, 30000),
     });
@@ -62,7 +62,7 @@ export class ElevenLabsClient {
 
     return {
       audioBase64,
-      durationSeconds: params.durationSeconds || 5,
+      durationSeconds: params.durationSeconds ?? 5,
     };
   }
 

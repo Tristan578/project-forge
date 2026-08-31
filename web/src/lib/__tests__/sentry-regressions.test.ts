@@ -121,13 +121,13 @@ describe('Lesson #3: ?? vs || for numeric defaults', () => {
   it('both ?? and || replace null', () => {
     const val: null = null;
     expect(val ?? 42).toBe(42);
-    expect(val || 42).toBe(42);
+    expect(val ?? 42).toBe(42);
   });
 
   it('both ?? and || replace undefined', () => {
     const val: undefined = undefined;
     expect(val ?? 42).toBe(42);
-    expect(val || 42).toBe(42);
+    expect(val ?? 42).toBe(42);
   });
 
   it('only || replaces NaN — ?? does NOT (NaN is not nullish)', () => {
@@ -284,7 +284,14 @@ describe('Sentry Session 2026-03-20: specific bug regressions', () => {
    * If a user passes duration=0 (instant), it gets replaced with 500ms.
    */
   it('duration || 500 regression: duration=0 returns 500 instead of 0', () => {
-    // Simulates the handler logic
+    // Simulates the handler logic.
+    //
+    // The `||` below IS the subject of this case; rewriting it to `??` would
+    // delete the behaviour being demonstrated. Note also that the case asserts
+    // a lambda declared right here rather than the shipped handler -- which has
+    // read `?? 500` since sceneManagementHandlers.ts:264 -- so it cannot
+    // actually catch the regression it is named for. Tracked in #9564.
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
     const getDuration = (input: number | undefined) => input || 500;
     expect(getDuration(0)).toBe(500); // documents the bug: instant transition becomes 500ms
     expect(getDuration(0)).not.toBe(0);

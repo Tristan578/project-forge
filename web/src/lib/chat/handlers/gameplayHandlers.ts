@@ -204,7 +204,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       ? ctx.store.allGameCameras[p.data.entityId]
       : undefined;
     const isActive = ctx.store.activeGameCameraId === p.data.entityId;
-    return { success: true, result: { camera: camera || null, isActive } };
+    return { success: true, result: { camera: camera ?? null, isActive } };
   },
 
   save_as_prefab: async (args, ctx) => {
@@ -227,15 +227,15 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
         rotation: transforms.rotation,
         scale: transforms.scale,
       } : { position: [0, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], scale: [1, 1, 1] as [number, number, number] },
-      material: ctx.store.primaryMaterial || undefined,
-      light: ctx.store.primaryLight || undefined,
-      physics: ctx.store.primaryPhysics || undefined,
-      script: ctx.store.primaryScript || undefined,
+      material: ctx.store.primaryMaterial ?? undefined,
+      light: ctx.store.primaryLight ?? undefined,
+      physics: ctx.store.primaryPhysics ?? undefined,
+      script: ctx.store.primaryScript ?? undefined,
       // `Object.hasOwn` for the same reason as `get_audio`: `entityId` reaches
       // here from a tool call, and a bare index on a name like `"constructor"`
       // would put an inherited function into the snapshot.
       audio: Object.hasOwn(ctx.store.entityAudio, entityId) ? ctx.store.entityAudio[entityId] : undefined,
-      particle: ctx.store.primaryParticle || undefined,
+      particle: ctx.store.primaryParticle ?? undefined,
     };
 
     const node = ctx.store.sceneGraph.nodes[entityId];
