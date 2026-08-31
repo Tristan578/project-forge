@@ -158,7 +158,7 @@ function topologicalSort(graph: ShaderGraph): ShaderNode[] | null {
   // Build adjacency list and in-degree counts
   edges.forEach((e) => {
     adjList.get(e.source)?.push(e.target);
-    inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
+    inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
   });
 
   // Kahn's algorithm
@@ -173,7 +173,7 @@ function topologicalSort(graph: ShaderGraph): ShaderNode[] | null {
     sorted.push(current);
 
     adjList.get(current)?.forEach((neighbor) => {
-      const newDegree = (inDegree.get(neighbor) || 0) - 1;
+      const newDegree = (inDegree.get(neighbor) ?? 0) - 1;
       inDegree.set(neighbor, newDegree);
       if (newDegree === 0) queue.push(neighbor);
     });

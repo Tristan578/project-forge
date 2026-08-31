@@ -39,6 +39,20 @@ export default function Error({ error, reset }: ErrorProps) {
           >
             Back to Dashboard
           </Link>
+          {/*
+            /dashboard is a real route but an auth-gated one — it is absent from
+            buildPublicRoutes() in proxy.ts and the page itself redirects to
+            /sign-in without a userId. So a logged-out visitor who hit a 500 had
+            "Try Again" (which re-runs the same failing render) and a link to a
+            sign-in wall, and no way back to a public page (#9046). "/" is
+            public, and this mirrors not-found.tsx, which already offers it.
+          */}
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center px-4 py-2 rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-900 transition-colors text-sm font-medium"
+          >
+            Go Home
+          </Link>
         </div>
       </div>
     </div>

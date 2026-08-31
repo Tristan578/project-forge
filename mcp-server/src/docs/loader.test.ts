@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { loadDocs } from './loader.js';
 
@@ -15,7 +15,11 @@ function createTempDocs(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'loader-test-'));
   for (const [relPath, content] of Object.entries(files)) {
     const fullPath = join(root, relPath);
-    const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+    // dirname(), not lastIndexOf('/'): join() emits the HOST separator, so on
+    // Windows there is no '/' to find, lastIndexOf returns -1, and
+    // substring(0, -1) yields '' -- every case in this file then died on
+    // `mkdir ''` (ENOENT) before asserting anything.
+    const dir = dirname(fullPath);
     if (dir !== root) {
       mkdirSync(dir, { recursive: true });
     }

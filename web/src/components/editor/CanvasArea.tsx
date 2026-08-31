@@ -120,7 +120,7 @@ export function CanvasArea() {
                 style={{
                   left: `${el.x}%`,
                   top: `${el.y}%`,
-                  fontSize: `${el.fontSize || 24}px`,
+                  fontSize: `${el.fontSize && el.fontSize > 0 ? el.fontSize : 24}px`,
                   color: el.color || 'white',
                   textShadow: '1px 1px 2px rgba(0,0,0,0.8)',
                   fontFamily: 'monospace',

@@ -11,6 +11,7 @@ import { Toaster } from "sonner";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import { SITE_URL } from "@/lib/constants";
 import { MCP_COMMAND_COUNT } from "@/lib/mcp/manifestStats";
+import { hasValidClerkKey as isValidClerkKey } from "@/lib/auth/clerkKey";
 import "./globals.css";
 
 // Lazy-load analytics and consent providers — they rely on browser APIs
@@ -24,9 +25,12 @@ const CookieConsent = lazy(() => import("@/components/CookieConsent").then((m) =
 // Replaced with static import of en.json (single locale) to allow static rendering
 // of marketing pages — improves LCP by ~1s on cold loads.
 
-// Clerk validates key format at runtime — skip wrapping when key is missing/invalid (CI E2E tests)
-const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
-const hasValidClerkKey = clerkKey.startsWith("pk_test_") || clerkKey.startsWith("pk_live_");
+// Clerk validates key format at runtime — skip wrapping when the key is missing
+// or invalid (CI E2E tests run without one). The predicate moved to
+// lib/auth/clerkKey.ts so next.config.ts can share it and fail the BUILD on a
+// key that is present but unusable, instead of degrading silently the way
+// docs.spawnforge.ai did for weeks (#9044).
+const hasValidClerkKey = isValidClerkKey();
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

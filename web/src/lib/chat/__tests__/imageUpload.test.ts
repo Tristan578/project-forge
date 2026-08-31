@@ -146,7 +146,7 @@ describe('resizeImage (mocked DOM)', () => {
       height = height;
       set src(_val: string) {
         // Trigger onload asynchronously via microtask
-        Promise.resolve().then(() => { if (this.onload) this.onload(); });
+        queueMicrotask(() => { if (this.onload) this.onload(); });
       }
     };
   }
@@ -212,7 +212,7 @@ describe('resizeImage (mocked DOM)', () => {
       onload: (() => void) | null = null;
       onerror: (() => void) | null = null;
       set src(_val: string) {
-        Promise.resolve().then(() => { if (this.onerror) this.onerror(); });
+        queueMicrotask(() => { if (this.onerror) this.onerror(); });
       }
     };
     await expect(resizeImage('data:image/png;base64,bad')).rejects.toThrow('Failed to load image');
@@ -244,7 +244,7 @@ describe('processImageFile (mocked DOM)', () => {
       onerror: (() => void) | null = null;
       readAsDataURL(_file: File) {
         this.result = fakeDataUrl;
-        Promise.resolve().then(() => { if (this.onload) this.onload(); });
+        queueMicrotask(() => { if (this.onload) this.onload(); });
       }
     };
 
@@ -256,7 +256,7 @@ describe('processImageFile (mocked DOM)', () => {
       width = 200;
       height = 150;
       set src(_val: string) {
-        Promise.resolve().then(() => { if (this.onload) this.onload(); });
+        queueMicrotask(() => { if (this.onload) this.onload(); });
       }
     };
 
@@ -279,7 +279,7 @@ describe('processImageFile (mocked DOM)', () => {
       onload: (() => void) | null = null;
       onerror: (() => void) | null = null;
       readAsDataURL(_file: File) {
-        Promise.resolve().then(() => { if (this.onerror) this.onerror(); });
+        queueMicrotask(() => { if (this.onerror) this.onerror(); });
       }
     };
 

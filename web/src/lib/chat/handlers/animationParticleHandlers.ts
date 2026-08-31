@@ -289,6 +289,6 @@ export const animationParticleHandlers: Record<string, ToolHandler> = {
 
   get_animation_clip: async (_args, ctx) => {
     const clipState = ctx.store.primaryAnimationClip;
-    return { success: true, result: clipState || { message: 'No animation clip on selected entity' } };
+    return { success: true, result: clipState ?? { message: 'No animation clip on selected entity' } };
   },
 };

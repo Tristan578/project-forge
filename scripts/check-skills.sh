@@ -50,6 +50,32 @@ trap 'rm -f "$findings_file"' EXIT
 have_shellcheck=0
 command -v shellcheck >/dev/null 2>&1 && have_shellcheck=1
 
+# is_executable <path> — is this script executable WHERE IT MATTERS?
+#
+# The authority is the git index mode, not the working-tree bit. What a CI runner
+# or a colleague gets is whatever git recorded (100755 vs 100644): a local
+# `chmod +x` that was never staged does not ship, and a file staged 100755 IS
+# executable on checkout even where the local filesystem cannot represent the
+# bit. NTFS through Git-for-Windows is exactly that case — it reports every
+# file as executable, so a bare `[ -x ]` here passed scripts that would arrive
+# non-executable on the Linux runner. Reading the index catches both the false
+# pass and the false failure. Untracked files have no index entry and fall back
+# to the filesystem bit, the only signal that exists for them.
+is_executable() {
+  local dir base mode
+  dir="$(dirname "$1")"
+  base="$(basename "$1")"
+  # -C the file's OWN directory: the skills tree may live in a different
+  # repository (or none) from wherever this gate was invoked, and asking the
+  # wrong repo returns "untracked" for a perfectly tracked file.
+  mode="$(git -C "$dir" ls-files -s -- "$base" 2>/dev/null | awk 'NR==1 {print $1}')"
+  if [ -n "$mode" ]; then
+    [ "$mode" = "100755" ]
+  else
+    [ -x "$1" ]
+  fi
+}
+
 # Record a finding against a skill directory (printed + classified after the loop).
 err() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$findings_file"; }   # <skill_dir> <file> <message>
 warn() { echo "::warning file=$1::$2" >&2; }
@@ -193,8 +219,8 @@ for skill_path in "${targets[@]}"; do
   if [ -d "$skill_path/scripts" ]; then
     while IFS= read -r sh; do
       [ -z "$sh" ] && continue
-      if [ ! -x "$sh" ]; then
-        err "$name_expected" "$sh" "skill script is not executable (chmod +x it)"
+      if ! is_executable "$sh"; then
+        err "$name_expected" "$sh" "skill script is not executable (git update-index --chmod=+x $sh)"
       fi
       if [ "$have_shellcheck" -eq 1 ]; then
         if ! shellcheck -S warning "$sh" >/dev/null 2>&1; then

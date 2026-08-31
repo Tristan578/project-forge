@@ -73,8 +73,8 @@ export const shaderHandlers: Record<string, ToolHandler> = {
 
     const nodeId = store.addNode(
       p.data.nodeType,
-      p.data.position || { x: 0, y: 0 },
-      p.data.data || {}
+      p.data.position ?? { x: 0, y: 0 },
+      p.data.data ?? {}
     );
 
     const nodeDef = SHADER_NODE_DEFINITIONS[p.data.nodeType];

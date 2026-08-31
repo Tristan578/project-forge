@@ -50,6 +50,28 @@ FAILURES=0
 
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+SKIPS=0
+# skipped <reason> — a case the HOST cannot represent, never one we chose not
+# to run. Only reachable behind a capability PROBE (never an OS-name check), and
+# under CI it becomes a hard failure: coverage may thin out on a developer
+# laptop, never on the runner that gates merges.
+skipped() {
+  echo "  SKIP: $1"
+  SKIPS=$((SKIPS + 1))
+  if [ "${CI:-}" = "true" ]; then fail "skipped in CI: $1"; fi
+}
+
+# Can this filesystem represent POSIX mode 600 at all? PROBE it rather than
+# sniffing $OSTYPE: NTFS through Git-for-Windows accepts chmod and then still
+# reports -rw-r--r--, so the two credential-permission assertions below would
+# fail a script that is doing exactly the right thing. Everywhere the mode is
+# real — every Linux and macOS runner — the probe succeeds and both cases run.
+MODE_600_SUPPORTED=0
+_probe="$(mktemp)"
+chmod 600 "$_probe" 2>/dev/null || true
+# shellcheck disable=SC2012  # a fixed-width mode string is exactly what is wanted; find(1) cannot produce one portably.
+if [ "$(ls -l "$_probe" | cut -c1-10)" = "-rw-------" ]; then MODE_600_SUPPORTED=1; fi
+rm -f "$_probe"
 
 [ -f "$SCRIPT" ] || { echo "helper not found: $SCRIPT"; exit 1; }
 
@@ -208,11 +230,15 @@ fi
 # shellcheck disable=SC2012
 # `ls -l` is the portable way to read the mode here; the path is a fixed
 # mktemp-derived name we created ourselves, so the filename caveat cannot apply.
-mode="$(ls -l "$uri_out" | cut -c1-10)"
-if [ "$mode" = "-rw-------" ]; then
-  pass "the --uri-out file is mode 600 (owner-only)"
+if [ "$MODE_600_SUPPORTED" -eq 1 ]; then
+  mode="$(ls -l "$uri_out" | cut -c1-10)"
+  if [ "$mode" = "-rw-------" ]; then
+    pass "the --uri-out file is mode 600 (owner-only)"
+  else
+    fail "the --uri-out file is $mode, expected -rw------- (a world-readable credential on a shared runner)"
+  fi
 else
-  fail "the --uri-out file is $mode, expected -rw------- (a world-readable credential on a shared runner)"
+  skipped "filesystem cannot represent mode 600 — the --uri-out file permission not verified"
 fi
 
 # --- 3. --endpoint response with no connection URI → fail loudly -------------
@@ -282,11 +308,15 @@ else
   pass "the revealed password never reaches stdout"
 fi
 # shellcheck disable=SC2012  # a fixed-width mode string is exactly what is wanted here; find(1) cannot produce one portably.
-mode="$(ls -l "$uri_out" | cut -c1-10)"
-if [ "$mode" = "-rw-------" ]; then
-  pass "the composed-URI file is mode 600 (owner-only)"
+if [ "$MODE_600_SUPPORTED" -eq 1 ]; then
+  mode="$(ls -l "$uri_out" | cut -c1-10)"
+  if [ "$mode" = "-rw-------" ]; then
+    pass "the composed-URI file is mode 600 (owner-only)"
+  else
+    fail "the composed-URI file is $mode, expected -rw-------"
+  fi
 else
-  fail "the composed-URI file is $mode, expected -rw-------"
+  skipped "filesystem cannot represent mode 600 — the composed-URI file permission not verified"
 fi
 
 # --- 3b. A password with URI metacharacters must be percent-encoded ----------
@@ -811,6 +841,34 @@ else
 fi
 
 echo ""
+echo "=== credential file is created private BEFORE the secret lands in it ==="
+# This is the platform-independent half of the mode-600 guarantee, and on hosts
+# whose filesystem cannot represent 600 it is the ONLY half that still runs.
+# The order matters on its own terms: creating the file, writing the connection
+# URI, and only then chmod-ing would leave the credential world-readable for
+# the width of that window on a shared runner. Pin the sequence in the source
+# so a reorder is a red suite rather than a silent race.
+HELPER_SRC="$(cat "$SCRIPT")"
+# The three patterns below are grep BREs matching the LITERAL text "$uri_out"
+# in the helper's source; single quotes and the escaped dollar are exactly
+# right, and expanding them here would search for this suite's own (unset)
+# variable instead. Hence one targeted SC2016 waiver per line.
+# shellcheck disable=SC2016
+chmod_line="$(grep -n 'chmod 600 "\$uri_out"' <<<"$HELPER_SRC" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016
+truncate_line="$(grep -n ': > "\$uri_out"' <<<"$HELPER_SRC" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016
+write_line="$(grep -n 'printf .* > "\$uri_out"' <<<"$HELPER_SRC" | head -1 | cut -d: -f1)"
+if [ -z "$chmod_line" ] || [ -z "$truncate_line" ] || [ -z "$write_line" ]; then
+  fail "could not locate the create/chmod/write sequence for \$uri_out in $HELPER (chmod=${chmod_line:-?} truncate=${truncate_line:-?} write=${write_line:-?})"
+elif [ "$truncate_line" -lt "$chmod_line" ] && [ "$chmod_line" -lt "$write_line" ]; then
+  pass "\$uri_out is truncated, chmod-ed 600, and only then written (no world-readable window)"
+else
+  fail "\$uri_out permission window: expected truncate < chmod < write, got ${truncate_line} < ${chmod_line} < ${write_line}"
+fi
+
+echo ""
+echo "  SKIPS=$SKIPS"
 if [ "$FAILURES" -eq 0 ]; then
   echo "All tests passed."
   exit 0

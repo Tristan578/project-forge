@@ -8,6 +8,9 @@ use crate::core::{
     pending_commands::PendingCommands,
     history::HistoryStack,
 };
+// Editor-only: consumed solely by the selection-emit systems below, which
+// already carry `#[cfg(not(feature = "runtime"))]`.
+#[cfg(not(feature = "runtime"))]
 use crate::core::selection::{Selection, SelectionChangedEvent};
 use super::events;
 

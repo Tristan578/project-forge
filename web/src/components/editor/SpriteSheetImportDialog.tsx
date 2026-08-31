@@ -147,14 +147,14 @@ export function SpriteSheetImportDialog({ isOpen, onClose }: SpriteSheetImportDi
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) processFile(file);
+    if (file) void processFile(file);
   }, [processFile]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file) processFile(file);
+    if (file) void processFile(file);
   }, [processFile]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {

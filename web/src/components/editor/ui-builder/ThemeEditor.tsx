@@ -56,7 +56,7 @@ export function ThemeEditor() {
   const applyTheme = useUIBuilderStore((s) => s.applyTheme);
   const [showPresets, setShowPresets] = useState(false);
 
-  const currentTheme = globalTheme || THEME_PRESETS.Dark;
+  const currentTheme = globalTheme ?? THEME_PRESETS.Dark;
 
   const handleChange = (field: keyof UITheme, value: string | number) => {
     applyTheme({ ...currentTheme, [field]: value });

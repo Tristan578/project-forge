@@ -79,7 +79,7 @@ export function VisualScriptEditor({ graph, onGraphChange, onCompile }: VisualSc
   const onConnect = useCallback((connection: Connection) => {
     setEdges(eds => addEdge({
       ...connection,
-      animated: connection.sourceHandle?.startsWith('exec') || false,
+      animated: connection.sourceHandle?.startsWith('exec') ?? false,
       style: { stroke: connection.sourceHandle?.startsWith('exec') ? '#fff' : '#4ade80' },
     }, eds));
   }, [setEdges]);

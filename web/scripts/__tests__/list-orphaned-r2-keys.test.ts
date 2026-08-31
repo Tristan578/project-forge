@@ -123,10 +123,39 @@ describe('list-orphaned-r2-keys', () => {
       expect(isMainModule('file:///x.ts', undefined)).toBe(false);
     });
 
+    // Both shapes are spelled out literally rather than derived with
+    // pathToFileURL, which would just restate the implementation. The case name
+    // has always said 'platform-native', but the fixture was POSIX-only: on
+    // Windows process.argv[1] is 'D:\\script.ts' while import.meta.url is
+    // 'file:///D:/script.ts', so the real question is whether those two match.
+    const native =
+      process.platform === 'win32'
+        ? {
+            argv: 'D:\\tmp\\list-orphaned-r2-keys.ts',
+            url: 'file:///D:/tmp/list-orphaned-r2-keys.ts',
+            other: 'file:///D:/tmp/other.ts',
+          }
+        : {
+            argv: '/tmp/list-orphaned-r2-keys.ts',
+            url: 'file:///tmp/list-orphaned-r2-keys.ts',
+            other: 'file:///tmp/other.ts',
+          };
+
     it('matches a platform-native argv path against the module URL', () => {
-      const argv1 = '/tmp/list-orphaned-r2-keys.ts';
-      expect(isMainModule('file:///tmp/list-orphaned-r2-keys.ts', argv1)).toBe(true);
-      expect(isMainModule('file:///tmp/other.ts', argv1)).toBe(false);
+      expect(isMainModule(native.url, native.argv)).toBe(true);
+      expect(isMainModule(native.other, native.argv)).toBe(false);
     });
+
+    // runIf, not an early `return`: an early return reports as a PASS on Linux,
+    // which claims coverage this case cannot give there. The drive letter is
+    // part of the identity -- without it a script at /tmp/x.ts and one at
+    // D:/tmp/x.ts would be indistinguishable -- but only Windows argv carries
+    // one, so the assertion is honestly Windows-only.
+    it.runIf(process.platform === 'win32')(
+      'does not treat a POSIX-shaped URL as this module on Windows',
+      () => {
+        expect(isMainModule('file:///tmp/list-orphaned-r2-keys.ts', native.argv)).toBe(false);
+      }
+    );
   });
 });

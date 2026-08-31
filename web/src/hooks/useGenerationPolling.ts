@@ -129,7 +129,7 @@ export function useGenerationPolling() {
     timersRef.current[id] = setInterval(poll, POLL_INTERVAL_MS);
 
     // Immediate first poll
-    poll();
+    void poll();
   }
 
   async function handleCompletion(id: string, type: string, data: StatusResponse) {
