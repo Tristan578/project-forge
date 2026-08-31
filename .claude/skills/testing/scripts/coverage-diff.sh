@@ -7,6 +7,22 @@
 
 set -euo pipefail
 
+# already_queued <path> — exact membership test over $changed_tests.
+#
+# Replaces the `[[ " ${arr[*]} " =~ " $x " ]]` idiom, which SUBSTRING-matches:
+# "a/b.test.ts" reads as already queued once "x/a/b.test.ts" is in the list, so
+# a real test file gets silently dropped from the coverage diff. (Unquoting the
+# right-hand side, as SC2076 suggests, would be worse still — App Router paths
+# contain [param] brackets, which are a regex character class.) Exact comparison
+# per element is both correct and shellcheck-clean.
+already_queued() {
+  local needle="$1" item
+  for item in ${changed_tests[@]+"${changed_tests[@]}"}; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
 cd "$REPO_ROOT"
 
@@ -34,7 +50,7 @@ while IFS= read -r f; do
     "${dir}/__tests__/${name}.test.ts" \
     "${dir}/${name}.test.${ext}" \
     "${dir}/${name}.test.ts"; do
-    if [[ -f "$candidate" ]] && [[ ! " ${changed_tests[*]} " =~ " $candidate " ]]; then
+    if [[ -f "$candidate" ]] && ! already_queued "$candidate"; then
       changed_tests+=("$candidate")
     fi
   done
@@ -94,9 +110,18 @@ for metric in statements branches functions lines; do
   after="$(parse_summary "${COVERAGE_DIR}/after" "$metric")"
   if [[ "$before" != "N/A" && "$after" != "N/A" ]]; then
     delta="$(node -e "console.log((${after} - ${before}).toFixed(2))" 2>/dev/null || echo "?")"
-    symbol="="
-    if (( $(echo "$delta > 0" | bc -l 2>/dev/null || echo 0) )); then symbol="+"; fi
-    if (( $(echo "$delta < 0" | bc -l 2>/dev/null || echo 0) )); then symbol="-"; regression=1; fi
+    # awk, not `bc ... || echo 0`. bc is absent from Git-for-Windows, Alpine and
+    # slim CI images, and the old fallback answered "0" (false) to BOTH the
+    # "> 0" and the "< 0" question -- so on any host without bc a real coverage
+    # DROP printed as "=" and left regression=0, silently disarming the gate
+    # this script exists to be. awk is in every POSIX environment; LC_ALL=C
+    # pins the decimal separator. A delta that is not a number ("?") is an
+    # explicit unknown, never a pass.
+    symbol="$(LC_ALL=C awk -v d="$delta" 'BEGIN {
+      if (d ~ /^-?[0-9]+(\.[0-9]+)?$/) { print (d > 0) ? "+" : ((d < 0) ? "-" : "=") }
+      else { print "?" }
+    }')"
+    if [[ "$symbol" == "-" || "$symbol" == "?" ]]; then regression=1; fi
     printf "  %-12s %-12s %-12s %s%s%%\n" "$metric" "${before}%" "${after}%" "$symbol" "$delta"
   else
     printf "  %-12s %-12s %-12s (unavailable)\n" "$metric" "$before" "$after"
