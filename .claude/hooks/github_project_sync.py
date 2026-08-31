@@ -786,7 +786,6 @@ def gh_create_issue_and_add_to_project(config, ticket_id, title, body="", labels
     try:
         issue_data = json.loads(gh_run(create_args))
         issue_number = int(issue_data["number"])
-        issue_url = issue_data["html_url"]
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
         raise RuntimeError(f"Issue creation returned an invalid response: {e}") from e
 
@@ -795,6 +794,9 @@ def gh_create_issue_and_add_to_project(config, ticket_id, title, body="", labels
     # a process killed immediately afterwards) cannot make the next push create
     # the same issue again.
     db_set_github_issue_number(ticket_id, issue_number)
+    # The canonical URL is derivable from the persisted number. Do not make an
+    # optional response field another failure point after creation succeeded.
+    issue_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
 
     item_id = gh_add_issue_to_project(config, issue_url, issue_number)
     return item_id, issue_number
@@ -839,6 +841,7 @@ def retry_project_attachment(config, entry, issue_number):
             return False
         entry["githubItemId"] = new_item_id
         entry.pop("projectAttachmentPending", None)
+        entry["projectStatusPending"] = True
         if is_real_project_item_id(old_item_id) and old_item_id != new_item_id:
             entry["legacyProjectItemId"] = old_item_id
 
@@ -853,6 +856,17 @@ def retry_project_attachment(config, entry, issue_number):
             ])
             entry.pop("legacyProjectItemId", None)
         except Exception as e:
+            text = str(e)
+            if (
+                "Could not resolve to a node" in text
+                or "Could not find" in text
+                or "not found" in text.lower()
+            ):
+                # Crash-idempotence: deletion may have succeeded immediately
+                # before the process stopped and saved the map. Missing now is
+                # the desired state, so clear the durable retry marker.
+                entry.pop("legacyProjectItemId", None)
+                return not entry.get("projectAttachmentPending")
             print(
                 f"  ! Issue #{issue_number} attached, but old project item "
                 f"cleanup failed: {e}",
@@ -1089,7 +1103,7 @@ class ProjectFieldSync:
     def apply(self, config, entry, issue_number, status, display):
         """Mirror `status` onto the board. Never raises."""
         if self.tripped:
-            return
+            return False
         item_id = entry.get("githubItemId")
         if not is_real_project_item_id(item_id):
             item_id = gh_resolve_project_item_id(config, issue_number) if issue_number else None
@@ -1099,7 +1113,7 @@ class ProjectFieldSync:
                 # record once so the summary can show it.
                 self.unmapped += 1
                 entry.pop("githubItemId", None)
-                return
+                return False
             entry["githubItemId"] = item_id
         try:
             if not gh_set_status(config, item_id, status):
@@ -1108,8 +1122,9 @@ class ProjectFieldSync:
                 # the same way an issue that is not on the board is recorded.
                 self.unmapped += 1
                 entry.pop("githubItemId", None)
-                return
+                return False
             self.applied += 1
+            return True
         except Exception as e:
             self.failures += 1
             text = str(e)
@@ -1118,10 +1133,11 @@ class ProjectFieldSync:
                 # per ticket only spends quota, so stop after the first one.
                 entry.pop("githubItemId", None)
                 self._trip(f"unresolvable project item id ({text[:120]})")
-                return
+                return False
             print(f"  ! Board status failed {display}: {text}", file=sys.stderr)
             if self.failures >= self.limit:
                 self._trip(f"{self.failures} consecutive failures")
+            return False
 
     def summary(self):
         parts = []
@@ -1338,13 +1354,16 @@ def _push_inner(include_done=False):
                 # Best-effort, like every other board-status write. item_id is
                 # absent when project-add failed; that is an unmapped board item,
                 # not a failed authoritative issue create.
+                project_status_pending = False
                 try:
                     if gh_set_status(config, item_id, status):
                         field_sync.applied += 1
                     else:
                         field_sync.unmapped += 1
+                        project_status_pending = True
                 except Exception as e:
                     field_sync.failures += 1
+                    project_status_pending = True
                     errlog.add(f"Board status failed {display}: {e}")
                 # Close the issue immediately if created as done
                 if status == "done":
@@ -1364,6 +1383,8 @@ def _push_inner(include_done=False):
                     new_entry["githubItemId"] = item_id
                 else:
                     new_entry["projectAttachmentPending"] = True
+                if project_status_pending:
+                    new_entry["projectStatusPending"] = True
                 tmap[tid] = new_entry
                 created += 1
                 print(f"  + {display} [{status}] -> #{new_gh_num}")
@@ -1400,6 +1421,7 @@ def _push_inner(include_done=False):
             project_work_pending = bool(
                 entry.get("projectAttachmentPending")
                 or entry.get("legacyProjectItemId")
+                or entry.get("projectStatusPending")
             )
 
             if not (
@@ -1419,8 +1441,12 @@ def _push_inner(include_done=False):
                         config, entry, gh_issue_num
                     )
 
+                if status_changed or entry.get("projectStatusPending"):
+                    if field_sync.apply(config, entry, gh_issue_num, status, display):
+                        entry.pop("projectStatusPending", None)
+                    else:
+                        entry["projectStatusPending"] = True
                 if status_changed:
-                    field_sync.apply(config, entry, gh_issue_num, status, display)
                     # Close/reopen the GitHub issue to match local status
                     gh_sync_issue_state(config, gh_issue_num, status,
                                         prev_status=entry.get("lastLocalStatus"))
@@ -2001,8 +2027,10 @@ def migrate_drafts():
                 entry["githubItemId"] = new_item_id
                 entry.pop("projectAttachmentPending", None)
                 try:
-                    gh_set_status(config, new_item_id, status)
+                    if not gh_set_status(config, new_item_id, status):
+                        entry["projectStatusPending"] = True
                 except Exception as e:
+                    entry["projectStatusPending"] = True
                     print(
                         f"  ! Issue #{gh_issue_number} created, but project "
                         f"status failed: {e}",

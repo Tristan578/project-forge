@@ -468,6 +468,20 @@ assert_out "successful project add still returns its real item id" \
 
 out="$(run_py "
 import json
+writes = []
+urls = []
+m.gh_run = lambda *args, **kwargs: json.dumps({'number': 42})
+m.db_set_github_issue_number = lambda tid, num: writes.append((tid, num))
+m.gh_add_issue_to_project = lambda cfg, url, num: (urls.append(url) or 'PVTI_real')
+result = m.gh_create_issue_and_add_to_project(
+    {'owner': 'o', 'repo': 'r'}, 'tid', 'title')
+print(result, writes, urls)
+")"
+assert_out "issue number is persisted without relying on an html_url response field" \
+  "('PVTI_real', 42) [('tid', 42)] ['https://github.com/o/r/issues/42']" "$out"
+
+out="$(run_py "
+import json
 calls = []
 entry = {'projectAttachmentPending': True}
 def fake_gh(args, **kwargs):
@@ -509,6 +523,28 @@ print(first, second, entry, adds, deletes)
 ")"
 assert_out "legacy cleanup retries without adding the existing issue twice" \
   "False True {'githubItemId': 'PVTI_replacement'} 1 2" "$out"
+
+out="$(run_py "
+entry = {'githubItemId': 'PVTI_new', 'legacyProjectItemId': 'PVTI_gone'}
+m.gh_run = lambda *args, **kwargs: (_ for _ in ()).throw(
+    RuntimeError('GraphQL: Could not resolve to a node with the global id'))
+print(m.retry_project_attachment(
+    {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, entry, 42), entry)
+")"
+assert_out "an already-deleted legacy item completes cleanup after a crash" \
+  "True {'githubItemId': 'PVTI_new'}" "$out"
+
+out="$(run_py "
+entry = {'githubItemId': 'PVTI_new', 'projectStatusPending': True}
+fs = m.ProjectFieldSync()
+m.gh_set_status = lambda *args: True
+ok = fs.apply({}, entry, 42, 'todo', 'ticket')
+if ok:
+    entry.pop('projectStatusPending', None)
+print(ok, entry, fs.applied)
+")"
+assert_out "a pending board status is retried and cleared on success" \
+  "True {'githubItemId': 'PVTI_new'} 1" "$out"
 
 out="$(run_py "
 import inspect
