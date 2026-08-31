@@ -3617,7 +3617,7 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
           web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
           echo "$CHANGED" | grep -q '^web/' && web=true
-          echo "$CHANGED" | grep -q '^engine/' && engine=true
+          echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
