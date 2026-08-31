@@ -796,10 +796,16 @@ def gh_create_issue_and_add_to_project(config, ticket_id, title, body="", labels
     # the same issue again.
     db_set_github_issue_number(ticket_id, issue_number)
 
+    item_id = gh_add_issue_to_project(config, issue_url, issue_number)
+    return item_id, issue_number
+
+
+def gh_add_issue_to_project(config, issue_url, issue_number):
+    """Best-effort Projects v2 attachment for an existing REST issue."""
     try:
         add_result = gh_run([
             "gh", "project", "item-add", str(config["projectNumber"]),
-            "--owner", owner,
+            "--owner", config["owner"],
             "--url", issue_url,
             "--format", "json",
         ])
@@ -811,9 +817,50 @@ def gh_create_issue_and_add_to_project(config, ticket_id, title, body="", labels
             f"  ! Issue #{issue_number} created, but project add failed: {e}",
             file=sys.stderr,
         )
-        item_id = None
+        return None
 
-    return item_id, issue_number
+    return item_id
+
+
+def retry_project_attachment(config, entry, issue_number):
+    """Retry pending project attachment/deletion without recreating an issue."""
+    issue_url = (
+        f"https://github.com/{config['owner']}/{config['repo']}/issues/{issue_number}"
+    )
+
+    if entry.get("projectAttachmentPending"):
+        old_item_id = entry.get("githubItemId")
+        # A process can die after the project mutation succeeds but before the
+        # map is saved. Resolve first so recovery never adds a second item.
+        new_item_id = gh_resolve_project_item_id(config, issue_number)
+        if not new_item_id:
+            new_item_id = gh_add_issue_to_project(config, issue_url, issue_number)
+        if not new_item_id:
+            return False
+        entry["githubItemId"] = new_item_id
+        entry.pop("projectAttachmentPending", None)
+        if is_real_project_item_id(old_item_id) and old_item_id != new_item_id:
+            entry["legacyProjectItemId"] = old_item_id
+
+    legacy_item_id = entry.get("legacyProjectItemId")
+    if is_real_project_item_id(legacy_item_id):
+        try:
+            gh_run([
+                "gh", "project", "item-delete",
+                str(config["projectNumber"]),
+                "--owner", config["owner"],
+                "--id", legacy_item_id,
+            ])
+            entry.pop("legacyProjectItemId", None)
+        except Exception as e:
+            print(
+                f"  ! Issue #{issue_number} attached, but old project item "
+                f"cleanup failed: {e}",
+                file=sys.stderr,
+            )
+            return False
+
+    return not entry.get("projectAttachmentPending")
 
 
 def gh_set_status(config, item_id, local_status):
@@ -1303,8 +1350,7 @@ def _push_inner(include_done=False):
                 if status == "done":
                     gh_sync_issue_state(config, new_gh_num, status)
 
-                tmap[tid] = {
-                    "githubItemId": item_id,
+                new_entry = {
                     "githubIssueNumber": new_gh_num,
                     "lastLocalStatus": status,
                     "lastGithubStatus": local_to_github(config, status),
@@ -1314,6 +1360,11 @@ def _push_inner(include_done=False):
                     "subtaskHash": cur_subtask_hash,
                     "metadataVersion": 3,
                 }
+                if item_id:
+                    new_entry["githubItemId"] = item_id
+                else:
+                    new_entry["projectAttachmentPending"] = True
+                tmap[tid] = new_entry
                 created += 1
                 print(f"  + {display} [{status}] -> #{new_gh_num}")
             except Exception as e:
@@ -1332,6 +1383,9 @@ def _push_inner(include_done=False):
                     "bodyHash": "",
                     "subtaskHash": "",
                     "metadataVersion": 2,
+                    # A durable DB link with no map entry is exactly the recovery
+                    # shape left by a process killed after REST creation.
+                    "projectAttachmentPending": True,
                 }
 
             entry = tmap[tid]
@@ -1343,14 +1397,27 @@ def _push_inner(include_done=False):
             body_changed = entry.get("bodyHash") != cur_body_hash
             subtask_changed = entry.get("subtaskHash") != cur_subtask_hash
             needs_upgrade = entry.get("metadataVersion", 0) < 3
+            project_work_pending = bool(
+                entry.get("projectAttachmentPending")
+                or entry.get("legacyProjectItemId")
+            )
 
-            if not (status_changed or body_changed or subtask_changed or needs_upgrade):
+            if not (
+                status_changed or body_changed or subtask_changed
+                or needs_upgrade or project_work_pending
+            ):
                 skipped += 1
                 continue
 
             try:
                 body = format_github_body(full_ticket)
                 gh_update_issue(config, gh_issue_num, body=body)
+
+                attachment_complete = True
+                if project_work_pending:
+                    attachment_complete = retry_project_attachment(
+                        config, entry, gh_issue_num
+                    )
 
                 if status_changed:
                     field_sync.apply(config, entry, gh_issue_num, status, display)
@@ -1372,6 +1439,11 @@ def _push_inner(include_done=False):
                     reasons.append("body")
                 if subtask_changed:
                     reasons.append("subtasks")
+                if project_work_pending:
+                    reasons.append(
+                        "project attachment"
+                        if attachment_complete else "project attachment pending"
+                    )
                 print(f"  ~ {display} [{', '.join(reasons)}]")
             except Exception as e:
                 errlog.add(f"Update failed {display}: {e}")
@@ -1912,23 +1984,17 @@ def migrate_drafts():
             new_item_id, gh_issue_number = gh_create_issue_and_add_to_project(
                 config, tid, title, body
             )
-            gh_set_status(config, new_item_id, status)
-
-            # Do not discard the old board item unless its replacement was
-            # actually added. The REST issue link is already durable either
-            # way, so a GraphQL outage can be repaired on a later sync.
-            if old_item_id and new_item_id:
-                try:
-                    gh_run([
-                        "gh", "project", "item-delete",
-                        str(config["projectNumber"]),
-                        "--owner", config["owner"],
-                        "--id", old_item_id,
-                    ])
-                except Exception:
-                    pass
-
-            entry["githubItemId"] = new_item_id
+            if new_item_id:
+                gh_set_status(config, new_item_id, status)
+                entry["githubItemId"] = new_item_id
+                entry.pop("projectAttachmentPending", None)
+                if is_real_project_item_id(old_item_id) and old_item_id != new_item_id:
+                    entry["legacyProjectItemId"] = old_item_id
+                    retry_project_attachment(config, entry, gh_issue_number)
+            else:
+                # Preserve the legacy item until a later push successfully adds
+                # the already-created REST issue and can delete the replacement.
+                entry["projectAttachmentPending"] = True
             entry["githubIssueNumber"] = gh_issue_number
             entry["bodyHash"] = compute_body_hash(full_ticket)
             entry["subtaskHash"] = compute_subtask_hash(full_ticket.get("subtasks", []))

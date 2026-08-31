@@ -466,6 +466,50 @@ print(item_id, issue_number, calls)
 assert_out "successful project add still returns its real item id" \
   "PVTI_real 42 [('tid', 42)]" "$out"
 
+out="$(run_py "
+import json
+calls = []
+entry = {'projectAttachmentPending': True}
+def fake_gh(args, **kwargs):
+    calls.append(args)
+    return json.dumps({'id': 'PVTI_attached'})
+m.gh_run = fake_gh
+m.gh_resolve_project_item_id = lambda *args: None
+ok = m.retry_project_attachment(
+    {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, entry, 42)
+print(ok, entry, len(calls), calls[0][1:3])
+")"
+assert_out "second run attaches the existing issue without another REST create" \
+  "True {'githubItemId': 'PVTI_attached'} 1 ['project', 'item-add']" "$out"
+
+out="$(run_py "
+import contextlib, io, json
+calls = []
+entry = {'githubItemId': 'PVTI_legacy', 'projectAttachmentPending': True}
+delete_attempts = 0
+def fake_gh(args, **kwargs):
+    global delete_attempts
+    calls.append(args)
+    if args[1:3] == ['project', 'item-add']:
+        return json.dumps({'id': 'PVTI_replacement'})
+    delete_attempts += 1
+    if delete_attempts == 1:
+        raise RuntimeError('temporary delete failure')
+    return ''
+m.gh_run = fake_gh
+m.gh_resolve_project_item_id = lambda *args: None
+with contextlib.redirect_stderr(io.StringIO()):
+    first = m.retry_project_attachment(
+        {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, entry, 42)
+    second = m.retry_project_attachment(
+        {'owner': 'o', 'repo': 'r', 'projectNumber': 1}, entry, 42)
+adds = sum(args[1:3] == ['project', 'item-add'] for args in calls)
+deletes = sum(args[1:3] == ['project', 'item-delete'] for args in calls)
+print(first, second, entry, adds, deletes)
+")"
+assert_out "legacy cleanup retries without adding the existing issue twice" \
+  "False True {'githubItemId': 'PVTI_replacement'} 1 2" "$out"
+
 # ==========================================================================
 # PF-1212 — the sync must not spend GraphQL quota on requests that cannot
 # succeed. pull() synthesized `issue-<number>` as a Projects v2 item id, push()
