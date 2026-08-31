@@ -612,8 +612,8 @@ jobs:
     name: Upload WASM to R2 CDN
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [build-wasm]
-    if: ${{ vars.R2_CDN_ENABLED == 'true' }}
+    needs: [build-wasm, security]
+    if: ${{ vars.R2_CDN_ENABLED == 'true' && needs.security.result == 'success' }}
     permissions:
       contents: read
     steps:
