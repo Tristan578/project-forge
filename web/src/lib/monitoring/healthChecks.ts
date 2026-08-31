@@ -216,6 +216,20 @@ export async function checkRateLimiting(): Promise<ServiceHealth> {
   };
 }
 
+/**
+ * Resolve the engine root exactly as `useEngine.ts` does.
+ *
+ * Kept in lockstep with ENGINE_CDN_ROOT there: `<cdn>/<version>` when a version
+ * is stamped, `<cdn>/latest` when it is not. Probing anything else is how the
+ * old check stayed green through #9581 — it HEAD'd the CDN *host*, which is
+ * always up, rather than the prefix this deployment actually asks for.
+ */
+export function resolveEngineRoot(cdnBase: string, version: string): string {
+  const base = cdnBase.replace(/\/+$/, '');
+  const v = version.trim();
+  return v ? `${base}/${v}` : `${base}/latest`;
+}
+
 export async function checkEngineCdn(): Promise<ServiceHealth> {
   const cdnUrl = process.env.NEXT_PUBLIC_ENGINE_CDN_URL;
 
@@ -229,14 +243,19 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
     };
   }
 
+  // A real asset under the resolved prefix, not the bucket root. The previous
+  // implementation pinged the root AND explicitly excluded 404 from its error
+  // condition, so a completely absent version prefix reported "up" — which is
+  // exactly what happened while production could not load the engine at all.
+  const root = resolveEngineRoot(cdnUrl, process.env.NEXT_PUBLIC_ENGINE_VERSION ?? '');
+  const probeUrl = `${root}/engine-pkg-webgl2/wasm-manifest.json`;
+
   try {
-    const pingUrl = cdnUrl.endsWith('/') ? cdnUrl : `${cdnUrl}/`;
     const { latencyMs } = await timed(() =>
       withTimeout(
-        fetch(pingUrl, { method: 'HEAD' }).then((res) => {
-          // 5xx indicates CDN server error; 4xx (except 404) indicates auth/config issue
-          if (res.status >= 500 || (res.status >= 400 && res.status !== 404)) {
-            throw new Error(`CDN returned ${res.status}`);
+        fetch(probeUrl, { method: 'HEAD' }).then((res) => {
+          if (!res.ok) {
+            throw new Error(`engine asset returned ${res.status}`);
           }
         }),
         TIMEOUT_MS,
@@ -247,16 +266,19 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
       status: 'healthy',
       latencyMs,
       lastChecked: new Date().toISOString(),
-      details: { url: cdnUrl },
+      details: { url: probeUrl },
     };
   } catch (err) {
+    // 'down', not 'degraded': there is no fallback. useEngine.ts tries the CDN
+    // then same-origin, and on a CDN deployment same-origin has no engine
+    // either, so an unreachable asset means the editor cannot start.
     return {
       name: 'Engine CDN',
-      status: 'degraded',
+      status: 'down',
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
       error: err instanceof Error ? err.message : String(err),
-      details: { url: cdnUrl },
+      details: { url: probeUrl },
     };
   }
 }

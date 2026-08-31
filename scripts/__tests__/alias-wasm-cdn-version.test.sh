@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# Contract test for scripts/alias-wasm-cdn-version.sh — the step that gives a
+# deploy's commit SHA a valid engine prefix when the engine did not change.
+#
+# WHY THE NEGATIVE CASES DOMINATE
+#
+# The bug being fixed (#9581) was silent: cd.yml stamped a SHA, the upload job
+# skipped, and both the CDN path and the same-origin fallback 404'd — while
+# every job stayed green. A fix that can itself fail quietly just relocates the
+# problem, so every way the copy can produce an empty prefix must exit non-zero.
+#
+# The trap worth naming: `aws s3 cp --recursive` over a non-existent prefix
+# EXITS 0 having copied nothing. Trusting its exit code alone would reproduce
+# the original failure exactly — a green deploy serving 404s.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$HERE/../alias-wasm-cdn-version.sh"
+CD_YML="$HERE/../../.github/workflows/cd.yml"
+
+PASS=0
+FAIL=0
+pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+
+[ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; exit 1; }
+
+# A stub `aws` driven by two files: what `s3 ls` prints per prefix, and whether
+# `s3 cp` succeeds. Records its argv so the flags can be asserted.
+make_aws() {
+  local dir="$1" ls_latest="$2" ls_dest="$3" cp_rc="$4"
+  cat > "$dir/aws" <<STUB
+#!/usr/bin/env bash
+echo "\$@" >> "$dir/argv.log"
+case "\$*" in
+  *"s3 ls"*"/latest/"*)  printf '%s' '${ls_latest}' ;;
+  *"s3 ls"*)             printf '%s' '${ls_dest}' ;;
+  *"s3 cp"*)             exit ${cp_rc} ;;
+esac
+exit 0
+STUB
+  chmod +x "$dir/aws"
+}
+
+run_case() {
+  local ls_latest="$1" ls_dest="$2" cp_rc="$3"
+  local dir
+  dir="$(mktemp -d)"
+  make_aws "$dir" "$ls_latest" "$ls_dest" "$cp_rc"
+  local out rc
+  out="$(AWS_CLI="$dir/aws" ENGINE_VERSION=abc123 R2_BUCKET=test-bucket bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+  printf '%s\n---RC---%s\n---ARGV---\n%s' "$out" "$rc" "$(cat "$dir/argv.log" 2>/dev/null)"
+  rm -rf "$dir"
+}
+
+echo "=== alias-wasm-cdn-version.sh ==="
+
+# --- happy path ---------------------------------------------------------------
+RES="$(run_case 'obj1
+obj2' 'obj1
+obj2' 0)"
+RC="${RES#*---RC---}"; RC="${RC%%$'\n'---ARGV---*}"
+if [ "$RC" = "0" ]; then
+  pass "a populated latest/ with a successful copy exits 0"
+else
+  fail "happy path exited $RC: $(head -3 <<<"$RES")"
+fi
+
+ARGV="${RES#*---ARGV---$'\n'}"
+if grep -q -- "--metadata-directive REPLACE" <<<"$ARGV"; then
+  pass "the copy REPLACEs metadata (latest/ is short-TTL; a pinned prefix must not inherit that)"
+else
+  fail "copy did not pass --metadata-directive REPLACE: $ARGV"
+fi
+if grep -q -- "immutable" <<<"$ARGV"; then
+  pass "the copy sets an immutable cache-control on the pinned prefix"
+else
+  fail "copy did not set an immutable cache-control: $ARGV"
+fi
+if grep -qE "s3 cp s3://test-bucket/latest/ s3://test-bucket/abc123/" <<<"$ARGV"; then
+  pass "copies latest/ to the stamped version prefix"
+else
+  fail "unexpected copy source/destination: $ARGV"
+fi
+
+echo ""
+echo "--- every way this can produce an empty prefix must fail ---"
+
+# The trap: `aws s3 cp --recursive` over a missing prefix exits 0 having copied
+# nothing. Exit code alone is not evidence.
+RES="$(run_case '' '' 0)"
+RC="${RES#*---RC---}"; RC="${RC%%$'\n'---ARGV---*}"
+if [ "$RC" != "0" ]; then
+  pass "an EMPTY latest/ fails even though the copy would exit 0 (exit $RC)"
+else
+  fail "an empty source produced a success — this is the original bug"
+fi
+if grep -q "refusing to stamp" <<<"$RES"; then
+  pass "the refusal explains that nothing would be behind the stamp"
+else
+  fail "empty-source refusal did not explain itself"
+fi
+
+# A copy that genuinely errors.
+RES="$(run_case 'obj1' 'obj1' 1)"
+RC="${RES#*---RC---}"; RC="${RC%%$'\n'---ARGV---*}"
+if [ "$RC" != "0" ]; then
+  pass "a failing copy exits non-zero (exit $RC)"
+else
+  fail "a failing copy was reported as success"
+fi
+
+# Source present, copy "succeeds", destination still empty. This is the shape
+# that would ship a green deploy serving 404s.
+RES="$(run_case 'obj1' '' 0)"
+RC="${RES#*---RC---}"; RC="${RC%%$'\n'---ARGV---*}"
+if [ "$RC" != "0" ]; then
+  pass "a copy that leaves the destination empty fails (exit $RC)"
+else
+  fail "an empty destination after copy was reported as success"
+fi
+
+# Missing configuration is a usage error, not a verdict.
+for var in ENGINE_VERSION R2_BUCKET; do
+  d="$(mktemp -d)"; make_aws "$d" 'obj1' 'obj1' 0
+  if [ "$var" = "ENGINE_VERSION" ]; then
+    out="$(AWS_CLI="$d/aws" R2_BUCKET=b bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+  else
+    out="$(AWS_CLI="$d/aws" ENGINE_VERSION=v bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+  fi
+  rm -rf "$d"
+  if [ "$rc" -ne 0 ]; then
+    pass "a missing $var exits non-zero"
+  else
+    fail "a missing $var was tolerated: $out"
+  fi
+done
+
+# --- wiring -------------------------------------------------------------------
+# The script is only useful if the deploy actually reaches it on the runs where
+# the engine did NOT change — which is ~11 of 12.
+echo ""
+echo "=== cd.yml wiring ==="
+if [ ! -f "$CD_YML" ]; then
+  fail "cd.yml not found"
+else
+  if grep -q 'scripts/alias-wasm-cdn-version\.sh' "$CD_YML"; then
+    pass "cd.yml calls the alias script"
+  else
+    fail "cd.yml never calls scripts/alias-wasm-cdn-version.sh"
+  fi
+
+  block="$(awk '/^  upload-wasm-cdn:/{f=1; next} f && /^  [a-z][a-z0-9-]*:$/{exit} f' "$CD_YML")"
+  if [ -z "$block" ]; then
+    fail "cd.yml has no upload-wasm-cdn job"
+  else
+    # Without always(), an `if:` carries an implicit success() over `needs`, so a
+    # SKIPPED build-wasm skips the upload with it. That implicit skip is the
+    # whole of #9581.
+    if grep -q 'always()' <<<"$block"; then
+      pass "upload-wasm-cdn uses always() so a skipped build-wasm cannot cascade-skip it"
+    else
+      fail "upload-wasm-cdn has no always() — a skipped build-wasm would skip the upload, which IS #9581"
+    fi
+    if grep -q "needs.build-wasm.result == 'skipped'" <<<"$block"; then
+      pass "upload-wasm-cdn has an explicit engine-unchanged path"
+    else
+      fail "upload-wasm-cdn does not branch on a skipped build-wasm"
+    fi
+  fi
+fi
+
+echo ""
+echo "  PASS=$PASS FAIL=$FAIL"
+if [ "$FAIL" -eq 0 ]; then
+  echo "SUITE PASSED"
+  exit 0
+fi
+echo "SUITE FAILED"
+exit 1
