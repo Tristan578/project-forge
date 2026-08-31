@@ -770,3 +770,20 @@ Net assertion delta over the round 39 cut is **+2** (function-freeze drift, plus
 the effect probe): **231 PASS / 0 FAIL**. No heredoc payload was added, so
 `SELF_EXEC_EXPECTED_DROP` is untouched. Shellcheck clean. All 18
 `scripts/__tests__/*.test.sh` suites pass. No workflow file was touched.
+
+## Coverage extension (PF-1065 / #9102): production WASM CDN upload
+
+`upload-wasm-cdn` publishes engine binaries to the production R2 bucket but
+previously depended only on `build-wasm`. A red `security` job therefore did
+not stop publication. The job now names `security` in `needs:` and requires
+`needs.security.result == 'success'` in its single-line `if:`. Equality is
+deliberate: if the dependency is removed, the missing result resolves to null
+and the condition fails closed; `!= 'failure'` would pass.
+
+The suite gives this job a separate pin block because its ordered job-level
+keys differ from all existing deploy loops. It pins the job count, exact key
+order, `security` as a flow-list element, exactly one `if:`, containment of the
+success clause, and the exact complete `if:` line. Red mutations verified each
+new failure path: removing the job, removing the whole `needs:` or `if:` key,
+removing `security` from `needs:`, replacing the condition with `!= 'failure'`,
+and appending `|| true` all make the suite exit nonzero.
