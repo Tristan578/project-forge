@@ -80,7 +80,12 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
   const handleFork = async () => {
     try {
       const projectId = await forkGame(gameId);
-      router.push(`/editor?project=${projectId}`);
+      // `/editor/<id>`, not `/editor?project=<id>`: the editor route is
+      // `app/editor/[id]` and reads the id from useParams(), and there is no
+      // `/editor` route for the query-string form to land on — so forking from
+      // the community gallery 404'd (#9046). This matches RemixButton, which is
+      // the same "server made you a project, now open it" flow.
+      router.push(`/editor/${encodeURIComponent(projectId)}`);
       onClose();
     } catch (err) {
       console.error('Failed to fork game:', err);

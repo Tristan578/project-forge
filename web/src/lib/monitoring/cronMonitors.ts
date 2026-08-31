@@ -22,7 +22,7 @@ import * as Sentry from '@sentry/nextjs';
 export interface CronMonitor {
   /** Vercel cron `path` (e.g. `/api/cron/health-monitor`). */
   readonly path: string;
-  /** Crontab schedule expression (e.g. `*\/5 * * * *`). Mirrors vercel.json. */
+  /** Crontab schedule expression (e.g. `*\/15 * * * *`). Mirrors vercel.json. */
   readonly schedule: string;
   /**
    * Stable Sentry monitor slug. Kebab-cased, deterministic, and decoupled from
@@ -41,7 +41,7 @@ export interface CronMonitor {
 export const CRON_MONITORS: readonly CronMonitor[] = [
   {
     path: '/api/cron/health-monitor',
-    schedule: '*/5 * * * *',
+    schedule: '*/15 * * * *',
     slug: 'spawnforge-health-monitor',
   },
 ] as const;
