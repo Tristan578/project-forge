@@ -378,25 +378,36 @@ jobs:
         if: steps.ci-wasm.outcome != 'success'
         run: cargo install wasm-bindgen-cli --version 0.2.127
 
-      - name: Build WebGL2
+      # BUILD AND BINDGEN TOGETHER, ONE VARIANT AT A TIME (#9579).
+      #
+      # Every cargo build writes the SAME file:
+      # target/wasm32-unknown-unknown/release/forge_engine.wasm. These four steps
+      # used to run as build, build, bindgen, bindgen -- so by the time either
+      # bindgen ran, that file held the WebGPU build, and BOTH pkg-webgl2 and
+      # pkg-webgpu received it. engine-pkg-webgl2 on the CDN was a WebGPU binary,
+      # served to exactly the browsers that have no WebGPU.
+      #
+      # It was invisible from CI: both packages upload, both are valid WASM, and
+      # nothing fails. The only symptom is the wrong renderer in a browser that
+      # cannot run it. The runtime pair below was always correct because it
+      # already interleaved, and its two CDN ETags differing while the editor
+      # pair's matched is what identified this.
+      #
+      # quality-gates.yml:339-349 has always done it this way. Keep all three
+      # workflows in the same shape.
+      - name: Build WebGL2 + wasm-bindgen
         if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
-        run: cargo build --target wasm32-unknown-unknown --release --features webgl2
+        run: |
+          cargo build --target wasm32-unknown-unknown --release --features webgl2
+          wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
 
-      - name: Build WebGPU
+      - name: Build WebGPU + wasm-bindgen
         if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
-        run: cargo build --target wasm32-unknown-unknown --release --features webgpu
-
-      - name: Run wasm-bindgen (WebGL2)
-        if: steps.ci-wasm.outcome != 'success'
-        working-directory: engine
-        run: wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
-
-      - name: Run wasm-bindgen (WebGPU)
-        if: steps.ci-wasm.outcome != 'success'
-        working-directory: engine
-        run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
+        run: |
+          cargo build --target wasm32-unknown-unknown --release --features webgpu
+          wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGL2 Runtime (stripped editor)
         if: steps.ci-wasm.outcome != 'success'
