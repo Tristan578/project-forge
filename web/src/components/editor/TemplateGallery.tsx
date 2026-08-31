@@ -29,12 +29,12 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
 
   useEffect(() => {
     if (isOpen) {
-      // Clear any error from a previous failed load so a successful reopen
-      // doesn't leave a stale banner up.
-      setError(null);
       import('@/data/templates')
         .then(({ TEMPLATE_REGISTRY }) => {
           setTemplates(TEMPLATE_REGISTRY);
+          // Clear any error from a previous failed load so a successful reopen
+          // doesn't leave a stale banner up.
+          setError(null);
         })
         .catch((err: unknown) => {
           // A failed chunk fetch (mid-session deploy, offline) previously only
