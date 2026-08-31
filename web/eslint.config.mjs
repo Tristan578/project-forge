@@ -256,9 +256,6 @@ const eslintConfig = defineConfig([
     // (see the clipboard, pointer-lock, audio-resume and dynamic-import call
     // sites) -- `void` there would only convert a visible unhandled rejection
     // into an invisible one, which is the bug this rule is meant to catch.
-    //
-    // prefer-nullish-coalescing (the `||` vs `??` half of #8938) is a separate
-    // 245-finding sweep and lands on its own.
     files: ['src/**/*.{ts,tsx}', 'scripts/**/*.ts'],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
