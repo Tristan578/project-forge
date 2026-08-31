@@ -1990,6 +1990,7 @@ STEPS_EOF
   test-web:
   test-mcp:
   check-validated:
+  publish-engine-cache:
   check-changes:
   check-deployment-drift:
   build-wasm:

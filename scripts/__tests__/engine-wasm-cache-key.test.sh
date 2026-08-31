@@ -175,6 +175,31 @@ for spec in "ci.yml:$CI_YML" "cd.yml:$CD_YML"; do
   fi
 done
 
+# The cache is only useful if SOMETHING on main keeps it warm. cd.yml's
+# build-wasm job is gated on engine-changed and measured as running once in the
+# last twelve CD runs, so a save that lives only there leaves the entry absent
+# on the other eleven -- every PR restoring nothing and rebuilding for no
+# benefit, with the feature looking installed and doing nothing. Pin that an
+# ungated warmer exists.
+echo ""
+echo "=== main keeps the cache warm (not just on engine-change merges) ==="
+warmer="$(awk '/^  publish-engine-cache:/{f=1} f && /^  [a-z][a-z0-9-]*:$/ && !/^  publish-engine-cache:/{exit} f' "$CD_YML")"
+if [ -z "$warmer" ]; then
+  fail "cd.yml has no publish-engine-cache job — the cache would only be seeded when an engine change merges"
+else
+  pass "cd.yml defines publish-engine-cache"
+  if grep -qE '^    if:' <<<"$warmer"; then
+    fail "publish-engine-cache carries a job-level if: — gating the warmer reintroduces the cold-cache hole it exists to close"
+  else
+    pass "publish-engine-cache is ungated (runs on every push to main)"
+  fi
+  if grep -q 'scripts/engine-wasm-cache-key.sh' <<<"$warmer"; then
+    pass "publish-engine-cache derives its key from the shared script"
+  else
+    fail "publish-engine-cache does not use the shared key script — it could warm the wrong key"
+  fi
+fi
+
 echo ""
 echo "  PASS=$PASS FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
