@@ -312,6 +312,20 @@ jobs:
         working-directory: engine
         run: cargo check --target wasm32-unknown-unknown --all-targets --features webgl2
 
+      # The step above covers the EDITOR feature set only, and `runtime` gates a
+      # different program: every editor-only definition disappears, so bridge
+      # test code referencing one stops compiling there while `webgl2` stays
+      # green. Nothing checked that combination, which is how
+      # `--all-targets --features webgl2,runtime` came to fail on `main` with two
+      # E0425s in `bridge/skeleton2d.rs` — invisible to CI, and hit only by
+      # whoever ran cargo locally against a runtime build.
+      #
+      # Same argument as the step above, one feature set over: type-checking is
+      # the whole win, because wasm32 still has no test harness to run them.
+      - name: Type-check WASM-only test code (runtime)
+        working-directory: engine
+        run: cargo check --target wasm32-unknown-unknown --all-targets --features webgl2,runtime
+
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.127
 
