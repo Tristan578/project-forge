@@ -2398,6 +2398,7 @@ STEPS_EOF
 
   cd_wasm_if_count="$(grep -cE "^    [\"']?if[\"']?[[:space:]]*:" <<<"$cd_wasm_block" || true)"
   cd_wasm_ifblk="$(awk "/^    [\"']?if[\"']?[[:space:]]*:/{f=1;print;next} f && /^    [A-Za-z_\"']/{exit} f{print}" <<<"$cd_wasm_block")"
+  readonly cd_wasm_ifblk
   cd_wasm_if_scan="$(awk '{sub(/[[:space:]]*#.*/, ""); print}' <<<"$cd_wasm_ifblk")"
   if [ "$cd_wasm_if_count" -ne 1 ]; then
     fail "cd.yml upload-wasm-cdn has $cd_wasm_if_count if: keys (expected exactly 1)"
@@ -2407,6 +2408,7 @@ STEPS_EOF
     fail "cd.yml upload-wasm-cdn if: lacks the fail-closed security success clause"
   fi
   cd_wasm_if_expect="    if: \${{ vars.R2_CDN_ENABLED == 'true' && needs.security.result == 'success' }}"
+  readonly cd_wasm_if_expect
   assert_block_lines_exact "$cd_wasm_ifblk" "cd.yml upload-wasm-cdn if: block" "$cd_wasm_if_expect" "the containment pin proves presence; this exact line rejects appended || true and != failure rewrites"
 
   # Invocations asserted against the comment-stripped SECURITY JOB block,
@@ -3749,6 +3751,8 @@ qg_sec
 cd_exec
 expected_preamble_cd
 cd_sec
+cd_wasm_ifblk
+cd_wasm_if_expect
 ci_exec
 expected_preamble_ci
 ci_gate_block
