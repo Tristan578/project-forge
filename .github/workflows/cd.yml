@@ -304,6 +304,23 @@ jobs:
     name: Publish Engine Cache
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # EXACTLY ONE WRITER PER RUN. build-wasm already saves this key when it
+    # runs, because it has just built the artifact and the save is free. This
+    # job is the complement -- the safety net for the case build-wasm does not
+    # cover: GitHub evicts a cache untouched for 7 days, and the engine tree can
+    # easily go that long unchanged (measured: build-wasm ran once in twelve CD
+    # runs). Without it the first PR after an eviction silently pays the full
+    # 5-minute build again.
+    #
+    # The condition is the exact complement of build-wasm's, derived from the
+    # SAME check-changes outputs rather than from needs.build-wasm.result. Two
+    # reasons: gating on the result would serialise this behind a 10-minute
+    # build for what is normally a 20-second cache hit, and -- the one that
+    # actually bites -- an ungated version has both jobs miss the same cold key
+    # and build the engine CONCURRENTLY, paying for the expensive build twice on
+    # exactly the pushes that are already the slowest.
+    needs: [check-changes]
+    if: needs.check-changes.outputs.engine-changed != 'true' && github.event_name != 'workflow_dispatch'
     permissions:
       contents: read
     steps:

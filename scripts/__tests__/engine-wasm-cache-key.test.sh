@@ -179,8 +179,16 @@ done
 # build-wasm job is gated on engine-changed and measured as running once in the
 # last twelve CD runs, so a save that lives only there leaves the entry absent
 # on the other eleven -- every PR restoring nothing and rebuilding for no
-# benefit, with the feature looking installed and doing nothing. Pin that an
-# ungated warmer exists.
+# benefit, with the feature looking installed and doing nothing.
+#
+# What matters is COVERAGE, not the absence of a gate. This assertion used to
+# demand the warmer carry no if: at all, which was a blunt proxy for coverage
+# and turned out to forbid the correct design: ungated, the warmer and
+# build-wasm both miss the same cold key on an engine-change push and build the
+# engine CONCURRENTLY, paying for the expensive build twice. The warmer is now
+# the exact complement of build-wasm, so between them every main push is
+# covered and no push runs both. That is pinned here and in the
+# mutual-exclusion block below; the two halves must be read together.
 echo ""
 echo "=== main keeps the cache warm (not just on engine-change merges) ==="
 warmer="$(awk '/^  publish-engine-cache:/{f=1} f && /^  [a-z][a-z0-9-]*:$/ && !/^  publish-engine-cache:/{exit} f' "$CD_YML")"
@@ -188,15 +196,57 @@ if [ -z "$warmer" ]; then
   fail "cd.yml has no publish-engine-cache job — the cache would only be seeded when an engine change merges"
 else
   pass "cd.yml defines publish-engine-cache"
-  if grep -qE '^    if:' <<<"$warmer"; then
-    fail "publish-engine-cache carries a job-level if: — gating the warmer reintroduces the cold-cache hole it exists to close"
+  warmer_if="$(grep -E '^    if:' <<<"$warmer" || true)"
+  if [ -z "$warmer_if" ]; then
+    # Ungated is not "safe by default" here -- it is the duplicate-build bug.
+    fail "publish-engine-cache carries no job-level if: — ungated it runs alongside build-wasm on engine-change pushes, both miss the same cold key, and the engine is built twice concurrently"
   else
-    pass "publish-engine-cache is ungated (runs on every push to main)"
+    pass "publish-engine-cache is gated (its complement of build-wasm is verified below)"
   fi
   if grep -q 'scripts/engine-wasm-cache-key.sh' <<<"$warmer"; then
     pass "publish-engine-cache derives its key from the shared script"
   else
     fail "publish-engine-cache does not use the shared key script — it could warm the wrong key"
+  fi
+fi
+
+# --- exactly one writer per run ------------------------------------------------
+# Two jobs write this key: build-wasm (free -- it just built the artifact) and
+# publish-engine-cache (the eviction safety net). They MUST be mutually
+# exclusive. When both are live on the same run they miss the same cold key and
+# build the engine CONCURRENTLY -- the expensive build paid twice, on exactly
+# the pushes that are already the slowest, and no job goes red to say so.
+echo ""
+echo "=== the two cache writers must be mutually exclusive ==="
+if [ ! -f "$CD_YML" ]; then
+  fail "cd.yml not found at $CD_YML"
+else
+  bw_if="$(awk '/^  build-wasm:/{f=1} f && /^    if:/{print; exit}' "$CD_YML")"
+  pc_if="$(awk '/^  publish-engine-cache:/{f=1} f && /^    if:/{print; exit}' "$CD_YML")"
+
+  writers="$(grep -cE '^ +key: \$\{\{ steps\.engine-key\.outputs\.key \}\}' "$CD_YML" || true)"
+  if [ "$writers" -eq 2 ]; then
+    pass "cd.yml has exactly 2 jobs keyed on the engine cache key"
+  else
+    fail "cd.yml has $writers jobs keyed on steps.engine-key.outputs.key (expected 2) — if a third writer appeared, the mutual-exclusion argument below no longer covers every writer"
+  fi
+
+  if [ -z "$pc_if" ]; then
+    fail "publish-engine-cache has no if: — it runs on EVERY push, including the engine-changed pushes where build-wasm is already building and saving the same key, so the engine gets built twice concurrently"
+  elif grep -q "engine-changed != 'true'" <<<"$pc_if" \
+       && grep -q "github.event_name != 'workflow_dispatch'" <<<"$pc_if"; then
+    pass "publish-engine-cache runs only when build-wasm does not (complement of engine-changed + workflow_dispatch)"
+  else
+    fail "publish-engine-cache's if: is not the complement of build-wasm's — got: ${pc_if}"
+  fi
+
+  # Pin the other half too: if build-wasm's trigger is ever widened, the
+  # complement above silently stops being a complement.
+  if grep -q "engine-changed == 'true'" <<<"$bw_if" \
+     && grep -q "github.event_name == 'workflow_dispatch'" <<<"$bw_if"; then
+    pass "build-wasm still triggers on exactly engine-changed + workflow_dispatch"
+  else
+    fail "build-wasm's trigger changed — got: ${bw_if} — publish-engine-cache's complement must be updated in the same commit or both will run"
   fi
 fi
 
