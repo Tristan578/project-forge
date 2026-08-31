@@ -1,6 +1,7 @@
 import { auth, clerkClient } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import { getUserByClerkId, syncUserFromClerk } from './user-service';
+import { captureException } from '@/lib/monitoring/sentry-server';
 import type { User } from '../db/schema';
 
 export interface AuthContext {
@@ -54,7 +55,13 @@ export async function authenticateRequest(): Promise<
   let user: User | null;
   try {
     user = await getUserByClerkId(clerkId);
-  } catch {
+  } catch (err) {
+    // REPORT before returning. This branch used to swallow the error, so a
+    // production 503 said only "User sync temporarily unavailable" and gave
+    // neither the client nor the logs any way to tell a DB outage from a Clerk
+    // failure from a permanently unsyncable account. The reason tag is what
+    // makes the two 503 paths distinguishable in Sentry.
+    captureException(err, { route: 'api_auth', phase: 'get_user_by_clerk_id' });
     // DB unavailable (circuit breaker open, Neon outage, etc). Return 503
     // to match the degraded-mode contract — returning 500 would leak a
     // generic error to clients and bypass the retry guidance in the 503
@@ -79,9 +86,28 @@ export async function authenticateRequest(): Promise<
       // DB failure (slow 503).
       return unauthorized('STALE_SESSION');
     }
+    if (syncResult.kind === 'unsyncable') {
+      // PERMANENT, not transient. The account cannot be synced no matter how
+      // many times it is retried -- the common case is a Clerk user carrying no
+      // email address, which happens with GitHub OAuth when the account's email
+      // is private. Reporting that as "temporarily unavailable, please retry"
+      // sends the user into an endless retry against a condition that will
+      // never clear, so it gets its own code and a 422.
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            error: 'ACCOUNT_NOT_SYNCABLE',
+            message:
+              'Your account is missing information we need (usually an email address). Add a verified email to your account and sign in again.',
+          },
+          { status: 422 },
+        ),
+      };
+    }
     if (syncResult.kind === 'degraded') {
-      // Genuine failure: deny access with 503 instead of returning a user
-      // without DB state (tier, credits). Prevents credit bypass (PF-474).
+      // Genuine transient failure: deny access with 503 instead of returning a
+      // user without DB state (tier, credits). Prevents credit bypass (PF-474).
       return {
         ok: false,
         response: NextResponse.json(
@@ -128,6 +154,7 @@ function bannedResponse(): { ok: false; response: NextResponse } {
 type SyncResult =
   | { kind: 'ok'; user: User }
   | { kind: 'deleted' } // Clerk confirmed user no longer exists
+  | { kind: 'unsyncable' } // permanent: the Clerk account lacks required data
   | { kind: 'degraded' }; // transient DB/Clerk failure after retry
 
 /**
@@ -152,6 +179,10 @@ async function attemptSyncWithRetry(clerkId: string, _attempt = 0): Promise<Sync
       await delay(500);
       return attemptSyncWithRetry(clerkId, _attempt + 1);
     }
+    // A Clerk fetch that is not a 404 and survives a retry is worth seeing --
+    // an invalid or missing CLERK_SECRET_KEY lands here, and previously
+    // produced a bare 503 with nothing to diagnose it by.
+    captureException(err, { route: 'api_auth', phase: 'clerk_get_user' });
     return { kind: 'degraded' };
   }
 
@@ -166,15 +197,38 @@ async function attemptSyncWithRetry(clerkId: string, _attempt = 0): Promise<Sync
     });
     if (!user) return { kind: 'degraded' };
     return { kind: 'ok', user };
-  } catch {
-    // DB write failed. Retry once; any failure here is transient, never a
-    // "deleted user" signal, so the result is always `degraded`.
+  } catch (err) {
+    // Not every failure here is transient. syncUserFromClerk throws
+    // "No email found in Clerk data" when the Clerk account carries no email
+    // address -- routine for GitHub OAuth when the account's email is private.
+    // Retrying that burns two attempts and a 500ms delay to reach the same
+    // answer, and then tells the user to retry a condition that will never
+    // clear on its own.
+    if (isMissingEmail(err)) {
+      captureException(err, { route: 'api_auth', phase: 'sync_user', reason: 'no_email' });
+      return { kind: 'unsyncable' };
+    }
+    // Genuinely transient (DB write, network): retry once, then report.
     if (_attempt < 1) {
       await delay(500);
       return attemptSyncWithRetry(clerkId, _attempt + 1);
     }
+    captureException(err, { route: 'api_auth', phase: 'sync_user', reason: 'db_write' });
     return { kind: 'degraded' };
   }
+}
+
+/**
+ * Is this failure permanent for this account?
+ *
+ * `syncUserFromClerk` rejects a Clerk user with no email address, and no amount
+ * of retrying supplies one. Matching on the message is unpleasant but it is the
+ * only signal the thrown Error carries; the string is defined one module away
+ * in user-service.ts and is covered by a test there, so a rename cannot drift
+ * silently past this.
+ */
+function isMissingEmail(err: unknown): boolean {
+  return err instanceof Error && /no email found/i.test(err.message);
 }
 
 /**

@@ -87,7 +87,13 @@ export interface CspOptions {
   allowUnsafeEval: boolean;
   /** Optional engine CDN origin to allow for `script-src` / `connect-src`. */
   engineCdn?: string;
+  /** Clerk publishable key, used to derive the deployment's exact Clerk host. */
+  clerkPublishableKey?: string;
 }
+
+const FALLBACK_CLERK_ORIGINS =
+  'https://*.clerk.accounts.dev https://*.accounts.dev ' +
+  'https://clerk.spawnforge.ai https://accounts.spawnforge.ai';
 
 /**
  * Build the application Content-Security-Policy header value.
@@ -96,9 +102,29 @@ export interface CspOptions {
  * the presence of the `'unsafe-eval'` token in `script-src` — keeping the delta
  * to a single token minimizes the blast radius of per-route scoping.
  */
-export function buildContentSecurityPolicy({ allowUnsafeEval, engineCdn = '' }: CspOptions): string {
+export function buildContentSecurityPolicy({
+  allowUnsafeEval,
+  engineCdn = '',
+  clerkPublishableKey,
+}: CspOptions): string {
   const cdnDirective = engineCdn ? ` ${engineCdn}` : '';
   const evalToken = allowUnsafeEval ? " 'unsafe-eval'" : '';
+  const clerkHost = clerkFrontendApiFromPublishableKey(clerkPublishableKey);
+  // Unlike /play, the global policy must remain usable when configuration is
+  // absent or malformed: static pages can still render Clerk sign-in widgets
+  // from the established development and production origins.
+  // BOTH Clerk hosts. The Frontend API alone is not enough: the hosted sign-in
+  // flow redirects to the Account Portal, and omitting it blocked that redirect
+  // in `connect-src` and broke production sign-in entirely.
+  const clerkAccountsHost = clerkAccountPortalFromFrontendApi(clerkHost);
+  const clerkOrigins = clerkHost
+    ? [`https://${clerkHost}`, clerkAccountsHost && `https://${clerkAccountsHost}`]
+        .filter(Boolean)
+        .join(' ')
+    : FALLBACK_CLERK_ORIGINS;
+  // Preserve the narrower legacy image fallback: Clerk development assets use
+  // img.clerk.com, so the accounts.dev wildcard is unnecessary in img-src.
+  const clerkImageOrigin = clerkHost ? `https://${clerkHost}` : 'https://clerk.spawnforge.ai';
 
   const directives = [
     "default-src 'self'",
@@ -106,12 +132,12 @@ export function buildContentSecurityPolicy({ allowUnsafeEval, engineCdn = '' }: 
     // required by the same-origin script-sandbox worker's Function() compiler on
     // editor routes, NOT by WASM (WASM uses 'wasm-unsafe-eval'). 'unsafe-inline'
     // is required by Clerk + Next.js inline framework scripts.
-    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com${cdnDirective}`,
+    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' ${clerkOrigins} https://challenges.cloudflare.com${cdnDirective}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://img.clerk.com https://clerk.spawnforge.ai",
+    `img-src 'self' data: blob: https://img.clerk.com ${clerkImageOrigin}`,
     "font-src 'self' data:",
-    `connect-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
-    "frame-src 'self' https://*.clerk.accounts.dev https://clerk.spawnforge.ai https://challenges.cloudflare.com",
+    `connect-src 'self' ${clerkOrigins} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
+    `frame-src 'self' ${clerkOrigins} https://challenges.cloudflare.com`,
     "worker-src 'self' blob:",
     "media-src 'self' blob:",
     "form-action 'self'",
@@ -185,6 +211,46 @@ export function clerkFrontendApiFromPublishableKey(publishableKey?: string): str
   if (!decoded.endsWith('$')) return null;
   const host = decoded.slice(0, -1);
   return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(host) ? host : null;
+}
+
+/**
+ * Derive Clerk's **Account Portal** host from its Frontend API host.
+ *
+ * A Clerk custom domain serves TWO hosts, and the publishable key encodes only
+ * the first:
+ *
+ *   Frontend API   clerk.spawnforge.ai         (encoded in the key)
+ *   Account Portal accounts.spawnforge.ai      (NOT encoded anywhere)
+ *
+ * Allowlisting only the Frontend API is what broke production sign-in: an
+ * unauthenticated request to /dashboard 307s to
+ * `accounts.spawnforge.ai/sign-in?redirect_url=...`, and with that host absent
+ * from `connect-src` the browser blocked it outright —
+ * "Connecting to 'https://accounts.spawnforge.ai/sign-in?...' violates the
+ * following Content Security Policy directive". OAuth completed, the redirect
+ * was refused, and the user landed back on the home page signed out.
+ *
+ * The two environments name the portal differently, so both are handled:
+ *
+ *   production   clerk.<domain>              -> accounts.<domain>
+ *   development  <slug>.clerk.accounts.dev   -> <slug>.accounts.dev
+ *
+ * Returns `null` for a host in neither shape rather than guessing — the same
+ * posture as the decoder above, since the result is interpolated into a header.
+ */
+export function clerkAccountPortalFromFrontendApi(frontendApiHost: string | null): string | null {
+  if (!frontendApiHost) return null;
+  // Development: the `clerk.` segment is interior (<slug>.clerk.accounts.dev).
+  // Check this FIRST — the production rule below would otherwise not match it
+  // and a dev instance would silently lose its portal host.
+  if (frontendApiHost.includes('.clerk.')) {
+    return frontendApiHost.replace('.clerk.', '.');
+  }
+  // Production: the `clerk.` segment leads (clerk.<domain>).
+  if (frontendApiHost.startsWith('clerk.')) {
+    return `accounts.${frontendApiHost.slice('clerk.'.length)}`;
+  }
+  return null;
 }
 
 export interface PlayCspOptions {
@@ -350,10 +416,18 @@ export function buildCspRouteRules({
   clerkPublishableKey,
   devUnsafeEval = isDevEvalAllowed(),
 }: Omit<PlayCspOptions, 'nonce'> = {}): CspRouteRule[] {
-  const globalCsp = buildContentSecurityPolicy({ allowUnsafeEval: true, engineCdn });
+  const globalCsp = buildContentSecurityPolicy({
+    allowUnsafeEval: true,
+    engineCdn,
+    clerkPublishableKey,
+  });
   // The eval-free routes drop 'unsafe-eval' in every real build; under the dev
   // server they must keep it or Fast Refresh's eval aborts hydration.
-  const evalFreeCsp = buildContentSecurityPolicy({ allowUnsafeEval: devUnsafeEval, engineCdn });
+  const evalFreeCsp = buildContentSecurityPolicy({
+    allowUnsafeEval: devUnsafeEval,
+    engineCdn,
+    clerkPublishableKey,
+  });
   // No nonce: a static `headers()` rule cannot carry a per-request value. The
   // proxy emits the nonce-bearing policy that supersedes this one on /play.
   const playCsp = buildPlayContentSecurityPolicy({ engineCdn, clerkPublishableKey, devUnsafeEval });
