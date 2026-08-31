@@ -8,10 +8,13 @@ use crate::core::{
         plan_reverb_zone_write, resolve_reverb_zone_commands, ReverbZoneCommand, ReverbZoneData,
         ReverbZoneEnabled, ReverbZoneEvent, ReverbZoneResync,
     },
-    selection::{Selection, SelectionChangedEvent},
     pending_commands::PendingCommands,
     history::{HistoryStack, UndoableAction},
 };
+// Editor-only: consumed solely by the selection-emit systems below, which
+// already carry `#[cfg(not(feature = "runtime"))]`.
+#[cfg(not(feature = "runtime"))]
+use crate::core::selection::{Selection, SelectionChangedEvent};
 use super::events;
 
 // ---------------------------------------------------------------------------

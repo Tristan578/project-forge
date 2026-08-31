@@ -25,12 +25,21 @@ mod query;
 mod animation;
 mod particles;
 mod scene_io;
+// Editor-only modules. Every item in each of these three files is reachable
+// only from the `#[cfg(not(feature = "runtime"))]` block in
+// `SelectionPlugin::build()` below, so the whole module is gated rather than
+// each item: `procedural` and `mesh_ops` each hold a `#[wasm_bindgen] extern`
+// console-log shim that only their (editor-only) systems call, and gating
+// item-by-item would leave that shim behind as a fresh dead-code warning.
+#[cfg(not(feature = "runtime"))]
 mod procedural;
+#[cfg(not(feature = "runtime"))]
 mod mesh_ops;
 mod scripts;
 mod game;
 mod skeleton2d;
 mod sprite;
+#[cfg(not(feature = "runtime"))]
 mod edit_mode;
 
 use bevy::prelude::*;

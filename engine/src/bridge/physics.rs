@@ -7,11 +7,24 @@ use bevy::prelude::*;
 use crate::core::{
     entity_id::EntityId,
     history::HistoryStack,
-    pending_commands::{self, PendingCommands},
-    physics::{DebugPhysicsEnabled, PhysicsData, PhysicsEnabled},
-    physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d},
-    selection::{Selection, SelectionChangedEvent},
+    pending_commands::PendingCommands,
+    physics::{PhysicsData, PhysicsEnabled},
+    physics_2d::{Physics2dData, Physics2dEnabled},
     engine_mode::EngineMode,
+};
+
+// Editor-only imports. `DebugPhysicsEnabled` serves only
+// `apply_debug_physics_toggle`, `PhysicsJoint2d` only the 2D joint appliers, and
+// `Selection`/`SelectionChangedEvent` only the selection-emit systems — every
+// one of them `#[cfg(not(feature = "runtime"))]`. Split out of the groups above
+// rather than gating those whole: the names left behind stay live in a runtime
+// build.
+#[cfg(not(feature = "runtime"))]
+use crate::core::{
+    pending_commands,
+    physics::DebugPhysicsEnabled,
+    physics_2d::PhysicsJoint2d,
+    selection::{Selection, SelectionChangedEvent},
 };
 
 use super::events;
@@ -480,6 +493,7 @@ pub(super) fn apply_physics2d_toggles(
 }
 
 /// System that applies 2D joint creation requests (editor-only, metadata-only).
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_create_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -508,6 +522,7 @@ pub(super) fn apply_create_joint2d_requests(
 }
 
 /// System that applies 2D joint update requests (editor-only, metadata-only).
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_update_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut PhysicsJoint2d)>,
@@ -535,6 +550,7 @@ pub(super) fn apply_update_joint2d_requests(
 }
 
 /// System that applies 2D joint removal requests (editor-only, metadata-only).
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_remove_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -667,6 +683,7 @@ pub(super) fn apply_raycast2d_requests(
 }
 
 /// System that applies 2D gravity updates to the Gravity2d resource.
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_gravity2d_updates(
     mut pending: ResMut<PendingCommands>,
     mut gravity: ResMut<crate::core::physics_2d_sim::Gravity2d>,
@@ -683,6 +700,7 @@ pub(super) fn apply_gravity2d_updates(
 }
 
 /// System that applies 2D debug physics toggles.
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_debug_physics2d_toggle(
     mut pending: ResMut<PendingCommands>,
     mut debug_enabled: ResMut<crate::core::physics_2d_sim::DebugPhysics2dEnabled>,
@@ -694,6 +712,7 @@ pub(super) fn apply_debug_physics2d_toggle(
 }
 
 /// System that handles 2D physics query requests (editor-only).
+#[cfg(not(feature = "runtime"))]
 pub(super) fn handle_physics2d_query(
     mut pending: ResMut<PendingCommands>,
     physics_query: Query<(&EntityId, &Physics2dData, Option<&Physics2dEnabled>)>,
