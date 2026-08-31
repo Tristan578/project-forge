@@ -70,7 +70,10 @@ for pkg in "${!VARIANTS[@]}"; do
     if [ "$wasm_size" -lt "$MIN_SIZE_BYTES" ]; then
       fail "${pkg}/forge_engine_bg.wasm — TOO SMALL (${wasm_size} bytes, expected >1MB). Rebuild with build_wasm.ps1"
     else
-      wasm_mb=$(echo "scale=1; ${wasm_size} / 1048576" | bc 2>/dev/null || echo "${wasm_size}B")
+      # awk rather than bc: bc is absent from Git-for-Windows, Alpine and slim
+      # CI images, and the old fallback printed a BYTE count into a field
+      # labelled MB. LC_ALL=C pins the decimal separator.
+      wasm_mb=$(LC_ALL=C awk -v b="${wasm_size}" 'BEGIN { printf "%.1f", b / 1048576 }')
       pass "${pkg}/ — OK (WASM: ${wasm_mb}MB) — ${desc}"
     fi
   fi

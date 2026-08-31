@@ -1,11 +1,34 @@
 import type { MetadataRoute } from 'next';
 import { readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { DOCS_URL } from '../lib/site';
 
 export interface MdxEntry {
   path: string;
   mtime: Date;
+}
+
+/**
+ * Turn a content-relative `.mdx` file path into the URL path it is served at.
+ *
+ * `path.relative()` answers in the HOST separator, and everything downstream —
+ * the emitted `url`, the `/index` strip, the `/mcp/` priority rule — is talking
+ * about URLs. On Windows that difference is not cosmetic: the sitemap advertised
+ * `/mcp\overview`, `/index` was never stripped (the `\/index$` rule cannot see a
+ * backslash), and every page silently fell to the 0.6 priority bucket because
+ * `startsWith('/mcp/')` matched nothing. Normalising once, here, keeps the rest
+ * of the module handling URL paths only.
+ *
+ * `separator` is injectable so the Windows shape can be asserted from any host;
+ * production always uses the platform's own `path.sep`.
+ */
+export function toUrlPath(rel: string, separator: string = sep): string {
+  const normalized = rel
+    .split(separator)
+    .join('/')
+    .replace(/\.mdx$/, '')
+    .replace(/\/index$/, '');
+  return normalized === 'index' ? '' : `/${normalized}`;
 }
 
 export function collectMdxPaths(dir: string, base: string): MdxEntry[] {
@@ -17,11 +40,8 @@ export function collectMdxPaths(dir: string, base: string): MdxEntry[] {
       if (stat.isDirectory()) {
         entries.push(...collectMdxPaths(full, base));
       } else if (entry.endsWith('.mdx')) {
-        const rel = relative(base, full)
-          .replace(/\.mdx$/, '')
-          .replace(/\/index$/, '');
         entries.push({
-          path: rel === 'index' ? '' : `/${rel}`,
+          path: toUrlPath(relative(base, full)),
           mtime: stat.mtime,
         });
       }

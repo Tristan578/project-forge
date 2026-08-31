@@ -55,6 +55,18 @@ API_DIR="${OPENAPI_API_DIR:-web/src/app/api}"
 fail=0
 err() { echo "::error::$*"; fail=1; }
 
+# jq_lines <filter> <file> — jq -r, with any trailing CR removed.
+#
+# Every comparison below is EXACT (sort | comm set arithmetic, string equality),
+# and two things can put a stray CR on one side of those comparisons: a spec or
+# allowlist saved with CRLF endings, and jq.exe on Windows, which opens stdout in
+# text mode and appends a CR to every line it writes. Either one makes
+# "/api/health" and "/api/health" + CR different strings, so a documented route
+# reads as UNDOCUMENTED and the gate fails a clean tree. Normalising here — once,
+# at the only point jq output enters the comparison — keeps the set arithmetic
+# about paths instead of about line endings.
+jq_lines() { jq -r "$1" "$2" | tr -d '\r'; }
+
 # --- 1. Spec must exist and be valid JSON (the live prod-500 class) -----------
 if [ ! -f "$SPEC" ]; then
   err "OpenAPI spec not found at $SPEC"
@@ -77,7 +89,10 @@ if ! jq empty "$ALLOWLIST" >/dev/null 2>&1; then
 fi
 
 # Every route's category must be defined in .categories.
-bad_categories="$(jq -r '
+# shellcheck disable=SC2016  # a jq filter, not a shell string: $cats is jq's
+# own variable and must NOT expand here. shellcheck suppresses SC2016 for a
+# literal `jq` invocation but cannot see through the jq_lines wrapper.
+bad_categories="$(jq_lines '
   (.categories // {}) as $cats
   | (.routes // {}) | to_entries[]
   | select(($cats[.value]) == null)
@@ -124,8 +139,8 @@ if [ ! -s "$routes_file" ]; then
   exit 1
 fi
 
-jq -r '.paths // {} | keys[]' "$SPEC" | sort -u > "$documented_file"
-jq -r '.routes // {} | keys[]' "$ALLOWLIST" | sort -u > "$allowlisted_file"
+jq_lines '.paths // {} | keys[]' "$SPEC" | sort -u > "$documented_file"
+jq_lines '.routes // {} | keys[]' "$ALLOWLIST" | sort -u > "$allowlisted_file"
 
 # --- 4. Routes that are neither documented nor allowlisted = VIOLATIONS --------
 # (routes) minus (documented ∪ allowlisted)
