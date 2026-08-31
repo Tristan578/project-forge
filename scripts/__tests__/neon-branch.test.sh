@@ -849,8 +849,15 @@ echo "=== credential file is created private BEFORE the secret lands in it ==="
 # the width of that window on a shared runner. Pin the sequence in the source
 # so a reorder is a red suite rather than a silent race.
 HELPER_SRC="$(cat "$SCRIPT")"
+# The three patterns below are grep BREs matching the LITERAL text "$uri_out"
+# in the helper's source; single quotes and the escaped dollar are exactly
+# right, and expanding them here would search for this suite's own (unset)
+# variable instead. Hence one targeted SC2016 waiver per line.
+# shellcheck disable=SC2016
 chmod_line="$(grep -n 'chmod 600 "\$uri_out"' <<<"$HELPER_SRC" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016
 truncate_line="$(grep -n ': > "\$uri_out"' <<<"$HELPER_SRC" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016
 write_line="$(grep -n 'printf .* > "\$uri_out"' <<<"$HELPER_SRC" | head -1 | cut -d: -f1)"
 if [ -z "$chmod_line" ] || [ -z "$truncate_line" ] || [ -z "$write_line" ]; then
   fail "could not locate the create/chmod/write sequence for \$uri_out in $HELPER (chmod=${chmod_line:-?} truncate=${truncate_line:-?} write=${write_line:-?})"

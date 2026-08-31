@@ -89,6 +89,9 @@ if ! jq empty "$ALLOWLIST" >/dev/null 2>&1; then
 fi
 
 # Every route's category must be defined in .categories.
+# shellcheck disable=SC2016  # a jq filter, not a shell string: $cats is jq's
+# own variable and must NOT expand here. shellcheck suppresses SC2016 for a
+# literal `jq` invocation but cannot see through the jq_lines wrapper.
 bad_categories="$(jq_lines '
   (.categories // {}) as $cats
   | (.routes // {}) | to_entries[]
