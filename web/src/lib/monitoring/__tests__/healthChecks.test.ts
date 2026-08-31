@@ -229,6 +229,19 @@ describe('healthChecks', () => {
   // checkEngineCdn
   // ---------------------------------------------------------------------------
   describe('checkEngineCdn', () => {
+    // This check reported "up" throughout #9581, while production could not
+    // load the engine at all. It pinged the CDN *host* -- always up -- and its
+    // error condition explicitly excluded 404, so a version prefix that had
+    // never been written still passed. The tests below pin the prefix it must
+    // actually probe and the statuses it must actually return.
+    const CDN = 'https://engine.spawnforge.ai';
+
+    const stubFetch = (status: number) => {
+      const mockFetch = vi.fn().mockResolvedValue({ ok: status >= 200 && status < 300, status });
+      vi.stubGlobal('fetch', mockFetch);
+      return mockFetch;
+    };
+
     it('returns degraded when CDN URL not configured', async () => {
       vi.resetModules();
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
@@ -237,46 +250,82 @@ describe('healthChecks', () => {
       expect(result.error).toContain('not configured');
     });
 
-    it('returns healthy when CDN responds with 2xx/3xx/4xx (not 5xx)', async () => {
+    it('probes the STAMPED version prefix, not the CDN root', async () => {
       vi.resetModules();
-      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://engine.spawnforge.ai');
-
-      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-      vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', CDN);
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_VERSION', 'abc123');
+      const mockFetch = stubFetch(200);
 
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
       const result = await checkEngineCdn();
 
       expect(result.status).toBe('healthy');
-      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+      // The exact url useEngine.ts will request. Probing anything shorter is
+      // what made the old check unable to observe the outage.
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${CDN}/abc123/engine-pkg-webgl2/wasm-manifest.json`,
+        expect.objectContaining({ method: 'HEAD' }),
+      );
     });
 
-    it('returns degraded when CDN returns 500', async () => {
+    it('falls back to the latest prefix when no version is stamped', async () => {
       vi.resetModules();
-      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://engine.spawnforge.ai');
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', CDN);
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_VERSION', '');
+      const mockFetch = stubFetch(200);
 
-      const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
-      vi.stubGlobal('fetch', mockFetch);
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      await checkEngineCdn();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${CDN}/latest/engine-pkg-webgl2/wasm-manifest.json`,
+        expect.objectContaining({ method: 'HEAD' }),
+      );
+    });
+
+    it('returns down on 404 — the exact shape of #9581', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', CDN);
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_VERSION', 'never-uploaded');
+      stubFetch(404);
 
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
       const result = await checkEngineCdn();
 
-      expect(result.status).toBe('degraded');
+      // The previous implementation returned 'healthy' here.
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('404');
+    });
+
+    it('returns down when the CDN returns 500', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', CDN);
+      stubFetch(503);
+
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkEngineCdn();
+
+      expect(result.status).toBe('down');
       expect(result.error).toContain('503');
     });
 
-    it('returns degraded when CDN request throws', async () => {
+    it('returns down when the request throws', async () => {
       vi.resetModules();
-      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://engine.spawnforge.ai');
-
-      const mockFetch = vi.fn().mockRejectedValue(new Error('network failure'));
-      vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', CDN);
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network failure')));
 
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
       const result = await checkEngineCdn();
 
-      expect(result.status).toBe('degraded');
+      expect(result.status).toBe('down');
       expect(result.error).toBe('network failure');
+    });
+
+    it('resolveEngineRoot tolerates trailing slashes and untrimmed versions', async () => {
+      vi.resetModules();
+      const { resolveEngineRoot } = await import('@/lib/monitoring/healthChecks');
+      expect(resolveEngineRoot('https://cdn.test//', 'sha1')).toBe('https://cdn.test/sha1');
+      expect(resolveEngineRoot('https://cdn.test', '  ')).toBe('https://cdn.test/latest');
     });
   });
 

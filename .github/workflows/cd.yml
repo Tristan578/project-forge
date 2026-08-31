@@ -624,7 +624,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [build-wasm, security]
-    if: ${{ vars.R2_CDN_ENABLED == 'true' && needs.security.result == 'success' }}
+    # always() is load-bearing (#9581). Without it the `if:` carries an implicit
+    # success() over `needs`, so a SKIPPED build-wasm skipped this job too --
+    # while the deploy still stamped NEXT_PUBLIC_ENGINE_VERSION with the commit
+    # SHA. Measured, build-wasm ran once in twelve CD runs, so eleven deploys in
+    # twelve pointed the app at a CDN prefix that was never written, and the
+    # engine 404'd with the same-origin fallback empty too.
+    #
+    # The job now runs on every deploy and takes one of two paths below:
+    # upload what build-wasm produced, or alias the existing latest/ when the
+    # engine did not change. security must still be green either way.
+    if: >-
+      always() &&
+      vars.R2_CDN_ENABLED == 'true' &&
+      needs.security.result == 'success' &&
+      (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped')
     permissions:
       contents: read
     steps:
@@ -636,13 +650,16 @@ jobs:
           unzip -q awscliv2.zip
           sudo ./aws/install --update
 
+      # --- Path A: the engine changed, so upload what build-wasm produced -----
       - name: Download WASM artifacts
+        if: needs.build-wasm.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: wasm-binaries
           path: engine/
 
       - name: Prepare WASM source directory
+        if: needs.build-wasm.result == 'success'
         run: |
           mkdir -p wasm-upload/engine-pkg-webgl2
           mkdir -p wasm-upload/engine-pkg-webgpu
@@ -654,9 +671,11 @@ jobs:
           cp engine/pkg-webgpu-runtime/* wasm-upload/engine-pkg-webgpu-runtime/ 2>/dev/null || true
 
       - name: Generate WASM manifests for CDN
+        if: needs.build-wasm.result == 'success'
         run: bash scripts/generate-wasm-manifests.sh wasm-upload
 
       - name: Upload to R2
+        if: needs.build-wasm.result == 'success'
         run: bash scripts/upload-wasm-to-r2.sh
         env:
           WASM_SOURCE_DIR: wasm-upload
@@ -664,6 +683,30 @@ jobs:
           R2_ACCOUNT_ID: ${{ secrets.ASSET_R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.ASSET_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.ASSET_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET || 'spawnforge-engine' }}
+
+      # --- Path B: the engine did NOT change -----------------------------------
+      # The bytes already at latest/ ARE this commit's engine, so copy them
+      # server-side onto the stamped prefix. No build, no download, and the
+      # deploy keeps its immutable version pin.
+      #
+      # The alternative -- not stamping and letting the client fall back to
+      # /latest -- trades this hard 404 for an intermittent one: /latest is
+      # replaced by the next engine upload while older bundles are still served,
+      # so the JS glue and the WASM can disagree at runtime. Pinning exists to
+      # prevent exactly that.
+      #
+      # Fails closed: an empty latest/ or a copy that writes nothing aborts the
+      # deploy rather than shipping a stamp with nothing behind it.
+      - name: Alias the engine CDN version (engine unchanged)
+        if: needs.build-wasm.result == 'skipped'
+        run: bash scripts/alias-wasm-cdn-version.sh
+        env:
+          ENGINE_VERSION: ${{ github.sha }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.ASSET_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ASSET_R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.ASSET_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          AWS_DEFAULT_REGION: auto
           R2_BUCKET: ${{ vars.R2_BUCKET || 'spawnforge-engine' }}
 
   # ---- Stage 1: Deploy to Staging ----
