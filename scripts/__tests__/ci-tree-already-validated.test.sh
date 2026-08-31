@@ -217,6 +217,55 @@ else
       fail "cd.yml '${job}' does not consult needs.check-validated.outputs.validated"
     fi
   done
+
+  # --- the cascade-skip rule -------------------------------------------------
+  #
+  # Making a job skippable is not a local change. GitHub prepends an implicit
+  # success() to any `if:` that lacks always(), and a SKIPPED dependency fails
+  # that success() exactly like a failed one -- so every dependent of a
+  # newly-skippable job silently stops running too.
+  #
+  # This is not hypothetical and it is not one-off. It shipped twice:
+  #   #9581  upload-wasm-cdn stopped uploading when build-wasm skipped, while
+  #          the deploy kept stamping the SHA -- production served 404s.
+  #   here   deploy-docs / deploy-design stopped deploying when lint skipped on
+  #          the fast path this file's feature introduces.
+  # Both times every job stayed green, which is what makes the class worth
+  # pinning structurally rather than fixing one site at a time.
+  echo ""
+  echo "=== a skippable job's dependents must survive the skip ==="
+  for skippable in lint typecheck test-web test-mcp e2e; do
+    # Same flow-list element idiom check-npm-audit.test.sh uses for `security`:
+    # anchored to a list delimiter so `lint` cannot match inside `lint-extra`.
+    dependents="$(awk '
+      /^  [A-Za-z0-9_-]+:$/ { job=substr($0, 3, length($0)-3) }
+      /^    needs:/ { if (job != "") { print job "\t" $0 } }
+    ' "$CD_YML" | grep -E "(\[|,)[[:space:]]*${skippable}[[:space:]]*(,|\])" | cut -f1)"
+
+    # A structural rule that matches nothing passes vacuously and is worse than
+    # no rule at all -- it reads as coverage. Every job in this list is gated on
+    # check-validated (asserted above), so each MUST have at least one dependent.
+    if [ -z "$dependents" ]; then
+      fail "cd.yml: no job lists the skippable '${skippable}' in needs: — either the extractor broke or the job was renamed; this rule would pass vacuously"
+      continue
+    fi
+
+    for dependent in $dependents; do
+      dblock="$(awk -v j="  ${dependent}:" '$0 == j {f=1; next} f && /^  [A-Za-z0-9_-]+:$/ {exit} f' "$CD_YML")"
+      difblk="$(awk '/^    if:/{f=1;print;next} f && /^    [A-Za-z_]/{exit} f{print}' <<<"$dblock")"
+      if [ -z "$difblk" ]; then
+        fail "cd.yml '${dependent}' depends on the skippable '${skippable}' and has no if: at all — it cascade-skips whenever ${skippable} is skipped"
+      elif ! grep -q 'always()' <<<"$difblk"; then
+        fail "cd.yml '${dependent}' depends on the skippable '${skippable}' but its if: has no always() — the implicit success() over needs: cascade-skips it on the fast path, silently, with every job green (#9581's defect class)"
+      elif ! grep -q "needs\.${skippable}\.result" <<<"$difblk"; then
+        # always() is only half of the fix: it also REMOVES the implicit
+        # success(), so an unreplaced lock is a REGRESSION, not a no-op.
+        fail "cd.yml '${dependent}' uses always() but never checks needs.${skippable}.result — always() dropped the implicit success() and nothing replaced it, so ${dependent} now runs even when ${skippable} FAILS"
+      else
+        pass "cd.yml '${dependent}' survives a skipped '${skippable}' and still gates on its result"
+      fi
+    done
+  done
 fi
 
 echo ""

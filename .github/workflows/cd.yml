@@ -1417,8 +1417,21 @@ jobs:
   # Independent of the main web deploy — docs can ship without a full Vercel web build.
   deploy-docs:
     name: Deploy Docs
-    needs: [check-deployment-drift, lint, typecheck, security]
-    if: (needs.check-deployment-drift.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'
+    needs: [check-deployment-drift, lint, typecheck, security, check-validated]
+    # always() is mandatory, not stylistic. Without it an `if:` carries an
+    # implicit success() over needs:, so once lint/typecheck became skippable
+    # (#9524 skips them when the tree was already validated) a skipped lint
+    # cascade-skipped this job -- docs/design would silently stop deploying on
+    # the fast path, with every job green. Same defect class as #9581.
+    #
+    # always() removes that implicit lock, so every dependency is now gated
+    # EXPLICITLY below -- including check-deployment-drift, which the implicit
+    # success() used to cover. This is strictly more locks than before, not
+    # fewer. 'skipped' is accepted for lint/typecheck ONLY when check-validated
+    # says the tree was already proven; tolerating a bare 'skipped' would let a
+    # bug in check-validated ship these production sites with neither having
+    # run, and that deploy would look exactly as green as a real one.
+    if: always() && (needs.check-deployment-drift.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.check-deployment-drift.result == 'success' && (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) && (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) && needs.security.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -1463,8 +1476,21 @@ jobs:
   # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
   deploy-design:
     name: Deploy Design Workbench
-    needs: [check-deployment-drift, lint, typecheck, security]
-    if: (needs.check-deployment-drift.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'
+    needs: [check-deployment-drift, lint, typecheck, security, check-validated]
+    # always() is mandatory, not stylistic. Without it an `if:` carries an
+    # implicit success() over needs:, so once lint/typecheck became skippable
+    # (#9524 skips them when the tree was already validated) a skipped lint
+    # cascade-skipped this job -- docs/design would silently stop deploying on
+    # the fast path, with every job green. Same defect class as #9581.
+    #
+    # always() removes that implicit lock, so every dependency is now gated
+    # EXPLICITLY below -- including check-deployment-drift, which the implicit
+    # success() used to cover. This is strictly more locks than before, not
+    # fewer. 'skipped' is accepted for lint/typecheck ONLY when check-validated
+    # says the tree was already proven; tolerating a bare 'skipped' would let a
+    # bug in check-validated ship these production sites with neither having
+    # run, and that deploy would look exactly as green as a real one.
+    if: always() && (needs.check-deployment-drift.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.check-deployment-drift.result == 'success' && (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) && (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) && needs.security.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
