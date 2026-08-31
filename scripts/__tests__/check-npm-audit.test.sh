@@ -2407,7 +2407,15 @@ STEPS_EOF
   else
     fail "cd.yml upload-wasm-cdn if: lacks the fail-closed security success clause"
   fi
-  cd_wasm_if_expect="    if: \${{ vars.R2_CDN_ENABLED == 'true' && needs.security.result == 'success' }}"
+  # Multi-line since #9581. always() is required: without it the implicit
+  # success() over `needs` made a SKIPPED build-wasm cascade-skip this job, so
+  # eleven deploys in twelve stamped a CDN version that was never uploaded. The
+  # security clause is unchanged and is separately pinned by containment above.
+  cd_wasm_if_expect="    if: >-
+      always() &&
+      vars.R2_CDN_ENABLED == 'true' &&
+      needs.security.result == 'success' &&
+      (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped')"
   readonly cd_wasm_if_expect
   assert_block_lines_exact "$cd_wasm_ifblk" "cd.yml upload-wasm-cdn if: block" "$cd_wasm_if_expect" "the containment pin proves presence; this exact line rejects appended || true and != failure rewrites"
 
@@ -3064,6 +3072,7 @@ OUTPUTS_EOF
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
+            scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3564,6 +3573,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
+            scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3622,6 +3632,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/pr-workitem-check.test.sh
       - name: Run WASM variant integrity test suite
         run: bash scripts/__tests__/wasm-variant-integrity.test.sh
+      - name: Run engine CDN alias test suite
+        run: bash scripts/__tests__/alias-wasm-cdn-version.test.sh
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
       - name: Run suite-wiring gate

@@ -40,8 +40,6 @@ INTERVAL="${HEALTH_CHECK_INTERVAL_S:-10}"
 STABILIZE="${HEALTH_CHECK_STABILIZE_S:-30}"
 TIMEOUT="${HEALTH_CHECK_TIMEOUT_S:-15}"
 
-BYPASS_SECRET="${VERCEL_AUTOMATION_BYPASS:-}"
-
 HEALTH_ENDPOINT="${DEPLOY_URL}/api/health"
 
 # Determine the fetch command. SSO-protected deployments reject bypass tokens;
@@ -55,6 +53,52 @@ elif [ -n "${VERCEL_AUTOMATION_BYPASS:-}" ]; then
   HEALTH_ENDPOINT="${DEPLOY_URL}/api/health?x-vercel-protection-bypass=${VERCEL_AUTOMATION_BYPASS}&x-vercel-set-bypass-cookie=true"
   echo "Using bypass token (query params) for health check"
 fi
+
+# ---------- engine reachability -------------------------------------------
+#
+# /api/health reports "Engine CDN: up" by probing the HOST. That is not the same
+# question as "can THIS deploy load its engine", and the gap shipped: cd.yml
+# stamps NEXT_PUBLIC_ENGINE_VERSION with the commit SHA on every deploy, while
+# the CDN upload only ran when the engine changed -- once in twelve CD runs. So
+# eleven deploys in twelve pointed at a prefix that was never written, the
+# same-origin fallback was empty too, and the engine 404'd while this check
+# stayed green (#9581).
+#
+# Fetch the EXACT url the deployed bundle will resolve, and fail on anything but
+# 200. The CDN is public, so this needs no Vercel auth.
+check_engine_reachable() {
+  local cdn="${ENGINE_CDN_URL:-}" version="${ENGINE_VERSION:-}"
+
+  if [ -z "$cdn" ]; then
+    # Same-origin deployment: there is no CDN url to resolve, so there is
+    # nothing here to verify. Say so rather than passing silently.
+    echo "Engine check skipped: ENGINE_CDN_URL is not set (same-origin deployment)"
+    return 0
+  fi
+
+  # Mirror useEngine.ts exactly: <cdn>/<version> when a version is stamped,
+  # <cdn>/latest when it is not. Checking a different url than the app resolves
+  # would reproduce the very gap this closes.
+  local root
+  if [ -n "$version" ]; then
+    root="${cdn%/}/${version}"
+  else
+    root="${cdn%/}/latest"
+  fi
+
+  local url="${root}/engine-pkg-webgl2/wasm-manifest.json"
+  echo "Engine check: ${url}"
+
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "${TIMEOUT}" "$url" 2>/dev/null || echo 000)"
+  if [ "$code" = "200" ]; then
+    echo "Engine check passed (HTTP 200)"
+    return 0
+  fi
+
+  echo "::error::Engine check failed: ${url} returned HTTP ${code}. The deploy stamped a version whose CDN prefix does not exist, so the editor cannot load the engine." >&2
+  return 1
+}
 
 # ---------- stabilization wait --------------------------------------------
 
@@ -105,6 +149,10 @@ while [ "$attempt" -lt "$RETRIES" ]; do
     if python3 -c "import json; d=json.load(open('/tmp/health_response.json')); assert d.get('status') in ('ok','degraded')" 2>/dev/null; then
       echo "Health check passed (attempt ${attempt}/${RETRIES})"
       cat /tmp/health_response.json 2>/dev/null || true
+      # A reachable API with an unreachable engine is not a healthy deploy.
+      if ! check_engine_reachable; then
+        exit 1
+      fi
       exit 0
     else
       echo "::warning::HTTP 200 but response body is invalid or status is 'error'"
