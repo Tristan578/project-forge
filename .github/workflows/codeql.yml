@@ -1,15 +1,42 @@
 name: "CodeQL Advanced"
 
+# NO `push` TRIGGER, deliberately (#9527).
+#
+# The repo is squash-only, so every commit on `main` arrived through a PR where
+# the dynamic-matrix analysis below already ran pre-merge. A push run re-analysed
+# byte-identical content: measured at 18.5 job-min mean across 12 sampled push
+# runs, 220 push runs in the 30 days to 2026-08-31, so roughly 4,080 job-min a
+# month for no marginal signal. CodeQL is advisory here -- ruleset 12865786
+# requires only `CI Success` -- so nothing was gating on it either.
+#
+# The weekly `schedule` runs on the default branch and takes the full
+# three-language matrix (the `else` branch in the matrix step below), so
+# main-branch alerts still refresh; they refresh weekly rather than per merge.
+# The accepted cost is a cross-language finding introduced by a single-language
+# change surfacing up to 7 days late. `workflow_dispatch` is here so that window
+# can be closed on demand instead of only by waiting for Wednesday.
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
   schedule:
     - cron: '17 7 * * 3'
+  workflow_dispatch:
 
+# github.event_name is part of the key on purpose. Every trigger that fires on
+# the default branch resolves github.ref to the same refs/heads/main, so without
+# it a scheduled scan and a dispatched one share a group -- and with
+# cancel-in-progress, whichever starts second kills the first. That would make
+# an on-demand scan silently abort the weekly one it was meant to supplement.
+#
+# The collision is older than the workflow_dispatch above: `push` fired on main
+# too, so a merge landing during the Wednesday 07:17 scan already cancelled it.
+# Splitting by event fixes that case as well.
+#
+# Deduplication within a trigger is preserved: two dispatches, or two pushes to
+# the same ref, still collapse to the latest. Pull requests were never affected
+# -- github.ref is refs/pull/N/merge there, already distinct per PR.
 concurrency:
-  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  group: codeql-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
