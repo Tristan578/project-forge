@@ -23,6 +23,10 @@ on:
         description: 'Whether .github/** changed (defaults to true when unset)'
         type: boolean
         default: true
+      design-changed:
+        description: 'Whether apps/design/** or packages/ui/** changed (defaults to true when unset)'
+        type: boolean
+        default: true
       can-commit-ratchet:
         description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
         type: boolean
@@ -569,7 +573,25 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-    if: ${{ github.event_name == 'pull_request' }}
+    # NO `if:` — this job runs whenever quality-gates is called.
+    #
+    # It used to read `github.event_name == 'pull_request'`. That is not a
+    # meaningful axis: the job compares effects-off against effects-on for the
+    # SAME commit and reads no pull_request payload at all. What the condition
+    # actually did was silently skip the job on the workflow_dispatch runs that
+    # unblock bot-authored PRs (#9161), while the reusable workflow — and so
+    # "CI Success" — still reported green. Removing it restores the invariant
+    # the required check depends on: CI Success means the same thing on every
+    # event.
+    #
+    # It is deliberately NOT re-gated on `inputs.web-changed`. That would be a
+    # COVERAGE REGRESSION, not an optimisation: `needs-web` is `^web/` only, so
+    # a `packages/ui/**` change (a runtime dependency of the web build via
+    # @spawnforge/ui) or a root `package-lock.json` bump would skip the
+    # performance gate entirely. Path-gating this job is #9526's work and needs
+    # a signal covering the whole web-build input set — web/, packages/ui/,
+    # package.json at any depth, package-lock.json, .node-version — which
+    # ci-gate does not currently emit as a single output.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -728,43 +750,46 @@ jobs:
 
   storybook-internal-gate:
     name: Storybook Internal Leak Gate
-    if: ${{ github.event_name == 'pull_request' }}
+    # Gated on the caller's path detection rather than on the event, for two
+    # reasons.
+    #
+    # 1. It read `github.event.pull_request.{base,head}.sha` directly. Once
+    #    ci.yml gained a workflow_dispatch trigger for bot-authored branches
+    #    (#9161), those are empty — `git diff` over two empty SHAs fails, the
+    #    `|| echo ""` swallows it, CHANGED comes back empty, and the gate would
+    #    have reported success having built nothing. Broadening the event
+    #    condition alone would have produced exactly that silent no-op.
+    # 2. The inline filter duplicated ci-gate's `needs-design` output. A
+    #    second copy of a path filter is the #8620 bug class: the copies drift
+    #    and the gate stops firing on precisely the PRs that needed it.
+    #
+    # `design-changed` defaults to true, so a caller that omits it builds
+    # Storybook rather than silently skipping the leak check.
+    if: ${{ inputs.design-changed }}
     runs-on: ubuntu-latest
+    # The only job in this workflow without one. A hung `build-storybook` would
+    # otherwise sit on a runner for GitHub's 6-hour default with quality-gates —
+    # and therefore the required CI Success check — unable to complete. 15
+    # matches lighthouse-delta, the other build-and-measure job here.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Check if design system files changed
-        id: check-design
-        run: |
-          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} 2>/dev/null || echo "")
-          if echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No design system changes — skipping Storybook build"
-          fi
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: steps.check-design.outputs.changed == 'true'
         with:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
-        if: steps.check-design.outputs.changed == 'true'
       - run: cd packages/ui && npm run build
-        if: steps.check-design.outputs.changed == 'true'
 
       - name: Build public Storybook (INCLUDE_INTERNAL not set)
-        if: steps.check-design.outputs.changed == 'true'
         run: cd apps/design && npm run build-storybook -- --output-dir storybook-public
         env:
           INCLUDE_INTERNAL: ''
 
       - name: Assert no internal story titles in public build
-        if: steps.check-design.outputs.changed == 'true'
         run: |
           if [ ! -d "apps/design/stories/internal" ]; then
             echo "No internal stories directory -- nothing to check."
