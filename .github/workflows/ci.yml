@@ -96,7 +96,16 @@ jobs:
           web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
 
           echo "$CHANGED" | grep -q '^web/' && web=true
-          echo "$CHANGED" | grep -q '^engine/' && engine=true
+          # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
+          # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
+          # so it compiles into every shipped WASM binary. It is a local patch we
+          # maintain for Bevy 0.18, not merely vendored code. Matching only
+          # '^engine/' meant a PR editing just the fork set engine=false, skipped
+          # Quality Gates / WASM Build entirely, and was first compiled by CD on
+          # main AFTER merge -- so a fork edit that failed to build reddened main
+          # rather than the PR. any_code derives from $engine, so this covers
+          # that too.
+          echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
           # The docs gate is what runs apps/docs/scripts/check-manifest-sync.ts,
