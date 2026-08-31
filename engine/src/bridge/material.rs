@@ -2,17 +2,29 @@
 
 use bevy::prelude::*;
 use crate::core::{
+    material::MaterialData,
+    shader_effects::{ShaderEffectData, ForgeMaterial},
+};
+
+// Editor-only imports. Only three systems in this file survive a `runtime`
+// build — `sync_extended_material_data`, `sync_custom_wgsl_uniforms` and
+// `sync_forge_shader_time` — and they need just `MaterialData`,
+// `ShaderEffectData` and `ForgeMaterial`. Everything below feeds the
+// selection-emit, environment, skybox, post-processing and shader appliers, all
+// of which already carry `#[cfg(not(feature = "runtime"))]`.
+#[cfg(not(feature = "runtime"))]
+use crate::core::{
     camera,
     environment::{self, EnvironmentSettings, SkyboxHandles},
     entity_id::EntityId,
     gizmo::CoordinateMode,
     history::{HistoryStack, UndoableAction},
     lighting::LightData,
-    material::MaterialData,
     pending_commands::PendingCommands,
     post_processing::PostProcessingSettings,
-    shader_effects::{ShaderEffectData, ForgeMaterial, ForgeShaderExtension},
+    shader_effects::ForgeShaderExtension,
 };
+#[cfg(not(feature = "runtime"))]
 use crate::bridge::{events, Selection, SelectionChangedEvent};
 
 /// System that emits material data when the primary selection has a MaterialData component.

@@ -4,6 +4,17 @@ import withBundleAnalyzer from "@next/bundle-analyzer";
 import createNextIntlPlugin from "next-intl/plugin";
 import { withBotId } from "botid/next/config";
 import { buildCspRouteRules, playCspOptionsFromEnv } from "./src/lib/security/csp";
+import { assertClerkPublishableKeyShape } from "./src/lib/auth/clerkKey";
+
+// Fail the build on a configured-but-unusable Clerk publishable key (#9044).
+// A MISSING key is fine and stays fine — local checkouts and CI E2E builds have
+// none. A key that is PRESENT but cannot work is always a paste error, and the
+// old inline prefix check treated it as "Clerk is not set up here". That is how
+// docs.spawnforge.ai shipped with every sign-in dead and no signal anywhere;
+// the same paste into this project's env var would take the paid funnel with
+// it. Checked here rather than at runtime so the deploy goes red instead of the
+// live site.
+assertClerkPublishableKeyShape();
 
 const analyzer = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",

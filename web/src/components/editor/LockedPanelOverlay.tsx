@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { Lock } from 'lucide-react';
 import { TIER_LABELS, getRequiredTier } from '@/lib/ai/tierAccess';
 import type { Tier } from '@/stores/userStore';
+import { SETTINGS_BILLING_HREF } from '@/lib/navigation/settingsRoutes';
 
 interface LockedPanelOverlayProps {
   /** The panel ID from panelRegistry — used to look up the required tier. */
@@ -47,7 +48,7 @@ export function LockedPanelOverlay({ panelId, requiredTier }: LockedPanelOverlay
       </div>
 
       <a
-        href="/settings/billing"
+        href={SETTINGS_BILLING_HREF}
         className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
       >
         Upgrade to {tierLabel}
