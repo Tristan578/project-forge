@@ -204,7 +204,7 @@ export function syncEntityAudioInstance(
   options?: { force?: boolean }
 ): void {
   const assetId = audio && audio.assetId !== null ? resolveAudioAssetId(audio.assetId) : null;
-  const signature = assetId === null ? 'none' : `${assetId} ${JSON.stringify(audio)}`;
+  const signature = assetId === null ? 'none' : `${assetId}\0${JSON.stringify(audio)}`;
   if (!options?.force && appliedSignatures.get(entityId) === signature) return;
   appliedSignatures.set(entityId, signature);
 
