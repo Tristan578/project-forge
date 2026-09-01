@@ -47,6 +47,30 @@ export const VITEST_TEST_TIMEOUT_MS = 30_000;
 /** Default vitest hook (beforeEach/afterEach) timeout */
 export const VITEST_HOOK_TIMEOUT_MS = 30_000;
 
+/**
+ * Timeout for Testing Library's async utilities (`findBy*`, `waitFor`).
+ *
+ * Testing Library defaults this to 1000ms, and that default is measured in WALL
+ * CLOCK. In a ~900-file run across many worker threads, a thread can simply not
+ * be scheduled for a second, and a `findBy*` then fails while the component
+ * under test is behaving perfectly. Observed on
+ * `EditorLayout.test.tsx > opens keyboard shortcuts panel`, which passes alone
+ * and fails in the full suite: the panel it waits for is a `vi.mock`'d stub that
+ * renders instantly, so nothing slow is involved.
+ *
+ * The wait cannot be removed. Those panels are behind `React.lazy`, and Vitest
+ * settles a dynamic import on a MACROTASK, so no amount of microtask flushing
+ * (`await act(async () => {})`) resolves the boundary -- verified by trying it.
+ * Polling is genuinely required.
+ *
+ * This budget therefore only bounds how long a wait may take before failing. It
+ * asserts nothing about behaviour: a component that never renders still fails,
+ * and nothing incorrect starts passing. It is deliberately far below
+ * VITEST_TEST_TIMEOUT_MS so a genuinely hung wait still surfaces as a specific
+ * "unable to find element" rather than an opaque test timeout.
+ */
+export const VITEST_ASYNC_UTIL_TIMEOUT_MS = 5_000;
+
 // ---------------------------------------------------------------------------
 // Engine / WASM loading
 // ---------------------------------------------------------------------------
