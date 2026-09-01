@@ -1,7 +1,7 @@
 /**
  * PF-689: Regression tests for Sentry-discovered anti-patterns.
  *
- * Each test documents a specific bug pattern from project_lessons_learned.md,
+ * Each test documents a specific bug pattern from .claude/rules/lessons-learned.md,
  * verifies the fixed behavior, and would fail against the buggy code.
  *
  * Bug patterns covered:
@@ -42,29 +42,25 @@ describe('Lesson #3: NaN guard — Number(undefined) ?? fallback', () => {
     // This is the bug: the developer intended to get 60, but gets NaN
   });
 
-  it('safe pattern: Number.isFinite guard returns fallback for non-finite input', () => {
-    function safeNumber(val: unknown, fallback: number): number {
-      const parsed = Number(val);
-      return Number.isFinite(parsed) ? parsed : fallback;
-    }
-    expect(safeNumber(undefined, 60)).toBe(60);
-    // Note: Number(null) === 0, which IS finite — so null → 0, not fallback.
-    // For null-safety, check explicitly or use `val ?? fallback` first.
-    expect(safeNumber('not-a-number', 60)).toBe(60);
-    expect(safeNumber(NaN, 60)).toBe(60);
-    expect(safeNumber('45', 60)).toBe(45);
-    expect(safeNumber(45, 60)).toBe(45);
-  });
-
-  it('safe pattern: Number.isFinite guard preserves zero (does NOT replace 0 with fallback)', () => {
-    function safeNumber(val: unknown, fallback: number): number {
-      const parsed = Number(val);
-      return Number.isFinite(parsed) ? parsed : fallback;
-    }
-    // 0 is a valid value — must NOT be replaced with fallback
-    expect(safeNumber(0, 60)).toBe(0);
-    expect(safeNumber('0', 60)).toBe(0);
-  });
+  /*
+   * Two "safe pattern: Number.isFinite guard ..." cases were removed here.
+   *
+   * They are not in #9564's list of nine, but they are the same shape: each
+   * declared its own `safeNumber` and asserted on it, so neither could fail for
+   * any change to this repo. The ticket's acceptance criterion is categorical —
+   * "no case asserts the behaviour of a lambda defined inside its own body" —
+   * and leaving two behind would have satisfied the list while missing the rule.
+   *
+   * What they demonstrated is now asserted against the shipping coercion in
+   * "generateSaveSystem coerces saveSlots and autoSaveInterval with a finite
+   * guard": non-finite input falls back, and an explicit 0 survives.
+   *
+   * The cases above and below are kept deliberately. They assert EXPRESSIONS
+   * (`Number(undefined)` is NaN; `NaN ?? 60` is NaN) rather than a locally
+   * defined function, and those language facts are what make the guard
+   * necessary — there is no module to point them at, and no lambda standing in
+   * for one.
+   */
 
   it('or-operator pattern || replaces zero with fallback — this is the bug', () => {
     // This demonstrates lesson #3: || treats 0 as falsy
@@ -76,22 +72,41 @@ describe('Lesson #3: NaN guard — Number(undefined) ?? fallback', () => {
     expect(correctDefault).toBe(0);
   });
 
-  it('saveSlots formula uses Number.isFinite guard (fixed from || pattern)', () => {
-    // Fixed: saveSystemGenerator now uses Number.isFinite pattern for saveSlots
-    // (was: `Number(val) || 3` which treated 0 as falsy)
-    const fixedPattern = (val: unknown) =>
-      Math.min(20, Math.max(1, Number.isFinite(Number(val)) ? Number(val) : 3));
-    expect(fixedPattern(undefined)).toBe(3);
-    expect(fixedPattern(null)).toBe(1); // Number(null) === 0, isFinite(0) → true, clamped to min 1
-    expect(fixedPattern('10')).toBe(10);
-    expect(fixedPattern(0)).toBe(1); // 0 is valid input, clamped to min 1 (not silently replaced with 3)
+  /**
+   * The saveSlots / autoSaveInterval coercions live in `parseAIResponse`, which
+   * is module-private — so this drives the exported `generateSaveSystem` with a
+   * stub `aiComplete`, which is the only path that reaches them.
+   *
+   * It previously re-declared both formulas as lambdas and asserted on those,
+   * touching no product code: reverting saveSystemGenerator to `Number(val) || 3`
+   * left it green (#9564).
+   */
+  it('generateSaveSystem coerces saveSlots and autoSaveInterval with a finite guard', async () => {
+    const { generateSaveSystem } = await import('@/lib/ai/saveSystemGenerator');
 
-    // The autoSaveInterval formula also uses the correct pattern (Number.isFinite)
-    const safePattern = (val: unknown) =>
-      Math.max(0, Number.isFinite(Number(val)) ? Number(val) : 60);
-    expect(safePattern(undefined)).toBe(60);
-    expect(safePattern(0)).toBe(0); // zero is valid for autoSaveInterval
-    expect(safePattern('45')).toBe(45);
+    const withConfig = (config: Record<string, unknown>) =>
+      generateSaveSystem({
+        description: 'test',
+        fields: [],
+        aiComplete: async () => JSON.stringify({ config, checkpoints: [] }),
+      });
+
+    // 0 is a real answer, not a missing one. Under `Number(val) || 3` this
+    // silently became 3; the finite guard keeps it and the clamp lifts it to
+    // the minimum of 1.
+    expect((await withConfig({ saveSlots: 0 })).config.saveSlots).toBe(1);
+    expect((await withConfig({ saveSlots: 10 })).config.saveSlots).toBe(10);
+    // Absent stays absent-defaulted, and the clamp still bounds the top end.
+    expect((await withConfig({})).config.saveSlots).toBe(3);
+    expect((await withConfig({ saveSlots: 999 })).config.saveSlots).toBe(20);
+
+    // autoSaveInterval is the case that produced NaN: `Number(undefined) ?? 60`
+    // is NaN, because ?? only catches null/undefined — not NaN.
+    const absent = (await withConfig({})).config.autoSaveInterval;
+    expect(Number.isNaN(absent)).toBe(false);
+    expect(absent).toBe(60);
+    // ...and 0 is a valid interval, not a missing one.
+    expect((await withConfig({ autoSaveInterval: 0 })).config.autoSaveInterval).toBe(0);
   });
 });
 
@@ -200,27 +215,31 @@ describe('Lesson #2: Async rate-limit calls must be awaited', () => {
 // Bug #17: Array spread on large arrays causes RangeError
 // ---------------------------------------------------------------------------
 
+/*
+ * THREE CASES WERE REMOVED FROM THIS BLOCK (#9564), NOT MOVED.
+ *
+ * They read:
+ *
+ *   const safeMax = (arr: number[]) => arr.reduce((m, x) => Math.max(m, x), -Infinity);
+ *   expect(safeMax([42])).toBe(42);
+ *
+ * — a lambda declared in the case body, asserted against itself, three times
+ * over ("single-element array", "negative numbers", "throws RangeError").
+ * They exercised no product code and could not fail for any change to this
+ * repo; they were assertions about `Array.prototype.reduce`.
+ *
+ * Searched before deleting: NO module in web/src uses a reduce-based max. The
+ * pattern these were written to protect does not exist here any more, so there
+ * is nothing to point them at. A case that cannot fail is not coverage — it is
+ * three green checks implying a spread-overflow guard that is not being tested.
+ *
+ * The lesson itself is worth keeping, so it is stated here rather than dressed
+ * up as a test: `Math.max(...arr)` and `arr.push(...other)` pass every element
+ * as an argument and blow the call stack somewhere above ~65k elements. Use a
+ * reduce or a for-of loop on anything unbounded. The `for-of` case below is
+ * kept because it demonstrates the safe alternative concretely.
+ */
 describe('Lesson #17: Large array spread causes stack overflow', () => {
-  it('Math.max(...largeArray) throws RangeError for arrays > ~65k elements', () => {
-    // Document the failure mode — do NOT actually crash the test runner
-    // by creating a 65k array. Use a smaller array to verify the pattern fix.
-    const safeMax = (arr: number[]) => arr.reduce((m, x) => Math.max(m, x), -Infinity);
-    const arr = [3, 1, 4, 1, 5, 9, 2, 6];
-    expect(safeMax(arr)).toBe(9);
-    // Also verify it handles empty array
-    expect(safeMax([])).toBe(-Infinity);
-  });
-
-  it('reduce-based max handles single-element array', () => {
-    const safeMax = (arr: number[]) => arr.reduce((m, x) => Math.max(m, x), -Infinity);
-    expect(safeMax([42])).toBe(42);
-  });
-
-  it('reduce-based max handles negative numbers', () => {
-    const safeMax = (arr: number[]) => arr.reduce((m, x) => Math.max(m, x), -Infinity);
-    expect(safeMax([-5, -3, -10])).toBe(-3);
-  });
-
   it('for-of loop push avoids spread stack overflow', () => {
     // Demonstrates safe alternative to arr.push(...other) for large arrays
     const target: number[] = [1, 2, 3];
@@ -251,57 +270,103 @@ describe('Sentry Session 2026-03-20: specific bug regressions', () => {
     expect(value).not.toBe(60);
   });
 
-  it('NaN guard fix: Number.isFinite pattern returns correct fallback', () => {
-    const safeValue = (raw: unknown, fallback: number): number => {
-      const parsed = Number(raw);
-      return Number.isFinite(parsed) ? parsed : fallback;
-    };
-    expect(safeValue(undefined, 60)).toBe(60);
-    expect(Number.isNaN(safeValue(undefined, 60))).toBe(false);
+  /*
+   * "NaN guard fix: Number.isFinite pattern returns correct fallback" was
+   * removed here (#9564). It declared `safeValue` in its own body and asserted
+   * on that, so it could not fail for any change to this repo.
+   *
+   * The FIX it was named for is now covered against the shipping code, in
+   * "generateSaveSystem coerces saveSlots and autoSaveInterval with a finite
+   * guard" above — which asserts `autoSaveInterval` comes back as 60 rather
+   * than NaN when the AI omits it. The case immediately above this comment is
+   * kept: it pins the language behaviour (`Number(undefined) ?? 60` IS NaN)
+   * that makes the guard necessary, and that assertion is about JavaScript, not
+   * about a module, so a lambda is the honest subject there.
+   */
+
+  /**
+   * Regression for `audioManager.getBusVolume` returning 1.0 for a bus whose
+   * volume is legitimately 0 (fully muted).
+   *
+   * This pair used to assert a lambda declared in its own body
+   * (`(v: number) => v || 1.0`), so it touched no product code: reintroducing
+   * `|| 1.0` in audioManager left it green, and it simultaneously pinned the
+   * BUGGY behaviour — anyone correcting the lambda to match the shipped `??`
+   * turned the suite red. It now drives the real getter (#9564).
+   */
+  it('getBusVolume honours an explicit 0 instead of falling back to 1.0', async () => {
+    const { audioManager } = await import('@/lib/audio/audioManager');
+
+    // createBus needs an AudioContext, and `ensureContext` calls it with `new`,
+    // so the stub has to be a real constructor — an arrow function is not one.
+    const makeGain = () => ({ gain: { value: 1 }, connect: vi.fn().mockReturnThis() });
+    class StubAudioContext {
+      state = 'running';
+      destination = {};
+      createGain = makeGain;
+    }
+    vi.stubGlobal('AudioContext', StubAudioContext);
+    audioManager.ensureContext();
+
+    audioManager.createBus('regression-muted', 0);
+    // The assertion that matters: 0 is a valid volume, not a missing one.
+    expect(audioManager.getBusVolume('regression-muted')).toBe(0);
+
+    audioManager.createBus('regression-half', 0.5);
+    expect(audioManager.getBusVolume('regression-half')).toBe(0.5);
+
+    // The 1.0 fallback is still correct for a bus that does not exist — that is
+    // the case `??` is there to serve, and it must keep working.
+    expect(audioManager.getBusVolume('no-such-bus')).toBe(1.0);
   });
 
   /**
-   * Regression for audioManager volume || 1.0 — volume of 0 gets replaced.
-   * Lesson: || treats 0 as falsy. Use ?? for numeric defaults.
+   * Regression for `load_scene_with_transition` replacing an explicit
+   * `duration: 0` (instant) with 500ms.
+   *
+   * This pair also asserted a lambda declared in its own body, and its docblock
+   * still pointed at `sceneManagementHandlers.ts line ~237: duration || 500` —
+   * a line that has read `?? 500` since :264. A fossil of a bug that no longer
+   * exists, pinning the buggy value. It now drives the real handler (#9564).
    */
-  it('volume || 1.0 regression: volume=0 returns 1.0 instead of 0 (regression for audio bug)', () => {
-    const computeTargetVolume = (gainValue: number) => gainValue || 1.0;
-    // Bug: gain value of 0 (fully muted) returns 1.0 (fully audible)
-    expect(computeTargetVolume(0)).toBe(1.0); // documents the bug
-    expect(computeTargetVolume(0)).not.toBe(0);
+  it('load_scene_with_transition preserves an explicit duration of 0', async () => {
+    const { sceneManagementHandlers } = await import(
+      '@/lib/chat/handlers/sceneManagementHandlers'
+    );
+
+    const startSceneTransition = vi.fn().mockResolvedValue(undefined);
+    const ctx = { store: { startSceneTransition } } as unknown as Parameters<
+      typeof sceneManagementHandlers.load_scene_with_transition
+    >[1];
+
+    await sceneManagementHandlers.load_scene_with_transition(
+      { sceneName: 'Level 2', duration: 0 },
+      ctx,
+    );
+
+    expect(startSceneTransition).toHaveBeenCalledWith(
+      'Level 2',
+      expect.objectContaining({ duration: 0 }),
+    );
   });
 
-  it('volume ?? 1.0 fix: volume=0 returns 0 correctly', () => {
-    const computeTargetVolume = (gainValue: number) => gainValue ?? 1.0;
-    expect(computeTargetVolume(0)).toBe(0); // correct: 0 is a valid volume
-    expect(computeTargetVolume(0.5)).toBe(0.5);
-    expect(computeTargetVolume(1.0)).toBe(1.0);
-  });
+  it('load_scene_with_transition still defaults duration when it is omitted', async () => {
+    const { sceneManagementHandlers } = await import(
+      '@/lib/chat/handlers/sceneManagementHandlers'
+    );
 
-  /**
-   * Regression for scene transition duration || 500.
-   * sceneManagementHandlers.ts line ~237: duration: p.data.duration || 500
-   * If a user passes duration=0 (instant), it gets replaced with 500ms.
-   */
-  it('duration || 500 regression: duration=0 returns 500 instead of 0', () => {
-    // Simulates the handler logic.
-    //
-    // The `||` below IS the subject of this case; rewriting it to `??` would
-    // delete the behaviour being demonstrated. Note also that the case asserts
-    // a lambda declared right here rather than the shipped handler -- which has
-    // read `?? 500` since sceneManagementHandlers.ts:264 -- so it cannot
-    // actually catch the regression it is named for. Tracked in #9564.
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
-    const getDuration = (input: number | undefined) => input || 500;
-    expect(getDuration(0)).toBe(500); // documents the bug: instant transition becomes 500ms
-    expect(getDuration(0)).not.toBe(0);
-  });
+    const startSceneTransition = vi.fn().mockResolvedValue(undefined);
+    const ctx = { store: { startSceneTransition } } as unknown as Parameters<
+      typeof sceneManagementHandlers.load_scene_with_transition
+    >[1];
 
-  it('duration ?? 500 fix: duration=0 returns 0 correctly', () => {
-    const getDuration = (input: number | undefined) => input ?? 500;
-    expect(getDuration(0)).toBe(0); // correct: instant transition works
-    expect(getDuration(undefined)).toBe(500); // fallback when not provided
-    expect(getDuration(1000)).toBe(1000); // custom duration preserved
+    await sceneManagementHandlers.load_scene_with_transition({ sceneName: 'Level 3' }, ctx);
+
+    // The 500ms fallback is the behaviour `??` exists to preserve.
+    expect(startSceneTransition).toHaveBeenCalledWith(
+      'Level 3',
+      expect.objectContaining({ duration: 500 }),
+    );
   });
 });
 
