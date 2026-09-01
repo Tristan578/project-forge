@@ -538,8 +538,14 @@ export function createGenerationHandler<TParams, TResult>(
           { ttlSeconds: cacheTtlSeconds, userId }
         );
 
+        // Copied to a const before it is tested: `cacheMiss` is a `let`
+        // assigned inside the `cachedGenerate` closure, so TypeScript discards
+        // any narrowing of it at every later read. Aliased-condition narrowing
+        // only carries through `durableSubmission` when the variable behind the
+        // condition is itself a const.
+        const miss = cacheMiss;
         const durableSubmission =
-          !cacheResult.cached && cacheMiss !== undefined && asyncJob !== undefined && isQstashConfigured();
+          !cacheResult.cached && miss !== undefined && asyncJob !== undefined && isQstashConfigured();
         if (durableSubmission) {
           // Run the durable publish post-response: `after()` keeps the Vercel
           // function alive so the publish never adds latency to — or can fail —
@@ -547,7 +553,7 @@ export function createGenerationHandler<TParams, TResult>(
           // safe to fire-and-forget. Gated on asyncJob + QStash so the dormant
           // path (and every non-async route) never touches `after()` at all —
           // `after()` requires a request scope, which only exists at runtime.
-          const { result: missResult, usageId: missUsageId } = cacheMiss;
+          const { result: missResult, usageId: missUsageId } = miss;
           after(() => maybePublishAsyncCallback(missResult, userId, missUsageId));
         }
 
