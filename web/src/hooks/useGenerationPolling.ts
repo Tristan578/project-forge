@@ -48,6 +48,7 @@ export function useGenerationPolling() {
   const timersRef = useRef<Record<string, NodeJS.Timeout>>({});
   const startedAtRef = useRef<Record<string, number>>({});
   const durablePollsRef = useRef<Record<string, () => void>>({});
+  const inFlightPollsRef = useRef<Record<string, true>>({});
 
   // On mount: drain any refunds that failed in a previous session
   useEffect(() => {
@@ -67,6 +68,7 @@ export function useGenerationPolling() {
       timersRef.current = {};
       startedAtRef.current = {};
       durablePollsRef.current = {};
+      inFlightPollsRef.current = {};
     };
   }, []);
 
@@ -90,6 +92,11 @@ export function useGenerationPolling() {
 
   function startPolling(id: string, jobId: string, type: string, durable: boolean) {
     const poll = async () => {
+      // Focus/visibility and the safety interval can fire together. Serialize
+      // reads per job so two completed responses cannot import the same asset.
+      if (inFlightPollsRef.current[id]) return;
+      inFlightPollsRef.current[id] = true;
+      try {
       const startedAt = startedAtRef.current[id] ?? Date.now();
       startedAtRef.current[id] = startedAt;
       // Keep the existing five-minute overall cap independent of focus events
@@ -147,6 +154,9 @@ export function useGenerationPolling() {
       } catch (err) {
         console.error('Poll error:', err);
         // Continue polling unless we've maxed out
+      }
+      } finally {
+        delete inFlightPollsRef.current[id];
       }
     };
 
@@ -560,6 +570,7 @@ export function useGenerationPolling() {
         delete timersRef.current[id];
         delete startedAtRef.current[id];
         delete durablePollsRef.current[id];
+        delete inFlightPollsRef.current[id];
       }
     }
     // NOTE: No cleanup return here — clearing all timers on deps change would stop

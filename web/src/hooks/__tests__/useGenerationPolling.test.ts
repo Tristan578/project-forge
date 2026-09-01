@@ -223,6 +223,31 @@ describe('useGenerationPolling', () => {
     unmount();
   });
 
+  it('serializes interval and focus reads for the same durable job', async () => {
+    mockJobs['durable'] = makeJob('durable', { durable: true });
+    let resolveStatus!: (response: Response) => void;
+    const pendingStatus = new Promise<Response>((resolve) => { resolveStatus = resolve; });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockReturnValue(pendingStatus);
+
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveStatus(new Response(JSON.stringify({
+        jobId: 'job-durable', status: 'processing', progress: 10,
+      }), { status: 200 }));
+      await pendingStatus;
+    });
+    unmount();
+  });
+
   it('updates progress on processing response', async () => {
     mockJobs['j1'] = makeJob('j1');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
