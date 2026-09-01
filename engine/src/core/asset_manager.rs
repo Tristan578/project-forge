@@ -63,6 +63,17 @@ pub struct GltfSourceHandle(pub Handle<Gltf>);
 #[derive(Component)]
 pub struct GltfSceneSpawned;
 
+/// Preserve a valid caller-supplied asset UUID so JS can correlate retries and
+/// re-imports. Legacy, blank, and malformed ids retain the generated fallback.
+/// UUID-only acceptance also prevents untrusted ids from becoming paths in the
+/// in-memory glTF asset source.
+pub(crate) fn resolve_import_asset_id(requested: Option<&str>) -> String {
+    requested
+        .and_then(|id| uuid::Uuid::parse_str(id).ok())
+        .unwrap_or_else(uuid::Uuid::new_v4)
+        .to_string()
+}
+
 /// Resource mapping asset IDs to loaded GPU texture handles.
 /// Populated by apply_texture_load in bridge, consumed by sync_material_data in core.
 #[derive(Resource, Default)]
@@ -145,5 +156,17 @@ mod tests {
         assert_eq!(decoded_base64_size("data:audio/wav;base64,%%%"), None);
         assert_eq!(decoded_base64_size("A===-"), None);
         assert_eq!(decoded_base64_size("AB=="), None);
+    }
+
+    #[test]
+    fn import_asset_id_preserves_valid_uuid_and_rejects_unsafe_fallbacks() {
+        let id = "4ec30cf9-d98f-4e67-86d9-470a6cdbbe09";
+        assert_eq!(super::resolve_import_asset_id(Some(id)), id);
+
+        for requested in [None, Some(""), Some("../not-an-asset-id")] {
+            let resolved = super::resolve_import_asset_id(requested);
+            assert!(uuid::Uuid::parse_str(&resolved).is_ok());
+            assert_ne!(Some(resolved.as_str()), requested);
+        }
     }
 }

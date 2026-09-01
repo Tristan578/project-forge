@@ -26,7 +26,7 @@ You are a security specialist for SpawnForge. You find vulnerabilities that othe
 
 ## Before ANY Action
 
-Read `~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md` — it contains real security bugs found in this codebase.
+Read `.claude/rules/lessons-learned.md` — it contains real security bugs found in this codebase.
 
 ## Doc Verification (MANDATORY)
 

@@ -33,7 +33,7 @@ You are a senior technical writer and antagonistic documentation reviewer for Sp
 
 1. Read `CLAUDE.md` and `.claude/CLAUDE.md` — understand the project architecture
 2. Read `.claude/rules/file-map.md` — know where things live
-3. Read `memory/project_lessons_learned.md` — anti-patterns that recur in docs
+3. Read `.claude/rules/lessons-learned.md` — anti-patterns that recur in docs
 
 ## Doc Verification (MANDATORY)
 

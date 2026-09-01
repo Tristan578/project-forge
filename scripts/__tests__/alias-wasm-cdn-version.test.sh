@@ -167,6 +167,45 @@ else
   fail "the parity refusal did not explain itself"
 fi
 
+# Stale type declarations must NOT break parity. upload-wasm-to-r2.sh passes
+# `--exclude "*.d.ts"`, but `aws s3 sync` never deletes, so the ones written
+# before that exclusion existed are still in latest/ -- 8 of them in the real
+# bucket, still serving 200. Counting them made parity unsatisfiable and failed
+# EVERY deploy (#9599), which is why the source is counted through the same
+# exclusion the uploader applies.
+RES="$(run_case 'a.js
+b.wasm
+c.json
+forge_engine.d.ts
+forge_engine_bg.wasm.d.ts' 'a.js
+b.wasm
+c.json' 0)"
+RC="${RES#*---RC---}"; RC="${RC%%$'
+'---ARGV---*}"
+if [ "$RC" = "0" ]; then
+  pass "stale .d.ts objects in latest/ do not break parity (the uploader excludes them too)"
+else
+  fail "stale .d.ts objects failed parity - this is #9599, which skipped every production deploy: $(head -3 <<<"$RES")"
+fi
+
+# The exclusion is narrow ON PURPOSE. Filtering "whatever did not get copied"
+# would make the assertion vacuous; only the uploader's own exclusions come out,
+# so a new extension the uploader DOES write must still fail.
+RES="$(run_case 'a.js
+b.wasm
+c.json
+forge_engine.d.ts
+e.map' 'a.js
+b.wasm
+c.json' 0)"
+RC="${RES#*---RC---}"; RC="${RC%%$'
+'---ARGV---*}"
+if [ "$RC" != "0" ]; then
+  pass "a new uncovered extension still fails parity even alongside excluded .d.ts files"
+else
+  fail "the .d.ts exclusion was written broadly enough to swallow a genuinely uncopied file - the parity guard is now vacuous"
+fi
+
 # Missing configuration is a usage error, not a verdict.
 for var in ENGINE_VERSION R2_BUCKET; do
   d="$(mktemp -d)"; make_aws "$d" 'obj1' 'obj1' 0

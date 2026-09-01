@@ -884,6 +884,9 @@ jobs:
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/__tests__/post-deploy-health-check.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
+            scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
+            scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
+            scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -981,6 +984,17 @@ jobs:
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
       - name: Run CD tree-validation gate test suite
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
+      - name: Run engine WASM cache-key test suite
+        run: bash scripts/__tests__/engine-wasm-cache-key.test.sh
+
+      - name: Run source-encoding gate test suite
+        run: bash scripts/__tests__/check-source-encoding.test.sh
+
+      - name: Run source-encoding gate
+        run: bash scripts/check-source-encoding.sh
+
+      - name: Run agent-harness reference gate test suite
+        run: bash scripts/__tests__/claude-refs-resolve.test.sh
 
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
@@ -1320,23 +1334,77 @@ jobs:
       # not the 4 variants cd.yml/quality-gates.yml produce — to keep the cargo
       # cost to one binary. wasm-bindgen MUST be 0.2.127 (pinned per CLAUDE.md),
       # exactly as quality-gates.yml / cd.yml install it.
+      #
+      # REUSE BEFORE REBUILD (#9574). Measured on run 33404636688, this job spent
+      # 412s of 606s on the toolchain and the cargo build, against 63s actually
+      # running the specs — and on a web-only PR that build reproduces a binary
+      # already sitting on main. The gate itself stays exactly as it was: it is
+      # the only PR workflow running the substantive @engine-smoke journeys, so
+      # the saving comes from not rebuilding the input, never from skipping the
+      # test.
+      #
+      # The key is CONTENT-ADDRESSED over the engine tree, the
+      # .transform-gizmo-fork path dependency and the pinned bindgen version
+      # (scripts/engine-wasm-cache-key.sh), so a hit cannot serve a binary that
+      # does not match the sources under test — a different tree is a different
+      # key. Any miss falls through to the build below.
+      #
+      # Restore-only here, deliberately. A cache saved from a PR branch is
+      # visible only to that PR, so saving on this side would help nothing; the
+      # entry is written by cd.yml on pushes to main, and GitHub lets every
+      # branch restore caches created on the default branch.
+      - name: Resolve the engine build key
+        id: engine-key
+        run: |
+          key="$(bash scripts/engine-wasm-cache-key.sh)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Engine WASM cache key: $key"
+
+      - name: Restore a prebuilt WebGL2 engine
+        id: engine-wasm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: engine/pkg-webgl2
+          key: ${{ steps.engine-key.outputs.key }}
+
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
         with:
           workspaces: engine -> target
 
       - name: Install wasm-bindgen-cli
+        if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
         run: cargo install wasm-bindgen-cli --version 0.2.127
 
       - name: Build WebGL2 WASM + wasm-bindgen
+        if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
         working-directory: engine
         run: |
           cargo build --target wasm32-unknown-unknown --release --features webgl2
           wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      # Whether restored or built, the engine must actually be here before the
+      # copy below silently produces an empty engine-pkg-webgl2 and the specs
+      # fail somewhere far less obvious.
+      #
+      # cache-hit comes in through env: rather than being interpolated into the
+      # script, matching how the Detect-changed-paths step takes its SHAs.
+      - name: Assert the WebGL2 engine is present
+        env:
+          CACHE_HIT: ${{ steps.engine-wasm-cache.outputs.cache-hit }}
+        run: |
+          if [ ! -s engine/pkg-webgl2/forge_engine_bg.wasm ]; then
+            if [ "$CACHE_HIT" = "true" ]; then origin="a cache restore"; else origin="a build"; fi
+            echo "::error::engine/pkg-webgl2/forge_engine_bg.wasm is missing or empty after ${origin}" >&2
+            ls -la engine/pkg-webgl2 2>&1 || true
+            exit 1
+          fi
 
       - name: Copy WASM into web/public (same-origin)
         run: |
