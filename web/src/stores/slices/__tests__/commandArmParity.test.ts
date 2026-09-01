@@ -55,13 +55,6 @@ const ALLOWED_UNROUTED: Record<string, string> = {
   preview_clip: 'PF-1174 — engine-side clip authoring unimplemented',
   remove_animation_clip: 'PF-1174 — engine-side clip authoring unimplemented',
 
-  // PF-1179: `sprites.rs` implements both against a per-entity `TilesetData`
-  // component keyed by `entityId`, but the store keys tilesets by asset id and
-  // the only caller has no entity to name. So they are deliberately left out of
-  // `route_domain` — routing them would trade a silent no-op for a silent
-  // `Missing entityId`. One side has to give first.
-  set_tileset: 'PF-1179 — entity-keyed engine arm vs asset-keyed caller',
-  remove_tileset: 'PF-1179 — entity-keyed engine arm vs asset-keyed caller',
 };
 
 /**
@@ -322,13 +315,10 @@ describe('store command names have engine dispatch arms', () => {
       expect(arms.routed.size).toBeGreaterThan(200);
     });
 
-    it('actually subtracts arms the router does not name', () => {
-      // Proves the routed intersection is doing work. If the engine ever routes
-      // every arm this drops to zero and the assertion should be relaxed
-      // deliberately — not left passing on a scan that stopped subtracting.
-      expect(arms.armedButUnrouted.size).toBeGreaterThan(0);
-      expect(arms.armedButUnrouted.has('set_tileset')).toBe(true);
-      expect(arms.implemented.has('set_tileset')).toBe(false);
+    it('routes every implemented arm', () => {
+      expect(arms.armedButUnrouted.size).toBe(0);
+      expect(arms.implemented.has('set_tileset')).toBe(true);
+      expect(arms.implemented.has('remove_tileset')).toBe(true);
     });
 
     it('read the store slices', () => {

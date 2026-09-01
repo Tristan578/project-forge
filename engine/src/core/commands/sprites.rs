@@ -947,40 +947,73 @@ fn handle_set_sorting_layers(payload: serde_json::Value) -> super::CommandResult
 }
 
 /// Handle set_tileset command.
-/// Payload: { entityId, assetId, tileSize, gridSize, spacing, margin, tiles }
+/// Payload: { assetId, tileSize, gridSize, spacing, margin, tiles }
 fn handle_set_tileset(payload: serde_json::Value) -> super::CommandResult {
-    let entity_id = payload.get("entityId")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing entityId")?
-        .to_string();
+    let tileset_data = parse_tileset_data(payload)?;
 
-    let mut obj = payload;
-    if let Some(map) = obj.as_object_mut() {
-        map.remove("entityId");
-    }
-    let tileset_data: crate::core::tileset::TilesetData =
-        serde_json::from_value(obj)
-            .map_err(|e| format!("Invalid tileset data: {}", e))?;
-
-    if queue_set_tileset_from_bridge(SetTilesetRequest { entity_id, tileset_data }) {
+    if queue_set_tileset_from_bridge(SetTilesetRequest { tileset_data }) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
     }
 }
 
-/// Handle remove_tileset command.
-/// Payload: { entityId }
-fn handle_remove_tileset(payload: serde_json::Value) -> super::CommandResult {
-    let entity_id = payload.get("entityId")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing entityId")?
-        .to_string();
+fn parse_tileset_data(
+    payload: serde_json::Value,
+) -> Result<crate::core::tileset::TilesetData, String> {
+    serde_json::from_value(payload).map_err(|e| format!("Invalid tileset data: {}", e))
+}
 
-    if queue_remove_tileset_from_bridge(RemoveTilesetRequest { entity_id }) {
+/// Handle remove_tileset command.
+/// Payload: { assetId }
+fn handle_remove_tileset(payload: serde_json::Value) -> super::CommandResult {
+    let asset_id = parse_remove_tileset_asset_id(&payload)?;
+
+    if queue_remove_tileset_from_bridge(RemoveTilesetRequest { asset_id }) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+fn parse_remove_tileset_asset_id(payload: &serde_json::Value) -> Result<String, String> {
+    Ok(payload
+        .get("assetId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing assetId")?
+        .to_string())
+}
+
+#[cfg(test)]
+mod tileset_command_tests {
+    use super::{parse_remove_tileset_asset_id, parse_tileset_data};
+    use serde_json::json;
+
+    #[test]
+    fn tileset_commands_are_asset_keyed_and_need_no_entity() {
+        let data = parse_tileset_data(json!({
+            "assetId": "dungeon-atlas",
+            "tileSize": [16, 16],
+            "gridSize": [8, 4],
+            "spacing": 1,
+            "margin": 2,
+            "tiles": []
+        }))
+        .expect("asset-keyed tileset payload");
+        assert_eq!(data.asset_id, "dungeon-atlas");
+
+        assert_eq!(
+            parse_remove_tileset_asset_id(&json!({ "assetId": "dungeon-atlas" })),
+            Ok("dungeon-atlas".to_string())
+        );
+    }
+
+    #[test]
+    fn remove_tileset_does_not_accept_the_obsolete_entity_key() {
+        assert_eq!(
+            parse_remove_tileset_asset_id(&json!({ "entityId": "entity-1" })),
+            Err("Missing assetId".to_string())
+        );
     }
 }
 
