@@ -167,10 +167,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     const rightSidePanelIds = ['scene-settings', 'ui-builder', 'effect-bindings', 'review', 'auto-iteration'];
 
-    // Auto-Iteration prefers Inspector, then an existing panel in the right
-    // dock group. If neither exists, omit a position so Dockview creates its
-    // normal floating/default group instead of silently placing it in Viewport.
-    if (panelId === 'auto-iteration') {
+    // Right-side panels prefer Inspector, then any other panel already open in
+    // the right dock group. If neither exists, omit a position so Dockview
+    // creates its normal default group: the `else if (viewport)` arm below
+    // would otherwise dock a right-side panel INSIDE the Viewport group, which
+    // is what #8933 reported. All five share one code path deliberately — the
+    // gap was never specific to Auto-Iteration, and fixing one member of the
+    // list while the other four kept falling through to Viewport would leave
+    // the same bug behind under a different panel name.
+    if (rightSidePanelIds.includes(panelId)) {
       const rightDockTarget = inspector
         ?? rightSidePanelIds
           .filter((candidateId) => candidateId !== panelId)
@@ -183,15 +188,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ...(rightDockTarget
           ? { position: { direction: 'within' as const, referencePanel: rightDockTarget } }
           : {}),
-      });
-    }
-    // Other right-side panels retain their established Inspector placement.
-    else if (rightSidePanelIds.includes(panelId) && inspector) {
-      api.addPanel({
-        id: panelId,
-        component: def.component,
-        title: def.title,
-        position: { direction: 'within', referencePanel: inspector },
       });
     }
     // Bottom panels go with assets

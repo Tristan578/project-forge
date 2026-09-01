@@ -368,6 +368,49 @@ describe('workspaceStore', () => {
       });
     });
 
+    it('places a non-Auto-Iteration right-side panel within an open sibling when Inspector is absent (#8933)', () => {
+      // The fallback is not specific to Auto-Iteration: every id in the
+      // right-dock list used to fall through to the Viewport arm without an
+      // Inspector, so fixing one of the five would have left the other four
+      // reproducing the same report under a different panel name.
+      const sibling = { id: 'auto-iteration', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'auto-iteration' ? sibling : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('scene-settings');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'scene-settings',
+        position: { direction: 'within', referencePanel: sibling },
+      }));
+    });
+
+    it('does not dock a right-side panel into the Viewport group when the right dock is empty (#8933)', () => {
+      // A viewport IS present here — that is the whole point. The old arm
+      // ordering reached `else if (viewport)` and placed the panel inside the
+      // 3D viewport tab group; asserting the absence of that position is what
+      // separates the fix from a test that merely re-states the happy path.
+      const viewport = { id: 'scene-viewport', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'scene-viewport' ? viewport : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('scene-settings');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith({
+        id: 'scene-settings',
+        component: 'scene-settings',
+        title: 'Scene Settings',
+      });
+    });
+
     it('should get open panel IDs', () => {
       const mockApi = {
         ...createMockApi(),
