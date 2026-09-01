@@ -334,6 +334,23 @@ describe('workspaceStore', () => {
       }));
     });
 
+    it('skips missing null peers when finding an existing right-dock panel (#8933)', () => {
+      const rightDockPanel = { id: 'ui-builder', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'ui-builder' ? rightDockPanel : null),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('auto-iteration');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'auto-iteration',
+        position: { direction: 'within', referencePanel: rightDockPanel },
+      }));
+    });
+
     it('opens Auto-Iteration without a relative position in an empty workspace (#8933)', () => {
       const mockApi = {
         ...createMockApi(),

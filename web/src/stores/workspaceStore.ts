@@ -175,7 +175,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ?? rightSidePanelIds
           .filter((candidateId) => candidateId !== panelId)
           .map((candidateId) => api.getPanel(candidateId))
-          .find((panel) => panel !== undefined);
+          .find((panel) => panel != null);
       api.addPanel({
         id: panelId,
         component: def.component,
