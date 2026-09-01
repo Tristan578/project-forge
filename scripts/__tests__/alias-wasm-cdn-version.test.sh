@@ -9,9 +9,16 @@
 # every job stayed green. A fix that can itself fail quietly just relocates the
 # problem, so every way the copy can produce an empty prefix must exit non-zero.
 #
-# The trap worth naming: `aws s3 cp --recursive` over a non-existent prefix
-# EXITS 0 having copied nothing. Trusting its exit code alone would reproduce
-# the original failure exactly — a green deploy serving 404s.
+# Two traps, both of which have actually bitten:
+#
+#   1. `aws s3 cp --recursive` over a non-existent prefix EXITS 0 having copied
+#      nothing. Trusting its exit code alone reproduces the original failure
+#      exactly - a green deploy serving 404s.
+#   2. `--metadata-directive REPLACE` DISCARDS every header not restated. The
+#      first version of this script restated only cache-control, so the aliased
+#      objects were served with NO Content-Type (#9593), which MIME-blocks the
+#      dynamic ES module import in useEngine.ts. HTTP 200 with the wrong headers
+#      is not a working engine, so "it copied something" is not the assertion.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -84,6 +91,23 @@ else
 fi
 
 echo ""
+echo "--- REPLACE discards every header not restated, so each type must be named ---"
+# The regression that made the engine unloadable while every object still
+# returned HTTP 200 (#9593): the aliased prefix carried no Content-Type, and a
+# module script served without a JavaScript MIME type is refused by the browser.
+check_type() {
+  local ext="$1" ctype="$2" label="$3"
+  if grep -qF -- "--include *${ext}" <<<"$ARGV" && grep -qF -- "--content-type ${ctype}" <<<"$ARGV"; then
+    pass "${label} is copied with --content-type ${ctype}"
+  else
+    fail "${label} is not given ${ctype} - REPLACE drops the type and the browser refuses the asset: ${ARGV}"
+  fi
+}
+check_type ".wasm" "application/wasm" "the wasm module"
+check_type ".js" "text/javascript" "the glue module"
+check_type ".json" "application/json" "the manifest"
+
+echo ""
 echo "--- every way this can produce an empty prefix must fail ---"
 
 # The trap: `aws s3 cp --recursive` over a missing prefix exits 0 having copied
@@ -118,6 +142,29 @@ if [ "$RC" != "0" ]; then
   pass "a copy that leaves the destination empty fails (exit $RC)"
 else
   fail "an empty destination after copy was reported as success"
+fi
+
+# A file whose extension matches no content-type group is silently skipped by
+# the per-extension copy. A destination that merely has SOME objects in it would
+# hide that, so the script compares COUNTS - here the source has 4 objects and
+# only 3 arrive.
+RES="$(run_case 'a.js
+b.wasm
+c.json
+d.css' 'a.js
+b.wasm
+c.json' 0)"
+RC="${RES#*---RC---}"; RC="${RC%%$'
+'---ARGV---*}"
+if [ "$RC" != "0" ]; then
+  pass "a source object that never reached the destination fails the deploy (exit $RC)"
+else
+  fail "a partially-copied prefix was reported as success - it would serve an incomplete engine"
+fi
+if grep -q "matches none of the content-type groups" <<<"$RES"; then
+  pass "the parity refusal names the cause and says to add a group rather than relax the check"
+else
+  fail "the parity refusal did not explain itself"
 fi
 
 # Missing configuration is a usage error, not a verdict.

@@ -243,21 +243,60 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
     };
   }
 
-  // A real asset under the resolved prefix, not the bucket root. The previous
-  // implementation pinged the root AND explicitly excluded 404 from its error
-  // condition, so a completely absent version prefix reported "up" — which is
-  // exactly what happened while production could not load the engine at all.
+  // Real assets under the resolved prefix, not the bucket root -- and their
+  // HEADERS, not just their status.
+  //
+  // Status alone is not evidence the engine is usable. #9593 shipped a prefix
+  // where every object returned HTTP 200 with NO Content-Type, because the
+  // server-side copy used `--metadata-directive REPLACE` and restated only
+  // cache-control. The browser refuses a module script without a JavaScript
+  // MIME type, so the engine could not load while this check said "up" -- the
+  // same shape as the pre-#9588 check that probed the CDN host.
+  //
+  // The two files below are exactly what useEngine.ts requests, and each is
+  // checked for the property the browser actually enforces:
+  //
+  //   forge_engine.js        loaded via `await import()`, so it must carry a
+  //                          JavaScript MIME type or the import is refused
+  //   forge_engine_bg.wasm   WebAssembly.instantiateStreaming requires
+  //                          application/wasm; otherwise the 95 MB module is
+  //                          buffered whole before compiling
   const root = resolveEngineRoot(cdnUrl, process.env.NEXT_PUBLIC_ENGINE_VERSION ?? '');
-  const probeUrl = `${root}/engine-pkg-webgl2/wasm-manifest.json`;
+  const base = `${root}/engine-pkg-webgl2`;
+  const probes: { url: string; accept: (t: string) => boolean; want: string }[] = [
+    {
+      url: `${base}/forge_engine.js`,
+      // Anchored at both ends: the type must END there or continue with a
+      // parameter. A bare prefix match would accept 'text/javascript2',
+      // which is not a JavaScript media type and which the browser would
+      // refuse exactly as it refuses an empty one.
+      accept: (t) => /^(text|application)\/(javascript|ecmascript)[ \t]*(;|$)/.test(t),
+      want: 'a JavaScript MIME type',
+    },
+    {
+      url: `${base}/forge_engine_bg.wasm`,
+      accept: (t) => /^application\/wasm[ \t]*(;|$)/.test(t),
+      want: 'application/wasm',
+    },
+  ];
 
   try {
     const { latencyMs } = await timed(() =>
       withTimeout(
-        fetch(probeUrl, { method: 'HEAD' }).then((res) => {
-          if (!res.ok) {
-            throw new Error(`engine asset returned ${res.status}`);
+        (async () => {
+          for (const probe of probes) {
+            const res = await fetch(probe.url, { method: 'HEAD' });
+            if (!res.ok) {
+              throw new Error(`${probe.url} returned ${res.status}`);
+            }
+            const type = (res.headers.get('content-type') ?? '').toLowerCase();
+            if (!probe.accept(type)) {
+              throw new Error(
+                `${probe.url} is served as "${type || '(none)'}" — expected ${probe.want}`,
+              );
+            }
           }
-        }),
+        })(),
         TIMEOUT_MS,
       ),
     );
@@ -266,19 +305,19 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
       status: 'healthy',
       latencyMs,
       lastChecked: new Date().toISOString(),
-      details: { url: probeUrl },
+      details: { url: base },
     };
   } catch (err) {
     // 'down', not 'degraded': there is no fallback. useEngine.ts tries the CDN
     // then same-origin, and on a CDN deployment same-origin has no engine
-    // either, so an unreachable asset means the editor cannot start.
+    // either, so an unusable asset means the editor cannot start.
     return {
       name: 'Engine CDN',
       status: 'down',
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
       error: err instanceof Error ? err.message : String(err),
-      details: { url: probeUrl },
+      details: { url: base },
     };
   }
 }
