@@ -196,7 +196,7 @@ gh run view <ID> --log-failed
 
 ---
 
-## Archive of Common CI Patterns (from project_lessons_learned.md)
+## Archive of Common CI Patterns (from .claude/rules/lessons-learned.md)
 
 | Pattern | PR that introduced it | Fix |
 |---------|----------------------|-----|

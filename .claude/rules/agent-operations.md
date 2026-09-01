@@ -6,12 +6,16 @@ Every agent MUST follow these procedures. Violations of these rules have caused 
 
 Before writing any code, read:
 1. **This file** — common operations and anti-pattern avoidance
-2. **`.claude/rules/docs-registry.md`** — first-party documentation URLs
-3. **`~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md`** —
-   29+ anti-patterns from real bugs. This lives in the USER-level memory directory, NOT in the
-   repo: a bare `memory/project_lessons_learned.md` does not resolve from the repo root and
-   silently sends agents looking for a file that isn't there. `MEMORY.md` in the same directory
-   is the index.
+2. **`.claude/rules/lessons-learned.md`** — anti-patterns from real bugs in this repo, and the
+   file `.claude/hooks/inject-lessons-learned.sh` reads to warn you before any Edit, Write, or
+   mutating Bash call.
+
+   It lives IN THE REPO, deliberately. It used to sit under the user-level memory directory at
+   an absolute path containing one machine's username, so on every other machine it resolved to
+   nothing: the hook took its silent `exit 0` and enforcement was off for entire sessions, while
+   the hook's own test skipped the check that would have noticed and reported success (#9605).
+   Knowledge that gates a hook belongs where the hook is — version-controlled, reviewed in PRs,
+   and portable across machines and contributors.
 
 ## Taskboard Ownership
 
@@ -217,7 +221,7 @@ stripe listen --forward-to http://spawnforge.localhost:1355/api/webhooks/stripe 
 
 ## 7. Anti-Pattern Prevention
 
-These are the top anti-patterns from `memory/project_lessons_learned.md`. Check EVERY time.
+These are the top anti-patterns from `.claude/rules/lessons-learned.md`. Check EVERY time.
 
 ### Before Editing panelRegistry.ts
 Read 10 lines before AND after the insertion point. Run `npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts` after. (#1 bug — 21 instances)
