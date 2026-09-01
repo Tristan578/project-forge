@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { POSTHOG_API_ORIGIN, POSTHOG_ASSET_ORIGIN } from '@/lib/security/posthog-origins';
 
 // Mock posthog-js before importing the module under test
 const mockCapture = vi.fn();
@@ -65,7 +66,11 @@ describe('posthog analytics wrapper', () => {
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     expect(mockInit).toHaveBeenCalledWith('phc_test123', expect.objectContaining({
-      api_host: 'https://us.i.posthog.com',
+      api_host: POSTHOG_API_ORIGIN,
+      // `asset_host` is stated, not left to posthog-js's region derivation, so
+      // the CSP's PostHog source list describes the client's real request
+      // surface instead of betting on library internals (#9047).
+      asset_host: POSTHOG_ASSET_ORIGIN,
       person_profiles: 'identified_only',
       capture_pageview: false,
     }));
@@ -156,7 +161,11 @@ describe('posthog analytics wrapper', () => {
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     expect(mockInit).toHaveBeenCalledWith('phc_test123', expect.objectContaining({
-      api_host: 'https://us.i.posthog.com',
+      api_host: POSTHOG_API_ORIGIN,
+      // `asset_host` is stated, not left to posthog-js's region derivation, so
+      // the CSP's PostHog source list describes the client's real request
+      // surface instead of betting on library internals (#9047).
+      asset_host: POSTHOG_ASSET_ORIGIN,
       person_profiles: 'identified_only',
       capture_pageview: false,
     }));

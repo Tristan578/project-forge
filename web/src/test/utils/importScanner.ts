@@ -4,8 +4,8 @@
  *
  * Two tests depend on this:
  *
- *   - `lib/game-creation/__tests__/serverSafeImports.test.ts` scans a fixed set
- *     of server-reachable subtrees for a value import of a client-only module.
+ *   - `lib/game-creation/__tests__/serverSafeImports.test.ts` walks outward from
+ *     every API route and refuses client-only first-party source.
  *   - `lib/chat/__tests__/apiHandlerReachability.test.ts` walks outward from
  *     every server-rendered module under `app/` and asserts none of them can
  *     reach `lib/chat/handlers`.

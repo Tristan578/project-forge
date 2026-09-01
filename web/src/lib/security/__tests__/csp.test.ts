@@ -11,6 +11,12 @@ import {
   isDevEvalAllowed,
   isPlayPath,
   PLAY_ROUTE_SOURCE,
+  POSTHOG_API_ORIGIN,
+  POSTHOG_ASSET_ORIGIN,
+  POSTHOG_ORIGINS,
+  SWAGGER_UI_CDN_ORIGIN,
+  SWAGGER_UI_SCRIPT_URL,
+  SWAGGER_UI_STYLE_URL,
   playCspOptionsFromEnv,
 } from '../csp';
 
@@ -25,6 +31,15 @@ function directive(csp: string, name: string): string {
   const value = csp.split(';').map((d) => d.trim()).find((d) => d.startsWith(`${name} `));
   if (!value) throw new Error(`no ${name} directive in CSP`);
   return value;
+}
+
+/**
+ * A directive's source list as whole tokens. Substring assertions on the joined
+ * directive cannot tell two origins that share a suffix apart, and would accept
+ * a source that is merely a prefix of the one intended.
+ */
+function sources(csp: string, name: string): string[] {
+  return directive(csp, name).split(/\s+/).slice(1);
 }
 
 describe('buildContentSecurityPolicy (#8612, #8634)', () => {
@@ -79,6 +94,25 @@ describe('buildContentSecurityPolicy (#8612, #8634)', () => {
       expect(csp).not.toContain('undefined');
       // No trailing/double spaces from an empty CDN directive.
       expect(csp).not.toMatch(/\s{2,}/);
+    });
+
+    it('allows BOTH PostHog origins for scripts and network calls (#9047)', () => {
+      const csp = buildContentSecurityPolicy({ allowUnsafeEval: false });
+      // Whole-token comparison, not `toContain` on the joined string: the ingest
+      // and assets hosts differ by three characters, and a substring assertion
+      // would be satisfied by a truncated or concatenated source.
+      expect(sources(csp, 'script-src')).toEqual(expect.arrayContaining([...POSTHOG_ORIGINS]));
+      expect(sources(csp, 'connect-src')).toEqual(expect.arrayContaining([...POSTHOG_ORIGINS]));
+    });
+
+    it('pins the two PostHog origins the client is configured to contact (#9047)', () => {
+      // posthog-js loads its lazy bundles (recorder, surveys, exception
+      // autocapture, web vitals, remote config) from the ASSETS host, which is
+      // not the ingest host. Admitting only the latter blocks them all with no
+      // error the app can observe, which is the failure #9047 was filed for.
+      expect(POSTHOG_API_ORIGIN).toBe('https://us.i.posthog.com');
+      expect(POSTHOG_ASSET_ORIGIN).toBe('https://us-assets.i.posthog.com');
+      expect(POSTHOG_ORIGINS).toEqual([POSTHOG_API_ORIGIN, POSTHOG_ASSET_ORIGIN]);
     });
 
     it('derives the deployment Clerk host for every Clerk network directive (#9058)', () => {
@@ -377,6 +411,39 @@ describe('buildCspRouteRules — ordering contract (#8612, #8634)', () => {
       for (const name of ['script-src', 'connect-src', 'frame-src']) {
         expect(directive(csp as string, name)).toContain(`https://${host}`);
       }
+    }
+  });
+
+  it('allows pinned Swagger assets only on /api-docs (#9047)', () => {
+    const rules = buildCspRouteRules({ devUnsafeEval: false });
+    const apiDocs = effectiveCspForPath(rules, '/api-docs');
+    const community = effectiveCspForPath(rules, '/community/game');
+
+    expect(apiDocs).toBeDefined();
+    expect(directive(apiDocs as string, 'script-src')).toContain(SWAGGER_UI_CDN_ORIGIN);
+    expect(directive(apiDocs as string, 'style-src')).toContain(SWAGGER_UI_CDN_ORIGIN);
+    expect(community).toBeDefined();
+    expect(community).not.toContain(SWAGGER_UI_CDN_ORIGIN);
+
+    expect(SWAGGER_UI_SCRIPT_URL).toBe(
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.14/swagger-ui-bundle.js',
+    );
+    expect(SWAGGER_UI_STYLE_URL).toBe(
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.14/swagger-ui.css',
+    );
+  });
+
+  it('keeps BOTH PostHog origins in global, eval-free, and /play policies (#9047)', () => {
+    const rules = buildCspRouteRules({ devUnsafeEval: false });
+    for (const path of ['/editor/project', '/community/game', '/play/user/game']) {
+      const csp = effectiveCspForPath(rules, path);
+      expect(csp).toBeDefined();
+      expect(sources(csp as string, 'script-src')).toEqual(
+        expect.arrayContaining([...POSTHOG_ORIGINS]),
+      );
+      expect(sources(csp as string, 'connect-src')).toEqual(
+        expect.arrayContaining([...POSTHOG_ORIGINS]),
+      );
     }
   });
 });

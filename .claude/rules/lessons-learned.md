@@ -200,3 +200,23 @@ not apply `:focus-visible` to programmatic focus following a pointer event.
 Driving real `Tab` presses is what made the result trustworthy — a wrong
 measurement would have sent a fix at healthy code.
 **Ticket:** #9604
+
+### 12. A bot-comment sweep taken before a branch update is stale by the time you report it
+**Applies:** gh pr update-branch|update-branch|gh api graphql|reviewThreads|isResolved
+**What happens:** You sweep a PR's review threads, find them all resolved, run
+`gh pr update-branch` to satisfy the strict-status-check policy, and report the
+PR as merge-ready. A reviewer comment posted in between is missed entirely —
+reported live on #9601, where a Sentry (Seer) thread landed at 21:30:09Z and the
+sweep that declared "0 unresolved threads" had run before it.
+**Why:** The branch update pushes a new head commit, and every bot reviewer is
+triggered by exactly that. So the update is not a neutral rebase — it is the
+event that generates the comments the sweep was checking for. Ordering the two
+that way guarantees the sweep can never see the reviewers it just woke up.
+**Prevention:** The bot-comment sweep is the LAST step before reporting, after
+every push and every `update-branch`, not a box ticked earlier in the sequence.
+On this repo the two are coupled by the ruleset (`strict_required_status_checks_policy`
+means each merge invalidates the next PR, so every PR gets an update-branch), so
+"CI is green" and "comments are clear" must both be re-established against the
+SAME head SHA. Quote that SHA when reporting merge-readiness — it is what makes
+the claim checkable, and it is what makes a stale sweep visible instead of silent.
+**Ticket:** #9196
