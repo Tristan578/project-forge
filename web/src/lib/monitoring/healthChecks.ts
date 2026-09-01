@@ -216,6 +216,20 @@ export async function checkRateLimiting(): Promise<ServiceHealth> {
   };
 }
 
+/**
+ * Resolve the engine root exactly as `useEngine.ts` does.
+ *
+ * Kept in lockstep with ENGINE_CDN_ROOT there: `<cdn>/<version>` when a version
+ * is stamped, `<cdn>/latest` when it is not. Probing anything else is how the
+ * old check stayed green through #9581 — it HEAD'd the CDN *host*, which is
+ * always up, rather than the prefix this deployment actually asks for.
+ */
+export function resolveEngineRoot(cdnBase: string, version: string): string {
+  const base = cdnBase.replace(/\/+$/, '');
+  const v = version.trim();
+  return v ? `${base}/${v}` : `${base}/latest`;
+}
+
 export async function checkEngineCdn(): Promise<ServiceHealth> {
   const cdnUrl = process.env.NEXT_PUBLIC_ENGINE_CDN_URL;
 
@@ -229,16 +243,60 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
     };
   }
 
+  // Real assets under the resolved prefix, not the bucket root -- and their
+  // HEADERS, not just their status.
+  //
+  // Status alone is not evidence the engine is usable. #9593 shipped a prefix
+  // where every object returned HTTP 200 with NO Content-Type, because the
+  // server-side copy used `--metadata-directive REPLACE` and restated only
+  // cache-control. The browser refuses a module script without a JavaScript
+  // MIME type, so the engine could not load while this check said "up" -- the
+  // same shape as the pre-#9588 check that probed the CDN host.
+  //
+  // The two files below are exactly what useEngine.ts requests, and each is
+  // checked for the property the browser actually enforces:
+  //
+  //   forge_engine.js        loaded via `await import()`, so it must carry a
+  //                          JavaScript MIME type or the import is refused
+  //   forge_engine_bg.wasm   WebAssembly.instantiateStreaming requires
+  //                          application/wasm; otherwise the 95 MB module is
+  //                          buffered whole before compiling
+  const root = resolveEngineRoot(cdnUrl, process.env.NEXT_PUBLIC_ENGINE_VERSION ?? '');
+  const base = `${root}/engine-pkg-webgl2`;
+  const probes: { url: string; accept: (t: string) => boolean; want: string }[] = [
+    {
+      url: `${base}/forge_engine.js`,
+      // Anchored at both ends: the type must END there or continue with a
+      // parameter. A bare prefix match would accept 'text/javascript2',
+      // which is not a JavaScript media type and which the browser would
+      // refuse exactly as it refuses an empty one.
+      accept: (t) => /^(text|application)\/(javascript|ecmascript)[ \t]*(;|$)/.test(t),
+      want: 'a JavaScript MIME type',
+    },
+    {
+      url: `${base}/forge_engine_bg.wasm`,
+      accept: (t) => /^application\/wasm[ \t]*(;|$)/.test(t),
+      want: 'application/wasm',
+    },
+  ];
+
   try {
-    const pingUrl = cdnUrl.endsWith('/') ? cdnUrl : `${cdnUrl}/`;
     const { latencyMs } = await timed(() =>
       withTimeout(
-        fetch(pingUrl, { method: 'HEAD' }).then((res) => {
-          // 5xx indicates CDN server error; 4xx (except 404) indicates auth/config issue
-          if (res.status >= 500 || (res.status >= 400 && res.status !== 404)) {
-            throw new Error(`CDN returned ${res.status}`);
+        (async () => {
+          for (const probe of probes) {
+            const res = await fetch(probe.url, { method: 'HEAD' });
+            if (!res.ok) {
+              throw new Error(`${probe.url} returned ${res.status}`);
+            }
+            const type = (res.headers.get('content-type') ?? '').toLowerCase();
+            if (!probe.accept(type)) {
+              throw new Error(
+                `${probe.url} is served as "${type || '(none)'}" — expected ${probe.want}`,
+              );
+            }
           }
-        }),
+        })(),
         TIMEOUT_MS,
       ),
     );
@@ -247,16 +305,19 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
       status: 'healthy',
       latencyMs,
       lastChecked: new Date().toISOString(),
-      details: { url: cdnUrl },
+      details: { url: base },
     };
   } catch (err) {
+    // 'down', not 'degraded': there is no fallback. useEngine.ts tries the CDN
+    // then same-origin, and on a CDN deployment same-origin has no engine
+    // either, so an unusable asset means the editor cannot start.
     return {
       name: 'Engine CDN',
-      status: 'degraded',
+      status: 'down',
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
       error: err instanceof Error ? err.message : String(err),
-      details: { url: cdnUrl },
+      details: { url: base },
     };
   }
 }

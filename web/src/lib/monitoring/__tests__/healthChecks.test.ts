@@ -229,54 +229,152 @@ describe('healthChecks', () => {
   // checkEngineCdn
   // ---------------------------------------------------------------------------
   describe('checkEngineCdn', () => {
+    // This check reported "up" through two separate outages.
+    //
+    //   #9581  it pinged the CDN *host* -- always up -- and excluded 404 from
+    //          its error condition, so a version prefix that had never been
+    //          written still passed.
+    //   #9593  it then checked only the STATUS of a real asset. The aliased
+    //          prefix returned 200 for everything while serving no
+    //          Content-Type, which MIME-blocks the module import in
+    //          useEngine.ts. The engine could not load; the check said "up".
+    //
+    // So these pin the urls it must request AND the headers it must enforce.
+    const CDN = 'https://engine.spawnforge.ai';
+    const JS = 'https://engine.spawnforge.ai/abc123/engine-pkg-webgl2/forge_engine.js';
+    const WASM = 'https://engine.spawnforge.ai/abc123/engine-pkg-webgl2/forge_engine_bg.wasm';
+
+    /** Fetch stub keyed by url -> [status, content-type]. */
+    const stubFetch = (byUrl: Record<string, [number, string]>) => {
+      const mockFetch = vi.fn((url: string) => {
+        const [status, type] = byUrl[url] ?? [404, ''];
+        return Promise.resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          headers: { get: (h: string) => (h.toLowerCase() === 'content-type' ? type : null) },
+        });
+      });
+      vi.stubGlobal('fetch', mockFetch);
+      return mockFetch;
+    };
+
+    const healthy = { [JS]: [200, 'text/javascript'], [WASM]: [200, 'application/wasm'] } as Record<
+      string,
+      [number, string]
+    >;
+
+    beforeEach(() => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', CDN);
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_VERSION', 'abc123');
+    });
+
     it('returns degraded when CDN URL not configured', async () => {
       vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', '');
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
       const result = await checkEngineCdn();
       expect(result.status).toBe('degraded');
       expect(result.error).toContain('not configured');
     });
 
-    it('returns healthy when CDN responds with 2xx/3xx/4xx (not 5xx)', async () => {
-      vi.resetModules();
-      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://engine.spawnforge.ai');
-
-      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-      vi.stubGlobal('fetch', mockFetch);
-
+    it('probes the STAMPED prefix for the exact files useEngine.ts imports', async () => {
+      const mockFetch = stubFetch(healthy);
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
       const result = await checkEngineCdn();
 
       expect(result.status).toBe('healthy');
-      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+      // Probing anything shorter is what made the old check blind to #9581.
+      expect(mockFetch).toHaveBeenCalledWith(JS, expect.objectContaining({ method: 'HEAD' }));
+      expect(mockFetch).toHaveBeenCalledWith(WASM, expect.objectContaining({ method: 'HEAD' }));
     });
 
-    it('returns degraded when CDN returns 500', async () => {
-      vi.resetModules();
-      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://engine.spawnforge.ai');
+    it('falls back to the latest prefix when no version is stamped', async () => {
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_VERSION', '');
+      const mockFetch = stubFetch({
+        'https://engine.spawnforge.ai/latest/engine-pkg-webgl2/forge_engine.js': [200, 'text/javascript'],
+        'https://engine.spawnforge.ai/latest/engine-pkg-webgl2/forge_engine_bg.wasm': [200, 'application/wasm'],
+      });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      await checkEngineCdn();
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://engine.spawnforge.ai/latest/engine-pkg-webgl2/forge_engine.js',
+        expect.objectContaining({ method: 'HEAD' }),
+      );
+    });
 
-      const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
-      vi.stubGlobal('fetch', mockFetch);
-
+    it('returns down on 404 — the shape of #9581', async () => {
+      stubFetch({});
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
       const result = await checkEngineCdn();
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('404');
+    });
 
-      expect(result.status).toBe('degraded');
+    it('returns down when the glue module has NO Content-Type — the shape of #9593', async () => {
+      // 200 for everything, no type. The browser refuses a module script
+      // without a JavaScript MIME type, so this must not read as healthy.
+      stubFetch({ [JS]: [200, ''], [WASM]: [200, 'application/wasm'] });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkEngineCdn();
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('(none)');
+      expect(result.error).toContain('JavaScript MIME type');
+    });
+
+    it('returns down when the wasm is not application/wasm', async () => {
+      stubFetch({ [JS]: [200, 'text/javascript'], [WASM]: [200, 'application/octet-stream'] });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkEngineCdn();
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('application/wasm');
+    });
+
+    it('accepts a charset parameter on the JS type', async () => {
+      stubFetch({ [JS]: [200, 'text/javascript; charset=utf-8'], [WASM]: [200, 'application/wasm'] });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      expect((await checkEngineCdn()).status).toBe('healthy');
+    });
+
+    // A prefix match would accept these. They are not JavaScript or wasm media
+    // types, and a browser refuses them exactly as it refuses an empty one, so
+    // the gate must not read them as healthy.
+    it('rejects a near-miss type that only shares a prefix', async () => {
+      stubFetch({ [JS]: [200, 'text/javascript2'], [WASM]: [200, 'application/wasm'] });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkEngineCdn();
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('text/javascript2');
+    });
+
+    it('rejects a near-miss wasm type that only shares a prefix', async () => {
+      stubFetch({ [JS]: [200, 'text/javascript'], [WASM]: [200, 'application/wasm2'] });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkEngineCdn();
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('application/wasm2');
+    });
+
+    it('returns down when the CDN returns 500', async () => {
+      stubFetch({ [JS]: [503, 'text/javascript'], [WASM]: [200, 'application/wasm'] });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkEngineCdn();
+      expect(result.status).toBe('down');
       expect(result.error).toContain('503');
     });
 
-    it('returns degraded when CDN request throws', async () => {
-      vi.resetModules();
-      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://engine.spawnforge.ai');
-
-      const mockFetch = vi.fn().mockRejectedValue(new Error('network failure'));
-      vi.stubGlobal('fetch', mockFetch);
-
+    it('returns down when the request throws', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network failure')));
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
       const result = await checkEngineCdn();
-
-      expect(result.status).toBe('degraded');
+      expect(result.status).toBe('down');
       expect(result.error).toBe('network failure');
+    });
+
+    it('resolveEngineRoot tolerates trailing slashes and untrimmed versions', async () => {
+      const { resolveEngineRoot } = await import('@/lib/monitoring/healthChecks');
+      expect(resolveEngineRoot('https://cdn.test//', 'sha1')).toBe('https://cdn.test/sha1');
+      expect(resolveEngineRoot('https://cdn.test', '  ')).toBe('https://cdn.test/latest');
     });
   });
 

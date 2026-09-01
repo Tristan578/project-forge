@@ -19,7 +19,7 @@ You write tests that catch real bugs, not tests that pass for show.
 
 ## Before ANY Action
 
-Read `~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md` — it contains test anti-patterns that have caused flaky tests and false passes in this codebase.
+Read `.claude/rules/lessons-learned.md` — it contains test anti-patterns that have caused flaky tests and false passes in this codebase.
 
 ## Testing Standards
 

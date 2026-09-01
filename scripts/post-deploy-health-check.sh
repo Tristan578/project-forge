@@ -40,8 +40,6 @@ INTERVAL="${HEALTH_CHECK_INTERVAL_S:-10}"
 STABILIZE="${HEALTH_CHECK_STABILIZE_S:-30}"
 TIMEOUT="${HEALTH_CHECK_TIMEOUT_S:-15}"
 
-BYPASS_SECRET="${VERCEL_AUTOMATION_BYPASS:-}"
-
 HEALTH_ENDPOINT="${DEPLOY_URL}/api/health"
 
 # Determine the fetch command. SSO-protected deployments reject bypass tokens;
@@ -55,6 +53,76 @@ elif [ -n "${VERCEL_AUTOMATION_BYPASS:-}" ]; then
   HEALTH_ENDPOINT="${DEPLOY_URL}/api/health?x-vercel-protection-bypass=${VERCEL_AUTOMATION_BYPASS}&x-vercel-set-bypass-cookie=true"
   echo "Using bypass token (query params) for health check"
 fi
+
+# ---------- engine reachability -------------------------------------------
+#
+# /api/health reports "Engine CDN: up" by probing the HOST. That is not the same
+# question as "can THIS deploy load its engine", and the gap shipped: cd.yml
+# stamps NEXT_PUBLIC_ENGINE_VERSION with the commit SHA on every deploy, while
+# the CDN upload only ran when the engine changed -- once in twelve CD runs. So
+# eleven deploys in twelve pointed at a prefix that was never written, the
+# same-origin fallback was empty too, and the engine 404'd while this check
+# stayed green (#9581).
+#
+# Fetch the EXACT url the deployed bundle will resolve, and fail on anything but
+# 200. The CDN is public, so this needs no Vercel auth.
+# Fail the deploy when the deployed app reports its engine as unreachable.
+#
+# WHY THIS READS THE APP'S OWN ANSWER RATHER THAN PROBING A URL ITSELF
+#
+# The engine url is built from NEXT_PUBLIC_ENGINE_CDN_URL, which lives in the
+# Vercel project environment -- not in GitHub. A first cut of this check took
+# the base url from `vars.ENGINE_CDN_URL`; no such variable exists, so it
+# resolved to empty, took the "same-origin, nothing to check" branch on every
+# run, and would have been dead code that read like a gate. Asking the running
+# deployment removes the duplicated plumbing entirely: it knows its own config,
+# and /api/health now probes the exact prefix useEngine.ts resolves.
+#
+# Statuses (public vocabulary: healthy is reported as 'up'):
+#   up       -- the stamped prefix serves the engine
+#   degraded -- no CDN configured; same-origin deployment, legitimate
+#   down     -- the prefix 404s or errors: the editor cannot start. Fail.
+#   absent   -- the service disappeared from the report. Fail closed rather
+#               than treat a missing check as a passing one.
+check_engine_health() {
+  # TEST SEAM: the suite points this at fixture bodies. Defaults to the file the
+  # probe above writes.
+  local body="${HEALTH_RESPONSE_FILE:-/tmp/health_response.json}"
+  local svc
+  svc="$(HEALTH_BODY="$body" python3 - <<'PYEOF' 2>/dev/null
+import json, os
+try:
+    d = json.load(open(os.environ['HEALTH_BODY']))
+except Exception:
+    print('PARSE_ERROR'); raise SystemExit(0)
+for s in d.get('services') or []:
+    if s.get('name') == 'Engine CDN':
+        print('%s|%s' % (s.get('status', 'unknown'), (s.get('error') or '')))
+        break
+else:
+    print('ABSENT')
+PYEOF
+)"
+
+  case "$svc" in
+    up*)
+      echo "Engine check passed (Engine CDN: up)"
+      return 0
+      ;;
+    degraded*)
+      echo "Engine check skipped (Engine CDN: degraded — no CDN configured, same-origin deployment)"
+      return 0
+      ;;
+    ABSENT|PARSE_ERROR|"")
+      echo "::error::Engine check failed: /api/health did not report an 'Engine CDN' service (${svc:-no output}). Refusing to treat a missing check as a passing one." >&2
+      return 1
+      ;;
+    *)
+      echo "::error::Engine check failed: Engine CDN is ${svc%%|*} — ${svc#*|}. The deploy stamped a version whose CDN prefix does not serve the engine, so the editor cannot load it." >&2
+      return 1
+      ;;
+  esac
+}
 
 # ---------- stabilization wait --------------------------------------------
 
@@ -105,6 +173,10 @@ while [ "$attempt" -lt "$RETRIES" ]; do
     if python3 -c "import json; d=json.load(open('/tmp/health_response.json')); assert d.get('status') in ('ok','degraded')" 2>/dev/null; then
       echo "Health check passed (attempt ${attempt}/${RETRIES})"
       cat /tmp/health_response.json 2>/dev/null || true
+      # A reachable API with an unreachable engine is not a healthy deploy.
+      if ! check_engine_health; then
+        exit 1
+      fi
       exit 0
     else
       echo "::warning::HTTP 200 but response body is invalid or status is 'error'"

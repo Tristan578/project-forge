@@ -267,6 +267,45 @@ else
   fail "ci.yml not found at $CI_YML"
 fi
 
+# ---- a suite named ONLY in a comment is NOT wired (#9576) ----
+#
+# The reference check is a fixed-string search over the workflow text, so before
+# this any mention satisfied it. A suite added with no `run:` step anywhere, but
+# named in a comment describing what it guards, was reported as wired -- a suite
+# that never executes passing the gate whose whole purpose is finding suites that
+# never execute. Verified against the pre-fix gate: it exited 0 on this fixture.
+mkfixture commented ghost.test.sh
+{
+  echo "jobs:"
+  echo "  selfdefense:"
+  echo "    steps:"
+  echo "      # drift guard; see scripts/__tests__/ghost.test.sh for the rationale"
+  echo "      - run: echo unrelated"
+} > "$TMPDIR_T/commented/workflows/ci.yml"
+if out="$(run_gate commented)"; then
+  fail "a suite named only in a COMMENT was reported as wired — it never runs (#9576)"
+else
+  pass "a suite named only in a comment is reported as an orphan"
+fi
+if grep -q 'ghost.test.sh' <<<"${out:-}"; then
+  pass "the orphan report names the suite that never runs"
+else
+  fail "the orphan report did not name ghost.test.sh: ${out:-<empty>}"
+fi
+
+# The counterpart: a real `run:` step still counts, so the strip cannot have
+# turned the gate into one that rejects everything.
+mkfixture commented_ok real.test.sh
+wire commented_ok real.test.sh
+{
+  echo "      # scripts/__tests__/decoy.test.sh is mentioned only in prose here"
+} >> "$TMPDIR_T/commented_ok/workflows/ci.yml"
+if out="$(run_gate commented_ok)"; then
+  pass "a suite with a real run: step still passes alongside an unrelated comment"
+else
+  fail "a genuinely wired suite was rejected after comment stripping: $out"
+fi
+
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
   echo "All check-suite-wiring.sh tests passed."

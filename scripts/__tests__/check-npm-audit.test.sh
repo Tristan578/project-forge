@@ -1989,6 +1989,8 @@ STEPS_EOF
   typecheck:
   test-web:
   test-mcp:
+  check-validated:
+  publish-engine-cache:
   check-changes:
   check-deployment-drift:
   build-wasm:
@@ -2224,13 +2226,13 @@ STEPS_EOF
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       github.event.inputs.promote_to_production != 'true' &&
-      needs.lint.result == 'success' &&
-      needs.typecheck.result == 'success' &&
-      needs.test-web.result == 'success' &&
-      (needs.test-mcp.result == 'success' || needs.test-mcp.result == 'skipped') &&
+      (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.test-web.result == 'success' || (needs.test-web.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
+      (needs.test-mcp.result == 'success' || (needs.test-mcp.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.security.result == 'success' || needs.security.result == 'skipped') &&
+      (needs.e2e.result == 'success' || (needs.e2e.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
-      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
       (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped')" ;;
       deploy-production) cd_dj_expect="    if: |
       always() &&
@@ -2300,9 +2302,16 @@ STEPS_EOF
   # on, and it lets the arms below reuse this suite's proven needs-element and
   # if-containment greps verbatim rather than hand-rolling weaker twins.
   #
-  # Unlike deploy-staging/deploy-production these jobs carry NO `always()`, so the
-  # implicit success() over needs: is doing real work here too — the explicit
-  # clause is the second lock, not the only one.
+  # These jobs USED to carry no `always()`, and the implicit success() over
+  # needs: was doing real work as a second lock. That stopped being viable
+  # once #9524 made lint/typecheck skippable: the implicit success() then
+  # cascade-skipped the whole deploy on the fast path, silently, with every
+  # job green. They now carry always() and gate every dependency EXPLICITLY
+  # -- including check-deployment-drift, which the implicit lock used to
+  # cover -- so the fail-safe property above is unchanged and the number of
+  # locks went UP, not down. A bare 'skipped' is never accepted for
+  # lint/typecheck; only 'skipped' alongside check-validated proving the
+  # tree was already validated.
   for cd_pj in deploy-docs deploy-design; do
     # Same last-key-wins job-count pin as the loop above: an appended duplicate
     # `deploy-docs:` at end of file is the effective job and carries none of the
@@ -2358,8 +2367,8 @@ STEPS_EOF
     # block-scalar continuation exposure here — the whole expression is the
     # one line, and anything appended to it changes that line.
     case "$cd_pj" in
-      deploy-docs) cd_pj_expect="    if: (needs.check-deployment-drift.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'" ;;
-      deploy-design) cd_pj_expect="    if: (needs.check-deployment-drift.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure' && needs.security.result == 'success'" ;;
+      deploy-docs) cd_pj_expect="    if: always() && (needs.check-deployment-drift.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.check-deployment-drift.result == 'success' && (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) && (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) && needs.security.result == 'success'" ;;
+      deploy-design) cd_pj_expect="    if: always() && (needs.check-deployment-drift.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.check-deployment-drift.result == 'success' && (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) && (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) && needs.security.result == 'success'" ;;
       *) cd_pj_expect="" ;;
     esac
     assert_block_lines_exact "$cd_pj_ifblk" "cd.yml ${cd_pj} if: block" "$cd_pj_expect" "the containment pin above proves the security clause is PRESENT; this proves nothing has been appended beside it (a trailing \`|| true\`, or a rewrite of the sibling lint/typecheck clauses) that changes what the one-line expression evaluates to while the pinned clause stays byte-identical"
@@ -2407,7 +2416,15 @@ STEPS_EOF
   else
     fail "cd.yml upload-wasm-cdn if: lacks the fail-closed security success clause"
   fi
-  cd_wasm_if_expect="    if: \${{ vars.R2_CDN_ENABLED == 'true' && needs.security.result == 'success' }}"
+  # Multi-line since #9581. always() is required: without it the implicit
+  # success() over `needs` made a SKIPPED build-wasm cascade-skip this job, so
+  # eleven deploys in twelve stamped a CDN version that was never uploaded. The
+  # security clause is unchanged and is separately pinned by containment above.
+  cd_wasm_if_expect="    if: >-
+      always() &&
+      vars.R2_CDN_ENABLED == 'true' &&
+      needs.security.result == 'success' &&
+      (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped')"
   readonly cd_wasm_if_expect
   assert_block_lines_exact "$cd_wasm_ifblk" "cd.yml upload-wasm-cdn if: block" "$cd_wasm_if_expect" "the containment pin proves presence; this exact line rejects appended || true and != failure rewrites"
 
@@ -3064,6 +3081,13 @@ OUTPUTS_EOF
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
+            scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
+            scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
+            scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
+            scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
+            scripts/__tests__/claude-refs-resolve.test.sh \
+            scripts/__tests__/e2e-tag-routing.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3246,7 +3270,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=538
+readonly SELF_EXEC_EXPECTED_DROP=561
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3564,6 +3588,13 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
+            scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
+            scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
+            scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
+            scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
+            scripts/__tests__/claude-refs-resolve.test.sh \
+            scripts/__tests__/e2e-tag-routing.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3622,6 +3653,22 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/pr-workitem-check.test.sh
       - name: Run WASM variant integrity test suite
         run: bash scripts/__tests__/wasm-variant-integrity.test.sh
+      - name: Run engine CDN alias test suite
+        run: bash scripts/__tests__/alias-wasm-cdn-version.test.sh
+      - name: Run post-deploy health gate test suite
+        run: bash scripts/__tests__/post-deploy-health-check.test.sh
+      - name: Run CD tree-validation gate test suite
+        run: bash scripts/__tests__/ci-tree-already-validated.test.sh
+      - name: Run engine WASM cache-key test suite
+        run: bash scripts/__tests__/engine-wasm-cache-key.test.sh
+      - name: Run source-encoding gate test suite
+        run: bash scripts/__tests__/check-source-encoding.test.sh
+      - name: Run source-encoding gate
+        run: bash scripts/check-source-encoding.sh
+      - name: Run agent-harness reference gate test suite
+        run: bash scripts/__tests__/claude-refs-resolve.test.sh
+      - name: Run E2E tag-routing gate test suite
+        run: bash scripts/__tests__/e2e-tag-routing.test.sh
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
       - name: Run suite-wiring gate
