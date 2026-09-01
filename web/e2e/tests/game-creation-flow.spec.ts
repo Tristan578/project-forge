@@ -44,7 +44,7 @@ test.describe('Game Creation Flow @ui @dev', () => {
     expect(jsErrors, `Unexpected JS errors: ${jsErrors.join(', ')}`).toHaveLength(0);
   });
 
-  test('editor boots without console errors', async ({ page, editor }) => {
+  test('editor boots without console errors @engine-ui', async ({ page, editor }) => {
     const consoleErrors: string[] = [];
 
     page.on('console', (msg) => {
@@ -54,7 +54,7 @@ test.describe('Game Creation Flow @ui @dev', () => {
     });
 
     // Reload fresh so the listener captures everything from navigation start
-    await editor.loadPage();
+    await editor.load();
 
     // Filter out known benign browser noise (extensions, CSP, Clerk 401 in CI)
     const appErrors = consoleErrors.filter(

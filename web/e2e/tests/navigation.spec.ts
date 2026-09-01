@@ -1,4 +1,7 @@
-import { test, expect } from '@playwright/test';
+// The editor fixture (not @playwright/test) — the Editor Route case needs
+// `editor.load()`, which navigates to /dev and waits for the engine. It
+// re-exports `test`/`expect`, so every other case here is unaffected.
+import { test, expect } from '../fixtures/editor.fixture';
 import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
 
 /**
@@ -168,9 +171,13 @@ test.describe('Navigation & Routing @ui', () => {
   });
 
   test.describe('Editor Route', () => {
-    test('/dev loads editor with canvas @dev', async ({ page }) => {
-      await page.goto('/dev');
-      await page.waitForLoadState('domcontentloaded');
+    test('/dev loads editor with canvas @dev @engine-ui', async ({ page, editor }) => {
+      // `editor.load()` navigates to /dev AND waits for __FORGE_ENGINE_READY.
+      // The bare `page.goto('/dev')` this replaces did neither, and did not
+      // suppress the init overlay — so the canvas, which stays `invisible`
+      // until the renderer starts, could never satisfy the assertion (#9586).
+      // Re-navigating after load() would have thrown that wait away.
+      await editor.load();
 
       const canvas = page.locator('canvas').first();
       await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
