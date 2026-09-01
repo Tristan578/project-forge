@@ -120,11 +120,24 @@ export default function RootLayout({
         <Suspense>{children}</Suspense>
       </NextIntlClientProvider>
       <Suspense fallback={null}>
-        <AnalyticsProvider />
+        {process.env.VERCEL ? <AnalyticsProvider /> : null}
         <PostHogProvider />
         <CookieConsent />
       </Suspense>
-      <SpeedInsights />
+      {/* Both Vercel client scripts are gated on actually running on Vercel.
+          They request /_vercel/{insights,speed-insights}/script.js, which exist
+          only when Vercel is serving. Anywhere else — CI, local dev, a
+          self-hosted preview — those paths return the HTML 404 page and the
+          browser refuses them: "MIME type ('text/html') is not executable".
+          That is a real console error on every page load, and it is what
+          failed the three "editor loads without console errors" specs the
+          moment they were first allowed to run (#9586).
+
+          Measured, not assumed: gating speed-insights alone left
+          /_vercel/insights/script.js still erroring on a production build
+          served outside Vercel. VERCEL is set automatically by Vercel's build
+          and runtime, so production analytics are unaffected. */}
+      {process.env.VERCEL ? <SpeedInsights /> : null}
       <Toaster theme="dark" position="bottom-right" richColors />
       <ServiceWorkerRegistration />
     </>

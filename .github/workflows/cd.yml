@@ -282,6 +282,87 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci-tree-already-validated.sh
+  # Keep main's WebGL2 engine cache warm for CI's engine-smoke gate (#9574).
+  #
+  # The save inside build-wasm is not enough on its own: that job is gated on
+  # engine-changed, and measured across the last 12 CD runs it ran ONCE and
+  # skipped eleven times. So a cache seeded only there would be absent right
+  # after this lands and would stay absent until an engine change happened to
+  # merge -- every PR in between restoring nothing and rebuilding for no
+  # benefit. The feature would look installed and do nothing.
+  #
+  # This job runs on every push to main and is a no-op on a hit: restore, and
+  # build only when the entry is genuinely missing. Cost is a checkout plus a
+  # cache probe (~15s) against the ~5 min it saves each PR that would otherwise
+  # rebuild. It also covers eviction -- GitHub drops caches untouched for 7 days,
+  # and while PR restores normally keep this one alive, an engine-quiet stretch
+  # would otherwise lose it with nothing to rewrite it.
+  #
+  # Deliberately NOT in any deploy job's needs: this is a cache warmer. If it
+  # fails, PRs rebuild exactly as they do today and nothing else changes.
+  publish-engine-cache:
+    name: Publish Engine Cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # EXACTLY ONE WRITER PER RUN. build-wasm already saves this key when it
+    # runs, because it has just built the artifact and the save is free. This
+    # job is the complement -- the safety net for the case build-wasm does not
+    # cover: GitHub evicts a cache untouched for 7 days, and the engine tree can
+    # easily go that long unchanged (measured: build-wasm ran once in twelve CD
+    # runs). Without it the first PR after an eviction silently pays the full
+    # 5-minute build again.
+    #
+    # The condition is the exact complement of build-wasm's, derived from the
+    # SAME check-changes outputs rather than from needs.build-wasm.result. Two
+    # reasons: gating on the result would serialise this behind a 10-minute
+    # build for what is normally a 20-second cache hit, and -- the one that
+    # actually bites -- an ungated version has both jobs miss the same cold key
+    # and build the engine CONCURRENTLY, paying for the expensive build twice on
+    # exactly the pushes that are already the slowest.
+    needs: [check-changes]
+    if: needs.check-changes.outputs.engine-changed != 'true' && github.event_name != 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve the engine build key
+        id: engine-key
+        run: |
+          key="$(bash scripts/engine-wasm-cache-key.sh)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Engine WASM cache key: $key"
+
+      - name: Restore or claim the WebGL2 engine cache
+        id: engine-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: engine/pkg-webgl2
+          key: ${{ steps.engine-key.outputs.key }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        with:
+          workspaces: engine -> target
+
+      - name: Install wasm-bindgen-cli
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        run: cargo install wasm-bindgen-cli --version 0.2.127
+
+      # Byte-identical to the build in build-wasm and in ci.yml's engine-smoke.
+      # If these three ever diverge the key stops describing the artifact.
+      - name: Build WebGL2 WASM + wasm-bindgen
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        working-directory: engine
+        run: |
+          cargo build --target wasm32-unknown-unknown --release --features webgl2
+          wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
 
   check-changes:
     name: Detect Changed Paths
@@ -326,7 +407,14 @@ jobs:
             exit 0
           fi
 
-          if echo "$CHANGED" | grep -q '^engine/'; then
+          # .transform-gizmo-fork/ is a PATH DEPENDENCY of the engine
+          # (engine/Cargo.toml: path = "../.transform-gizmo-fork/..."), so it
+          # compiles into the binary. Matching only ^engine/ meant a fork-only
+          # change left engine=false, build-wasm skipped, and PRODUCTION kept
+          # the stale engine -- while scripts/engine-wasm-cache-key.sh, which
+          # correctly includes the fork tree, produced a new key and rebuilt.
+          # CI would then test a binary users never received.
+          if echo "$CHANGED" | grep -qE '^engine/|^[.]transform-gizmo-fork/'; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
             echo "Engine files changed -- WASM build required"
           else
@@ -471,6 +559,36 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
+      # Publish the WebGL2 build so CI's engine-smoke gate can restore it
+      # instead of spending ~321s rebuilding an identical binary on every
+      # web-only PR (#9574).
+      #
+      # This has to be saved HERE rather than in ci.yml. A cache written from a
+      # PR branch is visible only to that PR, and ci.yml never runs on a push to
+      # main — so main's entry can only come from this workflow, which does. Once
+      # written, every branch can restore it.
+      #
+      # The key is derived by the same script the restore side uses. If these two
+      # ever computed it differently nothing would break loudly: every restore
+      # would simply miss and engine-smoke would quietly go back to a five-minute
+      # build. scripts/__tests__/engine-wasm-cache-key.test.sh asserts both
+      # workflows call the shared script.
+      #
+      # Unconditional on purpose: pkg-webgl2 exists whether it was built above or
+      # restored by the download step, and both are the same artifact.
+      - name: Resolve the engine build key
+        id: engine-key
+        run: |
+          key="$(bash scripts/engine-wasm-cache-key.sh)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Engine WASM cache key: $key"
+
+      - name: Publish the WebGL2 engine for PR reuse
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: engine/pkg-webgl2
+          key: ${{ steps.engine-key.outputs.key }}
+
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -571,16 +689,28 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          # Renders /dev and exposes the editor stores. Must match ci.yml's
+          # test-e2e-ui build: without it this job can only run specs that never
+          # open the editor, and the deploy path would keep testing 91 of 422
+          # while ci.yml tested 385 (#9586).
+          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run UI-only E2E tests (shard ${{ matrix.shard }})
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-        # Same selection as ci.yml test-e2e-ui: @journey needs the exposed
-        # store surface (NEXT_PUBLIC_E2E_HOOKS + E2E_STRICT_STORES) this
-        # store-less build does not set, and @engine needs WASM + GPU.
-        run: npx playwright test --grep '@ui' --grep-invert '@dev|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+        # Same selection as ci.yml test-e2e-ui, and it has to STAY the same --
+        # this job and that one are the two places the @ui suite runs, and they
+        # drifting apart is how the deploy path keeps a hole the PR gate has
+        # already closed.
+        #
+        # @journey needs E2E_STRICT_STORES on top of the hooks build and has its
+        # own gate. @engine-ui marks the specs that assert on #game-canvas,
+        # which stays `invisible` until the Bevy/wgpu renderer starts -- this
+        # config launches with --disable-gpu, so they run in the engine-smoke
+        # gate instead.
+        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

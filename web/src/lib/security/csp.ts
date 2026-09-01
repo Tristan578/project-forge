@@ -70,11 +70,18 @@ export {
  *
  * Note for anyone debugging CSP locally: `@vercel/analytics` and
  * `@vercel/speed-insights` load from `https://va.vercel-scripts.com` **only**
- * under `next dev`, so their two blocked-script console errors are dev-only noise
- * and are deliberately NOT allowlisted. In a real build both resolve to the
+ * under `next dev`, so their two blocked-script console errors there are dev-only
+ * noise and are deliberately NOT allowlisted. Adding the host would be permanent
+ * policy surface for a dev-only script that merely console-logs.
+ *
+ * This note used to go on to say that "in a real build both resolve to the
  * same-origin `/_vercel/{insights,speed-insights}/script.js`, already covered by
- * `'self'`. Adding the host would be permanent policy surface for a dev-only
- * script that merely console-logs.
+ * `'self'`", and treated the matter as closed. That is only true when **Vercel**
+ * serves the build. A production build served anywhere else — CI, a container, a
+ * self-hosted preview — has no such route, so both paths return the HTML 404 page
+ * and the browser refuses them for MIME type. Not a CSP failure, but a real
+ * console error on every page load, measured on CI (#9586). Both components are
+ * therefore mounted only when `process.env.VERCEL` is set; see `app/layout.tsx`.
  *
  * Which is the general rule: **never validate a CSP change against `next dev`.**
  * The dev server keeps `'unsafe-eval'` and inline scripts alive for Fast Refresh,

@@ -23,7 +23,8 @@ test.describe('2D Workflows @ui @dev', () => {
     expect(realErrors.length).toBeLessThan(5);
   });
 
-  test('project type selector or 2D option exists', async ({ page }) => {
+  test('project type selector or 2D option exists @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     // Look for 2D/3D project type selector
     const projectTypeUI = page.locator('button, select, [role="tab"]').filter({ hasText: /2d|3d|project.*type/i });
     const count = await projectTypeUI.count();
