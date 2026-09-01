@@ -318,7 +318,7 @@ export function createGenerationHandler<TParams, TResult>(
   const submissionResponse = (result: TResult): TResult | (TResult & { durable: true }) =>
     durableSubmissions
       ? Object.assign(
-          Array.isArray(result) ? [...result] : { ...(result as object) },
+          { ...(result as object) },
           { durable: true as const },
         ) as TResult & { durable: true }
       : result;
