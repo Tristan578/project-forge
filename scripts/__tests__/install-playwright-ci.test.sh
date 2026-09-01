@@ -68,6 +68,20 @@ assert_eq "cache-hit dependency mode succeeds" "0" "$?"
 assert_eq "dependency mode uses install-deps" \
   "$REPO_ROOT/web|playwright install-deps chromium" "$(cat "$TMP/log")"
 
+: > "$TMP/log"
+: > "$TMP/timeout-log"
+rm -f "$TMP/count"
+(
+  cd "$REPO_ROOT/scripts" || exit 98
+  PLAYWRIGHT_TEST_LOG="$TMP/log" PLAYWRIGHT_TEST_COUNT="$TMP/count" \
+    PLAYWRIGHT_TIMEOUT_LOG="$TMP/timeout-log" PLAYWRIGHT_TEST_FAILS=0 \
+    PATH="$STUB:$PATH" bash install-playwright-ci.sh browsers \
+    >"$TMP/out" 2>"$TMP/err"
+)
+assert_eq "filename-only invocation from scripts resolves the repository root" "0" "$?"
+assert_eq "filename-only invocation still runs npx from web" \
+  "$REPO_ROOT/web|playwright install --with-deps chromium" "$(cat "$TMP/log")"
+
 set +e
 run_case browsers 2 124
 rc=$?

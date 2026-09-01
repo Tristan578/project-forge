@@ -2,7 +2,7 @@
 # Bound and retry Playwright's apt/browser installation in CI (#9303).
 set -u
 
-SCRIPT_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ATTEMPT_TIMEOUT_SECONDS=300
 MAX_ATTEMPTS=2
