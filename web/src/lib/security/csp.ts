@@ -1,4 +1,6 @@
 import { SWAGGER_UI_CDN_ORIGIN } from './swagger-assets';
+import { POSTHOG_ORIGINS } from './posthog-origins';
+export { POSTHOG_API_ORIGIN, POSTHOG_ASSET_ORIGIN, POSTHOG_ORIGINS } from './posthog-origins';
 export {
   SWAGGER_UI_CDN_ORIGIN,
   SWAGGER_UI_SCRIPT_URL,
@@ -101,7 +103,14 @@ export interface CspOptions {
   allowSwaggerUiCdn?: boolean;
 }
 
-export const POSTHOG_ORIGIN = 'https://us.i.posthog.com';
+/**
+ * PostHog's origins as a CSP source list. Both entries are required: the ingest
+ * host takes the events, and the assets host serves every bundle posthog-js
+ * loads lazily (recorder, surveys, exception autocapture, web vitals, remote
+ * config). Admitting only the first blocks those bundles silently — see
+ * `posthog-origins.ts`, which both this policy and `posthog.init()` read.
+ */
+const POSTHOG_SOURCES = POSTHOG_ORIGINS.join(' ');
 
 const FALLBACK_CLERK_ORIGINS =
   'https://*.clerk.accounts.dev https://*.accounts.dev ' +
@@ -146,11 +155,11 @@ export function buildContentSecurityPolicy({
     // required by the same-origin script-sandbox worker's Function() compiler on
     // editor routes, NOT by WASM (WASM uses 'wasm-unsafe-eval'). 'unsafe-inline'
     // is required by Clerk + Next.js inline framework scripts.
-    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' ${clerkOrigins} https://challenges.cloudflare.com ${POSTHOG_ORIGIN}${cdnDirective}${swaggerCdn}`,
+    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' ${clerkOrigins} https://challenges.cloudflare.com ${POSTHOG_SOURCES}${cdnDirective}${swaggerCdn}`,
     `style-src 'self' 'unsafe-inline'${swaggerCdn}`,
     `img-src 'self' data: blob: https://img.clerk.com ${clerkImageOrigin}`,
     "font-src 'self' data:",
-    `connect-src 'self' ${clerkOrigins} ${POSTHOG_ORIGIN} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
+    `connect-src 'self' ${clerkOrigins} ${POSTHOG_SOURCES} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
     `frame-src 'self' ${clerkOrigins} https://challenges.cloudflare.com`,
     "worker-src 'self' blob:",
     "media-src 'self' blob:",
@@ -366,8 +375,8 @@ export function buildPlayContentSecurityPolicy({
 
   return [
     "default-src 'self'",
-    `script-src 'self'${scriptAuth}${devEval} 'wasm-unsafe-eval'${clerk} ${POSTHOG_ORIGIN}${cdn}`,
-    `connect-src 'self'${clerk} ${POSTHOG_ORIGIN}${cdn}`,
+    `script-src 'self'${scriptAuth}${devEval} 'wasm-unsafe-eval'${clerk} ${POSTHOG_SOURCES}${cdn}`,
+    `connect-src 'self'${clerk} ${POSTHOG_SOURCES}${cdn}`,
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: https://img.clerk.com${clerk}`,
     "font-src 'self' data:",
