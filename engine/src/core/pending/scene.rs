@@ -7,6 +7,7 @@ use super::PendingCommands;
 
 #[derive(Debug, Clone)]
 pub struct GltfImportRequest {
+    pub asset_id: Option<String>,
     pub data_base64: String,
     pub name: String,
     pub position: Option<bevy::math::Vec3>,
@@ -70,6 +71,7 @@ pub struct InstantiatePrefabRequest {
 
 #[derive(Debug, Clone)]
 pub struct AudioImportRequest {
+    pub asset_id: Option<String>,
     pub data_base64: String,
     pub name: String,
 }
