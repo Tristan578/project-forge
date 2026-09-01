@@ -66,7 +66,25 @@ fi
 # Concatenate every workflow once; the reference check is a fixed-string search
 # over that blob. Reading each file once keeps the gate O(suites + workflows)
 # instead of O(suites x workflows).
-wf_blob="$(cat "${workflows[@]}")"
+#
+# COMMENTS ARE STRIPPED FIRST (#9576). The search is a plain fixed-string match,
+# so before this ANY mention of a filename satisfied it -- including one inside a
+# YAML comment. A suite added with no `run:` step anywhere, but named in a
+# comment explaining what it guards, was reported as wired:
+#
+#   check-suite-wiring: all 29 test suite(s) are referenced by a workflow
+#
+# A suite that never executes passed the gate whose entire purpose is finding
+# suites that never execute. This gate's own error text says such a suite means
+# "a regression in what they guard ships on a green board", so it has to read
+# what a workflow RUNS, not what it merely mentions.
+#
+# The strip is deliberately naive (everything from `#` to end of line). A `#`
+# inside a quoted string on an executable line truncates that line early, which
+# can only ever HIDE a reference and report an EXTRA orphan. That direction is
+# safe: this gate already fails closed, and a false orphan is loud and trivially
+# fixed, whereas a false pass is precisely the defect being closed here.
+wf_blob="$(cat "${workflows[@]}" | awk '{ sub(/[[:space:]]*#.*/, ""); print }')"
 
 suite_count=0
 orphans=()
