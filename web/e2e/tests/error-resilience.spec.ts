@@ -29,10 +29,19 @@ test.describe('Error Resilience @ui @dev', () => {
 
       await editor.load();
 
-      // Wait for all deferred async initialisation to settle before checking errors.
-      // `networkidle` fires once the page has had no network requests for 500ms,
-      // which is a reliable proxy for "all lazy effects have run".
-      await page.waitForLoadState('networkidle');
+      // Wait for deferred async initialisation to settle before checking errors.
+      //
+      // This used `waitForLoadState('networkidle')`, which worked only while
+      // this spec ran without an engine. With a real engine the network never
+      // goes quiet for 500ms and the wait times out at 30s instead.
+      //
+      // The canvas is a stronger signal anyway: CanvasArea keeps it
+      // `invisible` until the first frame is drawn, so its becoming visible
+      // means the engine actually finished starting — where networkidle was
+      // only ever a proxy for that.
+      await expect(page.locator('canvas').first()).toBeVisible({
+        timeout: E2E_TIMEOUT_LOAD_MS,
+      });
 
       expect(errors).toEqual([]);
     });
@@ -49,7 +58,11 @@ test.describe('Error Resilience @ui @dev', () => {
 
       await editor.loadPage();
       // Wait for any async effects to complete before asserting no rejections.
-      await page.waitForLoadState('networkidle');
+      // Same reason as above: with an engine running, networkidle never fires.
+      // The canvas turning visible is the first-frame signal.
+      await expect(page.locator('canvas').first()).toBeVisible({
+        timeout: E2E_TIMEOUT_LOAD_MS,
+      });
 
       expect(rejections).toEqual([]);
     });
@@ -187,8 +200,14 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
       await canvas.dblclick();
-      // Use networkidle to wait for any async handlers triggered by the click
-      await page.waitForLoadState('networkidle');
+      // Give any async handler the click triggered a chance to throw.
+      //
+      // networkidle was used here and cannot settle while the engine is
+      // running. There is no event that means "the click's handlers are done",
+      // so this waits a bounded moment and then asserts. Kept short
+      // deliberately: a pageerror from a click surfaces on the next tick or
+      // two, and a longer wait would buy nothing but wall-clock.
+      await page.waitForTimeout(1000);
 
       // Filter out known harmless errors
       const criticalErrors = errors.filter(

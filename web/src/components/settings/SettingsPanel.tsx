@@ -43,8 +43,17 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         }
       }
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    // Capture phase, deliberately. A modal's Escape must not be defeatable by
+    // anything it renders over: in the bubble phase any descendant that calls
+    // stopPropagation() on keydown silently disables it. That is not
+    // hypothetical here — the editor canvas registers its own key handling and
+    // is only focusable once the engine is running (`tabIndex={isReady ? 0 : -1}`
+    // in CanvasArea), which is exactly why this dialog closed reliably in the
+    // engine-less UI job and intermittently failed to close in the engine
+    // smoke gate. Capture runs before any descendant handler, so the dialog
+    // closes regardless of what else is listening.
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose]);
 
   // Auto-focus dialog on open

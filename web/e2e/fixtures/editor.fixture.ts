@@ -82,8 +82,25 @@ export class EditorPage {
       () => (window as any).__FORGE_ENGINE_READY === true,
       { timeout: E2E_HYDRATION_TIMEOUT_MS }
     );
-    // Wait for the editor layout container to be visible (canonical way to know hydration + layout is stable)
-    await this.page.locator('.dv-dockview').first().waitFor({ state: 'visible', timeout: E2E_TIMEOUT_ELEMENT_MS });
+    // Wait for the editor layout to have mounted.
+    //
+    // This used to wait on `.dv-dockview`, which only exists in the full and
+    // condensed layouts. At compact widths `EditorLayout` returns an entirely
+    // different tree — MobileToolbar plus drawers, no Dockview at all — so
+    // every mobile- and tablet-viewport spec timed out here waiting for an
+    // element that layout never renders (9 of the 14 engine-gate failures on
+    // this PR's first CI run).
+    //
+    // The canvas region is rendered by both branches, so it is the
+    // layout-agnostic signal. `attached` rather than `visible`: CanvasArea
+    // holds the canvas `invisible` until the first frame is drawn, which is
+    // strictly later than the `__FORGE_ENGINE_READY` flag already awaited
+    // above — waiting for visibility here would reintroduce a hang for a
+    // different reason.
+    await this.page
+      .locator('[data-editor-region="canvas"], .dv-dockview')
+      .first()
+      .waitFor({ state: 'attached', timeout: E2E_TIMEOUT_ELEMENT_MS });
   }
 
   /** Navigate to /dev without waiting for WASM (for @ui tests in CI) */
