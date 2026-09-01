@@ -1,7 +1,9 @@
 /**
- * Polls generation job status at 3-second intervals.
+ * Polls generation job status. Durable jobs use server callbacks as the
+ * primary completion channel and only perform sparse safety/focus reads;
+ * legacy jobs retain the 3-second loop.
  * Auto-stops when job completes or fails.
- * Maximum poll duration: 5 minutes (100 polls).
+ * Maximum poll duration: 5 minutes.
  *
  * On completion:
  * - Downloads result from URL
@@ -27,7 +29,8 @@ import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
 
 const POLL_INTERVAL_MS = 3000;
-const MAX_POLL_COUNT = 100; // 5 minutes
+const DURABLE_POLL_INTERVAL_MS = 30_000;
+const MAX_POLL_DURATION_MS = 5 * 60 * 1000;
 
 interface StatusResponse {
   jobId: string;
@@ -42,8 +45,9 @@ interface StatusResponse {
 export function useGenerationPolling() {
   const jobs = useGenerationStore((s) => s.jobs);
   const updateJob = useGenerationStore((s) => s.updateJob);
-  const pollCountsRef = useRef<Record<string, number>>({});
   const timersRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const startedAtRef = useRef<Record<string, number>>({});
+  const durablePollsRef = useRef<Record<string, () => void>>({});
 
   // On mount: drain any refunds that failed in a previous session
   useEffect(() => {
@@ -61,18 +65,36 @@ export function useGenerationPolling() {
         clearInterval(timer);
       }
       timersRef.current = {};
-      pollCountsRef.current = {};
+      startedAtRef.current = {};
+      durablePollsRef.current = {};
     };
   }, []);
 
-  function startPolling(id: string, jobId: string, type: string) {
-    pollCountsRef.current[id] = 0;
+  // Durable callbacks update the persisted job server-side. Refresh the client
+  // view when the user returns, without maintaining a hot 3-second loop.
+  useEffect(() => {
+    const recheckDurableJobs = () => {
+      for (const poll of Object.values(durablePollsRef.current)) poll();
+    };
+    const recheckVisibleDurableJobs = () => {
+      if (document.visibilityState === 'visible') recheckDurableJobs();
+    };
 
+    window.addEventListener('focus', recheckDurableJobs);
+    document.addEventListener('visibilitychange', recheckVisibleDurableJobs);
+    return () => {
+      window.removeEventListener('focus', recheckDurableJobs);
+      document.removeEventListener('visibilitychange', recheckVisibleDurableJobs);
+    };
+  }, []);
+
+  function startPolling(id: string, jobId: string, type: string, durable: boolean) {
     const poll = async () => {
-      pollCountsRef.current[id] = (pollCountsRef.current[id] || 0) + 1;
-
-      // Timeout after max polls
-      if (pollCountsRef.current[id] > MAX_POLL_COUNT) {
+      const startedAt = startedAtRef.current[id] ?? Date.now();
+      startedAtRef.current[id] = startedAt;
+      // Keep the existing five-minute overall cap independent of focus events
+      // or the selected safety interval.
+      if (Date.now() - startedAt >= MAX_POLL_DURATION_MS) {
         await triggerRefund(id);
         updateJob(id, {
           status: 'failed',
@@ -80,6 +102,7 @@ export function useGenerationPolling() {
         });
         clearInterval(timersRef.current[id]);
         delete timersRef.current[id];
+        delete durablePollsRef.current[id];
         return;
       }
 
@@ -102,6 +125,7 @@ export function useGenerationPolling() {
           // Stop polling
           clearInterval(timersRef.current[id]);
           delete timersRef.current[id];
+          delete durablePollsRef.current[id];
         } else if (data.status === 'failed') {
           await triggerRefund(id);
           updateJob(id, {
@@ -112,6 +136,7 @@ export function useGenerationPolling() {
           // Stop polling
           clearInterval(timersRef.current[id]);
           delete timersRef.current[id];
+          delete durablePollsRef.current[id];
         } else {
           // Update progress
           updateJob(id, {
@@ -126,7 +151,11 @@ export function useGenerationPolling() {
     };
 
     // Start timer
-    timersRef.current[id] = setInterval(poll, POLL_INTERVAL_MS);
+    timersRef.current[id] = setInterval(
+      poll,
+      durable ? DURABLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS,
+    );
+    if (durable) durablePollsRef.current[id] = () => { void poll(); };
 
     // Immediate first poll
     void poll();
@@ -520,7 +549,7 @@ export function useGenerationPolling() {
       if (timersRef.current[job.id]) continue;
 
       // Start polling for this job
-      startPolling(job.id, job.jobId, job.type);
+      startPolling(job.id, job.jobId, job.type, job.durable === true);
     }
 
     // Cleanup timers for jobs that are no longer active
@@ -529,7 +558,8 @@ export function useGenerationPolling() {
       if (!activeJobIds.has(id)) {
         clearInterval(timersRef.current[id]);
         delete timersRef.current[id];
-        delete pollCountsRef.current[id];
+        delete startedAtRef.current[id];
+        delete durablePollsRef.current[id];
       }
     }
     // NOTE: No cleanup return here — clearing all timers on deps change would stop

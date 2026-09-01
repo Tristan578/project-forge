@@ -314,6 +314,14 @@ export function createGenerationHandler<TParams, TResult>(
   // is identical; only the termination guarantees differ. Refund-on-failure
   // stays in the factory, so the async-refund contract is path-independent.
   const useAgent = isGenerationAgentEnabled();
+  const durableSubmissions = asyncJob !== undefined && isQstashConfigured();
+  const submissionResponse = (result: TResult): TResult | (TResult & { durable: true }) =>
+    durableSubmissions
+      ? Object.assign(
+          Array.isArray(result) ? [...result] : { ...(result as object) },
+          { durable: true as const },
+        ) as TResult & { durable: true }
+      : result;
   const runExecute = (
     params: TParams,
     apiKey: string,
@@ -541,7 +549,12 @@ export function createGenerationHandler<TParams, TResult>(
         const headers: Record<string, string> = {
           'X-Cache': cacheResult.cached ? 'HIT' : 'MISS',
         };
-        return NextResponse.json(cacheResult.result, { status: successStatus, headers });
+        // A cache hit did not arm a new durable callback, so it deliberately
+        // retains the legacy response shape and client polling cadence.
+        const responseResult = cacheResult.cached
+          ? cacheResult.result
+          : submissionResponse(cacheResult.result);
+        return NextResponse.json(responseResult, { status: successStatus, headers });
       } catch (err) {
         if (err instanceof ApiKeyError) {
           return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -593,7 +606,7 @@ export function createGenerationHandler<TParams, TResult>(
       if (asyncJob && isQstashConfigured()) {
         after(() => maybePublishAsyncCallback(result, userId, usageId));
       }
-      return NextResponse.json(result, { status: successStatus });
+      return NextResponse.json(submissionResponse(result), { status: successStatus });
     } catch (err) {
       // Refund tokens on provider failure. Tracked rather than inferred from
       // `usageId`: BYOK leaves it undefined (nothing was charged) and the refund

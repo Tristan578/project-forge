@@ -169,6 +169,60 @@ describe('useGenerationPolling', () => {
     fetchSpy.mockRestore();
   });
 
+  it('keeps the legacy 3-second cadence for non-durable jobs', async () => {
+    mockJobs['legacy'] = makeJob('legacy', { durable: false });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      mockFetchResponse({ jobId: 'job-legacy', status: 'processing', progress: 10 }),
+    );
+
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_999); });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it('uses sparse 30-second safety reads for durable jobs', async () => {
+    mockJobs['durable'] = makeJob('durable', { durable: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      mockFetchResponse({ jobId: 'job-durable', status: 'processing', progress: 10 }),
+    );
+
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(269_999); });
+    expect(fetchSpy).toHaveBeenCalledTimes(10);
+    unmount();
+  });
+
+  it('rechecks durable jobs when the window regains focus or becomes visible', async () => {
+    mockJobs['durable'] = makeJob('durable', { durable: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      mockFetchResponse({ jobId: 'job-durable', status: 'processing', progress: 10 }),
+    );
+    const visibilitySpy = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    visibilitySpy.mockRestore();
+    unmount();
+  });
+
   it('updates progress on processing response', async () => {
     mockJobs['j1'] = makeJob('j1');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
@@ -535,7 +589,7 @@ describe('useGenerationPolling', () => {
 
     renderHook(() => useGenerationPolling());
 
-    // Immediate first poll + 100 interval polls = 101 polls, timeout at poll 101
+    // The legacy loop retains its five-minute overall timeout.
     for (let i = 0; i < 101; i++) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3000);
