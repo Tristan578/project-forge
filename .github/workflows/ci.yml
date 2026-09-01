@@ -411,6 +411,23 @@ jobs:
   # caught in CI instead of silently looping or letting incomplete reviews
   # through. Gated on its own `hooks` path output (NOT any-code) so hook-only
   # PRs pay only this ~30s gate, never the full quality-gates fan-out.
+  # Path-gated on purpose, and the cost of that is recorded here rather than
+  # left for the next person to rediscover (#9606).
+  #
+  # The hooks are development-workflow enforcement, not product code, so paying
+  # 5 minutes on every PR to re-prove them is poor value. The gate stays.
+  #
+  # What the gate costs, measured: this job did not execute in 25+ consecutive
+  # CI runs, and during that stretch two real defects accumulated in
+  # block-main-commits.sh — `git \<newline> commit` was not blocked on main, and
+  # the F4 size-cap case could not build its own payload. The first PR to touch
+  # `.claude/hooks/` inherited 62 failing assertions that had nothing to do with
+  # its change.
+  #
+  # So the trade is explicit: cheap PRs, and whoever next edits a hook pays the
+  # accumulated debt. If that becomes the common case, the fix is a scheduled
+  # run (5 min/week) rather than moving to every-PR — see #9606 for the
+  # discussion.
   hook-tests:
     name: Hook Tests
     needs: [ci-gate]
