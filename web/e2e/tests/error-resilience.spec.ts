@@ -9,7 +9,7 @@ import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_
  */
 test.describe('Error Resilience @ui @dev', () => {
   test.describe('Console Error Monitoring', () => {
-    test('editor loads without critical JS errors', async ({ page, editor }) => {
+    test('editor loads without critical JS errors @engine-ui', async ({ page, editor }) => {
       const errors: string[] = [];
       page.on('console', (msg) => {
         if (msg.type() === 'error') {
@@ -131,7 +131,7 @@ test.describe('Error Resilience @ui @dev', () => {
       await editor.loadPage();
     });
 
-    test('rapid button clicks do not crash', async ({ page }) => {
+    test('rapid button clicks do not crash @engine-ui', async ({ page }) => {
       const addEntityBtn = page.getByRole('button', { name: 'Add Entity' });
       if (await addEntityBtn.isVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS })) {
         // Click rapidly 5 times
@@ -145,7 +145,7 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible();
     });
 
-    test('opening and closing settings rapidly does not crash', async ({ page }) => {
+    test('opening and closing settings rapidly does not crash @engine-ui', async ({ page }) => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
@@ -160,7 +160,7 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible();
     });
 
-    test('window resize does not crash the editor', async ({ page }) => {
+    test('window resize does not crash the editor @engine-ui', async ({ page }) => {
       // Resize to mobile width
       await page.setViewportSize({ width: 375, height: 667 });
       // Wait for the canvas to remain visible at the new viewport before resizing again
@@ -173,7 +173,7 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     });
 
-    test('double-clicking on canvas does not produce errors', async ({ page }) => {
+    test('double-clicking on canvas does not produce errors @engine-ui', async ({ page }) => {
       const errors: string[] = [];
       page.on('pageerror', (error) => {
         errors.push(error.message);
@@ -195,7 +195,7 @@ test.describe('Error Resilience @ui @dev', () => {
   });
 
   test.describe('Network Resilience', () => {
-    test('editor loads even when API endpoints are slow', async ({ page, editor }) => {
+    test('editor loads even when API endpoints are slow @engine-ui', async ({ page, editor }) => {
       // Slow down API responses
       await page.route('**/api/**', async (route) => {
         // Add 100ms delay but don't block

@@ -80,7 +80,7 @@ test.describe('iPhone 14 Viewport (390x844) @ui @dev', () => {
     // Absent from DOM is also acceptable compact-mode behaviour
   });
 
-  test('canvas area takes full viewport width', async ({ page }) => {
+  test('canvas area takes full viewport width @engine-ui', async ({ page }) => {
     const canvas = page.locator('canvas').first();
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
@@ -128,7 +128,7 @@ test.describe('Pixel 7 Viewport (412x915) @ui @dev', () => {
     }
   });
 
-  test('canvas area takes full viewport width', async ({ page }) => {
+  test('canvas area takes full viewport width @engine-ui', async ({ page }) => {
     const canvas = page.locator('canvas').first();
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 

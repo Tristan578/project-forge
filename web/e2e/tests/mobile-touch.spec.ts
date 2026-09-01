@@ -20,7 +20,7 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 // Responsive Layout Breakpoints
 // ---------------------------------------------------------------------------
 test.describe('Responsive Layout Breakpoints @ui @dev', () => {
-  test('mobile viewport (375×667) shows canvas', async ({ page, editor }) => {
+  test('mobile viewport (375×667) shows canvas @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
 
@@ -28,7 +28,7 @@ test.describe('Responsive Layout Breakpoints @ui @dev', () => {
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
-  test('tablet viewport (768×1024) shows canvas', async ({ page, editor }) => {
+  test('tablet viewport (768×1024) shows canvas @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await editor.loadPage();
 
@@ -36,7 +36,7 @@ test.describe('Responsive Layout Breakpoints @ui @dev', () => {
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
-  test('desktop viewport (1280×800) shows canvas', async ({ page, editor }) => {
+  test('desktop viewport (1280×800) shows canvas @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await editor.loadPage();
 
@@ -44,7 +44,7 @@ test.describe('Responsive Layout Breakpoints @ui @dev', () => {
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
-  test('small mobile viewport (320×568) shows canvas', async ({ page, editor }) => {
+  test('small mobile viewport (320×568) shows canvas @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await editor.loadPage();
 
@@ -52,7 +52,7 @@ test.describe('Responsive Layout Breakpoints @ui @dev', () => {
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
-  test('tablet landscape viewport (1024×768) shows canvas', async ({ page, editor }) => {
+  test('tablet landscape viewport (1024×768) shows canvas @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await editor.loadPage();
 
@@ -60,7 +60,7 @@ test.describe('Responsive Layout Breakpoints @ui @dev', () => {
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
-  test('full desktop viewport (1440×900) shows canvas', async ({ page, editor }) => {
+  test('full desktop viewport (1440×900) shows canvas @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await editor.loadPage();
 
@@ -68,7 +68,7 @@ test.describe('Responsive Layout Breakpoints @ui @dev', () => {
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
-  test('canvas is visible after switching from mobile to desktop viewport', async ({ page, editor }) => {
+  test('canvas is visible after switching from mobile to desktop viewport @engine-ui', async ({ page, editor }) => {
     // Start at mobile
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
@@ -81,7 +81,7 @@ test.describe('Responsive Layout Breakpoints @ui @dev', () => {
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
-  test('canvas is visible after switching from desktop to mobile viewport', async ({ page, editor }) => {
+  test('canvas is visible after switching from desktop to mobile viewport @engine-ui', async ({ page, editor }) => {
     // Start at desktop
     await page.setViewportSize({ width: 1440, height: 900 });
     await editor.loadPage();
@@ -128,7 +128,7 @@ test.describe('Mobile Sidebar Collapse @ui @dev', () => {
     }
   });
 
-  test('sidebar is visible at condensed desktop viewport (1280px)', async ({ page, editor }) => {
+  test('sidebar is visible at condensed desktop viewport (1280px) @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await editor.loadPage();
 
@@ -333,7 +333,7 @@ test.describe('Virtual Joystick Store Config @ui @dev', () => {
 // Canvas Rendering Across Breakpoints
 // ---------------------------------------------------------------------------
 test.describe('Canvas Rendering Across Breakpoints @ui @dev', () => {
-  test('canvas has non-zero dimensions at mobile viewport', async ({ page, editor }) => {
+  test('canvas has non-zero dimensions at mobile viewport @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
 
@@ -346,7 +346,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui @dev', () => {
     expect(box!.height).toBeGreaterThan(0);
   });
 
-  test('canvas has non-zero dimensions at tablet viewport', async ({ page, editor }) => {
+  test('canvas has non-zero dimensions at tablet viewport @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await editor.loadPage();
 
@@ -359,7 +359,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui @dev', () => {
     expect(box!.height).toBeGreaterThan(0);
   });
 
-  test('canvas has non-zero dimensions at desktop viewport', async ({ page, editor }) => {
+  test('canvas has non-zero dimensions at desktop viewport @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await editor.loadPage();
 
@@ -372,7 +372,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui @dev', () => {
     expect(box!.height).toBeGreaterThan(0);
   });
 
-  test('canvas width increases as viewport widens', async ({ page, editor }) => {
+  test('canvas width increases as viewport widens @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
 
@@ -393,7 +393,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui @dev', () => {
     expect(desktopBox!.width).toBeGreaterThan(mobileBox!.width);
   });
 
-  test('canvas remains visible after rapid viewport resizes', async ({ page, editor }) => {
+  test('canvas remains visible after rapid viewport resizes @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await editor.loadPage();
 

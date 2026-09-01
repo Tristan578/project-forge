@@ -57,8 +57,18 @@ export default defineConfig({
   // (`dispatchCommand` returns void, so the fake-bridge integration suite can
   // never see one). Its describe block raises the cap to
   // E2E_TIMEOUT_PIPELINE_LIVE_MS.
-  testMatch: '**/{engine-smoke,pipeline-live-engine}.spec.ts',
-  grep: /@engine-smoke/,
+  // The @engine-ui set (#9586) lives across nine editor spec files, so file
+  // matching can no longer be the primary filter -- the TAG is. Every test
+  // selected here still has to carry @engine-smoke or @engine-ui, so an
+  // untagged slow spec elsewhere cannot wander into this job's budget.
+  //
+  // @engine-ui marks the 36 tests that assert on #game-canvas. The editor holds
+  // that canvas `invisible` until the Bevy/wgpu renderer starts, so they can
+  // only pass where there is a real engine and a software GL context — which is
+  // this job and nowhere else. They were previously excluded from the @ui job
+  // and selected by nothing, i.e. they ran nowhere at all.
+  testMatch: '**/*.spec.ts',
+  grep: /@engine-smoke|@engine-ui/,
   fullyParallel: true,
   forbidOnly: true,
   // One retry absorbs a transient software-rendering blip; a genuine engine

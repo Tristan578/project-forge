@@ -80,6 +80,7 @@ web/.next/
 web/out/
 web/test-results/
 web/playwright-report/
+web/blob-report/
 # Playwright MCP browser-session scratch output (console-*.log / page-*.yml)
 .playwright-mcp/
 

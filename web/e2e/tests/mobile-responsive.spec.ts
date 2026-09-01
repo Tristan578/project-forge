@@ -22,7 +22,7 @@ test.describe('iPhone 14 Viewport (390x844) @ui @dev', () => {
     await editor.loadPage();
   });
 
-  test('canvas is visible', async ({ page }) => {
+  test('canvas is visible @engine-ui', async ({ page }) => {
     const canvas = page.locator('canvas').first();
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
@@ -106,7 +106,7 @@ test.describe('iPad Viewport (768x1024) @ui @dev', () => {
     await editor.loadPage();
   });
 
-  test('canvas is visible', async ({ page }) => {
+  test('canvas is visible @engine-ui', async ({ page }) => {
     const canvas = page.locator('canvas').first();
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });

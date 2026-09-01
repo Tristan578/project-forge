@@ -44,7 +44,7 @@ test.describe('Game Creation Flow @ui @dev', () => {
     expect(jsErrors, `Unexpected JS errors: ${jsErrors.join(', ')}`).toHaveLength(0);
   });
 
-  test('editor boots without console errors', async ({ page, editor }) => {
+  test('editor boots without console errors @engine-ui', async ({ page, editor }) => {
     const consoleErrors: string[] = [];
 
     page.on('console', (msg) => {
