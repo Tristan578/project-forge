@@ -9,7 +9,7 @@ import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_
  */
 test.describe('Error Resilience @ui @dev', () => {
   test.describe('Console Error Monitoring', () => {
-    test('editor loads without critical JS errors', async ({ page, editor }) => {
+    test('editor loads without critical JS errors @engine-ui', async ({ page, editor }) => {
       const errors: string[] = [];
       page.on('console', (msg) => {
         if (msg.type() === 'error') {
@@ -27,12 +27,21 @@ test.describe('Error Resilience @ui @dev', () => {
         }
       });
 
-      await editor.loadPage();
+      await editor.load();
 
-      // Wait for all deferred async initialisation to settle before checking errors.
-      // `networkidle` fires once the page has had no network requests for 500ms,
-      // which is a reliable proxy for "all lazy effects have run".
-      await page.waitForLoadState('networkidle');
+      // Wait for deferred async initialisation to settle before checking errors.
+      //
+      // This used `waitForLoadState('networkidle')`, which worked only while
+      // this spec ran without an engine. With a real engine the network never
+      // goes quiet for 500ms and the wait times out at 30s instead.
+      //
+      // The canvas is a stronger signal anyway: CanvasArea keeps it
+      // `invisible` until the first frame is drawn, so its becoming visible
+      // means the engine actually finished starting — where networkidle was
+      // only ever a proxy for that.
+      await expect(page.locator('canvas').first()).toBeVisible({
+        timeout: E2E_TIMEOUT_LOAD_MS,
+      });
 
       expect(errors).toEqual([]);
     });
@@ -49,6 +58,13 @@ test.describe('Error Resilience @ui @dev', () => {
 
       await editor.loadPage();
       // Wait for any async effects to complete before asserting no rejections.
+      //
+      // networkidle is correct *here*, unlike in the two tests above. This one
+      // calls loadPage(), which skips the engine, so nothing keeps the network
+      // busy and the state settles normally. The canvas-visible signal used
+      // above would be wrong here for the same reason: CanvasArea holds the
+      // canvas `invisible` until a first frame that is never drawn without an
+      // engine, so waiting on it would hang forever.
       await page.waitForLoadState('networkidle');
 
       expect(rejections).toEqual([]);
@@ -131,7 +147,8 @@ test.describe('Error Resilience @ui @dev', () => {
       await editor.loadPage();
     });
 
-    test('rapid button clicks do not crash', async ({ page }) => {
+    test('rapid button clicks do not crash @engine-ui', async ({ page, editor }) => {
+      await editor.load();
       const addEntityBtn = page.getByRole('button', { name: 'Add Entity' });
       if (await addEntityBtn.isVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS })) {
         // Click rapidly 5 times
@@ -145,7 +162,8 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible();
     });
 
-    test('opening and closing settings rapidly does not crash', async ({ page }) => {
+    test('opening and closing settings rapidly does not crash @engine-ui', async ({ page, editor }) => {
+      await editor.load();
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
@@ -160,7 +178,8 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible();
     });
 
-    test('window resize does not crash the editor', async ({ page }) => {
+    test('window resize does not crash the editor @engine-ui', async ({ page, editor }) => {
+      await editor.load();
       // Resize to mobile width
       await page.setViewportSize({ width: 375, height: 667 });
       // Wait for the canvas to remain visible at the new viewport before resizing again
@@ -173,7 +192,8 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     });
 
-    test('double-clicking on canvas does not produce errors', async ({ page }) => {
+    test('double-clicking on canvas does not produce errors @engine-ui', async ({ page, editor }) => {
+      await editor.load();
       const errors: string[] = [];
       page.on('pageerror', (error) => {
         errors.push(error.message);
@@ -183,8 +203,14 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
       await canvas.dblclick();
-      // Use networkidle to wait for any async handlers triggered by the click
-      await page.waitForLoadState('networkidle');
+      // Give any async handler the click triggered a chance to throw.
+      //
+      // networkidle was used here and cannot settle while the engine is
+      // running. There is no event that means "the click's handlers are done",
+      // so this waits a bounded moment and then asserts. Kept short
+      // deliberately: a pageerror from a click surfaces on the next tick or
+      // two, and a longer wait would buy nothing but wall-clock.
+      await page.waitForTimeout(1000);
 
       // Filter out known harmless errors
       const criticalErrors = errors.filter(
@@ -195,7 +221,7 @@ test.describe('Error Resilience @ui @dev', () => {
   });
 
   test.describe('Network Resilience', () => {
-    test('editor loads even when API endpoints are slow', async ({ page, editor }) => {
+    test('editor loads even when API endpoints are slow @engine-ui', async ({ page, editor }) => {
       // Slow down API responses
       await page.route('**/api/**', async (route) => {
         // Add 100ms delay but don't block
@@ -203,7 +229,7 @@ test.describe('Error Resilience @ui @dev', () => {
         await route.continue();
       });
 
-      await editor.loadPage();
+      await editor.load();
 
       // Editor should still render
       await expect(page.locator('canvas').first()).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });

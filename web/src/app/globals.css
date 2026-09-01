@@ -125,6 +125,23 @@ body {
   border-bottom: 2px solid #3b82f6;
 }
 
+/* Keyboard focus ring for panel tabs (WCAG 2.4.7 Focus Visible).
+
+   Dockview's own stylesheet ships `.dv-tab { outline: none; }`. That has the
+   same specificity (0,1,0) as the global `:focus-visible` rule further down
+   this file, and it loads after it, so the later rule won and every panel tab
+   rendered no focus indicator at all. Each tab is a tabIndex=0 div, so the
+   whole tab strip was reachable by keyboard and invisible while focused.
+
+   Scoping to the theme class raises specificity to (0,3,0) so this wins on
+   merit rather than with !important. The offset is negative because tabs sit
+   flush against each other -- a positive offset would be clipped by the
+   neighbouring tab. */
+.dockview-theme-forge .dv-tab:focus-visible {
+  outline: 2px solid var(--sf-accent, #3b82f6);
+  outline-offset: -2px;
+}
+
 /* Scene transition overlays */
 .scene-transition-overlay {
   position: fixed;

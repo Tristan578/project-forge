@@ -887,6 +887,7 @@ jobs:
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
+            scripts/__tests__/e2e-tag-routing.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -995,6 +996,8 @@ jobs:
 
       - name: Run agent-harness reference gate test suite
         run: bash scripts/__tests__/claude-refs-resolve.test.sh
+      - name: Run E2E tag-routing gate test suite
+        run: bash scripts/__tests__/e2e-tag-routing.test.sh
 
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
@@ -1177,16 +1180,33 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          # Renders /dev and exposes the editor stores. Without it this job could
+          # only run specs that never open the editor -- 91 of 422 tests, all
+          # public pages and API routes -- while reading as an application gate
+          # (#9586). The same flag the journey gate already builds with.
+          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run UI-only E2E tests (shard ${{ matrix.shard }})
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-        # @journey is excluded here defensively: those specs demand the exposed
-        # store surface (NEXT_PUBLIC_E2E_HOOKS) + E2E_STRICT_STORES, neither of
-        # which this store-less @ui build sets. They run only in test-e2e-journey.
-        run: npx playwright test --grep '@ui' --grep-invert '@dev|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+        # Two tags are excluded, for two different reasons.
+        #
+        # @journey needs E2E_STRICT_STORES on top of the hooks build, and has its
+        # own gate (test-e2e-journey) that sets it.
+        #
+        # @engine-ui marks the 37 specs that assert on the canvas. The editor
+        # holds #game-canvas `invisible` until the Bevy/wgpu renderer starts, and
+        # this job has no WASM engine and launches with --disable-gpu, so those
+        # specs cannot pass here no matter what the build sets. They run in
+        # test-e2e-engine-smoke, which has the engine and a software GL context.
+        # Selection, counted from the specs themselves rather than from a
+        # remembered run: 422 @ui tests total, 37 tagged @engine-ui, so 385 are
+        # selected here. scripts/__tests__/e2e-tag-routing.test.sh keeps this
+        # honest -- it asserts the tag is real, that something else runs it, and
+        # that cd.yml selects exactly the same set.
+        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
