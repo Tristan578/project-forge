@@ -1,3 +1,13 @@
+import { SWAGGER_UI_CDN_ORIGIN } from './swagger-assets';
+import { POSTHOG_ORIGINS } from './posthog-origins';
+export { POSTHOG_API_ORIGIN, POSTHOG_ASSET_ORIGIN, POSTHOG_ORIGINS } from './posthog-origins';
+export {
+  SWAGGER_UI_CDN_ORIGIN,
+  SWAGGER_UI_SCRIPT_URL,
+  SWAGGER_UI_STYLE_URL,
+  SWAGGER_UI_VERSION,
+} from './swagger-assets';
+
 /**
  * Content-Security-Policy construction for the SpawnForge web app.
  *
@@ -96,7 +106,18 @@ export interface CspOptions {
   engineCdn?: string;
   /** Clerk publishable key, used to derive the deployment's exact Clerk host. */
   clerkPublishableKey?: string;
+  /** Admit the pinned Swagger UI CDN assets. Only `/api-docs` may set this. */
+  allowSwaggerUiCdn?: boolean;
 }
+
+/**
+ * PostHog's origins as a CSP source list. Both entries are required: the ingest
+ * host takes the events, and the assets host serves every bundle posthog-js
+ * loads lazily (recorder, surveys, exception autocapture, web vitals, remote
+ * config). Admitting only the first blocks those bundles silently — see
+ * `posthog-origins.ts`, which both this policy and `posthog.init()` read.
+ */
+const POSTHOG_SOURCES = POSTHOG_ORIGINS.join(' ');
 
 const FALLBACK_CLERK_ORIGINS =
   'https://*.clerk.accounts.dev https://*.accounts.dev ' +
@@ -113,9 +134,11 @@ export function buildContentSecurityPolicy({
   allowUnsafeEval,
   engineCdn = '',
   clerkPublishableKey,
+  allowSwaggerUiCdn = false,
 }: CspOptions): string {
   const cdnDirective = engineCdn ? ` ${engineCdn}` : '';
   const evalToken = allowUnsafeEval ? " 'unsafe-eval'" : '';
+  const swaggerCdn = allowSwaggerUiCdn ? ` ${SWAGGER_UI_CDN_ORIGIN}` : '';
   const clerkHost = clerkFrontendApiFromPublishableKey(clerkPublishableKey);
   // Unlike /play, the global policy must remain usable when configuration is
   // absent or malformed: static pages can still render Clerk sign-in widgets
@@ -139,11 +162,11 @@ export function buildContentSecurityPolicy({
     // required by the same-origin script-sandbox worker's Function() compiler on
     // editor routes, NOT by WASM (WASM uses 'wasm-unsafe-eval'). 'unsafe-inline'
     // is required by Clerk + Next.js inline framework scripts.
-    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' ${clerkOrigins} https://challenges.cloudflare.com${cdnDirective}`,
-    "style-src 'self' 'unsafe-inline'",
+    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' ${clerkOrigins} https://challenges.cloudflare.com ${POSTHOG_SOURCES}${cdnDirective}${swaggerCdn}`,
+    `style-src 'self' 'unsafe-inline'${swaggerCdn}`,
     `img-src 'self' data: blob: https://img.clerk.com ${clerkImageOrigin}`,
     "font-src 'self' data:",
-    `connect-src 'self' ${clerkOrigins} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
+    `connect-src 'self' ${clerkOrigins} ${POSTHOG_SOURCES} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
     `frame-src 'self' ${clerkOrigins} https://challenges.cloudflare.com`,
     "worker-src 'self' blob:",
     "media-src 'self' blob:",
@@ -359,8 +382,8 @@ export function buildPlayContentSecurityPolicy({
 
   return [
     "default-src 'self'",
-    `script-src 'self'${scriptAuth}${devEval} 'wasm-unsafe-eval'${clerk}${cdn}`,
-    `connect-src 'self'${clerk}${cdn}`,
+    `script-src 'self'${scriptAuth}${devEval} 'wasm-unsafe-eval'${clerk} ${POSTHOG_SOURCES}${cdn}`,
+    `connect-src 'self'${clerk} ${POSTHOG_SOURCES}${cdn}`,
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: https://img.clerk.com${clerk}`,
     "font-src 'self' data:",
@@ -435,6 +458,12 @@ export function buildCspRouteRules({
     engineCdn,
     clerkPublishableKey,
   });
+  const apiDocsCsp = buildContentSecurityPolicy({
+    allowUnsafeEval: devUnsafeEval,
+    engineCdn,
+    clerkPublishableKey,
+    allowSwaggerUiCdn: true,
+  });
   // No nonce: a static `headers()` rule cannot carry a per-request value. The
   // proxy emits the nonce-bearing policy that supersedes this one on /play.
   const playCsp = buildPlayContentSecurityPolicy({ engineCdn, clerkPublishableKey, devUnsafeEval });
@@ -447,7 +476,10 @@ export function buildCspRouteRules({
     { source: '/:path*', headers: csp(globalCsp) },
     // Overrides AFTER the global rule so they are the last writer for their paths.
     { source: PLAY_ROUTE_SOURCE, headers: csp(playCsp) },
-    ...EVAL_FREE_ROUTE_SOURCES.map((source) => ({ source, headers: csp(evalFreeCsp) })),
+    ...EVAL_FREE_ROUTE_SOURCES.map((source) => ({
+      source,
+      headers: csp(source === '/api-docs/:path*' ? apiDocsCsp : evalFreeCsp),
+    })),
   ];
 }
 

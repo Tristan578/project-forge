@@ -31,7 +31,7 @@ use crate::core::{
         z_from_sorting, z_from_sorting_with_config,
     },
     tilemap::{tile_flat_index, TilemapData, TilemapEnabled, TilemapOrigin, Grid2dConfig},
-    tileset::TilesetData,
+    tileset::{TilesetData, TilesetRegistry},
 };
 use super::events;
 // Editor-only: consumed solely by the selection-emit systems below, which
@@ -864,7 +864,7 @@ pub(super) fn apply_tilemap_data_removals(
 }
 
 /// Compute a simple hash of the tilemap data for change detection.
-fn tilemap_data_hash(data: &TilemapData) -> u64 {
+fn tilemap_data_hash(data: &TilemapData, tileset: Option<&TilesetData>) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
@@ -884,6 +884,11 @@ fn tilemap_data_hash(data: &TilemapData) -> u64 {
             tile.hash(&mut hasher);
         }
     }
+    if let Some(tileset) = tileset {
+        tileset.grid_size.hash(&mut hasher);
+        tileset.spacing.hash(&mut hasher);
+        tileset.margin.hash(&mut hasher);
+    }
     hasher.finish()
 }
 
@@ -897,14 +902,15 @@ pub(super) fn sync_tilemap_rendering(
     >,
     tile_entities: Query<Entity, With<TileEntity>>,
     children_query: Query<&Children>,
-    tileset_query: Query<&TilesetData>,
+    tilesets: Res<TilesetRegistry>,
     texture_handles: Res<TextureHandleMap>,
     mut atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut commands: Commands,
     transform_query: Query<&Transform>,
 ) {
     for (tilemap_entity, tilemap_data, mut render_state) in tilemap_query.iter_mut() {
-        let current_hash = tilemap_data_hash(tilemap_data);
+        let tileset_opt = tilesets.0.get(&tilemap_data.tileset_asset_id);
+        let current_hash = tilemap_data_hash(tilemap_data, tileset_opt);
         if current_hash == render_state.last_hash {
             continue;
         }
@@ -923,10 +929,6 @@ pub(super) fn sync_tilemap_rendering(
         let Some(image_handle) = texture_handles.0.get(&tilemap_data.tileset_asset_id) else {
             continue;
         };
-
-        // Find the TilesetData component on any entity (tilesets are stored per-asset, not per-entity typically).
-        // For now, look up by matching asset_id.
-        let tileset_opt: Option<&TilesetData> = tileset_query.iter().find(|ts| ts.asset_id == tilemap_data.tileset_asset_id);
 
         // Calculate atlas columns/rows from tileset or tilemap data
         let tile_w = tilemap_data.tile_size[0];
@@ -1425,36 +1427,24 @@ pub(super) fn apply_set_sorting_layers(
 // ========== Tileset CRUD Systems ==========
 
 /// System that processes pending set_tileset requests from the bridge.
-/// Inserts or updates TilesetData on matching entities.
+/// Inserts or updates tileset metadata by its atlas asset id.
 pub(super) fn apply_set_tileset_requests(
     mut pending: ResMut<PendingCommands>,
-    mut query: Query<(Entity, &EntityId, Option<&mut TilesetData>)>,
-    mut commands: Commands,
+    mut tilesets: ResMut<TilesetRegistry>,
 ) {
     for request in pending.set_tileset_requests.drain(..) {
-        let found = query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id);
-        let Some((entity, _, existing)) = found else { continue };
-
-        if let Some(mut existing_data) = existing {
-            *existing_data = request.tileset_data;
-        } else {
-            commands.entity(entity).insert(request.tileset_data);
-        }
+        tilesets.insert(request.tileset_data);
     }
 }
 
 /// System that processes pending remove_tileset requests from the bridge.
-/// Removes TilesetData from matching entities.
+/// Removes tileset metadata by atlas asset id.
 pub(super) fn apply_remove_tileset_requests(
     mut pending: ResMut<PendingCommands>,
-    query: Query<(Entity, &EntityId)>,
-    mut commands: Commands,
+    mut tilesets: ResMut<TilesetRegistry>,
 ) {
     for request in pending.remove_tileset_requests.drain(..) {
-        let found = query.iter().find(|(_, eid)| eid.0 == request.entity_id);
-        let Some((entity, _)) = found else { continue };
-
-        commands.entity(entity).remove::<TilesetData>();
+        tilesets.remove(&request.asset_id);
     }
 }
 

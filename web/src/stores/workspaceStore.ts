@@ -165,13 +165,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const inspector = api.getPanel('inspector');
     const assets = api.getPanel('asset-browser');
 
-    // Right-side panels go with inspector
-    if (['scene-settings', 'ui-builder', 'effect-bindings', 'review', 'auto-iteration'].includes(panelId) && inspector) {
+    const rightSidePanelIds = ['scene-settings', 'ui-builder', 'effect-bindings', 'review', 'auto-iteration'];
+
+    // Right-side panels prefer Inspector, then any other panel already open in
+    // the right dock group. If neither exists, omit a position so Dockview
+    // creates its normal default group: the `else if (viewport)` arm below
+    // would otherwise dock a right-side panel INSIDE the Viewport group, which
+    // is what #8933 reported. All five share one code path deliberately — the
+    // gap was never specific to Auto-Iteration, and fixing one member of the
+    // list while the other four kept falling through to Viewport would leave
+    // the same bug behind under a different panel name.
+    if (rightSidePanelIds.includes(panelId)) {
+      const rightDockTarget = inspector
+        ?? rightSidePanelIds
+          .filter((candidateId) => candidateId !== panelId)
+          .map((candidateId) => api.getPanel(candidateId))
+          .find((panel) => panel != null);
       api.addPanel({
         id: panelId,
         component: def.component,
         title: def.title,
-        position: { direction: 'within', referencePanel: inspector },
+        ...(rightDockTarget
+          ? { position: { direction: 'within' as const, referencePanel: rightDockTarget } }
+          : {}),
       });
     }
     // Bottom panels go with assets

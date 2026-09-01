@@ -12,6 +12,7 @@
 
 import posthog from 'posthog-js';
 import { safeGetItem } from '@/lib/storage/safeLocalStorage';
+import { POSTHOG_API_ORIGIN, POSTHOG_ASSET_ORIGIN } from '@/lib/security/posthog-origins';
 
 /** Type-safe analytics event names for funnel tracking. */
 export enum AnalyticsEvent {
@@ -54,7 +55,12 @@ export function initPostHog(): void {
   if (!hasConsented()) return;
 
   posthog.init(POSTHOG_KEY, {
-    api_host: 'https://us.i.posthog.com',
+    api_host: POSTHOG_API_ORIGIN,
+    // Stated rather than derived. Without it posthog-js computes the assets
+    // host from `api_host` internally, and the CSP's `script-src` would be
+    // betting on that derivation instead of describing it — see
+    // `lib/security/posthog-origins.ts`.
+    asset_host: POSTHOG_ASSET_ORIGIN,
     person_profiles: 'identified_only',
     capture_pageview: false, // We handle page views manually via Next.js router
     loaded: () => {
