@@ -58,11 +58,14 @@ test.describe('Error Resilience @ui @dev', () => {
 
       await editor.loadPage();
       // Wait for any async effects to complete before asserting no rejections.
-      // Same reason as above: with an engine running, networkidle never fires.
-      // The canvas turning visible is the first-frame signal.
-      await expect(page.locator('canvas').first()).toBeVisible({
-        timeout: E2E_TIMEOUT_LOAD_MS,
-      });
+      //
+      // networkidle is correct *here*, unlike in the two tests above. This one
+      // calls loadPage(), which skips the engine, so nothing keeps the network
+      // busy and the state settles normally. The canvas-visible signal used
+      // above would be wrong here for the same reason: CanvasArea holds the
+      // canvas `invisible` until a first frame that is never drawn without an
+      // engine, so waiting on it would hang forever.
+      await page.waitForLoadState('networkidle');
 
       expect(rejections).toEqual([]);
     });
