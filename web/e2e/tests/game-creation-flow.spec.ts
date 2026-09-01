@@ -54,7 +54,7 @@ test.describe('Game Creation Flow @ui @dev', () => {
     });
 
     // Reload fresh so the listener captures everything from navigation start
-    await editor.loadPage();
+    await editor.load();
 
     // Filter out known benign browser noise (extensions, CSP, Clerk 401 in CI)
     const appErrors = consoleErrors.filter(

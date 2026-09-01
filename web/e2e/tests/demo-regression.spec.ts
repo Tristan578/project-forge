@@ -22,7 +22,8 @@ test.describe('Demo Regression Walkthrough @ui @dev', () => {
     await editor.loadPage();
   });
 
-  test('editor loads with core panels visible @engine-ui', async ({ page }) => {
+  test('editor loads with core panels visible @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     // Hierarchy panel
     const hierarchyTab = page.locator('.dv-tab').filter({ hasText: /hierarchy/i }).first();
     await expect(hierarchyTab).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
@@ -269,7 +270,8 @@ test.describe('Demo Regression Walkthrough @ui @dev', () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  test('canvas element has correct dimensions @engine-ui', async ({ page }) => {
+  test('canvas element has correct dimensions @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     const canvas = page.locator('canvas').first();
     await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 

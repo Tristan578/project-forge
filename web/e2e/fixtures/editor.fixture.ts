@@ -34,6 +34,18 @@ export class EditorPage {
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
 
+      // Undo `loadPage()`'s engine skip, so `load()` means "with engine" even
+      // when a describe-level beforeEach already called `loadPage()`. Init
+      // scripts accumulate and run in the order they were added, so this one
+      // runs after that flag was set and wins.
+      //
+      // Without this a test could not opt back into a real engine, and the
+      // canvas stays `invisible` forever — which is why 37 specs asserted on a
+      // canvas that could never appear: they inherited `loadPage()`, which sets
+      // `__SKIP_ENGINE = true`, and then asserted the engine's output (#9586).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__SKIP_ENGINE = false;
+
       // Seed the persisted backend choice so `loadWasm()` (useEngine.ts) takes
       // the WebGL2 path directly: it reads this key before anything else and
       // only calls `probeWebGPU()` when it is not 'webgl2', so no config spends

@@ -247,7 +247,7 @@ test.describe('Responsive Layout @ui @dev', () => {
 
   test('full mode shows all panels at wide viewport @engine-ui', async ({ page, editor }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await editor.loadPage();
+    await editor.load();
 
     // In full mode (>=1440px), all panels should be visible
     const canvas = page.locator('canvas').first();
@@ -264,7 +264,7 @@ test.describe('Responsive Layout @ui @dev', () => {
   test('viewport breakpoint transitions between condensed and compact @engine-ui', async ({ page, editor }) => {
     // Start at condensed width
     await page.setViewportSize({ width: 1200, height: 800 });
-    await editor.loadPage();
+    await editor.load();
 
     // Canvas should be visible
     const canvas = page.locator('canvas').first();

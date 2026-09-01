@@ -21,6 +21,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CI_YML="${E2E_TAG_ROUTING_CI_YML:-$HERE/../../.github/workflows/ci.yml}"
+CD_YML="${E2E_TAG_ROUTING_CD_YML:-$HERE/../../.github/workflows/cd.yml}"
 E2E_DIR="${E2E_TAG_ROUTING_E2E_DIR:-$HERE/../../web/e2e}"
 
 PASS=0
@@ -75,6 +76,38 @@ else
       fail "'${tag}' is excluded from the @ui job and NO other job or config selects it — specs carrying it run nowhere, while the required check stays green (this is exactly #9586)"
     fi
   done
+fi
+
+echo ""
+echo "=== ci.yml and cd.yml must run the SAME @ui selection ==="
+# These are the only two places the @ui suite runs. When they drift, the deploy
+# path keeps a hole the PR gate has already closed -- which is exactly what
+# happened: ci.yml was fixed to stop excluding the editor specs and cd.yml was
+# left excluding them, so deploys would still have tested 91 of 422 (#9586).
+# Fixing one of two identical call sites is the same mistake that produced the
+# CDN failures this milestone chased, so it is asserted rather than remembered.
+if [ ! -f "$CD_YML" ]; then
+  fail "cd.yml not found at $CD_YML — cannot verify the deploy path runs the same selection"
+else
+  ci_sel="$(grep -oE "grep-invert '[^']+'" "$CI_YML" | head -1)"
+  cd_sel="$(grep -oE "grep-invert '[^']+'" "$CD_YML" | head -1)"
+  if [ -z "$ci_sel" ] || [ -z "$cd_sel" ]; then
+    fail "could not read the @ui selection from both workflows (ci='${ci_sel:-none}' cd='${cd_sel:-none}') — this rule would pass vacuously"
+  elif [ "$ci_sel" = "$cd_sel" ]; then
+    pass "ci.yml and cd.yml exclude the same tags (${ci_sel})"
+  else
+    fail "the @ui selection has drifted — ci.yml uses ${ci_sel} but cd.yml uses ${cd_sel}; the deploy path tests a different set than the PR gate"
+  fi
+
+  # The hooks build is half the fix; a matching grep against a store-less build
+  # still cannot open the editor.
+  cd_job="$(awk '/^  test-e2e-ui:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:$/ && !/test-e2e-ui/{exit}' "$CD_YML")"
+  [ -n "$cd_job" ] || cd_job="$(grep -B40 "grep '@ui'" "$CD_YML")"
+  if grep -q 'NEXT_PUBLIC_E2E_HOOKS' <<<"$cd_job"; then
+    pass "cd.yml's @ui job also builds with NEXT_PUBLIC_E2E_HOOKS"
+  else
+    fail "cd.yml's @ui job does not set NEXT_PUBLIC_E2E_HOOKS — /dev redirects to /sign-in there, so the deploy path still tests public pages only"
+  fi
 fi
 
 echo ""

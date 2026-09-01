@@ -1196,12 +1196,16 @@ jobs:
         # @journey needs E2E_STRICT_STORES on top of the hooks build, and has its
         # own gate (test-e2e-journey) that sets it.
         #
-        # @engine-ui marks the 36 specs that assert on the canvas. The editor
+        # @engine-ui marks the 37 specs that assert on the canvas. The editor
         # holds #game-canvas `invisible` until the Bevy/wgpu renderer starts, and
         # this job has no WASM engine and launches with --disable-gpu, so those
         # specs cannot pass here no matter what the build sets. They run in
         # test-e2e-engine-smoke, which has the engine and a software GL context.
-        # Measured: 386 tests pass here, 36 need the engine.
+        # Selection, counted from the specs themselves rather than from a
+        # remembered run: 422 @ui tests total, 37 tagged @engine-ui, so 385 are
+        # selected here. scripts/__tests__/e2e-tag-routing.test.sh keeps this
+        # honest -- it asserts the tag is real, that something else runs it, and
+        # that cd.yml selects exactly the same set.
         run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload blob report

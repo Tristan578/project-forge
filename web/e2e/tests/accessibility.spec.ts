@@ -6,6 +6,13 @@ import {
 } from '../constants';
 
 /**
+ * How many Tab presses the focus-visibility walk makes. Large enough to cover
+ * the editor's top bar and toolbar (17 controls when measured), small enough
+ * that the test stays quick.
+ */
+const FOCUS_WALK_STEPS = 25;
+
+/**
  * Accessibility E2E tests.
  * Verifies ARIA roles, labels, keyboard navigation, focus management,
  * and screen reader compatibility across the editor UI.
@@ -144,19 +151,38 @@ test.describe('Accessibility @ui @dev', () => {
       expect(await focusedTag.jsonValue()).toBeTruthy();
     });
 
-    // fixme: focus management in settings dialog is timing-dependent on CI
-    test.fixme('Tab key moves focus to interactive elements inside settings dialog', async ({ page }) => {
+    test('Tab key moves focus to interactive elements inside settings dialog', async ({ page }) => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
-      // Tab once — focus should land on an interactive element
+      const dialog = page.locator(
+        '[role="dialog"][aria-labelledby="settings-dialog-title"]'
+      );
+      await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+
       await page.keyboard.press('Tab');
 
-      const focusedTag = await page.evaluate(() => document.activeElement?.tagName ?? 'null');
-      // After one Tab, focus should be on a focusable element
-      expect(['BUTTON', 'INPUT', 'A', 'TEXTAREA', 'SELECT', 'DIV']).toContain(focusedTag);
+      // The real requirement is a focus trap: keyboard focus must stay inside an
+      // open modal. The previous assertion only checked that *some* focusable
+      // tag was active, and accepted DIV -- which passes even when focus escapes
+      // to the page behind the dialog, the exact failure it should catch.
+      //
+      // waitForFunction rather than a bare evaluate is what un-quarantines this:
+      // the dialog's mount and its focus handler settle a frame apart, so
+      // sampling activeElement immediately after the keypress was reading a
+      // moment too early. That was the CI timing dependency -- polling for the
+      // settled state removes it without loosening what is asserted.
+      await page.waitForFunction(
+        () => {
+          const dlg = document.querySelector(
+            '[role="dialog"][aria-labelledby="settings-dialog-title"]'
+          );
+          const el = document.activeElement;
+          return !!dlg && !!el && el !== document.body && dlg.contains(el);
+        },
+        { timeout: E2E_TIMEOUT_ELEMENT_MS }
+      );
 
       await page.keyboard.press('Escape');
     });
@@ -167,44 +193,88 @@ test.describe('Accessibility @ui @dev', () => {
       await editor.loadPage();
     });
 
-    // fixme: animation/transition states cause intermittent zero-opacity reads on CI
-    test.fixme('text elements have non-zero opacity', async ({ page }) => {
+    test('text elements have non-zero opacity', async ({ page }) => {
+      // Entrance transitions legitimately read as opacity 0 while in flight,
+      // which is what made this intermittent on CI. Waiting for the document's
+      // running animations to settle makes the sample deterministic rather than
+      // racing them -- the assertion itself is unchanged.
+      await page.waitForFunction(
+        () => document.getAnimations().every((a) => a.playState !== 'running'),
+        { timeout: E2E_TIMEOUT_ELEMENT_MS }
+      );
+
       const textElements = page.locator('span, p, h1, h2, h3, label');
       const count = await textElements.count();
+      let checked = 0;
 
       for (let i = 0; i < Math.min(count, 10); i++) {
         const el = textElements.nth(i);
-        if (await el.isVisible()) {
-          const opacity = await el.evaluate((e) => {
-            return window.getComputedStyle(e).opacity;
-          });
-          expect(Number(opacity)).toBeGreaterThan(0);
-        }
+        if (!(await el.isVisible())) continue;
+        const opacity = await el.evaluate(
+          (e) => window.getComputedStyle(e).opacity
+        );
+        checked++;
+        expect(Number(opacity)).toBeGreaterThan(0);
       }
+
+      // A run where nothing was visible would otherwise pass having asserted
+      // nothing at all.
+      expect(checked).toBeGreaterThan(0);
     });
 
+    // WCAG 2.4.7 (Focus Visible): every control reachable by keyboard must show
+    // a rendered focus indicator.
+    //
+    // This previously computed a boolean and asserted `toBeDefined()` on it --
+    // which is satisfied by `false`, so it reported green regardless of what the
+    // page rendered. The style check was independently vacuous: computed
+    // `outline` is a triple like "rgb(0, 0, 0) none 0px", never the bare string
+    // "none", so the first clause was always true.
+    //
+    // Input modality matters: Chromium does not apply `:focus-visible` for a
+    // programmatic `el.focus()` that follows a pointer interaction, so a probe
+    // built on `.focus()` reports missing indicators on controls that are fine.
+    // Driving real Tab presses is what makes the result trustworthy.
     test('interactive elements have visible focus indicators', async ({ page }) => {
-      // Tab to a button
-      await page.keyboard.press('Tab');
-      await page.keyboard.press('Tab');
+      // Start from a known point so the tab order is deterministic.
+      await page.locator('body').click({ position: { x: 2, y: 2 } });
 
-      const hasFocusStyle = await page.evaluate(() => {
-        const el = document.activeElement;
-        if (!el) return false;
-        const styles = window.getComputedStyle(el);
-        // Check for outline, box-shadow, or border that indicates focus
-        return (
-          styles.outline !== 'none' ||
-          styles.outlineStyle !== 'none' ||
-          styles.boxShadow !== 'none' ||
-          el.classList.contains('focus-visible') ||
-          el.matches(':focus-visible')
-        );
-      });
+      const offenders: string[] = [];
+      let focusedCount = 0;
 
-      // Focus indicator should exist (may be via outline, shadow, or class)
-      // Some frameworks use class-based focus styling, so this is best-effort
-      expect(hasFocusStyle).toBeDefined();
+      for (let i = 0; i < FOCUS_WALK_STEPS; i++) {
+        await page.keyboard.press('Tab');
+        const result = await page.evaluate(() => {
+          const el = document.activeElement as HTMLElement | null;
+          if (!el || el === document.body) return null;
+          const styles = window.getComputedStyle(el);
+          const hasOutline =
+            styles.outlineStyle !== 'none' && parseFloat(styles.outlineWidth) > 0;
+          const hasShadow = styles.boxShadow !== 'none';
+          return {
+            visible: hasOutline || hasShadow,
+            label: (
+              el.getAttribute('aria-label') ||
+              el.getAttribute('title') ||
+              el.textContent ||
+              el.tagName
+            )
+              .trim()
+              .slice(0, 60),
+          };
+        });
+        if (!result) continue;
+        focusedCount++;
+        if (!result.visible) offenders.push(result.label);
+      }
+
+      // Without this, a page where Tab reached nothing would satisfy the
+      // assertion below and quietly restore the vacuous pass.
+      expect(focusedCount).toBeGreaterThan(0);
+      expect(
+        offenders,
+        'controls with no visible focus indicator: ' + offenders.join(', ')
+      ).toEqual([]);
     });
   });
 

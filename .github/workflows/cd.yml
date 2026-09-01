@@ -689,16 +689,28 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          # Renders /dev and exposes the editor stores. Must match ci.yml's
+          # test-e2e-ui build: without it this job can only run specs that never
+          # open the editor, and the deploy path would keep testing 91 of 422
+          # while ci.yml tested 385 (#9586).
+          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run UI-only E2E tests (shard ${{ matrix.shard }})
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-        # Same selection as ci.yml test-e2e-ui: @journey needs the exposed
-        # store surface (NEXT_PUBLIC_E2E_HOOKS + E2E_STRICT_STORES) this
-        # store-less build does not set, and @engine needs WASM + GPU.
-        run: npx playwright test --grep '@ui' --grep-invert '@dev|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+        # Same selection as ci.yml test-e2e-ui, and it has to STAY the same --
+        # this job and that one are the two places the @ui suite runs, and they
+        # drifting apart is how the deploy path keeps a hole the PR gate has
+        # already closed.
+        #
+        # @journey needs E2E_STRICT_STORES on top of the hooks build and has its
+        # own gate. @engine-ui marks the specs that assert on #game-canvas,
+        # which stays `invisible` until the Bevy/wgpu renderer starts -- this
+        # config launches with --disable-gpu, so they run in the engine-smoke
+        # gate instead.
+        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

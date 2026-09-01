@@ -27,7 +27,7 @@ test.describe('Error Resilience @ui @dev', () => {
         }
       });
 
-      await editor.loadPage();
+      await editor.load();
 
       // Wait for all deferred async initialisation to settle before checking errors.
       // `networkidle` fires once the page has had no network requests for 500ms,
@@ -131,7 +131,8 @@ test.describe('Error Resilience @ui @dev', () => {
       await editor.loadPage();
     });
 
-    test('rapid button clicks do not crash @engine-ui', async ({ page }) => {
+    test('rapid button clicks do not crash @engine-ui', async ({ page, editor }) => {
+      await editor.load();
       const addEntityBtn = page.getByRole('button', { name: 'Add Entity' });
       if (await addEntityBtn.isVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS })) {
         // Click rapidly 5 times
@@ -145,7 +146,8 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible();
     });
 
-    test('opening and closing settings rapidly does not crash @engine-ui', async ({ page }) => {
+    test('opening and closing settings rapidly does not crash @engine-ui', async ({ page, editor }) => {
+      await editor.load();
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
@@ -160,7 +162,8 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible();
     });
 
-    test('window resize does not crash the editor @engine-ui', async ({ page }) => {
+    test('window resize does not crash the editor @engine-ui', async ({ page, editor }) => {
+      await editor.load();
       // Resize to mobile width
       await page.setViewportSize({ width: 375, height: 667 });
       // Wait for the canvas to remain visible at the new viewport before resizing again
@@ -173,7 +176,8 @@ test.describe('Error Resilience @ui @dev', () => {
       await expect(page.locator('canvas').first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     });
 
-    test('double-clicking on canvas does not produce errors @engine-ui', async ({ page }) => {
+    test('double-clicking on canvas does not produce errors @engine-ui', async ({ page, editor }) => {
+      await editor.load();
       const errors: string[] = [];
       page.on('pageerror', (error) => {
         errors.push(error.message);
@@ -203,7 +207,7 @@ test.describe('Error Resilience @ui @dev', () => {
         await route.continue();
       });
 
-      await editor.loadPage();
+      await editor.load();
 
       // Editor should still render
       await expect(page.locator('canvas').first()).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
