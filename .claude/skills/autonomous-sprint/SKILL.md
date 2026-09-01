@@ -20,7 +20,7 @@ gh issue list --repo Tristan578/project-forge --state closed --since "$(date -v-
 
 # 3. Read context
 cat .claude/rules/gotchas.md
-cat memory/project_lessons_learned.md
+cat .claude/rules/lessons-learned.md
 ```
 
 **If live state contradicts the session log below: trust GitHub, rewrite the log.**
@@ -122,7 +122,7 @@ Move to the next item in the priority queue. Repeat the loop.
 ## Context Files
 
 - `.claude/rules/gotchas.md` — 40+ anti-patterns with real examples
-- `memory/project_lessons_learned.md` — 60+ recurring mistakes
+- `.claude/rules/lessons-learned.md` — 60+ recurring mistakes
 - `.claude/rules/agent-operations.md` — SOPs for testing, committing, PR creation
 - `.claude/rules/web-quality.md` — ESLint rules, React patterns, Next.js constraints
 

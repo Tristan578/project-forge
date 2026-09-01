@@ -42,7 +42,7 @@ LESSONS LEARNED CHECK — You have completed a significant chunk of work in this
 3. Did you find documentation that was wrong or misleading?
 4. Did you make a mistake that a lesson could prevent next time?
 
-If yes to any: add the lesson to ~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md following the existing format (### N. title, What happens, Why, Prevention, Ticket).
+If yes to any: add the lesson to .claude/rules/lessons-learned.md following the existing format (### N. title, What happens, Why, Prevention, Ticket).
 
 If nothing to log, continue with your work.
 EOF
