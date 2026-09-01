@@ -25,7 +25,8 @@ import { createRequire } from 'node:module';
  * which makes `require.cache` the only interception point. `next build` is
  * unaffected: this file is loaded by vitest and nothing else.
  *
- * Remove once upstream stops loading the bundler plugin from the runtime entry.
+ * Remove once upstream stops loading the bundler plugin from the runtime entry
+ * — tracked at #9618.
  */
 if (typeof document !== 'undefined') {
   const nodeRequire = createRequire(import.meta.url);
