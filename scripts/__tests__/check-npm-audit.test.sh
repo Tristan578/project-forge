@@ -2509,6 +2509,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 concurrency:
   group: ci-${{ github.ref }}
@@ -3702,6 +3704,8 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
           DISPATCH_SHA: ${{ github.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: bash scripts/resolve-ci-diff-range.sh

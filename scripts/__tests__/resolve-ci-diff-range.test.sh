@@ -13,10 +13,9 @@
 # over a CI run that executed no gate at all. So the bulk of this suite asserts
 # that unresolvable input EXITS NON-ZERO and writes NO outputs.
 #
-# The wiring pins at the end assert the other half of the fix: ci.yml still
-# carries the workflow_dispatch trigger and still consumes this script's
-# outputs, and the two bot-PR producers still dispatch it. Any one of those
-# reverting restores the permanently-unmergeable-PR bug with CI fully green.
+# The wiring pins at the end assert both callers: ci.yml still carries the
+# workflow_dispatch trigger for bot PRs and the push-main trigger for merged-tree
+# verification, while all events still consume this script's outputs.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,6 +81,16 @@ else
   fail "pull_request: expected base-sha=aaa111/head-sha=bbb222, got rc=$RESOLVE_RC [$RESOLVE_OUT]"
 fi
 
+# ---- push: verify the actual before..after range on main --------------------
+run_resolve EVENT_NAME=push PUSH_BEFORE_SHA="$MAIN_SHA" PUSH_HEAD_SHA="$TOPIC_SHA"
+if [ "$RESOLVE_RC" -eq 0 ] &&
+  grep -qx "base-sha=${MAIN_SHA}" <<<"$RESOLVE_OUT" &&
+  grep -qx "head-sha=${TOPIC_SHA}" <<<"$RESOLVE_OUT"; then
+  pass "push: emits the event's before and head SHAs verbatim"
+else
+  fail "push: expected base=$MAIN_SHA head=$TOPIC_SHA, got rc=$RESOLVE_RC [$RESOLVE_OUT]"
+fi
+
 # ---- workflow_dispatch: merge-base against the default branch --------------
 run_resolve EVENT_NAME=workflow_dispatch DISPATCH_SHA="$TOPIC_SHA" DEFAULT_BRANCH=main
 if [ "$RESOLVE_RC" -eq 0 ] &&
@@ -120,6 +129,12 @@ assert_hard_failure "pull_request with empty base SHA" \
   EVENT_NAME=pull_request PR_BASE_SHA= PR_HEAD_SHA=bbb222
 assert_hard_failure "pull_request with empty head SHA" \
   EVENT_NAME=pull_request PR_BASE_SHA=aaa111 PR_HEAD_SHA=
+assert_hard_failure "push with empty before SHA" \
+  EVENT_NAME=push PUSH_BEFORE_SHA= PUSH_HEAD_SHA="$TOPIC_SHA"
+assert_hard_failure "push with empty head SHA" \
+  EVENT_NAME=push PUSH_BEFORE_SHA="$MAIN_SHA" PUSH_HEAD_SHA=
+assert_hard_failure "push with all-zero before SHA" \
+  EVENT_NAME=push PUSH_BEFORE_SHA=0000000000000000000000000000000000000000 PUSH_HEAD_SHA="$TOPIC_SHA"
 assert_hard_failure "workflow_dispatch with empty github.sha" \
   EVENT_NAME=workflow_dispatch DISPATCH_SHA= DEFAULT_BRANCH=main
 assert_hard_failure "workflow_dispatch against an unknown default branch" \
@@ -127,7 +142,7 @@ assert_hard_failure "workflow_dispatch against an unknown default branch" \
 assert_hard_failure "unset event name" \
   EVENT_NAME=
 assert_hard_failure "unsupported event name" \
-  EVENT_NAME=push DISPATCH_SHA="$TOPIC_SHA" DEFAULT_BRANCH=main
+  EVENT_NAME=schedule DISPATCH_SHA="$TOPIC_SHA" DEFAULT_BRANCH=main
 
 # GITHUB_OUTPUT missing entirely — the one case run_resolve cannot express,
 # since it always sets it.
@@ -159,6 +174,10 @@ pin() {
 
 pin "ci.yml still declares the workflow_dispatch trigger (#9161/#9381)" \
   "$CI_YML" '^  workflow_dispatch:'
+pin "ci.yml runs merged-tree verification on pushes to main (#9495)" \
+  "$CI_YML" '^  push:'
+pin "ci.yml passes the push before SHA into the resolver (#9495)" \
+  "$CI_YML" 'PUSH_BEFORE_SHA: \$\{\{ github\.event\.before \}\}'
 pin "ci.yml resolves the diff range through this script" \
   "$CI_YML" 'scripts/resolve-ci-diff-range\.sh'
 pin "ci-gate consumes the resolved base SHA" \

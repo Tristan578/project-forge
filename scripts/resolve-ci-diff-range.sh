@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # resolve-ci-diff-range.sh — resolve the BASE..HEAD range that the ci-gate
-# `Detect changed paths` step diffs, for BOTH events ci.yml runs on.
+# `Detect changed paths` step diffs, for every event ci.yml runs on.
 #
-# WHY THIS EXISTS (#9161 / #9193 / #9381)
-# ---------------------------------------
+# WHY THIS EXISTS (#9161 / #9193 / #9381 / #9495)
+# -----------------------------------------------
 # ci.yml used to be `pull_request`-only and read the range straight out of
 # `github.event.pull_request.{base,head}.sha`. That stranded every bot-authored
 # PR, because GitHub's recursion guard says: "events triggered by the
@@ -26,6 +26,8 @@
 #   EVENT_NAME      github.event_name
 #   PR_BASE_SHA     github.event.pull_request.base.sha  (pull_request only)
 #   PR_HEAD_SHA     github.event.pull_request.head.sha  (pull_request only)
+#   PUSH_BEFORE_SHA github.event.before                 (push only)
+#   PUSH_HEAD_SHA   github.sha                          (push only)
 #   DISPATCH_SHA    github.sha                          (workflow_dispatch)
 #   DEFAULT_BRANCH  the repo default branch, e.g. `main`
 #   GITHUB_OUTPUT   step-output file
@@ -43,6 +45,8 @@ set -uo pipefail
 EVENT_NAME="${EVENT_NAME:-}"
 PR_BASE_SHA="${PR_BASE_SHA:-}"
 PR_HEAD_SHA="${PR_HEAD_SHA:-}"
+PUSH_BEFORE_SHA="${PUSH_BEFORE_SHA:-}"
+PUSH_HEAD_SHA="${PUSH_HEAD_SHA:-}"
 DISPATCH_SHA="${DISPATCH_SHA:-}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 GITHUB_OUTPUT="${GITHUB_OUTPUT:-}"
@@ -60,6 +64,14 @@ case "$EVENT_NAME" in
     [ -n "$PR_HEAD_SHA" ] || die "pull_request event with an empty head SHA"
     base_sha="$PR_BASE_SHA"
     head_sha="$PR_HEAD_SHA"
+    ;;
+  push)
+    [ -n "$PUSH_BEFORE_SHA" ] || die "push event with an empty before SHA"
+    [ -n "$PUSH_HEAD_SHA" ] || die "push event with an empty head SHA"
+    [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ] \
+      || die "push event has an all-zero before SHA — refusing to turn a first/forced push into an empty green run"
+    base_sha="$PUSH_BEFORE_SHA"
+    head_sha="$PUSH_HEAD_SHA"
     ;;
   workflow_dispatch)
     [ -n "$DISPATCH_SHA" ] || die "workflow_dispatch event with an empty github.sha"
@@ -82,7 +94,7 @@ case "$EVENT_NAME" in
     die "EVENT_NAME is unset"
     ;;
   *)
-    die "unsupported event '${EVENT_NAME}' — ci.yml runs on pull_request and workflow_dispatch only"
+    die "unsupported event '${EVENT_NAME}' — ci.yml runs on pull_request, push, and workflow_dispatch only"
     ;;
 esac
 
