@@ -110,12 +110,13 @@ fi
 
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
-assert_eq "all four browser-install steps use the retry helper" "4" \
-  "$(( $(grep -c 'bash ../scripts/install-playwright-ci.sh browsers' "$CI_YML") + $(grep -c 'bash ../scripts/install-playwright-ci.sh browsers' "$QG_YML") ))"
-assert_eq "all three cache-hit dependency steps use the retry helper" "3" \
-  "$(grep -c 'bash ../scripts/install-playwright-ci.sh deps' "$CI_YML")"
-assert_eq "all seven install steps have an outer 12-minute timeout" "7" \
-  "$(( $(grep -c 'timeout-minutes: 12' "$CI_YML") + $(grep -c 'timeout-minutes: 12' "$QG_YML") ))"
+CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
+assert_eq "all six browser-install steps use the retry helper" "6" \
+  "$(( $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CD_YML") ))"
+assert_eq "all four cache-hit dependency steps use the retry helper" "4" \
+  "$(( $(grep -c 'scripts/install-playwright-ci.sh deps' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$CD_YML") ))"
+assert_eq "all ten install steps have an outer 12-minute timeout" "10" \
+  "$(( $(grep -c 'timeout-minutes: 12' "$CI_YML") + $(grep -c 'timeout-minutes: 12' "$QG_YML") + $(grep -c 'timeout-minutes: 12' "$CD_YML") ))"
 
 if [ "$FAILURES" -ne 0 ]; then echo "$FAILURES test(s) failed." >&2; exit 1; fi
 echo "All install-playwright-ci tests passed."
