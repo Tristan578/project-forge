@@ -63,10 +63,30 @@ function isWithin(file: string, root: string): boolean {
 
 describe('API route server-safe imports', () => {
   const routes = collectSourceFiles(API_ROOT).filter(file => /[\\/]route\.[cm]?[jt]sx?$/.test(file));
-  const graph = walkModuleGraph(routes, SRC);
+  // `stopAtClientBoundary` records a `'use client'` module but does not follow
+  // its imports, which is the right question to ask of a SERVER graph. It is
+  // forward-looking rather than a live fix: no API route reaches such a module
+  // today (measured — both walks reach the same 210 files, 0 of them client
+  // boundaries), so it changes nothing now. It keeps a future failure report
+  // pointed at the route's own edge instead of trailing off into whatever that
+  // component happens to pull in.
+  const graph = walkModuleGraph(routes, SRC, { stopAtClientBoundary: true });
 
-  it('finds every API route entry (fails closed on a bad root)', () => {
-    expect(routes.length).toBeGreaterThan(90);
+  // The failure this guards is a wrong API_ROOT: the walk comes back EMPTY and
+  // all three assertions below pass vacuously. A count floor is the wrong shape
+  // for that. Pinned near the live count (99) it reddens on a legitimate bulk
+  // route removal, and whoever sees it red is being told a number moved, not
+  // that the guard stopped guarding; pinned low it no longer separates "found
+  // the tree" from "found one file". Assert the two structural properties
+  // instead — the root resolved, and the walk reached a real route beneath it.
+  it('resolves the API root', () => {
+    expect(routes.length, `No route.ts under ${API_ROOT} — API_ROOT is wrong.`).toBeGreaterThan(0);
+  });
+
+  it('reaches a route beneath the API root', () => {
+    // `/api/health` is the deploy smoke-test target, so it outlives any bulk
+    // route change that would move a count.
+    expect(routes.map(file => relative(API_ROOT, file))).toContain(join('health', 'route.ts'));
   });
 
   it('resolves every first-party runtime edge', () => {
