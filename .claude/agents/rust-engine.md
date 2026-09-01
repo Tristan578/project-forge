@@ -29,7 +29,7 @@ You work exclusively in `engine/src/`. You understand ECS architecture, WASM con
 
 1. Read `.claude/rules/bevy-api.md` — Bevy 0.18 migration notes, import paths, ECS limits
 2. Read `.claude/rules/entity-snapshot.md` — EntityType, EntitySnapshot, history, spawn_from_snapshot
-3. Read `~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md` — engine-specific anti-patterns
+3. Read `.claude/rules/lessons-learned.md` — engine-specific anti-patterns
 
 ## Architecture Rules — NEVER Violate
 
