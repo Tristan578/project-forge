@@ -37,7 +37,7 @@ engine/src/core/mesh_simplify.rs  # Rust unit tests (cargo test)
 ### Vitest Configuration
 - Workspace split: `web/vitest.config.node.ts` (environment: node — lib, stores, API routes) and `web/vitest.config.jsdom.ts` (environment: jsdom — components, hooks)
 - Standalone `web/vitest.config.ts` is what CI uses for coverage thresholds (workspace configs drop thresholds)
-- Coverage: `npm run test:coverage` (bounded, 600s timeout — see `scripts/run-vitest-coverage.sh`) or `npm run test:coverage:changed` (fast, changed-files only, for local/nightly iteration). Full-suite coverage-threshold enforcement is CI's job (`.github/workflows/quality-gates.yml` `test-web`).
+- Coverage: from the repository root, run `cd web && npm run test:coverage` (bounded, 600s timeout — see `scripts/run-vitest-coverage.sh`) or `cd web && npm run test:coverage:changed` (fast, changed-files only, for local/nightly iteration). The full command enforces coverage thresholds locally; CI runs the same threshold checks in `.github/workflows/quality-gates.yml` (`test-web`).
 - Run specific: `npx vitest run myTestFile`
 
 ### Playwright Configuration
@@ -298,7 +298,7 @@ Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX 
 | Hooks | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` |
 | Mocking | `vi.fn()`, `vi.spyOn()`, `vi.mock()`, `vi.resetModules()` |
 | Timers | `vi.useFakeTimers()`, `vi.advanceTimersByTime()` |
-| Coverage | V8 provider: `npm run test:coverage` (bounded) — see `scripts/run-vitest-coverage.sh` |
+| Coverage | V8 provider: `cd web && npm run test:coverage` (bounded) — see `scripts/run-vitest-coverage.sh` |
 
 ### Mock Rules (SpawnForge-specific)
 
