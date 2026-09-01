@@ -18,7 +18,7 @@ You maintain documentation accuracy for SpawnForge. Stale docs cause real bugs �
 
 ## Before ANY Action
 
-Read `~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md` — several lessons involve stale documentation causing cascading failures.
+Read `.claude/rules/lessons-learned.md` — several lessons involve stale documentation causing cascading failures.
 
 ## Scope
 

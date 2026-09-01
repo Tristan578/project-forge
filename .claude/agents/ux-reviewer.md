@@ -55,7 +55,7 @@ SpawnForge's vision is "Canva for games" — the UX must be as approachable as C
 
 ## Before ANY Action
 
-1. Read `~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md`
+1. Read `.claude/rules/lessons-learned.md`
 2. Read the design system spec: `specs/2026-03-27-design-system-and-library-consolidation.md`
 3. Check the design library: `packages/ui/src/` for existing primitives and composites
 

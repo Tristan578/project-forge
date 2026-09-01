@@ -886,6 +886,7 @@ jobs:
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
+            scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -991,6 +992,9 @@ jobs:
 
       - name: Run source-encoding gate
         run: bash scripts/check-source-encoding.sh
+
+      - name: Run agent-harness reference gate test suite
+        run: bash scripts/__tests__/claude-refs-resolve.test.sh
 
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
