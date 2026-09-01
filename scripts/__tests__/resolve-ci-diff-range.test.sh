@@ -176,6 +176,10 @@ pin "ci.yml still declares the workflow_dispatch trigger (#9161/#9381)" \
   "$CI_YML" '^  workflow_dispatch:'
 pin "ci.yml runs merged-tree verification on pushes to main (#9495)" \
   "$CI_YML" '^  push:'
+pin "ci.yml isolates concurrency groups by event type (#9495)" \
+  "$CI_YML" '^  group: ci-\$\{\{ github\.event_name \}\}-\$\{\{ github\.ref \}\}$'
+pin "ci.yml only cancels superseded pull-request runs (#9495)" \
+  "$CI_YML" '^  cancel-in-progress: \$\{\{ github\.event_name == .pull_request. \}\}$'
 pin "ci.yml passes the push before SHA into the resolver (#9495)" \
   "$CI_YML" 'PUSH_BEFORE_SHA: \$\{\{ github\.event\.before \}\}'
 pin "ci.yml resolves the diff range through this script" \
