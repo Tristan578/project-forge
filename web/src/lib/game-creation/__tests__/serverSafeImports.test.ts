@@ -1,5 +1,5 @@
 /**
- * Guards the RSC boundary that `lib/game-creation/` sits on.
+ * Guards every API route's server-only module graph.
  *
  * `app/api/game/decompose/route.ts` — a React Server Component module — imports
  * `lib/game-creation/index.ts`, which re-exports the executor barrel, which
@@ -20,52 +20,37 @@
  * `ExecutorContext.getStore()`, supplied by the (client-only) orchestrator. A
  * function value carries no module edge.
  *
- * Scope, stated honestly: this checks the subtrees listed in `GUARDED_ROOTS` —
- * those reachable from a server route today — and it is textual, so it catches
- * the direct import forms, not an alias laundered through a third module. It is
- * a tripwire for the regression that actually happened, not a proof of the whole
- * boundary. `next build` remains the authority.
- *
- * A root belongs here once a guarded module VALUE-imports it, because from that
- * moment its own imports are on the server graph too. `lib/game/` was added when
- * `sceneCreateExecutor` began importing the game-camera wire contract (PF-1126):
- * that module needs `GameCameraData` from `@/stores/slices/types`, and the whole
- * boundary now rests on that import staying `import type`.
- *
- * `lib/physics/` joined the same way (PF-1213): `physicsEnableExecutor`
- * value-imports `buildPhysicsPatch` so the `update_physics` payload is picked
- * from the allowlist that mirrors the engine's `PhysicsPatch` rather than being
- * hand-assembled from string literals. Its `@/stores/slices/types` import has to
- * stay `import type` for the same reason the two roots below do.
- *
- * `lib/playMode/` joined the same way (PF-1199): `verifyExecutor` value-imports
- * `winnabilityValidator` so the verify step asks the REAL play gate whether the
- * generated game can be won instead of restating its rules. That put the whole
- * subtree on the server graph, and its own `@/stores/slices/types` import has to
- * stay `import type` for the same reason `lib/game/` does.
+ * The old guard scanned four manually maintained lib/ subtrees for two literal
+ * specifier prefixes. An API route could import a harmless-looking lib module
+ * which imported another module which finally reached stores/, hooks/ or
+ * components/; the direct textual scan saw none of that chain. This guard starts
+ * at every real API `route.ts`, follows every first-party runtime edge,
+ * and reports the shortest chain to client-only source. `next build` remains the
+ * authority for package and bundler behaviour; this is the fast first-party
+ * graph tripwire.
  */
 
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { afterAll, describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, relative } from 'node:path';
 import {
+  chainTo,
   collectSourceFiles,
   isTypeOnlyOccurrence,
   stripComments,
+  walkModuleGraph,
 } from '@/test/utils/importScanner';
 
-/** `web/src/lib` — the base every reported path is relative to. */
-const LIB = join(__dirname, '..', '..');
+/** `web/src` — the base every reported path is relative to. */
+const SRC = join(__dirname, '..', '..', '..');
+const API_ROOT = join(SRC, 'app', 'api');
+const CLIENT_ONLY_ROOTS = ['stores', 'hooks', 'components'].map(root => join(SRC, root));
 
-const GUARDED_ROOTS = [
-  join(LIB, 'game-creation'),
-  join(LIB, 'game'),
-  join(LIB, 'playMode'),
-  join(LIB, 'physics'),
-];
-
-/** Modules that pull client-only React state into whatever imports them. */
-const CLIENT_ONLY_SPECIFIERS = ['@/stores/', '@/hooks/useEngine'];
+function isWithin(file: string, root: string): boolean {
+  const path = relative(root, file);
+  return path === '' || (!path.startsWith('..') && !isAbsolute(path));
+}
 
 /*
  * `collectSourceFiles`, `stripComments` and `isTypeOnlyOccurrence` live in
@@ -76,37 +61,34 @@ const CLIENT_ONLY_SPECIFIERS = ['@/stores/', '@/hooks/useEngine'];
  * the bottom of this file still exercise them through this import.
  */
 
-describe('game-creation server-safe imports', () => {
-  const files = GUARDED_ROOTS.flatMap(collectSourceFiles);
+describe('API route server-safe imports', () => {
+  const routes = collectSourceFiles(API_ROOT).filter(file => /[\\/]route\.[cm]?[jt]sx?$/.test(file));
+  const graph = walkModuleGraph(routes, SRC);
 
-  it('finds source files to check (fails closed on a bad root)', () => {
-    expect(files.length).toBeGreaterThan(5);
+  it('finds every API route entry (fails closed on a bad root)', () => {
+    expect(routes.length).toBeGreaterThan(90);
   });
 
-  // A root that silently stops existing would take its coverage with it while
-  // the aggregate count above stays comfortably over the threshold.
-  it.each(GUARDED_ROOTS)('walks %s', root => {
-    expect(collectSourceFiles(root).length).toBeGreaterThan(0);
+  it('resolves every first-party runtime edge', () => {
+    expect(
+      graph.unresolved.map(([file, specifier]) => `${relative(SRC, file)} -> ${specifier}`),
+      'An unresolved @/ or relative import is a hole in the module-graph walk.',
+    ).toEqual([]);
   });
 
-  it('never value-imports a client-only module', () => {
-    const violations: string[] = [];
-
-    for (const file of files) {
-      const source = readFileSync(file, 'utf8');
-      const raw = source.split('\n');
-      stripComments(source).forEach((line, i) => {
-        if (!CLIENT_ONLY_SPECIFIERS.some(spec => line.includes(spec))) return;
-        if (isTypeOnlyOccurrence(line)) return;
-        violations.push(`${relative(LIB, file)}:${i + 1}: ${raw[i]?.trim() ?? line.trim()}`);
-      });
-    }
+  it('never reaches client-only first-party source', () => {
+    const violations = [...graph.parents.keys()]
+      .filter(file => CLIENT_ONLY_ROOTS.some(root => isWithin(file, root)))
+      .filter(file => {
+        const parent = graph.parents.get(file);
+        return parent == null || !CLIENT_ONLY_ROOTS.some(root => isWithin(parent, root));
+      })
+      .map(file => chainTo(file, graph.parents).map(part => relative(SRC, part)).join(' -> '));
 
     expect(
       violations,
-      'A value import of a client-only module from a server-reachable lib/ ' +
-        'subtree breaks `next build` via /api/game/decompose. Use `import ' +
-        'type`, or take the value through ExecutorContext (e.g. `getStore()`).',
+      'An API route runtime-imports stores/, hooks/ or components/. Keep the ' +
+        'edge type-only, or inject the value from a client boundary.',
     ).toEqual([]);
   });
 });
@@ -145,6 +127,30 @@ describe('serverSafeImports helpers', () => {
 
   it.each(ERASED)('treats a compile-time-erased occurrence as safe: %s', line => {
     expect(isTypeOnlyOccurrence(line)).toBe(true);
+  });
+
+  const fixture = mkdtempSync(join(tmpdir(), 'api-route-graph-'));
+  afterAll(() => rmSync(fixture, { recursive: true, force: true }));
+
+  it('resolves aliases and follows transitive runtime edges, but erases type edges', () => {
+    const route = join(fixture, 'app', 'api', 'example', 'route.ts');
+    const middle = join(fixture, 'lib', 'middle', 'index.ts');
+    const store = join(fixture, 'stores', 'runtime.ts');
+    const component = join(fixture, 'components', 'types.ts');
+    for (const file of [route, middle, store, component]) mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(route, "export { run } from '@/lib/middle';\n");
+    writeFileSync(
+      middle,
+      "export const run = () => import('@/stores/runtime');\n" +
+        "export type View = import('@/components/types').View;\n",
+    );
+    writeFileSync(store, 'export const state = {};\n');
+    writeFileSync(component, 'export interface View {}\n');
+
+    const walked = walkModuleGraph([route], fixture);
+    expect([...walked.parents.keys()]).toContain(store);
+    expect([...walked.parents.keys()]).not.toContain(component);
+    expect(walked.unresolved).toEqual([]);
   });
 
   it('does not let an inline block comment hide the code after it', () => {
