@@ -102,7 +102,7 @@ All hooks in `.claude/hooks/` must:
 | Broken script paths in skills | Agent hits `not found`, wastes time | Run `dx-audit.sh` after any rename |
 | Missing `CLAUDE.md` entry for new skill | New agent sessions don't know it exists | Add to Skills section after every skill creation |
 | IDE config drift | Agents on different IDEs use different patterns | Sync all 4 configs after every skill change |
-| Undocumented gotchas | Same mistake repeated by every agent | Add to `memory/project_lessons_learned.md` immediately |
+| Undocumented gotchas | Same mistake repeated by every agent | Add to `.claude/rules/lessons-learned.md` immediately |
 | Ticket without user story or AC | Agent doesn't know what "done" looks like | Enforce template at ticket creation |
 
 ## When to Run Which Audit

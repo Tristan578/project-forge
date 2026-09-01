@@ -36,9 +36,56 @@ if [ -z "$TARGET" ]; then
   exit 0
 fi
 
-LESSONS="$HOME/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md"
+# RESOLUTION IS REPO-RELATIVE AND CONTAINS NO USERNAME.
+#
+# This line used to read
+#   $HOME/.claude/projects/-Users-tristannolan-project-forge/memory/...
+# which embedded one machine's username and a macOS-style project slug. On every
+# other machine it resolved to nothing, the `exit 0` below was taken, and this
+# hook -- the enforcement mechanism eight subagents are told to rely on --
+# injected NOTHING, silently, for entire sessions (#9605).
+#
+# Order: an explicit override (tests), then the repo copy. The legacy user-level
+# location is still honoured for machines that have it, but matched by GLOB so
+# no username is baked in ever again.
+resolve_lessons() {
+  if [ -n "${LESSONS_FILE:-}" ]; then
+    printf '%s' "$LESSONS_FILE"
+    return
+  fi
+  # Derived from this script's own location -- NO subprocess. `git rev-parse`
+  # would work, but it forks on every Edit/Write/mutating-Bash call, and this
+  # hook runs under a 5s timeout that it has already blown once in its history
+  # (the per-line grep loop, 540 kills in a 120-session window). On Windows a
+  # single fork is ~200ms of that budget. The hook lives at
+  # <repo>/.claude/hooks/, so the repo copy is two directories up.
+  local self_dir
+  self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  if [ -n "$self_dir" ] && [ -f "$self_dir/../rules/lessons-learned.md" ]; then
+    printf '%s' "$self_dir/../rules/lessons-learned.md"
+    return
+  fi
+  local legacy
+  for legacy in "$HOME"/.claude/projects/*/memory/project_lessons_learned.md; do
+    if [ -f "$legacy" ]; then
+      printf '%s' "$legacy"
+      return
+    fi
+  done
+  printf ''
+}
 
-if [ ! -f "$LESSONS" ]; then
+LESSONS="$(resolve_lessons)"
+
+# LOUD, NOT SILENT. The awk-abort path below already refuses to pass unnoticed,
+# on the grounds that "an unwarned edit is exactly what this hook exists to
+# stop". A missing lessons file has the identical consequence and had the
+# opposite handling: a bare `exit 0`. That asymmetry is how enforcement stayed
+# dead through a whole session while the hook's own test reported success.
+if [ -z "$LESSONS" ] || [ ! -f "$LESSONS" ]; then
+  echo "LESSONS HOOK DISABLED — no lessons file found, so anti-pattern warnings were NOT injected for this operation."
+  echo "Expected at: <repo>/.claude/rules/lessons-learned.md (override with \$LESSONS_FILE)."
+  echo "Restore it before relying on this hook; it fails open by design and will not block you."
   exit 0
 fi
 
