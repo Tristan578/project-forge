@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { SWAGGER_UI_SCRIPT_URL, SWAGGER_UI_STYLE_URL } from '@/lib/security/swagger-assets';
 
 declare global {
   interface Window {
@@ -21,7 +22,7 @@ declare global {
  * /api-docs — Swagger UI rendered from /api/openapi.
  *
  * Loads Swagger UI from the jsDelivr CDN (no npm dependency required).
- * CDN: https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/
+ * The exact CDN version is shared with the route-scoped CSP in `csp.ts`.
  */
 export default function ApiDocsPage() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -32,12 +33,12 @@ export default function ApiDocsPage() {
     // Inject Swagger UI stylesheet
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css';
+    link.href = SWAGGER_UI_STYLE_URL;
     document.head.appendChild(link);
 
     // Inject Swagger UI bundle script
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js';
+    script.src = SWAGGER_UI_SCRIPT_URL;
     script.onload = () => {
       if (!containerRef.current) return;
       if (typeof window.SwaggerUIBundle !== 'function') return;
