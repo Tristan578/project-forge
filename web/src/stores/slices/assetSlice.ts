@@ -9,10 +9,10 @@ import type { AssetMetadata } from './types';
 export interface AssetSlice {
   assetRegistry: Record<string, AssetMetadata>;
 
-  importGltf: (dataBase64: string, name: string, targetEntityId?: string) => void;
+  importGltf: (dataBase64: string, name: string, targetEntityId?: string, assetId?: string) => void;
   loadTexture: (dataBase64: string, name: string, entityId: string, slot: string) => void;
   removeTexture: (entityId: string, slot: string) => void;
-  importAudio: (dataBase64: string, name: string) => void;
+  importAudio: (dataBase64: string, name: string, assetId?: string) => void;
   placeAsset: (assetId: string) => void;
   deleteAsset: (assetId: string) => void;
   setAssetRegistry: (assets: Record<string, AssetMetadata>) => void;
@@ -29,7 +29,7 @@ export function setAssetDispatcher(dispatcher: (command: string, payload: unknow
 export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (set, get) => ({
   assetRegistry: {},
 
-  importGltf: (dataBase64, name, targetEntityId) => {
+  importGltf: (dataBase64, name, targetEntityId, assetId) => {
     // Conditional spread: when no target is supplied (or it's an empty string),
     // the payload is byte-identical to the original { dataBase64, name } so existing
     // callers and tests are unaffected. When present, the engine replaces that
@@ -39,6 +39,7 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
         dataBase64,
         name,
         ...(targetEntityId ? { targetEntityId } : {}),
+        ...(assetId ? { id: assetId } : {}),
       });
     }
   },
@@ -48,7 +49,7 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
   removeTexture: (entityId, slot) => {
     if (dispatchCommand) dispatchCommand('remove_texture', { entityId, slot });
   },
-  importAudio: (dataBase64, name) => {
+  importAudio: (dataBase64, name, assetId) => {
     // The engine receives `dataBase64` to validate the payload and record its
     // decoded size, while playback remains JS-side. Hold the bytes until
     // `ASSET_IMPORTED` names the asset id the engine minted, then
@@ -61,7 +62,7 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
     if (!dispatchCommand) return;
     const bytes = decodeBase64ToArrayBuffer(dataBase64);
     if (bytes) queueAudioImport(name, bytes);
-    dispatchCommand('import_audio', { dataBase64, name });
+    dispatchCommand('import_audio', { dataBase64, name, ...(assetId ? { id: assetId } : {}) });
   },
   placeAsset: (assetId) => {
     if (dispatchCommand) dispatchCommand('place_asset', { assetId });
