@@ -173,6 +173,17 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     expect(mockPublish).not.toHaveBeenCalled();
   });
 
+  it('uses one request-time QStash snapshot for the response and publish decision', async () => {
+    const handler = makeAsyncHandler();
+    mockConfigured.mockReturnValue(false);
+
+    const res = await handler(makeRequest({ prompt: 'a castle' }));
+
+    await expect(res.json()).resolves.not.toHaveProperty('durable');
+    expect(afterCallbacks).toHaveLength(0);
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+
   it('does not publish when the extractor returns null (synchronous result)', async () => {
     const handler = makeAsyncHandler({ provider: 'dalle3', providerJobId: (r) => (r.provider === 'sdxl' ? r.jobId : null) });
     const res = await handler(makeRequest({ prompt: 'a hero' }));
