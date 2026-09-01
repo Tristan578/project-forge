@@ -99,13 +99,12 @@ pub struct SetSortingLayersRequest {
 
 #[derive(Debug, Clone)]
 pub struct SetTilesetRequest {
-    pub entity_id: String,
     pub tileset_data: crate::core::tileset::TilesetData,
 }
 
 #[derive(Debug, Clone)]
 pub struct RemoveTilesetRequest {
-    pub entity_id: String,
+    pub asset_id: String,
 }
 
 // === Tilemap Request Structs ===
