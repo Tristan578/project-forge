@@ -498,9 +498,33 @@ jobs:
             mkdir -p "web/public/$variant"
           done
 
+      # The only Playwright job in the repo that downloaded browsers on every
+      # run -- ci.yml's five all carry this block, this one did not. Same cache
+      # path and same key as those, so a hit here reuses what they already
+      # populated instead of warming a second, parallel entry.
+      #
+      # Key on the REAL root lockfile: this is a single-root-lockfile monorepo,
+      # so hashFiles('web/package-lock.json') returns '' and yields a constant
+      # key that never invalidates -- the stale-browser failure from #8589.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: web
         run: npx playwright install --with-deps chromium
+
+      # The cache carries browser binaries, not the apt-level libraries they
+      # link against, and those do not survive a fresh runner -- so a cache hit
+      # still needs install-deps. Same split as the five jobs in ci.yml.
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
 
       - name: Run editor boot smoke test
         working-directory: web

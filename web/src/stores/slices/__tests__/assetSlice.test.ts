@@ -45,6 +45,19 @@ describe('assetSlice', () => {
         name: 'model.glb',
       });
     });
+
+    it('forwards an optional stable asset id', () => {
+      store.getState().importGltf(
+        'data:base64...',
+        'model.glb',
+        undefined,
+        '4ec30cf9-d98f-4e67-86d9-470a6cdbbe09',
+      );
+
+      expect(mockDispatch).toHaveBeenCalledWith('import_gltf', expect.objectContaining({
+        id: '4ec30cf9-d98f-4e67-86d9-470a6cdbbe09',
+      }));
+    });
   });
 
   describe('loadTexture', () => {
@@ -86,10 +99,21 @@ describe('assetSlice', () => {
       });
     });
 
+    it('forwards an optional stable asset id', () => {
+      store.getState().importAudio(
+        REAL_BASE64,
+        'sound.mp3',
+        '7ace805c-ff9f-4a4d-89e8-4d3ea890fa4e',
+      );
+
+      expect(mockDispatch).toHaveBeenCalledWith('import_audio', expect.objectContaining({
+        id: '7ace805c-ff9f-4a4d-89e8-4d3ea890fa4e',
+      }));
+    });
+
     it('holds the decoded bytes under the import name', () => {
-      // The engine drops `dataBase64` and mints its own asset id, so these bytes
-      // are the only copy the Web Audio graph will ever see and `name` is the
-      // only thing correlating them with the ASSET_IMPORTED that follows.
+      // Legacy callers omit an id, so the engine still mints one and `name`
+      // remains the correlation key for the ASSET_IMPORTED that follows.
       store.getState().importAudio(REAL_BASE64, 'jump.wav');
 
       expect(vi.mocked(queueAudioImport)).toHaveBeenCalledTimes(1);

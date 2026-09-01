@@ -39,7 +39,7 @@ Output a triage summary table:
 Dispatch a code-review agent (use `/pr-code-review <N>`) that:
 - Reads the FULL diff and every changed file in context
 - Checks for: logic errors, security, API contracts, performance, conventions
-- Cross-references against `project_lessons_learned.md` (45+ anti-patterns)
+- Cross-references against `.claude/rules/lessons-learned.md` (45+ anti-patterns)
 - Verifies findings against actual code before reporting
 - Posts findings as a GitHub PR comment (not APPROVE/REQUEST_CHANGES)
 

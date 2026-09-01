@@ -119,6 +119,32 @@ describe('SettingsPanel', () => {
     expect(mockOnClose).toHaveBeenCalled();
   });
 
+  it('closes on Escape even when a descendant stops propagation', () => {
+    // The test above fires on `document` itself, so it passes whether the
+    // listener is registered in the capture or the bubble phase — it cannot
+    // see the difference, and so cannot hold the fix in place.
+    //
+    // The difference is not academic. The editor canvas registers its own key
+    // handling and is focusable only while the engine is running
+    // (`tabIndex={isReady ? 0 : -1}` in CanvasArea), so a bubble-phase document
+    // listener could be cut off before it ever ran. That is why this dialog
+    // closed reliably in the engine-less UI job and intermittently refused to
+    // close in the engine smoke gate (#9586).
+    //
+    // A modal's Escape must not be defeatable by anything it renders over.
+    // Firing from a descendant that stops propagation asserts exactly that:
+    // it fails in the bubble phase and passes in the capture phase.
+    render(<SettingsPanel onClose={mockOnClose} />);
+    const dialog = screen.getByRole('dialog');
+    const swallower = document.createElement('div');
+    swallower.addEventListener('keydown', (e) => e.stopPropagation());
+    dialog.appendChild(swallower);
+
+    fireEvent.keyDown(swallower, { key: 'Escape' });
+
+    expect(mockOnClose).toHaveBeenCalled();
+  });
+
   it('switches to next tab on ArrowRight key', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
     const tablist = screen.getByRole('tablist');
