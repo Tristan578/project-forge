@@ -32,7 +32,8 @@ test.describe('Keyboard Shortcuts @ui @dev', () => {
     await expect(chatOverlay).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 
-  test('W key activates Translate gizmo', async ({ page }) => {
+  test('W key activates Translate gizmo @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     // Click on canvas to ensure editor has focus
     const canvas = page.locator('canvas').first();
     await canvas.click();
@@ -54,7 +55,8 @@ test.describe('Keyboard Shortcuts @ui @dev', () => {
     }
   });
 
-  test('E key activates Rotate gizmo', async ({ page }) => {
+  test('E key activates Rotate gizmo @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     const canvas = page.locator('canvas').first();
     await canvas.click();
 
@@ -64,7 +66,8 @@ test.describe('Keyboard Shortcuts @ui @dev', () => {
     expect(await rotateBtn.count()).toBeGreaterThan(0);
   });
 
-  test('R key activates Scale gizmo', async ({ page }) => {
+  test('R key activates Scale gizmo @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     const canvas = page.locator('canvas').first();
     await canvas.click();
 
@@ -122,7 +125,8 @@ test.describe('Keyboard Shortcuts @ui @dev', () => {
     expect(storeExists).toBe(true);
   });
 
-  test('Delete key does not crash with no selection', async ({ page }) => {
+  test('Delete key does not crash with no selection @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     const canvas = page.locator('canvas').first();
     await canvas.click();
 
@@ -173,7 +177,8 @@ test.describe('Keyboard Shortcuts @ui @dev', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('F2 key does not crash without entity selected', async ({ page }) => {
+  test('F2 key does not crash without entity selected @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     const canvas = page.locator('canvas').first();
     await canvas.click();
 
@@ -183,7 +188,8 @@ test.describe('Keyboard Shortcuts @ui @dev', () => {
     await expect(canvas).toBeVisible();
   });
 
-  test('multiple rapid shortcut presses do not corrupt state', async ({ page }) => {
+  test('multiple rapid shortcut presses do not corrupt state @engine-ui', async ({ page, editor }) => {
+    await editor.load();
     const canvas = page.locator('canvas').first();
     await canvas.click();
 

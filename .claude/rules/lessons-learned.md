@@ -167,3 +167,36 @@ uncertainty to the reviewer without their consent.
 say what is unverified. If you predicted a failure mode, do not describe the
 work as ready until that prediction is tested.
 **Ticket:** #9604
+
+### 11. An assertion that cannot fail is worse than no test at all
+**Applies:** expect(|toBeDefined|assert|.spec.ts|.test.ts|a11y|accessibility
+**What happens:** A named check sits in the suite, runs on every PR, reports
+green, and is incapable of reporting anything else. It is counted as coverage by
+everyone reading the board.
+**Why:** Two independent ways to write one, both found in a single accessibility
+test:
+- **The assertion is trivially true.** `expect(hasFocusStyle).toBeDefined()`
+  where `hasFocusStyle` is a locally computed boolean. `false` is defined, so the
+  check passes no matter what the page rendered.
+- **The predicate is trivially true.** `styles.outline !== 'none'` looks like a
+  real comparison, but computed `outline` is a triple such as
+  `"rgb(0, 0, 0) none 0px"` — never the bare string `none` — so the clause is
+  always true regardless of the element.
+
+Rewriting that one test to assert what it claimed immediately found a real
+WCAG 2.4.7 defect: Dockview ships `.dv-tab { outline: none }` at the same
+specificity as the app's global `:focus-visible` rule and loads after it, so
+every editor panel tab was keyboard-reachable with no visible focus indicator.
+The vacuous test had been reporting that as fine.
+**Prevention:** Before trusting a green test, ask what value would make it fail
+and confirm that value is reachable. Assert on *content*, not existence. When a
+check walks a collection, assert the walk was non-empty — otherwise zero items
+inspected reads as zero problems found. Deliberate reporting-only checks are
+fine, but say so at the call site so the next reader does not count them as
+gates.
+**Also:** measure with the right modality. A first probe using `el.focus()`
+reported missing focus rings on controls that were fine, because Chromium does
+not apply `:focus-visible` to programmatic focus following a pointer event.
+Driving real `Tab` presses is what made the result trustworthy — a wrong
+measurement would have sent a fix at healthy code.
+**Ticket:** #9604
