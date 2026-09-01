@@ -103,8 +103,19 @@ copy_group '*.json' 'application/json' || exit 1
 # destination that merely has SOME objects in it would hide that. Comparing
 # counts turns "a new file type appeared" into a failed deploy instead of an
 # engine that is missing one of its parts.
+#
+# The source is counted through the SAME exclusion upload-wasm-to-r2.sh applies
+# (`--exclude "*.d.ts"`, lines 39 and 59). That uploader stopped writing type
+# declarations, but `aws s3 sync` never deletes, so the ones written before the
+# exclusion existed are still sitting in latest/ -- 8 of them, still serving 200.
+# Counting those made parity unsatisfiable and failed every deploy (#9599).
+#
+# Only the uploader's own exclusions are filtered, deliberately. Subtracting
+# "whatever did not get copied" would make this assertion vacuous, which is the
+# entire protection: a NEW extension the uploader does write, and no group
+# covers, must still fail here.
 src_count="$(printf '%s
-' "$listing" | grep -c . || true)"
+' "$listing" | grep -c -v -e '^$' -e '\.d\.ts$' || true)"
 dest_listing="$("$AWS" s3 ls "${DEST}" --recursive 2>/dev/null)"
 dest_count="$(printf '%s
 ' "$dest_listing" | grep -c . || true)"
