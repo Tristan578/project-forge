@@ -336,6 +336,25 @@ describe('healthChecks', () => {
       expect((await checkEngineCdn()).status).toBe('healthy');
     });
 
+    // A prefix match would accept these. They are not JavaScript or wasm media
+    // types, and a browser refuses them exactly as it refuses an empty one, so
+    // the gate must not read them as healthy.
+    it('rejects a near-miss type that only shares a prefix', async () => {
+      stubFetch({ [JS]: [200, 'text/javascript2'], [WASM]: [200, 'application/wasm'] });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkEngineCdn();
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('text/javascript2');
+    });
+
+    it('rejects a near-miss wasm type that only shares a prefix', async () => {
+      stubFetch({ [JS]: [200, 'text/javascript'], [WASM]: [200, 'application/wasm2'] });
+      const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkEngineCdn();
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('application/wasm2');
+    });
+
     it('returns down when the CDN returns 500', async () => {
       stubFetch({ [JS]: [503, 'text/javascript'], [WASM]: [200, 'application/wasm'] });
       const { checkEngineCdn } = await import('@/lib/monitoring/healthChecks');

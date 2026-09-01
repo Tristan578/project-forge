@@ -83,7 +83,12 @@ fi
 # the local extension there; a server-side copy has no local file to guess from).
 copy_group() {
   local pattern="$1" ctype="$2"
-  if ! "$AWS" s3 cp "${SRC}" "${DEST}"         --recursive         --exclude "*" --include "${pattern}"         --metadata-directive REPLACE         --cache-control "${IMMUTABLE_CACHE_CONTROL}"         --content-type "${ctype}"; then
+  if ! "$AWS" s3 cp "${SRC}" "${DEST}" \
+        --recursive \
+        --exclude "*" --include "${pattern}" \
+        --metadata-directive REPLACE \
+        --cache-control "${IMMUTABLE_CACHE_CONTROL}" \
+        --content-type "${ctype}"; then
     echo "::error::alias-wasm-cdn-version: copying ${pattern} from ${SRC} to ${DEST} failed" >&2
     return 1
   fi

@@ -266,13 +266,16 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
   const probes: { url: string; accept: (t: string) => boolean; want: string }[] = [
     {
       url: `${base}/forge_engine.js`,
-      // The MIME types browsers accept for module scripts.
-      accept: (t) => /^(text|application)\/(javascript|ecmascript)/.test(t),
+      // Anchored at both ends: the type must END there or continue with a
+      // parameter. A bare prefix match would accept 'text/javascript2',
+      // which is not a JavaScript media type and which the browser would
+      // refuse exactly as it refuses an empty one.
+      accept: (t) => /^(text|application)\/(javascript|ecmascript)[ \t]*(;|$)/.test(t),
       want: 'a JavaScript MIME type',
     },
     {
       url: `${base}/forge_engine_bg.wasm`,
-      accept: (t) => /^application\/wasm/.test(t),
+      accept: (t) => /^application\/wasm[ \t]*(;|$)/.test(t),
       want: 'application/wasm',
     },
   ];
