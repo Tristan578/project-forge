@@ -30,7 +30,11 @@ test.describe('Settings Panel @ui @dev', () => {
   });
 
   test('tab list has correct ARIA role', async ({ page }) => {
-    const tabList = page.locator('[role="tablist"]');
+    // Scoped by accessible name. A bare [role="tablist"] now matches FOUR
+    // elements -- the settings tabs plus three dockview panel tablists -- and
+    // fails Playwright strict mode. This assertion is about the SETTINGS tab
+    // list (SettingsPanel.tsx: aria-label="Settings tabs"), so it says so.
+    const tabList = page.getByRole('tablist', { name: 'Settings tabs' });
     await expect(tabList).toBeVisible();
   });
 
@@ -320,7 +324,11 @@ test.describe('Settings Panel @ui @dev', () => {
     await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Should still have correct structure
-    const tabList = page.locator('[role="tablist"]');
+    // Scoped by accessible name. A bare [role="tablist"] now matches FOUR
+    // elements -- the settings tabs plus three dockview panel tablists -- and
+    // fails Playwright strict mode. This assertion is about the SETTINGS tab
+    // list (SettingsPanel.tsx: aria-label="Settings tabs"), so it says so.
+    const tabList = page.getByRole('tablist', { name: 'Settings tabs' });
     await expect(tabList).toBeVisible();
   });
 });

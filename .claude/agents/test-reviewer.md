@@ -30,7 +30,7 @@ the gap as a finding instead.
 
 ## Before ANY Action
 
-Read `~/.claude/projects/-Users-tristannolan-project-forge/memory/project_lessons_learned.md` — it
+Read `.claude/rules/lessons-learned.md` — it
 lists the test anti-patterns that have produced flaky tests and false passes in this codebase.
 
 ## What you review

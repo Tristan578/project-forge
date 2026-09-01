@@ -358,6 +358,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<SkyboxHandles>()
             .init_resource::<core::project_type::ProjectType>()
             .init_resource::<core::tilemap::Grid2dConfig>()
+            .init_resource::<core::tileset::TilesetRegistry>()
             .init_resource::<core::lod::PerformanceMetrics>()
             .init_resource::<core::lod::SimplificationBackend>()
             .init_resource::<core::custom_wgsl::CustomShaderRegistry>()
@@ -540,7 +541,7 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, sprite::apply_tilemap_data_updates)
             .add_systems(Update, sprite::apply_tilemap_data_removals)
             .add_systems(Update, sprite::sync_tilemap_rendering)
-            // Tileset CRUD (always-active): set/remove TilesetData on entities
+            // Tileset CRUD (always-active): set/remove asset-keyed atlas metadata
             .add_systems(Update, sprite::apply_set_tileset_requests)
             .add_systems(Update, sprite::apply_remove_tileset_requests)
             // Sorting layers (always-active): update SortingLayerConfig resource

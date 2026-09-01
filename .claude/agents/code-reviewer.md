@@ -81,7 +81,7 @@ INFO:
 ## Lessons Learned (check every PR against these)
 
 The full list of 22 recurring agent mistakes and the 26-item quality checklist:
-@../../memory/project_lessons_learned.md
+@../rules/lessons-learned.md
 
 ## Anti-Patterns to Always Flag
 

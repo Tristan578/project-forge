@@ -58,6 +58,7 @@ use crate::core::{
     sprite::SpriteData,
     terrain::{TerrainData, TerrainMeshData},
     tilemap::{TilemapData, TilemapEnabled},
+    tileset::TilesetRegistry,
 };
 
 #[cfg(not(feature = "runtime"))]
@@ -334,8 +335,10 @@ pub(super) fn apply_scene_load(
     mut bus_config: ResMut<AudioBusConfig>,
     mut custom_wgsl_source: ResMut<CustomWgslSource>,
     existing_entities: Query<Entity, (With<EntityId>, Without<entity_factory::Undeletable>)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    // Bundled into one tuple parameter: Bevy caps a system at 16 parameters and
+    // this system is at the cap, so `tilesets` below could not be added flat.
+    (mut meshes, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>),
+    mut tilesets: ResMut<TilesetRegistry>,
     mut selection: ResMut<Selection>,
     mut selection_events: MessageWriter<SelectionChangedEvent>,
 ) {
@@ -410,6 +413,11 @@ pub(super) fn apply_scene_load(
 
     // 6b. Load asset registry
     *asset_registry = AssetRegistry { assets: scene_file.assets };
+
+    // 6c. Drop the outgoing scene's tilesets. They are keyed by asset id and are
+    // not part of the scene file, so a survivor would silently supply the WRONG
+    // grid/spacing to a same-named tileset in the scene being loaded.
+    *tilesets = TilesetRegistry::default();
 
     // 7. Spawn entities from snapshots
     // Sort by hierarchy: roots first (no parent_id), then children
@@ -508,6 +516,7 @@ pub(super) fn apply_new_scene(
     mut asset_registry: ResMut<AssetRegistry>,
     mut post_processing_settings: ResMut<PostProcessingSettings>,
     mut bus_config: ResMut<AudioBusConfig>,
+    mut tilesets: ResMut<TilesetRegistry>,
     existing_entities: Query<Entity, (With<EntityId>, Without<entity_factory::Undeletable>)>,
     mut selection: ResMut<Selection>,
     mut selection_events: MessageWriter<SelectionChangedEvent>,
@@ -541,6 +550,7 @@ pub(super) fn apply_new_scene(
     *asset_registry = AssetRegistry::default();
     *post_processing_settings = PostProcessingSettings::default();
     *bus_config = AudioBusConfig::default();
+    *tilesets = TilesetRegistry::default();
     scene_name.0 = "Untitled".to_string();
 
     // 5. Emit events
@@ -599,7 +609,9 @@ pub(super) fn apply_gltf_import(
             continue;
         }
 
-        let asset_id = uuid::Uuid::new_v4().to_string();
+        let asset_id = crate::core::asset_manager::resolve_import_asset_id(
+            request.asset_id.as_deref(),
+        );
         let file_size = request.data_base64.len() as u64;
 
         // Parse data URL prefix if present: "data:model/gltf-binary;base64,AAAA..."
@@ -1009,7 +1021,9 @@ pub(super) fn apply_audio_import(
             tracing::error!("Audio import rejected: invalid base64 payload");
             continue;
         };
-        let asset_id = uuid::Uuid::new_v4().to_string();
+        let asset_id = crate::core::asset_manager::resolve_import_asset_id(
+            request.asset_id.as_deref(),
+        );
 
         asset_registry.assets.insert(
             asset_id.clone(),

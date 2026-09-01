@@ -300,6 +300,117 @@ describe('workspaceStore', () => {
       expect(mockPanel.api.setActive).toHaveBeenCalled();
     });
 
+    it('places Auto-Iteration within Inspector when Inspector is present (#8933)', () => {
+      const inspector = { id: 'inspector', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'inspector' ? inspector : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('auto-iteration');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'auto-iteration',
+        position: { direction: 'within', referencePanel: inspector },
+      }));
+    });
+
+    it('places Auto-Iteration within an existing right-dock panel when Inspector is absent (#8933)', () => {
+      const rightDockPanel = { id: 'scene-settings', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'scene-settings' ? rightDockPanel : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('auto-iteration');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'auto-iteration',
+        position: { direction: 'within', referencePanel: rightDockPanel },
+      }));
+    });
+
+    it('skips missing null peers when finding an existing right-dock panel (#8933)', () => {
+      const rightDockPanel = { id: 'ui-builder', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'ui-builder' ? rightDockPanel : null),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('auto-iteration');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'auto-iteration',
+        position: { direction: 'within', referencePanel: rightDockPanel },
+      }));
+    });
+
+    it('opens Auto-Iteration without a relative position in an empty workspace (#8933)', () => {
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn(() => undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('auto-iteration');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith({
+        id: 'auto-iteration',
+        component: 'auto-iteration',
+        title: 'Auto-Iteration',
+      });
+    });
+
+    it('places a non-Auto-Iteration right-side panel within an open sibling when Inspector is absent (#8933)', () => {
+      // The fallback is not specific to Auto-Iteration: every id in the
+      // right-dock list used to fall through to the Viewport arm without an
+      // Inspector, so fixing one of the five would have left the other four
+      // reproducing the same report under a different panel name.
+      const sibling = { id: 'auto-iteration', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'auto-iteration' ? sibling : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('scene-settings');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'scene-settings',
+        position: { direction: 'within', referencePanel: sibling },
+      }));
+    });
+
+    it('does not dock a right-side panel into the Viewport group when the right dock is empty (#8933)', () => {
+      // A viewport IS present here — that is the whole point. The old arm
+      // ordering reached `else if (viewport)` and placed the panel inside the
+      // 3D viewport tab group; asserting the absence of that position is what
+      // separates the fix from a test that merely re-states the happy path.
+      const viewport = { id: 'scene-viewport', api: { setActive: vi.fn() } };
+      const mockApi = {
+        ...createMockApi(),
+        getPanel: vi.fn((id: string) => id === 'scene-viewport' ? viewport : undefined),
+        addPanel: vi.fn(),
+      } as unknown as DockviewApi;
+      useWorkspaceStore.setState({ api: mockApi });
+
+      useWorkspaceStore.getState().openPanel('scene-settings');
+
+      expect(mockApi.addPanel).toHaveBeenCalledWith({
+        id: 'scene-settings',
+        component: 'scene-settings',
+        title: 'Scene Settings',
+      });
+    });
+
     it('should get open panel IDs', () => {
       const mockApi = {
         ...createMockApi(),
