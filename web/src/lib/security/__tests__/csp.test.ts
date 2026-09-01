@@ -11,6 +11,10 @@ import {
   isDevEvalAllowed,
   isPlayPath,
   PLAY_ROUTE_SOURCE,
+  POSTHOG_ORIGIN,
+  SWAGGER_UI_CDN_ORIGIN,
+  SWAGGER_UI_SCRIPT_URL,
+  SWAGGER_UI_STYLE_URL,
   playCspOptionsFromEnv,
 } from '../csp';
 
@@ -79,6 +83,12 @@ describe('buildContentSecurityPolicy (#8612, #8634)', () => {
       expect(csp).not.toContain('undefined');
       // No trailing/double spaces from an empty CDN directive.
       expect(csp).not.toMatch(/\s{2,}/);
+    });
+
+    it('allows the configured PostHog origin for scripts and network calls (#9047)', () => {
+      const csp = buildContentSecurityPolicy({ allowUnsafeEval: false });
+      expect(directive(csp, 'script-src')).toContain(POSTHOG_ORIGIN);
+      expect(directive(csp, 'connect-src')).toContain(POSTHOG_ORIGIN);
     });
 
     it('derives the deployment Clerk host for every Clerk network directive (#9058)', () => {
@@ -377,6 +387,35 @@ describe('buildCspRouteRules — ordering contract (#8612, #8634)', () => {
       for (const name of ['script-src', 'connect-src', 'frame-src']) {
         expect(directive(csp as string, name)).toContain(`https://${host}`);
       }
+    }
+  });
+
+  it('allows pinned Swagger assets only on /api-docs (#9047)', () => {
+    const rules = buildCspRouteRules({ devUnsafeEval: false });
+    const apiDocs = effectiveCspForPath(rules, '/api-docs');
+    const community = effectiveCspForPath(rules, '/community/game');
+
+    expect(apiDocs).toBeDefined();
+    expect(directive(apiDocs as string, 'script-src')).toContain(SWAGGER_UI_CDN_ORIGIN);
+    expect(directive(apiDocs as string, 'style-src')).toContain(SWAGGER_UI_CDN_ORIGIN);
+    expect(community).toBeDefined();
+    expect(community).not.toContain(SWAGGER_UI_CDN_ORIGIN);
+
+    expect(SWAGGER_UI_SCRIPT_URL).toBe(
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.14/swagger-ui-bundle.js',
+    );
+    expect(SWAGGER_UI_STYLE_URL).toBe(
+      'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.14/swagger-ui.css',
+    );
+  });
+
+  it('keeps PostHog available in global, eval-free, and /play policies (#9047)', () => {
+    const rules = buildCspRouteRules({ devUnsafeEval: false });
+    for (const path of ['/editor/project', '/community/game', '/play/user/game']) {
+      const csp = effectiveCspForPath(rules, path);
+      expect(csp).toBeDefined();
+      expect(directive(csp as string, 'script-src')).toContain(POSTHOG_ORIGIN);
+      expect(directive(csp as string, 'connect-src')).toContain(POSTHOG_ORIGIN);
     }
   });
 });

@@ -1,3 +1,11 @@
+import { SWAGGER_UI_CDN_ORIGIN } from './swagger-assets';
+export {
+  SWAGGER_UI_CDN_ORIGIN,
+  SWAGGER_UI_SCRIPT_URL,
+  SWAGGER_UI_STYLE_URL,
+  SWAGGER_UI_VERSION,
+} from './swagger-assets';
+
 /**
  * Content-Security-Policy construction for the SpawnForge web app.
  *
@@ -89,7 +97,11 @@ export interface CspOptions {
   engineCdn?: string;
   /** Clerk publishable key, used to derive the deployment's exact Clerk host. */
   clerkPublishableKey?: string;
+  /** Admit the pinned Swagger UI CDN assets. Only `/api-docs` may set this. */
+  allowSwaggerUiCdn?: boolean;
 }
+
+export const POSTHOG_ORIGIN = 'https://us.i.posthog.com';
 
 const FALLBACK_CLERK_ORIGINS =
   'https://*.clerk.accounts.dev https://*.accounts.dev ' +
@@ -106,9 +118,11 @@ export function buildContentSecurityPolicy({
   allowUnsafeEval,
   engineCdn = '',
   clerkPublishableKey,
+  allowSwaggerUiCdn = false,
 }: CspOptions): string {
   const cdnDirective = engineCdn ? ` ${engineCdn}` : '';
   const evalToken = allowUnsafeEval ? " 'unsafe-eval'" : '';
+  const swaggerCdn = allowSwaggerUiCdn ? ` ${SWAGGER_UI_CDN_ORIGIN}` : '';
   const clerkHost = clerkFrontendApiFromPublishableKey(clerkPublishableKey);
   // Unlike /play, the global policy must remain usable when configuration is
   // absent or malformed: static pages can still render Clerk sign-in widgets
@@ -132,11 +146,11 @@ export function buildContentSecurityPolicy({
     // required by the same-origin script-sandbox worker's Function() compiler on
     // editor routes, NOT by WASM (WASM uses 'wasm-unsafe-eval'). 'unsafe-inline'
     // is required by Clerk + Next.js inline framework scripts.
-    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' ${clerkOrigins} https://challenges.cloudflare.com${cdnDirective}`,
-    "style-src 'self' 'unsafe-inline'",
+    `script-src 'self'${evalToken} 'unsafe-inline' 'wasm-unsafe-eval' ${clerkOrigins} https://challenges.cloudflare.com ${POSTHOG_ORIGIN}${cdnDirective}${swaggerCdn}`,
+    `style-src 'self' 'unsafe-inline'${swaggerCdn}`,
     `img-src 'self' data: blob: https://img.clerk.com ${clerkImageOrigin}`,
     "font-src 'self' data:",
-    `connect-src 'self' ${clerkOrigins} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
+    `connect-src 'self' ${clerkOrigins} ${POSTHOG_ORIGIN} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
     `frame-src 'self' ${clerkOrigins} https://challenges.cloudflare.com`,
     "worker-src 'self' blob:",
     "media-src 'self' blob:",
@@ -352,8 +366,8 @@ export function buildPlayContentSecurityPolicy({
 
   return [
     "default-src 'self'",
-    `script-src 'self'${scriptAuth}${devEval} 'wasm-unsafe-eval'${clerk}${cdn}`,
-    `connect-src 'self'${clerk}${cdn}`,
+    `script-src 'self'${scriptAuth}${devEval} 'wasm-unsafe-eval'${clerk} ${POSTHOG_ORIGIN}${cdn}`,
+    `connect-src 'self'${clerk} ${POSTHOG_ORIGIN}${cdn}`,
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: https://img.clerk.com${clerk}`,
     "font-src 'self' data:",
@@ -428,6 +442,12 @@ export function buildCspRouteRules({
     engineCdn,
     clerkPublishableKey,
   });
+  const apiDocsCsp = buildContentSecurityPolicy({
+    allowUnsafeEval: devUnsafeEval,
+    engineCdn,
+    clerkPublishableKey,
+    allowSwaggerUiCdn: true,
+  });
   // No nonce: a static `headers()` rule cannot carry a per-request value. The
   // proxy emits the nonce-bearing policy that supersedes this one on /play.
   const playCsp = buildPlayContentSecurityPolicy({ engineCdn, clerkPublishableKey, devUnsafeEval });
@@ -440,7 +460,10 @@ export function buildCspRouteRules({
     { source: '/:path*', headers: csp(globalCsp) },
     // Overrides AFTER the global rule so they are the last writer for their paths.
     { source: PLAY_ROUTE_SOURCE, headers: csp(playCsp) },
-    ...EVAL_FREE_ROUTE_SOURCES.map((source) => ({ source, headers: csp(evalFreeCsp) })),
+    ...EVAL_FREE_ROUTE_SOURCES.map((source) => ({
+      source,
+      headers: csp(source === '/api-docs/:path*' ? apiDocsCsp : evalFreeCsp),
+    })),
   ];
 }
 
