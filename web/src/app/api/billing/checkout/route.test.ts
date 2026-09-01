@@ -212,7 +212,7 @@ describe('POST /api/billing/checkout', () => {
     const { POST } = await import('./route');
     await POST(makeReq({ tier: 'hobbyist' }));
 
-    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-07-29.dahlia');
+    expect(capturedStripeOpts.value?.apiVersion).toBe('2026-08-26.dahlia');
   });
 
   it('does not enable automatic_tax when STRIPE_TAX_ENABLED is unset (no-op guard)', async () => {
