@@ -599,7 +599,9 @@ pub(super) fn apply_gltf_import(
             continue;
         }
 
-        let asset_id = uuid::Uuid::new_v4().to_string();
+        let asset_id = crate::core::asset_manager::resolve_import_asset_id(
+            request.asset_id.as_deref(),
+        );
         let file_size = request.data_base64.len() as u64;
 
         // Parse data URL prefix if present: "data:model/gltf-binary;base64,AAAA..."
@@ -1009,7 +1011,9 @@ pub(super) fn apply_audio_import(
             tracing::error!("Audio import rejected: invalid base64 payload");
             continue;
         };
-        let asset_id = uuid::Uuid::new_v4().to_string();
+        let asset_id = crate::core::asset_manager::resolve_import_asset_id(
+            request.asset_id.as_deref(),
+        );
 
         asset_registry.assets.insert(
             asset_id.clone(),

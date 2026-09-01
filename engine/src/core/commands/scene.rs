@@ -144,6 +144,7 @@ fn handle_new_scene(_payload: serde_json::Value) -> super::CommandResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportGltfPayload {
+    id: Option<String>,
     data_base64: String,
     name: String,
     position: Option<[f32; 3]>,
@@ -162,6 +163,7 @@ fn handle_import_gltf(payload: serde_json::Value) -> super::CommandResult {
         .map_err(|e| format!("Invalid import_gltf payload: {}", e))?;
 
     let request = GltfImportRequest {
+        asset_id: data.id,
         data_base64: data.data_base64,
         name: data.name.clone(),
         position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
@@ -286,6 +288,7 @@ fn handle_delete_asset(payload: serde_json::Value) -> super::CommandResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportAudioPayload {
+    id: Option<String>,
     data_base64: String,
     name: String,
 }
@@ -297,6 +300,7 @@ fn handle_import_audio(payload: serde_json::Value) -> super::CommandResult {
         .map_err(|e| format!("Invalid import_audio payload: {}", e))?;
 
     let request = AudioImportRequest {
+        asset_id: data.id,
         data_base64: data.data_base64,
         name: data.name.clone(),
     };
@@ -659,6 +663,29 @@ mod tests {
     }
 
     #[test]
+    fn data_base64_imports_carry_caller_supplied_asset_ids() {
+        let gltf = run_with_queue("import_gltf", json!({
+            "id": "4ec30cf9-d98f-4e67-86d9-470a6cdbbe09",
+            "dataBase64": "SGVsbG8=",
+            "name": "my_model.glb"
+        }));
+        assert_eq!(
+            gltf.gltf_import_requests[0].asset_id.as_deref(),
+            Some("4ec30cf9-d98f-4e67-86d9-470a6cdbbe09")
+        );
+
+        let audio = run_with_queue("import_audio", json!({
+            "id": "7ace805c-ff9f-4a4d-89e8-4d3ea890fa4e",
+            "dataBase64": "U3Bhd25Gb3JnZQ==",
+            "name": "theme.ogg"
+        }));
+        assert_eq!(
+            audio.audio_import_requests[0].asset_id.as_deref(),
+            Some("7ace805c-ff9f-4a4d-89e8-4d3ea890fa4e")
+        );
+    }
+
+    #[test]
     fn import_gltf_target_entity_id_defaults_to_none() {
         // Negative/normalization case: an absent targetEntityId yields
         // target_entity_id == None (engine-generated fallback — a new root entity
@@ -684,6 +711,7 @@ mod tests {
 
         assert_eq!(pending.audio_import_requests.len(), 1);
         let request = &pending.audio_import_requests[0];
+        assert_eq!(request.asset_id, None);
         assert_eq!(request.data_base64, "U3Bhd25Gb3JnZQ==");
         assert_eq!(request.name, "theme.ogg");
     }
