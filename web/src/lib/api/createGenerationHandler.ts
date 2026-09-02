@@ -265,8 +265,9 @@ export function createGenerationHandler<TParams, TResult>(
 
   /**
    * After a successful provider submission, publish the durable QStash callback
-   * (PF-906). No-ops unless QStash is configured, `asyncJob` is declared, and
-   * the result carries a pollable provider job id. A publish failure is logged
+   * (PF-906). The caller snapshots QStash availability for the request before
+   * scheduling this callback; this no-ops unless `asyncJob` is declared and the
+   * result carries a pollable provider job id. A publish failure is logged
    * to Sentry but NEVER fails the user's request — the client poller still
    * covers completion, and the response shape is unchanged.
    */
@@ -275,7 +276,7 @@ export function createGenerationHandler<TParams, TResult>(
     userId: string,
     usageId: string | undefined,
   ): Promise<void> {
-    if (!asyncJob || !isQstashConfigured()) return;
+    if (!asyncJob) return;
 
     let providerJobId: string | null;
     try {
@@ -314,6 +315,16 @@ export function createGenerationHandler<TParams, TResult>(
   // is identical; only the termination guarantees differ. Refund-on-failure
   // stays in the factory, so the async-refund contract is path-independent.
   const useAgent = isGenerationAgentEnabled();
+  const submissionResponse = (
+    result: TResult,
+    durableSubmission: boolean,
+  ): TResult | (TResult & { durable: true }) =>
+    durableSubmission
+      ? Object.assign(
+          { ...(result as object) },
+          { durable: true as const },
+        ) as TResult & { durable: true }
+      : result;
   const runExecute = (
     params: TParams,
     apiKey: string,
@@ -527,21 +538,34 @@ export function createGenerationHandler<TParams, TResult>(
           { ttlSeconds: cacheTtlSeconds, userId }
         );
 
-        if (!cacheResult.cached && cacheMiss && asyncJob && isQstashConfigured()) {
+        // Copied to a const before it is tested: `cacheMiss` is a `let`
+        // assigned inside the `cachedGenerate` closure, so TypeScript discards
+        // any narrowing of it at every later read. Aliased-condition narrowing
+        // only carries through `durableSubmission` when the variable behind the
+        // condition is itself a const.
+        const miss = cacheMiss;
+        const durableSubmission =
+          !cacheResult.cached && miss !== undefined && asyncJob !== undefined && isQstashConfigured();
+        if (durableSubmission) {
           // Run the durable publish post-response: `after()` keeps the Vercel
           // function alive so the publish never adds latency to — or can fail —
           // the submit. maybePublishAsyncCallback is self-guarded (never throws),
           // safe to fire-and-forget. Gated on asyncJob + QStash so the dormant
           // path (and every non-async route) never touches `after()` at all —
           // `after()` requires a request scope, which only exists at runtime.
-          const { result: missResult, usageId: missUsageId } = cacheMiss;
+          const { result: missResult, usageId: missUsageId } = miss;
           after(() => maybePublishAsyncCallback(missResult, userId, missUsageId));
         }
 
         const headers: Record<string, string> = {
           'X-Cache': cacheResult.cached ? 'HIT' : 'MISS',
         };
-        return NextResponse.json(cacheResult.result, { status: successStatus, headers });
+        // A cache hit did not arm a new durable callback, so it deliberately
+        // retains the legacy response shape and client polling cadence.
+        const responseResult = cacheResult.cached
+          ? cacheResult.result
+          : submissionResponse(cacheResult.result, durableSubmission);
+        return NextResponse.json(responseResult, { status: successStatus, headers });
       } catch (err) {
         if (err instanceof ApiKeyError) {
           return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -590,10 +614,11 @@ export function createGenerationHandler<TParams, TResult>(
       const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
       // Run the durable publish post-response (see cached path). Same asyncJob +
       // QStash gate so the dormant/non-async path never touches `after()`.
-      if (asyncJob && isQstashConfigured()) {
+      const durableSubmission = asyncJob !== undefined && isQstashConfigured();
+      if (durableSubmission) {
         after(() => maybePublishAsyncCallback(result, userId, usageId));
       }
-      return NextResponse.json(result, { status: successStatus });
+      return NextResponse.json(submissionResponse(result, durableSubmission), { status: successStatus });
     } catch (err) {
       // Refund tokens on provider failure. Tracked rather than inferred from
       // `usageId`: BYOK leaves it undefined (nothing was charged) and the refund
