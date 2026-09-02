@@ -1,0 +1,98 @@
+name: Chromatic Baseline
+
+# Establishes the Chromatic baseline on main (PF-1345 / #9621).
+#
+# Why this workflow exists. The PR-side visual-regression job lives in
+# quality-gates.yml, which is `workflow_call` only. Its two callers are ci.yml
+# (`pull_request`) and cd.yml — and cd.yml deliberately skips quality-gates on
+# push to main, because CI already ran them on the same commit pre-merge. Net
+# effect: Chromatic had never produced a build on main, so there was no ancestor
+# build for a PR build to diff against and EVERY PR touching apps/design/ or
+# packages/ui/ reported 100% of stories as "must be accepted as baselines".
+#
+# Observed live on #9590: `92 visual and accessibility changes must be accepted
+# as baselines` alongside `92 stories published` — the whole story set — with an
+# identical count across three different heads, on a PR whose only design-system
+# deltas were four dev-only tooling bumps that cannot change rendered output.
+#
+# A gate that reports the same amber for a dependency bump as for a genuine UI
+# regression carries no signal. This job gives main a baseline so the PR job's
+# number means something.
+#
+# chromatic-accept.yml remains the manual override for an intentional redesign
+# on a feature branch; this one only ever accepts what is already merged.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/design/**'
+      - 'packages/ui/**'
+      - '.github/workflows/chromatic-baseline.yml'
+  # Seeds the first baseline without waiting for a design-system commit, and
+  # re-seeds if a baseline is ever lost.
+  workflow_dispatch:
+
+concurrency:
+  # Never cancel a baseline write in flight: a half-written baseline leaves the
+  # next PR diffing against nothing, which is the exact failure this fixes.
+  group: chromatic-baseline-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: Accept Chromatic baseline on main
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Chromatic walks git history to resolve build ancestry.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Sync vendored UI for Storybook
+        run: bash apps/design/scripts/sync-vendored-ui.sh
+
+      - name: Check Chromatic token
+        id: check-token
+        env:
+          CHROMATIC_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+        run: |
+          if [ -n "$CHROMATIC_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CHROMATIC_PROJECT_TOKEN not set - no baseline written. Every design-system PR will keep reporting 100% of stories as unaccepted until it is."
+          fi
+
+      - name: Publish and accept baseline
+        if: steps.check-token.outputs.available == 'true'
+        uses: chromaui/action@534eebfc19023579541d106f7b61d5ad70ed65c7 # v18.5.0
+        with:
+          projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+          workingDir: apps/design
+          # Accept whatever main renders as the new truth — main is the merged,
+          # already-reviewed state, and it is what PR builds must be diffed
+          # against.
+          autoAcceptChanges: main
+          # A baseline must cover every story, so TurboSnap (`onlyChanged`) is
+          # deliberately OFF here even though the PR job uses it: a partial
+          # baseline leaves the untouched stories with no ancestor and they come
+          # back as "new" on the next unrelated PR.
+          onlyChanged: false
+          # Wait for the build to finish rather than exiting at upload —
+          # autoAcceptChanges is applied server-side on completion, so exiting
+          # early would report success before the baseline exists.
+          exitOnceUploaded: false
+          exitZeroOnChanges: true

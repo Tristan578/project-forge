@@ -3,6 +3,12 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # Re-run the same required aggregate against the commit that actually landed.
+  # Two independently-green PRs can conflict semantically after merge; without
+  # this push run, main can stay red until an unrelated PR happens to exercise
+  # the affected path (#9495).
+  push:
+    branches: [main]
   # Token-free unblock for bot-authored PRs (#9161 / #9193 / #9381).
   #
   # GitHub's recursion guard: "events triggered by the GITHUB_TOKEN will not
@@ -27,8 +33,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Restrict default token permissions (CWE-732 / CodeQL workflow-missing-permissions).
 # Individual jobs add specific permissions only when needed.
@@ -67,8 +73,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The diff range differs by event: a pull_request carries base/head in its
-      # payload, a workflow_dispatch carries neither and has to merge-base
+      # The diff range differs by event: a pull_request carries PR base/head, a
+      # push carries before/after, and workflow_dispatch has to merge-base
       # against the default branch. Extracted to a script because the failure
       # posture is the load-bearing part — an unresolvable range MUST fail the
       # job, since an empty CHANGED sets all fourteen filters false, skips every
@@ -81,6 +87,8 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
           DISPATCH_SHA: ${{ github.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: bash scripts/resolve-ci-diff-range.sh
@@ -245,9 +253,8 @@ jobs:
       mcp-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-mcp) }}
       ci-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-ci) }}
       design-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-design) }}
-      # PRs never run on main — the ratchet commit step is guarded by
-      # github.ref == refs/heads/main so it is a no-op here, but false
-      # makes the intent explicit.
+      # Post-merge verification is intentionally read-only. Coverage ratcheting
+      # remains owned by coverage-ratchet.yml and ships through its PR.
       can-commit-ratchet: false
     secrets: inherit
 
