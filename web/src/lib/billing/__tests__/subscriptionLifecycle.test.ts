@@ -219,8 +219,11 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
     expect(cteCall!.values).toContain('ch_full:1000');
   });
 
-  it('passes a tiny refund through the same single CTE (the zero-deduction floor lives in SQL)', async () => {
-    // 1 cent refund of $100: the CTE's floor(...) yields 0 and it inserts nothing.
+  it('binds amountRefunded/amountTotal for a tiny refund to the single fallback CTE', async () => {
+    // 1 cent refund of $100. Whether that deducts 0 is decided inside the CTE
+    // (bigint integer division truncates 1/10000 of the balance to 0 — there is
+    // no floor() on this path; FLOOR( only exists in the paymentIntentId CTE),
+    // which mockNeonSql cannot evaluate: this test pins the binding only.
     await reverseAddonTokens('user_abc', 'ch_tiny', 1, 10000);
     expect(mockNeonTransaction).not.toHaveBeenCalled();
     const cte = mockNeonSqlCalls.find(c => c.strings.some(s => s.includes('audit')));
@@ -229,7 +232,7 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
     expect(cte!.values).toContain(10000);
   });
 
-  it('carries the cumulative refund reference so the CTE can refuse a duplicate (idempotency)', async () => {
+  it('binds the per-tranche refund reference (`<chargeId>:<cents>`) the CTE keys its idempotency on', async () => {
     await reverseAddonTokens('user_abc', 'ch_dup', 500, 1000);
     expect(mockNeonTransaction).not.toHaveBeenCalled();
     const cte = mockNeonSqlCalls.find(c => c.strings.some(s => s.includes('audit')));
@@ -242,12 +245,14 @@ describe('handleEntitlementsUpdated (PF-911 / #8821)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // vi.clearAllMocks() resets call history but NOT the `mockReturnValueOnce`
-    // queue. Earlier describe blocks (e.g. reverseAddonTokens) enqueue one-time
-    // return values that their handler can return early before consuming, so a
-    // stale `[]` (user-not-found) would bleed into this block's first DB read
-    // and make `findUserByStripeCustomer` return null — silently skipping the
-    // UPDATE this block asserts on. mockReset() drains that queue so the suite
-    // is hermetic regardless of describe order; we re-establish the default
+    // queue. An earlier describe block that enqueued a one-time return value its
+    // handler returned early before consuming would bleed a stale `[]`
+    // (user-not-found) into this block's first DB read and make
+    // `findUserByStripeCustomer` return null — silently skipping the UPDATE
+    // this block asserts on. The reverseAddonTokens block used to do exactly
+    // that; the mock*Once guard (#9542) now fails any such enqueue before it
+    // can reach here, so this mockReset() is belt-and-braces: it keeps the
+    // suite hermetic regardless of describe order; we re-establish the default
     // user-found return immediately after.
     mockSelectWhere.mockReset();
     mockNeonSqlCalls.length = 0;
@@ -303,10 +308,12 @@ describe('handleEntitlementsUpdated (PF-911 / #8821)', () => {
   // an unconsumed `mockReturnValueOnce([])` (user-not-found) that bled into the
   // first DB read here, skipping the UPDATE (this block passed in isolation but
   // failed mid-file). vi.clearAllMocks() does NOT drain the once-queue; only
-  // mockReset() does. This test stages exactly that leaked state, then runs the
+  // mockReset() does. The mock*Once guard (#9542) now fails the enqueueing
+  // test itself, so this is the second line of defence: it stages exactly that
+  // leaked state (inside this test, which the guard permits), runs the
   // hermetic-reset logic the beforeEach applies, and proves the next handler
-  // read sees the real user. If someone reverts the beforeEach to clearAllMocks,
-  // this fails.
+  // read sees the real user. If someone reverts the beforeEach to
+  // clearAllMocks, this fails.
   it('is hermetic against a leaked one-time user-not-found from a prior block', async () => {
     // Simulate the leak: an earlier block queued a stale empty result.
     mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });

@@ -12,7 +12,7 @@ vi.mock('@/lib/rateLimit', () => ({
 }));
 
 it('arms a once-value on the factory mock without consuming it', () => {
-  vi.mocked(getClientIp).mockReturnValueOnce('armed');
+  vi.mocked(getClientIp).mockReturnValueOnce('armed'); // <- leak
   // Nothing calls getClientIp here.
   expect(true).toBe(true);
 });

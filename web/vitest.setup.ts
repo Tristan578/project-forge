@@ -111,8 +111,10 @@ expect.extend(matchers);
 import { afterEach, beforeEach, vi } from 'vitest';
 
 // mock*Once leak guard (#9542): fails the test that arms a *Once value on a
-// shared mock and never consumes it. Imported for its side effects — it wraps
-// `vi.fn` and registers its own afterEach. See the file header for the rules.
+// shared mock (module-scoped vi.fn, vi.mock factory mock, or bare automock)
+// and never consumes it. Imported for its side effects — it wraps `vi.fn`,
+// hooks the mocker so automocks and factories are registered however they are
+// built, and registers its own afterEach. See the file header for the rules.
 import './vitest.mockOnceGuard';
 
 // queryWithResilience auto-passthrough for auto-mocked modules.
