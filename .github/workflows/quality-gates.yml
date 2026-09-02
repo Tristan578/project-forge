@@ -521,11 +521,12 @@ jobs:
 
       # The cache carries browser binaries, not the apt-level libraries they
       # link against, and those do not survive a fresh runner -- so a cache hit
-      # still needs install-deps. Same split as the five jobs in ci.yml.
+      # still needs install-deps. Same split as the three e2e jobs in ci.yml.
       - name: Install Playwright OS deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh deps
 
       - name: Run editor boot smoke test
         working-directory: web

@@ -113,9 +113,13 @@ QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
 assert_eq "all six browser-install steps use the retry helper" "6" \
   "$(( $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CD_YML") ))"
-assert_eq "all four cache-hit dependency steps use the retry helper" "4" \
-  "$(( $(grep -c 'scripts/install-playwright-ci.sh deps' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$CD_YML") ))"
-assert_eq "all ten install steps have an outer 12-minute timeout" "10" \
+# Every workflow that installs Playwright is summed here, quality-gates.yml
+# included. Leaving it out of this sum is what let the editor-boot cache-hit
+# step keep calling `npx playwright install-deps` bare while the suite reported
+# full coverage (#9570 review).
+assert_eq "all five cache-hit dependency steps use the retry helper" "5" \
+  "$(( $(grep -c 'scripts/install-playwright-ci.sh deps' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$CD_YML") ))"
+assert_eq "all eleven install steps have an outer 12-minute timeout" "11" \
   "$(( $(grep -c 'timeout-minutes: 12' "$CI_YML") + $(grep -c 'timeout-minutes: 12' "$QG_YML") + $(grep -c 'timeout-minutes: 12' "$CD_YML") ))"
 
 if [ "$FAILURES" -ne 0 ]; then echo "$FAILURES test(s) failed." >&2; exit 1; fi
