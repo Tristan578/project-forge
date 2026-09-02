@@ -31,7 +31,7 @@
   },
   "overrides": {
     "@clerk/nextjs": "^7.5.12",
-    "@clerk/shared": "^4.25.5",
+    "@clerk/shared": "^4.30.2",
     "@hono/node-server": "^2.0.5",
     "dompurify": ">=3.4.13",
     "esbuild": ">=0.25.0",
