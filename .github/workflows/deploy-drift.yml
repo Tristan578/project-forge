@@ -1,0 +1,58 @@
+name: Deploy Drift
+
+# A merge can land on main with ZERO workflow runs (#9640): a merge GitHub
+# performs on a bot's behalf (Dependabot auto-merge) is a GITHUB_TOKEN-class
+# event, and those never create push-triggered runs — so neither the push-CI
+# verification of the merged tree nor cd.yml runs, and production silently
+# stays on the previous commit until the next unrelated merge deploys the
+# accumulated diff. a65b1c99 (#9590, 32 dependency updates) shipped that way.
+#
+# This dispatches ci.yml and cd.yml for main's head whenever they have no run
+# for it. workflow_dispatch is the documented exception to the GITHUB_TOKEN
+# rule, so the runs it creates are real runs with real checks. Details and
+# the fail-closed rules in scripts/deploy-drift-dispatch.sh.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-drift
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch missing runs for main
+    # Forks have no production to drift from and no token to dispatch with.
+    if: ${{ github.repository == 'Tristan578/project-forge' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Dispatch ci.yml / cd.yml for a main head that has no runs
+        id: drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash scripts/deploy-drift-dispatch.sh
+
+      - name: Summary
+        if: ${{ always() && steps.drift.outputs.head != '' }}
+        env:
+          HEAD: ${{ steps.drift.outputs.head }}
+          DISPATCHED: ${{ steps.drift.outputs.dispatched }}
+        run: |
+          {
+            echo "### Deploy drift"
+            echo
+            echo "- main head: \`${HEAD}\`"
+            echo "- dispatched: ${DISPATCHED:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
