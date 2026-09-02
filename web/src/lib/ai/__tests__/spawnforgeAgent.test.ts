@@ -37,10 +37,15 @@ vi.mock('@/lib/ai/toolAdapter', () => ({
   convertManifestToolsToSdkTools: vi.fn(() => ({})),
 }));
 
-vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
-  AI_MODELS: { gatewayChat: 'anthropic/claude-sonnet-4.6' },
-}));
+vi.mock('@/lib/ai/models', async () => {
+  // Real thinkingModeFor / supportsEffort (#9626); only the ids are stubbed.
+  const actual = await vi.importActual<typeof import('@/lib/ai/models')>('@/lib/ai/models');
+  return {
+    ...actual,
+    AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
+    AI_MODELS: { gatewayChat: 'anthropic/claude-sonnet-4.6' },
+  };
+});
 
 vi.mock('@/data/commands.json', () => ({
   default: { version: '1', commands: [] },
@@ -156,7 +161,11 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     expect(args.providerOptions).toBeUndefined();
   });
 
-  it('emits anthropic.thinking when thinking=true on direct backend', () => {
+  // The shape is decided by the MODEL (#9626): baseOptions' claude-sonnet-4.5
+  // takes the budget form; the premium model takes adaptive and effort.
+  const premiumOptions = { ...baseOptions, model: 'claude-opus-4-8' };
+
+  it('emits the budget thinking form for a model that rejects adaptive (sonnet 4.5)', () => {
     createSpawnforgeAgent({ ...baseOptions, thinking: true });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
     expect(args.providerOptions).toEqual({
@@ -164,23 +173,56 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     });
   });
 
-  it('emits anthropic.effort when effort is set on direct backend', () => {
-    createSpawnforgeAgent({ ...baseOptions, effort: 'medium' });
+  it('emits the adaptive thinking form for the premium model, which 400s on the budget form', () => {
+    createSpawnforgeAgent({ ...premiumOptions, thinking: true });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
+    expect(args.providerOptions).toEqual({
+      anthropic: { thinking: { type: 'adaptive' } },
+    });
+  });
+
+  it('emits anthropic.effort when effort is set on a model that supports it', () => {
+    createSpawnforgeAgent({ ...premiumOptions, effort: 'medium' });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
     expect(args.providerOptions).toEqual({
       anthropic: { effort: 'medium' },
     });
   });
 
-  it('emits both thinking and effort together when both are set', () => {
-    createSpawnforgeAgent({ ...baseOptions, thinking: true, effort: 'high' });
+  it('drops effort for a model that 400s on it (Haiku 4.5), keeping the budget thinking form', () => {
+    createSpawnforgeAgent({ ...baseOptions, model: 'claude-haiku-4-5-20251001', thinking: true, effort: 'high' });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
+    expect(args.providerOptions).toEqual({
+      anthropic: { thinking: { type: 'enabled', budgetTokens: 10000 } },
+    });
+  });
+
+  it('omits providerOptions entirely when only an unsupported effort is set', () => {
+    createSpawnforgeAgent({ ...baseOptions, effort: 'medium' });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
+    expect(args.providerOptions).toBeUndefined();
+  });
+
+  it('emits both adaptive thinking and effort together on the premium model', () => {
+    createSpawnforgeAgent({ ...premiumOptions, thinking: true, effort: 'high' });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
     expect(args.providerOptions).toEqual({
       anthropic: {
-        thinking: { type: 'enabled', budgetTokens: 10000 },
+        thinking: { type: 'adaptive' },
         effort: 'high',
       },
     });
+  });
+
+  it.each([
+    ['claude-opus-4-8', { type: 'adaptive' }],
+    ['claude-sonnet-4-6', { type: 'adaptive' }],
+    ['claude-sonnet-4.5', { type: 'enabled', budgetTokens: 10000 }],
+    ['claude-haiku-4-5-20251001', { type: 'enabled', budgetTokens: 10000 }],
+  ])('thinking shape for %s', (model, expected) => {
+    createSpawnforgeAgent({ ...baseOptions, model, thinking: true });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: { thinking: unknown } } };
+    expect(args.providerOptions?.anthropic.thinking).toEqual(expected);
   });
 
   it('does not emit providerOptions for gateway backend even with thinking/effort', () => {
@@ -195,14 +237,14 @@ describe('createSpawnforgeAgent — providerOptions', () => {
   });
 
   it('forwards effort=low and effort=high without modification', () => {
-    createSpawnforgeAgent({ ...baseOptions, effort: 'low' });
+    createSpawnforgeAgent({ ...premiumOptions, effort: 'low' });
     expect(
       (mockToolLoopAgent.mock.calls[0][0] as { providerOptions: { anthropic: { effort: string } } })
         .providerOptions.anthropic.effort,
     ).toBe('low');
 
     mockToolLoopAgent.mockClear();
-    createSpawnforgeAgent({ ...baseOptions, effort: 'high' });
+    createSpawnforgeAgent({ ...premiumOptions, effort: 'high' });
     expect(
       (mockToolLoopAgent.mock.calls[0][0] as { providerOptions: { anthropic: { effort: string } } })
         .providerOptions.anthropic.effort,
