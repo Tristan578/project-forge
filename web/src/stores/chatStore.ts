@@ -17,10 +17,63 @@ export interface ToolCallStatus {
   id: string;
   name: string;
   input: Record<string, unknown>;
-  status: 'pending' | 'success' | 'error' | 'preview' | 'rejected' | 'undone';
+  /**
+   * `'approval-required'` and `'denied'` belong to the SERVER-side tool
+   * approval gate (PF-8860) and are not interchangeable with `'preview'` /
+   * `'rejected'`, which belong to the client-only `approvalMode` toggle.
+   * A `'preview'` call is resolved locally by approveToolCalls/rejectToolCalls
+   * and the model is never told about it; an `'approval-required'` call is
+   * blocked by the SDK server-side and can only be resolved by resuming the
+   * turn with an approval-response — which is what `resumeAfterApproval` does.
+   */
+  status:
+    | 'pending'
+    | 'success'
+    | 'error'
+    | 'preview'
+    | 'rejected'
+    | 'undone'
+    | 'approval-required'
+    | 'denied';
   result?: unknown;
   error?: string;
   undoable: boolean;
+  /**
+   * Set when the server blocks this call (and retained after the decision, so
+   * the resume history can be rebuilt). The SDK correlates a resume by this id
+   * and throws `InvalidToolApprovalError` for one it never issued, so a
+   * decision whose call has no `approvalId` is dropped rather than sent.
+   */
+  approvalId?: string;
+}
+
+/** A tool call the server blocked pending the user's explicit approval. */
+export interface ApprovalRequiredTool {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  approvalId: string;
+}
+
+/** One user decision on a blocked call, as handed to `resumeAfterApproval`. */
+export interface ApprovalDecision {
+  toolCallId: string;
+  approved: boolean;
+  reason?: string;
+}
+
+/**
+ * Everything needed to restart a turn the server paused on approval. Held on
+ * the store because the pause outlives `sendMessage`'s call stack — the user
+ * may take minutes to answer.
+ */
+export interface PausedTurnState {
+  assistantMsgId: string;
+  apiMessages: { role: string; content: unknown }[];
+  /** toolCallIds already reported to the model in an earlier iteration. */
+  reportedToolCallIds: string[];
+  /** Loop iteration the pause happened on, so the resume keeps the same cap. */
+  iteration: number;
 }
 
 export interface ChatMessage {
@@ -72,6 +125,8 @@ interface ChatState {
   pendingEntityRefs: Record<string, string>; // @DisplayName → entity ID for current input
   conversations: Conversation[];
   activeConversationId: string | null;
+  /** Non-null while a turn is parked on a server-side tool approval (PF-8860). */
+  pausedTurnState: PausedTurnState | null;
 
   showTokenDepletedModal: boolean;
   setShowTokenDepletedModal: (show: boolean) => void;
@@ -84,6 +139,12 @@ interface ChatState {
   setApprovalMode: (enabled: boolean) => void;
   approveToolCalls: (messageId: string) => Promise<void>;
   rejectToolCalls: (messageId: string) => void;
+  /**
+   * Answer the server's approval request(s) for a paused turn and resume it.
+   * Approved calls are executed locally FIRST and their results ride along in
+   * the resume, because the agent's tools have no server-side `execute`.
+   */
+  resumeAfterApproval: (messageId: string, decisions: ApprovalDecision[]) => Promise<void>;
   setMessageFeedback: (messageId: string, feedback: 'positive' | 'negative' | null) => void;
   batchUndoMessage: (messageId: string) => void;
   clearChat: () => void;
@@ -140,6 +201,13 @@ interface DeferredTool {
 interface StreamResult {
   stopReason: string;
   deferredTools: DeferredTool[];
+  /**
+   * Calls the SERVER blocked on `tool-approval-request` (PF-8860). Non-empty
+   * means the turn is paused and only `resumeAfterApproval` can continue it.
+   * Distinct from `deferredTools`, which is the client-side approvalMode
+   * pause and resolves without ever telling the model.
+   */
+  approvalRequiredTools: ApprovalRequiredTool[];
 }
 
 /** Stream one API turn — returns the stop_reason and any deferred tools */
@@ -174,6 +242,16 @@ async function streamOneTurn(
   let buffer = '';
   let stopReason = 'end_turn';
   const deferredTools: DeferredTool[] = [];
+  const approvalRequiredTools: ApprovalRequiredTool[] = [];
+
+  // PF-8860: `tool-input-available` and `tool-approval-request` for the SAME
+  // toolCallId have no guaranteed order on the wire, so a tool can no longer
+  // be executed the moment its input lands — that would race the gate and run
+  // a destructive call whose approval-request simply arrived second. Inputs
+  // are buffered here and resolved once, after the whole turn has streamed.
+  const bufferedToolInputs = new Map<string, { name: string; input: Record<string, unknown> }>();
+  /** toolCallId → approvalId, for every call the server gated. */
+  const gatedApprovalIds = new Map<string, string>();
 
   const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -224,6 +302,50 @@ async function streamOneTurn(
           : t,
       ),
     }));
+  };
+
+  // Resolve every buffered tool input once the turn has finished streaming.
+  // Gated calls become 'approval-required' cards carrying their approvalId and
+  // are NOT executed; everything else runs exactly as it did before, in stream
+  // order (Map preserves insertion order), so execution stays serialized.
+  //
+  // Idempotent: the map is cleared, so the post-loop safety call after a stream
+  // that ended without a `finish` chunk cannot double-execute anything.
+  let bufferDrained = false;
+  const drainBufferedToolInputs = async () => {
+    if (bufferDrained) return;
+    bufferDrained = true;
+    for (const [id, { name, input }] of bufferedToolInputs) {
+      const approvalId = gatedApprovalIds.get(id);
+      if (approvalId) {
+        approvalRequiredTools.push({ id, name, input, approvalId });
+        onUpdate((msg) => {
+          const existing = (msg.toolCalls ?? []).some((t) => t.id === id);
+          const gated = {
+            status: 'approval-required' as const,
+            approvalId,
+            input,
+            name,
+          };
+          if (!existing) {
+            return {
+              ...msg,
+              toolCalls: [
+                ...(msg.toolCalls ?? []),
+                { id, name, input, status: 'approval-required' as const, undoable: true, approvalId },
+              ],
+            };
+          }
+          return {
+            ...msg,
+            toolCalls: (msg.toolCalls ?? []).map((t) => (t.id === id ? { ...t, ...gated } : t)),
+          };
+        });
+        continue;
+      }
+      await handleToolInput(id, name, input);
+    }
+    bufferedToolInputs.clear();
   };
 
   // Usage rides on the `finish` chunk (the route's messageMetadata callback) or a
@@ -287,13 +409,40 @@ async function streamOneTurn(
         case 'tool-input-delta':
           break;
 
+        // Buffer only — see drainBufferedToolInputs. Executing here would race
+        // a `tool-approval-request` that has not arrived yet (PF-8860).
         case 'tool-input-available':
-          await handleToolInput(
-            str(event.toolCallId),
-            str(event.toolName),
-            (event.input as Record<string, unknown>) ?? {},
-          );
+          bufferedToolInputs.set(str(event.toolCallId), {
+            name: str(event.toolName),
+            input: (event.input as Record<string, unknown>) ?? {},
+          });
           break;
+
+        // The server gated this call. Named (not `default`) so a future chunk
+        // rename fails a test instead of silently disabling the gate.
+        case 'tool-approval-request':
+          gatedApprovalIds.set(str(event.toolCallId), str(event.approvalId));
+          break;
+
+        // The SDK echoing back a decision this client just sent. Deliberate
+        // no-op: the card is already in its post-decision state locally.
+        case 'tool-approval-response':
+          break;
+
+        // Emitted on the RESUMED stream for a call the user denied — the SDK
+        // synthesizes an `execution-denied` result and reports it with this
+        // chunk. Undocumented in the ticket; without a case for it the card
+        // would sit at 'pending' forever.
+        case 'tool-output-denied': {
+          const id = str(event.toolCallId);
+          onUpdate((msg) => ({
+            ...msg,
+            toolCalls: (msg.toolCalls ?? []).map((t) =>
+              t.id === id ? { ...t, status: 'denied' as const } : t,
+            ),
+          }));
+          break;
+        }
 
         case 'tool-input-error':
         case 'tool-output-error': {
@@ -313,6 +462,7 @@ async function streamOneTurn(
           break;
 
         case 'finish':
+          await drainBufferedToolInputs();
           readUsage(event.messageMetadata);
           break;
 
@@ -328,7 +478,242 @@ async function streamOneTurn(
     }
   }
 
-  return { stopReason, deferredTools };
+  // Safety net for a stream that ends without a terminal `finish` chunk (an
+  // older server, or a truncated response). Idempotent — a stream that did
+  // emit `finish` already drained.
+  await drainBufferedToolInputs();
+
+  return { stopReason, deferredTools, approvalRequiredTools };
+}
+
+// ---------------------------------------------------------------------------
+// Follow-up message construction (AI SDK ModelMessage format)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the assistant + tool messages that report a finished tool round back
+ * to the model.
+ *
+ * These MUST be AI SDK `ModelMessage`s, not Anthropic content blocks. The old
+ * shape — `{role:'user', content:[{type:'tool_result', tool_use_id, ...}]}` —
+ * is rejected outright by the SDK's `modelMessageSchema`, which
+ * `standardizePrompt` runs on every `agent.stream({messages})`. Because
+ * standardization happens inside `streamText`'s detached async body the
+ * rejection surfaced as a stream `error` chunk rather than a request failure,
+ * so the second iteration of every tool-calling turn failed quietly. Verified
+ * against the installed ai@7.x schema; `route.test.ts` pins it.
+ *
+ * `reported` carries the toolCallIds already sent in a previous iteration.
+ * `ChatMessage.toolCalls` accumulates across the whole turn, so without it
+ * each iteration would re-send earlier `tool-call` parts and the provider
+ * would see duplicate tool_use ids.
+ *
+ * The tool message is always LAST — `collectToolApprovals` returns nothing
+ * unless `messages.at(-1).role === 'tool'`, which would silently drop every
+ * approval decision.
+ */
+function appendToolTurn(
+  apiMessages: { role: string; content: unknown }[],
+  msg: ChatMessage,
+  reported: Set<string>,
+  decisions?: ApprovalDecision[],
+): { role: string; content: unknown }[] {
+  const toolCalls = (msg.toolCalls ?? []).filter((tc) => !reported.has(tc.id));
+  if (toolCalls.length === 0) return apiMessages;
+
+  const assistantContent: unknown[] = [];
+  if (msg.content) {
+    assistantContent.push({ type: 'text', text: msg.content });
+  }
+  for (const tc of toolCalls) {
+    assistantContent.push({
+      type: 'tool-call',
+      toolCallId: tc.id,
+      toolName: tc.name,
+      input: tc.input,
+    });
+    if (tc.approvalId) {
+      assistantContent.push({
+        type: 'tool-approval-request',
+        approvalId: tc.approvalId,
+        toolCallId: tc.id,
+      });
+    }
+  }
+
+  const decisionByToolCallId = new Map(
+    (decisions ?? []).map((d) => [d.toolCallId, d] as const),
+  );
+
+  const toolContent: unknown[] = [];
+  for (const tc of toolCalls) {
+    const decision = decisionByToolCallId.get(tc.id);
+    if (decision && tc.approvalId) {
+      toolContent.push({
+        type: 'tool-approval-response',
+        approvalId: tc.approvalId,
+        approved: decision.approved,
+        ...(decision.reason ? { reason: decision.reason } : {}),
+      });
+      // A DENIED call carries no tool-result: the SDK synthesizes an
+      // `execution-denied` output and emits `tool-output-denied`. An APPROVED
+      // call must carry one, because these tools have no server-side
+      // `execute` — `executeToolCall` returns undefined for them, so if the
+      // client did not supply the result the assistant `tool_use` would reach
+      // the provider with nothing answering it and the request would 400.
+      // Supplying it also short-circuits the SDK's re-execution attempt.
+      if (!decision.approved) continue;
+    }
+
+    // Report what actually happened. Anything that did not run reports as an
+    // error rather than the blanket "Success" the previous implementation sent
+    // for every non-error status — telling the model a blocked call succeeded
+    // is how a denied destructive action gets narrated as done.
+    let output: { type: 'text' | 'error-text'; value: string };
+    if (tc.status === 'error') {
+      output = { type: 'error-text', value: `Error: ${tc.error || 'Unknown error'}` };
+    } else if (tc.status === 'success' || tc.status === 'undone') {
+      output = { type: 'text', value: String(tc.result ?? 'Success') };
+    } else {
+      output = { type: 'error-text', value: `Not executed (status: ${tc.status}).` };
+    }
+
+    toolContent.push({
+      type: 'tool-result',
+      toolCallId: tc.id,
+      toolName: tc.name,
+      output,
+    });
+  }
+
+  for (const tc of toolCalls) reported.add(tc.id);
+
+  return [
+    ...apiMessages,
+    { role: 'assistant', content: assistantContent },
+    { role: 'tool', content: toolContent },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Agentic loop — shared by sendMessage and resumeAfterApproval
+// ---------------------------------------------------------------------------
+
+interface AgenticLoopParams {
+  get: () => ChatState;
+  set: (partial: Partial<ChatState>) => void;
+  assistantMsgId: string;
+  apiMessages: { role: string; content: unknown }[];
+  /** Mutated as iterations report calls; carried across an approval pause. */
+  reportedToolCallIds: Set<string>;
+  model: string;
+  thinking: boolean;
+  signal: AbortSignal;
+  turnTokens: { input: number; output: number };
+  startIteration?: number;
+}
+
+/**
+ * Run the model/tool loop until the model stops, the iteration cap is hit, or
+ * the turn is paused.
+ *
+ * Extracted from `sendMessage` so the approval resume re-enters the SAME
+ * semantics rather than a parallel copy — a resumed turn can call more tools,
+ * and can be gated again on the next step.
+ */
+async function runAgenticLoop(params: AgenticLoopParams): Promise<void> {
+  const {
+    get, set, assistantMsgId, reportedToolCallIds, model, thinking, signal, turnTokens,
+  } = params;
+
+  const { useEditorStore } = await import('./editorStore');
+  const { buildSceneContext } = await import('../lib/chat/context');
+
+  const updateAssistant = (cb: (msg: ChatMessage) => ChatMessage) => {
+    const msgs = get().messages.map((m) => (m.id === assistantMsgId ? cb(m) : m));
+    set({ messages: msgs });
+  };
+  const handleUsage = (input: number, output: number) => {
+    turnTokens.input += input;
+    turnTokens.output += output;
+  };
+  const handleError = (msg: string) => set({ error: msg });
+
+  let iteration = params.startIteration ?? 0;
+  let currentApiMessages = params.apiMessages;
+
+  while (iteration < MAX_LOOP_ITERATIONS) {
+    set({ loopIteration: iteration });
+
+    // Re-read approval mode and scene context each iteration so changes
+    // mid-loop take effect immediately (#7516, #7515).
+    const currentApprovalMode = get().approvalMode;
+    const currentSceneContext = buildSceneContext(useEditorStore.getState());
+
+    const { stopReason, deferredTools, approvalRequiredTools } = await streamOneTurn(
+      currentApiMessages,
+      model,
+      currentSceneContext,
+      thinking,
+      signal,
+      updateAssistant,
+      handleUsage,
+      handleError,
+      currentApprovalMode,
+    );
+
+    // SERVER-side approval gate (PF-8860). Tested FIRST and separately from
+    // the approvalMode pause below: a gated call never reaches
+    // `handleToolInput`, so `stopReason` stays 'end_turn' for a turn whose
+    // only calls were blocked — the `stopReason !== 'tool_use'` test further
+    // down would exit the loop as if the model had simply finished, and the
+    // pause would be lost. Their resume semantics also differ: this one has to
+    // go back to the model, approvalMode never does.
+    if (approvalRequiredTools.length > 0) {
+      set({
+        pausedTurnState: {
+          assistantMsgId,
+          apiMessages: currentApiMessages,
+          reportedToolCallIds: [...reportedToolCallIds],
+          iteration,
+        },
+      });
+      return;
+    }
+
+    // Approval mode: when the turn produced tool calls (which always means
+    // the model returned stop_reason 'tool_use' — a turn with no tools cannot
+    // populate deferredTools), pause the loop. Present every pending call as a
+    // 'preview' and stop to wait for the user. There is deliberately no
+    // "auto-execute mid-loop" path: approval mode exists precisely so nothing
+    // runs without an explicit OK. approveToolCalls() executes the previews and
+    // rejectToolCalls() marks them rejected.
+    if (currentApprovalMode && deferredTools.length > 0) {
+      updateAssistant((msg) => ({
+        ...msg,
+        toolCalls: (msg.toolCalls ?? []).map((t) =>
+          t.status === 'pending' ? { ...t, status: 'preview' as const } : t,
+        ),
+      }));
+      return; // Wait for user to approve/reject
+    }
+
+    // If Claude finished (end_turn) or max iterations, stop
+    if (stopReason !== 'tool_use') break;
+
+    iteration++;
+
+    const currentMsg = get().messages.find((m) => m.id === assistantMsgId);
+    if (!currentMsg?.toolCalls?.length) break;
+
+    const next = appendToolTurn(currentApiMessages, currentMsg, reportedToolCallIds);
+    if (next === currentApiMessages) break; // nothing new to report
+    currentApiMessages = next;
+
+    // Reset the assistant message content for the next turn's text
+    // but keep existing tool calls (they accumulate across turns)
+    updateAssistant((msg) => ({ ...msg, content: '' }));
+  }
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -348,6 +733,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingEntityRefs: {},
   conversations: [],
   activeConversationId: null,
+  pausedTurnState: null,
   showTokenDepletedModal: false,
 
   setShowTokenDepletedModal: (show) => set({ showTokenDepletedModal: show }),
@@ -443,12 +829,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       abortController,
       loopIteration: 0,
       hasUnreadMessages: rightPanelTab !== 'chat',
+      // Sending a new message abandons any turn parked on an approval — the
+      // paused history no longer ends where the SDK expects, so a later
+      // resume of it would throw InvalidToolApprovalError.
+      pausedTurnState: null,
     });
 
     try {
-      const { useEditorStore } = await import('./editorStore');
-      const { buildSceneContext } = await import('../lib/chat/context');
-
       // Build initial API messages from conversation history (with context truncation)
       const allMessages = [...messages, userMessage];
       const apiMessages = buildTruncatedApiMessages(allMessages);
@@ -456,110 +843,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const assistantMsgId = assistantMessage.id;
       const turnTokens = { input: 0, output: 0 };
 
-      // Helper to update the assistant message in state
-      function updateAssistant(cb: (msg: ChatMessage) => ChatMessage) {
-        const state = get();
-        const msgs = state.messages.map((m) =>
-          m.id === assistantMsgId ? cb(m) : m
-        );
+      const updateAssistant = (cb: (msg: ChatMessage) => ChatMessage) => {
+        const msgs = get().messages.map((m) => (m.id === assistantMsgId ? cb(m) : m));
         set({ messages: msgs });
-      }
+      };
 
-      function handleUsage(input: number, output: number) {
-        turnTokens.input += input;
-        turnTokens.output += output;
-      }
-
-      function handleError(msg: string) {
-        set({ error: msg });
-      }
-
-      // --- Agentic loop ---
-      let iteration = 0;
-      let currentApiMessages = apiMessages;
-
-      while (iteration < MAX_LOOP_ITERATIONS) {
-        set({ loopIteration: iteration });
-
-        // Re-read approval mode and scene context each iteration so changes
-        // mid-loop take effect immediately (#7516, #7515).
-        const currentApprovalMode = get().approvalMode;
-        const currentEditorState = useEditorStore.getState();
-        const currentSceneContext = buildSceneContext(currentEditorState);
-
-        const { stopReason, deferredTools } = await streamOneTurn(
-          currentApiMessages,
-          activeModel,
-          currentSceneContext,
-          thinkingEnabled,
-          abortController.signal,
-          updateAssistant,
-          handleUsage,
-          handleError,
-          currentApprovalMode,
-        );
-
-        // Approval mode: when the turn produced tool calls (which always means
-        // the model returned stop_reason 'tool_use' — a turn with no tools cannot
-        // populate deferredTools), pause the loop. Present every pending call as a
-        // 'preview' and break to wait for the user. There is deliberately no
-        // "auto-execute mid-loop" path: approval mode exists precisely so nothing
-        // runs without an explicit OK. approveToolCalls() executes the previews and
-        // rejectToolCalls() marks them rejected.
-        if (currentApprovalMode && deferredTools.length > 0) {
-          updateAssistant((msg) => ({
-            ...msg,
-            toolCalls: (msg.toolCalls ?? []).map((t) =>
-              t.status === 'pending' ? { ...t, status: 'preview' as const } : t
-            ),
-          }));
-          break; // Wait for user to approve/reject
-        }
-
-        // If Claude finished (end_turn) or max iterations, stop
-        if (stopReason !== 'tool_use') break;
-
-        iteration++;
-
-        // Build follow-up messages with tool results
-        const currentMsg = get().messages.find((m) => m.id === assistantMsgId);
-        if (!currentMsg?.toolCalls?.length) break;
-
-        // Construct the assistant content blocks for the API
-        const assistantContentBlocks: unknown[] = [];
-        if (currentMsg.content) {
-          assistantContentBlocks.push({ type: 'text', text: currentMsg.content });
-        }
-        for (const tc of currentMsg.toolCalls) {
-          assistantContentBlocks.push({
-            type: 'tool_use',
-            id: tc.id,
-            name: tc.name,
-            input: tc.input,
-          });
-        }
-
-        // Construct tool_result blocks
-        const toolResultBlocks = currentMsg.toolCalls.map((tc) => ({
-          type: 'tool_result' as const,
-          tool_use_id: tc.id,
-          content: tc.status === 'error'
-            ? `Error: ${tc.error || 'Unknown error'}`
-            : String(tc.result || 'Success'),
-          is_error: tc.status === 'error',
-        }));
-
-        // Append assistant + tool_result to conversation
-        currentApiMessages = [
-          ...currentApiMessages,
-          { role: 'assistant', content: assistantContentBlocks },
-          { role: 'user', content: toolResultBlocks },
-        ];
-
-        // Reset the assistant message content for the next turn's text
-        // but keep existing tool calls (they accumulate across turns)
-        updateAssistant((msg) => ({ ...msg, content: '' }));
-      }
+      await runAgenticLoop({
+        get,
+        set,
+        assistantMsgId,
+        apiMessages,
+        reportedToolCallIds: new Set<string>(),
+        model: activeModel,
+        thinking: thinkingEnabled,
+        signal: abortController.signal,
+        turnTokens,
+      });
 
       // Store final token cost on the message
       const totalTokens = turnTokens.input + turnTokens.output;
@@ -615,7 +914,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setThinkingEnabled: (enabled) => set({ thinkingEnabled: enabled }),
 
-  clearChat: () => set({ messages: [], error: null, sessionTokens: { input: 0, output: 0 } }),
+  clearChat: () => set({ messages: [], error: null, sessionTokens: { input: 0, output: 0 }, pausedTurnState: null }),
 
   clearUnread: () => set({ hasUnreadMessages: false }),
 
@@ -741,6 +1040,134 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ),
     };
     set({ messages: msgs });
+  },
+
+  resumeAfterApproval: async (messageId: string, decisions: ApprovalDecision[]) => {
+    const state = get();
+    const paused = state.pausedTurnState;
+    // Stale-call guard: the pause may have been abandoned by a new message, or
+    // this may be a card from an older turn.
+    if (!paused || paused.assistantMsgId !== messageId) return;
+    if (state.isStreaming) return;
+
+    const idx = msgIndexMap.get(messageId);
+    if (idx === undefined) return;
+    const message = state.messages[idx];
+
+    // Only calls the SERVER actually gated can be answered. A call with no
+    // approvalId has no request for the SDK to correlate against, and sending
+    // one would throw InvalidToolApprovalError for the whole turn.
+    const gated = (message?.toolCalls ?? []).filter(
+      (tc): tc is ToolCallStatus & { approvalId: string } =>
+        tc.status === 'approval-required' && typeof tc.approvalId === 'string' && tc.approvalId.length > 0,
+    );
+    if (gated.length === 0) return;
+
+    const byToolCallId = new Map(decisions.map((d) => [d.toolCallId, d] as const));
+    // A gated call the caller said nothing about is DENIED, never assumed
+    // approved. Resuming with an unanswered destructive call would let the
+    // model proceed as if the user had agreed.
+    const effective: ApprovalDecision[] = gated.map(
+      (tc) => byToolCallId.get(tc.id) ?? { toolCallId: tc.id, approved: false, reason: 'No decision provided' },
+    );
+
+    const abortController = new AbortController();
+    set({ isStreaming: true, error: null, abortController, pausedTurnState: null, loopIteration: paused.iteration });
+
+    const turnTokens = { input: 0, output: 0 };
+
+    try {
+      const { executeToolCall } = await import('../lib/chat/executor');
+      const { useEditorStore } = await import('./editorStore');
+
+      const applyToolCallUpdate = (id: string, update: Partial<ToolCallStatus>) => {
+        const msgs = get().messages.slice();
+        const currentIdx = msgIndexMap.get(messageId);
+        if (currentIdx === undefined) return;
+        const current = msgs[currentIdx];
+        msgs[currentIdx] = {
+          ...current,
+          toolCalls: (current.toolCalls ?? []).map((t) => (t.id === id ? { ...t, ...update } : t)),
+        };
+        set({ messages: msgs });
+      };
+
+      // Execute the approved calls HERE, before resuming. The agent's tools
+      // carry no server-side `execute`, so the SDK's own re-execution of an
+      // approved call returns undefined and appends no result — the resumed
+      // request would then carry an assistant tool_use with nothing answering
+      // it and the provider would reject the whole turn. Supplying the result
+      // in the resume also short-circuits that re-execution attempt.
+      for (const decision of effective) {
+        const tc = gated.find((t) => t.id === decision.toolCallId);
+        if (!tc) continue;
+        if (!decision.approved) {
+          applyToolCallUpdate(tc.id, { status: 'denied' });
+          continue;
+        }
+        const result = await executeToolCall(tc.name, tc.input, useEditorStore.getState());
+        applyToolCallUpdate(tc.id, {
+          status: result.success ? 'success' : 'error',
+          result: result.result,
+          error: result.error,
+        });
+      }
+
+      const updatedMessage = get().messages.find((m) => m.id === messageId);
+      if (!updatedMessage) return;
+
+      const reportedToolCallIds = new Set(paused.reportedToolCallIds);
+      const resumedApiMessages = appendToolTurn(
+        paused.apiMessages,
+        updatedMessage,
+        reportedToolCallIds,
+        effective,
+      );
+
+      // Reset the visible assistant text for the resumed turn's output, the
+      // same way the loop does between iterations — the text just sent is now
+      // part of the history the model sees.
+      const msgsAfterReset = get().messages.map((m) =>
+        m.id === messageId ? { ...m, content: '' } : m,
+      );
+      set({ messages: msgsAfterReset });
+
+      await runAgenticLoop({
+        get,
+        set,
+        assistantMsgId: messageId,
+        apiMessages: resumedApiMessages,
+        reportedToolCallIds,
+        model: state.activeModel,
+        thinking: state.thinkingEnabled,
+        signal: abortController.signal,
+        turnTokens,
+        startIteration: paused.iteration + 1,
+      });
+
+      const msgs = get().messages.map((m) =>
+        m.id === messageId
+          ? { ...m, tokenCost: (m.tokenCost ?? 0) + turnTokens.input + turnTokens.output }
+          : m,
+      );
+      set({ messages: msgs });
+
+      const prev = get().sessionTokens;
+      set({
+        sessionTokens: {
+          input: prev.input + turnTokens.input,
+          output: prev.output + turnTokens.output,
+        },
+      });
+    } catch (err: unknown) {
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        const errorMessage = err instanceof Error ? err.message : 'Chat request failed';
+        set({ error: errorMessage });
+        showError(`AI chat error: ${errorMessage}`);
+      }
+    } finally {
+      set({ isStreaming: false, abortController: null, loopIteration: 0 });
+    }
   },
 
   setMessageFeedback: (messageId: string, feedback: 'positive' | 'negative' | null) => {
