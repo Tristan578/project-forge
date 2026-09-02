@@ -30,6 +30,7 @@ vi.mock('lucide-react', () => ({
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
   GitFork: (props: Record<string, unknown>) => <span data-testid="fork-icon" {...props} />,
   RotateCw: (props: Record<string, unknown>) => <span data-testid="retry-icon" {...props} />,
+  Flag: (props: Record<string, unknown>) => <span data-testid="flag-icon" {...props} />,
 }));
 
 vi.mock('next/navigation', () => ({

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, Maximize, Minimize, Loader2, RotateCw } from 'lucide-react';
 import { ShareButtons } from './ShareButtons';
 import { RemixButton } from './RemixButton';
+import { ReportGameDialog } from './ReportGameDialog';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
 import { captureException } from '@/lib/monitoring/sentry-client';
@@ -359,6 +360,9 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
               gameUrl={shareUrl}
             />
           )}
+          {/* gameData.id is the published_games row id, which is what the
+              report route keys off — no new GamePlayer prop is needed. */}
+          {gameData && <ReportGameDialog gameId={gameData.id} />}
           <button
             onClick={toggleFullscreen}
             className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
