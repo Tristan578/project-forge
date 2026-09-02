@@ -15,7 +15,7 @@
  */
 
 import { verifyWebhook } from '@clerk/nextjs/webhooks';
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { syncUserFromClerk, getUserByClerkId, deleteUserAccount } from '@/lib/auth/user-service';
 import {
   enqueueRetry,
@@ -56,7 +56,7 @@ async function handleWebhookEvent(
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   // Passed explicitly: verifyWebhook's own env fallback is
   // CLERK_WEBHOOK_SIGNING_SECRET, while this deployment's variable is
   // CLERK_WEBHOOK_SECRET (web/.env.example). Relying on the fallback would

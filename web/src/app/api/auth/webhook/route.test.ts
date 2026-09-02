@@ -2,6 +2,7 @@ vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { POST } from './route';
+import { NextRequest } from 'next/server';
 import { syncUserFromClerk, getUserByClerkId, deleteUserAccount } from '@/lib/auth/user-service';
 
 vi.mock('@/lib/auth/user-service');
@@ -29,14 +30,14 @@ describe('POST /api/auth/webhook', () => {
 
   it('returns 500 if WEBHOOK_SECRET is missing', async () => {
     vi.stubEnv('CLERK_WEBHOOK_SECRET', '');
-    const req = new Request('http://localhost/api/auth/webhook', { method: 'POST' });
+    const req = new NextRequest('http://localhost/api/auth/webhook', { method: 'POST' });
     const res = await POST(req);
     expect(res.status).toBe(500);
   });
 
   it('returns 400 if verification rejects for missing svix headers', async () => {
     mockVerify.mockRejectedValueOnce(new Error('Missing required Svix headers'));
-    const req = new Request('http://localhost/api/auth/webhook', { method: 'POST' });
+    const req = new NextRequest('http://localhost/api/auth/webhook', { method: 'POST' });
     const res = await POST(req);
     expect(res.status).toBe(400);
     expect(syncUserFromClerk).not.toHaveBeenCalled();
@@ -44,7 +45,7 @@ describe('POST /api/auth/webhook', () => {
 
   it('returns 400 if signature is invalid', async () => {
     mockVerify.mockRejectedValueOnce(new Error('Invalid signature'));
-    const req = new Request('http://localhost/api/auth/webhook', {
+    const req = new NextRequest('http://localhost/api/auth/webhook', {
       method: 'POST',
       body: JSON.stringify({ type: 'user.created' }),
     });
@@ -55,7 +56,7 @@ describe('POST /api/auth/webhook', () => {
 
   it('passes the request and the CLERK_WEBHOOK_SECRET explicitly (verifyWebhook falls back to a differently named variable)', async () => {
     mockVerify.mockResolvedValue({ type: 'user.updated', data: { id: 'clerk_123', email_addresses: [] } });
-    const req = new Request('http://localhost/api/auth/webhook', { method: 'POST', body: '{}' });
+    const req = new NextRequest('http://localhost/api/auth/webhook', { method: 'POST', body: '{}' });
     await POST(req);
     expect(mockVerify).toHaveBeenCalledTimes(1);
     expect(mockVerify).toHaveBeenCalledWith(req, { signingSecret: 'whsec_mock' });
@@ -67,7 +68,7 @@ describe('POST /api/auth/webhook', () => {
       data: { id: 'clerk_123', email_addresses: [] },
     });
 
-    const req = new Request('http://localhost/api/auth/webhook', { 
+    const req = new NextRequest('http://localhost/api/auth/webhook', { 
       method: 'POST', 
       body: JSON.stringify({}) 
     });
@@ -83,7 +84,7 @@ describe('POST /api/auth/webhook', () => {
       data: { id: 'clerk_123', email_addresses: [] },
     });
 
-    const req = new Request('http://localhost/api/auth/webhook', { 
+    const req = new NextRequest('http://localhost/api/auth/webhook', { 
       method: 'POST', 
       body: JSON.stringify({}) 
     });
@@ -102,7 +103,7 @@ describe('POST /api/auth/webhook', () => {
     vi.mocked(getUserByClerkId).mockResolvedValue({ id: 'internal-uuid', clerkId: 'clerk_123' } as never);
     vi.mocked(deleteUserAccount).mockResolvedValue(undefined);
 
-    const req = new Request('http://localhost/api/auth/webhook', {
+    const req = new NextRequest('http://localhost/api/auth/webhook', {
       method: 'POST',
       body: JSON.stringify({}),
     });
@@ -121,7 +122,7 @@ describe('POST /api/auth/webhook', () => {
     });
     vi.mocked(getUserByClerkId).mockResolvedValue(null);
 
-    const req = new Request('http://localhost/api/auth/webhook', {
+    const req = new NextRequest('http://localhost/api/auth/webhook', {
       method: 'POST',
       body: JSON.stringify({}),
     });
@@ -141,7 +142,7 @@ describe('POST /api/auth/webhook', () => {
     vi.mocked(getUserByClerkId).mockResolvedValue({ id: 'internal-uuid', clerkId: 'clerk_123' } as never);
     vi.mocked(deleteUserAccount).mockRejectedValue(new Error('DB failure'));
 
-    const req = new Request('http://localhost/api/auth/webhook', {
+    const req = new NextRequest('http://localhost/api/auth/webhook', {
       method: 'POST',
       body: JSON.stringify({}),
     });
@@ -157,7 +158,7 @@ describe('POST /api/auth/webhook', () => {
       data: {},
     });
 
-    const req = new Request('http://localhost/api/auth/webhook', {
+    const req = new NextRequest('http://localhost/api/auth/webhook', {
       method: 'POST',
       body: JSON.stringify({}),
     });
