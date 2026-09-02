@@ -102,6 +102,42 @@ describe('POST /api/admin/featured', () => {
     expect(JSON.stringify(body.issues)).toContain('gameId');
   });
 
+  // z.string().datetime() rejects minute-precision timestamps since zod 4.5
+  // (#9637). Pinned so the tightening is deliberate: seconds are required.
+  it('should return 400 for a minute-precision expiresAt (2026-01-01T00:00Z)', async () => {
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/admin/featured', {
+      method: 'POST',
+      body: JSON.stringify({ gameId: 'game_1', expiresAt: '2026-01-01T00:00Z' }),
+    });
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Validation failed');
+    expect(JSON.stringify(body.issues)).toContain('expiresAt');
+  });
+
+  it('accepts a second-precision expiresAt (2026-01-01T00:00:00Z) and proceeds past validation', async () => {
+    const selectChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(selectChain) } as never);
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/admin/featured', {
+      method: 'POST',
+      body: JSON.stringify({ gameId: 'nonexistent', expiresAt: '2026-01-01T00:00:00Z' }),
+    });
+    const res = await POST(req);
+
+    // Validation passed: the request reached the game lookup.
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('Game not found');
+  });
+
   it('should return 404 when game not found', async () => {
     const selectChain = {
       from: vi.fn().mockReturnThis(),
