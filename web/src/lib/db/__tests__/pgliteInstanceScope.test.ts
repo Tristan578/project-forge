@@ -1,0 +1,194 @@
+/**
+ * Pins the one-PGlite-per-file rule that `.claude/rules/gotchas-build-ci.md`
+ * states in prose.
+ *
+ * Repeated Postgres-WASM init/teardown inside a single vitest worker is the
+ * shape behind the intermittent V8 CHECK failure in
+ * `ThreadIsolation::UnregisterWasmAllocation` (SIGILL, exit 132) that failed
+ * Web Tests closed on #9590 — see #9643, upstream electric-sql/pglite#1053 and
+ * nodejs/node#64500. One instance per FILE (`beforeAll`) keeps the crash
+ * surface at one boot; a `beforeEach` multiplies it by the test count.
+ *
+ * Until this file existed the rule was a sentence in a rules document with no
+ * assertion behind it, so the next author to write a `beforeEach`-scoped
+ * harness reintroduced the churn silently. A convention enforced only by prose
+ * is not enforced.
+ *
+ * Two traps this scanner is deliberately shaped around:
+ *
+ * 1. **The population is NOT `*.db.test.ts`.** Three of the eight harness
+ *    consumers (`chargeRefund`, `radarReview`, `reverseAddonTokens`, all under
+ *    `lib/billing/__tests__/`) carry no `.db` suffix, and `pgliteHarness.test.ts`
+ *    — the file that actually crashed — carries none either. A sweep globbing
+ *    `*.db.test.ts` structurally skips the exemplar.
+ *
+ * 2. **`createTestHarness` is an ambiguous name.** `src/__integration__/harness.ts`
+ *    exports its own `createTestHarness()`, a Zustand store harness that boots
+ *    no WASM at all; six files call it from `beforeEach`, correctly. Matching
+ *    the bare identifier produces six false positives and would fail this suite
+ *    on healthy code, so every match is keyed on the IMPORT SPECIFIER resolving
+ *    to `lib/db/__tests__/pgliteHarness` (or a direct `new PGlite(`) instead.
+ */
+
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, join, relative } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { stripComments } from '@/test/utils/importScanner';
+
+/** `web/src` — the base every reported path is relative to. */
+const SRC = join(__dirname, '..', '..', '..');
+
+const SKIPPED_DIRS = new Set(['node_modules', '.next', 'dist', 'coverage']);
+
+/** The module whose `createTestHarness` really boots Postgres-WASM. */
+const HARNESS_MODULE = 'lib/db/__tests__/pgliteHarness';
+
+/** The only hook a PGlite boot may sit in. */
+const REQUIRED_HOOK = 'beforeAll';
+
+const HOOK_NAMES = ['beforeAll', 'beforeEach', 'afterAll', 'afterEach'];
+
+function collectTestFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (SKIPPED_DIRS.has(entry.name)) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...collectTestFiles(full));
+    } else if (/\.test\.tsx?$/.test(entry.name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/**
+ * True when `file` imports `createTestHarness` from the PGlite harness — by
+ * specifier, never by bare name. Covers the `@/lib/db/__tests__/pgliteHarness`
+ * alias and the `./pgliteHarness` relative form used from inside that folder.
+ */
+function importsPgliteHarness(file: string, lines: string[]): boolean {
+  const source = lines.join('\n');
+  const dir = relative(SRC, file).replace(/\\/g, '/');
+  const inHarnessDir = dir.startsWith('lib/db/__tests__/');
+
+  for (const statement of source.match(/import[\s\S]*?from\s*['"][^'"]+['"]/g) ?? []) {
+    if (!/\bcreateTestHarness\b/.test(statement)) continue;
+    // A type-only import boots nothing.
+    if (/^import\s+type\b/.test(statement.trim())) continue;
+    const specifier = statement.match(/from\s*['"]([^'"]+)['"]/)?.[1] ?? '';
+    const normalized = specifier.replace(/^@\//, '');
+    if (normalized === HARNESS_MODULE) return true;
+    if (inHarnessDir && /^\.{1,2}\/pgliteHarness$/.test(specifier)) return true;
+  }
+  return false;
+}
+
+/**
+ * The hook enclosing the call on `lineIndex`, or `null` at file/describe scope.
+ *
+ * Walks upward tracking brace balance: each `}` seen going up owes a `{`, so
+ * the first `{` that drives the balance negative opens the block we are inside.
+ * If that line names a hook, that is the answer; otherwise keep climbing, which
+ * is what lets a call nested in an `if` inside a `beforeAll` still resolve to
+ * `beforeAll`. Operates on comment-stripped lines, so a brace in a comment
+ * cannot skew the count.
+ */
+function enclosingHook(lines: string[], lineIndex: number): string | null {
+  let balance = 0;
+  for (let i = lineIndex; i >= 0; i -= 1) {
+    const line = lines[i];
+    // Scan right-to-left so the braces on the call's own line are counted
+    // relative to the call, not the whole line.
+    const scanFrom = i === lineIndex ? line.length - 1 : line.length - 1;
+    for (let c = scanFrom; c >= 0; c -= 1) {
+      if (line[c] === '}') balance += 1;
+      else if (line[c] === '{') {
+        balance -= 1;
+        if (balance < 0) {
+          const opener = line.slice(0, c);
+          const hook = HOOK_NAMES.find(name => new RegExp(`\\b${name}\\s*\\(`).test(opener));
+          if (hook) return hook;
+          balance = 0; // Keep climbing past a non-hook block.
+        }
+      }
+    }
+  }
+  return null;
+}
+
+interface Boot {
+  file: string;
+  line: number;
+  call: string;
+  hook: string | null;
+}
+
+function findBoots(): { boots: Boot[]; scanned: number; consumers: Set<string> } {
+  const boots: Boot[] = [];
+  const consumers = new Set<string>();
+  const files = collectTestFiles(SRC);
+
+  for (const file of files) {
+    // This file writes `new PGlite(` as a regex literal, so it is a match for
+    // itself — the same self-match the engine's `component_carry_tests.rs`
+    // sibling-file split exists to dodge. Excluding exactly one path (never a
+    // pattern) keeps that from widening into an escape hatch.
+    if (file === __filename) continue;
+    const lines = stripComments(readFileSync(file, 'utf8'));
+    const viaHarness = importsPgliteHarness(file, lines);
+
+    lines.forEach((line, index) => {
+      const direct = /\bnew\s+PGlite\s*\(/.test(line);
+      const factory = viaHarness && /\bcreateTestHarness\s*\(/.test(line);
+      if (!direct && !factory) return;
+      consumers.add(file);
+      boots.push({
+        file: relative(SRC, file).replace(/\\/g, '/'),
+        line: index + 1,
+        call: direct ? 'new PGlite(' : 'createTestHarness(',
+        hook: enclosingHook(lines, index),
+      });
+    });
+  }
+
+  return { boots, scanned: files.length, consumers };
+}
+
+describe('PGlite instances are scoped per file, not per test', () => {
+  const { boots, scanned, consumers } = findBoots();
+
+  // A scan that matches nothing reports zero problems and reads as coverage
+  // (lessons-learned #11). These three assertions are what make every verdict
+  // below a real one.
+  it('scanned a non-empty population', () => {
+    expect(scanned).toBeGreaterThan(0);
+    expect(boots.length).toBeGreaterThan(0);
+  });
+
+  it('matches harness consumers that do NOT carry the .db.test.ts suffix', () => {
+    // The whole point of the corrected rule: a `*.db.test.ts` glob misses these.
+    const names = new Set([...consumers].map(f => basename(f)));
+    for (const missed of ['chargeRefund.test.ts', 'radarReview.test.ts', 'reverseAddonTokens.test.ts']) {
+      expect(names).toContain(missed);
+    }
+  });
+
+  it('does not match the unrelated Zustand createTestHarness', () => {
+    // `src/__integration__/harness.ts` exports a same-named factory that boots
+    // no WASM; its callers use `beforeEach` correctly. Keying on the bare name
+    // instead of the specifier would drag them in and fail on healthy code.
+    const zustandHarness = join(SRC, '__integration__', 'harness.ts');
+    expect(statSync(zustandHarness).isFile()).toBe(true);
+    for (const file of consumers) {
+      expect(relative(SRC, file).replace(/\\/g, '/')).not.toMatch(/^__integration__\//);
+    }
+  });
+
+  it.each(
+    // Named per boot so a failure reports the offending file, not just a count.
+    findBoots().boots.map(b => [`${b.file}:${b.line}`, b] as const),
+  )('%s boots PGlite in beforeAll', (_label, boot) => {
+    expect(boot.hook).toBe(REQUIRED_HOOK);
+  });
+});
