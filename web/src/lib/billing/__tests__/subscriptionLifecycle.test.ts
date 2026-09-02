@@ -180,12 +180,17 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
     mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
   });
 
-  it('does nothing when user not found', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
+  // The fallback path is ONE CTE statement (#8187): it never touches the
+  // drizzle `select` chain, so queuing `mockSelectWhere.mockReturnValueOnce`
+  // here armed values nothing consumed — the mock*Once guard (#9542) flagged
+  // them as leaks into the next test. The observable contract is: exactly one
+  // audit CTE is issued and no multi-statement transaction runs; the
+  // user-not-found / zero-deduction / duplicate-refund outcomes are decided
+  // inside that SQL, which `mockNeonSql` cannot evaluate.
+  it('issues the single audit CTE and no transaction when the user is unknown', async () => {
     await reverseAddonTokens('ghost', 'ch_1', 500, 1000);
     expect(mockNeonTransaction).not.toHaveBeenCalled();
+    expect(mockNeonSqlCalls.filter(c => c.strings.some(s => s.includes('audit')))).toHaveLength(1);
   });
 
   it('deducts proportional tokens for partial refund via CTE', async () => {
@@ -214,21 +219,22 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
     expect(cteCall!.values).toContain('ch_full:1000');
   });
 
-  it('does nothing when calculated deduction is 0', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 10, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }]) });
-    // 1 cent refund of $100 = 0.01 ratio, floor(10 * 0.01) = 0
+  it('passes a tiny refund through the same single CTE (the zero-deduction floor lives in SQL)', async () => {
+    // 1 cent refund of $100: the CTE's floor(...) yields 0 and it inserts nothing.
     await reverseAddonTokens('user_abc', 'ch_tiny', 1, 10000);
     expect(mockNeonTransaction).not.toHaveBeenCalled();
+    const cte = mockNeonSqlCalls.find(c => c.strings.some(s => s.includes('audit')));
+    expect(cte).toBeDefined();
+    expect(cte!.values).toContain(1);
+    expect(cte!.values).toContain(10000);
   });
 
-  it('skips when refund already exists (idempotency)', async () => {
-    mockSelectWhere.mockReturnValueOnce({
-      limit: vi.fn().mockResolvedValue([{ id: 'existing-txn' }]),
-    });
+  it('carries the cumulative refund reference so the CTE can refuse a duplicate (idempotency)', async () => {
     await reverseAddonTokens('user_abc', 'ch_dup', 500, 1000);
     expect(mockNeonTransaction).not.toHaveBeenCalled();
+    const cte = mockNeonSqlCalls.find(c => c.strings.some(s => s.includes('audit')));
+    expect(cte).toBeDefined();
+    expect(cte!.values).toContain('ch_dup:500');
   });
 });
 
