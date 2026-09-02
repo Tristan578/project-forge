@@ -85,7 +85,8 @@ function importsPgliteHarness(file: string, lines: string[]): boolean {
 }
 
 /**
- * The hook enclosing the call on `lineIndex`, or `null` at file/describe scope.
+ * The hook enclosing the call that starts at `column` on `lineIndex`, or `null`
+ * at file/describe scope.
  *
  * Walks upward tracking brace balance: each `}` seen going up owes a `{`, so
  * the first `{` that drives the balance negative opens the block we are inside.
@@ -93,14 +94,20 @@ function importsPgliteHarness(file: string, lines: string[]): boolean {
  * is what lets a call nested in an `if` inside a `beforeAll` still resolve to
  * `beforeAll`. Operates on comment-stripped lines, so a brace in a comment
  * cannot skew the count.
+ *
+ * `column` is load-bearing, not decorative. On the call's own line the scan must
+ * start at the character BEFORE the call; starting at end-of-line counts the
+ * hook's own trailing `}`, which then cancels its opening `{` so the balance
+ * never goes negative and the hook is never named. That made every single-line
+ * `beforeAll(async () => { harness = await createTestHarness(); });` resolve to
+ * `null` — a false failure on fully compliant code. Pinned by the
+ * `enclosingHook` suite below.
  */
-function enclosingHook(lines: string[], lineIndex: number): string | null {
+export function enclosingHook(lines: string[], lineIndex: number, column: number): string | null {
   let balance = 0;
   for (let i = lineIndex; i >= 0; i -= 1) {
     const line = lines[i];
-    // Scan right-to-left so the braces on the call's own line are counted
-    // relative to the call, not the whole line.
-    const scanFrom = i === lineIndex ? line.length - 1 : line.length - 1;
+    const scanFrom = i === lineIndex ? column - 1 : line.length - 1;
     for (let c = scanFrom; c >= 0; c -= 1) {
       if (line[c] === '}') balance += 1;
       else if (line[c] === '{') {
@@ -130,24 +137,28 @@ function findBoots(): { boots: Boot[]; scanned: number; consumers: Set<string> }
   const files = collectTestFiles(SRC);
 
   for (const file of files) {
-    // This file writes `new PGlite(` as a regex literal, so it is a match for
-    // itself — the same self-match the engine's `component_carry_tests.rs`
-    // sibling-file split exists to dodge. Excluding exactly one path (never a
-    // pattern) keeps that from widening into an escape hatch.
+    // This file spells both call shapes out as plain string literals — in the
+    // `call:` field below and in the `enclosingHook` fixtures at the bottom —
+    // so it is a match for itself. (The two regexes above are NOT: after `new`
+    // comes a backslash, not whitespace.) Same self-match the engine's
+    // `component_carry_tests.rs` sibling-file split exists to dodge. Excluding
+    // exactly one path (never a pattern) keeps that from widening into an
+    // escape hatch.
     if (file === __filename) continue;
     const lines = stripComments(readFileSync(file, 'utf8'));
     const viaHarness = importsPgliteHarness(file, lines);
 
     lines.forEach((line, index) => {
-      const direct = /\bnew\s+PGlite\s*\(/.test(line);
-      const factory = viaHarness && /\bcreateTestHarness\s*\(/.test(line);
-      if (!direct && !factory) return;
+      const direct = /\bnew\s+PGlite\s*\(/.exec(line);
+      const factory = viaHarness ? /\bcreateTestHarness\s*\(/.exec(line) : null;
+      const match = direct ?? factory;
+      if (!match) return;
       consumers.add(file);
       boots.push({
         file: relative(SRC, file).replace(/\\/g, '/'),
         line: index + 1,
         call: direct ? 'new PGlite(' : 'createTestHarness(',
-        hook: enclosingHook(lines, index),
+        hook: enclosingHook(lines, index, match.index),
       });
     });
   }
@@ -186,9 +197,54 @@ describe('PGlite instances are scoped per file, not per test', () => {
   });
 
   it.each(
+    // Enumerates the SAME `boots` the three guards above certified — a second
+    // `findBoots()` call here would let the guards vouch for one array while
+    // the cases ran over another, and would re-read every test file under
+    // `web/src` a second time per run.
     // Named per boot so a failure reports the offending file, not just a count.
-    findBoots().boots.map(b => [`${b.file}:${b.line}`, b] as const),
+    boots.map(b => [`${b.file}:${b.line}`, b] as const),
   )('%s boots PGlite in beforeAll', (_label, boot) => {
     expect(boot.hook).toBe(REQUIRED_HOOK);
+  });
+});
+
+describe('enclosingHook', () => {
+  // The scanner is only as good as this function, and its failure direction is
+  // a FALSE FAILURE on compliant code, which is the kind a reviewer talks the
+  // author out of trusting. Each case below fails on the pre-fix version that
+  // started its backward scan at end-of-line.
+  const columnOf = (line: string) => line.indexOf('createTestHarness(');
+
+  it('resolves a hook written entirely on one line', () => {
+    const lines = ['  beforeAll(async () => { harness = await createTestHarness(); });'];
+    expect(enclosingHook(lines, 0, columnOf(lines[0]))).toBe('beforeAll');
+  });
+
+  it('names the offending hook when a one-line boot is per-test', () => {
+    // The verdict must differ by hook, not merely be non-null: a fix that
+    // returned `beforeAll` unconditionally would pass the case above.
+    const lines = ['  beforeEach(async () => { harness = await createTestHarness(); });'];
+    expect(enclosingHook(lines, 0, columnOf(lines[0]))).toBe('beforeEach');
+  });
+
+  it('resolves a hook spanning several lines', () => {
+    const lines = ['beforeAll(async () => {', '  harness = await createTestHarness();', '});'];
+    expect(enclosingHook(lines, 1, columnOf(lines[1]))).toBe('beforeAll');
+  });
+
+  it('climbs past an intervening non-hook block', () => {
+    const lines = [
+      'beforeAll(async () => {',
+      '  if (needed) {',
+      '    harness = await createTestHarness();',
+      '  }',
+      '});',
+    ];
+    expect(enclosingHook(lines, 2, columnOf(lines[2]))).toBe('beforeAll');
+  });
+
+  it('returns null at describe scope', () => {
+    const lines = ['describe("x", () => {', '  const harness = createTestHarness();', '});'];
+    expect(enclosingHook(lines, 1, columnOf(lines[1]))).toBeNull();
   });
 });
