@@ -65,14 +65,6 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-// Keep @anthropic-ai/sdk mock for modules that still import it indirectly
-vi.mock('@anthropic-ai/sdk', () => {
-  class MockAnthropic {
-    messages = { create: vi.fn() };
-  }
-  return { default: MockAnthropic };
-});
-
 // Mock the SpawnForge agent module — route.ts calls createSpawnforgeAgent().stream()
 function makeMockNegStreamResponse() {
   return new Response('f:{"messageId":"msg-1"}\n0:"Hello"\n', {
