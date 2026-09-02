@@ -103,6 +103,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         provider: data.provider,
         createdAt: Date.now(),
         usageId: data.usageId,
+        durable: data.durable === true,
         metadata: activeTab === 'sheet'
           ? { frameCount, frameSize: size.split('x')[0] }
           : undefined,

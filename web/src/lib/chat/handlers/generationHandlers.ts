@@ -28,6 +28,7 @@ export function trackJob(opts: {
   provider: string;
   entityId?: string;
   usageId?: string;
+  durable?: boolean;
   autoPlace?: boolean;
   targetEntityId?: string;
   materialSlot?: string;
@@ -43,6 +44,7 @@ export function trackJob(opts: {
     createdAt: Date.now(),
     entityId: opts.entityId,
     usageId: opts.usageId,
+    durable: opts.durable,
     autoPlace: opts.autoPlace,
     targetEntityId: opts.targetEntityId,
     materialSlot: opts.materialSlot,
@@ -147,6 +149,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.model3d,
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
       entityId: modelTargetId,
       autoPlace: p.data.autoPlace ?? true,
       targetEntityId: modelTargetId,
@@ -191,6 +194,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt ?? 'image-to-3d',
       provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.model3d,
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
       entityId: imageTargetId,
       autoPlace: p.data.autoPlace ?? true,
       targetEntityId: imageTargetId,
@@ -254,6 +258,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.texture,
       entityId: effectiveEntityId,
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
       autoPlace: p.data.autoPlace ?? !!effectiveEntityId,
       targetEntityId: effectiveEntityId,
       materialSlot,
@@ -299,6 +304,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.texture,
       entityId: effectiveEntityId,
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
       targetEntityId: effectiveEntityId,
     });
 
@@ -408,6 +414,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.texture,
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
     });
 
     return {
@@ -468,6 +475,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       provider: (data.provider as string) ?? DIRECT_CAPABILITY_PROVIDER.music,
       entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
       autoPlace: musicAutoPlace,
       targetEntityId: musicEntityId,
     });
@@ -511,6 +519,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
       entityId: spriteTargetId,
       autoPlace: p.data.autoPlace ?? !!spriteTargetId,
       targetEntityId: spriteTargetId,
@@ -551,6 +560,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: `sprite-sheet from ${p.data.sourceAssetId}`,
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
     });
 
     return {
@@ -591,6 +601,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
           prompt,
           provider: (result.data.provider as string) ?? 'dalle3',
           usageId: result.data.usageId as string | undefined,
+          durable: result.data.durable === true,
         });
         jobIds.push(result.data.jobId as string);
       }
@@ -633,6 +644,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
+      durable: data.durable === true,
     });
 
     return {
