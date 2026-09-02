@@ -31,9 +31,27 @@ interface ManifestEntry extends ManifestTool {
   category: string;
   tokenCost: number;
   requiredScope: string;
+  /**
+   * True when the command destroys or wholesale-replaces content the user
+   * already has, or has an irreversible effect outside the editor session.
+   * Absent (not `false`) on the ~92% of commands that are ordinary edits.
+   * Drives the agent's `toolApproval` map — see `getAgentToolApproval()`.
+   */
+  destructive?: boolean;
 }
 
 const manifest = manifestJson as { version: string; commands: ManifestEntry[] };
+
+/**
+ * The predicate that decides which manifest commands the agent advertises.
+ *
+ * Extracted so `getAgentTools()` and `getAgentToolApproval()` cannot drift:
+ * an approval map with a key the tool set does not contain is dead config,
+ * and a tool the map does not cover falls through the gate silently.
+ */
+function isAgentAdvertised(cmd: ManifestEntry): boolean {
+  return cmd.requiredScope.endsWith(':write') || cmd.category === 'query';
+}
 
 /**
  * Build AI SDK tool definitions from the MCP command manifest.
@@ -54,7 +72,7 @@ const manifest = manifestJson as { version: string; commands: ManifestEntry[] };
  */
 function getAgentTools() {
   const writeTools = manifest.commands
-    .filter((cmd) => cmd.requiredScope.endsWith(':write') || cmd.category === 'query')
+    .filter(isAgentAdvertised)
     .map((cmd) => ({
       name: cmd.name,
       description: cmd.description,
@@ -72,6 +90,43 @@ function getAgentTools() {
  * the chat route really uses, rather than against a helper it does not call.
  */
 export const AGENT_TOOLS = getAgentTools();
+
+/**
+ * Per-tool approval statuses handed to the SDK as `toolApproval` (PF-8860).
+ *
+ * `'user-approval'` makes the SDK stop the step loop for that call, emit a
+ * `tool-approval-request` UI chunk and add the toolCallId to
+ * `blockedToolCallIds` — no `tool-input-available` follows, so a destructive
+ * call cannot reach the client executor at all until the user answers.
+ * `'not-applicable'` is the SDK's "no gate" status and leaves a call on
+ * exactly today's path.
+ *
+ * Derived from the manifest's `destructive` flag rather than from
+ * `requiredScope`: `:write` covers 260 of 351 commands, so scope-gating would
+ * put an approval prompt in front of every `spawn_entity` in a normal
+ * "build me a platformer" turn. A gate that fires on 95% of ordinary edits is
+ * a gate users turn off.
+ *
+ * Keys are restricted to `isAgentAdvertised()` — the same predicate
+ * `getAgentTools()` uses — so the map can never name a tool the agent does not
+ * offer, and every offered tool has an explicit status.
+ */
+function getAgentToolApproval(): Record<string, 'user-approval' | 'not-applicable'> {
+  const approval: Record<string, 'user-approval' | 'not-applicable'> = {};
+  for (const cmd of manifest.commands) {
+    if (!isAgentAdvertised(cmd)) continue;
+    approval[cmd.name] = cmd.destructive === true ? 'user-approval' : 'not-applicable';
+  }
+  return approval;
+}
+
+/**
+ * The approval map the agent is constructed with. Cached at module load for
+ * the same reason as AGENT_TOOLS — static JSON, no per-request input.
+ *
+ * Exported so a test can assert the map against the tool set it must mirror.
+ */
+export const AGENT_TOOL_APPROVAL = getAgentToolApproval();
 
 // ---------------------------------------------------------------------------
 // Agent factory
@@ -208,6 +263,20 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
     model: modelInstance,
     instructions: buildAgentInstructions(instructions, isDirectBackend),
     tools: AGENT_TOOLS,
+    // Server-side gate on destructive calls (PF-8860). This is the only place
+    // the gate is enforced — the client-side `approvalMode` toggle in
+    // chatStore is a user convenience that never talks back to the model.
+    //
+    // `experimental_toolApprovalSecret` is deliberately NOT set. Setting it
+    // makes a missing/incorrect `signature` on the resumed approval-request a
+    // hard throw, and our resume history is reconstructed by the browser, so
+    // enabling it requires echoing the signature through the whole client
+    // resume path. Without it, the approval is not cryptographically bound to
+    // the arguments the user saw — acceptable here only because the browser
+    // executes every tool anyway (the client is the user), and because the SDK
+    // still rejects an `approvalId` it never issued. Revisit if tools ever
+    // gain server-side `execute` functions.
+    toolApproval: AGENT_TOOL_APPROVAL,
     stopWhen: stepCountIs(maxSteps),
     ...(hasProviderOptions ? { providerOptions } : {}),
     experimental_telemetry: { isEnabled: true },
