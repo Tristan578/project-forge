@@ -18,7 +18,11 @@ const mockJobs: Record<string, Record<string, unknown>> = {};
 vi.mock('@/stores/generationStore', () => ({
   useGenerationStore: Object.assign(
     (selector: (s: Record<string, unknown>) => unknown) =>
-      selector({ jobs: mockJobs, updateJob: mockUpdateJob }),
+      // Real Zustand hands the selector a fresh `jobs` object on every store
+      // update, which is what makes the hook's `[jobs]` effect re-run. Returning
+      // the mutable `mockJobs` map by reference froze those deps, so no test
+      // could exercise a state transition after mount. Snapshot it per read.
+      selector({ jobs: { ...mockJobs }, updateJob: mockUpdateJob }),
     {
       getState: () => ({ jobs: mockJobs }),
     },
@@ -889,6 +893,69 @@ describe('useGenerationPolling', () => {
 
     // Completed jobs should not be polled
     expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('resets the timeout clock when a job id is polled again after finishing', async () => {
+    // The teardown site that mattered is the poll-RESPONSE one (`completed` /
+    // `failed`), not the [jobs] sweep. Those paths deleted the id from timersRef,
+    // and the sweep only walks `Object.keys(timersRef.current)` — so whatever they
+    // forgot became unreachable for the life of the session. `startedAtRef` was
+    // the one being forgotten, and that is observable rather than merely a leak:
+    // startPolling seeds from `startedAtRef.current[id] ?? Date.now()`, so a
+    // re-queued id inherits the finished run's clock. With more than five minutes
+    // elapsed the very first poll trips MAX_POLL_DURATION_MS and the fresh job is
+    // failed and refunded before a single status request goes out (#9603).
+    //
+    // Driving the first run to `failed` (not mutating the store to `completed`)
+    // is load-bearing: the sweep always cleared startedAtRef itself, so a test
+    // that ends the run through the sweep passes against the unfixed code.
+    let statusPayload: Record<string, unknown> = {
+      jobId: 'job-reuse',
+      status: 'failed',
+      error: 'Generation failed',
+    };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => ({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(statusPayload),
+      }) as unknown as Response,
+    );
+
+    // No usageId, so the `failed` branch's triggerRefund returns before its fetch.
+    mockJobs['reuse'] = makeJob('reuse', { durable: true });
+    const { rerender } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(mockUpdateJob).toHaveBeenCalledWith('reuse', expect.objectContaining({
+      status: 'failed',
+    }));
+
+    // The store catches up to the terminal status the poll already applied.
+    mockJobs['reuse'] = makeJob('reuse', { durable: true, status: 'failed' });
+    rerender();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // More than the five-minute cap passes with the id idle.
+    await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60 * 1000); });
+
+    statusPayload = { jobId: 'job-reuse', status: 'processing', progress: 10 };
+    fetchSpy.mockClear();
+    mockUpdateJob.mockClear();
+
+    // Same id is queued again — a brand-new run.
+    mockJobs['reuse'] = makeJob('reuse', { durable: true, status: 'pending' });
+    rerender();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // It must actually poll, not time out on its first tick.
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/generate/model/status?jobId=job-reuse'),
+    );
+    const timedOut = mockUpdateJob.mock.calls.some(
+      (c: unknown[]) => (c[1] as Record<string, unknown>).error === 'Generation timed out',
+    );
+    expect(timedOut).toBe(false);
     fetchSpy.mockRestore();
   });
 

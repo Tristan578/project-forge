@@ -90,6 +90,23 @@ export function useGenerationPolling() {
     };
   }, []);
 
+  // Every teardown path must drop the job from ALL four ref maps, not just the
+  // timer. The bookkeeping sweep in the [jobs] effect below iterates
+  // `Object.keys(timersRef.current)`, so an id already removed from timersRef is
+  // unreachable there — anything a teardown site forgets stays for the life of
+  // the session. `startedAtRef` was the one being missed, and it is not merely a
+  // leak: startPolling reads `startedAtRef.current[id] ?? Date.now()`, so a
+  // re-queued job reusing an id inherits the previous run's clock and can trip
+  // the five-minute cap on its very first poll, failing and refunding a job that
+  // just started (#9603).
+  function stopPolling(id: string) {
+    clearInterval(timersRef.current[id]);
+    delete timersRef.current[id];
+    delete startedAtRef.current[id];
+    delete durablePollsRef.current[id];
+    delete inFlightPollsRef.current[id];
+  }
+
   function startPolling(id: string, jobId: string, type: string, durable: boolean) {
     const poll = async () => {
       // Focus/visibility and the safety interval can fire together. Serialize
@@ -107,9 +124,7 @@ export function useGenerationPolling() {
           status: 'failed',
           error: 'Generation timed out',
         });
-        clearInterval(timersRef.current[id]);
-        delete timersRef.current[id];
-        delete durablePollsRef.current[id];
+        stopPolling(id);
         return;
       }
 
@@ -130,9 +145,7 @@ export function useGenerationPolling() {
           await handleCompletion(id, type, data);
 
           // Stop polling
-          clearInterval(timersRef.current[id]);
-          delete timersRef.current[id];
-          delete durablePollsRef.current[id];
+          stopPolling(id);
         } else if (data.status === 'failed') {
           await triggerRefund(id);
           updateJob(id, {
@@ -141,9 +154,7 @@ export function useGenerationPolling() {
           });
 
           // Stop polling
-          clearInterval(timersRef.current[id]);
-          delete timersRef.current[id];
-          delete durablePollsRef.current[id];
+          stopPolling(id);
         } else {
           // Update progress
           updateJob(id, {
@@ -566,11 +577,7 @@ export function useGenerationPolling() {
     const activeJobIds = new Set(activeJobs.map((j) => j.id));
     for (const id of Object.keys(timersRef.current)) {
       if (!activeJobIds.has(id)) {
-        clearInterval(timersRef.current[id]);
-        delete timersRef.current[id];
-        delete startedAtRef.current[id];
-        delete durablePollsRef.current[id];
-        delete inFlightPollsRef.current[id];
+        stopPolling(id);
       }
     }
     // NOTE: No cleanup return here — clearing all timers on deps change would stop
