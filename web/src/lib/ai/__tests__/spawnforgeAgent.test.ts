@@ -37,15 +37,9 @@ vi.mock('@/lib/ai/toolAdapter', () => ({
   convertManifestToolsToSdkTools: vi.fn(() => ({})),
 }));
 
-vi.mock('@/lib/ai/models', async () => {
-  // Real thinkingModeFor / supportsEffort (#9626); only the ids are stubbed.
-  const actual = await vi.importActual<typeof import('@/lib/ai/models')>('@/lib/ai/models');
-  return {
-    ...actual,
-    AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
-    AI_MODELS: { gatewayChat: 'anthropic/claude-sonnet-4.6' },
-  };
-});
+// `@/lib/ai/models` is deliberately NOT mocked. Replacing it with a fixture
+// set of invented ids decoupled the providerOptions this suite asserts from
+// the per-model table production actually consults (PF-1216 / #9339).
 
 vi.mock('@/data/commands.json', () => ({
   default: { version: '1', commands: [] },
@@ -55,6 +49,13 @@ import {
   buildAgentInstructions,
   createSpawnforgeAgent,
 } from '@/lib/ai/spawnforgeAgent';
+import {
+  AI_MODEL_PREMIUM,
+  AI_MODEL_PRIMARY,
+  GATEWAY_MODEL_CHAT,
+  GATEWAY_MODEL_FAST,
+  GATEWAY_MODEL_PREMIUM,
+} from '@/lib/ai/models';
 
 describe('buildAgentInstructions', () => {
   it('passes a plain string through unchanged', () => {
@@ -144,9 +145,12 @@ describe('buildAgentInstructions', () => {
   });
 });
 
+// The model id is load-bearing now: the thinking/effort shape is chosen per
+// model by `models.ts`, not per backend (PF-1216 / #9339). Use the live
+// primary constant so this base case tracks whatever the product ships.
 const baseOptions = {
   isDirectBackend: true,
-  model: 'claude-sonnet-4.5',
+  model: AI_MODEL_PRIMARY,
   instructions: 'system text',
 };
 
@@ -155,34 +159,74 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     mockToolLoopAgent.mockClear();
   });
 
+  // Both are Claude 5 (adaptive + effort); the per-model table below is what
+  // covers the families that answer a different shape.
+  const premiumOptions = { ...baseOptions, model: AI_MODEL_PREMIUM };
+
   it('omits providerOptions when neither thinking nor effort is set', () => {
     createSpawnforgeAgent(baseOptions);
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
     expect(args.providerOptions).toBeUndefined();
   });
 
-  // The shape is decided by the MODEL (#9626): baseOptions' claude-sonnet-4.5
-  // takes the budget form; the premium model takes adaptive and effort.
-  const premiumOptions = { ...baseOptions, model: 'claude-opus-4-8' };
-
-  it('emits the budget thinking form for a model that rejects adaptive (sonnet 4.5)', () => {
+  it('emits the adaptive thinking shape for a Claude 5 model on the direct backend', () => {
     createSpawnforgeAgent({ ...baseOptions, thinking: true });
-    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
-    expect(args.providerOptions).toEqual({
-      anthropic: { thinking: { type: 'enabled', budgetTokens: 10000 } },
-    });
-  });
-
-  it('emits the adaptive thinking form for the premium model, which 400s on the budget form', () => {
-    createSpawnforgeAgent({ ...premiumOptions, thinking: true });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
     expect(args.providerOptions).toEqual({
       anthropic: { thinking: { type: 'adaptive' } },
     });
   });
 
-  it('emits anthropic.effort when effort is set on a model that supports it', () => {
-    createSpawnforgeAgent({ ...premiumOptions, effort: 'medium' });
+  // The regression this whole table exists for: Claude 4.7+ answers
+  // `{ type: 'enabled' }` with HTTP 400, and Haiku 4.5 answers
+  // `{ type: 'adaptive' }` with HTTP 400. Asserting the ABSENCE of the wrong
+  // key is the half that would have caught the live bug.
+  it.each([
+    ['claude-sonnet-5', { type: 'adaptive' }],
+    ['claude-opus-5', { type: 'adaptive' }],
+    ['claude-sonnet-4-6', { type: 'adaptive' }],
+    ['claude-opus-4-8', { type: 'adaptive' }],
+    ['claude-haiku-4-5', { type: 'enabled', budgetTokens: 10000 }],
+    ['claude-haiku-4-5-20251001', { type: 'enabled', budgetTokens: 10000 }],
+    // The dotted spelling parses the same as the dashed one (#9626).
+    ['claude-sonnet-4.5', { type: 'enabled', budgetTokens: 10000 }],
+  ])('emits the right thinking shape for %s', (model, expected) => {
+    createSpawnforgeAgent({ ...baseOptions, model, thinking: true });
+    const args = mockToolLoopAgent.mock.calls[0][0] as {
+      providerOptions?: { anthropic: { thinking?: Record<string, unknown> } };
+    };
+    expect(args.providerOptions?.anthropic.thinking).toEqual(expected);
+  });
+
+  it('never sends budgetTokens to a Claude 5 model', () => {
+    for (const model of ['claude-sonnet-5', 'claude-opus-5']) {
+      mockToolLoopAgent.mockClear();
+      createSpawnforgeAgent({ ...baseOptions, model, thinking: true, effort: 'high' });
+      const args = mockToolLoopAgent.mock.calls[0][0] as {
+        providerOptions?: { anthropic: { thinking?: Record<string, unknown> } };
+      };
+      expect(args.providerOptions?.anthropic.thinking).not.toHaveProperty('budgetTokens');
+      expect(args.providerOptions?.anthropic.thinking).not.toHaveProperty('type', 'enabled');
+    }
+  });
+
+  it('omits thinking entirely for a model with no known shape rather than 400-ing', () => {
+    // Fail-safe direction: an unmapped id degrades the feature to a no-op.
+    createSpawnforgeAgent({ ...baseOptions, model: 'gpt-4o-mini', thinking: true });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
+    expect(args.providerOptions).toBeUndefined();
+  });
+
+  it('drops effort for a model that does not accept it (Haiku 4.5)', () => {
+    createSpawnforgeAgent({ ...baseOptions, model: 'claude-haiku-4-5', effort: 'high' });
+    const args = mockToolLoopAgent.mock.calls[0][0] as {
+      providerOptions?: { anthropic?: { effort?: string } };
+    };
+    expect(args.providerOptions).toBeUndefined();
+  });
+
+  it('emits anthropic.effort when effort is set on direct backend', () => {
+    createSpawnforgeAgent({ ...baseOptions, effort: 'medium' });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
     expect(args.providerOptions).toEqual({
       anthropic: { effort: 'medium' },
@@ -197,12 +241,6 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     });
   });
 
-  it('omits providerOptions entirely when only an unsupported effort is set', () => {
-    createSpawnforgeAgent({ ...baseOptions, effort: 'medium' });
-    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
-    expect(args.providerOptions).toBeUndefined();
-  });
-
   it('emits both adaptive thinking and effort together on the premium model', () => {
     createSpawnforgeAgent({ ...premiumOptions, thinking: true, effort: 'high' });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
@@ -214,17 +252,6 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     });
   });
 
-  it.each([
-    ['claude-opus-4-8', { type: 'adaptive' }],
-    ['claude-sonnet-4-6', { type: 'adaptive' }],
-    ['claude-sonnet-4.5', { type: 'enabled', budgetTokens: 10000 }],
-    ['claude-haiku-4-5-20251001', { type: 'enabled', budgetTokens: 10000 }],
-  ])('thinking shape for %s', (model, expected) => {
-    createSpawnforgeAgent({ ...baseOptions, model, thinking: true });
-    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: { thinking: unknown } } };
-    expect(args.providerOptions?.anthropic.thinking).toEqual(expected);
-  });
-
   it('does not emit anthropic thinking/effort for the gateway backend (only the gateway routing fields)', () => {
     createSpawnforgeAgent({
       ...baseOptions,
@@ -234,7 +261,9 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic?: unknown; gateway?: unknown } };
     expect(args.providerOptions?.anthropic).toBeUndefined();
-    expect(args.providerOptions).toEqual({ gateway: { caching: 'auto' } });
+    expect(args.providerOptions).toEqual({
+      gateway: { models: [GATEWAY_MODEL_FAST], caching: 'auto' },
+    });
   });
 
   it('forwards effort=low and effort=high without modification', () => {
@@ -260,31 +289,35 @@ describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', (
     mockToolLoopAgent.mockClear();
   });
 
-  // The stubbed gatewayChat id is not in the fallback chain, so these cases
-  // see caching only; the fallback list is covered below with real ids (#9631).
+  // These cases run on the real primary model, which sits mid-chain, so each
+  // one carries the ordered fallback list alongside the field under test.
   it('always emits gateway.caching on the gateway backend, even with neither userId nor tags', () => {
     createSpawnforgeAgent(gatewayBase);
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
-    expect(args.providerOptions).toEqual({ gateway: { caching: 'auto' } });
+    expect(args.providerOptions).toEqual({ gateway: { models: [GATEWAY_MODEL_FAST], caching: 'auto' } });
   });
 
   it('emits providerOptions.gateway.user on the gateway backend when userId is set', () => {
     createSpawnforgeAgent({ ...gatewayBase, userId: 'user_123' });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
-    expect(args.providerOptions).toEqual({ gateway: { user: 'user_123', caching: 'auto' } });
+    expect(args.providerOptions).toEqual({
+      gateway: { user: 'user_123', models: [GATEWAY_MODEL_FAST], caching: 'auto' },
+    });
   });
 
   it('emits providerOptions.gateway.tags on the gateway backend when tags is set', () => {
     createSpawnforgeAgent({ ...gatewayBase, tags: ['route:chat', 'tier:pro'] });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
-    expect(args.providerOptions).toEqual({ gateway: { tags: ['route:chat', 'tier:pro'], caching: 'auto' } });
+    expect(args.providerOptions).toEqual({
+      gateway: { tags: ['route:chat', 'tier:pro'], models: [GATEWAY_MODEL_FAST], caching: 'auto' },
+    });
   });
 
   it('emits both userId and tags together on the gateway backend', () => {
     createSpawnforgeAgent({ ...gatewayBase, userId: 'user_123', tags: ['route:chat'] });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
     expect(args.providerOptions).toEqual({
-      gateway: { user: 'user_123', tags: ['route:chat'], caching: 'auto' },
+      gateway: { user: 'user_123', tags: ['route:chat'], models: [GATEWAY_MODEL_FAST], caching: 'auto' },
     });
   });
 
@@ -295,8 +328,8 @@ describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', (
   });
 
   it.each([
-    ['anthropic/claude-opus-4-8', ['anthropic/claude-sonnet-4-6', 'anthropic/claude-haiku-4-5']],
-    ['anthropic/claude-sonnet-4-6', ['anthropic/claude-haiku-4-5']],
+    [GATEWAY_MODEL_PREMIUM, [GATEWAY_MODEL_CHAT, GATEWAY_MODEL_FAST]],
+    [GATEWAY_MODEL_CHAT, [GATEWAY_MODEL_FAST]],
   ])('emits the ordered fallback list for %s (#9631)', (model, models) => {
     createSpawnforgeAgent({ ...gatewayBase, model });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
@@ -304,7 +337,7 @@ describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', (
   });
 
   it('emits no fallback list for the cheapest model or an unknown provider model', () => {
-    for (const model of ['anthropic/claude-haiku-4-5', 'openai/gpt-4o-mini']) {
+    for (const model of [GATEWAY_MODEL_FAST, 'openai/gpt-4o-mini']) {
       mockToolLoopAgent.mockClear();
       createSpawnforgeAgent({ ...gatewayBase, model });
       const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
@@ -332,7 +365,7 @@ describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', (
     });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic?: unknown; gateway?: unknown } };
     expect(args.providerOptions).toEqual({
-      anthropic: { thinking: { type: 'enabled', budgetTokens: 10000 } },
+      anthropic: { thinking: { type: 'adaptive' } },
     });
   });
 });

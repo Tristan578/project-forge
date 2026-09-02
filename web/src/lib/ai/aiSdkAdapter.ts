@@ -33,24 +33,29 @@ import { DEFAULT_MAX_TOKENS, THINKING_MAX_TOKENS } from '@/lib/constants';
 
 /**
  * Map a canonical SpawnForge model name to the gateway format string.
- * Gateway uses `provider/model` format (e.g. `anthropic/claude-sonnet-4-6`).
+ * Gateway uses `provider/model` format (e.g. `anthropic/claude-sonnet-5`).
  *
  * Derives the mapping from AI_MODELS (the single source of truth) rather
  * than maintaining a duplicate local map that can drift out of sync.
+ *
+ * Matching is EXACT. It used to fall through to `.includes('sonnet')` /
+ * `'opus'` / `'haiku'`, which turns a version bump into a silent model swap:
+ * once `AI_MODELS.deep` moved to Opus 5, an explicit `claude-opus-4-8` request
+ * matched the `opus` substring and came back as `anthropic/claude-opus-5` —
+ * a different model than the caller named, with no warning (PF-1216 / #9339).
+ * An unrecognised `claude-*` id now keeps its own name under the `anthropic/`
+ * prefix, so a wrong id fails loudly at the provider instead of quietly
+ * resolving to something else.
  */
 function toGatewayModelId(canonicalModel: string): string {
   // Already in gateway format
   if (canonicalModel.includes('/')) return canonicalModel;
   // Map known canonical model IDs to their gateway equivalents via AI_MODELS
-  if (canonicalModel === AI_MODELS.chat || canonicalModel.includes('sonnet')) {
-    return AI_MODELS.gatewayChat;
-  }
-  if (canonicalModel === AI_MODELS.fast || canonicalModel.includes('haiku')) {
-    return AI_MODELS.gatewayChat; // haiku routes to chat gateway by default
-  }
-  if (canonicalModel === AI_MODELS.deep || canonicalModel.includes('opus')) {
-    return AI_MODELS.gatewayDeep;
-  }
+  if (canonicalModel === AI_MODELS.chat) return AI_MODELS.gatewayChat;
+  // Deliberate, pre-existing behaviour: the fast tier has no separate gateway
+  // route here and rides the chat gateway model.
+  if (canonicalModel === AI_MODELS.fast) return AI_MODELS.gatewayChat;
+  if (canonicalModel === AI_MODELS.deep) return AI_MODELS.gatewayDeep;
   // Fallback: construct gateway ID from canonical name
   return `anthropic/${canonicalModel}`;
 }
