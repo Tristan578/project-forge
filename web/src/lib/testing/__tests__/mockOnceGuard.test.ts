@@ -195,8 +195,19 @@ function fixtureLine(fixture: string, marker: string): number {
   return idx + 1;
 }
 
+/**
+ * Escape every regex metacharacter, not just `.`. Today's fixture names carry
+ * nothing else, so this is a latent hazard rather than a live bug — but a
+ * fixture named with a `+`, `(` or `[` would silently change what the pattern
+ * matches instead of failing, which is the direction that ships a green
+ * assertion over the wrong site.
+ */
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function sitePattern(fixture: string, marker: string): RegExp {
-  return new RegExp(`${fixture.replace(/\./g, '\\.')}:${fixtureLine(fixture, marker)}:\\d+`);
+  return new RegExp(`${escapeRegExp(fixture)}:${fixtureLine(fixture, marker)}:\\d+`);
 }
 
 const EVERY_FIXTURE_TEST = 21;
