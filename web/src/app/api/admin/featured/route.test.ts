@@ -80,6 +80,7 @@ describe('GET /api/admin/featured', () => {
 
 describe('POST /api/admin/featured', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
@@ -226,6 +227,7 @@ describe('POST /api/admin/featured', () => {
 
 describe('DELETE /api/admin/featured', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
