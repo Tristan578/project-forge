@@ -126,6 +126,37 @@ describe('fetchAI', () => {
     await expect(fetchAI('prompt')).rejects.toThrow(/rate limit/i);
   });
 
+  it('keeps the wait time when the 429 body already carries one', async () => {
+    // rateLimitResponse() puts the wait in the sentence; the generic rewrite
+    // used to throw it away and leave this path vaguer than the generate
+    // dialogs (#9623).
+    mockFetch.mockResolvedValueOnce(
+      makeErrorResponse(429, { error: 'Too many requests. Try again in 5 minutes.' }),
+    );
+
+    const { fetchAI } = await import('../client');
+    await expect(fetchAI('prompt')).rejects.toThrow('Too many requests. Try again in 5 minutes.');
+  });
+
+  it('keeps the singular wait too — the 60-second windows say "1 minute"', async () => {
+    // /api/chat is 10 per 60 s, so this is the most common production 429.
+    mockFetch.mockResolvedValueOnce(
+      makeErrorResponse(429, { error: 'Too many requests. Try again in 1 minute.' }),
+    );
+
+    const { fetchAI } = await import('../client');
+    await expect(fetchAI('prompt')).rejects.toThrow('Too many requests. Try again in 1 minute.');
+  });
+
+  it('keeps a wait expressed in seconds — the most common 429 mid-window', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeErrorResponse(429, { error: 'Too many requests. Try again in 45 seconds.' }),
+    );
+
+    const { fetchAI } = await import('../client');
+    await expect(fetchAI('prompt')).rejects.toThrow('Too many requests. Try again in 45 seconds.');
+  });
+
   it('throws a user-friendly message on 401', async () => {
     mockFetch.mockResolvedValueOnce(makeErrorResponse(401, { error: 'Unauthorized' }));
 

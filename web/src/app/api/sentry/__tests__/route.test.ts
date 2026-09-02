@@ -72,7 +72,7 @@ describe('POST /api/sentry', () => {
     it('returns 429 when rateLimitPublicRoute returns a response', async () => {
       const { NextResponse } = await import('next/server');
       const limitResponse = NextResponse.json(
-        { error: 'Too many requests. Please try again later.' },
+        { error: 'Too many requests. Try again in 1 minute.' },
         { status: 429 }
       );
       rateLimitPublicRouteMock.mockResolvedValue(limitResponse);
