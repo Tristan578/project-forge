@@ -133,10 +133,34 @@ export async function POST(request: NextRequest) {
   }
 
   // Check slug availability (for this user)
-  const existingSlug = await queryWithResilience(() => getDb().select({ id: publishedGames.id, version: publishedGames.version })
+  const existingSlug = await queryWithResilience(() => getDb().select({
+      id: publishedGames.id,
+      version: publishedGames.version,
+      flaggedAt: publishedGames.flaggedAt,
+    })
     .from(publishedGames)
     .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
     .limit(1));
+
+  // A game under a moderation hold cannot be republished by its creator
+  // (#8354). Without this the auto-hide is trivially bypassable: republish
+  // sets status back to 'published' unconditionally, and DELETE /api/publish/[id]
+  // (creator unpublish) only moves the row to 'unpublished', so a reported game
+  // could be restored in two calls. flaggedAt — not status — is the gate,
+  // because it is the one field that survives that round trip; an admin approve
+  // and a won appeal both clear it, which is what re-enables republishing.
+  if (existingSlug.length > 0 && existingSlug[0].flaggedAt !== null) {
+    reqLogAuth.warn('Republish blocked by moderation hold', { gameId: existingSlug[0].id });
+    return NextResponse.json(
+      {
+        error:
+          'This game is under moderation review and cannot be republished. ' +
+          'You can appeal the decision at /api/moderation/appeal.',
+        code: 'MODERATION_HOLD',
+      },
+      { status: 403 },
+    );
+  }
 
   // Get project data (verify ownership)
   const [project] = await queryWithResilience(() => getDb().select().from(projects)

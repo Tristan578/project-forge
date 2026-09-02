@@ -559,7 +559,8 @@ describe('POST /api/publish', () => {
   // -------------------------------------------------------------------------
   describe('republish (update existing slug)', () => {
     it('returns 200 when republishing an existing slug', async () => {
-      const existingPublication = { id: 'pub-existing', version: 2 };
+      // flaggedAt is always selected by the route; null = no moderation hold.
+      const existingPublication = { id: 'pub-existing', version: 2, flaggedAt: null };
       const updatedPub = makePublication({ id: 'pub-existing', version: 3 });
 
       const mockUpdate = vi.fn().mockReturnValue({
@@ -612,6 +613,44 @@ describe('POST /api/publish', () => {
 
       const body = await res.json();
       expect(body).toHaveProperty('publication');
+    });
+
+    it('refuses to republish a game under a moderation hold (#8354)', async () => {
+      // A reported game is auto-hidden with flaggedAt set. Republishing sets
+      // status back to 'published' unconditionally, so without this gate the
+      // creator could undo any takedown in one call.
+      const heldPublication = {
+        id: 'pub-held',
+        version: 2,
+        flaggedAt: new Date('2026-05-01T00:00:00.000Z'),
+      };
+
+      const mockUpdate = vi.fn();
+      const selectMock = vi
+        .fn()
+        .mockReturnValueOnce({
+          // publish-limit count
+          from: () => ({ where: () => Promise.resolve([]) }),
+        })
+        .mockReturnValueOnce({
+          // existing slug found — and it is on hold
+          from: () => ({
+            where: () => ({ limit: () => Promise.resolve([heldPublication]) }),
+          }),
+        });
+
+      vi.mocked(getDb).mockReturnValue({
+        select: selectMock,
+        update: mockUpdate,
+      } as never);
+
+      const res = await POST(makeRequest(validBody()));
+      const body = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(body.code).toBe('MODERATION_HOLD');
+      // The status flip must never run.
+      expect(mockUpdate).not.toHaveBeenCalled();
     });
   });
 });
