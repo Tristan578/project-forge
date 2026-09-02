@@ -3085,7 +3085,8 @@ OUTPUTS_EOF
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
-            scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
@@ -3273,7 +3274,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=568
+readonly SELF_EXEC_EXPECTED_DROP=571
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3593,7 +3594,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
-            scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
@@ -3663,6 +3665,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/alias-wasm-cdn-version.test.sh
       - name: Run post-deploy health gate test suite
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
+      - name: Run CD rolling-release helper test suite
+        run: bash scripts/__tests__/cd-rolling-release.test.sh
       - name: Run CD tree-validation gate test suite
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run engine WASM cache-key test suite

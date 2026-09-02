@@ -30,6 +30,18 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     launchOptions: { args: ['--disable-gpu', '--no-sandbox'] },
+    // When pointed at a Deployment-Protection-guarded URL (a preview or the
+    // staging project's deployment URL), the automation bypass secret goes in
+    // the documented header on every request; `x-vercel-set-bypass-cookie`
+    // keeps follow-up navigations authorised.
+    ...(process.env.VERCEL_AUTOMATION_BYPASS
+      ? {
+          extraHTTPHeaders: {
+            'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS,
+            'x-vercel-set-bypass-cookie': 'true',
+          },
+        }
+      : {}),
   },
 
   projects: [

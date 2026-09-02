@@ -1,0 +1,5 @@
+---
+"web": patch
+---
+
+Production deploys are now verified against the build that was just made. The post-deploy health check and smoke tests used to run against the public domain during a Rolling Release, where 95% of traffic still went to the previous build, and the health check against the protected deployment URL could never authenticate and exited 0 with a warning. Both now pin themselves to the rolling-release canary through Vercel's `vcrrForceCanary` cookie and assert that `/api/health` reports the commit this run deployed; a protected answer fails the check instead of passing it. The last-known-good deployment is read from the Rolling Release API so automatic rollback can actually fire, and rollback uses Instant Rollback rather than a promote that would start another staged rollout of the old build.

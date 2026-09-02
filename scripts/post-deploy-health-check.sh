@@ -5,25 +5,50 @@
 # Waits for the deployment to stabilize before the first attempt.
 #
 # Usage:
-#   bash scripts/post-deploy-health-check.sh <deployment-url>
+#   bash scripts/post-deploy-health-check.sh <base-url>
 #
 # Arguments:
-#   deployment-url   Base URL of the deployment (no trailing slash).
-#                    Example: https://spawnforge-abc123.vercel.app
+#   base-url   Base URL to probe (no trailing slash). Either a deployment URL
+#              (https://spawnforge-abc123.vercel.app) or the public production
+#              domain (https://www.spawnforge.ai) — see HEALTH_CHECK_FORCE_CANARY.
 #
 # Environment variables (all optional):
-#   HEALTH_CHECK_RETRIES      Number of attempts before declaring failure (default: 3)
-#   HEALTH_CHECK_INTERVAL_S   Seconds between retry attempts (default: 10)
-#   HEALTH_CHECK_STABILIZE_S  Seconds to wait before the first check (default: 30)
-#   HEALTH_CHECK_TIMEOUT_S    curl max-time per request in seconds (default: 15)
-#   VERCEL_AUTOMATION_BYPASS  Deployment Protection bypass secret (from Vercel project
-#                             settings). Required for preview/staging deployments that
-#                             have Deployment Protection enabled — without it, curl
-#                             receives HTTP 401 instead of the actual health response.
+#   HEALTH_CHECK_RETRIES        Number of attempts before declaring failure (default: 3)
+#   HEALTH_CHECK_INTERVAL_S     Seconds between retry attempts (default: 10)
+#   HEALTH_CHECK_STABILIZE_S    Seconds to wait before the first check (default: 30)
+#   HEALTH_CHECK_TIMEOUT_S      curl max-time per request in seconds (default: 15)
+#   HEALTH_CHECK_FORCE_CANARY   'true' to probe the ROLLING RELEASE CANARY through
+#                               the public domain: the first request carries
+#                               `?vcrrForceCanary=true`, Vercel answers with the
+#                               `_vcrr_*` cookie pinning this client to the canary,
+#                               and a cookie jar carries it on every later request.
+#                               This is how CD verifies the build it just made
+#                               without any Deployment Protection credential:
+#                               the public domain is unprotected, and the cookie
+#                               is documented at vercel.com/docs/rolling-releases.
+#   HEALTH_CHECK_EXPECT_COMMIT  When set, /api/health's `commit` (first 8 chars of
+#                               VERCEL_GIT_COMMIT_SHA) must match this SHA's first
+#                               8 chars, or the check fails. This is what proves
+#                               the probe reached THIS deploy and not the base.
+#   VERCEL_AUTOMATION_BYPASS    Deployment Protection bypass secret. Sent as the
+#                               `x-vercel-protection-bypass` HEADER (never a query
+#                               parameter — those land in logs). Works for Vercel
+#                               Authentication, Password Protection and Trusted
+#                               IPs alike (vercel.com/docs/deployment-protection/
+#                               methods-to-bypass-deployment-protection/
+#                               protection-bypass-automation).
 #
 # Exit codes:
 #   0  All checks passed — deployment is healthy
-#   1  Deployment unhealthy after all retries — caller should trigger rollback
+#   1  Deployment unhealthy, unreachable, or NOT OBSERVABLE after all retries —
+#      caller should treat the deploy as unverified and roll back / stop.
+#
+# There is deliberately no "could not authenticate, exit 0" path. Until #9624
+# this script warned and exited 0 whenever Deployment Protection answered the
+# probe, which was every production run (the deployment URL is SSO-protected and
+# nothing passed a bypass), so the gate had never observed a single deploy it
+# reported as healthy. A check that cannot observe the artifact is not a check;
+# it must fail, and say why.
 
 set -euo pipefail
 
@@ -31,27 +56,36 @@ set -euo pipefail
 
 DEPLOY_URL="${1:-}"
 if [[ -z "$DEPLOY_URL" ]]; then
-  echo "::error::Usage: $0 <deployment-url>"
+  echo "::error::Usage: $0 <base-url>"
   exit 1
 fi
+DEPLOY_URL="${DEPLOY_URL%/}"
 
 RETRIES="${HEALTH_CHECK_RETRIES:-3}"
 INTERVAL="${HEALTH_CHECK_INTERVAL_S:-10}"
 STABILIZE="${HEALTH_CHECK_STABILIZE_S:-30}"
 TIMEOUT="${HEALTH_CHECK_TIMEOUT_S:-15}"
+FORCE_CANARY="${HEALTH_CHECK_FORCE_CANARY:-false}"
+EXPECT_COMMIT="${HEALTH_CHECK_EXPECT_COMMIT:-}"
 
 HEALTH_ENDPOINT="${DEPLOY_URL}/api/health"
+# TEST SEAMS: the suite points these at a scratch directory.
+RESPONSE_FILE="${HEALTH_RESPONSE_FILE:-/tmp/health_response.json}"
+HEADERS_FILE="${HEALTH_HEADERS_FILE:-/tmp/health_headers.txt}"
 
-# Determine the fetch command. SSO-protected deployments reject bypass tokens;
-# they require Vercel CLI authentication. Use `vercel curl` when VERCEL_TOKEN
-# is available (set by the CD workflow), falling back to plain curl + bypass params.
-USE_VERCEL_CURL=false
-if command -v vercel >/dev/null 2>&1 && [ -n "${VERCEL_TOKEN:-}" ]; then
-  USE_VERCEL_CURL=true
-  echo "Using 'vercel curl' for authenticated health check (SSO bypass)"
-elif [ -n "${VERCEL_AUTOMATION_BYPASS:-}" ]; then
-  HEALTH_ENDPOINT="${DEPLOY_URL}/api/health?x-vercel-protection-bypass=${VERCEL_AUTOMATION_BYPASS}&x-vercel-set-bypass-cookie=true"
-  echo "Using bypass token (query params) for health check"
+CURL_ARGS=(--silent --show-error --max-time "$TIMEOUT")
+if [ -n "${VERCEL_AUTOMATION_BYPASS:-}" ]; then
+  CURL_ARGS+=(-H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS}")
+  echo "Using the Deployment Protection bypass header"
+fi
+if [ "$FORCE_CANARY" = "true" ]; then
+  COOKIE_JAR="$(mktemp)"
+  CURL_ARGS+=(--cookie-jar "$COOKIE_JAR" --cookie "$COOKIE_JAR")
+  HEALTH_ENDPOINT="${HEALTH_ENDPOINT}?vcrrForceCanary=true"
+  echo "Forcing the rolling-release canary via vcrrForceCanary (cookie jar: ${COOKIE_JAR})"
+fi
+if [ -n "$EXPECT_COMMIT" ]; then
+  echo "Expecting /api/health to report commit ${EXPECT_COMMIT:0:8}"
 fi
 
 # ---------- engine reachability -------------------------------------------
@@ -124,6 +158,36 @@ PYEOF
   esac
 }
 
+# ---------- commit identity -----------------------------------------------
+#
+# Under Rolling Releases the public domain serves TWO builds at once. A 200 with
+# a healthy body proves that SOMETHING is healthy; only the commit field proves
+# it is the build this run deployed. Prefix-compare on 8 chars, which is what
+# /api/health emits.
+check_commit_identity() {
+  [ -n "$EXPECT_COMMIT" ] || return 0
+  local body="${HEALTH_RESPONSE_FILE:-/tmp/health_response.json}"
+  local reported
+  reported="$(HEALTH_BODY="$body" python3 - <<'PYEOF' 2>/dev/null
+import json, os
+try:
+    d = json.load(open(os.environ['HEALTH_BODY']))
+    print(str(d.get('commit') or ''))
+except Exception:
+    print('')
+PYEOF
+)"
+  if [ -z "$reported" ]; then
+    echo "::error::Commit check failed: /api/health reported no commit, so this probe cannot be tied to the deploy under test." >&2
+    return 1
+  fi
+  if [ "${reported:0:8}" != "${EXPECT_COMMIT:0:8}" ]; then
+    echo "::error::Commit check failed: /api/health reports ${reported:0:8}, expected ${EXPECT_COMMIT:0:8}. The probe reached a DIFFERENT build (the rolling-release base, or a newer canary) — this deploy is not what was verified." >&2
+    return 1
+  fi
+  echo "Commit check passed (/api/health reports ${reported:0:8})"
+}
+
 # ---------- stabilization wait --------------------------------------------
 
 echo "Waiting ${STABILIZE}s for deployment to stabilize: ${DEPLOY_URL}"
@@ -136,55 +200,38 @@ while [ "$attempt" -lt "$RETRIES" ]; do
   attempt=$(( attempt + 1 ))
   echo "Health check attempt ${attempt}/${RETRIES}: ${HEALTH_ENDPOINT}"
 
-  if [ "$USE_VERCEL_CURL" = true ]; then
-    # vercel curl doesn't support curl flags. Capture body + stderr.
-    VCURL_ERR=""
-    if vercel curl "${DEPLOY_URL}/api/health" --token="$VERCEL_TOKEN" > /tmp/health_response.json 2>/tmp/health_stderr.txt; then
-      if python3 -c "import json; json.load(open('/tmp/health_response.json'))" 2>/dev/null; then
-        HTTP_CODE=200
-      else
-        HTTP_CODE=000
-        echo "  vercel curl returned non-JSON:"
-        cat /tmp/health_response.json 2>/dev/null | head -5
-      fi
-    else
-      HTTP_CODE=000
-      VCURL_ERR=$(cat /tmp/health_stderr.txt 2>/dev/null | head -3)
-      echo "  vercel curl failed: $VCURL_ERR"
-      echo "" > /tmp/health_response.json
-      # If vercel curl can't authenticate, warn and exit 0 (non-blocking)
-      if echo "$VCURL_ERR" | grep -qi "auth\|401\|permission\|login"; then
-        echo "::warning::vercel curl auth failure — SSO protection blocks CI health checks. Deploy succeeded, skipping health check."
-        exit 0
-      fi
-    fi
-  else
-    HTTP_CODE=$(curl --silent \
-      --output /tmp/health_response.json \
-      --write-out "%{http_code}" \
-      --max-time "$TIMEOUT" \
-      "$HEALTH_ENDPOINT") || HTTP_CODE="000"
-  fi
+  HTTP_CODE=$(curl "${CURL_ARGS[@]}" \
+    --output "$RESPONSE_FILE" \
+    --dump-header "$HEADERS_FILE" \
+    --write-out "%{http_code}" \
+    "$HEALTH_ENDPOINT") || HTTP_CODE="000"
 
   echo "  HTTP status: ${HTTP_CODE}"
 
   if [ "$HTTP_CODE" -eq 200 ]; then
     # Validate JSON body
-    if python3 -c "import json; d=json.load(open('/tmp/health_response.json')); assert d.get('status') in ('ok','degraded')" 2>/dev/null; then
+    if python3 -c "import json; d=json.load(open('$RESPONSE_FILE')); assert d.get('status') in ('ok','degraded')" 2>/dev/null; then
       echo "Health check passed (attempt ${attempt}/${RETRIES})"
-      cat /tmp/health_response.json 2>/dev/null || true
-      # A reachable API with an unreachable engine is not a healthy deploy.
+      cat "$RESPONSE_FILE" 2>/dev/null || true
+      # The right build, and a reachable engine: both are required before the
+      # success exit. Either failing means the deploy is not verified.
+      if ! check_commit_identity; then
+        exit 1
+      fi
       if ! check_engine_health; then
         exit 1
       fi
       exit 0
     else
       echo "::warning::HTTP 200 but response body is invalid or status is 'error'"
-      cat /tmp/health_response.json 2>/dev/null || true
+      cat "$RESPONSE_FILE" 2>/dev/null || true
     fi
+  elif [ "$HTTP_CODE" -eq 401 ] || [ "$HTTP_CODE" -eq 403 ] || { [ "$HTTP_CODE" -eq 302 ] && grep -qi '^location: .*vercel\.com/sso' "$HEADERS_FILE" 2>/dev/null; }; then
+    echo "::error::Deployment Protection answered the probe (HTTP ${HTTP_CODE}). The deployment cannot be observed from here: probe it through the public domain with HEALTH_CHECK_FORCE_CANARY=true, or pass the project's bypass secret as VERCEL_AUTOMATION_BYPASS." >&2
+    exit 1
   else
     echo "::warning::Health check returned HTTP ${HTTP_CODE}"
-    cat /tmp/health_response.json 2>/dev/null || true
+    cat "$RESPONSE_FILE" 2>/dev/null || true
   fi
 
   if [ "$attempt" -lt "$RETRIES" ]; then
@@ -193,12 +240,5 @@ while [ "$attempt" -lt "$RETRIES" ]; do
   fi
 done
 
-# If all attempts failed but we were using vercel curl, it's likely an auth issue.
-# The deploy itself succeeded — don't block the pipeline on health check auth.
-if [ "$USE_VERCEL_CURL" = true ]; then
-  echo "::warning::Health check could not authenticate after ${RETRIES} attempt(s). Deploy succeeded but health could not be verified. Consider disabling SSO for preview deployments or using Standard Protection with a bypass token."
-  exit 0
-fi
-
-echo "::error::Health check failed after ${RETRIES} attempt(s) — deployment at ${DEPLOY_URL} is unhealthy"
+echo "::error::Health check failed after ${RETRIES} attempt(s) — deployment at ${DEPLOY_URL} is unhealthy or unreachable"
 exit 1
