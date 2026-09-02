@@ -12,7 +12,7 @@
 | Asset | Location | Notes |
 |-------|----------|-------|
 | Copilot custom instructions | `.github/copilot-instructions.md` | Root-level project overview, build commands, architecture rules |
-| Copilot file-scoped instructions | `.github/instructions/copilot.instructions.md` | Detailed coding standards, security, testing patterns (applies to `**`) |
+| ~~Copilot file-scoped instructions~~ | ~~`.github/instructions/copilot.instructions.md`~~ | Removed in #9627: it was a forked copy of the root file plus stale agent-session directives that went live when the 4,000-char cap was lifted |
 | PR review instructions | `.github/instructions/review.instructions.md` | Architecture boundaries, security, perf review checklist |
 | CI pipeline | `.github/workflows/ci.yml` | 7 jobs: lint, typecheck, web tests, MCP tests, WASM build, Next.js build, E2E, security audit |
 | CD pipeline | `.github/workflows/cd.yml` | Deploy to Vercel on main |
