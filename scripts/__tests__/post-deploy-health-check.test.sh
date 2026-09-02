@@ -207,7 +207,7 @@ else
 fi
 
 OUT="$(HEALTH_CHECK_FORCE_CANARY=true e2e 200 "$HEALTHY")"; RC=$?
-if [ "$RC" = 0 ] && grep -q 'vcrrForceCanary=true' "$TMP/args" && grep -q -- '--cookie-jar' "$TMP/args" && grep -q -- '--cookie' "$TMP/args"; then
+if [ "$RC" = 0 ] && grep -q 'vcrrForceCanary=true' "$TMP/args" && grep -qx -- '--cookie-jar' "$TMP/args" && grep -qx -- '--cookie' "$TMP/args"; then
   pass "force-canary appends vcrrForceCanary=true and carries a cookie jar on the request"
 else
   fail "force-canary wiring missing; args=$(tr '\n' ' ' < "$TMP/args") $OUT"

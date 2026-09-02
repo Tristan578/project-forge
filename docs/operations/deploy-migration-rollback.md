@@ -4,7 +4,7 @@
 migration to the production Neon database, and something after that point failed —
 the deploy, the health check, the smoke tests, or the application itself once live.
 
-**Read this first:** `vercel promote` (the automatic rollback in `cd.yml`) reverts
+**Read this first:** `vercel rollback` (the automatic rollback in `cd.yml`) reverts
 **code only**. It does **not** revert the database schema. After an automatic
 rollback you are running the *previous* code against the *new* schema. That
 combination is often fine (additive migrations) and occasionally fatal
@@ -119,11 +119,16 @@ code that matches it:
 
 ```bash
 # The failed run logged the last-known-good URL as `prev_url`.
-vercel promote "<prev_url>" --scope tnolan --token="$VERCEL_TOKEN"
+# Instant Rollback, never `vercel promote`: under Rolling Releases a promote of
+# the old build starts a staged rollout of it, or no-ops while a rollout is active.
+vercel rollback "<prev_url>" --yes --scope tnolan --token="$VERCEL_TOKEN"
 ```
 
-If the automatic rollback already ran, this is already done — verify with
-`vercel ls --scope tnolan` and by checking `https://www.spawnforge.ai/api/health`.
+If the automatic rollback already ran, this is already done — verify by checking
+that `https://www.spawnforge.ai/api/health` reports the restored commit (`vercel ls`
+prints `● Ready` for every deployment and says nothing about which one serves
+production; `vercel rolling-release fetch` shows the live base when a rollout is
+active).
 
 ---
 

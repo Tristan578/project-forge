@@ -15,7 +15,7 @@
 # `Last-known-good production URL: unknown`; both rollback steps are guarded
 # on that output being non-empty, so automatic rollback has never fired. And
 # under Rolling Releases the newest READY production deployment is the CANARY,
-# not the base — the live base is `rolling-release.currentDeployment`.
+# not the base — the live base is `rollingRelease.currentDeployment`.
 #
 # WHY THE SECOND QUESTION EXISTS AT ALL
 #
@@ -33,8 +33,20 @@
 # Main is linear, so a newer deployment is a superset of any older canary it
 # finds ramping. That older canary is therefore aborted (instant rollback to
 # the base it was ramping from — nothing is lost) and this deployment is
-# started in its place. The reverse case — an older run finding a NEWER canary
-# — is a superseded run and fails loudly; it must not touch the rollout.
+# started in its place — ONCE. The reverse case — an older run finding a NEWER
+# canary — is a superseded run and fails loudly; it must not touch the rollout.
+#
+# THE RESPONSE SHAPE
+#
+# `GET /v1/projects/{id}/rolling-release` answers `{ "rollingRelease": {...} }`
+# — every field (`state`, `currentDeployment`, `canaryDeployment`,
+# `queuedDeploymentId`, `currentCanaryPercentage`, `activeStage`) sits UNDER
+# that one key, and the key is `null` when the feature is enabled but nothing
+# has rolled out yet (openapi.vercel.sh; the CLI's own `rolling-release fetch`
+# destructures `{ rollingRelease }` before printing, which is how a first cut
+# of this script came to read the fields at the top level and passed a suite
+# whose fixtures made the same mistake). `RR_FIXTURE_NOTE` below is the shape
+# a live read returned on 2026-09-02, pinned by the test suite.
 #
 # Environment:
 #   VERCEL_TOKEN VERCEL_TEAM_ID VERCEL_PROJECT_ID   required
@@ -62,9 +74,7 @@ poll_interval="${RR_POLL_INTERVAL_S:-6}"
 
 # api <method> <path> [json-body]
 # Sets API_STATUS and API_BODY. Deliberately NOT "prints the body": a caller
-# doing `body=$(api ...)` would run it in a subshell and lose the status —
-# which is exactly how the first cut of this script reported "HTTP " (empty)
-# on every call.
+# doing `body=$(api ...)` would run it in a subshell and lose the status.
 API_STATUS=""
 API_BODY=""
 API_TMP="$(mktemp)"
@@ -116,13 +126,45 @@ emit_output() {
 
 # ---------- state readers --------------------------------------------------
 
-# Sets RR_STATUS and RR_BODY (the rolling-release JSON, possibly empty).
+# Reads GET /v1/projects/{id}/rolling-release and sets:
+#   RR_STATUS  HTTP status
+#   RR_KIND    active | idle | none | error
+#              active: rollingRelease.state == ACTIVE
+#              idle:   a rollingRelease document in any other state (COMPLETE,
+#                      ABORTED, ...) — nothing is ramping
+#              none:   rollingRelease is null, or the endpoint answers 404/400
+#                      (feature not enabled): production is whatever the
+#                      project's production target says
+#              error:  any other status, or a body without the wrapper
+#   RR_DOC     the unwrapped document (empty for none/error)
 RR_STATUS=""
-RR_BODY=""
+RR_KIND=""
+RR_DOC=""
 read_rolling_release() {
   api GET "/v1/projects/${VERCEL_PROJECT_ID}/rolling-release"
   RR_STATUS="$API_STATUS"
-  RR_BODY="$API_BODY"
+  RR_DOC=""
+  case "$RR_STATUS" in
+    200)
+      local kind
+      kind=$(printf '%s' "$API_BODY" | jq -r 'if (type == "object" and has("rollingRelease")) then (if .rollingRelease == null then "none" else "doc" end) else "error" end' 2>/dev/null || echo error)
+      case "$kind" in
+        none) RR_KIND=none ;;
+        doc)
+          RR_DOC=$(printf '%s' "$API_BODY" | jq -c '.rollingRelease' 2>/dev/null || true)
+          if [ "$(jqr "$RR_DOC" '.state')" = "ACTIVE" ]; then RR_KIND=active; else RR_KIND=idle; fi
+          ;;
+        *) RR_KIND=error ;;
+      esac
+      ;;
+    404|400) RR_KIND=none ;;
+    *) RR_KIND=error ;;
+  esac
+}
+
+rr_error_exit() {
+  echo "::error::Rolling release lookup failed (HTTP ${RR_STATUS}): $(printf '%s' "$API_BODY" | head -c 300)" >&2
+  exit 1
 }
 
 # Prints the url of the deployment the production target currently points at.
@@ -138,13 +180,11 @@ production_target_url() {
 # ---------- lkg -----------------------------------------------------------
 
 cmd_lkg() {
-  local rr url state
+  local url
   read_rolling_release
-  rr="$RR_BODY"
-  if [ "$RR_STATUS" = "200" ]; then
-    state=$(jqr "$rr" '.state')
-    if [ "$state" = "ACTIVE" ]; then
-      url=$(jqr "$rr" '.currentDeployment.url')
+  case "$RR_KIND" in
+    active)
+      url=$(jqr "$RR_DOC" '.currentDeployment.url')
       if [ -z "$url" ]; then
         echo "::error::Rolling release is ACTIVE but reports no currentDeployment — refusing to guess a rollback target" >&2
         exit 1
@@ -154,21 +194,18 @@ cmd_lkg() {
       emit_output prev_url "$url"
       printf '%s\n' "$url"
       return 0
-    fi
-  elif [ "$RR_STATUS" != "404" ] && [ "$RR_STATUS" != "400" ]; then
-    # 404/400 = Rolling Releases not enabled on this project; anything else
-    # is a real failure and must not degrade into "no rollback target".
-    echo "::error::Rolling release lookup failed (HTTP ${RR_STATUS})" >&2
-    exit 1
-  fi
+      ;;
+    error) rr_error_exit ;;
+  esac
 
+  # idle or none: the production target is the live deployment.
   url=$(production_target_url) || exit 1
   if [ -z "$url" ]; then
     echo "::error::Project reports no production target deployment — refusing to emit an empty rollback target" >&2
     exit 1
   fi
   url=$(with_scheme "$url")
-  echo "Last-known-good production URL: ${url} (production target)"
+  echo "Last-known-good production URL: ${url} (production target; rolling release ${RR_KIND})"
   emit_output prev_url "$url"
   printf '%s\n' "$url"
 }
@@ -218,7 +255,9 @@ abort_rolling_release() {
 }
 
 cmd_ensure_canary() {
-  local url="$1" ours ours_id ours_created rr state cur_id can_id queued can_created attempt started=false
+  local url="$1" ours ours_id ours_created attempt
+  local state cur_id can_id queued can_created target
+  local started=false aborted=false
   [ -n "$url" ] || { echo "::error::ensure-canary needs the deployment url" >&2; exit 2; }
   ours=$(deployment_identity "$url") || exit 1
   ours_id="${ours%% *}"
@@ -229,59 +268,76 @@ cmd_ensure_canary() {
   while [ "$attempt" -lt "$poll_attempts" ]; do
     attempt=$((attempt + 1))
     read_rolling_release
-    rr="$RR_BODY"
 
-    if [ "$RR_STATUS" = "404" ] || [ "$RR_STATUS" = "400" ]; then
-      # Rolling Releases not enabled: production is whatever the target says.
-      local target
-      target=$(production_target_url) || exit 1
-      target="${target#https://}"
-      if [ "$target" = "${url#https://}" ]; then
-        echo "Rolling Releases are not enabled; this deployment is the production target"
-        emit_output canary_state current
-        return 0
-      fi
-      echo "  attempt ${attempt}/${poll_attempts}: production target is ${target:-<none>}, waiting"
-      sleep "$poll_interval"
-      continue
-    fi
-    if [ "$RR_STATUS" != "200" ]; then
-      echo "::error::Rolling release lookup failed (HTTP ${RR_STATUS})" >&2
-      exit 1
-    fi
+    case "$RR_KIND" in
+      error) rr_error_exit ;;
+      none)
+        # No rolling release: production is whatever the target says.
+        target=$(production_target_url) || exit 1
+        target="${target#https://}"
+        if [ "$target" = "${url#https://}" ]; then
+          echo "No rolling release in progress; this deployment is the production target"
+          emit_output canary_state current
+          return 0
+        fi
+        if [ "$started" != true ]; then
+          start_rolling_release "$ours_id"
+          started=true
+        fi
+        echo "  attempt ${attempt}/${poll_attempts}: production target is ${target:-<none>}, waiting"
+        sleep "$poll_interval"
+        continue
+        ;;
+    esac
 
-    state=$(jqr "$rr" '.state')
-    cur_id=$(jqr "$rr" '.currentDeployment.id')
-    can_id=$(jqr "$rr" '.canaryDeployment.id')
-    queued=$(jqr "$rr" '.queuedDeploymentId')
+    state=$(jqr "$RR_DOC" '.state')
+    cur_id=$(jqr "$RR_DOC" '.currentDeployment.id')
+    can_id=$(jqr "$RR_DOC" '.canaryDeployment.id')
+    queued=$(jqr "$RR_DOC" '.queuedDeploymentId')
 
     if [ "$cur_id" = "$ours_id" ]; then
-      echo "This deployment is the current production deployment"
+      echo "This deployment is the current production deployment (state=${state})"
       emit_output canary_state current
       return 0
     fi
-    if [ "$can_id" = "$ours_id" ]; then
-      echo "This deployment is the active canary (state=${state}, $(jqr "$rr" '.currentCanaryPercentage')%)"
+    if [ "$RR_KIND" = "active" ] && [ "$can_id" = "$ours_id" ]; then
+      echo "This deployment is the active canary ($(jqr "$RR_DOC" '.currentCanaryPercentage')%)"
       emit_output canary_state canary
       return 0
     fi
-    if [ "$queued" = "$ours_id" ]; then
-      echo "  attempt ${attempt}/${poll_attempts}: queued behind canary ${can_id:-<none>}, waiting"
-      sleep "$poll_interval"
-      continue
-    fi
 
-    if [ "$state" = "ACTIVE" ] && [ -n "$can_id" ]; then
-      can_created=$(jqr "$rr" '.canaryDeployment.createdAt')
+    # A rollout of ANOTHER deployment is active (ours may be queued behind it —
+    # the queue only drains when that rollout resolves, which can be 40
+    # minutes away). Decide by age, once.
+    if [ "$RR_KIND" = "active" ] && [ -n "$can_id" ]; then
+      can_created=$(jqr "$RR_DOC" '.canaryDeployment.createdAt')
       if [ -n "$can_created" ] && [ "$can_created" -gt "$ours_created" ] 2>/dev/null; then
         echo "::error::Superseded: a newer deployment (${can_id}) is already the canary. This run's deployment (${ours_id}) will not be rolled out — a later merge owns production now." >&2
         exit 1
       fi
+      if [ "$aborted" = true ]; then
+        # We already aborted once and started ours; a foreign ACTIVE canary
+        # still showing is an eventually-consistent read, not a new rollout.
+        # Never abort twice — the second rollback would abort OUR rollout.
+        echo "  attempt ${attempt}/${poll_attempts}: API still shows canary ${can_id} after our start, waiting"
+        sleep "$poll_interval"
+        continue
+      fi
+      if [ -z "$cur_id" ]; then
+        echo "::error::Rolling release is ACTIVE with canary ${can_id} but reports no currentDeployment — refusing to abort without a rollback target" >&2
+        exit 1
+      fi
+      [ "$queued" = "$ours_id" ] && echo "This deployment is queued behind the older canary ${can_id}; resolving the stale rollout instead of waiting for it"
       echo "A stale rolling release is active (canary ${can_id}, older than this deployment) — aborting it so this deployment can roll out"
       abort_rolling_release "$cur_id" || exit 1
-      started=false
+      aborted=true
+      start_rolling_release "$ours_id"
+      started=true
+      sleep "$poll_interval"
+      continue
     fi
 
+    # Idle document (COMPLETE/ABORTED/...) and ours is not current: start ours.
     if [ "$started" != true ]; then
       start_rolling_release "$ours_id"
       started=true

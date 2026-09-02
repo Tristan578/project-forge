@@ -155,10 +155,11 @@ nslookup spawnforge.ai
 gh run list --workflow=cd.yml --limit=5
 
 # 3. If last deploy is the cause, rollback:
-# Option A: Vercel Dashboard > Deployments > find last-known-good > "Promote to Production"
-# Option B: Manual rollback via CLI:
-vercel ls --scope=<team> --token=$VERCEL_TOKEN
-vercel promote <last-good-deployment-url> --scope=<team> --token=$VERCEL_TOKEN
+# Option A: Vercel Dashboard > Deployments > find last-known-good > "Instant Rollback"
+#   (NOT "Promote to Production": under Rolling Releases a promote starts a staged
+#   rollout of the old build, or no-ops while a rollout is active)
+# Option B: Manual rollback via CLI (or dispatch cd.yml with rollback_production=<url>):
+vercel rollback <last-good-deployment-url> --yes --scope=<team> --token=$VERCEL_TOKEN
 
 # 4. If Vercel itself is down, there is no self-remediation.
 #    Post in #incidents: "Vercel outage affecting SpawnForge. Monitoring Vercel status page."
@@ -671,10 +672,10 @@ push to main
 ### Rollback Procedure
 ```bash
 # Option 1: Vercel Dashboard
-# Deployments > select last-known-good > "Promote to Production"
+# Deployments > select last-known-good > "Instant Rollback" (not "Promote" — see above)
 
 # Option 2: CLI
-vercel promote <deployment-url> --scope=<team> --token=$VERCEL_TOKEN
+vercel rollback <deployment-url> --yes --scope=<team> --token=$VERCEL_TOKEN
 
 # Option 3: Re-run CD from a good commit
 git log --oneline -10  # Find the last good commit

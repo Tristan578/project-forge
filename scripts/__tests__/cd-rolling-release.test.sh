@@ -10,6 +10,17 @@
 # success" — so the refusal cases below outnumber the accepting ones, and every
 # accepting case asserts the exact URL that came out, not merely exit 0.
 #
+# THE SHAPE IS PINNED TO THE API, NOT TO THE SCRIPT
+#
+# The first cut of this suite fed the script flat `{ "state": ... }` bodies —
+# the shape the CLI prints after destructuring — and certified 25/25 PASS for
+# a script that would have read empty fields against the real endpoint on
+# every production deploy. Every fixture below therefore carries the wrapper
+# documented at openapi.vercel.sh (`{ "rollingRelease": {...} | null }`), and
+# LIVE_ACTIVE below is the document a real GET returned on 2026-09-02, trimmed
+# to the fields the script reads. If the API shape changes, change it HERE from
+# a live read, never to match the script.
+#
 # The Vercel API is stubbed with a `curl` on PATH that answers per URL from a
 # fixture directory; no network.
 set -uo pipefail
@@ -30,8 +41,7 @@ mkdir -p "$TMP/bin" "$TMP/fx"
 # The curl stub: finds the URL among its arguments, strips the query string,
 # maps the path to a fixture file, and prints "<body>\n<status>" exactly as
 # `curl -w '\n%{http_code}'` does. Every request is appended to a log so the
-# suite can assert WHICH calls were made (a stale rollout must be aborted
-# before ours is started, and a superseded run must make no mutation at all).
+# suite can assert WHICH calls were made and HOW MANY TIMES.
 cat > "$TMP/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 url=""; method="GET"
@@ -60,7 +70,8 @@ fixture() {
   key="$(printf '%s %s' "$1" "$2" | tr '/ ' '__')"
   printf '%s\n%s' "$4" "$3" > "$TMP/fx/$key"
 }
-reset_fixtures() { rm -f "$TMP/fx"/*; : > "$TMP/log"; }
+reset_fixtures() { rm -f "$TMP/fx"/*; : > "$TMP/log"; : > "$TMP/out"; }
+count() { grep -c "^$1\$" "$TMP/log" || true; }
 
 run() {
   (cd "$TMP" && PATH="$TMP/bin:$PATH" CURL_LOG="$TMP/log" FIXTURES="$TMP/fx" \
@@ -71,35 +82,54 @@ run() {
 
 RR=/v1/projects/prj_1/rolling-release
 PROJECT=/v9/projects/prj_1
+OURS=spawnforge-ours-tnolan.vercel.app
+DEPLOYMENT=/v13/deployments/$OURS
+START=$RR/start
+ROLLBACK_BASE=/v1/projects/prj_1/rollback/dpl_base
+
+# A live GET on 2026-09-02 04:50 UTC (project spawnforge), trimmed to the fields
+# the script reads. Note the wrapper and the nesting.
+LIVE_ACTIVE='{"rollingRelease":{"state":"ACTIVE","substate":null,"currentDeployment":{"id":"dpl_4ReF3BPyrssnUfUQC7f4aB7wH9jt","url":"spawnforge-75vgr46qg-tnolan.vercel.app","target":"production","createdAt":1788320738792,"readyState":"READY"},"canaryDeployment":{"id":"dpl_B6Ug75PArByBjN76t2EtanXNmBhj","url":"spawnforge-ia2589c6u-tnolan.vercel.app","target":"production","createdAt":1788323657956,"readyState":"READY"},"queuedDeploymentId":null,"currentCanaryPercentage":5,"activeStage":{"index":0,"isFinalStage":false,"targetPercentage":5,"requireApproval":false,"duration":10,"linearShift":true}}}'
+wrap() { printf '{"rollingRelease":%s}' "$1"; }
 
 # ---------------------------------------------------------------------------
 echo "=== lkg: the rollback target is the rolling-release BASE, never the canary ==="
 
-reset_fixtures; : > "$TMP/out"
-fixture GET "$RR" 200 '{"state":"ACTIVE","currentDeployment":{"id":"dpl_base","url":"spawnforge-base-tnolan.vercel.app"},"canaryDeployment":{"id":"dpl_canary","url":"spawnforge-canary-tnolan.vercel.app"}}'
+reset_fixtures
+fixture GET "$RR" 200 "$LIVE_ACTIVE"
 OUT="$(run lkg)"; RC=$?
-if [ "$RC" = 0 ] && [ "$(tail -1 <<<"$OUT")" = "https://spawnforge-base-tnolan.vercel.app" ] && grep -q '^prev_url=https://spawnforge-base-tnolan.vercel.app$' "$TMP/out"; then
-  pass "ACTIVE rollout: lkg is currentDeployment (the base) with an https scheme, and prev_url is written"
+if [ "$RC" = 0 ] && [ "$(tail -1 <<<"$OUT")" = "https://spawnforge-75vgr46qg-tnolan.vercel.app" ] && grep -q '^prev_url=https://spawnforge-75vgr46qg-tnolan.vercel.app$' "$TMP/out"; then
+  pass "ACTIVE rollout (live shape): lkg is rollingRelease.currentDeployment (the base) with an https scheme, and prev_url is written"
 else
   fail "ACTIVE rollout: expected the base url; got rc=$RC: $OUT / out=$(cat "$TMP/out")"
 fi
-if ! grep -q canary "$TMP/out"; then
+if ! grep -q ia2589c6u "$TMP/out"; then
   pass "ACTIVE rollout: the canary is never offered as a rollback target"
 else
   fail "ACTIVE rollout: the canary leaked into prev_url"
 fi
 
-reset_fixtures; : > "$TMP/out"
-fixture GET "$RR" 200 '{"state":"COMPLETE","currentDeployment":{"id":"dpl_old","url":"spawnforge-old-tnolan.vercel.app"}}'
+reset_fixtures
+fixture GET "$RR" 200 "$(wrap '{"state":"COMPLETE","currentDeployment":{"id":"dpl_old","url":"spawnforge-old-tnolan.vercel.app"}}')"
 fixture GET "$PROJECT" 200 '{"targets":{"production":{"id":"dpl_live","url":"spawnforge-live-tnolan.vercel.app"}}}'
 OUT="$(run lkg)"; RC=$?
 if [ "$RC" = 0 ] && [ "$(tail -1 <<<"$OUT")" = "https://spawnforge-live-tnolan.vercel.app" ]; then
-  pass "no active rollout: lkg is the project's production target, not a stale rolling-release record"
+  pass "no active rollout (COMPLETE): lkg is the project's production target, not a stale rolling-release record"
 else
   fail "no active rollout: expected the production target; got rc=$RC: $OUT"
 fi
 
-reset_fixtures; : > "$TMP/out"
+reset_fixtures
+fixture GET "$RR" 200 '{"rollingRelease":null}'
+fixture GET "$PROJECT" 200 '{"targets":{"production":{"id":"dpl_live","url":"spawnforge-live-tnolan.vercel.app"}}}'
+OUT="$(run lkg)"; RC=$?
+if [ "$RC" = 0 ] && [ "$(tail -1 <<<"$OUT")" = "https://spawnforge-live-tnolan.vercel.app" ]; then
+  pass "rollingRelease: null (enabled, nothing rolled out yet): lkg falls through to the production target"
+else
+  fail "rollingRelease null: expected the production target; got rc=$RC: $OUT"
+fi
+
+reset_fixtures
 fixture GET "$RR" 404 '{"error":{"code":"not_found","message":"rolling release not enabled"}}'
 fixture GET "$PROJECT" 200 '{"targets":{"production":{"id":"dpl_live","url":"spawnforge-live-tnolan.vercel.app"}}}'
 OUT="$(run lkg)"; RC=$?
@@ -110,7 +140,7 @@ else
 fi
 
 # --- refusals: an unanswerable question must not become an empty answer ---
-reset_fixtures; : > "$TMP/out"
+reset_fixtures
 fixture GET "$RR" 500 '{"error":"boom"}'
 OUT="$(run lkg)"; RC=$?
 if [ "$RC" != 0 ] && [ ! -s "$TMP/out" ]; then
@@ -119,8 +149,8 @@ else
   fail "a 5xx should fail closed; got rc=$RC out=$(cat "$TMP/out")"
 fi
 
-reset_fixtures; : > "$TMP/out"
-fixture GET "$RR" 200 '{"state":"ACTIVE","canaryDeployment":{"id":"dpl_canary","url":"spawnforge-canary-tnolan.vercel.app"}}'
+reset_fixtures
+fixture GET "$RR" 200 "$(wrap '{"state":"ACTIVE","canaryDeployment":{"id":"dpl_canary","url":"spawnforge-canary-tnolan.vercel.app"}}')"
 OUT="$(run lkg)"; RC=$?
 if [ "$RC" != 0 ] && [ ! -s "$TMP/out" ]; then
   pass "an ACTIVE rollout with no currentDeployment refuses to guess"
@@ -128,8 +158,17 @@ else
   fail "ACTIVE without a base should refuse; got rc=$RC out=$(cat "$TMP/out")"
 fi
 
-reset_fixtures; : > "$TMP/out"
-fixture GET "$RR" 404 '{}'
+reset_fixtures
+fixture GET "$RR" 200 '{"state":"ACTIVE","currentDeployment":{"id":"dpl_base","url":"spawnforge-base-tnolan.vercel.app"}}'
+OUT="$(run lkg)"; RC=$?
+if [ "$RC" != 0 ] && [ ! -s "$TMP/out" ]; then
+  pass "a 200 WITHOUT the rollingRelease wrapper (the shape the first cut expected) is refused, not misread as idle"
+else
+  fail "an unwrapped body should fail closed; got rc=$RC out=$(cat "$TMP/out") $OUT"
+fi
+
+reset_fixtures
+fixture GET "$RR" 200 '{"rollingRelease":null}'
 fixture GET "$PROJECT" 200 '{"targets":{}}'
 OUT="$(run lkg)"; RC=$?
 if [ "$RC" != 0 ] && [ ! -s "$TMP/out" ]; then
@@ -138,7 +177,7 @@ else
   fail "no production target should refuse; got rc=$RC out=$(cat "$TMP/out")"
 fi
 
-reset_fixtures; : > "$TMP/out"
+reset_fixtures
 fixture GET "$RR" 200 'this is not json'
 fixture GET "$PROJECT" 200 '<html>maintenance</html>'
 OUT="$(run lkg)"; RC=$?
@@ -152,13 +191,11 @@ fi
 echo ""
 echo "=== ensure-canary: verification must observe THIS deployment ==="
 
-OURS=spawnforge-ours-tnolan.vercel.app
-DEPLOYMENT=/v13/deployments/$OURS
-START=$RR/start
+OURS_DOC='{"id":"dpl_ours","createdAt":2000,"readyState":"READY"}'
 
-reset_fixtures; : > "$TMP/out"
-fixture GET "$DEPLOYMENT" 200 '{"id":"dpl_ours","createdAt":2000,"readyState":"READY"}'
-fixture GET "$RR" 200 '{"state":"ACTIVE","currentCanaryPercentage":5,"currentDeployment":{"id":"dpl_base","createdAt":1000},"canaryDeployment":{"id":"dpl_ours","createdAt":2000}}'
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 "$(wrap '{"state":"ACTIVE","currentCanaryPercentage":5,"currentDeployment":{"id":"dpl_base","createdAt":1000},"canaryDeployment":{"id":"dpl_ours","createdAt":2000}}')"
 OUT="$(run ensure-canary "https://$OURS")"; RC=$?
 if [ "$RC" = 0 ] && grep -q '^canary_state=canary$' "$TMP/out" && ! grep -q POST "$TMP/log"; then
   pass "already the canary: succeeds, reports canary_state=canary, mutates nothing"
@@ -166,9 +203,9 @@ else
   fail "already the canary: rc=$RC out=$(cat "$TMP/out") log=$(cat "$TMP/log") $OUT"
 fi
 
-reset_fixtures; : > "$TMP/out"
-fixture GET "$DEPLOYMENT" 200 '{"id":"dpl_ours","createdAt":2000,"readyState":"READY"}'
-fixture GET "$RR" 200 '{"state":"COMPLETE","currentDeployment":{"id":"dpl_ours","createdAt":2000}}'
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 "$(wrap '{"state":"COMPLETE","currentDeployment":{"id":"dpl_ours","createdAt":2000}}')"
 OUT="$(run ensure-canary "https://$OURS")"; RC=$?
 if [ "$RC" = 0 ] && grep -q '^canary_state=current$' "$TMP/out" && ! grep -q POST "$TMP/log"; then
   pass "already current (rollout completed): succeeds with canary_state=current, mutates nothing"
@@ -176,31 +213,42 @@ else
   fail "already current: rc=$RC out=$(cat "$TMP/out") log=$(cat "$TMP/log") $OUT"
 fi
 
-reset_fixtures; : > "$TMP/out"
-fixture GET "$DEPLOYMENT" 200 '{"id":"dpl_ours","createdAt":2000,"readyState":"READY"}'
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 '{"rollingRelease":null}'
+fixture GET "$PROJECT" 200 "{\"targets\":{\"production\":{\"id\":\"dpl_ours\",\"url\":\"$OURS\"}}}"
+OUT="$(run ensure-canary "https://$OURS")"; RC=$?
+if [ "$RC" = 0 ] && grep -q '^canary_state=current$' "$TMP/out" && ! grep -q POST "$TMP/log"; then
+  pass "rollingRelease: null and the production target is ours: succeeds with canary_state=current, no start issued"
+else
+  fail "null + target is ours: rc=$RC out=$(cat "$TMP/out") log=$(cat "$TMP/log") $OUT"
+fi
+
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
 fixture GET "$RR" 404 '{"error":{"code":"not_found"}}'
 fixture GET "$PROJECT" 200 "{\"targets\":{\"production\":{\"id\":\"dpl_ours\",\"url\":\"$OURS\"}}}"
 OUT="$(run ensure-canary "https://$OURS")"; RC=$?
 if [ "$RC" = 0 ] && grep -q '^canary_state=current$' "$TMP/out"; then
-  pass "Rolling Releases disabled: succeeds when the production target is this deployment"
+  pass "Rolling Releases disabled (404): succeeds when the production target is this deployment"
 else
   fail "disabled + target is ours: rc=$RC out=$(cat "$TMP/out") $OUT"
 fi
 
 # The live incident: an OLDER canary is still ramping, so Vercel never started
 # ours. The script must abort the stale rollout (rollback to its base — nothing
-# is lost, ours is a superset) and then start ours, in that order.
-reset_fixtures; : > "$TMP/out"
-fixture GET "$DEPLOYMENT" 200 '{"id":"dpl_ours","createdAt":2000,"readyState":"READY"}'
-fixture GET "$RR" 200 '{"state":"ACTIVE","currentDeployment":{"id":"dpl_base","createdAt":500},"canaryDeployment":{"id":"dpl_stale","createdAt":1500}}'
-fixture POST "$RR/../rollback/dpl_base" 200 '{}'
-fixture POST "/v1/projects/prj_1/rollback/dpl_base" 200 '{}'
-fixture POST "$START" 200 '{"state":"ACTIVE","canaryDeployment":{"id":"dpl_ours"}}'
-OUT="$(ATTEMPTS=2 run ensure-canary "https://$OURS")"; RC=$?
-if grep -q '^POST /v1/projects/prj_1/rollback/dpl_base$' "$TMP/log" && grep -q "^POST $START\$" "$TMP/log"; then
-  pass "a stale OLDER canary is aborted (rollback to its base) and this deployment is started"
+# is lost, ours is a superset) and then start ours — each EXACTLY ONCE, however
+# many polls still show the old canary afterwards.
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 "$(wrap '{"state":"ACTIVE","currentDeployment":{"id":"dpl_base","createdAt":500},"canaryDeployment":{"id":"dpl_stale","createdAt":1500}}')"
+fixture POST "$ROLLBACK_BASE" 200 '{}'
+fixture POST "$START" 200 "$(wrap '{"state":"ACTIVE","canaryDeployment":{"id":"dpl_ours"}}')"
+OUT="$(ATTEMPTS=4 run ensure-canary "https://$OURS")"; RC=$?
+if [ "$(count "POST $ROLLBACK_BASE")" = "1" ] && [ "$(count "POST $START")" = "1" ]; then
+  pass "a stale OLDER canary is aborted (rollback to its base) and this deployment is started — each exactly once across 4 polls"
 else
-  fail "stale older canary: expected rollback then start; log=$(cat "$TMP/log")"
+  fail "stale older canary: expected 1 rollback + 1 start; log=$(cat "$TMP/log")"
 fi
 ROLLBACK_LINE="$(grep -n 'rollback' "$TMP/log" | head -1 | cut -d: -f1)"
 START_LINE="$(grep -n 'start' "$TMP/log" | head -1 | cut -d: -f1)"
@@ -215,10 +263,25 @@ else
   fail "the script reported success although the rollout never adopted this deployment"
 fi
 
+# Queued behind an older active canary: the queue drains only when that rollout
+# resolves (up to 40 minutes), so this must take the same abort+start path, not
+# wait out the poll budget.
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 "$(wrap '{"state":"ACTIVE","currentDeployment":{"id":"dpl_base","createdAt":500},"canaryDeployment":{"id":"dpl_stale","createdAt":1500},"queuedDeploymentId":"dpl_ours"}')"
+fixture POST "$ROLLBACK_BASE" 200 '{}'
+fixture POST "$START" 200 '{}'
+OUT="$(ATTEMPTS=2 run ensure-canary "https://$OURS")"; RC=$?
+if [ "$(count "POST $ROLLBACK_BASE")" = "1" ] && [ "$(count "POST $START")" = "1" ] && grep -q 'queued behind the older canary' <<<"$OUT"; then
+  pass "queued behind an OLDER canary: the stale rollout is aborted and ours started, not waited out"
+else
+  fail "queued behind older: rc=$RC log=$(cat "$TMP/log") $OUT"
+fi
+
 # A NEWER canary means a later merge owns production: this run is superseded.
-reset_fixtures; : > "$TMP/out"
-fixture GET "$DEPLOYMENT" 200 '{"id":"dpl_ours","createdAt":2000,"readyState":"READY"}'
-fixture GET "$RR" 200 '{"state":"ACTIVE","currentDeployment":{"id":"dpl_base","createdAt":500},"canaryDeployment":{"id":"dpl_newer","createdAt":3000}}'
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 "$(wrap '{"state":"ACTIVE","currentDeployment":{"id":"dpl_base","createdAt":500},"canaryDeployment":{"id":"dpl_newer","createdAt":3000}}')"
 OUT="$(run ensure-canary "https://$OURS")"; RC=$?
 if [ "$RC" != 0 ] && ! grep -q POST "$TMP/log" && grep -qi superseded <<<"$OUT"; then
   pass "a NEWER canary: fails loudly as superseded and issues no mutation"
@@ -226,26 +289,55 @@ else
   fail "newer canary: rc=$RC log=$(cat "$TMP/log") $OUT"
 fi
 
-# Nothing active and ours is not current: start ours, and only report success
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 "$(wrap '{"state":"ACTIVE","currentDeployment":{"id":"dpl_base","createdAt":500},"canaryDeployment":{"id":"dpl_newer","createdAt":3000},"queuedDeploymentId":"dpl_ours"}')"
+OUT="$(run ensure-canary "https://$OURS")"; RC=$?
+if [ "$RC" != 0 ] && ! grep -q POST "$TMP/log" && grep -qi superseded <<<"$OUT"; then
+  pass "queued behind a NEWER canary: superseded, no mutation"
+else
+  fail "queued behind newer: rc=$RC log=$(cat "$TMP/log") $OUT"
+fi
+
+# ACTIVE with a canary but no base: there is no rollback target, so abort must
+# be refused (a rollback to an empty id is a malformed mutation).
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 "$(wrap '{"state":"ACTIVE","canaryDeployment":{"id":"dpl_stale","createdAt":1500}}')"
+OUT="$(run ensure-canary "https://$OURS")"; RC=$?
+if [ "$RC" != 0 ] && ! grep -q POST "$TMP/log" && grep -q 'no currentDeployment' <<<"$OUT"; then
+  pass "an ACTIVE stale canary with no currentDeployment is refused without any mutation"
+else
+  fail "active without base: rc=$RC log=$(cat "$TMP/log") $OUT"
+fi
+
+# Idle document and ours is not current: start ours, and only report success
 # once the API reflects it.
-reset_fixtures; : > "$TMP/out"
-fixture GET "$DEPLOYMENT" 200 '{"id":"dpl_ours","createdAt":2000,"readyState":"READY"}'
-fixture GET "$RR" 200 '{"state":"COMPLETE","currentDeployment":{"id":"dpl_base","createdAt":500}}'
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 "$(wrap '{"state":"COMPLETE","currentDeployment":{"id":"dpl_base","createdAt":500}}')"
 fixture POST "$START" 200 '{}'
-OUT="$(ATTEMPTS=2 run ensure-canary "https://$OURS")"; RC=$?
-if grep -q "^POST $START\$" "$TMP/log" && [ "$RC" != 0 ]; then
-  pass "idle project, ours not current: start is issued, and success is withheld until the API reflects it"
+OUT="$(ATTEMPTS=3 run ensure-canary "https://$OURS")"; RC=$?
+if [ "$(count "POST $START")" = "1" ] && [ "$RC" != 0 ]; then
+  pass "idle project, ours not current: start is issued exactly once across the polling loop, and success is withheld until the API reflects it"
 else
   fail "idle project: rc=$RC log=$(cat "$TMP/log") $OUT"
 fi
-if [ "$(grep -c "^POST $START\$" "$TMP/log")" = "1" ]; then
-  pass "start is issued exactly once across the polling loop"
+
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 '{"rollingRelease":null}'
+fixture GET "$PROJECT" 200 '{"targets":{"production":{"id":"dpl_other","url":"spawnforge-other-tnolan.vercel.app"}}}'
+fixture POST "$START" 200 '{}'
+OUT="$(ATTEMPTS=3 run ensure-canary "https://$OURS")"; RC=$?
+if [ "$(count "POST $START")" = "1" ] && [ "$RC" != 0 ]; then
+  pass "rollingRelease: null and the target is another deployment: start is issued once, success withheld"
 else
-  fail "start was issued $(grep -c "^POST $START\$" "$TMP/log") times"
+  fail "null + other target: rc=$RC log=$(cat "$TMP/log") $OUT"
 fi
 
 # --- refusals ---
-reset_fixtures; : > "$TMP/out"
+reset_fixtures
 fixture GET "$DEPLOYMENT" 404 '{"error":{"code":"not_found"}}'
 OUT="$(run ensure-canary "https://$OURS")"; RC=$?
 if [ "$RC" != 0 ] && ! grep -q POST "$TMP/log"; then
@@ -254,14 +346,24 @@ else
   fail "unresolvable url: rc=$RC log=$(cat "$TMP/log")"
 fi
 
-reset_fixtures; : > "$TMP/out"
-fixture GET "$DEPLOYMENT" 200 '{"id":"dpl_ours","createdAt":2000,"readyState":"READY"}'
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
 fixture GET "$RR" 500 '{"error":"boom"}'
 OUT="$(run ensure-canary "https://$OURS")"; RC=$?
-if [ "$RC" != 0 ]; then
-  pass "a 5xx from the rolling-release API fails closed"
+if [ "$RC" != 0 ] && ! grep -q POST "$TMP/log"; then
+  pass "a 5xx from the rolling-release API fails closed without any mutation"
 else
-  fail "a 5xx should fail closed; got rc=$RC"
+  fail "a 5xx should fail closed; got rc=$RC log=$(cat "$TMP/log")"
+fi
+
+reset_fixtures
+fixture GET "$DEPLOYMENT" 200 "$OURS_DOC"
+fixture GET "$RR" 200 '{"state":"COMPLETE","currentDeployment":{"id":"dpl_ours"}}'
+OUT="$(run ensure-canary "https://$OURS")"; RC=$?
+if [ "$RC" != 0 ] && ! grep -q POST "$TMP/log"; then
+  pass "an unwrapped 200 body is refused before any mutation — never misread as 'ours is current'"
+else
+  fail "unwrapped body: rc=$RC log=$(cat "$TMP/log") $OUT"
 fi
 
 OUT="$(run ensure-canary)"; RC=$?
@@ -293,16 +395,20 @@ if grep -qF 'run: bash scripts/cd-rolling-release.sh ensure-canary "$DEPLOY_URL"
 else
   fail "cd.yml does not run 'cd-rolling-release.sh ensure-canary' — verification could grade a different build"
 fi
-if ! grep -qE "vercel ls .*\| *grep -E 'READY'" "$CD" && ! grep -qF "grep -E 'READY'" "$CD"; then
+if grep -qF "steps.canary.outputs.canary_state == 'canary'" "$CD"; then
+  pass "cd.yml gates the canary pin (force-canary) on the script's canary_state output"
+else
+  fail "cd.yml forces the canary cookie unconditionally — with no active rollout Vercel sets no cookie and the smoke suite fails a healthy deploy"
+fi
+if ! grep -qF "grep -E 'READY'" "$CD"; then
   pass "the 'grep READY' last-known-good capture is gone from cd.yml"
 else
   fail "cd.yml still greps 'READY' out of 'vercel ls' — that never matched ('● Ready')"
 fi
-# shellcheck disable=SC2016  # the literal $PREV_URL IS the text cd.yml must carry
-if ! grep -qF 'vercel promote "$PREV_URL"' "$CD" && grep -qF 'vercel rollback "$PREV_URL" --yes' "$CD"; then
-  pass "the automatic rollback uses Instant Rollback, not a promote that would start another rolling release"
+if ! grep -qE '^\s*vercel promote ' "$CD" && [ "$(grep -cE '^\s*vercel rollback "\$[A-Z_]+" --yes' "$CD")" -ge 2 ]; then
+  pass "no rollback path in cd.yml promotes: both the automatic and the manual rollback use Instant Rollback"
 else
-  fail "cd.yml's automatic rollback still promotes (starts a 40-minute rollout of the old build) instead of vercel rollback"
+  fail "cd.yml still has a 'vercel promote' rollback path (promote starts a staged rollout of the old build, or no-ops mid-rollout) — automatic AND manual must use vercel rollback"
 fi
 
 echo ""

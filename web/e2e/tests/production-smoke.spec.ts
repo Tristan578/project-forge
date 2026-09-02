@@ -16,7 +16,7 @@
  *
  * @tags @smoke @production
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 
 const PROD_URL = process.env.PRODUCTION_URL || 'https://www.spawnforge.ai';
 
@@ -33,13 +33,22 @@ const FORCE_CANARY = process.env.SMOKE_FORCE_CANARY === 'true';
 /** First 8 chars of the commit /api/health must report; CD passes github.sha. */
 const EXPECT_COMMIT = (process.env.SMOKE_EXPECT_COMMIT || '').slice(0, 8);
 
-test.beforeEach(async ({ request, page }) => {
+/** Cookies from the canary seed, added to the one browser context that needs them. */
+let canaryCookies: Awaited<ReturnType<APIRequestContext['storageState']>>['cookies'] = [];
+
+// Only the `request` fixture here: asking for `page` would launch a browser
+// for every request-only test. The single browser test adds the cookies to
+// its own context below.
+test.beforeEach(async ({ request }) => {
+  canaryCookies = [];
   if (!FORCE_CANARY) return;
   const seed = await request.get(`${PROD_URL}/api/health?vcrrForceCanary=true`);
   expect(seed.status(), 'canary seed request must succeed').toBe(200);
   const { cookies } = await request.storageState();
+  // CD sets SMOKE_FORCE_CANARY only when ensure-canary reported an ACTIVE
+  // rollout with our deployment as the canary, so the cookie must exist here.
   expect(cookies.some((c) => c.name.startsWith('_vcrr_')), 'Vercel must set the rolling-release cookie').toBe(true);
-  await page.context().addCookies(cookies);
+  canaryCookies = cookies;
 });
 
 test.describe('Deployment identity @smoke @production', () => {
@@ -91,6 +100,7 @@ test.describe('Production Smoke Tests @smoke @production', () => {
       }
     });
 
+    if (canaryCookies.length > 0) await page.context().addCookies(canaryCookies);
     await page.goto(`${PROD_URL}/sign-in`, { waitUntil: 'networkidle' });
 
     // Page must not be blank — body must have visible content

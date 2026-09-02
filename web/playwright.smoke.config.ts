@@ -30,18 +30,12 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     launchOptions: { args: ['--disable-gpu', '--no-sandbox'] },
-    // When pointed at a Deployment-Protection-guarded URL (a preview or the
-    // staging project's deployment URL), the automation bypass secret goes in
-    // the documented header on every request; `x-vercel-set-bypass-cookie`
-    // keeps follow-up navigations authorised.
-    ...(process.env.VERCEL_AUTOMATION_BYPASS
-      ? {
-          extraHTTPHeaders: {
-            'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS,
-            'x-vercel-set-bypass-cookie': 'true',
-          },
-        }
-      : {}),
+    // Deliberately NO `extraHTTPHeaders` bypass here: that option attaches a
+    // header to every request from both contexts, and this suite also fetches
+    // engine.spawnforge.ai and drives a real browser through Clerk, PostHog and
+    // Sentry hosts — a Deployment Protection bypass secret must never reach
+    // them. If a protected URL ever has to be smoke-tested, scope the
+    // `x-vercel-protection-bypass` header to that origin per request.
   },
 
   projects: [

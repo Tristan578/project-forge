@@ -18,10 +18,13 @@
 #   HEALTH_CHECK_STABILIZE_S    Seconds to wait before the first check (default: 30)
 #   HEALTH_CHECK_TIMEOUT_S      curl max-time per request in seconds (default: 15)
 #   HEALTH_CHECK_FORCE_CANARY   'true' to probe the ROLLING RELEASE CANARY through
-#                               the public domain: the first request carries
-#                               `?vcrrForceCanary=true`, Vercel answers with the
-#                               `_vcrr_*` cookie pinning this client to the canary,
-#                               and a cookie jar carries it on every later request.
+#                               the public domain: every attempt carries
+#                               `?vcrrForceCanary=true` (idempotent), Vercel answers
+#                               with the `_vcrr_*` cookie pinning this client to the
+#                               canary, and a cookie jar carries it across retries.
+#                               Only set this while a rollout is ACTIVE — with none,
+#                               Vercel sets no cookie (cd.yml gates it on
+#                               `ensure-canary`'s canary_state output).
 #                               This is how CD verifies the build it just made
 #                               without any Deployment Protection credential:
 #                               the public domain is unprotected, and the cookie
@@ -80,6 +83,7 @@ if [ -n "${VERCEL_AUTOMATION_BYPASS:-}" ]; then
 fi
 if [ "$FORCE_CANARY" = "true" ]; then
   COOKIE_JAR="$(mktemp)"
+  trap 'rm -f "$COOKIE_JAR"' EXIT
   CURL_ARGS+=(--cookie-jar "$COOKIE_JAR" --cookie "$COOKIE_JAR")
   HEALTH_ENDPOINT="${HEALTH_ENDPOINT}?vcrrForceCanary=true"
   echo "Forcing the rolling-release canary via vcrrForceCanary (cookie jar: ${COOKIE_JAR})"

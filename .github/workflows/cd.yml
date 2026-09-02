@@ -75,7 +75,12 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
-      - name: Promote previous deployment to production
+      # Instant Rollback, not `vercel promote`: with Rolling Releases enabled a
+      # promote of the old build starts a staged rollout of it when nothing is
+      # ramping, and is a silent no-op while a rollout is active — neither
+      # reverts traffic. `vercel rollback` aborts any active rolling release and
+      # points production at the target at once (#9624).
+      - name: Roll production back to the previous deployment (Instant Rollback)
         id: promote-previous
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
@@ -84,7 +89,7 @@ jobs:
           ROLLBACK_URL: ${{ github.event.inputs.rollback_production }}
         run: |
           echo "Rolling back production to: $ROLLBACK_URL"
-          vercel promote "$ROLLBACK_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          vercel rollback "$ROLLBACK_URL" --yes --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "Rollback complete. Production now at: $ROLLBACK_URL"
 
       # Was a Slack post gated on `vars.SLACK_WEBHOOK_INCIDENTS != ''`. That repo
@@ -106,8 +111,8 @@ jobs:
         run: |
           NOTIFY_BODY="Production was manually rolled back by \`${ACTOR}\`.
 
-          **Promoted URL:** ${ROLLBACK_URL}
-          **\`vercel promote\` outcome:** ${PROMOTE_OUTCOME}
+          **Restored URL:** ${ROLLBACK_URL}
+          **\`vercel rollback\` outcome:** ${PROMOTE_OUTCOME}
           **Run:** ${RUN_URL}
 
           A manual rollback means production was serving something bad. Record the
@@ -1442,7 +1447,10 @@ jobs:
           HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
-          HEALTH_CHECK_FORCE_CANARY: 'true'
+          # Only pin to the canary when there IS one: with no active rollout
+          # (feature off, or the rollout already resolved) Vercel sets no cookie,
+          # and the commit assertion alone carries the proof.
+          HEALTH_CHECK_FORCE_CANARY: ${{ steps.canary.outputs.canary_state == 'canary' }}
           HEALTH_CHECK_EXPECT_COMMIT: ${{ github.sha }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
@@ -1461,7 +1469,7 @@ jobs:
         working-directory: web
         env:
           PRODUCTION_URL: https://www.spawnforge.ai
-          SMOKE_FORCE_CANARY: 'true'
+          SMOKE_FORCE_CANARY: ${{ steps.canary.outputs.canary_state == 'canary' }}
           SMOKE_EXPECT_COMMIT: ${{ github.sha }}
         # Use dedicated smoke config — no local webServer, hits live URL directly
         run: npx playwright test --config playwright.smoke.config.ts --project=chromium
@@ -1512,9 +1520,10 @@ jobs:
           fi
 
           # Instant Rollback, not `vercel promote`: with Rolling Releases enabled
-          # a promote STARTS a staged rollout of the old build (5% for 10 min,
-          # 25% for 30 min...), so the broken canary would keep serving during
-          # the "rollback". `vercel rollback` aborts the active rolling release
+          # a promote of the old build either starts a staged rollout of it (5%
+          # for 10 min, 25% for 30 min...) or, while our canary is still ramping,
+          # is a silent no-op ("the project's state won't change") — neither
+          # reverts traffic. `vercel rollback` aborts the active rolling release
           # and routes 100% of traffic to the target at once
           # (vercel.com/docs/rolling-releases#aborting-a-rolling-release).
           vercel rollback "$PREV_URL" --yes --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
