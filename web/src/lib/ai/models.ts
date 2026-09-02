@@ -8,7 +8,7 @@
  * Two naming conventions are used:
  *
  * 1. Short names (`AI_MODEL_PRIMARY`, `AI_MODEL_FAST`): provider-agnostic IDs
- *    used by the legacy @anthropic-ai/sdk path and the provider registry's
+ *    used by the direct @ai-sdk/anthropic path and the provider registry's
  *    MODEL_MAP translation layer.
  *
  * 2. Gateway-format names (`GATEWAY_MODEL_CHAT`, etc.): fully-qualified
