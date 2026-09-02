@@ -1,14 +1,30 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, X, Loader2, ChevronDown, ChevronRight, Undo2, RotateCcw, Eye, XCircle } from 'lucide-react';
+import { Check, X, Loader2, ChevronDown, ChevronRight, Undo2, RotateCcw, Eye, XCircle, ShieldAlert, Ban } from 'lucide-react';
 import type { ToolCallStatus } from '@/stores/chatStore';
 import { useEditorStore } from '@/stores/editorStore';
 
 interface ToolCallCardProps {
   toolCall: ToolCallStatus;
+  /** Client-side approvalMode preview: execute locally. */
   onApprove?: (id: string) => void;
+  /** Client-side approvalMode preview: drop locally. */
   onReject?: (id: string) => void;
+  /**
+   * SERVER-side approval gate (PF-8860). Deliberately separate from
+   * onApprove/onReject: those resolve a 'preview' locally and never tell the
+   * model, whereas these resume the paused turn with an approval-response.
+   * Wiring the gate to the preview handlers would execute a destructive call
+   * while the server still considered it blocked.
+   */
+  onApproveGated?: (id: string) => void;
+  onDenyGated?: (id: string) => void;
+  /**
+   * The answer already recorded for this call while a sibling blocked call is
+   * still unanswered. Undefined until the user clicks.
+   */
+  gatedDecision?: boolean;
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -342,7 +358,14 @@ function summarizeInput(name: string, input: Record<string, unknown>): string {
   }
 }
 
-export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProps) {
+export function ToolCallCard({
+  toolCall,
+  onApprove,
+  onReject,
+  onApproveGated,
+  onDenyGated,
+  gatedDecision,
+}: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const undo = useEditorStore((s) => s.undo);
 
@@ -363,33 +386,51 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
         return <XCircle size={14} className="text-red-400/60" />;
       case 'undone':
         return <RotateCcw size={14} className="text-zinc-400" />;
+      case 'approval-required':
+        return <ShieldAlert size={14} className="text-amber-400" />;
+      case 'denied':
+        return <Ban size={14} className="text-red-400/60" />;
     }
   })();
 
   const isPreview = toolCall.status === 'preview';
   const isRejected = toolCall.status === 'rejected';
   const isUndone = toolCall.status === 'undone';
+  const needsApproval = toolCall.status === 'approval-required';
+  const isDenied = toolCall.status === 'denied';
 
   return (
     <div className={`my-1 rounded border text-xs ${
-      isPreview
-        ? 'border-amber-700/50 bg-amber-950/20'
-        : isRejected
+      needsApproval
+        ? 'border-amber-500/70 bg-amber-950/30'
+        : isDenied
           ? 'border-red-900/30 bg-red-950/10 opacity-60'
-          : isUndone
-            ? 'border-zinc-700/50 bg-zinc-800/30 opacity-50'
-            : 'border-zinc-700 bg-zinc-800/50'
+          : isPreview
+            ? 'border-amber-700/50 bg-amber-950/20'
+            : isRejected
+              ? 'border-red-900/30 bg-red-950/10 opacity-60'
+              : isUndone
+                ? 'border-zinc-700/50 bg-zinc-800/30 opacity-50'
+                : 'border-zinc-700 bg-zinc-800/50'
     }`}>
       <button
         className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
         onClick={() => setExpanded(!expanded)}
       >
         {statusIcon}
-        <span className={`font-medium ${isRejected || isUndone ? 'text-zinc-400 line-through' : 'text-zinc-300'}`}>
+        <span className={`font-medium ${isRejected || isUndone || isDenied ? 'text-zinc-400 line-through' : 'text-zinc-300'}`}>
           {label}
         </span>
         {summary && <span className="truncate text-zinc-400">{summary}</span>}
         <span className="ml-auto flex items-center gap-1">
+          {needsApproval && (
+            <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-400">
+              Approval required
+            </span>
+          )}
+          {isDenied && (
+            <span className="text-[9px] text-red-400/60">Denied</span>
+          )}
           {isRejected && (
             <span className="text-[9px] text-red-400/60">Rejected</span>
           )}
@@ -412,6 +453,65 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
           {expanded ? <ChevronDown size={12} className="text-zinc-400" /> : <ChevronRight size={12} className="text-zinc-400" />}
         </span>
       </button>
+
+      {/* Server-side approval gate (PF-8860).
+
+          The full materialized input is rendered UNCONDITIONALLY here, not
+          behind the expand chevron: approving a call whose arguments you
+          cannot see is not approval. chatStore buffers `tool-input-available`
+          until the turn finishes, so `toolCall.input` is guaranteed complete
+          by the time this state is reachable.
+
+          No keyboard default, no timeout, no batch auto-approve — each
+          blocked call is answered explicitly. */}
+      {needsApproval && (
+        <div className="border-t border-amber-600/40">
+          <div className="px-2 py-1.5">
+            <p className="mb-1 text-[10px] uppercase tracking-wide text-amber-300/80">
+              This action will run with these arguments
+            </p>
+            <pre
+              data-testid="approval-input"
+              className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-900/60 px-2 py-1.5 text-[11px] text-zinc-300"
+            >
+              {JSON.stringify(toolCall.input, null, 2)}
+            </pre>
+          </div>
+          <div className="flex items-center gap-2 border-t border-amber-600/30 px-2 py-1.5">
+            <button
+              onClick={() => onApproveGated?.(toolCall.id)}
+              disabled={gatedDecision !== undefined}
+              aria-label={`Approve ${label}`}
+              className={`flex items-center gap-1 rounded px-2 py-1 ${
+                gatedDecision === true
+                  ? 'bg-green-600/40 text-green-300'
+                  : 'bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-40'
+              }`}
+            >
+              <Check size={12} />
+              <span>Approve</span>
+            </button>
+            <button
+              onClick={() => onDenyGated?.(toolCall.id)}
+              disabled={gatedDecision !== undefined}
+              aria-label={`Deny ${label}`}
+              className={`flex items-center gap-1 rounded px-2 py-1 ${
+                gatedDecision === false
+                  ? 'bg-red-600/40 text-red-300'
+                  : 'bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-40'
+              }`}
+            >
+              <X size={12} />
+              <span>Deny</span>
+            </button>
+            {gatedDecision !== undefined && (
+              <span className="text-[10px] text-zinc-400">
+                Waiting for the other blocked actions to be answered
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Preview approval buttons */}
       {isPreview && (
