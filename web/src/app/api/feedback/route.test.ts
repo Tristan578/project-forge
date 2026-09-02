@@ -73,6 +73,21 @@ describe('POST /api/feedback', () => {
     expect(body.code).toBe('VALIDATION_ERROR');
   });
 
+  // min(10) is counted in code points (#9637): nine emoji (18 UTF-16 units) is
+  // deliberately rejected — an emoji-only body under ten characters is not
+  // substantive feedback.
+  it('should return 422 for a nine-emoji description (18 UTF-16 units, 9 code points)', async () => {
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/feedback', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'bug', description: '\u{1F41B}'.repeat(9) }),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).code).toBe('VALIDATION_ERROR');
+  });
+
   it('should return 422 for description too short', async () => {
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/feedback', {
