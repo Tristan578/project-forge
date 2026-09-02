@@ -11,6 +11,7 @@
  */
 
 import 'server-only';
+import { UPSTASH_REST_TIMEOUT_MS } from '@/lib/config/timeouts';
 import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
 
 export class DbRateLimitError extends Error {
@@ -31,7 +32,9 @@ function getLimit(): number {
 // Lazy Upstash Ratelimit singleton
 // ---------------------------------------------------------------------------
 
-type LimiterInstance = { limit: (key: string) => Promise<{ success: boolean; remaining: number; reset: number }> };
+type LimiterInstance = {
+  limit: (key: string) => Promise<{ success: boolean; remaining: number; reset: number; reason?: string }>;
+};
 
 let _initPromise: Promise<LimiterInstance | null> | null = null;
 
@@ -57,6 +60,12 @@ async function initLimiter(): Promise<LimiterInstance | null> {
       redis,
       limiter: Ratelimit.slidingWindow(getLimit(), '1 s'),
       prefix: '@spawnforge/db-ratelimit',
+      // The SDK's default is 5 s, and on expiry it RESOLVES
+      // `{ success: true, reason: 'timeout' }` instead of throwing, so the
+      // catch in checkDbRateLimit() never sees a stalled Upstash. Same bound
+      // as every other Upstash call (#9623); the resolved-open case is
+      // reported below.
+      timeout: UPSTASH_REST_TIMEOUT_MS,
     });
 
     return rl;
@@ -88,23 +97,44 @@ export async function checkDbRateLimit(): Promise<void> {
 
   try {
     const result = await limiter.limit(key);
-    if (result.success) return;
+    if (result.success) {
+      reportTimeoutFailOpen(result.reason);
+      return;
+    }
 
     // Brief backoff and retry once
     await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
     const retry = await limiter.limit(key);
-    if (retry.success) return;
+    if (retry.success) {
+      reportTimeoutFailOpen(retry.reason);
+      return;
+    }
 
     throw new DbRateLimitError();
   } catch (err) {
     if (err instanceof DbRateLimitError) throw err;
-    // Upstash failure (network error, timeout, 5xx) — fail open so a Redis
-    // incident doesn't take down every DB-backed request. This silently
-    // disables global DB-overload protection, so report it (sampled, to avoid
-    // a Sentry storm during a sustained outage) before allowing the query
-    // through (#8664).
+    // Upstash failure (network error, 5xx, a thrown SDK error) — fail open so
+    // a Redis incident doesn't take down every DB-backed request. This
+    // silently disables global DB-overload protection, so report it (sampled,
+    // to avoid a Sentry storm during a sustained outage) before allowing the
+    // query through (#8664). A STALL never reaches here: the SDK resolves it
+    // as allowed with `reason: 'timeout'`, which reportTimeoutFailOpen covers.
     sampledCaptureException('checkDbRateLimit.failOpen', err);
   }
+}
+
+/**
+ * The SDK's timeout is a resolve, not a throw — `success: true` with
+ * `reason: 'timeout'` — so the global DB-overload guard fails open with no
+ * exception to catch. Report it as the fail-open it is, sampled like the
+ * catch above.
+ */
+function reportTimeoutFailOpen(reason: string | undefined): void {
+  if (reason !== 'timeout') return;
+  sampledCaptureException(
+    'checkDbRateLimit.timeoutFailOpen',
+    new Error(`Upstash DB rate limit timed out after ${UPSTASH_REST_TIMEOUT_MS}ms; query allowed`),
+  );
 }
 
 // ---------------------------------------------------------------------------

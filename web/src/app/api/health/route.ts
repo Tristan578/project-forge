@@ -2,7 +2,7 @@
  * GET /api/health — service health endpoint.
  *
  * Runs 10 checks (DB, Payments, Rate limiting, Engine CDN, AI providers, Clerk,
- * Anthropic, Sentry, R2, generation factory), four of which make an outbound
+ * chat backend, Sentry, R2, generation factory), five of which make an outbound
  * network call — see `runAllHealthChecks()` for which.
  * Only DB and Clerk failures produce HTTP 503 — all other services degrade gracefully.
  * Sensitive details are stripped from the public response; internal details are logged.
@@ -45,7 +45,7 @@ function normalizeStatus(s: ServiceHealth): PublicServiceHealth {
  * Module-level cache of the fully-shaped RESPONSE (body + HTTP status), which
  * is a layer above the shared report cache inside `getCachedHealthReport()`.
  * This one saves the normalize/sanitize/log work on a hit; that one saves the
- * four outbound probes and is shared with every other health-reading surface.
+ * five outbound probes and is shared with every other health-reading surface.
  *
  * Neither is a rate limit — both are per-lambda-instance, so they bound one
  * instance rather than the aggregate. The two bounds live in `GET` below:
@@ -78,7 +78,7 @@ export function resetHealthCache(): void {
  *
  * 1. Raw request volume against a public JSON endpoint — 60 req/min per IP via
  *    `rateLimitPublicRoute()`, in front of everything including the caches.
- * 2. The outbound fan-out (1 uncached request → 4 outbound probes) — charged to
+ * 2. The outbound fan-out (1 uncached request → 5 outbound probes) — charged to
  *    a budget SHARED with the `/health` page (`checkHealthFanoutBudget()`), and
  *    consumed only after both caches miss, since a cached report costs nothing
  *    to serve. Giving each surface its own bucket would not bound the fan-out,
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Shared with /api/status and the /health page, and in-flight deduped, so N
   // concurrent cold requests cost one fan-out rather than N. A live cached
   // report is free to serve, so it must not spend fan-out budget; only a miss
-  // — the caller that would actually pay for the four probes — is charged.
+  // — the caller that would actually pay for the five probes — is charged.
   let report: HealthReport | null = peekCachedHealthReport();
   if (report === null) {
     const budget = await checkHealthFanoutBudget(getClientIp(req));

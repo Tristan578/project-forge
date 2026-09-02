@@ -22,6 +22,7 @@ import {
   API_MAX_DURATION_SIMPLE_S,
   API_MAX_DURATION_CRON_S,
   EXTERNAL_API_TIMEOUT_MS,
+  UPSTASH_REST_TIMEOUT_MS,
   REPLICATE_STATUS_TIMEOUT_MS,
   WEBSOCKET_MESSAGE_TIMEOUT_MS,
   REAPER_BRIDGE_TIMEOUT_MS,
@@ -158,6 +159,11 @@ describe('API maxDuration constants (seconds)', () => {
 describe('External API timeouts', () => {
   it('EXTERNAL_API_TIMEOUT_MS is 60 seconds', () => {
     expect(EXTERNAL_API_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it('UPSTASH_REST_TIMEOUT_MS is 3 seconds', () => {
+    // Bounds the rate limiter in front of every rate-limited route (#9623).
+    expect(UPSTASH_REST_TIMEOUT_MS).toBe(3_000);
   });
 
   it('REPLICATE_STATUS_TIMEOUT_MS is positive', () => {
