@@ -106,6 +106,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
           : DIRECT_CAPABILITY_PROVIDER.music,
         entityId: target,
         usageId: typeof data.usageId === 'string' ? data.usageId : undefined,
+        durable: data.durable === true,
         autoPlace: !!target,
         targetEntityId: target,
       });
