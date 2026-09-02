@@ -63,6 +63,21 @@ describe('handleAnimationEvent', () => {
     expect(useEditorStore.setState).not.toHaveBeenCalled();
   });
 
+  // `remove_animation_clip` and "the selected entity has no clip" both arrive
+  // here (PF-1174 / #9278): the CHANGED payload is a clip, so it cannot say none.
+  it('ANIMATION_CLIP_REMOVED: clears primaryAnimationClip for the selected entity only', () => {
+    actions.primaryId = 'ent-1';
+    let result = handleAnimationEvent('ANIMATION_CLIP_REMOVED', { entityId: 'ent-1' }, mockSetGet.set, mockSetGet.get);
+    expect(result).toBe(true);
+    expect(useEditorStore.setState).toHaveBeenCalledWith({ primaryAnimationClip: null });
+
+    vi.mocked(useEditorStore.setState).mockClear();
+    actions.primaryId = 'other-ent';
+    result = handleAnimationEvent('ANIMATION_CLIP_REMOVED', { entityId: 'ent-1' }, mockSetGet.set, mockSetGet.get);
+    expect(result).toBe(true);
+    expect(useEditorStore.setState).not.toHaveBeenCalled();
+  });
+
   // The emitted payload is `{ entityId, data, enabled }` — the rig is under
   // `data`, in the engine's wire shape. This test used to read a `skeleton` key
   // nothing emits and assert the DISPATCHING `setSkeleton2d`, which is the

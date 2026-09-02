@@ -1,10 +1,16 @@
 //! Animation command handlers
 
+use crate::core::animation_clip::{AnimationClipData, Interpolation, PlayMode, PropertyTarget};
 use crate::core::pending_commands::{
-    queue_animation_request_from_bridge,
-    AnimationRequest, AnimationAction,
-    QueryRequest,
+    queue_animation_clip_add_keyframe_from_bridge, queue_animation_clip_preview_from_bridge,
+    queue_animation_clip_property_update_from_bridge, queue_animation_clip_remove_keyframe_from_bridge,
+    queue_animation_clip_removal_from_bridge, queue_animation_clip_update_from_bridge,
+    queue_animation_clip_update_keyframe_from_bridge, queue_animation_request_from_bridge,
+    AnimationAction, AnimationClipAddKeyframe, AnimationClipPreview, AnimationClipPropertyUpdate,
+    AnimationClipRemoval, AnimationClipRemoveKeyframe, AnimationClipUpdate, AnimationClipUpdateKeyframe,
+    AnimationRequest, QueryRequest,
 };
+use serde::Deserialize;
 
 /// Dispatch animation commands
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
@@ -38,14 +44,18 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
                 Err(e) => Some(Err(e)),
             }
         },
+        // Keyframe-clip authoring (PF-1174 / #9278). The names are the ones the
+        // manifest and `animationSlice` have always dispatched; the old stubs
+        // (`add_keyframe`, `play_animation_clip`, `get_animation_clips`, …) were
+        // a second vocabulary nothing sent, and are deleted rather than aliased.
+        "create_animation_clip" => Some(handle_create_animation_clip(payload.clone())),
+        "add_clip_keyframe" => Some(handle_add_clip_keyframe(payload.clone())),
+        "remove_clip_keyframe" => Some(handle_remove_clip_keyframe(payload.clone())),
+        "update_clip_keyframe" => Some(handle_update_clip_keyframe(payload.clone())),
+        "set_clip_property" => Some(handle_set_clip_property(payload.clone())),
+        "preview_clip" => Some(handle_preview_clip(payload.clone())),
+        "remove_animation_clip" => Some(handle_remove_animation_clip(payload.clone())),
         // Stub handlers for animation commands not yet fully implemented
-        "create_animation_clip" => Some(Err("Not yet implemented: create_animation_clip".to_string())),
-        "add_keyframe" => Some(Err("Not yet implemented: add_keyframe".to_string())),
-        "remove_keyframe" => Some(Err("Not yet implemented: remove_keyframe".to_string())),
-        "update_keyframe" => Some(Err("Not yet implemented: update_keyframe".to_string())),
-        "get_animation_clips" => Some(Err("Not yet implemented: get_animation_clips".to_string())),
-        "play_animation_clip" => Some(Err("Not yet implemented: play_animation_clip".to_string())),
-        "stop_animation_clip" => Some(Err("Not yet implemented: stop_animation_clip".to_string())),
         // `set_animation_state_machine` / `remove_animation_state_machine` are
         // NOT stubbed here any more: `sprites.rs` implements both, and the stubs
         // shadowed it for as long as the router pointed the names at this domain.
@@ -301,6 +311,226 @@ fn handle_set_clip_speed(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
+// === Keyframe-clip authoring (PF-1174 / #9278) ===
+//
+// Each payload is a typed struct rather than a chain of `payload.get(..)`: a
+// misspelled enum value (`"ping-pong"`, `"linear "`) is a hard `Err` naming the
+// field, not a silent default. The enums deserialize from the same snake_case
+// strings `stores/slices/types.ts` declares (`position_x`, `ease_in_out`,
+// `ping_pong`), so the wire vocabulary has exactly one spelling.
+
+const NOT_INITIALIZED: &str = "PendingCommands resource not initialized";
+
+fn finite_or(name: &str, v: Option<f32>) -> Result<Option<f32>, String> {
+    match v {
+        Some(x) if !x.is_finite() => Err(format!("{name} must be finite, got {x}")),
+        other => Ok(other),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateClipPayload {
+    entity_id: String,
+    duration: Option<f32>,
+    play_mode: Option<PlayMode>,
+}
+
+/// `create_animation_clip` — insert a fresh clip (replacing any existing one;
+/// the old clip goes onto the undo stack).
+fn handle_create_animation_clip(payload: serde_json::Value) -> super::CommandResult {
+    let data: CreateClipPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid create_animation_clip payload: {e}"))?;
+    let mut clip = AnimationClipData::default();
+    clip.apply_properties(finite_or("duration", data.duration)?, data.play_mode, None, None)?;
+    let entity_id = data.entity_id.clone();
+    if queue_animation_clip_update_from_bridge(AnimationClipUpdate { entity_id: data.entity_id, clip_data: clip }) {
+        tracing::info!("Queued create_animation_clip for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err(NOT_INITIALIZED.to_string())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddKeyframePayload {
+    entity_id: String,
+    target: PropertyTarget,
+    time: f32,
+    value: f32,
+    #[serde(default)]
+    interpolation: Interpolation,
+}
+
+fn handle_add_clip_keyframe(payload: serde_json::Value) -> super::CommandResult {
+    let data: AddKeyframePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid add_clip_keyframe payload: {e}"))?;
+    if !data.time.is_finite() || data.time < 0.0 {
+        return Err(format!("time must be a finite number >= 0, got {}", data.time));
+    }
+    if !data.value.is_finite() {
+        return Err(format!("value must be finite, got {}", data.value));
+    }
+    let entity_id = data.entity_id.clone();
+    let request = AnimationClipAddKeyframe {
+        entity_id: data.entity_id,
+        target: data.target,
+        time: data.time,
+        value: data.value,
+        interpolation: data.interpolation,
+    };
+    if queue_animation_clip_add_keyframe_from_bridge(request) {
+        tracing::info!("Queued add_clip_keyframe for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err(NOT_INITIALIZED.to_string())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveKeyframePayload {
+    entity_id: String,
+    target: PropertyTarget,
+    time: f32,
+}
+
+fn handle_remove_clip_keyframe(payload: serde_json::Value) -> super::CommandResult {
+    let data: RemoveKeyframePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid remove_clip_keyframe payload: {e}"))?;
+    if !data.time.is_finite() {
+        return Err(format!("time must be finite, got {}", data.time));
+    }
+    let entity_id = data.entity_id.clone();
+    let request = AnimationClipRemoveKeyframe { entity_id: data.entity_id, target: data.target, time: data.time };
+    if queue_animation_clip_remove_keyframe_from_bridge(request) {
+        tracing::info!("Queued remove_clip_keyframe for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err(NOT_INITIALIZED.to_string())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateKeyframePayload {
+    entity_id: String,
+    target: PropertyTarget,
+    time: f32,
+    value: Option<f32>,
+    interpolation: Option<Interpolation>,
+    new_time: Option<f32>,
+}
+
+fn handle_update_clip_keyframe(payload: serde_json::Value) -> super::CommandResult {
+    let data: UpdateKeyframePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid update_clip_keyframe payload: {e}"))?;
+    if !data.time.is_finite() {
+        return Err(format!("time must be finite, got {}", data.time));
+    }
+    if data.value.is_none() && data.interpolation.is_none() && data.new_time.is_none() {
+        return Err("update_clip_keyframe needs at least one of value, interpolation, newTime".to_string());
+    }
+    let entity_id = data.entity_id.clone();
+    let request = AnimationClipUpdateKeyframe {
+        entity_id: data.entity_id,
+        target: data.target,
+        time: data.time,
+        new_value: finite_or("value", data.value)?,
+        new_interpolation: data.interpolation,
+        new_time: finite_or("newTime", data.new_time)?,
+    };
+    if queue_animation_clip_update_keyframe_from_bridge(request) {
+        tracing::info!("Queued update_clip_keyframe for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err(NOT_INITIALIZED.to_string())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipPropertyPayload {
+    entity_id: String,
+    duration: Option<f32>,
+    play_mode: Option<PlayMode>,
+    speed: Option<f32>,
+    autoplay: Option<bool>,
+}
+
+fn handle_set_clip_property(payload: serde_json::Value) -> super::CommandResult {
+    let data: ClipPropertyPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_clip_property payload: {e}"))?;
+    if data.duration.is_none() && data.play_mode.is_none() && data.speed.is_none() && data.autoplay.is_none() {
+        return Err("set_clip_property needs at least one of duration, playMode, speed, autoplay".to_string());
+    }
+    // Validate the same way the drain will apply it, so a bad value is refused
+    // here with a reason instead of being logged and dropped a frame later.
+    AnimationClipData::default().apply_properties(
+        finite_or("duration", data.duration)?,
+        data.play_mode.clone(),
+        finite_or("speed", data.speed)?,
+        data.autoplay,
+    )?;
+    let entity_id = data.entity_id.clone();
+    let update = AnimationClipPropertyUpdate {
+        entity_id: data.entity_id,
+        duration: data.duration,
+        play_mode: data.play_mode,
+        speed: data.speed,
+        autoplay: data.autoplay,
+    };
+    if queue_animation_clip_property_update_from_bridge(update) {
+        tracing::info!("Queued set_clip_property for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err(NOT_INITIALIZED.to_string())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewClipPayload {
+    entity_id: String,
+    action: String,
+    seek_time: Option<f32>,
+}
+
+fn handle_preview_clip(payload: serde_json::Value) -> super::CommandResult {
+    let data: PreviewClipPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid preview_clip payload: {e}"))?;
+    // Same validation the drain applies: refuse an unknown action or a seek
+    // without a time here, where the caller can see the reason.
+    AnimationClipData::default().preview(&data.action, finite_or("seekTime", data.seek_time)?)?;
+    let entity_id = data.entity_id.clone();
+    let preview = AnimationClipPreview { entity_id: data.entity_id, action: data.action, seek_time: data.seek_time };
+    if queue_animation_clip_preview_from_bridge(preview) {
+        tracing::info!("Queued preview_clip for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err(NOT_INITIALIZED.to_string())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveClipPayload {
+    entity_id: String,
+}
+
+fn handle_remove_animation_clip(payload: serde_json::Value) -> super::CommandResult {
+    let data: RemoveClipPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid remove_animation_clip payload: {e}"))?;
+    let entity_id = data.entity_id.clone();
+    if queue_animation_clip_removal_from_bridge(AnimationClipRemoval { entity_id: data.entity_id }) {
+        tracing::info!("Queued remove_animation_clip for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err(NOT_INITIALIZED.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,15 +568,20 @@ mod tests {
     /// contract — the router must not fall through to "Unknown command" for
     /// them — so they are covered like any other arm.
     const STUB_ARMS: &[&str] = &[
-        "create_animation_clip",
-        "add_keyframe",
-        "remove_keyframe",
-        "update_keyframe",
-        "get_animation_clips",
-        "play_animation_clip",
-        "stop_animation_clip",
         "list_skeleton_animations",
         "get_skeleton_animation",
+    ];
+
+    /// Keyframe-clip authoring commands: each queues exactly one request onto
+    /// its own `PendingCommands` queue (PF-1174 / #9278).
+    const CLIP_ARMS: &[&str] = &[
+        "create_animation_clip",
+        "add_clip_keyframe",
+        "remove_clip_keyframe",
+        "update_clip_keyframe",
+        "set_clip_property",
+        "preview_clip",
+        "remove_animation_clip",
     ];
 
     /// Every command this module answers. `every_dispatch_arm_is_covered` reads
@@ -357,6 +592,7 @@ mod tests {
             .iter()
             .chain(QUERY_ARMS)
             .chain(STUB_ARMS)
+            .chain(CLIP_ARMS)
             .copied()
             .collect()
     }
@@ -430,6 +666,17 @@ mod tests {
             "set_clip_speed" => {
                 json!({ "entityId": "entity_1", "clipName": "run", "speed": 2.0 })
             }
+            "create_animation_clip" => json!({ "entityId": "entity_1", "duration": 3.0, "playMode": "ping_pong" }),
+            "add_clip_keyframe" => json!({
+                "entityId": "entity_1", "target": "position_y", "time": 1.0, "value": 2.5, "interpolation": "ease_in_out"
+            }),
+            "remove_clip_keyframe" => json!({ "entityId": "entity_1", "target": "position_y", "time": 1.0 }),
+            "update_clip_keyframe" => json!({
+                "entityId": "entity_1", "target": "position_y", "time": 1.0, "value": 4.0, "newTime": 1.5
+            }),
+            "set_clip_property" => json!({ "entityId": "entity_1", "speed": 2.0, "autoplay": false }),
+            "preview_clip" => json!({ "entityId": "entity_1", "action": "seek", "seekTime": 0.5 }),
+            "remove_animation_clip" => json!({ "entityId": "entity_1" }),
             other => panic!("no fixture payload for `{other}` — add one"),
         }
     }
@@ -449,6 +696,13 @@ mod tests {
             "set_clip_speed" => ("clipName", json!(false)),
             "get_animation_state" | "list_animations" => ("entityId", json!(0)),
             "get_animation_graph" => ("entityId", json!({})),
+            "create_animation_clip" => ("playMode", json!("ping-pong")),
+            "add_clip_keyframe" => ("target", json!("position.y")),
+            "remove_clip_keyframe" => ("time", json!("1.0")),
+            "update_clip_keyframe" => ("target", json!(7)),
+            "set_clip_property" => ("entityId", json!(null)),
+            "preview_clip" => ("action", json!("rewind")),
+            "remove_animation_clip" => ("entityId", json!(false)),
             other => panic!("no required field recorded for `{other}` — add one"),
         }
     }
@@ -743,7 +997,7 @@ mod tests {
 
     #[test]
     fn every_command_reports_a_missing_pending_queue() {
-        for command in QUEUEING_ARMS.iter().chain(QUERY_ARMS) {
+        for command in QUEUEING_ARMS.iter().chain(QUERY_ARMS).chain(CLIP_ARMS) {
             unregister_pending_commands();
             let result = dispatch(command, &valid_payload(command))
                 .unwrap_or_else(|| panic!("`{command}` is not dispatched"));
@@ -778,12 +1032,132 @@ mod tests {
     #[test]
     fn a_stub_queues_nothing() {
         let (result, pending) = dispatch_with_queue(
-            "play_animation_clip",
-            json!({ "entityId": "entity_1", "clipName": "run" }),
+            "list_skeleton_animations",
+            json!({ "entityId": "entity_1" }),
         );
         assert!(result.is_err());
         assert!(pending.animation_requests.is_empty());
         assert!(pending.query_requests.is_empty());
+    }
+
+    // === Keyframe-clip authoring (PF-1174 / #9278) ===
+
+    fn clip_queue_depths(p: &PendingCommands) -> [usize; 7] {
+        [
+            p.animation_clip_updates.len(),
+            p.animation_clip_add_keyframes.len(),
+            p.animation_clip_remove_keyframes.len(),
+            p.animation_clip_update_keyframes.len(),
+            p.animation_clip_property_updates.len(),
+            p.animation_clip_previews.len(),
+            p.animation_clip_removals.len(),
+        ]
+    }
+
+    /// Each clip command lands on ITS queue and no other, exactly once.
+    #[test]
+    fn every_clip_command_queues_exactly_one_request_on_its_own_queue() {
+        for (i, command) in CLIP_ARMS.iter().enumerate() {
+            let pending = queue_after(command, valid_payload(command));
+            let mut expected = [0usize; 7];
+            expected[i] = 1;
+            assert_eq!(clip_queue_depths(&pending), expected, "`{command}` queue depths");
+            assert!(pending.animation_requests.is_empty(), "`{command}` touched the GLTF animation queue");
+        }
+    }
+
+    #[test]
+    fn create_animation_clip_carries_the_requested_duration_and_mode() {
+        let pending = queue_after("create_animation_clip", valid_payload("create_animation_clip"));
+        let clip = &pending.animation_clip_updates[0].clip_data;
+        assert_eq!(clip.duration, 3.0);
+        assert_eq!(clip.play_mode, PlayMode::PingPong);
+        assert!(clip.tracks.is_empty());
+        assert!(!clip.playing);
+    }
+
+    #[test]
+    fn create_animation_clip_defaults_when_only_the_entity_is_given() {
+        let pending = queue_after("create_animation_clip", json!({ "entityId": "entity_1" }));
+        let clip = &pending.animation_clip_updates[0].clip_data;
+        assert_eq!(clip.duration, AnimationClipData::default().duration);
+        assert_eq!(clip.play_mode, PlayMode::Loop);
+    }
+
+    #[test]
+    fn add_clip_keyframe_parses_the_snake_case_wire_vocabulary() {
+        let pending = queue_after("add_clip_keyframe", valid_payload("add_clip_keyframe"));
+        let k = &pending.animation_clip_add_keyframes[0];
+        assert_eq!(k.target, PropertyTarget::PositionY);
+        assert_eq!(k.interpolation, Interpolation::EaseInOut);
+        assert_eq!((k.time, k.value), (1.0, 2.5));
+    }
+
+    #[test]
+    fn add_clip_keyframe_defaults_interpolation_to_linear() {
+        let pending = queue_after(
+            "add_clip_keyframe",
+            json!({ "entityId": "entity_1", "target": "scale_x", "time": 0.0, "value": 1.0 }),
+        );
+        assert_eq!(pending.animation_clip_add_keyframes[0].interpolation, Interpolation::Linear);
+    }
+
+    /// JSON cannot carry NaN or infinity (serde_json refuses to emit them and
+    /// rejects `1e400` as out of range), so the non-finite guards are exercised
+    /// at the data level in `animation_clip.rs`; here the reachable bad inputs
+    /// are negative times and a missing seek time.
+    #[test]
+    fn keyframe_commands_refuse_negative_times() {
+        let err = error_from("add_clip_keyframe", json!({ "entityId": "e", "target": "position_x", "time": -1.0, "value": 0.0 }));
+        assert!(err.contains(">= 0"), "{err}");
+        let mut payload = valid_payload("update_clip_keyframe");
+        payload["newTime"] = json!(-0.5);
+        let pending = queue_after("update_clip_keyframe", payload);
+        // The command layer forwards the request; the drain applies
+        // `update_keyframe`, whose own test pins the `>= 0` refusal.
+        assert_eq!(pending.animation_clip_update_keyframes[0].new_time, Some(-0.5));
+        let mut clip = AnimationClipData::default();
+        clip.add_keyframe(PropertyTarget::PositionX, 1.0, 0.0, Interpolation::Linear).unwrap();
+        assert!(clip.update_keyframe(&PropertyTarget::PositionX, 1.0, None, None, Some(-0.5)).is_err());
+    }
+
+    #[test]
+    fn update_clip_keyframe_needs_something_to_change() {
+        let err = error_from("update_clip_keyframe", json!({ "entityId": "e", "target": "position_x", "time": 1.0 }));
+        assert!(err.contains("at least one"), "{err}");
+    }
+
+    #[test]
+    fn set_clip_property_refuses_a_zero_duration_and_an_empty_update() {
+        let err = error_from("set_clip_property", json!({ "entityId": "e", "duration": 0.0 }));
+        assert!(err.contains("duration must be > 0"), "{err}");
+        let err = error_from("set_clip_property", json!({ "entityId": "e" }));
+        assert!(err.contains("at least one"), "{err}");
+        let pending = queue_after("set_clip_property", json!({ "entityId": "entity_1", "playMode": "once" }));
+        let u = &pending.animation_clip_property_updates[0];
+        assert_eq!(u.play_mode, Some(PlayMode::Once));
+        assert_eq!((u.duration, u.speed, u.autoplay), (None, None, None));
+    }
+
+    #[test]
+    fn preview_clip_accepts_the_four_transport_actions_and_nothing_else() {
+        for action in ["play", "pause", "stop"] {
+            let pending = queue_after("preview_clip", json!({ "entityId": "entity_1", "action": action }));
+            assert_eq!(pending.animation_clip_previews[0].action, action);
+        }
+        let err = error_from("preview_clip", json!({ "entityId": "e", "action": "seek" }));
+        assert!(err.contains("seekTime"), "{err}");
+        let err = error_from("preview_clip", json!({ "entityId": "e", "action": "rewind" }));
+        assert!(err.contains("unknown preview action"), "{err}");
+    }
+
+    /// The old stub spellings are gone, not aliased: a second vocabulary is how
+    /// this surface drifted apart in the first place.
+    #[test]
+    fn the_retired_stub_spellings_are_not_dispatched() {
+        for name in ["add_keyframe", "remove_keyframe", "update_keyframe", "get_animation_clips", "play_animation_clip", "stop_animation_clip"] {
+            assert!(dispatch(name, &json!({ "entityId": "e" })).is_none(), "`{name}` is still dispatched");
+        }
     }
 
     // === Parity with production ===

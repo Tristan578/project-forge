@@ -65,6 +65,7 @@ use crate::core::{
     pending_commands::PendingCommands,
     physics::PhysicsPlugin,
     physics_2d_sim::Physics2dPlugin,
+    animation_clip::AnimationClipPlugin,
     post_processing::PostProcessingPlugin,
     quality::QualitySettings,
     scene,
@@ -223,6 +224,7 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(InputPlugin)
         .add_plugins(PhysicsPlugin)
         .add_plugins(Physics2dPlugin)
+        .add_plugins(AnimationClipPlugin)
         .add_plugins(ShaderEffectsPlugin)
         .add_plugins(CustomWgslPlugin)
         .add_plugins(CameraControlPlugin)
@@ -406,6 +408,19 @@ impl Plugin for SelectionPlugin {
                 physics::apply_gravity2d_updates,
                 physics::apply_debug_physics2d_toggle,
                 physics::handle_physics2d_query,
+            ))
+            // Keyframe-clip authoring drains (PF-1174 / #9278). Both builds:
+            // the queues are filled unconditionally, and an exported game's
+            // autoplay clips are what the authoring is for. The playback
+            // sampler itself is `AnimationClipPlugin` in core.
+            .add_systems(Update, (
+                animation::apply_animation_clip_updates,
+                animation::apply_animation_clip_add_keyframes,
+                animation::apply_animation_clip_remove_keyframes,
+                animation::apply_animation_clip_update_keyframes,
+                animation::apply_animation_clip_property_updates,
+                animation::apply_animation_clip_previews,
+                animation::apply_animation_clip_removals,
             ));
 
         app
@@ -680,6 +695,7 @@ impl Plugin for SelectionPlugin {
                     particles::emit_particle_on_selection,
                     material::emit_shader_on_selection,
                     animation::emit_animation_on_selection,
+                    animation::emit_animation_clip_on_selection,
                     game::emit_game_camera_on_selection,
                     skeleton2d::emit_skeleton2d_on_selection,
                     sprite::emit_sprite_on_selection,
