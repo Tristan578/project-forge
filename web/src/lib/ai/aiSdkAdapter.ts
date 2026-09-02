@@ -24,7 +24,7 @@ import type { ResolveChatStreamEvent, ChatMessage, ResolveChatOptions } from '@/
 import type { ResolvedRoute } from '@/lib/providers/types';
 import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
 import type { ManifestTool } from '@/lib/ai/toolAdapter';
-import { AI_MODEL_PRIMARY, AI_MODELS, thinkingModeFor } from '@/lib/ai/models';
+import { AI_MODEL_PRIMARY, AI_MODELS, anthropicThinkingOption } from '@/lib/ai/models';
 import { DEFAULT_MAX_TOKENS, THINKING_MAX_TOKENS } from '@/lib/constants';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +65,23 @@ function toAnthropicModelId(canonicalModel: string): string {
     return canonicalModel.split('/').slice(1).join('/');
   }
   return canonicalModel;
+}
+
+/**
+ * Build the AI SDK model instance for a resolved backend route.
+ *
+ * Direct routes get `anthropic()` (thinking mode + prompt caching); every
+ * other backend goes through `gateway()`. Exported so non-streaming callers —
+ * the decomposer's structured-output call, for one — pick the same provider
+ * for the same route instead of re-deriving the rule and drifting from it.
+ */
+export function resolveModelInstance(
+  route: ResolvedRoute,
+  canonicalModel: string,
+): ReturnType<typeof gateway> | ReturnType<typeof anthropic> {
+  return route.backendId === 'direct'
+    ? anthropic(toAnthropicModelId(canonicalModel))
+    : gateway(toGatewayModelId(canonicalModel));
 }
 
 // ---------------------------------------------------------------------------
@@ -125,16 +142,18 @@ export async function* streamViaSdk(
       ? convertManifestToolsToSdkTools(manifestTools)
       : undefined;
 
-  // Select model provider based on resolved backend
-  let modelInstance: ReturnType<typeof gateway> | ReturnType<typeof anthropic>;
+  // Select model provider based on resolved backend. Direct Anthropic
+  // preserves thinking mode and prompt caching; everything else (gateway,
+  // OpenRouter, GitHub Models) goes through the AI Gateway provider.
+  const modelInstance = resolveModelInstance(route, canonicalModel);
 
-  if (route.backendId === 'direct') {
-    // Direct Anthropic path: preserves thinking mode and prompt caching
-    modelInstance = anthropic(toAnthropicModelId(canonicalModel));
-  } else {
-    // Gateway / OpenRouter / GitHub Models: use AI Gateway provider
-    modelInstance = gateway(toGatewayModelId(canonicalModel));
-  }
+  // Model-gated thinking shape — see `models.ts`. `undefined` means this model
+  // has no known thinking shape, so the field is omitted rather than sent in a
+  // form the API rejects (PF-1216 / #9339).
+  const thinkingOption =
+    route.backendId === 'direct' && options.thinking
+      ? anthropicThinkingOption(canonicalModel)
+      : undefined;
 
   try {
     let toolIndex = 0;
@@ -145,20 +164,8 @@ export async function* streamViaSdk(
       maxOutputTokens: maxTokens,
       tools,
       experimental_telemetry: { isEnabled: true },
-      // The thinking shape is a property of the model (#9626): adaptive for
-      // Opus 4.7+ / Sonnet 4.6+ / Claude 5, budget for Haiku 4.5 and earlier,
-      // nothing for a model that has no extended thinking.
-      ...(route.backendId === 'direct' && options.thinking && thinkingModeFor(canonicalModel) !== 'none'
-        ? {
-            providerOptions: {
-              anthropic: {
-                thinking:
-                  thinkingModeFor(canonicalModel) === 'adaptive'
-                    ? { type: 'adaptive' }
-                    : { type: 'enabled', budgetTokens: 10000 },
-              },
-            },
-          }
+      ...(thinkingOption
+        ? { providerOptions: { anthropic: { thinking: thinkingOption } } }
         : {}),
     });
 

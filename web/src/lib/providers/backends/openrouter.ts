@@ -26,6 +26,11 @@ const ENDPOINT = 'https://openrouter.ai/api/v1';
  */
 const MODEL_MAP: Record<string, string> = {
   // Anthropic models on OpenRouter
+  'claude-sonnet-5': 'anthropic/claude-sonnet-5',
+  'claude-opus-5': 'anthropic/claude-opus-5',
+  // 4.x ids stay mapped after the Claude 5 migration (PF-1216 / #9339) so an
+  // explicitly-requested legacy model still routes to itself, and so pointing
+  // AI_MODEL_PRIMARY/AI_MODEL_PREMIUM back at them needs no edit here.
   'claude-sonnet-4-6': 'anthropic/claude-sonnet-4-6',
   'claude-opus-4-8': 'anthropic/claude-opus-4-8',
   'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',

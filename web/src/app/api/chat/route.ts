@@ -364,7 +364,7 @@ export async function POST(request: NextRequest) {
     model = deepTierGranted ? AI_MODEL_DEEP : AI_MODEL_PRIMARY;
   }
 
-  // Premium model gate: claude-opus-4-8 is restricted to Pro tier. Reject
+  // Premium model gate: claude-opus-5 is restricted to Pro tier. Reject
   // before billing so non-Pro users requesting premium are not charged the
   // estimated cost. The gate only blocks the model — it does not silently
   // downgrade, so the client gets an explicit signal to update its UI.
@@ -375,7 +375,7 @@ export async function POST(request: NextRequest) {
   // into 403s on every deep-gen surface instead of the intended upgrade.
   if (isPremiumModel(model) && auth.ctx.user.tier !== 'pro' && !deepTierGranted) {
     return Response.json(
-      { error: 'The premium model (Opus 4.8) requires a Pro subscription.' },
+      { error: 'The premium model (Opus 5) requires a Pro subscription.' },
       { status: 403 },
     );
   }

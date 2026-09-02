@@ -15,10 +15,13 @@ interface ModelOption {
   requiresPro?: boolean;
 }
 
+// Labels are hand-written display names for the constants above — they drift
+// silently (this list still said "Sonnet 4.5" while the constant was 4.6), so
+// re-read `@/lib/ai/models` whenever a model id changes.
 const MODEL_OPTIONS: ModelOption[] = [
-  { value: AI_MODEL_PRIMARY, label: 'Sonnet 4.5' },
+  { value: AI_MODEL_PRIMARY, label: 'Sonnet 5' },
   { value: AI_MODEL_FAST, label: 'Haiku 4.5' },
-  { value: AI_MODEL_PREMIUM, label: 'Opus 4.8 (Pro)', requiresPro: true },
+  { value: AI_MODEL_PREMIUM, label: 'Opus 5 (Pro)', requiresPro: true },
 ];
 
 export function ChatInput() {
