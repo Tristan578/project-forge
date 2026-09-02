@@ -20,7 +20,7 @@
 | Error Tracking | Sentry | Error capture, tracing, replay | DSN format validation | No |
 | Asset Storage | Cloudflare R2 | User assets, marketplace files | Config check (4 env vars) | No |
 | Engine CDN | Cloudflare R2 + Worker | WASM binary delivery | HEAD `engine.spawnforge.ai/` | No |
-| Rate Limiting | Upstash Redis | Distributed rate limiting | Config check | No |
+| Rate Limiting | Upstash Redis | Distributed rate limiting | `EVAL return 1` via the limiter's own REST transport (read-only; billed per command; bounded by the shared fan-out budget) — `degraded` carries Upstash's error body when the command is refused or stalls | No |
 | AI (Anthropic) | Anthropic API | Chat, scene generation | HEAD `api.anthropic.com` | No |
 | AI (Meshy) | Meshy API | 3D model generation | Config check | No |
 | AI (ElevenLabs) | ElevenLabs API | SFX/voice generation | Config check | No |

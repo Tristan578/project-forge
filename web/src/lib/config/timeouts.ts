@@ -195,6 +195,16 @@ export function deriveGenerationStepTimeoutMs(
 /** External API call timeout (e.g., OpenAI, Replicate image generation) */
 export const EXTERNAL_API_TIMEOUT_MS = 60_000;
 
+/**
+ * Upper bound on one Upstash REST round-trip (`lib/upstash/restCommand.ts`):
+ * the distributed rate limiter, its `/api/health` probe, the SDK limiter's own
+ * `timeout`, and the response cache all use it. The limiter runs in front of
+ * every rate-limited route and its degrade path only engages when the call
+ * THROWS, so a stalled connection would otherwise hold the route for the
+ * function's whole maxDuration.
+ */
+export const UPSTASH_REST_TIMEOUT_MS = 3_000;
+
 /** Replicate status poll timeout */
 export const REPLICATE_STATUS_TIMEOUT_MS = 15_000;
 
