@@ -2,11 +2,17 @@
  * Health check library for SpawnForge service monitoring.
  *
  * Each check runs with a 5-second timeout. For external services that
- * charge per call (Stripe, etc.) we only validate config presence.
- * For services that are safe to ping (DB, CDN) we perform real checks.
+ * charge per call (Stripe, etc.) we only validate config presence. For
+ * services that are safe to ping (DB, CDN) we perform real checks. Upstash is
+ * the deliberate exception to the per-call rule: its check executes one
+ * read-only EVAL, because a presence check reported the rate limiter healthy
+ * for four months while every real command was being refused (#9623) — the
+ * shared fan-out budget bounds what that probe can cost.
  *
- * Individual service checks for Clerk, the chat backend, Sentry, and Cloudflare
- * R2 use a 3-second timeout to keep the health endpoint responsive.
+ * Individual service checks for Clerk, the chat backend and the generation
+ * factory use a 3-second timeout (SERVICE_TIMEOUT_MS) to keep the health
+ * endpoint responsive; the Upstash probe is bounded by UPSTASH_REST_TIMEOUT_MS.
+ * Sentry and Cloudflare R2 are config-presence checks and make no call.
  *
  * Every environment variable a check reads comes from a shared constants module
  * (`@/lib/config/providers`, `@/lib/config/assetStorage`) rather than a literal
@@ -28,7 +34,8 @@ import {
   type PlatformKeyProvider,
 } from '@/lib/config/providers';
 import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
-import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
+import { HEALTH_CACHE_TTL_MS, UPSTASH_REST_TIMEOUT_MS } from '@/lib/config/timeouts';
+import { postUpstashCommand } from '@/lib/upstash/restCommand';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
@@ -50,7 +57,11 @@ export interface HealthReport {
 }
 
 const TIMEOUT_MS = 5_000;
-/** Tighter timeout for lightweight connectivity checks (Clerk, chat backend, Sentry, R2) */
+/**
+ * Tighter timeout for lightweight connectivity checks (Clerk, chat backend,
+ * generation factory). The Upstash probe uses UPSTASH_REST_TIMEOUT_MS from
+ * `@/lib/config/timeouts` instead, so it is bounded the same way the limiter is.
+ */
 const SERVICE_TIMEOUT_MS = 3_000;
 
 /**
@@ -207,13 +218,45 @@ export async function checkRateLimiting(): Promise<ServiceHealth> {
     };
   }
 
-  return {
-    name: 'Rate Limiting (Upstash)',
-    status: 'healthy',
-    latencyMs: 0,
-    lastChecked: new Date().toISOString(),
-    details: { configured: true },
-  };
+  // Execute a read-only EVAL through the SAME transport the limiter uses
+  // (`postUpstashCommand`: body form, base URL, bounded error detail, same
+  // timeout) — by construction, not by transcription, so a change to the
+  // limiter's request is a change to this probe. Reporting "healthy" on the
+  // presence of the two env vars is how this check said the rate limiter was
+  // fine in the very request whose own EVAL had just been refused with 400
+  // (#9623, four months). Upstash bills per command; the fan-out budget that
+  // gates every cold report is the bound on that spend.
+  // The bound lives in the transport (AbortSignal.timeout(UPSTASH_REST_TIMEOUT_MS)),
+  // so a stall surfaces as fetch's own "aborted due to timeout" error — no
+  // second race is wrapped around it, which would only hide which bound fired.
+  try {
+    const { latencyMs } = await timed(async () => {
+      const result = await postUpstashCommand(['EVAL', 'return 1', 0], {
+        timeoutMs: UPSTASH_REST_TIMEOUT_MS,
+      });
+      if (result !== 1) {
+        throw new Error(`Upstash answered EVAL with ${JSON.stringify(result)} instead of 1`);
+      }
+    });
+    return {
+      name: 'Rate Limiting (Upstash)',
+      status: 'healthy',
+      latencyMs,
+      lastChecked: new Date().toISOString(),
+      details: { probe: 'EVAL return 1' },
+    };
+  } catch (err) {
+    // 'degraded', not 'down': the limiter degrades to the SDK path and then to
+    // per-instance memory, so requests still flow — with less protection.
+    return {
+      name: 'Rate Limiting (Upstash)',
+      status: 'degraded',
+      latencyMs: 0,
+      lastChecked: new Date().toISOString(),
+      error: err instanceof Error ? err.message : String(err),
+      details: { probe: 'EVAL return 1' },
+    };
+  }
 }
 
 /**
@@ -706,7 +749,7 @@ async function checkGenerationFactory(): Promise<ServiceHealth> {
 
 /**
  * Run all service checks concurrently and return a full HealthReport.
- * Checks run in parallel. Anthropic downtime causes 'degraded' overall but
+ * Checks run in parallel. Chat-backend downtime causes 'degraded' overall but
  * does not trigger 503 (not in CRITICAL_SERVICES).
  */
 export async function runAllHealthChecks(): Promise<HealthReport> {
@@ -738,12 +781,14 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
 /**
  * Module-level cache for `runAllHealthChecks()`.
  *
- * Of the ten checks it runs, **four make outbound network calls**: the database
- * (`SELECT 1` against Neon), the engine CDN (HEAD), Clerk (`GET
- * api.clerk.com/v1/jwks`) and Anthropic (HEAD). `checkGenerationFactory` drives
- * the handler in-process, and the remaining five are `process.env` presence
- * checks that return `latencyMs: 0` without touching the network. So one
- * inbound request costs four outbound ones — smaller than a naive read of
+ * Of the ten checks it runs, **five make outbound network calls**: the database
+ * (`SELECT 1` against Neon), the engine CDN (HEAD), Clerk (`HEAD
+ * api.clerk.com/v1/jwks`), the chat backend (HEAD to its probe URL — the AI
+ * Gateway in production) and Upstash (a read-only `EVAL`,
+ * billed per command — #9623). `checkGenerationFactory` drives the handler
+ * in-process, and the remaining four are `process.env` presence checks that
+ * return `latencyMs: 0` without touching the network. So one inbound request
+ * costs five outbound ones — smaller than a naive read of
  * `runAllHealthChecks()` suggests, but still an amplification vector, and the
  * Clerk probe in particular sends `CLERK_SECRET_KEY` to Clerk's API on behalf
  * of whoever triggered it.

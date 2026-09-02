@@ -147,4 +147,62 @@ describe('checkDbRateLimit — with Upstash', () => {
       err,
     );
   });
+
+  it('bounds the SDK limiter with UPSTASH_REST_TIMEOUT_MS', async () => {
+    const { Ratelimit } = await import('@upstash/ratelimit');
+    const { UPSTASH_REST_TIMEOUT_MS } = await import('@/lib/config/timeouts');
+    mockLimit.mockResolvedValue({ success: true, remaining: 1, reset: 0 });
+
+    await checkDbRateLimit();
+
+    expect(vi.mocked(Ratelimit)).toHaveBeenCalledWith(
+      expect.objectContaining({ prefix: '@spawnforge/db-ratelimit', timeout: UPSTASH_REST_TIMEOUT_MS }),
+    );
+  });
+
+  it('reports the SDK resolve-as-allowed timeout as a fail-open, then allows the query (#9623)', async () => {
+    // @upstash/ratelimit 2.x never throws on a stall: it resolves success:true
+    // with reason:'timeout', so the catch above can never see it.
+    mockLimit.mockResolvedValue({ success: true, remaining: 0, reset: 0, reason: 'timeout' });
+
+    await expect(checkDbRateLimit()).resolves.toBeUndefined();
+
+    expect(mockSampledCapture).toHaveBeenCalledTimes(1);
+    expect(mockSampledCapture).toHaveBeenCalledWith(
+      'checkDbRateLimit.timeoutFailOpen',
+      expect.objectContaining({ message: expect.stringContaining('timed out') }),
+    );
+  });
+
+  it('reports a timeout that resolves the RETRY as allowed, exactly once', async () => {
+    vi.useFakeTimers();
+    try {
+      // A genuine deny, then the 100 ms retry stalls and the SDK resolves it
+      // open — the branch a real overload turns into a silent bypass.
+      mockLimit
+        .mockResolvedValueOnce({ success: false, remaining: 0, reset: 0 })
+        .mockResolvedValueOnce({ success: true, remaining: 0, reset: 0, reason: 'timeout' });
+
+      const promise = checkDbRateLimit();
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(promise).resolves.toBeUndefined();
+
+      expect(mockLimit).toHaveBeenCalledTimes(2);
+      expect(mockSampledCapture).toHaveBeenCalledTimes(1);
+      expect(mockSampledCapture).toHaveBeenCalledWith(
+        'checkDbRateLimit.timeoutFailOpen',
+        expect.objectContaining({ message: expect.stringContaining('timed out') }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not report a timeout when the SDK answered normally', async () => {
+    mockLimit.mockResolvedValue({ success: true, remaining: 5, reset: 0 });
+
+    await checkDbRateLimit();
+
+    expect(mockSampledCapture).not.toHaveBeenCalled();
+  });
 });
