@@ -97,6 +97,48 @@ describe('command manifest', () => {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // PF-8860 — the `destructive` flag that drives the chat agent's approval gate
+  // -------------------------------------------------------------------------
+  describe('destructive flag', () => {
+    const flagged = manifest.commands.filter(
+      (c) => (c as { destructive?: unknown }).destructive === true,
+    );
+
+    it('is present on a non-empty, plausible subset of commands', () => {
+      // A gate derived from zero flagged commands gates nothing and would pass
+      // every other assertion in this block vacuously.
+      expect(flagged.length).toBeGreaterThan(10);
+      expect(flagged.length).toBeLessThan(manifest.commands.length / 4);
+    });
+
+    it('is only ever the literal `true` when present', () => {
+      // `destructive: false` must not appear: absence is the negative case, so
+      // a stray `false` would be a second way to say the same thing.
+      for (const cmd of manifest.commands) {
+        const value = (cmd as { destructive?: unknown }).destructive;
+        expect([undefined, true], `${cmd.name}`).toContain(value);
+      }
+    });
+
+    it('covers the commands that destroy user content', () => {
+      const names = new Set(flagged.map((c) => c.name));
+      for (const name of [
+        'delete_entities', 'despawn_entity', 'delete_scene', 'delete_prefab',
+        'new_scene', 'clear_world', 'load_scene', 'switch_scene', 'publish_game',
+      ]) {
+        expect(names.has(name), `${name} must be flagged destructive`).toBe(true);
+      }
+    });
+
+    it('leaves ordinary editing commands unflagged', () => {
+      const names = new Set(flagged.map((c) => c.name));
+      for (const name of ['spawn_entity', 'update_transform', 'set_visibility', 'update_material']) {
+        expect(names.has(name), `${name} must NOT be flagged destructive`).toBe(false);
+      }
+    });
+  });
+
   it.each(manifest.commands)('$name has valid visibility field', (cmd) => {
     expect(
       ['public', 'internal'],

@@ -66,13 +66,23 @@ export function buildZodSchema(
  * Derive MCP tool annotations from the command's requiredScope.
  * Read-only scopes get readOnlyHint; write/manage scopes get destructiveHint
  * for operations that modify or delete scene state.
+ *
+ * `manifestDestructive` is the manifest's own `destructive` flag (PF-8860),
+ * the same field the chat agent's approval gate is derived from. When it is
+ * set the annotation follows it; the name-prefix heuristic below stays as a
+ * widening fallback so nothing it already covered stops being flagged. The
+ * heuristic alone could not see whole-scene replacements like `new_scene`,
+ * `clear_world` or `load_scene` — and its `clear_scene` case names a command
+ * that does not exist in the manifest at all.
  */
 export function deriveAnnotations(
   scope: string,
   name: string,
+  manifestDestructive?: boolean,
 ): ToolAnnotations {
   const isRead = scope.endsWith(':read');
-  const isDestructive = name.startsWith('despawn_') ||
+  const isDestructive = manifestDestructive === true ||
+    name.startsWith('despawn_') ||
     name.startsWith('delete_') ||
     name.startsWith('remove_') ||
     name === 'clear_scene' ||
@@ -102,6 +112,7 @@ export function registerTools(server: McpServer, bridge: EditorBridge): void {
     const annotations = deriveAnnotations(
       cmd.requiredScope,
       cmd.name,
+      (cmd as { destructive?: boolean }).destructive,
     );
 
     server.registerTool(
