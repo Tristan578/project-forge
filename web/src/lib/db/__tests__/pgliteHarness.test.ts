@@ -1,6 +1,6 @@
-import { PGlite } from '@electric-sql/pglite';
+import type { PGlite } from '@electric-sql/pglite';
 import { neon, neonConfig } from '@neondatabase/serverless';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { makeNeonAdapter, SqlTemplate } from './pgliteHarness';
 
 type SingleBody = { query: string; params: unknown[] };
@@ -45,26 +45,38 @@ function expectComposedEqual(expected: SingleBody, captured: SingleBody): void {
 }
 
 describe('PGlite harness Neon adapter fidelity', () => {
-  // ONE Postgres-WASM instance per file, like every other .db.test.ts suite.
-  // This file used to boot and tear down a fresh PGlite around each test, and
-  // repeated WASM init/teardown in one process is the shape behind the
+  // No Postgres-WASM instance at all. Every test here compares the SQL text and
+  // parameter list that `makeNeonAdapter` COMPOSES against the wire body the
+  // real Neon driver sends, and reads that text synchronously off `queryData`;
+  // nothing is ever executed. `makeNeonAdapter` touches its client only inside
+  // the `RunQuery` body, which runs when a `NeonQueryPromise` is awaited — so
+  // the constructor argument is a type obligation, not a runtime one.
+  //
+  // This file used to boot and tear down a fresh PGlite around each test.
+  // Repeated WASM init/teardown in one process is the shape behind the
   // intermittent V8 CHECK failure in ThreadIsolation::UnregisterWasmAllocation
   // (SIGILL, exit 132) that failed Web Tests closed on #9590 (#9643; upstream
-  // electric-sql/pglite#1053, nodejs/node#64500). The tests only compose SQL
-  // text and compare it with the real driver's wire body, so they share the
-  // instance safely.
-  let pglite: PGlite;
-
-  beforeAll(() => {
-    pglite = new PGlite();
+  // electric-sql/pglite#1053, nodejs/node#64500). Sharing one instance would
+  // have cut that surface from four to one; needing none cuts it to zero.
+  //
+  // The stand-in throws rather than no-ops, and records what it was asked for,
+  // so a future test that does need a real database fails loudly here instead
+  // of silently observing an empty result set. Reach for `createTestHarness()`
+  // in that case.
+  const touched: string[] = [];
+  const pglite = new Proxy({} as PGlite, {
+    get(_target, property) {
+      const name = String(property);
+      touched.push(name);
+      throw new Error(
+        `pgliteHarness.test.ts composes SQL and executes nothing, but PGlite.${name} was read. ` +
+          'Use createTestHarness() if the test needs a real database.',
+      );
+    },
   });
 
   afterEach(() => {
     neonConfig.fetchFunction = undefined;
-  });
-
-  afterAll(async () => {
-    await pglite.close();
   });
 
   it('matches embedded-fragment SQL text and parameter numbering', async () => {
@@ -127,5 +139,13 @@ describe('PGlite harness Neon adapter fidelity', () => {
     const composed = new SqlTemplate(['SELECT * WHERE ', ''], [parameterized]);
 
     expect(() => composed.toParameterizedQuery()).toThrow('This query is not composable');
+  });
+
+  // Declared last so it observes every test above. This is what makes dropping
+  // PGlite from this file a checked claim rather than an assumption: add a test
+  // that actually queries, and the stand-in throws inside it AND this records
+  // the property it reached for.
+  it('never touches the database client', () => {
+    expect(touched).toEqual([]);
   });
 });
