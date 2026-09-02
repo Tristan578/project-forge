@@ -9,19 +9,11 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
+// Clerk's verifyWebhook() does header extraction + signature verification
+// itself (#9629); the route's contract is what it does with the verdict.
 const mockVerify = vi.fn();
-vi.mock('svix', () => ({
-  Webhook: class {
-    verify = mockVerify;
-  },
-}));
-
-vi.mock('next/headers', () => ({
-  headers: vi.fn().mockResolvedValue(new Headers({
-    'svix-id': 'svix_id_mock',
-    'svix-timestamp': 'svix_timestamp_mock',
-    'svix-signature': 'svix_signature_mock',
-  })),
+vi.mock('@clerk/nextjs/webhooks', () => ({
+  verifyWebhook: (...args: unknown[]) => mockVerify(...args),
 }));
 
 describe('POST /api/auth/webhook', () => {
@@ -42,25 +34,35 @@ describe('POST /api/auth/webhook', () => {
     expect(res.status).toBe(500);
   });
 
-  it('returns 400 if svix headers are missing', async () => {
-    vi.mocked(await import('next/headers')).headers.mockResolvedValueOnce(new Headers());
+  it('returns 400 if verification rejects for missing svix headers', async () => {
+    mockVerify.mockRejectedValueOnce(new Error('Missing required Svix headers'));
     const req = new Request('http://localhost/api/auth/webhook', { method: 'POST' });
     const res = await POST(req);
     expect(res.status).toBe(400);
+    expect(syncUserFromClerk).not.toHaveBeenCalled();
   });
 
   it('returns 400 if signature is invalid', async () => {
-    mockVerify.mockImplementation(() => { throw new Error('Invalid signature'); });
-    const req = new Request('http://localhost/api/auth/webhook', { 
-      method: 'POST', 
-      body: JSON.stringify({ type: 'user.created' }) 
+    mockVerify.mockRejectedValueOnce(new Error('Invalid signature'));
+    const req = new Request('http://localhost/api/auth/webhook', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'user.created' }),
     });
     const res = await POST(req);
     expect(res.status).toBe(400);
+    expect(syncUserFromClerk).not.toHaveBeenCalled();
+  });
+
+  it('passes the request and the CLERK_WEBHOOK_SECRET explicitly (verifyWebhook falls back to a differently named variable)', async () => {
+    mockVerify.mockResolvedValue({ type: 'user.updated', data: { id: 'clerk_123', email_addresses: [] } });
+    const req = new Request('http://localhost/api/auth/webhook', { method: 'POST', body: '{}' });
+    await POST(req);
+    expect(mockVerify).toHaveBeenCalledTimes(1);
+    expect(mockVerify).toHaveBeenCalledWith(req, { signingSecret: 'whsec_mock' });
   });
 
   it('syncs user on user.created event', async () => {
-    mockVerify.mockReturnValue({
+    mockVerify.mockResolvedValue({
       type: 'user.created',
       data: { id: 'clerk_123', email_addresses: [] },
     });
@@ -76,7 +78,7 @@ describe('POST /api/auth/webhook', () => {
   });
 
   it('syncs user on user.updated event', async () => {
-    mockVerify.mockReturnValue({
+    mockVerify.mockResolvedValue({
       type: 'user.updated',
       data: { id: 'clerk_123', email_addresses: [] },
     });
@@ -93,7 +95,7 @@ describe('POST /api/auth/webhook', () => {
 
   // PF-840 regression: user.deleted must cascade-delete user data, not be ignored.
   it('deletes user data on user.deleted event when user exists (PF-840)', async () => {
-    mockVerify.mockReturnValue({
+    mockVerify.mockResolvedValue({
       type: 'user.deleted',
       data: { id: 'clerk_123' },
     });
@@ -113,7 +115,7 @@ describe('POST /api/auth/webhook', () => {
   });
 
   it('returns 200 on user.deleted when user not found in DB (PF-840)', async () => {
-    mockVerify.mockReturnValue({
+    mockVerify.mockResolvedValue({
       type: 'user.deleted',
       data: { id: 'clerk_never_synced' },
     });
@@ -132,7 +134,7 @@ describe('POST /api/auth/webhook', () => {
 
   it('captures exception in Sentry when deleteUserAccount throws (PF-840)', async () => {
     const { captureException } = await import('@/lib/monitoring/sentry-server');
-    mockVerify.mockReturnValue({
+    mockVerify.mockResolvedValue({
       type: 'user.deleted',
       data: { id: 'clerk_123' },
     });
@@ -150,7 +152,7 @@ describe('POST /api/auth/webhook', () => {
   });
 
   it('rejects user.deleted event with missing id field (PF-840)', async () => {
-    mockVerify.mockReturnValue({
+    mockVerify.mockResolvedValue({
       type: 'user.deleted',
       data: {},
     });
