@@ -1866,7 +1866,7 @@
     },
     {
       "name": "toggle_debug_physics",
-      "description": "Toggle debug wireframe rendering of physics colliders",
+      "description": "Toggle debug wireframe rendering of physics colliders. Applied in both the editor and exported (runtime) games (#9550).",
       "category": "editor",
       "parameters": {
         "type": "object",
@@ -4948,7 +4948,7 @@
     },
     {
       "name": "create_joint",
-      "description": "Create a physics joint between two entities. Requires physics enabled on both. Joint types: fixed, revolute, spherical, prismatic, rope, spring",
+      "description": "Create a physics joint between two entities. Requires physics enabled on both. Joint types: fixed, revolute, spherical, prismatic, rope, spring. Applied in both the editor and exported (runtime) games (#9550).",
       "category": "scene",
       "parameters": {
         "type": "object",
@@ -5036,7 +5036,7 @@
     },
     {
       "name": "update_joint",
-      "description": "Update joint properties on an entity",
+      "description": "Update joint properties on an entity. Applied in both the editor and exported (runtime) games (#9550).",
       "category": "scene",
       "parameters": {
         "type": "object",
@@ -5129,7 +5129,7 @@
     },
     {
       "name": "remove_joint",
-      "description": "Remove a physics joint from an entity",
+      "description": "Remove a physics joint from an entity. Applied in both the editor and exported (runtime) games (#9550).",
       "category": "scene",
       "parameters": {
         "type": "object",
@@ -5149,7 +5149,7 @@
     },
     {
       "name": "get_joint",
-      "description": "Get the joint configuration for the selected entity",
+      "description": "Get the joint configuration for the selected entity. Applied in both the editor and exported (runtime) games (#9550).",
       "category": "query",
       "parameters": {
         "type": "object",
@@ -9766,7 +9766,7 @@
     },
     {
       "name": "get_physics2d",
-      "description": "Query 2D physics data for an entity",
+      "description": "Query 2D physics data for an entity. Applied in both the editor and exported (runtime) games (#9550).",
       "category": "physics2d",
       "parameters": {
         "type": "object",
@@ -9786,7 +9786,7 @@
     },
     {
       "name": "set_gravity2d",
-      "description": "Set global 2D gravity",
+      "description": "Set global 2D gravity. Applied in both the editor and exported (runtime) games (#9550).",
       "category": "physics2d",
       "parameters": {
         "type": "object",
@@ -9808,7 +9808,7 @@
     },
     {
       "name": "set_debug_physics2d",
-      "description": "Toggle 2D physics debug rendering",
+      "description": "Toggle 2D physics debug rendering. Applied in both the editor and exported (runtime) games (#9550).",
       "category": "physics2d",
       "parameters": {
         "type": "object",

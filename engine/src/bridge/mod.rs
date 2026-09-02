@@ -379,10 +379,34 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, query::process_reverb_zone_queries)
             .add_systems(Update, query::process_play_state_queries);
 
-        #[cfg(not(feature = "runtime"))]
-        app.add_systems(Update, query::process_joint_queries);
-        #[cfg(not(feature = "runtime"))]
-        app.add_systems(Update, query::process_joint2d_queries);
+        // Joint reads and the joint / gravity / debug-toggle drains run in BOTH
+        // builds (#9550). `core::commands::physics::dispatch` accepts and queues
+        // every one of these commands regardless of feature, and the consuming
+        // systems (`Physics2dPlugin`, `PhysicsPlugin`, `HistoryStack`) are
+        // registered unconditionally above — so a runtime build that omitted
+        // the drains kept the commands' promise on the wire and broke it in the
+        // ECS: `set_gravity2d` from an exported game's script grew
+        // `gravity2d_updates` by one entry per frame, forever, and did nothing.
+        // Deliberately NOT `.in_set(EditorSystemSet)`: that set is
+        // `run_if(in_edit_mode)` and has no members in a runtime build.
+        // `core::pending::runtime_drains` pins this placement.
+        app
+            .add_systems(Update, query::process_joint_queries)
+            .add_systems(Update, query::process_joint2d_queries)
+            .add_systems(Update, (
+                physics::apply_debug_physics_toggle,
+                physics::apply_create_joint_requests,
+                physics::apply_update_joint_requests,
+                physics::apply_remove_joint_requests,
+            ))
+            .add_systems(Update, (
+                physics::apply_create_joint2d_requests,
+                physics::apply_update_joint2d_requests,
+                physics::apply_remove_joint2d_requests,
+                physics::apply_gravity2d_updates,
+                physics::apply_debug_physics2d_toggle,
+                physics::handle_physics2d_query,
+            ));
 
         app
             .add_systems(Update, scripts::emit_play_tick_system)
@@ -683,20 +707,6 @@ impl Plugin for SelectionPlugin {
                     core::terrain::collect_terrain_changes,
                     procedural::emit_terrain_changes,
                 ).chain().in_set(EditorSystemSet))
-                .add_systems(Update, (
-                    physics::apply_debug_physics_toggle,
-                    physics::apply_create_joint_requests,
-                    physics::apply_update_joint_requests,
-                    physics::apply_remove_joint_requests,
-                ))
-                .add_systems(Update, (
-                    physics::apply_create_joint2d_requests,
-                    physics::apply_update_joint2d_requests,
-                    physics::apply_remove_joint2d_requests,
-                    physics::apply_gravity2d_updates,
-                    physics::apply_debug_physics2d_toggle,
-                    physics::handle_physics2d_query,
-                ))
                 .add_systems(Update, (
                     scene_io::apply_scene_export,
                     scene_io::apply_scene_load,
