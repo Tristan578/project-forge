@@ -36,7 +36,7 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 |---------|-----------------|-----------------|
 | Next.js | https://github.com/vercel/next.js/releases | ^16.2.10 |
 | Clerk | https://github.com/clerk/javascript/releases | @clerk/nextjs ^7.5.12 |
-| Stripe | https://github.com/stripe/stripe-node/releases | stripe ^22.3.0 |
+| Stripe | https://github.com/stripe/stripe-node/releases | stripe ^22.6.0 |
 | AI SDK | https://github.com/vercel/ai/releases | ai ^7.0.11 |
 | Drizzle ORM | https://github.com/drizzle-team/drizzle-orm/releases | drizzle-orm 0.45.2 |
 | Neon Serverless | https://github.com/neondatabase/serverless/releases | @neondatabase/serverless ^1.0.2 |
@@ -186,4 +186,4 @@ GitHub is a primary dependency (CI/CD, issue tracking, PR workflows, CLI). Check
 
 ## References
 
-- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.3.0, wasm-bindgen =0.2.127, Next.js 16.x, Bevy 0.18, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency
+- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.6.0, wasm-bindgen =0.2.127, Next.js 16.x, Bevy 0.18, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency

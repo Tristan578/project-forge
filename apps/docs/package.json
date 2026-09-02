@@ -13,10 +13,10 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@clerk/nextjs": "^7.8.0",
+    "@clerk/nextjs": "^7.8.3",
     "@tailwindcss/postcss": "^4.3.3",
-    "fumadocs-core": "^16.14.5",
-    "fumadocs-ui": "^16.14.5",
+    "fumadocs-core": "^16.15.4",
+    "fumadocs-ui": "^16.15.4",
     "gray-matter": "^4",
     "next": "^16.3.3",
     "react": "^19.2.8",
@@ -26,11 +26,11 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^7.0.1",
-    "@testing-library/react": "^16",
-    "@testing-library/user-event": "^14.6.5",
-    "@types/node": "^26.2.0",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.6",
+    "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
+    "@types/react-dom": "^19.2.5",
     "tsx": "^4.23.12",
     "typescript": "^6",
     "vitest": "^4"

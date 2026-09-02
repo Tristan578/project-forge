@@ -1,3 +1,56 @@
+import { createRequire } from 'node:module';
+
+/**
+ * Neutralize Sentry's BUILD-TIME orchestrion webpack plugin inside jsdom tests.
+ *
+ * `@sentry/nextjs` >= 10.72 made `build/cjs/index.server.js` eagerly
+ * `require('./config/deprecatedWithSentryConfig.js')`, which drags the
+ * build-time `@sentry/server-utils/orchestrion/webpack` plugin into the RUNTIME
+ * server entry. 10.70.0 did not — that is the regression. The plugin's vendored
+ * `import.meta.url` shim branches on `typeof document`:
+ *
+ *   typeof document === 'undefined'
+ *     ? pathToFileURL(__filename).href        // Node — a file: URL, fine
+ *     : new URL('...', document.baseURI).href // browser — an http: URL
+ *
+ * Under `environment: 'jsdom'` a global `document` exists, so it takes the
+ * browser branch, hands `fileURLToPath()` an `http:` URL, and EVERY test file
+ * that transitively imports `@sentry/nextjs` dies at import time with
+ * `TypeError: The URL must be of scheme file` (132 files on the 10.72 bump).
+ *
+ * The five exports are all webpack/turbopack plugin construction, reached only
+ * from `withSentryConfig` during `next build`; nothing under `src/` references
+ * them, so inert stubs change nothing a test can observe. A Vite alias cannot
+ * reach this — the module is externalized and loaded by Node's own CJS loader,
+ * which makes `require.cache` the only interception point. `next build` is
+ * unaffected: this file is loaded by vitest and nothing else.
+ *
+ * Remove once upstream stops loading the bundler plugin from the runtime entry
+ * — tracked at #9618.
+ */
+if (typeof document !== 'undefined') {
+  const nodeRequire = createRequire(import.meta.url);
+  try {
+    const id = nodeRequire.resolve('@sentry/server-utils/orchestrion/webpack');
+    if (!nodeRequire.cache[id]) {
+      nodeRequire.cache[id] = {
+        id,
+        filename: id,
+        loaded: true,
+        exports: {
+          getOrchestrionLoaderPath: () => '',
+          getSentryInstrumentations: () => [],
+          resolveOrchestrionRuntimeRequest: () => undefined,
+          sentryOrchestrionWebpackPlugin: () => ({ apply: () => {} }),
+          serializeInstrumentations: () => '',
+        },
+      } as unknown as NodeJS.Module;
+    }
+  } catch {
+    // Sentry absent, or the subpath moved — nothing to neutralize.
+  }
+}
+
 /**
  * Vitest setup — polyfill localStorage for Node 22+.
  *
