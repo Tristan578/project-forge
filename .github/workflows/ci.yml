@@ -1527,6 +1527,89 @@ jobs:
           path: web/playwright-report/
           retention-days: 14
 
+  # Cross-browser E2E (#9610). firefox, webkit and the two mobile projects had
+  # been declared in playwright.config.ts for months and executed by nothing:
+  # every workflow passed --project=chromium or a chromium-only config, so the
+  # cross-browser coverage the config advertised was a label. This job runs
+  # the same @ui selection as test-e2e-ui on Firefox, WebKit and the two mobile
+  # emulations (Linux WebKit — Playwright ships and installs it; no macOS
+  # runner is involved).
+  #
+  # NON-BLOCKING for its first window: continue-on-error keeps a browser-
+  # specific failure from turning CI Success red until the never-run corpus has
+  # been triaged. Follow-up on #9610: add this job to ci-success.needs once it
+  # has been green on main for a week. scripts/__tests__/e2e-tag-routing.test.sh
+  # pins that every declared project is executed by SOME workflow, so this job
+  # cannot be quietly dropped without that guard going red.
+  test-e2e-crossbrowser:
+    name: E2E Cross-Browser (non-blocking)
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Cache Playwright browsers (all engines)
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          # A browser-set segment in the key: the chromium-only jobs cache
+          # under `playwright-<os>-<lockfile>`, and restoring THAT here would
+          # report cache-hit and skip the Firefox/WebKit install (#9610).
+          key: playwright-all-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers (chromium, firefox, webkit)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh browsers chromium firefox webkit
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh deps chromium firefox webkit
+
+      - name: Build for cross-browser E2E
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          # Same flag as test-e2e-ui: without it /dev redirects to /sign-in and
+          # every editor spec is unrunnable (#9586).
+          NEXT_PUBLIC_E2E_HOOKS: 'true'
+        run: npx next build
+
+      - name: Run @ui specs on firefox, webkit and the mobile emulations
+        working-directory: web
+        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --config playwright.crossbrowser.config.ts
+
+      - name: Upload cross-browser report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-crossbrowser-report
+          path: web/playwright-report-crossbrowser/
+          retention-days: 14
+
   # Merge sharded E2E reports into a single HTML report
   merge-e2e-reports:
     name: Merge E2E Reports

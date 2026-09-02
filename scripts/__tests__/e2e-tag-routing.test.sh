@@ -135,6 +135,75 @@ else
 fi
 
 echo ""
+echo "=== every declared Playwright project is executed by some workflow (#9610) ==="
+# firefox, webkit, mobile-iphone and mobile-pixel sat in playwright.config.ts
+# for months and were executed by nothing: every workflow passed
+# --project=chromium or a chromium-only config, so cross-browser coverage was
+# a label. Declared-but-unrun is the #9586 shape again — nothing red, nothing
+# run. A project NAME counts as executed when some workflow either names it
+# with --project, or invokes its config without --project (all of that
+# config's projects run). Names are matched globally: a project is a
+# browser/device target, and running `firefox` from the cross-browser config
+# is running firefox.
+WEB_DIR="$(cd "$E2E_DIR/.." 2>/dev/null && pwd)"
+declared=""
+for cfg in "$WEB_DIR"/playwright*.config.ts; do
+  [ -f "$cfg" ] || continue
+  base="$(basename "$cfg")"
+  while IFS= read -r name; do
+    [ -n "$name" ] && declared="${declared}${base}:${name}"$'\n'
+  done < <(grep -oE "^[[:space:]]*name: '[^']+'" "$cfg" | sed -E "s/.*name: '([^']+)'/\1/")
+done
+executed=""
+for wf in "$CI_YML" "$CD_YML" "$(dirname "$CI_YML")/quality-gates.yml"; do
+  [ -f "$wf" ] || continue
+  while IFS= read -r line; do
+    cfg="$(grep -oE -- '--config[= ]+[^ ]+' <<<"$line" | head -1 | sed -E 's/--config[= ]+//')"
+    cfg="$(basename "${cfg:-playwright.config.ts}")"
+    projects="$(grep -oE -- '--project[= ]+[^ ]+' <<<"$line" | sed -E 's/--project[= ]+//')"
+    if [ -n "$projects" ]; then
+      for p in $projects; do executed="${executed}${cfg}:${p}"$'\n'; done
+    else
+      while IFS= read -r entry; do
+        [ -n "$entry" ] && executed="${executed}${entry}"$'\n'
+      done < <(grep "^${cfg}:" <<<"$declared" || true)
+    fi
+  done < <(grep -h 'playwright test' "$wf" | grep -vE '^[[:space:]]*#')
+done
+names="$(sed -E 's/^[^:]+://' <<<"$declared" | sort -u | grep . || true)"
+exec_names="$(sed -E 's/^[^:]+://' <<<"$executed" | sort -u | grep . || true)"
+# Declared projects that no workflow runs, each with the reason on record.
+#   agent-chromium — playwright.agent.config.ts is the agentic browser harness,
+#                    driven by hand against a dev server; no workflow runs it
+#                    by design (#9610 records this as a policy decision).
+ALLOWLIST_UNEXECUTED="agent-chromium"
+name_count="$(grep -c . <<<"$names" || true)"
+if [ "${name_count:-0}" -ge 5 ]; then
+  pass "enumerated ${name_count} distinct Playwright project names across the configs (a walk over zero names would pass vacuously)"
+else
+  fail "enumerated only ${name_count:-0} project names — the config glob or the name: pattern no longer matches"
+fi
+missing=""
+for n in $names; do
+  if grep -qx "$n" <<<"$exec_names"; then continue; fi
+  allowed=false
+  for a in $ALLOWLIST_UNEXECUTED; do [ "$a" = "$n" ] && allowed=true; done
+  [ "$allowed" = true ] || missing="${missing} ${n}"
+done
+if [ -z "$missing" ]; then
+  pass "every declared project is executed by a workflow or allowlisted with a reason (executed: $(tr '\n' ' ' <<<"$exec_names"))"
+else
+  fail "declared but executed by NO workflow:${missing} — a project that runs nowhere is coverage that reads as present (#9610)"
+fi
+for a in $ALLOWLIST_UNEXECUTED; do
+  if grep -qx "$a" <<<"$names"; then
+    pass "allowlisted project '${a}' still exists (the allowlist is not stale)"
+  else
+    fail "allowlisted project '${a}' is no longer declared anywhere — drop it from ALLOWLIST_UNEXECUTED"
+  fi
+done
+
+echo ""
 echo "  PASS=$PASS FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
   echo "SUITE PASSED"

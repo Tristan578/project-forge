@@ -82,6 +82,22 @@ assert_eq "filename-only invocation from scripts resolves the repository root" "
 assert_eq "filename-only invocation still runs npx from web" \
   "$REPO_ROOT/web|playwright install --with-deps chromium" "$(cat "$TMP/log")"
 
+: > "$TMP/log"
+: > "$TMP/timeout-log"
+rm -f "$TMP/count"
+PLAYWRIGHT_TEST_LOG="$TMP/log" PLAYWRIGHT_TEST_COUNT="$TMP/count" \
+  PLAYWRIGHT_TIMEOUT_LOG="$TMP/timeout-log" PLAYWRIGHT_TEST_FAILS=0 \
+  PATH="$STUB:$PATH" bash "$SCRIPT" browsers chromium firefox webkit >"$TMP/out" 2>"$TMP/err"
+assert_eq "an explicit browser list installs exactly those engines (#9610)" \
+  "$REPO_ROOT/web|playwright install --with-deps chromium firefox webkit" "$(cat "$TMP/log")"
+: > "$TMP/log"
+rm -f "$TMP/count"
+PLAYWRIGHT_TEST_LOG="$TMP/log" PLAYWRIGHT_TEST_COUNT="$TMP/count" \
+  PLAYWRIGHT_TIMEOUT_LOG="$TMP/timeout-log" PLAYWRIGHT_TEST_FAILS=0 \
+  PATH="$STUB:$PATH" bash "$SCRIPT" deps chromium firefox webkit >"$TMP/out" 2>"$TMP/err"
+assert_eq "dependency mode honours the same browser list" \
+  "$REPO_ROOT/web|playwright install-deps chromium firefox webkit" "$(cat "$TMP/log")"
+
 set +e
 run_case browsers 2 124
 rc=$?
@@ -111,15 +127,15 @@ fi
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
-assert_eq "all six browser-install steps use the retry helper" "6" \
+assert_eq "all seven browser-install steps use the retry helper" "7" \
   "$(( $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CD_YML") ))"
 # Every workflow that installs Playwright is summed here, quality-gates.yml
 # included. Leaving it out of this sum is what let the editor-boot cache-hit
 # step keep calling `npx playwright install-deps` bare while the suite reported
 # full coverage (#9570 review).
-assert_eq "all five cache-hit dependency steps use the retry helper" "5" \
+assert_eq "all six cache-hit dependency steps use the retry helper" "6" \
   "$(( $(grep -c 'scripts/install-playwright-ci.sh deps' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$CD_YML") ))"
-assert_eq "all eleven install steps have an outer 12-minute timeout" "11" \
+assert_eq "all thirteen install steps have an outer 12-minute timeout" "13" \
   "$(( $(grep -c 'timeout-minutes: 12' "$CI_YML") + $(grep -c 'timeout-minutes: 12' "$QG_YML") + $(grep -c 'timeout-minutes: 12' "$CD_YML") ))"
 
 if [ "$FAILURES" -ne 0 ]; then echo "$FAILURES test(s) failed." >&2; exit 1; fi

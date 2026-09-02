@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Bound and retry Playwright's apt/browser installation in CI (#9303).
+#
+# Usage: install-playwright-ci.sh browsers|deps [browser ...]
+# The browser list defaults to chromium; the cross-browser job passes
+# `chromium firefox webkit` (#9610).
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,9 +11,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ATTEMPT_TIMEOUT_SECONDS=300
 MAX_ATTEMPTS=2
 
-case "${1:-}" in
-  browsers) playwright_args=(install --with-deps chromium) ;;
-  deps) playwright_args=(install-deps chromium) ;;
+mode="${1:-}"
+if [ $# -gt 0 ]; then shift; fi
+browsers=("$@")
+if [ ${#browsers[@]} -eq 0 ]; then browsers=(chromium); fi
+case "$mode" in
+  browsers) playwright_args=(install --with-deps "${browsers[@]}") ;;
+  deps) playwright_args=(install-deps "${browsers[@]}") ;;
   *)
     echo "install-playwright-ci: expected mode 'browsers' or 'deps'" >&2
     exit 2
@@ -24,16 +32,16 @@ cd "$REPO_ROOT/web" || {
   exit 2
 }
 for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
-  echo "Playwright ${1} install attempt ${attempt}/${MAX_ATTEMPTS}"
+  echo "Playwright ${mode} install attempt ${attempt}/${MAX_ATTEMPTS}"
   timeout --signal=TERM --kill-after=15s \
     "${ATTEMPT_TIMEOUT_SECONDS}s" npx playwright "${playwright_args[@]}"
   exit_code=$?
   if [ "$exit_code" -eq 0 ]; then exit 0; fi
   if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
-    echo "::warning::Playwright ${1} install failed with exit ${exit_code}; retrying"
+    echo "::warning::Playwright ${mode} install failed with exit ${exit_code}; retrying"
     sleep 5
   fi
 done
 
-echo "::error::Playwright ${1} install failed after ${MAX_ATTEMPTS} attempts" >&2
+echo "::error::Playwright ${mode} install failed after ${MAX_ATTEMPTS} attempts" >&2
 exit "$exit_code"
