@@ -1,3 +1,5 @@
+import type { Behavior } from '@/lib/game-creation/behaviorVocabulary';
+
 export interface ScriptTemplate {
   id: string;
   name: string;
@@ -330,3 +332,165 @@ function onUpdate(dt) {
 }`,
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Behaviour scripts — the pipeline's script substrate (PF-1114)
+// ---------------------------------------------------------------------------
+
+/**
+ * The generated-game pipeline needs script sources too, and it cannot use
+ * SCRIPT_TEMPLATES above: those are AUTHORING starting points for a human in
+ * the Script Editor, so `enemy_patrol` looks the player up with
+ * forge.scene.findByName("Player") and walks a hardcoded four-point route. The
+ * pipeline mints a crypto.randomUUID() for every entity and takes entity NAMES
+ * from LLM output, so a name lookup resolves to nothing in a generated game
+ * whose player the model called "Runner".
+ *
+ * These are the same idea, parameterized: the caller passes the target's engine
+ * id and the project type, and gets source bound to that id. SCRIPT_TEMPLATES
+ * is deliberately left alone — its length is pinned by scriptTemplates.test.ts
+ * and the editor panels enumerate it.
+ *
+ * TWO ENGINE FACTS ARE BAKED IN HERE AND MUST STAY:
+ *
+ *  1. **Movement is forge.translate, never forge.physics.** physicsRoles.ts
+ *     gives every enemy and npc a body of type 'fixed' with isSensor true,
+ *     precisely because system_follower writes the Transform directly. A fixed
+ *     body ignores applyForce, applyImpulse and setVelocity in complete
+ *     silence, so a behaviour script that reaches for them is an entity that
+ *     never moves and never reports why.
+ *  2. **The lateral axis differs by project type.** In 3D the ground plane is
+ *     x/z; in 2D it is x/y. Hardcoding z gives a 2D game whose enemies chase
+ *     into the screen. LATERAL is the index of the second movement axis in the
+ *     [x, y, z] triple every forge transform call uses.
+ */
+
+/**
+ * Ids that are safe to embed in generated source as a double-quoted literal.
+ *
+ * The engine matches an entity on its EntityId component byte-for-byte, and the
+ * pipeline mints those with crypto.randomUUID(), so this is deliberately
+ * narrower than "any string the engine would accept": a quote or a newline in
+ * an id would close the literal and turn a target id into executable text. A
+ * value outside this set is refused rather than escaped, because there is no
+ * legitimate id that needs escaping.
+ */
+const SAFE_ENTITY_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+export interface BehaviorScriptParams {
+  /** The entity this behaviour reacts to — the player, for every entry today. */
+  targetEntityId: string | null;
+  projectType: '2d' | '3d';
+}
+
+/**
+ * Source for one behaviour, or `null` when this behaviour has no script
+ * substrate (`chase`, `patrol` and `idle` are planned as engine components) or
+ * when the target id could not be embedded safely.
+ *
+ * Returning null rather than throwing keeps the caller in charge of the
+ * user-facing message: the plan builder drops the step and warns, which is what
+ * every other unplannable step in this pipeline does.
+ */
+export function buildBehaviorScript(
+  behavior: Behavior,
+  params: BehaviorScriptParams,
+): string | null {
+  // 2D lays the world out on x/y; 3D on x/z. Index into the [x, y, z] triple.
+  const lateral = params.projectType === '2d' ? 1 : 2;
+
+  switch (behavior) {
+    case 'chase':
+    case 'patrol':
+    case 'idle':
+      // Planned as an engine component (or as nothing at all). Not an error.
+      return null;
+
+    case 'flee': {
+      const target = params.targetEntityId;
+      if (target === null || !SAFE_ENTITY_ID.test(target)) return null;
+      return `// Flee - backs away from the target while the target is close.
+const TARGET_ID = "${target}";
+const LATERAL = ${lateral};
+const FLEE_SPEED = 4;
+const PANIC_RANGE = 10;
+
+function onUpdate(dt) {
+  const self = forge.getTransform(entityId);
+  const target = forge.getTransform(TARGET_ID);
+  if (!self || !target) return;
+
+  const ax = self.position[0] - target.position[0];
+  const ab = self.position[LATERAL] - target.position[LATERAL];
+  const len = Math.sqrt(ax * ax + ab * ab);
+  if (len === 0 || len > PANIC_RANGE) return;
+
+  // forge.translate writes the Transform directly. Enemies and NPCs are FIXED
+  // sensor bodies, so forge.physics.applyForce would be a silent no-op here.
+  const move = [0, 0, 0];
+  move[0] = (ax / len) * FLEE_SPEED * dt;
+  move[LATERAL] = (ab / len) * FLEE_SPEED * dt;
+  forge.translate(entityId, move[0], move[1], move[2]);
+}`;
+    }
+
+    case 'projectile_fire': {
+      const target = params.targetEntityId;
+      if (target === null || !SAFE_ENTITY_ID.test(target)) return null;
+      return `// Projectile Fire - launches a shot at the target on a fixed cadence.
+const TARGET_ID = "${target}";
+const LATERAL = ${lateral};
+const FIRE_INTERVAL = 1.5;
+const PROJECTILE_SPEED = 12;
+const PROJECTILE_LIFETIME = 3;
+let cooldown = FIRE_INTERVAL;
+let shots = [];
+
+function onUpdate(dt) {
+  cooldown -= dt;
+
+  const self = forge.getTransform(entityId);
+  const target = forge.getTransform(TARGET_ID);
+  if (self && target && cooldown <= 0) {
+    const ax = target.position[0] - self.position[0];
+    const ab = target.position[LATERAL] - self.position[LATERAL];
+    const len = Math.sqrt(ax * ax + ab * ab);
+    if (len > 0) {
+      const dir = [0, 0, 0];
+      dir[0] = ax / len;
+      dir[LATERAL] = ab / len;
+      // Spawned one unit along the firing direction so the shot does not start
+      // inside the shooter's own collider.
+      const id = forge.spawn("sphere", {
+        name: "Projectile",
+        position: [
+          self.position[0] + dir[0],
+          self.position[1] + dir[1],
+          self.position[2] + dir[2],
+        ],
+      });
+      shots.push({ id: id, life: PROJECTILE_LIFETIME, dir: dir });
+      cooldown = FIRE_INTERVAL;
+    }
+  }
+
+  // Reverse order: splice() during a forward walk skips the next element.
+  for (let i = shots.length - 1; i >= 0; i--) {
+    const shot = shots[i];
+    shot.life -= dt;
+    if (shot.life <= 0) {
+      forge.destroy(shot.id);
+      shots.splice(i, 1);
+      continue;
+    }
+    forge.translate(
+      shot.id,
+      shot.dir[0] * PROJECTILE_SPEED * dt,
+      shot.dir[1] * PROJECTILE_SPEED * dt,
+      shot.dir[2] * PROJECTILE_SPEED * dt
+    );
+  }
+}`;
+    }
+  }
+}

@@ -35,6 +35,11 @@
 import { registerSystem } from './registry';
 import type { SystemStepInput, SystemStepContext, PlannedEntity } from './registry';
 import type { GameSystem, OrchestratorGDD } from '../types';
+// The ownership rule for entities that carry their own `behavior` (PF-1114).
+// See the note on `planBehaviorSteps` in `../behaviorSteps.ts`: per-entity
+// intent wins, so this system leaves those entities' motion components alone
+// rather than planning a second writer for the same component.
+import { hasAuthoredBehavior } from '../behaviorVocabulary';
 // Reused rather than restated: a second copy of the health bag or of the
 // health-shaped predicate is a copy that drifts, and the bag must stay COMPLETE
 // (the engine merges a partial one onto `HealthData::default()` and reports
@@ -305,6 +310,10 @@ function planFollowers(
     if (entity.entity.role !== 'enemy') continue;
     // A nest that walks is a design error, not a chase.
     if (excluded.has(entity.entityId)) continue;
+    // The design said what THIS enemy does, so the behaviour pass owns it —
+    // including when it said `idle` or `patrol`, which mean "do not chase".
+    // Planning a follower here too would give one entity two writers.
+    if (hasAuthoredBehavior(entity.entity)) continue;
     enemies.push(entity);
   }
 
@@ -337,6 +346,41 @@ function planFollowers(
     steps.push(followerStep(enemy, player.entityId, speed, stopDistance));
   }
   return steps;
+}
+
+/**
+ * The chase tuning a GDD asked for, for a caller outside this system.
+ *
+ * `planBehaviorSteps` plans the follower for an entity carrying
+ * `behavior: 'chase'`, so without this the same design saying
+ * `config: { chaseSpeed: 8 }` on its challenge system would silently get the
+ * engine default instead. The clamps and the key aliases are the ones
+ * `planFollowers` uses, read off the same constants rather than restated.
+ *
+ * Indexed loop: `.find` skips array holes, and a missed challenge system here
+ * is a speed the design asked for and did not get.
+ */
+export function chaseTuningFor(gdd: OrchestratorGDD): {
+  speed: number;
+  stopDistance: number;
+} {
+  for (let i = 0; i < gdd.systems.length; i += 1) {
+    const system = gdd.systems[i];
+    if (!system || system.category !== 'challenge') continue;
+    return {
+      speed: clamp(
+        readPositiveNumber(system.config, CHASE_SPEED_KEYS) ?? DEFAULT_CHASE_SPEED,
+        0,
+        MAX_CHASE_SPEED,
+      ),
+      stopDistance: clamp(
+        readPositiveNumber(system.config, STOP_DISTANCE_KEYS) ?? DEFAULT_STOP_DISTANCE,
+        0,
+        MAX_STOP_DISTANCE,
+      ),
+    };
+  }
+  return { speed: DEFAULT_CHASE_SPEED, stopDistance: DEFAULT_STOP_DISTANCE };
 }
 
 /**
@@ -384,6 +428,10 @@ function planMovingPlatforms(system: GameSystem, ctx: SystemStepContext): System
   for (let i = 0; i < platforms.length; i += 1) {
     const platform = platforms[i];
     if (!platform) continue;
+    // Same ownership rule as the follower pass: an entity carrying its own
+    // `behavior` already had its `movingPlatform` planned (or deliberately not
+    // planned) by `planBehaviorSteps`.
+    if (hasAuthoredBehavior(platform.entity)) continue;
     const vertical = VERTICAL_NAME_PATTERN.test(platform.entity.name);
     const waypoints: [number, number, number][] = [
       [0, 0, 0],
