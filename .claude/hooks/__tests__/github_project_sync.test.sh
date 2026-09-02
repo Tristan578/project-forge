@@ -316,36 +316,39 @@ assert_out "reconcile wires the database resolver into classify_drift" "wired" "
 # Three witnesses ship alongside the verdict so it can never pass vacuously:
 # 'locked' proves the child really holds the lock before reconcile is called,
 # 'denied' proves THIS process is refused that same lock (so the platform
-# honours cross-process flock at all, and the path under test is the one the
-# module uses), and 'noted' proves the skip left the lock-wanted note behind —
+# honours cross-process locking at all, and the path under test is the one the
+# module uses -- both sides drive m._try_lock_exclusive rather than calling a
+# locking API directly, so this runs on Windows too and cannot drift away from
+# the implementation), and 'noted' proves the skip left the lock-wanted note —
 # the note is what stops the long reconcile sweep from starving the Stop-hook
 # push it is blocking.
 out="$(run_py "
-import fcntl, pathlib, subprocess, sys, tempfile
+import pathlib, subprocess, sys, tempfile
 tmp = pathlib.Path(tempfile.mkdtemp())
 m.LOCK_PATH = tmp / '.sync-push.lock'
 m.LOCK_WANTED_PATH = tmp / '.sync-lock-wanted'
 lock_path = str(m.LOCK_PATH)
 child_src = (
-    'import fcntl, os, sys\n'
-    'fd = os.open(sys.argv[1], os.O_CREAT | os.O_WRONLY)\n'
-    'fcntl.flock(fd, fcntl.LOCK_EX)\n'
+    'import importlib.util, sys\n'
+    'spec = importlib.util.spec_from_file_location(\'gps\', sys.argv[2])\n'
+    'mod = importlib.util.module_from_spec(spec)\n'
+    'spec.loader.exec_module(mod)\n'
+    'fd = open(sys.argv[1], \'w\')\n'
+    'assert mod._try_lock_exclusive(fd)\n'
     'sys.stdout.write(\'locked\')\n'
     'sys.stdout.flush()\n'
     'sys.stdin.readline()\n'
 )
 child = subprocess.Popen(
-    [sys.executable, '-c', child_src, lock_path],
+    [sys.executable, '-c', child_src, lock_path, m.__file__],
     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 handshake = child.stdout.read(6)
-probe = 'granted'
-try:
-    probe_fd = open(lock_path, 'w')
-    fcntl.flock(probe_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    fcntl.flock(probe_fd, fcntl.LOCK_UN)
-    probe_fd.close()
-except (IOError, OSError):
-    probe = 'denied'
+probe_fd = open(lock_path, 'w')
+probe = 'denied'
+if m._try_lock_exclusive(probe_fd):
+    probe = 'granted'
+    m._release_lock(probe_fd)
+probe_fd.close()
 ran = []
 m._reconcile_inner = lambda *a, **k: ran.append(1)
 m.reconcile(apply_changes=True)

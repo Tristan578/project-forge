@@ -24,6 +24,20 @@
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
+# Normalise CRLF to LF before anything reasons about line structure.
+#
+# jq does not emit the same line ending everywhere: on Windows hosts it returns
+# CRLF, which turns a `\<LF>` line continuation into `\<CR><LF>`.
+# strip_line_continuations below matches backslash-newline exactly, so the join
+# silently does not happen, `git` and `commit` stay in separate segments, and
+# `git \<newline>commit` is allowed onto main — the exact bypass the round-10
+# cases assert against. Verified by tracing $COMMAND's bytes through the hook.
+#
+# Done here rather than inside strip_line_continuations so that split_segments
+# and everything else downstream also see clean newlines; a stray \r is an
+# input-encoding artefact, not something the parser should carry.
+COMMAND=${COMMAND//$'\r\n'/$'\n'}
+
 if [ -z "$COMMAND" ]; then
   exit 0
 fi

@@ -35,7 +35,13 @@ FAIL=0
 # run_hook <cwd> <command-string>  → sets HOOK_EXIT and HOOK_STDERR
 run_hook() {
   local cwd="$1" cmd="$2" payload
-  payload=$(jq -nc --arg c "$cmd" '{tool_input: {command: $c}}')
+  # Fed through stdin, not argv. The F4 case builds a 60,000-character command
+  # to prove the size cap fails closed, and Windows caps a process command line
+  # at 32,767 characters — so `jq --arg` died with "Argument list too long",
+  # $payload came back empty, and the hook exited 0 because an empty command is
+  # a no-op by design. The test then read that as "the size cap did not fire".
+  # `jq -Rs` slurps stdin as one raw string, which has no such limit.
+  payload=$(printf '%s' "$cmd" | jq -Rsc '{tool_input: {command: .}}')
   HOOK_STDERR=$(cd "$cwd" && printf '%s' "$payload" | bash "$HOOK" 2>&1 1>/dev/null)
   HOOK_EXIT=$?
 }
