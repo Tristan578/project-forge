@@ -90,16 +90,31 @@ beforeAll(async () => {
 afterAll(async () => {
   // Defensive: if beforeAll threw before assigning harness, afterAll still runs
   // and must not mask the real beforeAll failure with a TypeError of its own.
-  // (One historical failure mode: PGlite 0.5.x has no pgvector, so the graph
-  // migration's `CREATE EXTENSION vector` / `vector(1536)` / HNSW index threw
-  // during harness build. That is now handled by the pgvector-compat shim in
-  // pgliteHarness.ts buildSchema — PF-985 #8977 — not left as a skip.)
+  // (One historical failure mode: base PGlite has no pgvector, so the graph
+  // migration's `CREATE EXTENSION vector` failed during harness build. The
+  // harness now loads the real extension rather than rewriting production DDL.)
   if (harness) {
     await harness.close();
   }
 });
 
 describe('schema.ts ↔ migration-chain parity (#8707)', () => {
+  it('replays the graph migration with its real vector column and HNSW index', async () => {
+    const column = await harness.pglite.query<{ udt_name: string }>(
+      `SELECT udt_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'graph_nodes' AND column_name = 'embedding'`,
+    );
+    expect(column.rows).toEqual([{ udt_name: 'vector' }]);
+
+    const index = await harness.pglite.query<{ indexdef: string }>(
+      `SELECT indexdef FROM pg_indexes
+       WHERE schemaname = 'public' AND tablename = 'graph_nodes'
+         AND indexname = 'idx_graph_nodes_embedding_hnsw'`,
+    );
+    expect(index.rows[0]?.indexdef).toContain('USING hnsw');
+    expect(index.rows[0]?.indexdef).toContain('vector_cosine_ops');
+  });
+
   it('enumerates the schema (a refactor that empties this list must fail loudly)', () => {
     expect(tables.length).toBeGreaterThanOrEqual(20);
     // An unnamed index() still reaches production via db:push under a
