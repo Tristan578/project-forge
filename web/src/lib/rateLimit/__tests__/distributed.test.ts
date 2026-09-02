@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+import { UPSTASH_REST_TIMEOUT_MS } from '@/lib/config/timeouts';
+
 // We mock the root rateLimit module and globalThis.fetch before importing distributed
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
@@ -11,14 +13,16 @@ globalThis.fetch = mockFetch;
 // Dynamic import so env vars and mocks are applied per test
 let distributedRateLimit: typeof import('../distributed').distributedRateLimit;
 
-// Helper to build a successful Upstash EVAL response.
-// The Lua script returns [allowed (0|1), count].
-function makeEvalResponse(allowed: boolean, count: number) {
+// Helper to build a successful Upstash EVAL response, in the shape the shipped
+// script returns (pinned by slidingWindowScript.lua.test.ts): [1, count] on
+// allow, [0, count, oldest] on deny — `oldest` being the score of the earliest
+// entry still in the window, which is what resetAt is derived from.
+function makeEvalResponse(allowed: boolean, count: number, oldest: number = Date.now() - 1_000) {
   return {
     ok: true,
     status: 200,
     statusText: 'OK',
-    json: async () => ({ result: [allowed ? 1 : 0, count] }),
+    json: async () => ({ result: allowed ? [1, count] : [0, count, oldest] }),
   };
 }
 
@@ -116,13 +120,18 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(result.remaining).toBe(0);
   });
 
-  it('calls the Upstash EVAL endpoint with correct headers', async () => {
+  it('posts the command to the Upstash base URL with bearer auth', async () => {
     mockFetch.mockResolvedValue(makeEvalResponse(true, 1));
 
     await distributedRateLimit('test-key', 10, 30);
 
+    // Body-form commands go to the BASE URL. `POST <base>/eval` is the path
+    // form, and Upstash appends a POST body to a path-form command as ONE
+    // trailing argument — which is how every call was refused with 400 from
+    // #8369 (2026-04-13) until #9623. The URL is pinned exactly so a `/eval`
+    // suffix can never come back.
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://redis.upstash.io/eval',
+      'https://redis.upstash.io',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
@@ -133,26 +142,154 @@ describe('distributedRateLimit — Upstash path', () => {
     );
   });
 
-  it('sends Lua script with correct arguments to EVAL', async () => {
+  it('bounds the Upstash round-trip with AbortSignal.timeout(UPSTASH_REST_TIMEOUT_MS)', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout');
+    mockFetch.mockResolvedValue(makeEvalResponse(true, 1));
+
+    await distributedRateLimit('timeout-key', 10, 30);
+
+    // The fallback only engages when fetch THROWS; a stalled connection never
+    // does on its own, so the signal is what keeps a hung Upstash from holding
+    // every rate-limited route for the function's whole duration — and the
+    // bound has to be the shared constant, not any signal.
+    expect(spy).toHaveBeenCalledWith(UPSTASH_REST_TIMEOUT_MS);
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    spy.mockRestore();
+  });
+
+  it('derives resetAt from the oldest in-window entry on deny, and from now on allow', async () => {
+    const before = Date.now();
+    const oldest = before - 50_000; // entered 50s ago in a 60s window
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ result: [0, 5, oldest] }),
+    });
+    const denied = await distributedRateLimit('reset-deny', 5, 60);
+    expect(denied.allowed).toBe(false);
+    // The window reopens when that entry expires: ~10s from now, not 60s.
+    expect(denied.resetAt).toBe(oldest + 60_000);
+
+    mockFetch.mockResolvedValueOnce(makeEvalResponse(true, 2));
+    const allowed = await distributedRateLimit('reset-allow', 5, 60);
+    expect(allowed.resetAt).toBeGreaterThanOrEqual(before + 60_000);
+  });
+
+  it('sends the documented body-form EVAL command array', async () => {
     mockFetch.mockResolvedValue(makeEvalResponse(true, 1));
 
     await distributedRateLimit('lua-key', 5, 30);
 
     const callBody = JSON.parse(mockFetch.mock.calls[0][1].body as string) as unknown[];
     const prefixed = '@spawnforge/ratelimit:lua-key';
-    // [luaScript, numkeys, key, windowStart, limit, now, member, windowSeconds]
-    expect(typeof callBody[0]).toBe('string'); // Lua script
-    expect((callBody[0] as string)).toContain('ZREMRANGEBYSCORE');
-    expect((callBody[0] as string)).toContain('ZADD');
-    expect((callBody[0] as string)).toContain('ZCARD');
-    expect(callBody[1]).toBe(1);              // numkeys
-    expect(callBody[2]).toBe(prefixed);       // KEYS[1]
+    // https://upstash.com/docs/redis/features/restapi — "Array's first element
+    // must be the command name and command parameters should be appended next
+    // to each other in the same order as Redis protocol":
+    // ["EVAL", luaScript, numkeys, key, windowStart, limit, now, member, windowSeconds]
+    expect(callBody).toHaveLength(9);
+    expect(callBody[0]).toBe('EVAL');          // command name — REQUIRED in body form
+    expect(typeof callBody[1]).toBe('string'); // Lua script
+    expect((callBody[1] as string)).toContain('ZREMRANGEBYSCORE');
+    expect((callBody[1] as string)).toContain('ZADD');
+    expect((callBody[1] as string)).toContain('ZCARD');
+    expect(callBody[2]).toBe(1);               // numkeys
+    expect(callBody[3]).toBe(prefixed);        // KEYS[1]
     // ARGV: windowStart, limit, now, member, windowSeconds
-    expect(typeof callBody[3]).toBe('number'); // windowStart
-    expect(callBody[4]).toBe(5);              // limit
-    expect(typeof callBody[5]).toBe('number'); // now
-    expect(typeof callBody[6]).toBe('string'); // member
-    expect(callBody[7]).toBe(30);             // windowSeconds
+    expect(typeof callBody[4]).toBe('number'); // windowStart
+    expect(callBody[5]).toBe(5);               // limit
+    expect(typeof callBody[6]).toBe('number'); // now
+    expect(typeof callBody[7]).toBe('string'); // member
+    expect(callBody[8]).toBe(30);              // windowSeconds
+  });
+
+  it('never emits the path-form request that Upstash rejects', async () => {
+    mockFetch.mockResolvedValue(makeEvalResponse(true, 1));
+
+    await distributedRateLimit('shape-key', 5, 30);
+
+    const [calledUrl, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const callBody = JSON.parse(init.body as string) as unknown[];
+    expect(calledUrl.endsWith('/eval')).toBe(false);
+    // A body whose first element is the script (not the command name) is the
+    // exact shape that produced SPAWNFORGE-AI-B.
+    expect(callBody[0]).not.toContain('redis.call');
+  });
+
+  it('carries the Upstash error body into the thrown error so the fallback is diagnosable', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => '{"error":"ERR wrong number of arguments for \'eval\' command"}',
+      json: async () => ({ error: 'unused' }),
+    });
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
+    const { rateLimit } = await import('@/lib/rateLimit');
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
+
+    await distributedRateLimit('detail-key', 10, 60);
+
+    expect(sampledCaptureException).toHaveBeenCalledTimes(1);
+    const [action, err] = vi.mocked(sampledCaptureException).mock.calls[0] as [string, Error];
+    expect(action).toBe('distributedRateLimit.failOpen');
+    expect(err.message).toBe(
+      "Upstash EVAL failed: 400 Bad Request — {\"error\":\"ERR wrong number of arguments for 'eval' command\"}",
+    );
+  });
+
+  it('bounds the error detail and tolerates an unreadable body', async () => {
+    const { rateLimit } = await import('@/lib/rateLimit');
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      text: async () => 'x'.repeat(1000),
+      json: async () => ({}),
+    });
+    await distributedRateLimit('long-key', 10, 60);
+    const longErr = vi.mocked(sampledCaptureException).mock.calls[0][1] as Error;
+    expect(longErr.message).toBe(`Upstash EVAL failed: 500 Internal Server Error — ${'x'.repeat(200)}`);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      text: async () => { throw new Error('stream closed'); },
+      json: async () => ({}),
+    });
+    await distributedRateLimit('unreadable-key', 10, 60);
+    const bareErr = vi.mocked(sampledCaptureException).mock.calls[1][1] as Error;
+    expect(bareErr.message).toBe('Upstash EVAL failed: 502 Bad Gateway');
+
+    // Whitespace is collapsed so a multi-line body reads as one line in Sentry…
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => '  ERR foo\n\n\t  bar ',
+      json: async () => ({}),
+    });
+    await distributedRateLimit('multiline-key', 10, 60);
+    const collapsedErr = vi.mocked(sampledCaptureException).mock.calls[2][1] as Error;
+    expect(collapsedErr.message).toBe('Upstash EVAL failed: 400 Bad Request — ERR foo bar');
+
+    // …and a whitespace-only body yields the bare status line, no separator.
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: async () => '   \n ',
+      json: async () => ({}),
+    });
+    await distributedRateLimit('blank-key', 10, 60);
+    const blankErr = vi.mocked(sampledCaptureException).mock.calls[3][1] as Error;
+    expect(blankErr.message).toBe('Upstash EVAL failed: 400 Bad Request');
   });
 
   it('provides a resetAt timestamp in the future', async () => {
@@ -169,6 +306,7 @@ describe('distributedRateLimit — Upstash path', () => {
       ok: false,
       status: 503,
       statusText: 'Service Unavailable',
+      text: async () => '',
       json: async () => ({ error: 'unavailable' }),
     });
 
@@ -201,7 +339,7 @@ describe('distributedRateLimit — Upstash path', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [evalUrl] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(evalUrl).toBe('https://redis.upstash.io/eval');
+    expect(evalUrl).toBe('https://redis.upstash.io');
   });
 
   it('issues no cleanup round-trip on deny', async () => {

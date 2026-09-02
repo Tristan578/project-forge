@@ -9,7 +9,8 @@
  * identical requests.
  */
 
-import { captureException } from '@/lib/monitoring/sentry-server';
+import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
+import { isUpstashConfigured, postUpstashCommand } from '@/lib/upstash/restCommand';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -142,52 +143,33 @@ function memorySet<T>(key: string, result: T, ttlMs: number, operation: string):
 // Upstash Redis cache layer
 // ---------------------------------------------------------------------------
 
-function isUpstashConfigured(): boolean {
-  return Boolean(
-    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN,
-  );
-}
-
+// Both Redis calls go through the shared body-form transport (#9623) so they
+// carry the same 3 s bound as the rate limiter: `cachedGenerate()` awaits the
+// read before every cacheable generation, so an unbounded stall here held every
+// /api/generate/* route for its whole maxDuration. Failures are reported through
+// the per-action sampler — an Upstash incident must not become one Sentry event
+// per paid generation (#8666).
 async function redisGet<T>(key: string): Promise<T | undefined> {
-  const url = process.env.UPSTASH_REDIS_REST_URL!;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
-
   try {
-    const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (!resp.ok) return undefined;
-    const body = await resp.json() as { result: string | null };
-    if (!body.result) return undefined;
-
-    return JSON.parse(body.result) as T;
+    const result = await postUpstashCommand(['GET', key]);
+    if (typeof result !== 'string' || result === '') return undefined;
+    return JSON.parse(result) as T;
   } catch (err) {
-    captureException(err, { action: 'responseCache.redisGet', key });
+    sampledCaptureException('responseCache.redisGet', err, { keyPrefix: key.split(':')[1] ?? key });
     return undefined;
   }
 }
 
 async function redisSet<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
-  const url = process.env.UPSTASH_REDIS_REST_URL!;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
-
   try {
     const serialized = JSON.stringify(value);
 
     // Enforce max entry size (10 MB, measured in bytes not code units)
     if (Buffer.byteLength(serialized, 'utf-8') > 10 * 1024 * 1024) return;
 
-    await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(['SET', key, serialized, 'EX', ttlSeconds]),
-    });
+    await postUpstashCommand(['SET', key, serialized, 'EX', ttlSeconds]);
   } catch (err) {
-    captureException(err, { action: 'responseCache.redisSet', key });
+    sampledCaptureException('responseCache.redisSet', err, { keyPrefix: key.split(':')[1] ?? key });
   }
 }
 
@@ -307,7 +289,7 @@ export async function cachedGenerate<T>(
     if (isUpstashConfigured()) {
       // Fire-and-forget Redis write
       redisSet(key, result, ttlSeconds).catch((err) =>
-        captureException(err, { action: 'responseCache.backgroundSet', key })
+        sampledCaptureException('responseCache.backgroundSet', err, { keyPrefix: key.split(':')[1] ?? key })
       );
     }
 

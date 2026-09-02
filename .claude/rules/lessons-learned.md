@@ -248,3 +248,27 @@ keep the two halves' settings distinct on purpose — TurboSnap/`onlyChanged` is
 right for the PR side and wrong for the baseline, because a partial reference
 reproduces the bug on the next unrelated PR.
 **Ticket:** #9621
+
+### 14. A mocked transport test pins whatever contract you believed, right or wrong
+**Applies:** upstash|rateLimit/distributed|healthChecks|responseCache
+**What happens:** A unit test asserts the exact URL and body the code sends,
+passes for four months, and the provider has been refusing every one of those
+requests with 400 the whole time. Here: `distributedRateLimit` posted its Lua
+script to `POST <base>/eval` with the arguments as the body. Upstash appends a
+POST body to a path-form command as ONE trailing argument, so the script arrived
+with no `numkeys`. The catch degraded to the SDK limiter, so nothing failed —
+the only trace was a sampled Sentry event (`SPAWNFORGE-AI-B`) that read
+"400 Bad Request" and nothing else, and `/api/health` reported the rate limiter
+healthy because two environment variables existed.
+**Why:** A mock cannot disagree with you. `mockFetch` proves what the code
+sends, never what the provider accepts, and it pins a wrong contract with the
+same confidence as a right one. A fallback that swallows the failure then turns
+a 100% error rate into silence (lesson #1's family).
+**Prevention:** Cite the provider's documented encoding (or its SDK's — here
+`["eval", script, keys.length, ...keys, ...args]` posted to the base URL) next
+to the assertion, and pin THAT. Make the health probe execute the same request
+shape the code path uses, never an adjacent property. Treat any non-zero count
+of a `*.failOpen` Sentry action as a contract break to diagnose, not noise, and
+carry the provider's error body into the captured exception so the next break
+is readable.
+**Ticket:** #9623
