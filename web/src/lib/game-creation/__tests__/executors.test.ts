@@ -124,9 +124,8 @@ vi.mock('@/lib/ai/contentSafety', () => ({
   })),
 }));
 
-vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-sonnet-4-6',
-}));
+// `@/lib/ai/models` is not mocked: it is a side-effect-free constants module,
+// and a fixture copy of it silently drifts from what the product ships.
 
 // ---------------------------------------------------------------------------
 // Helpers

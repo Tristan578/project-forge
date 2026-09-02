@@ -107,9 +107,8 @@ vi.mock('@/stores/dialogueStore', () => ({
   ),
 }));
 
-vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-sonnet-4-6',
-}));
+// `@/lib/ai/models` is not mocked: it is a side-effect-free constants module,
+// and a fixture copy of it silently drifts from what the product ships.
 
 vi.mock('lucide-react', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('lucide-react');
