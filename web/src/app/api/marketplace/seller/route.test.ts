@@ -109,6 +109,22 @@ describe('POST /api/marketplace/seller', () => {
     expect(res.status).toBe(401);
   });
 
+  // Code-point counting (#9637): one emoji is one character, so it fails min(2).
+  it('should return 422 for a single-emoji displayName (one code point)', async () => {
+    const mockDb = { select: vi.fn(), insert: vi.fn() };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/marketplace/seller', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: '\u{1F642}' }),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).code).toBe('VALIDATION_ERROR');
+  });
+
   it('should return 400 when displayName is too short', async () => {
     const mockDb = { select: vi.fn(), insert: vi.fn() };
     vi.mocked(getDb).mockReturnValue(mockDb as never);

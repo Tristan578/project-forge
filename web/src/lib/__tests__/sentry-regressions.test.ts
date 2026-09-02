@@ -376,17 +376,19 @@ describe('Sentry Session 2026-03-20: specific bug regressions', () => {
 
 describe('PF-892: Sentry client config must not include server-only AI integrations', () => {
   /**
-   * anthropicAIIntegration and vercelAIIntegration are server-only Sentry
-   * integrations. Including them in the browser (client) config causes runtime
-   * errors because the Anthropic SDK is not available in the browser context.
+   * vercelAIIntegration is a server-only Sentry integration. Including it in
+   * the browser (client) config causes runtime errors.
    *
    * instrumentation-client.ts must only use browser-safe integrations:
    *   - browserTracingIntegration
    *   - replayIntegration
    *
    * sentry.server.config.ts and sentry.edge.config.ts may use:
-   *   - anthropicAIIntegration
    *   - vercelAIIntegration
+   *
+   * anthropicAIIntegration is pinned ABSENT everywhere (#9632): the
+   * @anthropic-ai/sdk it instruments was removed — it had no import sites, so
+   * the integration could never emit a span while reading as AI coverage.
    */
   it('instrumentation-client.ts does not contain anthropicAIIntegration', async () => {
     const fs = await import('fs');
@@ -410,7 +412,7 @@ describe('PF-892: Sentry client config must not include server-only AI integrati
     expect(content).not.toContain('vercelAIIntegration');
   });
 
-  it('sentry.server.config.ts contains anthropicAIIntegration (server-side AI monitoring)', async () => {
+  it('sentry.server.config.ts keeps vercelAIIntegration — the integration that sees our AI traffic', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const serverConfigPath = path.resolve(
@@ -418,7 +420,28 @@ describe('PF-892: Sentry client config must not include server-only AI integrati
       'sentry.server.config.ts',
     );
     const content = fs.readFileSync(serverConfigPath, 'utf-8');
-    expect(content).toContain('anthropicAIIntegration');
+    expect(content).toContain('vercelAIIntegration');
+  });
+
+  it('no Sentry config registers anthropicAIIntegration — the SDK it instruments is gone (#9632)', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    for (const file of ['sentry.server.config.ts', 'sentry.edge.config.ts', 'instrumentation-client.ts']) {
+      const content = fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8');
+      expect(content, file).not.toContain('anthropicAIIntegration');
+    }
+  });
+
+  it('web/package.json no longer depends on @anthropic-ai/sdk or @google/generative-ai (#9632)', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf-8')) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const all = { ...pkg.dependencies, ...pkg.devDependencies };
+    expect(all).not.toHaveProperty('@anthropic-ai/sdk');
+    expect(all).not.toHaveProperty('@google/generative-ai');
   });
 });
 

@@ -7,6 +7,7 @@ import {
   AI_MODELS,
   GATEWAY_MODEL_PREMIUM,
   GATEWAY_MODEL_DEEP,
+  gatewayFallbackModels,
   isPremiumModel,
 } from '../models';
 
@@ -167,5 +168,19 @@ describe('isPremiumModel', () => {
     expect(isPremiumModel('claude-opus-5-0')).toBe(false);
     expect(isPremiumModel('anthropic/claude-opus-9-9')).toBe(false);
     expect(isPremiumModel('opus-pretender')).toBe(false);
+  });
+});
+
+describe('gatewayFallbackModels (#9631)', () => {
+  it('premium falls back to chat then fast, chat to fast, fast to nothing', () => {
+    expect(gatewayFallbackModels(GATEWAY_MODEL_PREMIUM)).toEqual([AI_MODELS.gatewayChat, 'anthropic/claude-haiku-4-5']);
+    expect(gatewayFallbackModels(AI_MODELS.gatewayChat)).toEqual(['anthropic/claude-haiku-4-5']);
+    expect(gatewayFallbackModels('anthropic/claude-haiku-4-5')).toEqual([]);
+  });
+
+  it('never guesses a fallback for an unknown id', () => {
+    expect(gatewayFallbackModels('openai/gpt-4o-mini')).toEqual([]);
+    expect(gatewayFallbackModels(undefined)).toEqual([]);
+    expect(gatewayFallbackModels(null)).toEqual([]);
   });
 });
