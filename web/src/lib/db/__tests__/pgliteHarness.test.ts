@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
 import { neon, neonConfig } from '@neondatabase/serverless';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { makeNeonAdapter, SqlTemplate } from './pgliteHarness';
 
 type SingleBody = { query: string; params: unknown[] };
@@ -45,14 +45,25 @@ function expectComposedEqual(expected: SingleBody, captured: SingleBody): void {
 }
 
 describe('PGlite harness Neon adapter fidelity', () => {
+  // ONE Postgres-WASM instance per file, like every other .db.test.ts suite.
+  // This file used to boot and tear down a fresh PGlite around each test, and
+  // repeated WASM init/teardown in one process is the shape behind the
+  // intermittent V8 CHECK failure in ThreadIsolation::UnregisterWasmAllocation
+  // (SIGILL, exit 132) that failed Web Tests closed on #9590 (#9643; upstream
+  // electric-sql/pglite#1053, nodejs/node#64500). The tests only compose SQL
+  // text and compare it with the real driver's wire body, so they share the
+  // instance safely.
   let pglite: PGlite;
 
-  beforeEach(() => {
+  beforeAll(() => {
     pglite = new PGlite();
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     neonConfig.fetchFunction = undefined;
+  });
+
+  afterAll(async () => {
     await pglite.close();
   });
 
