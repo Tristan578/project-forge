@@ -220,3 +220,31 @@ means each merge invalidates the next PR, so every PR gets an update-branch), so
 SAME head SHA. Quote that SHA when reporting merge-readiness — it is what makes
 the claim checkable, and it is what makes a stale sweep visible instead of silent.
 **Ticket:** #9196
+
+### 13. A comparison gate whose reference state is never written compares against nothing
+**Applies:** chromatic|baseline|snapshot|visual regression|quality-gates.yml|workflow_call|UI Tests|golden|approve
+**What happens:** A diffing check reports the SAME result on every PR forever —
+here, `UI Tests | 92 visual and accessibility changes must be accepted as
+baselines`, where 92 is 100% of published stories and the count was byte-identical
+across three unrelated heads. Everyone learns to read the amber as background
+noise, so the one PR that genuinely breaks the UI looks exactly like the four
+dev-only dependency bumps that cannot possibly change rendering.
+**Why:** The gate ran only on the comparison side. `quality-gates.yml`'s
+`chromatic` job is `workflow_call` only; its callers are `ci.yml`
+(`pull_request`) and `cd.yml`, and `cd.yml` deliberately skips quality-gates on
+push to main. So no build was ever produced on `main`, the branch every PR build
+diffs against. Baselines were written solely by a manual `workflow_dispatch`.
+This is lesson #1's family with a different mechanism: not "asserts the wrong
+property" but "has no reference to assert against", and it fails OPEN and
+permanently rather than once.
+**Prevention:** A diff-based gate has TWO halves and they live on different
+triggers. Whenever you add or review one — visual snapshots, coverage ratchets,
+bundle-size budgets, golden files, perf baselines — find the job that writes the
+reference on the trunk and confirm it actually runs there. If the only writer is
+a manual dispatch, there is no baseline. The tell is cheap and specific: **the
+same non-zero count on two unrelated commits**, and no status of that name on any
+recent trunk commit (`gh api repos/{owner}/{repo}/commits/<sha>/status`). Also
+keep the two halves' settings distinct on purpose — TurboSnap/`onlyChanged` is
+right for the PR side and wrong for the baseline, because a partial reference
+reproduces the bug on the next unrelated PR.
+**Ticket:** #9621
