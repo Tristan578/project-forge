@@ -335,7 +335,7 @@ jobs:
 
       - name: Restore or claim the WebGL2 engine cache
         id: engine-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
@@ -584,7 +584,7 @@ jobs:
           echo "Engine WASM cache key: $key"
 
       - name: Publish the WebGL2 engine for PR reuse
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
@@ -646,7 +646,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
