@@ -30,9 +30,17 @@ vercel logs --scope tnolan --follow
    ```bash
    vercel rollback <deployment-url> --yes --scope tnolan
    ```
-3. Verify the rollback is live:
+3. Verify the rollback is live — by commit, not by status code (`curl -I` on the
+   apex answers 307 to www and says nothing about which build answered):
    ```bash
-   curl -I https://spawnforge.ai
+   curl -s https://www.spawnforge.ai/api/health | jq .commit   # must equal the restored deployment's commit
+   ```
+4. Undo the rollback once a fix is ready. Instant Rollback turns auto-assignment
+   of production domains OFF: pushes to `main` do not go live by themselves until
+   a rolling release completes. CD's `ensure-canary` step starts its rollout
+   explicitly; if that run reports it could not become the canary:
+   ```bash
+   vercel promote <fixed-deployment-url> --scope tnolan   # vercel.com/docs/instant-rollback#undo-a-rollback
    ```
 
 ### Pull environment variables to local

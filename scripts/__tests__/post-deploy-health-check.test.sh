@@ -212,6 +212,15 @@ if [ "$RC" = 0 ] && grep -q 'vcrrForceCanary=true' "$TMP/args" && grep -qx -- '-
 else
   fail "force-canary wiring missing; args=$(tr '\n' ' ' < "$TMP/args") $OUT"
 fi
+# The jar curl writes must be the jar it reads, or the _vcrr_ cookie is never
+# replayed on a retry (the round-1 trap: two mktemp files).
+JAR_WRITTEN="$(awk 'p{print; exit} $0=="--cookie-jar"{p=1}' "$TMP/args")"
+JAR_READ="$(awk 'p{print; exit} $0=="--cookie"{p=1}' "$TMP/args")"
+if [ -n "$JAR_WRITTEN" ] && [ "$JAR_WRITTEN" = "$JAR_READ" ]; then
+  pass "the jar written (--cookie-jar) is the jar read (--cookie), so the canary cookie survives retries"
+else
+  fail "cookie jar written ('$JAR_WRITTEN') and read ('$JAR_READ') differ — the canary cookie would never be replayed"
+fi
 
 OUT="$(VERCEL_AUTOMATION_BYPASS=s3cret e2e 200 "$HEALTHY")"; RC=$?
 if [ "$RC" = 0 ] && grep -qx 'x-vercel-protection-bypass: s3cret' "$TMP/args"; then
@@ -269,10 +278,12 @@ else
 fi
 
 # --- no fail-open path may survive ---
-if [ "$(grep -c '^  *exit 0' "$SCRIPT")" = "1" ]; then
+# Any indentation, including column 0: a fail-open `exit 0` pasted at the top
+# level must be counted too.
+if [ "$(grep -cE '^[[:space:]]*exit 0([[:space:]]|$)' "$SCRIPT")" = "1" ]; then
   pass "exactly one 'exit 0' exists in the script — the success path"
 else
-  fail "the script has $(grep -c '^  *exit 0' "$SCRIPT") 'exit 0' sites; a second one is a fail-open path (the pre-#9624 script had two)"
+  fail "the script has $(grep -cE '^[[:space:]]*exit 0([[:space:]]|$)' "$SCRIPT") 'exit 0' sites; a second one is a fail-open path (the pre-#9624 script had two)"
 fi
 if ! grep -qi 'skipping health check' "$SCRIPT" && ! grep -q 'vercel curl' "$SCRIPT"; then
   pass "the 'could not authenticate, skipping' branch and the vercel-curl path are gone"

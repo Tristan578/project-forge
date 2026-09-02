@@ -45,9 +45,14 @@ test.beforeEach(async ({ request }) => {
   const seed = await request.get(`${PROD_URL}/api/health?vcrrForceCanary=true`);
   expect(seed.status(), 'canary seed request must succeed').toBe(200);
   const { cookies } = await request.storageState();
-  // CD sets SMOKE_FORCE_CANARY only when ensure-canary reported an ACTIVE
-  // rollout with our deployment as the canary, so the cookie must exist here.
-  expect(cookies.some((c) => c.name.startsWith('_vcrr_')), 'Vercel must set the rolling-release cookie').toBe(true);
+  if (!cookies.some((c) => c.name.startsWith('_vcrr_'))) {
+    // CD set SMOKE_FORCE_CANARY because ensure-canary saw an ACTIVE rollout
+    // minutes ago; it can have resolved since (auto-advanced to 100%,
+    // completed or aborted by hand, or superseded by a later merge), and
+    // Vercel then sets no cookie. The cookie was only ever the vehicle — the
+    // commit assertion below is the proof — so let that decide.
+    console.warn('SMOKE_FORCE_CANARY is set but Vercel set no _vcrr_ cookie: no rollout is active; the commit assertion decides');
+  }
   canaryCookies = cookies;
 });
 

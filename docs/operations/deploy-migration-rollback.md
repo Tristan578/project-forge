@@ -124,6 +124,13 @@ code that matches it:
 vercel rollback "<prev_url>" --yes --scope tnolan --token="$VERCEL_TOKEN"
 ```
 
+Instant Rollback turns auto-assignment of production domains **off** until a
+rolling release completes: pushes to `main` do not go live by themselves. CD's
+`ensure-canary` step starts the next rollout explicitly; if that run reports it
+could not become the canary, undo the rollback by hand once the fix is ready:
+`vercel promote <fixed-deployment-url> --scope tnolan`
+(vercel.com/docs/instant-rollback#undo-a-rollback).
+
 If the automatic rollback already ran, this is already done — verify by checking
 that `https://www.spawnforge.ai/api/health` reports the restored commit (`vercel ls`
 prints `● Ready` for every deployment and says nothing about which one serves

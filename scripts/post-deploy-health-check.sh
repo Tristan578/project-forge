@@ -214,7 +214,7 @@ while [ "$attempt" -lt "$RETRIES" ]; do
 
   if [ "$HTTP_CODE" -eq 200 ]; then
     # Validate JSON body
-    if python3 -c "import json; d=json.load(open('$RESPONSE_FILE')); assert d.get('status') in ('ok','degraded')" 2>/dev/null; then
+    if HEALTH_BODY="$RESPONSE_FILE" python3 -c "import json, os; d=json.load(open(os.environ['HEALTH_BODY'])); assert d.get('status') in ('ok','degraded')" 2>/dev/null; then
       echo "Health check passed (attempt ${attempt}/${RETRIES})"
       cat "$RESPONSE_FILE" 2>/dev/null || true
       # The right build, and a reachable engine: both are required before the
