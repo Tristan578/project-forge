@@ -4,10 +4,17 @@ import {
   AI_MODEL_FAST,
   AI_MODEL_PREMIUM,
   AI_MODEL_DEEP,
+  AI_MODEL_PRIMARY_4X,
+  AI_MODEL_PREMIUM_4X,
   AI_MODELS,
+  GATEWAY_MODEL_CHAT,
+  GATEWAY_MODEL_FAST,
   GATEWAY_MODEL_PREMIUM,
   GATEWAY_MODEL_DEEP,
   gatewayFallbackModels,
+  THINKING_BUDGET_TOKENS,
+  anthropicThinkingOption,
+  bareModelId,
   isPremiumModel,
   supportsEffort,
   thinkingModeFor,
@@ -230,5 +237,122 @@ describe('gatewayFallbackModels (#9631)', () => {
     expect(gatewayFallbackModels('openai/gpt-4o-mini')).toEqual([]);
     expect(gatewayFallbackModels(undefined)).toEqual([]);
     expect(gatewayFallbackModels(null)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Extended-thinking / effort capability table (PF-1216 / #9339)
+// ---------------------------------------------------------------------------
+
+describe('bareModelId', () => {
+  it('strips a provider prefix', () => {
+    expect(bareModelId('anthropic/claude-opus-5')).toBe('claude-opus-5');
+  });
+
+  it('passes a bare id through unchanged', () => {
+    expect(bareModelId('claude-opus-5')).toBe('claude-opus-5');
+  });
+});
+
+describe('thinkingModeFor — gateway spelling parity (PF-1216 / #9339)', () => {
+  it('resolves the gateway-format id to the same mode as the bare id', () => {
+    expect(thinkingModeFor(GATEWAY_MODEL_CHAT)).toBe(thinkingModeFor(AI_MODEL_PRIMARY));
+    expect(thinkingModeFor(GATEWAY_MODEL_PREMIUM)).toBe(thinkingModeFor(AI_MODEL_PREMIUM));
+    expect(thinkingModeFor(GATEWAY_MODEL_FAST)).toBe('budget');
+  });
+
+  it('returns none for an id with no parseable Claude version', () => {
+    // Fail-safe: an id the parser cannot place must omit the field rather than
+    // guess a shape the API answers with HTTP 400.
+    expect(thinkingModeFor('gpt-4o')).toBe('none');
+    expect(thinkingModeFor('')).toBe('none');
+    expect(thinkingModeFor(null)).toBe('none');
+    expect(thinkingModeFor(undefined)).toBe('none');
+  });
+
+  it('supportsEffort is false for every non-adaptive id', () => {
+    expect(supportsEffort(AI_MODEL_FAST)).toBe(false);
+    expect(supportsEffort(GATEWAY_MODEL_FAST)).toBe(false);
+    expect(supportsEffort('claude-sonnet-4.5')).toBe(false);
+    expect(supportsEffort('gpt-4o')).toBe(false);
+    expect(supportsEffort('')).toBe(false);
+    expect(supportsEffort(null)).toBe(false);
+  });
+});
+
+describe('anthropicThinkingOption', () => {
+  it('returns the adaptive literal for the Claude 5 family', () => {
+    expect(anthropicThinkingOption(AI_MODEL_PRIMARY)).toEqual({ type: 'adaptive' });
+    expect(anthropicThinkingOption(AI_MODEL_PREMIUM)).toEqual({ type: 'adaptive' });
+  });
+
+  it('never emits budgetTokens for a Claude 5 model', () => {
+    // The exact 400 this migration exists to remove.
+    for (const model of [AI_MODEL_PRIMARY, AI_MODEL_PREMIUM, AI_MODEL_DEEP]) {
+      expect(anthropicThinkingOption(model)).not.toHaveProperty('budgetTokens');
+      expect(anthropicThinkingOption(model)).not.toMatchObject({ type: 'enabled' });
+    }
+  });
+
+  it('keeps the legacy budget literal for Haiku 4.5', () => {
+    expect(anthropicThinkingOption(AI_MODEL_FAST)).toEqual({
+      type: 'enabled',
+      budgetTokens: THINKING_BUDGET_TOKENS,
+    });
+  });
+
+  it('keeps the 4.x rollback constants on a supported shape', () => {
+    // Pointing AI_MODEL_PRIMARY/AI_MODEL_PREMIUM back at these must not leave
+    // the thinking toggle a silent no-op.
+    expect(anthropicThinkingOption(AI_MODEL_PRIMARY_4X)).toEqual({ type: 'adaptive' });
+    expect(anthropicThinkingOption(AI_MODEL_PREMIUM_4X)).toEqual({ type: 'adaptive' });
+  });
+
+  it('keeps the legacy budget literal for pre-4.6 Claude models', () => {
+    // The dotted spelling parses the same as the dashed one (#9626).
+    expect(anthropicThinkingOption('claude-sonnet-4.5')).toEqual({
+      type: 'enabled',
+      budgetTokens: THINKING_BUDGET_TOKENS,
+    });
+  });
+
+  it('returns undefined for a model with no known shape', () => {
+    expect(anthropicThinkingOption('gpt-4o')).toBeUndefined();
+    expect(anthropicThinkingOption(null)).toBeUndefined();
+  });
+});
+
+describe('thinking-table coverage for shipped models', () => {
+  // A model we actually route must never land on the safe `none` default —
+  // that would turn the extended-thinking toggle into a silent no-op for a
+  // tier that pays for it. Derived from AI_MODELS so a new chat model is
+  // covered the day it is added, not the day someone remembers this file.
+  const SHIPPED_CHAT_MODELS = [
+    AI_MODELS.chat,
+    AI_MODELS.fast,
+    AI_MODELS.premium,
+    AI_MODELS.deep,
+    bareModelId(GATEWAY_MODEL_CHAT),
+    bareModelId(GATEWAY_MODEL_FAST),
+    bareModelId(GATEWAY_MODEL_PREMIUM),
+    bareModelId(GATEWAY_MODEL_DEEP),
+    AI_MODEL_PRIMARY_4X,
+    AI_MODEL_PREMIUM_4X,
+  ];
+
+  it('sanity: the derived id set is non-empty and all Anthropic', () => {
+    // A vacuous sweep over zero ids would report as full coverage.
+    expect(SHIPPED_CHAT_MODELS.length).toBeGreaterThan(0);
+    for (const id of SHIPPED_CHAT_MODELS) {
+      expect(id, `${id} is not an Anthropic chat id`).toMatch(/^claude-/);
+    }
+  });
+
+  it.each(SHIPPED_CHAT_MODELS)('%s has an explicit thinking shape', (model) => {
+    expect(
+      thinkingModeFor(model),
+      `${model} is routable but has no entry in THINKING_MODE_BY_MODEL, so the thinking toggle silently does nothing for it`,
+    ).not.toBe('none');
+    expect(anthropicThinkingOption(model)).toBeDefined();
   });
 });
