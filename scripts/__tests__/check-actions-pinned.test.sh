@@ -175,6 +175,78 @@ res="$(run_gate "$repo")"; rc="${res%%|*}"
 if [ "$rc" = "0" ]; then pass "empty .github/workflows/ passes (exit 0)"; else fail "no workflows should exit 0, got $rc"; fi
 rm -rf "$repo"
 
+# --- 10. Chromatic halves pinned at different SHAs -> exit 1 ------------------
+# The baseline writer and the PR comparer must run the same CLI: the reference
+# snapshots have to be captured by the same code that captures the ones being
+# diffed against them. Dependabot bumps one workflow file per PR, so nothing
+# else in CI notices the split.
+OTHER_SHA40="89abcdef0123456789abcdef0123456789abcdef"
+repo="$(make_repo)"
+write_wf "$repo" quality-gates.yml "jobs:
+  chromatic:
+    steps:
+      - uses: chromaui/action@$SHA40 # v18.5.0
+"
+write_wf "$repo" chromatic-baseline.yml "jobs:
+  baseline:
+    steps:
+      - uses: chromaui/action@$OTHER_SHA40 # v18.7.1
+"
+res="$(run_gate "$repo")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "drifted chromaui/action pins fail (exit 1)"; else fail "chromaui drift should exit 1, got $rc ($out)"; fi
+if grep -qF "2 different SHAs" <<<"$out"; then pass "drift failure names the count"; else fail "drift failure does not name the count"; fi
+if grep -qF "chromaui/action@$SHA40" <<<"$out" && grep -qF "chromaui/action@$OTHER_SHA40" <<<"$out"; then
+  pass "drift failure lists both offending pins"
+else
+  fail "drift failure does not list both pins"
+fi
+# The mutable-ref remediation text is for a different fault and must not appear.
+if grep -qF "pinned by a mutable ref" <<<"$out"; then fail "drift failure prints unrelated mutable-ref advice"; else pass "drift failure omits mutable-ref advice"; fi
+rm -rf "$repo"
+
+# --- 11. Chromatic halves in lockstep -> exit 0 ------------------------------
+repo="$(make_repo)"
+write_wf "$repo" quality-gates.yml "jobs:
+  chromatic:
+    steps:
+      - uses: chromaui/action@$SHA40 # v18.7.1
+"
+write_wf "$repo" chromatic-baseline.yml "jobs:
+  baseline:
+    steps:
+      - uses: chromaui/action@$SHA40 # v18.7.1
+"
+res="$(run_gate "$repo")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "matching chromaui/action pins pass (exit 0)"; else fail "lockstep pins should exit 0, got $rc ($out)"; fi
+rm -rf "$repo"
+
+# --- 12. Comparer with no baseline writer -> exit 1 --------------------------
+# This is the #9621 defect itself: Chromatic ran only on the PR side, so there
+# was no ancestor build and every PR reported 100% of stories as unaccepted.
+repo="$(make_repo)"
+write_wf "$repo" quality-gates.yml "jobs:
+  chromatic:
+    steps:
+      - uses: chromaui/action@$SHA40 # v18.7.1
+"
+res="$(run_gate "$repo")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "a Chromatic comparer with no baseline writer fails (exit 1)"; else fail "missing baseline writer should exit 1, got $rc ($out)"; fi
+if grep -qF "chromatic-baseline.yml" <<<"$out"; then pass "failure names the missing workflow"; else fail "failure does not name chromatic-baseline.yml"; fi
+rm -rf "$repo"
+
+# --- 13. No Chromatic anywhere -> both guards inert (exit 0) -----------------
+# Removing Chromatic entirely must disable these checks, not trip them.
+repo="$(make_repo)"
+write_wf "$repo" ci.yml "jobs:
+  build:
+    steps:
+      - uses: actions/checkout@$SHA40 # v4
+"
+res="$(run_gate "$repo")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "no Chromatic anywhere leaves both guards inert (exit 0)"; else fail "absent Chromatic should exit 0, got $rc ($out)"; fi
+if grep -qF "chromatic-baseline.yml" <<<"$out"; then fail "guard fired with no Chromatic present"; else pass "guard stays silent with no Chromatic present"; fi
+rm -rf "$repo"
+
 echo ""
 echo "=== ci.yml integration wiring ==="
 # Every other check-*.sh gate's suite runs in the lockfile-sync-tests ("CI
