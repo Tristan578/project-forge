@@ -262,7 +262,10 @@ export const creditTransactions = pgTable(
   ]
 );
 
-export const publishStatusEnum = pgEnum('publish_status', ['published', 'unpublished', 'processing']);
+// 'flagged' = hidden pending moderation review after viewer reports crossed
+// REPORT_AUTOHIDE_THRESHOLD. Distinct from 'unpublished' (creator-initiated or
+// admin takedown) so an appeal can restore the game to 'published' (#8354).
+export const publishStatusEnum = pgEnum('publish_status', ['published', 'unpublished', 'processing', 'flagged']);
 
 export const publishedGames = pgTable(
   'published_games',
@@ -278,6 +281,11 @@ export const publishedGames = pgTable(
     cdnUrl: text('cdn_url'),
     thumbnail: text('thumbnail'),
     playCount: integer('play_count').notNull().default(0),
+    // Monotonic count of distinct reporters (one row per reporter in
+    // game_reports); never decremented by an admin approve (#8354).
+    reportCount: integer('report_count').notNull().default(0),
+    // Set when status first flipped to 'flagged'; cleared on admin approve.
+    flaggedAt: timestamp('flagged_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -287,6 +295,45 @@ export const publishedGames = pgTable(
     index('idx_published_games_slug').on(table.slug),
   ]
 );
+
+/**
+ * Reason taxonomy for viewer-initiated game reports (#8354).
+ * Mirrors the `reason` union accepted by POST /api/community/games/[id]/report
+ * and the labels rendered by ReportGameDialog.
+ */
+export const gameReportReasonEnum = pgEnum('game_report_reason', [
+  'sexual_content',
+  'violence',
+  'hate_speech',
+  'copyright',
+  'spam',
+  'other',
+]);
+
+/**
+ * One row per (game, reporter). The unique index is the ON CONFLICT arbiter
+ * that makes a repeat report from the same account a no-op — it is the only
+ * thing stopping a single user from inflating `publishedGames.reportCount`
+ * past REPORT_AUTOHIDE_THRESHOLD by resubmitting.
+ */
+export const gameReports = pgTable(
+  'game_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id),
+    reporterId: uuid('reporter_id').notNull().references(() => users.id),
+    reason: gameReportReasonEnum('reason').notNull(),
+    details: text('details'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_game_reports_reporter_game').on(table.gameId, table.reporterId),
+    index('idx_game_reports_game').on(table.gameId),
+  ]
+);
+
+export type GameReport = typeof gameReports.$inferSelect;
+export type NewGameReport = typeof gameReports.$inferInsert;
 
 // --- Community Gallery Tables ---
 

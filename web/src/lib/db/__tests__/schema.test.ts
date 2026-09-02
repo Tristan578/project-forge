@@ -5,7 +5,7 @@ import * as schema from '../schema';
 const EXPECTED_TABLE_NAMES = [
   'users', 'apiKeys', 'providerKeys', 'tokenUsage', 'tokenPurchases',
   'projects', 'tokenConfig', 'tierConfig', 'costLog', 'creditTransactions',
-  'publishedGames', 'gameRatings', 'gameComments', 'gameLikes', 'userFollows',
+  'publishedGames', 'gameReports', 'gameRatings', 'gameComments', 'gameLikes', 'userFollows',
   'gameTags', 'gameForks', 'featuredGames', 'marketplaceAssets',
   'assetPurchases', 'assetReviews', 'sellerProfiles', 'feedback', 'generationJobs',
   'webhookEvents', 'leaderboards', 'leaderboardEntries', 'moderationAppeals',
@@ -37,6 +37,7 @@ describe('database schema', () => {
       { name: 'tokenSourceEnum', value: schema.tokenSourceEnum },
       { name: 'publishStatusEnum', value: schema.publishStatusEnum },
       { name: 'jobStatusEnum', value: schema.jobStatusEnum },
+      { name: 'gameReportReasonEnum', value: schema.gameReportReasonEnum },
     ];
 
     for (const { name, value } of enums) {
