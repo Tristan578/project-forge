@@ -86,6 +86,7 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
         provider: data.provider,
         createdAt: Date.now(),
         usageId: data.usageId,
+        durable: data.durable === true,
         metadata: { targetSize, palette, dithering, ditheringIntensity: dithering === 'none' ? 0 : ditheringIntensity, style },
       });
 

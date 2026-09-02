@@ -132,7 +132,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
   it('publishes the callback with the extracted job id after a successful execute', async () => {
     const res = await makeAsyncHandler({ estimatedSeconds: 45 })(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({ jobId: 'task-123' });
+    await expect(res.json()).resolves.toMatchObject({ jobId: 'task-123', durable: true });
     // Runs post-response via after(): the response is fully formed before the
     // publish executes, so it never blocks the user submit.
     expect(mockPublish).not.toHaveBeenCalled();
@@ -156,6 +156,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     mockResolve.mockResolvedValue({ type: 'byok', key: 'user-key', metered: false, usageId: undefined });
     const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ durable: true });
     await flushAfter();
     expect(mockPublish).toHaveBeenCalledWith(
       expect.objectContaining({ providerJobId: 'task-123', tokenUsageId: null }),
@@ -167,7 +168,19 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     mockConfigured.mockReturnValue(false);
     const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
+    await expect(res.json()).resolves.not.toHaveProperty('durable');
     await flushAfter();
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+
+  it('uses one request-time QStash snapshot for the response and publish decision', async () => {
+    const handler = makeAsyncHandler();
+    mockConfigured.mockReturnValue(false);
+
+    const res = await handler(makeRequest({ prompt: 'a castle' }));
+
+    await expect(res.json()).resolves.not.toHaveProperty('durable');
+    expect(afterCallbacks).toHaveLength(0);
     expect(mockPublish).not.toHaveBeenCalled();
   });
 
@@ -223,6 +236,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     const res = await makeCachedAsyncHandler()(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Cache')).toBe('MISS');
+    await expect(res.json()).resolves.toMatchObject({ durable: true });
     // Runs post-response via after(), exactly like the non-cached path.
     expect(mockPublish).not.toHaveBeenCalled();
     await flushAfter();
@@ -242,6 +256,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     const res = await makeCachedAsyncHandler()(makeRequest({ prompt: 'a castle' }));
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Cache')).toBe('HIT');
+    await expect(res.json()).resolves.not.toHaveProperty('durable');
     await flushAfter();
     expect(mockPublish).not.toHaveBeenCalled();
   });
