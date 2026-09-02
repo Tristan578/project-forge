@@ -71,7 +71,7 @@ export const handleGeneratePixelArt: ToolHandler = async (args): Promise<Executi
       return { success: false, error: data.error ?? 'Generation failed' };
     }
 
-    const data = await response.json() as { jobId: string; provider: string; usageId?: string; tokenCost?: number; palette?: string };
+    const data = await response.json() as { jobId: string; provider: string; usageId?: string; tokenCost?: number; palette?: string; durable?: boolean };
 
     const pixelTargetId = targetEntityId ?? entityId;
     trackJob({
@@ -82,6 +82,7 @@ export const handleGeneratePixelArt: ToolHandler = async (args): Promise<Executi
       provider: data.provider ?? 'dalle3',
       entityId: pixelTargetId,
       usageId: data.usageId,
+      durable: data.durable === true,
       autoPlace: autoPlace ?? !!pixelTargetId,
       targetEntityId: pixelTargetId,
     });

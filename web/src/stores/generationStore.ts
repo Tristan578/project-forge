@@ -28,6 +28,7 @@ export interface GenerationJob {
   error?: string;
   entityId?: string;         // Target entity (for texture/audio attachment)
   usageId?: string;          // Token usage ID for refund on failure
+  durable?: boolean;         // Server callback is the primary completion channel
   metadata?: Record<string, unknown>;  // Type-specific data
   dbId?: string;             // Database record ID (for syncing)
   autoPlace?: boolean;       // Auto-import and attach to entity on completion
@@ -75,6 +76,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     if (job.autoPlace !== undefined) parameters['autoPlace'] = job.autoPlace;
     if (job.targetEntityId !== undefined) parameters['targetEntityId'] = job.targetEntityId;
     if (job.materialSlot !== undefined) parameters['materialSlot'] = job.materialSlot;
+    if (job.durable !== undefined) parameters['durable'] = job.durable;
 
     fetch('/api/jobs', {
       method: 'POST',
@@ -221,6 +223,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             typeof params['targetEntityId'] === 'string' ? params['targetEntityId'] : undefined,
           materialSlot:
             typeof params['materialSlot'] === 'string' ? params['materialSlot'] : undefined,
+          durable: params['durable'] === true,
         };
       }
 
