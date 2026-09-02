@@ -70,11 +70,23 @@ echo ""
 echo "=== no harness file may reference the retired path ==="
 # The hook and the lessons file both describe the migration, so both legitimately
 # name the old file. Nothing else may.
-STALE="$(grep -rl 'project_lessons_learned' "$ROOT/.claude" 2>/dev/null \
+# TRACKED files only (#9611): `.claude/*` is gitignored with a narrow
+# whitelist, so a working-tree grep reads whatever a developer keeps under
+# `.claude/prompts/` and the verdict differs between machines — the exact
+# inverse of "a local failure means a real defect". The enumeration must be
+# non-empty, or the sweep passes vacuously.
+TRACKED_COUNT="$(git -C "$ROOT" ls-files .claude 2>/dev/null | grep -c . || true)"
+if [ "${TRACKED_COUNT:-0}" -gt 0 ]; then
+  pass "enumerated ${TRACKED_COUNT} tracked file(s) under .claude for the retired-path sweep"
+else
+  fail "git ls-files .claude returned nothing — the retired-path sweep would pass vacuously"
+fi
+STALE="$(git -C "$ROOT" ls-files -z .claude 2>/dev/null \
+  | (cd "$ROOT" && xargs -0 grep -l 'project_lessons_learned' 2>/dev/null) \
   | grep -v 'inject-lessons-learned.sh' \
   | grep -v 'rules/lessons-learned.md' || true)"
 if [ -z "$STALE" ]; then
-  pass "no file points at the retired project_lessons_learned.md"
+  pass "no tracked file points at the retired project_lessons_learned.md"
 else
   fail "these still reference the retired path, and read nothing at runtime:"
   printf '%s\n' "$STALE" | sed "s|^$ROOT/|    |"

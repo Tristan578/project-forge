@@ -2528,6 +2528,7 @@ STEPS_EOF
   docs-internal-gate:
   design-internal-gate:
   hook-tests:
+  hook-tests-windows:
   skills-lint:
   lockfile-sync:
   openapi-route-sync:

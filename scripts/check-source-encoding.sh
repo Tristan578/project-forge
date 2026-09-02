@@ -66,10 +66,18 @@ while IFS= read -r f; do
   [ -n "$f" ] || continue
   [ -f "$f" ] || continue
   scanned=$((scanned + 1))
+  # 0x0D (CR) is deliberately outside the class for most files, but a shell
+  # source with CRLF dies at its shebang on every platform the suites run on
+  # (#9611), so for *.sh / *.bash it is rejected like any other control byte.
+  case "$f" in
+    *.sh|*.bash) control_class='\x00-\x08\x0B\x0C\x0D\x0E-\x1F' ;;
+    *) control_class='\x00-\x08\x0B\x0C\x0E-\x1F' ;;
+  esac
   # perl reads NUL-bearing files without complaint, unlike several shell tools.
   # Report line and column so the finding is actionable without `cat -A`.
-  hits="$(perl -ne '
-    while (/([\x00-\x08\x0B\x0C\x0E-\x1F])/g) {
+  hits="$(SRC_ENC_CLASS="$control_class" perl -ne '
+    my $re = qr/[$ENV{SRC_ENC_CLASS}]/;
+    while (/($re)/g) {
       printf("%s:%d:%d: control byte 0x%02X\n", $ARGV, $., pos($_), ord($1));
     }
   ' "$f" 2>/dev/null)"
