@@ -655,13 +655,15 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh browsers
 
       - name: Install Playwright OS deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh deps
 
       # The @ui specs do not load the engine, so a missing WASM artifact must
       # not fail the gate on a web-only push -- but when build-wasm DID run,
@@ -1425,9 +1427,10 @@ jobs:
 
       - name: Install Playwright for smoke tests
         if: ${{ success() }}
+        timeout-minutes: 12
         run: |
           npm ci
-          cd web && npx playwright install --with-deps chromium
+          bash scripts/install-playwright-ci.sh browsers
 
       - name: Run production smoke tests
         if: ${{ success() }}
