@@ -315,7 +315,6 @@ Scan for documentation that may be out of date.
 
 ## What to check
 - .github/copilot-instructions.md vs actual Bevy version in engine/Cargo.toml
-- .github/instructions/copilot.instructions.md MCP command count vs actual
 - docs/coverage-plan.md thresholds vs web/vitest.config.ts actual thresholds
 - README.md feature claims vs implemented features
 - Any TODO/FIXME/HACK comments added in the last week
@@ -329,11 +328,10 @@ Scan for documentation that may be out of date.
 
 ### 4a. Fix stale copilot instructions
 - Update `.github/copilot-instructions.md`: verify Bevy 0.18 and 322 MCP commands
-- Update `.github/instructions/copilot.instructions.md`: verify 322 MCP commands, Bevy 0.18
 - Add coverage thresholds reference
 
 ### 4b. Consolidate copilot instructions
-- `.github/copilot-instructions.md` (root) and `.github/instructions/copilot.instructions.md` overlap significantly. Consider merging into a single source of truth at `.github/copilot-instructions.md` (the root file that both Copilot Chat and coding agent read).
+- **Done in #9627.** `.github/instructions/copilot.instructions.md` was a forked copy of the root file and has been removed, leaving `.github/copilot-instructions.md` as the single source of truth that both Copilot Chat and the coding agent read.
 
 ### 4c. Connect our MCP server to Copilot coding agent
 - Configure the SpawnForge MCP server as an MCP integration for the coding agent, giving it access to engine commands during sessions. This is optional and advanced but could let the coding agent actually test engine commands.
