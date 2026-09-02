@@ -1,5 +1,19 @@
 # @spawnforge/docs
 
+## 0.2.1
+
+### Patch Changes
+
+- [#9547](https://github.com/Tristan578/project-forge/pull/9547) [`926110e`](https://github.com/Tristan578/project-forge/commit/926110e9657bd968598a84a4fcc44fff48377cfa) Thanks [@Tristan578](https://github.com/Tristan578)! - Fixed internal links that pointed at routes which do not exist.
+  
+  In the editor, the "You're out of tokens" modal is intentionally non-dismissible, and two of its three exits 404'd: "Buy Token Pack" and "Use Your Own API Key" now open the Billing and API Keys tabs on `/settings` instead of the `/settings/billing` and `/settings/api-keys` pages that were never built. The low-token banner, the failed-payment banner and the locked-panel upgrade prompt pointed at the same missing billing page and now open the Billing tab too. Forking a game from the community gallery landed on a dead `/editor?project=…` URL and now opens the new project in the editor.
+  
+  The 500 error page now offers a "Go Home" link alongside "Try Again" and "Back to Dashboard", so a signed-out visitor who hits an error has a recovery link that does not lead to a sign-in wall.
+  
+  On the docs site, every category tile on the MCP command reference linked to a page that did not exist; `/mcp/<category>` is now a real page listing that category's commands with their parameters, scopes and token costs. The homepage no longer links to an API reference that has not shipped.
+
+- [#9560](https://github.com/Tristan578/project-forge/pull/9560) [`990280b`](https://github.com/Tristan578/project-forge/commit/990280b306d093896d72e2b2e9e5a3155bc59bc2) Thanks [@Tristan578](https://github.com/Tristan578)! - Emit URL paths in the docs sitemap regardless of the host's path separator ([#9538](https://github.com/Tristan578/project-forge/issues/9538)). `collectMdxPaths` fed `path.relative()` output straight into the sitemap, so a build on Windows advertised `/mcp\overview`, never stripped a trailing `/index`, and — because `startsWith('/mcp/')` then matched nothing — silently demoted every MCP page from priority 0.7 to 0.6. The normalisation now lives in an exported `toUrlPath()` whose separator is injectable, so the Windows shape stays pinned from a POSIX runner where the conversion is otherwise a no-op.
+
 ## 0.2.0
 
 ### Minor Changes
