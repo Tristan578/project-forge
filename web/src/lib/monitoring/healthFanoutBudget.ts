@@ -4,10 +4,11 @@ import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 /**
  * A single per-IP budget for the *expensive* half of a health check.
  *
- * Rendering a health report costs four outbound network calls — Neon, the
- * engine CDN, Clerk (`GET api.clerk.com/v1/jwks`, sending `CLERK_SECRET_KEY`)
- * and Anthropic. Three public surfaces can trigger that fan-out: the `/health`
- * page, `GET /api/health` and `GET /api/status`.
+ * Rendering a health report costs five outbound network calls — Neon, the
+ * engine CDN, Clerk (`HEAD api.clerk.com/v1/jwks`, sending `CLERK_SECRET_KEY`),
+ * the chat backend and Upstash (a read-only EVAL, billed per command). Three
+ * public surfaces can trigger that fan-out: the `/health` page,
+ * `GET /api/health` and `GET /api/status`.
  *
  * Giving each surface its own bucket does not bound the fan-out, it triples it:
  * a caller exhausted on the page simply asks one of the APIs a moment later and
