@@ -19,7 +19,18 @@ Usage:
 Requires: gh CLI (authenticated), taskboard API at localhost:3010, SQLite DB
 """
 
-import fcntl
+# fcntl is POSIX-only. Importing it unconditionally made this whole module
+# unimportable on Windows, which failed all 56 tests in
+# .claude/hooks/__tests__/github_project_sync.test.sh for a reason that had
+# nothing to do with what they test (#9606). msvcrt provides the equivalent
+# non-blocking byte-range lock on Windows; see _try_lock_exclusive below.
+try:
+    import fcntl
+
+    msvcrt = None
+except ModuleNotFoundError:  # Windows
+    fcntl = None
+    import msvcrt
 import hashlib
 import json
 import os
@@ -1150,6 +1161,41 @@ class ProjectFieldSync:
         return parts
 
 
+def _try_lock_exclusive(lock_fd):
+    """Take a non-blocking exclusive lock on an open file. False if held.
+
+    Both backends are chosen so the OS drops the lock when the process dies:
+    a crashed sync must not wedge every later run. An atomic O_EXCL lock file
+    would have been simpler and would have had exactly that failure mode.
+    """
+    try:
+        if fcntl is not None:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            lock_fd.seek(0)
+            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+        return True
+    except (IOError, OSError):
+        return False
+
+
+def _release_lock(lock_fd):
+    """Release a lock taken by _try_lock_exclusive.
+
+    Failures are swallowed: closing the handle releases the lock on both
+    platforms anyway, and raising here would mask the caller's own exception
+    when this runs in a finally block.
+    """
+    try:
+        if fcntl is not None:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        else:
+            lock_fd.seek(0)
+            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+    except (IOError, OSError):
+        pass
+
+
 LOCK_PATH = _MAIN_HOOKS / ".sync-push.lock"
 LOCK_WANTED_PATH = _MAIN_HOOKS / ".sync-lock-wanted"
 # How recently another run must have asked for the lock for the holder to yield.
@@ -1195,9 +1241,7 @@ def with_sync_lock(label, fn):
     in a row.
     """
     lock_fd = open(LOCK_PATH, "w")
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (IOError, OSError):
+    if not _try_lock_exclusive(lock_fd):
         print(f"[SYNC] Another sync is already running — skipping {label}")
         request_sync_lock()
         lock_fd.close()
@@ -1206,7 +1250,7 @@ def with_sync_lock(label, fn):
     try:
         return fn()
     finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        _release_lock(lock_fd)
         lock_fd.close()
 
 
