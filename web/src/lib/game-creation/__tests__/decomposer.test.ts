@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { decomposeIntoSystems } from '../decomposer';
+import { BEHAVIOR_VOCAB } from '../behaviorVocabulary';
 
 vi.mock('@/lib/ai/client', () => ({
   fetchAI: vi.fn(),
@@ -522,5 +523,82 @@ describe('decomposeIntoSystems', () => {
     // The appearance convention has to be stated or the model writes prose and
     // every entity silently falls back to the role-default shape.
     expect(prompt).toContain('primitive:<shape>');
+  });
+
+  // ---------------------------------------------------------------------------
+  // The CLOSED singular `behavior` that replaced it (PF-1114)
+  // ---------------------------------------------------------------------------
+
+  function sceneWithBehavior(behavior: unknown): Record<string, unknown> {
+    return {
+      name: 'Main Level',
+      purpose: 'Primary gameplay arena',
+      systems: ['movement'],
+      entities: [
+        { name: 'Player', role: 'player', systems: ['movement'], appearance: 'primitive:capsule' },
+        { name: 'Bat', role: 'enemy', systems: [], appearance: 'primitive:sphere', behavior },
+      ],
+      transitions: [],
+    };
+  }
+
+  it('accepts every vocabulary value and carries it onto the entity', async () => {
+    // Iterating the exported const, so a verb added to the vocabulary that the
+    // schema does not accept fails here rather than at generation time.
+    for (const behavior of BEHAVIOR_VOCAB) {
+      fetchAI.mockClear();
+      fetchAI.mockResolvedValue(makeValidLLMJson({ scenes: [sceneWithBehavior(behavior)] }));
+
+      const gdd = await decomposeIntoSystems('make a platformer', '2d');
+
+      expect(fetchAI).toHaveBeenCalledTimes(1);
+      expect(gdd.scenes[0].entities[1].behavior).toBe(behavior);
+    }
+  });
+
+  it('leaves the field off entirely when the model omits it', async () => {
+    fetchAI.mockResolvedValue(makeValidLLMJson({ scenes: [sceneWithBehavior(undefined)] }));
+
+    const gdd = await decomposeIntoSystems('make a platformer', '2d');
+
+    expect(gdd.scenes[0].entities[1].behavior).toBeUndefined();
+  });
+
+  it('rejects a value outside the vocabulary and RETRIES rather than sanitizing it', async () => {
+    // The retry count is the assertion that matters. A schema that merely
+    // dropped the unknown key would also "not throw", and the design would
+    // silently lose the intent the model was asked for.
+    fetchAI.mockResolvedValue(
+      makeValidLLMJson({ scenes: [sceneWithBehavior('teleport-and-explode')] }),
+    );
+
+    await expect(decomposeIntoSystems('make a platformer', '2d')).rejects.toThrow(
+      /behavior/,
+    );
+    // One initial attempt plus MAX_RETRIES.
+    expect(fetchAI).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects the removed free-text ARRAY shape', async () => {
+    fetchAI.mockResolvedValue(
+      makeValidLLMJson({ scenes: [sceneWithBehavior(['chase', 'melee-attack'])] }),
+    );
+
+    await expect(decomposeIntoSystems('make a platformer', '2d')).rejects.toThrow();
+  });
+
+  it('states the whole vocabulary to the model, and still never says the plural', async () => {
+    await decomposeIntoSystems('make a platformer', '2d');
+
+    const [userMessage, opts] = fetchAI.mock.calls[0] as [string, { systemOverride: string }];
+    const prompt = `${userMessage}\n${opts.systemOverride}`;
+
+    // A verb the schema accepts but the prompt never mentions is a verb the
+    // model will not emit — the capability would exist and never be reached.
+    for (const behavior of BEHAVIOR_VOCAB) {
+      expect(prompt).toContain(`"${behavior}"`);
+    }
+    // The plural is the removed shape and must not return through the prompt.
+    expect(prompt).not.toContain('behaviors');
   });
 });

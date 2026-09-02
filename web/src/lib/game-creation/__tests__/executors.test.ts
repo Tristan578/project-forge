@@ -662,12 +662,15 @@ describe('custom_script_generate executor', () => {
   };
 
   // A minimal valid script that uses 2 namespaces and is under 30 lines
+  // Every call here exists in forgeTypes.ts. The fixtures used to be written
+  // against the executor's own fictional API (forge.entity.*, isKeyDown), which
+  // made the confidence assertions below depend on namespaces that do not exist
+  // (PF-1114).
   const validScript = [
     'let speed = 5;',
     'function onUpdate(dt) {',
-    '  if (forge.input.isKeyDown("w")) {',
-    '    const pos = forge.entity.getPosition("player");',
-    '    forge.entity.setPosition("player", pos[0], pos[1], pos[2] - speed * dt);',
+    '  if (forge.input.isPressed("move_forward")) {',
+    '    forge.translate("player", 0, 0, -speed * dt);',
     '  }',
     '}',
   ].join('\n');
@@ -675,12 +678,12 @@ describe('custom_script_generate executor', () => {
   // A script that uses 6+ namespaces (low confidence)
   const complexScript = [
     'function onUpdate(dt) {',
-    '  forge.entity.setPosition("e1", 0, 0, 0);',
-    '  forge.input.isKeyDown("w");',
+    '  forge.setPosition("e1", 0, 0, 0);',
+    '  forge.input.isPressed("move_forward");',
     '  forge.physics.applyForce("e1", 0, 1, 0);',
     '  forge.audio.play("e1");',
     '  forge.scene.load("next");',
-    '  forge.ui.setText("score", "100");',
+    '  forge.ui.updateText("score", "100");',
     '}',
   ].join('\n');
 
@@ -1094,5 +1097,92 @@ describe('auto_polish executor', () => {
     expect(calls.map(([command]) => command)).toEqual([
       'update_ambient_light', 'spawn_entity', 'update_transform', 'toggle_physics', 'update_physics',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// behavior_script executor (PF-1114)
+// ---------------------------------------------------------------------------
+
+describe('behavior_script executor', () => {
+  const executor = EXECUTOR_REGISTRY.get('behavior_script')!;
+
+  const baseInput = {
+    behavior: 'flee' as const,
+    entityId: 'rabbit-entity-1',
+    targetEntityId: 'player-entity-1',
+    projectType: '3d' as const,
+  };
+
+  it('is registered', () => {
+    expect(executor).toBeDefined();
+    expect(executor.name).toBe('behavior_script');
+  });
+
+  it('attaches the template with set_script, bound to the entity it was given', async () => {
+    const ctx = makeMockCtx();
+    const result = await executor.execute(baseInput, ctx);
+
+    expect(result.success).toBe(true);
+    expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_script', expect.objectContaining({
+      entityId: 'rabbit-entity-1',
+      enabled: true,
+    }));
+    const [, payload] = vi.mocked(ctx.dispatchCommand).mock.calls[0] as [string, { source: string }];
+    // The TARGET rides inside the source; the entity it is attached to rides on
+    // the command. Swapping the two attaches the behaviour to the player.
+    expect(payload.source).toContain('player-entity-1');
+  });
+
+  it('makes NO model call — the whole point of a template', async () => {
+    const { fetchAI } = await import('@/lib/ai/client');
+    vi.mocked(fetchAI).mockClear();
+
+    await executor.execute(baseInput, makeMockCtx());
+
+    expect(fetchAI).not.toHaveBeenCalled();
+  });
+
+  it('never emits a physics force for an entity the engine spawns as a fixed sensor', async () => {
+    // `physicsRoles.ts` gives enemy and npc `bodyType: 'fixed'`, `isSensor:
+    // true`. Rapier ignores forces on a fixed body and reports nothing, so this
+    // would be an enemy that never moves and never explains why.
+    const ctx = makeMockCtx();
+    await executor.execute({ ...baseInput, behavior: 'projectile_fire' }, ctx);
+
+    const [, payload] = vi.mocked(ctx.dispatchCommand).mock.calls[0] as [string, { source: string }];
+    expect(payload.source).not.toContain('forge.physics.applyForce');
+    expect(payload.source).not.toContain('forge.physics.applyImpulse');
+    expect(payload.source).not.toContain('forge.physics.setVelocity');
+  });
+
+  it('refuses a behaviour that is planned as an engine component', async () => {
+    // `chase` is a `follower`. Dispatching nothing and returning success would
+    // leave an entity with no behaviour and a plan reporting a step completed.
+    const ctx = makeMockCtx();
+    const result = await executor.execute({ ...baseInput, behavior: 'chase' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_INPUT');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+  });
+
+  it('refuses a target id it cannot embed in source safely', async () => {
+    const ctx = makeMockCtx();
+    const result = await executor.execute(
+      { ...baseInput, targetEntityId: '"; forge.destroy(entityId); //' },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('SCRIPT_UNAVAILABLE');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown behaviour rather than guessing', async () => {
+    const result = await executor.execute({ ...baseInput, behavior: 'melee-attack' }, makeMockCtx());
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('INVALID_INPUT');
   });
 });

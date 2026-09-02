@@ -425,8 +425,8 @@ function onUpdate(dt) {
   const len = Math.sqrt(ax * ax + ab * ab);
   if (len === 0 || len > PANIC_RANGE) return;
 
-  // forge.translate writes the Transform directly. Enemies and NPCs are FIXED
-  // sensor bodies, so forge.physics.applyForce would be a silent no-op here.
+  // forge.translate writes the Transform directly. Enemies and NPCs spawn as
+  // FIXED sensor bodies, so the physics force calls are silent no-ops on them.
   const move = [0, 0, 0];
   move[0] = (ax / len) * FLEE_SPEED * dt;
   move[LATERAL] = (ab / len) * FLEE_SPEED * dt;
