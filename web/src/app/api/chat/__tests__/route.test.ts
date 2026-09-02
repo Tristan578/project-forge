@@ -139,14 +139,6 @@ vi.mock('@/lib/ai/spawnforgeAgent', () => ({
   createSpawnforgeAgent: vi.fn(() => mockAgent),
 }));
 
-// Keep @anthropic-ai/sdk mock for modules that still import it indirectly
-vi.mock('@anthropic-ai/sdk', () => {
-  class MockAnthropic {
-    messages = { create: vi.fn() };
-  }
-  return { default: MockAnthropic };
-});
-
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
