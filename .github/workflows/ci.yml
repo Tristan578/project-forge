@@ -1209,6 +1209,21 @@ jobs:
         working-directory: web
         run: bash ../scripts/install-playwright-ci.sh deps
 
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+
       - name: Build for E2E
         working-directory: web
         env:
@@ -1312,6 +1327,21 @@ jobs:
       # journey specs can drive a representative generated game without WASM/AI.
       # cd.yml never sets this flag, so prod/staging/preview deploys never expose
       # stores — this is a CI-only build.
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+
       - name: Build for journey E2E (stores exposed)
         working-directory: web
         env:
@@ -1486,6 +1516,21 @@ jobs:
         timeout-minutes: 12
         working-directory: web
         run: bash ../scripts/install-playwright-ci.sh deps
+
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
 
       - name: Build for engine-smoke E2E
         working-directory: web
