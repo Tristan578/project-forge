@@ -163,6 +163,13 @@ pub fn emit_input_bindings_changed(input_map: &crate::core::input::InputMap) {
 }
 
 /// Emit a physics changed event for an entity.
+///
+/// `emit_physics_on_selection` is gated on `selection.primary` and
+/// `Changed<PhysicsData>`, so it reports neither an undo/redo of a NON-selected
+/// entity nor a removal. Undo and redo reach the browser through
+/// `bridge::component_resync::apply_component_resyncs` instead. There is no
+/// `PHYSICS_REMOVED`: `UndoableAction::PhysicsChange` mutates `PhysicsData` in
+/// place and no arm removes it, so such an event would be a name nothing emits.
 pub fn emit_physics_changed(entity_id: &str, physics_data: &crate::core::physics::PhysicsData, enabled: bool) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -192,6 +199,12 @@ pub fn emit_debug_physics_changed(enabled: bool) {
 }
 
 /// Emit a joint changed event.
+///
+/// Undo, redo and REMOVAL do not come through here: `emit_joint_on_selection`
+/// is gated on `selection.primary` and `Changed<JointData>`, neither of which
+/// can see a write to a non-selected entity or a component that no longer
+/// exists. Those go through `bridge::component_resync::apply_component_resyncs`,
+/// which calls this for a restore and `emit_joint_removed` for a removal.
 pub fn emit_joint_changed(joint_data: &crate::core::physics::JointData) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -203,6 +216,21 @@ pub fn emit_joint_changed(joint_data: &crate::core::physics::JointData) {
     emit_event("JOINT_CHANGED", &JointPayload {
         data: joint_data,
     });
+}
+
+/// Emit a joint removed event for an entity.
+///
+/// `JOINT_CHANGED` cannot express a removal: its payload IS the flattened
+/// `JointData`, so there is no field left to say "gone", and it carries no
+/// entity id at all. Mirrors `emit_reverb_zone_removed`.
+pub fn emit_joint_removed(entity_id: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct JointRemovedPayload<'a> {
+        entity_id: &'a str,
+    }
+
+    emit_event("JOINT_REMOVED", &JointRemovedPayload { entity_id });
 }
 
 /// Emit a scene exported event with the full JSON.
@@ -306,6 +334,13 @@ pub fn emit_script_changed(entity_id: &str, script_data: Option<&crate::core::sc
 }
 
 /// Emit an audio changed event for an entity.
+///
+/// `emit_audio_on_selection` is gated on `selection.primary` and
+/// `Changed<AudioData>`, so it reports neither an undo/redo of a NON-selected
+/// entity nor a removal. Both reach the browser through
+/// `bridge::component_resync::apply_component_resyncs`, which passes `None` here
+/// for a removal — no second event name is needed, because `audio` is already an
+/// `Option` on the wire.
 pub fn emit_audio_changed(entity_id: &str, audio_data: Option<&crate::core::audio::AudioData>) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -391,6 +426,41 @@ pub fn emit_shader_changed(entity_id: &str, data: Option<&crate::core::shader_ef
         data: Option<&'a crate::core::shader_effects::ShaderEffectData>,
     }
     emit_event("SHADER_CHANGED", &ShaderPayload { entity_id, data });
+}
+
+/// Emit an animation clip changed event for an entity.
+///
+/// `ANIMATION_CLIP_CHANGED` had a browser handler and NO emitter — the inbound
+/// half of the dead-vocabulary class, indistinguishable from an entity that
+/// simply has no clip. The payload is the clip FLATTENED next to `entityId`,
+/// which is the shape that handler has always read.
+pub fn emit_animation_clip_changed(
+    entity_id: &str,
+    clip: &crate::core::animation_clip::AnimationClipData,
+) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AnimationClipPayload<'a> {
+        entity_id: &'a str,
+        #[serde(flatten)]
+        clip: &'a crate::core::animation_clip::AnimationClipData,
+    }
+
+    emit_event("ANIMATION_CLIP_CHANGED", &AnimationClipPayload { entity_id, clip });
+}
+
+/// Emit an animation clip removed event for an entity.
+///
+/// The flattened `ANIMATION_CLIP_CHANGED` payload cannot say "gone" — every key
+/// in it belongs to a clip that no longer exists.
+pub fn emit_animation_clip_removed(entity_id: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AnimationClipRemovedPayload<'a> {
+        entity_id: &'a str,
+    }
+
+    emit_event("ANIMATION_CLIP_REMOVED", &AnimationClipRemovedPayload { entity_id });
 }
 
 /// Emit a terrain changed event for an entity.
@@ -712,6 +782,12 @@ pub fn emit_active_game_camera_changed(entity_id: &str) {
 // ============================================================================
 
 /// Emit a 2D physics changed event for an entity.
+///
+/// A removal goes through `emit_physics2d_removed`: this payload FLATTENS a
+/// `Physics2dData` that no longer exists, and the undo arm used to paper over
+/// that by sending `Physics2dData::default()` — which the browser then merged
+/// onto its copy, so undoing the creation of a 2D body left a default body in
+/// the store instead of none.
 pub fn emit_physics2d_changed(entity_id: &str, physics_data: &crate::core::physics_2d::Physics2dData, enabled: bool) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -748,6 +824,31 @@ pub fn emit_joint2d_changed(entity_id: &str, joint_data: &crate::core::physics_2
         );
     }
     emit_event("JOINT2D_CHANGED", &payload);
+}
+
+/// Emit a 2D physics removed event for an entity.
+pub fn emit_physics2d_removed(entity_id: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Physics2dRemovedPayload<'a> {
+        entity_id: &'a str,
+    }
+
+    emit_event("PHYSICS2D_REMOVED", &Physics2dRemovedPayload { entity_id });
+}
+
+/// Emit a 2D joint removed event for an entity.
+///
+/// `JOINT2D_CHANGED` is built from `PhysicsJoint2d::to_flat()`, so like its 3D
+/// sibling it cannot describe a joint that is gone.
+pub fn emit_joint2d_removed(entity_id: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Joint2dRemovedPayload<'a> {
+        entity_id: &'a str,
+    }
+
+    emit_event("JOINT2D_REMOVED", &Joint2dRemovedPayload { entity_id });
 }
 
 /// Emit a 2D raycast hit event.

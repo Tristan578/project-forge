@@ -21,6 +21,7 @@ use super::physics::{JointData, PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::{Selection, SelectionChangedEvent};
 use super::shader_effects::ShaderEffectData;
+use super::component_resync::ComponentResync;
 use super::component_carry::{
     build_aux_index, insert_aux_components, insert_base_components, snapshot_entity,
     AuxComponentData, AuxQueries, BaseComponentData,
@@ -1534,6 +1535,50 @@ pub fn spawn_from_snapshot(
         commands.entity(entity).insert(ld.clone());
     }
 
+    // Everything above restores components and emits NOTHING, so undo-of-delete
+    // (and redo-of-spawn, prefab instantiation, CSG source restore, combine and
+    // array undo — every caller) put the entity back in the engine while the
+    // browser kept empty maps for all of it. The scene-graph event repopulates
+    // the entity; nothing repopulated its components, so every inspector showed
+    // the component as missing on an entity that had it, and the next edit sent
+    // a full-replace command built from a default (#9291).
+    //
+    // Only what the snapshot CARRIES is re-reported — see `resyncs_for_snapshot`.
+    for resync in super::component_resync::resyncs_for_snapshot(snapshot) {
+        queue_resync(resync, "restore");
+    }
+    // Reverb zones and 2D skeletons keep their own established resync queues
+    // rather than being folded into `ComponentResync`: they already work, and a
+    // migration would be regression surface with no user-visible gain.
+    if let Some(rzd) = &snapshot.reverb_zone_data {
+        if !super::pending_commands::queue_reverb_zone_resync_pending(
+            super::reverb_zone::ReverbZoneResync {
+                entity_id: snapshot.entity_id.clone(),
+                data: Some(rzd.clone()),
+                enabled: snapshot.reverb_zone_enabled,
+            },
+        ) {
+            tracing::warn!(
+                "restore: could not queue reverb zone resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                snapshot.entity_id,
+            );
+        }
+    }
+    if let Some(sk) = &snapshot.skeleton2d_data {
+        if !super::pending_commands::queue_skeleton2d_resync_pending(
+            super::skeleton2d::Skeleton2dResync {
+                entity_id: snapshot.entity_id.clone(),
+                data: Some(sk.clone()),
+                enabled: snapshot.skeleton2d_enabled,
+            },
+        ) {
+            tracing::warn!(
+                "restore: could not queue 2D skeleton resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+                snapshot.entity_id,
+            );
+        }
+    }
+
     entity
 }
 
@@ -1548,6 +1593,9 @@ pub fn apply_undo_requests(
     script_query: Query<(Entity, &EntityId, Option<&ScriptData>)>,
     audio_query: Query<(Entity, &EntityId, Option<&AudioData>)>,
     particle_query: Query<(Entity, &EntityId, Option<&ParticleData>)>,
+    // Enablement markers for the re-reports the arms queue. Read-only, and
+    // `Has<T>` registers no access to `T`, so it conflicts with nothing above.
+    enabled_query: Query<(&EntityId, Has<PhysicsEnabled>, Has<ParticleEnabled>, Has<super::physics_2d::Physics2dEnabled>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -1558,7 +1606,7 @@ pub fn apply_undo_requests(
     }
 
     if let Some(action) = history.pop_undo() {
-        execute_undo(&action, &mut commands, &mut query, &mut mat_query, &mut light_query, &mut physics_query, &script_query, &audio_query, &particle_query, &mut meshes, &mut materials);
+        execute_undo(&action, &mut commands, &mut query, &mut mat_query, &mut light_query, &mut physics_query, &script_query, &audio_query, &particle_query, &enabled_query, &mut meshes, &mut materials);
         history.push_redo(action);
     }
 }
@@ -1574,6 +1622,9 @@ pub fn apply_redo_requests(
     script_query: Query<(Entity, &EntityId, Option<&ScriptData>)>,
     audio_query: Query<(Entity, &EntityId, Option<&AudioData>)>,
     particle_query: Query<(Entity, &EntityId, Option<&ParticleData>)>,
+    // Enablement markers for the re-reports the arms queue. Read-only, and
+    // `Has<T>` registers no access to `T`, so it conflicts with nothing above.
+    enabled_query: Query<(&EntityId, Has<PhysicsEnabled>, Has<ParticleEnabled>, Has<super::physics_2d::Physics2dEnabled>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -1584,7 +1635,7 @@ pub fn apply_redo_requests(
     }
 
     if let Some(action) = history.pop_redo() {
-        execute_redo(&action, &mut commands, &mut query, &mut mat_query, &mut light_query, &mut physics_query, &script_query, &audio_query, &particle_query, &mut meshes, &mut materials);
+        execute_redo(&action, &mut commands, &mut query, &mut mat_query, &mut light_query, &mut physics_query, &script_query, &audio_query, &particle_query, &enabled_query, &mut meshes, &mut materials);
         // Use push_undo_only to avoid clearing remaining redo items
         history.push_undo_only(action);
     }
@@ -1668,6 +1719,57 @@ pub fn apply_ambient_light_updates(
     }
 }
 
+/// Queue one component re-report, or say loudly that it could not be queued.
+///
+/// `queue_component_resync_pending` returns `false` when the thread-local
+/// `PendingCommands` is not registered, which makes the push a SILENT no-op.
+/// Dropping that signal would defeat the very re-report the call exists to make:
+/// the browser's mirror would keep stale state with nothing in the log to say
+/// why. Checked here once rather than at 30-odd call sites, which is how the
+/// check stays honest as arms are added.
+fn queue_resync(resync: ComponentResync, direction: &str) {
+    let kind = resync.kind();
+    let entity_id = resync.entity_id().to_string();
+    if !super::pending_commands::queue_component_resync_pending(resync) {
+        tracing::warn!(
+            "{}: could not queue {:?} resync for '{}' — PendingCommands is not registered; the editor mirror will be stale",
+            direction,
+            kind,
+            entity_id,
+        );
+    }
+}
+
+/// The three enablement markers a re-report needs, for one entity.
+///
+/// Read from the ECS rather than from the action because these markers are
+/// toggled by their own commands: `PhysicsChange`, `ParticleChange` and
+/// `Physics2dChange` neither record nor write them, so the live marker IS the
+/// post-state. The arms that DO write a marker (`Physics2dToggle`) take the
+/// value from the action instead, and never call this.
+///
+/// `Has<T>` registers no component access, so this query cannot conflict with
+/// the mutable queries beside it.
+fn marker_state(
+    enabled_query: &Query<(&EntityId, Has<PhysicsEnabled>, Has<ParticleEnabled>, Has<super::physics_2d::Physics2dEnabled>)>,
+    entity_id: &str,
+) -> MarkerState {
+    for (eid, physics, particle, physics2d) in enabled_query.iter() {
+        if eid.0 == entity_id {
+            return MarkerState { physics, particle, physics2d };
+        }
+    }
+    MarkerState::default()
+}
+
+/// Enablement markers currently on an entity. See [`marker_state`].
+#[derive(Debug, Clone, Copy, Default)]
+struct MarkerState {
+    physics: bool,
+    particle: bool,
+    physics2d: bool,
+}
+
 /// Execute undo for an action.
 fn execute_undo(
     action: &UndoableAction,
@@ -1679,6 +1781,7 @@ fn execute_undo(
     script_query: &Query<(Entity, &EntityId, Option<&ScriptData>)>,
     audio_query: &Query<(Entity, &EntityId, Option<&AudioData>)>,
     particle_query: &Query<(Entity, &EntityId, Option<&ParticleData>)>,
+    enabled_query: &Query<(&EntityId, Has<PhysicsEnabled>, Has<ParticleEnabled>, Has<super::physics_2d::Physics2dEnabled>)>,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
@@ -1688,6 +1791,13 @@ fn execute_undo(
             for (_, eid, mut transform, _, _) in query.iter_mut() {
                 if &eid.0 == entity_id {
                     *transform = old_transform.to_transform();
+                    queue_resync(
+                        ComponentResync::Transform {
+                            entity_id: entity_id.clone(),
+                            transform: old_transform.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1698,6 +1808,13 @@ fn execute_undo(
                 for (_, eid, mut transform, _, _) in query.iter_mut() {
                     if &eid.0 == entity_id {
                         *transform = old_transform.to_transform();
+                        queue_resync(
+                            ComponentResync::Transform {
+                                entity_id: entity_id.clone(),
+                                transform: old_transform.clone(),
+                            },
+                            "undo",
+                        );
                         break;
                     }
                 }
@@ -1748,6 +1865,13 @@ fn execute_undo(
             for (eid, mut mat) in mat_query.iter_mut() {
                 if &eid.0 == entity_id {
                     *mat = old_material.clone();
+                    queue_resync(
+                        ComponentResync::Material {
+                            entity_id: entity_id.clone(),
+                            data: old_material.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1757,6 +1881,13 @@ fn execute_undo(
             for (eid, mut light) in light_query.iter_mut() {
                 if &eid.0 == entity_id {
                     *light = old_light.clone();
+                    queue_resync(
+                        ComponentResync::Light {
+                            entity_id: entity_id.clone(),
+                            data: old_light.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1766,6 +1897,16 @@ fn execute_undo(
             for (eid, mut phys) in physics_query.iter_mut() {
                 if &eid.0 == entity_id {
                     *phys = old_physics.clone();
+                    // `PhysicsEnabled` is a separate marker this action neither
+                    // records nor writes, so the live marker is the post-state.
+                    queue_resync(
+                        ComponentResync::Physics {
+                            entity_id: entity_id.clone(),
+                            data: old_physics.clone(),
+                            enabled: marker_state(enabled_query, entity_id).physics,
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1778,6 +1919,13 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<ScriptData>();
                     }
+                    queue_resync(
+                        ComponentResync::Script {
+                            entity_id: entity_id.clone(),
+                            data: old_script.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1790,6 +1938,13 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<AudioData>().remove::<AudioEnabled>();
                     }
+                    queue_resync(
+                        ComponentResync::Audio {
+                            entity_id: entity_id.clone(),
+                            data: old_audio.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1802,6 +1957,19 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<ParticleData>().remove::<ParticleEnabled>();
                     }
+                    // The removal branch takes `ParticleEnabled` off, so the
+                    // post-state is `false` there regardless of the live marker;
+                    // the restore branch does not touch it, so the live marker
+                    // IS the post-state.
+                    queue_resync(
+                        ComponentResync::Particle {
+                            entity_id: entity_id.clone(),
+                            data: old_particle.clone(),
+                            enabled: old_particle.is_some()
+                                && marker_state(enabled_query, entity_id).particle,
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1814,6 +1982,13 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<ShaderEffectData>();
                     }
+                    queue_resync(
+                        ComponentResync::Shader {
+                            entity_id: entity_id.clone(),
+                            data: old_shader.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1906,6 +2081,13 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<JointData>();
                     }
+                    queue_resync(
+                        ComponentResync::Joint {
+                            entity_id: entity_id.clone(),
+                            data: old_joint.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1918,6 +2100,18 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<super::game_components::GameComponents>();
                     }
+                    // An EMPTY list is how `GAME_COMPONENT_CHANGED` expresses
+                    // "this entity has none" — there is no separate removal event.
+                    queue_resync(
+                        ComponentResync::GameComponents {
+                            entity_id: entity_id.clone(),
+                            components: old_components
+                                .as_ref()
+                                .map(|gc| gc.components.clone())
+                                .unwrap_or_default(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1930,6 +2124,13 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<AnimationClipData>();
                     }
+                    queue_resync(
+                        ComponentResync::AnimationClip {
+                            entity_id: entity_id.clone(),
+                            data: old_clip.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -1988,6 +2189,13 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<super::sprite::SpriteData>();
                     }
+                    queue_resync(
+                        ComponentResync::Sprite {
+                            entity_id: entity_id.clone(),
+                            data: old_sprite.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -2014,6 +2222,18 @@ fn execute_undo(
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
+                    // The removal branch takes the marker off with the data, so
+                    // its post-state is `false`; the restore branch leaves the
+                    // marker alone, so the live one IS the post-state.
+                    queue_resync(
+                        ComponentResync::Physics2d {
+                            entity_id: entity_id.clone(),
+                            data: old_physics.clone(),
+                            enabled: old_physics.is_some()
+                                && marker_state(enabled_query, entity_id).physics2d,
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -2031,15 +2251,20 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        let restored = old_physics.clone().unwrap_or_default();
-                        crate::bridge::events::emit_physics2d_changed(
-                            entity_id,
-                            &restored,
-                            *old_enabled,
-                        );
-                    }
+                    // Was a `#[cfg(target_arch = "wasm32")]` call straight
+                    // into `bridge::events` — the one arm that emitted at all,
+                    // and therefore the one behaviour no native test could
+                    // cover. It also could not express the removal branch: it
+                    // sent `Physics2dData::default()` for a body that no longer
+                    // existed. Both go through the queue now.
+                    queue_resync(
+                        ComponentResync::Physics2d {
+                            entity_id: entity_id.clone(),
+                            data: old_physics.clone(),
+                            enabled: *old_enabled,
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -2052,6 +2277,13 @@ fn execute_undo(
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::PhysicsJoint2d>();
                     }
+                    queue_resync(
+                        ComponentResync::Joint2d {
+                            entity_id: entity_id.clone(),
+                            data: old_joint.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -2071,6 +2303,13 @@ fn execute_undo(
                         commands.entity(entity).remove::<super::tilemap::TilemapData>();
                         commands.entity(entity).remove::<TilemapEnabled>();
                     }
+                    queue_resync(
+                        ComponentResync::Tilemap {
+                            entity_id: entity_id.clone(),
+                            data: old_tilemap.clone(),
+                        },
+                        "undo",
+                    );
                     break;
                 }
             }
@@ -2139,6 +2378,7 @@ fn execute_redo(
     script_query: &Query<(Entity, &EntityId, Option<&ScriptData>)>,
     audio_query: &Query<(Entity, &EntityId, Option<&AudioData>)>,
     particle_query: &Query<(Entity, &EntityId, Option<&ParticleData>)>,
+    enabled_query: &Query<(&EntityId, Has<PhysicsEnabled>, Has<ParticleEnabled>, Has<super::physics_2d::Physics2dEnabled>)>,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
@@ -2148,6 +2388,13 @@ fn execute_redo(
             for (_, eid, mut transform, _, _) in query.iter_mut() {
                 if &eid.0 == entity_id {
                     *transform = new_transform.to_transform();
+                    queue_resync(
+                        ComponentResync::Transform {
+                            entity_id: entity_id.clone(),
+                            transform: new_transform.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2158,6 +2405,13 @@ fn execute_redo(
                 for (_, eid, mut transform, _, _) in query.iter_mut() {
                     if &eid.0 == entity_id {
                         *transform = new_transform.to_transform();
+                        queue_resync(
+                            ComponentResync::Transform {
+                                entity_id: entity_id.clone(),
+                                transform: new_transform.clone(),
+                            },
+                            "redo",
+                        );
                         break;
                     }
                 }
@@ -2202,6 +2456,13 @@ fn execute_redo(
             for (eid, mut mat) in mat_query.iter_mut() {
                 if &eid.0 == entity_id {
                     *mat = new_material.clone();
+                    queue_resync(
+                        ComponentResync::Material {
+                            entity_id: entity_id.clone(),
+                            data: new_material.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2211,6 +2472,13 @@ fn execute_redo(
             for (eid, mut light) in light_query.iter_mut() {
                 if &eid.0 == entity_id {
                     *light = new_light.clone();
+                    queue_resync(
+                        ComponentResync::Light {
+                            entity_id: entity_id.clone(),
+                            data: new_light.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2220,6 +2488,16 @@ fn execute_redo(
             for (eid, mut phys) in physics_query.iter_mut() {
                 if &eid.0 == entity_id {
                     *phys = new_physics.clone();
+                    // `PhysicsEnabled` is a separate marker this action neither
+                    // records nor writes, so the live marker is the post-state.
+                    queue_resync(
+                        ComponentResync::Physics {
+                            entity_id: entity_id.clone(),
+                            data: new_physics.clone(),
+                            enabled: marker_state(enabled_query, entity_id).physics,
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2232,6 +2510,13 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<ScriptData>();
                     }
+                    queue_resync(
+                        ComponentResync::Script {
+                            entity_id: entity_id.clone(),
+                            data: new_script.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2244,6 +2529,13 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<AudioData>().remove::<AudioEnabled>();
                     }
+                    queue_resync(
+                        ComponentResync::Audio {
+                            entity_id: entity_id.clone(),
+                            data: new_audio.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2256,6 +2548,19 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<ParticleData>().remove::<ParticleEnabled>();
                     }
+                    // The removal branch takes `ParticleEnabled` off, so the
+                    // post-state is `false` there regardless of the live marker;
+                    // the restore branch does not touch it, so the live marker
+                    // IS the post-state.
+                    queue_resync(
+                        ComponentResync::Particle {
+                            entity_id: entity_id.clone(),
+                            data: new_particle.clone(),
+                            enabled: new_particle.is_some()
+                                && marker_state(enabled_query, entity_id).particle,
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2268,6 +2573,13 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<ShaderEffectData>();
                     }
+                    queue_resync(
+                        ComponentResync::Shader {
+                            entity_id: entity_id.clone(),
+                            data: new_shader.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2350,6 +2662,13 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<JointData>();
                     }
+                    queue_resync(
+                        ComponentResync::Joint {
+                            entity_id: entity_id.clone(),
+                            data: new_joint.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2362,6 +2681,18 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<super::game_components::GameComponents>();
                     }
+                    // An EMPTY list is how `GAME_COMPONENT_CHANGED` expresses
+                    // "this entity has none" — there is no separate removal event.
+                    queue_resync(
+                        ComponentResync::GameComponents {
+                            entity_id: entity_id.clone(),
+                            components: new_components
+                                .as_ref()
+                                .map(|gc| gc.components.clone())
+                                .unwrap_or_default(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2374,6 +2705,13 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<AnimationClipData>();
                     }
+                    queue_resync(
+                        ComponentResync::AnimationClip {
+                            entity_id: entity_id.clone(),
+                            data: new_clip.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2423,6 +2761,13 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<super::sprite::SpriteData>();
                     }
+                    queue_resync(
+                        ComponentResync::Sprite {
+                            entity_id: entity_id.clone(),
+                            data: new_sprite.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2438,6 +2783,16 @@ fn execute_redo(
                         commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
+                    // See the undo arm.
+                    queue_resync(
+                        ComponentResync::Physics2d {
+                            entity_id: entity_id.clone(),
+                            data: new_physics.clone(),
+                            enabled: new_physics.is_some()
+                                && marker_state(enabled_query, entity_id).physics2d,
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2455,15 +2810,20 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
                     }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        let restored = new_physics.clone().unwrap_or_default();
-                        crate::bridge::events::emit_physics2d_changed(
-                            entity_id,
-                            &restored,
-                            *new_enabled,
-                        );
-                    }
+                    // Was a `#[cfg(target_arch = "wasm32")]` call straight
+                    // into `bridge::events` — the one arm that emitted at all,
+                    // and therefore the one behaviour no native test could
+                    // cover. It also could not express the removal branch: it
+                    // sent `Physics2dData::default()` for a body that no longer
+                    // existed. Both go through the queue now.
+                    queue_resync(
+                        ComponentResync::Physics2d {
+                            entity_id: entity_id.clone(),
+                            data: new_physics.clone(),
+                            enabled: *new_enabled,
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2476,6 +2836,13 @@ fn execute_redo(
                     } else {
                         commands.entity(entity).remove::<super::physics_2d::PhysicsJoint2d>();
                     }
+                    queue_resync(
+                        ComponentResync::Joint2d {
+                            entity_id: entity_id.clone(),
+                            data: new_joint.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -2490,6 +2857,13 @@ fn execute_redo(
                         commands.entity(entity).remove::<super::tilemap::TilemapData>();
                         commands.entity(entity).remove::<TilemapEnabled>();
                     }
+                    queue_resync(
+                        ComponentResync::Tilemap {
+                            entity_id: entity_id.clone(),
+                            data: new_tilemap.clone(),
+                        },
+                        "redo",
+                    );
                     break;
                 }
             }
@@ -4545,7 +4919,7 @@ mod reverb_zone_history_tests {
     /// Run one system once through a Schedule, which also flushes the deferred
     /// `Commands` the undo arms queue — without the flush every assertion below
     /// would read the pre-undo state and pass vacuously.
-    fn run_once(world: &mut World, system: fn(Commands, ResMut<HistoryStack>, Query<(Entity, &EntityId, &mut Transform, &mut EntityName, &mut EntityVisible)>, Query<(&EntityId, &mut crate::core::material::MaterialData)>, Query<(&EntityId, &mut crate::core::lighting::LightData)>, Query<(&EntityId, &mut crate::core::physics::PhysicsData)>, Query<(Entity, &EntityId, Option<&crate::core::scripting::ScriptData>)>, Query<(Entity, &EntityId, Option<&crate::core::audio::AudioData>)>, Query<(Entity, &EntityId, Option<&crate::core::particles::ParticleData>)>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>)) {
+    fn run_once(world: &mut World, system: fn(Commands, ResMut<HistoryStack>, Query<(Entity, &EntityId, &mut Transform, &mut EntityName, &mut EntityVisible)>, Query<(&EntityId, &mut crate::core::material::MaterialData)>, Query<(&EntityId, &mut crate::core::lighting::LightData)>, Query<(&EntityId, &mut crate::core::physics::PhysicsData)>, Query<(Entity, &EntityId, Option<&crate::core::scripting::ScriptData>)>, Query<(Entity, &EntityId, Option<&crate::core::audio::AudioData>)>, Query<(Entity, &EntityId, Option<&crate::core::particles::ParticleData>)>, Query<(&EntityId, Has<crate::core::physics::PhysicsEnabled>, Has<crate::core::particles::ParticleEnabled>, Has<crate::core::physics_2d::Physics2dEnabled>)>, ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>)) {
         let mut schedule = Schedule::default();
         schedule.add_systems(system);
         schedule.run(world);
