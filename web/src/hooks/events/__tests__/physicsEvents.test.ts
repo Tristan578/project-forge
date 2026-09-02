@@ -767,8 +767,8 @@ describe('handlePhysicsEvent', () => {
 
   describe('2D event names nothing emits', () => {
     /**
-     * These four are the phantom names this handler used to listen for. Pinning
-     * them as UNHANDLED is the point: `handlePhysicsEvent` returning `false` is
+     * These are phantom names this handler used to listen for. Pinning them as
+     * UNHANDLED is the point: `handlePhysicsEvent` returning `false` is
      * what `useEngineEvents` reports as an unhandled event, so a future rename
      * back onto one of these names fails here instead of silently going dead
      * again. `RAYCAST2D_HIT`/`RAYCAST2D_MISS` are real engine names that are
@@ -778,7 +778,6 @@ describe('handlePhysicsEvent', () => {
     it.each([
       'PHYSICS2D_UPDATED',
       'JOINT2D_UPDATED',
-      'PHYSICS2D_REMOVED',
       'RAYCAST2D_RESULT',
       'RAYCAST2D_HIT',
       'RAYCAST2D_MISS',
@@ -1023,7 +1022,76 @@ describe('handlePhysicsEvent', () => {
     });
   });
 
-  // `RAYCAST2D_RESULT` used to have three "returns true (placeholder handler)"
+    /**
+   * The removal half of the undo/redo re-report path (#9290, #9291).
+   *
+   * `PHYSICS2D_REMOVED` was on the phantom list above until the engine started
+   * emitting it: `PHYSICS2D_CHANGED` FLATTENS a `Physics2dData`, so it cannot
+   * describe a body that is gone, and the undo arm papered over that by sending
+   * `Physics2dData::default()` — which the store then merged, leaving a default
+   * 2D body behind on the entity whose body had just been undone away.
+   */
+  describe('component removal events', () => {
+    it('PHYSICS2D_REMOVED routes to the state-only removal action', () => {
+      const result = handlePhysicsEvent(
+        'PHYSICS2D_REMOVED',
+        { entityId: 'sprite-9' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.applyPhysics2dRemovalFromEngine).toHaveBeenCalledWith('sprite-9');
+      // The dispatching sibling would send `remove_physics_2d` straight back at
+      // the engine that just reported the removal.
+      expect(actions.removePhysics2d).not.toHaveBeenCalled();
+    });
+
+    it('JOINT2D_REMOVED routes to the state-only removal action', () => {
+      const result = handlePhysicsEvent(
+        'JOINT2D_REMOVED',
+        { entityId: 'sprite-9' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.applyJoint2dRemovalFromEngine).toHaveBeenCalledWith('sprite-9');
+      expect(actions.removeJoint2d).not.toHaveBeenCalled();
+    });
+
+    it('JOINT_REMOVED clears the inspector only for the primary entity', () => {
+      actions.primaryId = 'entity-1';
+
+      expect(
+        handlePhysicsEvent('JOINT_REMOVED', { entityId: 'entity-1' }, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
+    });
+
+    it('JOINT_REMOVED for another entity leaves the inspector alone', () => {
+      actions.primaryId = 'entity-1';
+
+      expect(
+        handlePhysicsEvent('JOINT_REMOVED', { entityId: 'other' }, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+    });
+
+    it.each(['PHYSICS2D_REMOVED', 'JOINT2D_REMOVED', 'JOINT_REMOVED'])(
+      '%s with no entityId writes nothing',
+      (name) => {
+        actions.primaryId = 'entity-1';
+
+        expect(handlePhysicsEvent(name, {}, mockSetGet.set, mockSetGet.get)).toBe(true);
+        expect(actions.applyPhysics2dRemovalFromEngine).not.toHaveBeenCalled();
+        expect(actions.applyJoint2dRemovalFromEngine).not.toHaveBeenCalled();
+        expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+// `RAYCAST2D_RESULT` used to have three "returns true (placeholder handler)"
   // cases here. It is covered by the "2D event names nothing emits" block above,
   // which asserts the opposite — and the opposite is correct: the engine emits
   // `RAYCAST2D_HIT`/`RAYCAST2D_MISS`, so a placeholder returning `true` claimed an

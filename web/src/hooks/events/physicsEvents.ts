@@ -251,6 +251,23 @@ export function handlePhysicsEvent(
       return true;
     }
 
+    /**
+     * `JOINT_CHANGED` cannot express a removal: its payload IS the flattened
+     * `JointData`, so there is no field left to mean "gone". Emitted by the
+     * undo/redo resync drain, which is also the only thing that ever reports a
+     * joint on a NON-selected entity — hence the primary check that
+     * `JOINT_CHANGED` itself cannot make, its payload carrying no entity id at
+     * all (#9290).
+     */
+    case 'JOINT_REMOVED': {
+      const payload = castPayload<{ entityId?: string }>(data);
+      if (typeof payload.entityId !== 'string') return true;
+      if (useEditorStore.getState().primaryId === payload.entityId) {
+        useEditorStore.getState().setPrimaryJoint(null);
+      }
+      return true;
+    }
+
     case 'DEBUG_PHYSICS_CHANGED': {
       const payload = castPayload<{ enabled: boolean }>(data);
       useEditorStore.getState().setDebugPhysics(payload.enabled);
@@ -295,6 +312,31 @@ export function handlePhysicsEvent(
       const parsed = parseJoint2dWire(data);
       if (!parsed) return true;
       useEditorStore.getState().applyJoint2dFromEngine(parsed.entityId, parsed.data);
+      return true;
+    }
+
+    /**
+     * `PHYSICS2D_CHANGED` FLATTENS a `Physics2dData`, so it cannot describe a
+     * body that is gone. The undo arm used to paper over that by emitting a
+     * `Physics2dData::default()` — which `applyPhysics2dFromEngine` then merged
+     * into the store, leaving a default 2D body behind on the entity whose body
+     * had just been undone away.
+     *
+     * Routes to the state-only removal action, not `removePhysics2d`, which
+     * dispatches `remove_physics_2d` back at the engine that reported it.
+     */
+    case 'PHYSICS2D_REMOVED': {
+      const payload = castPayload<{ entityId?: string }>(data);
+      if (typeof payload.entityId !== 'string') return true;
+      useEditorStore.getState().applyPhysics2dRemovalFromEngine(payload.entityId);
+      return true;
+    }
+
+    /** The 2D sibling of `JOINT_REMOVED`; `JOINT2D_CHANGED` is equally flat. */
+    case 'JOINT2D_REMOVED': {
+      const payload = castPayload<{ entityId?: string }>(data);
+      if (typeof payload.entityId !== 'string') return true;
+      useEditorStore.getState().applyJoint2dRemovalFromEngine(payload.entityId);
       return true;
     }
 

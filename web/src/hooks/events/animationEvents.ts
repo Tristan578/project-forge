@@ -43,6 +43,24 @@ export function handleAnimationEvent(
     // `create_skeleton2d` — so Apply Rig destroyed the rig it had just applied,
     // and each round trip pushed another `SkeletonChange` onto the engine's
     // history, evicting the user's real undo entries.
+    /**
+     * The counterpart to ANIMATION_CLIP_CHANGED, which is a flattened clip and
+     * so has no way to say "gone" — every key in it belongs to a clip that no
+     * longer exists. Emitted by the undo/redo resync drain (#9290).
+     *
+     * `setState` is state-only by construction; routing this through a
+     * dispatching action would send a command back at the engine that just
+     * reported the removal.
+     */
+    case 'ANIMATION_CLIP_REMOVED': {
+      const payload = castPayload<{ entityId?: string }>(data);
+      if (typeof payload.entityId !== 'string') return true;
+      if (useEditorStore.getState().primaryId === payload.entityId) {
+        useEditorStore.setState({ primaryAnimationClip: null });
+      }
+      return true;
+    }
+
     case 'SKELETON2D_UPDATED': {
       const payload = castPayload<{ entityId: string; data: unknown }>(data);
       const skeleton = parseSkeletonWire2d(payload.data);

@@ -27,6 +27,50 @@ describe('handleAnimationEvent', () => {
     expect(handleAnimationEvent('UNKNOWN', {}, mockSetGet.set, mockSetGet.get)).toBe(false);
   });
 
+  /**
+   * `ANIMATION_CLIP_CHANGED` is a clip FLATTENED next to `entityId`, so it has
+   * no key left to mean "gone". The undo/redo re-report drain emits this
+   * instead when a clip is removed (#9290).
+   */
+  describe('ANIMATION_CLIP_REMOVED', () => {
+    it('clears the inspector clip for the primary entity', () => {
+      actions.primaryId = 'ent-1';
+
+      const result = handleAnimationEvent(
+        'ANIMATION_CLIP_REMOVED',
+        { entityId: 'ent-1' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ primaryAnimationClip: null });
+    });
+
+    it('leaves the inspector alone for another entity', () => {
+      actions.primaryId = 'ent-1';
+
+      const result = handleAnimationEvent(
+        'ANIMATION_CLIP_REMOVED',
+        { entityId: 'other' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).not.toHaveBeenCalled();
+    });
+
+    it('drops a payload with no entityId', () => {
+      actions.primaryId = 'ent-1';
+
+      expect(
+        handleAnimationEvent('ANIMATION_CLIP_REMOVED', {}, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(useEditorStore.setState).not.toHaveBeenCalled();
+    });
+  });
+
   it('ANIMATION_STATE_CHANGED: calls setEntityAnimation', () => {
     const payload = { entityId: 'ent-1', playing: true, clipName: 'walk', time: 0.5 };
     const result = handleAnimationEvent('ANIMATION_STATE_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);

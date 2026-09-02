@@ -10,6 +10,7 @@ import { releaseEntityAudio, resetEntityAudioGraphForScene } from '@/lib/audio/e
 import { takeStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
+import { applyWhenPrimary } from './primaryGate';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
 
@@ -103,9 +104,17 @@ export function handleTransformEvent(
       return true;
     }
 
+    /**
+     * Gated on the entity for the same reason as MATERIAL_CHANGED: the resync
+     * drain emits TRANSFORM_CHANGED for whichever entity an undo moved, and for
+     * every entity a snapshot restore brings back, not only the selected one.
+     */
     case 'TRANSFORM_CHANGED': {
-      const payload = castPayload<TransformData>(data);
-      useEditorStore.getState().setPrimaryTransform(payload);
+      const payload = castPayload<TransformData & { entityId?: string }>(data);
+      if (typeof payload.entityId !== 'string') return true;
+      applyWhenPrimary(payload.entityId, () => {
+        useEditorStore.getState().setPrimaryTransform(payload);
+      });
       return true;
     }
 
