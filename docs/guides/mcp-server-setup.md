@@ -6,7 +6,7 @@ Connect your AI agent to SpawnForge's MCP server to programmatically create and 
 
 - Node.js 24
 - npm or yarn
-- A running SpawnForge editor instance at `http://localhost:3000` (the MCP server connects to it via WebSocket)
+- A running SpawnForge editor (`cd web && npm run dev` → `http://spawnforge.localhost:1355`; `/dev` bypasses auth locally) and the loopback relay (`cd mcp-server && MCP_RELAY_TOKEN=<secret> npm run relay`)
 
 ## Installation
 
@@ -18,15 +18,19 @@ npm run build
 
 ## Architecture Overview
 
-The MCP server uses **stdio transport** to communicate with AI clients (Claude Desktop, Claude Code, Cursor). Separately, it maintains an outbound WebSocket connection to the running SpawnForge editor to relay commands and receive scene state.
+The MCP server uses **stdio transport** to communicate with AI clients (Claude Desktop, Claude Code, Cursor). Separately, it dials a small **loopback relay**; the editor tab attaches to the same relay when opened with `?mcp=<token>`. Every command handler runs inside that tab (the WASM engine and the editor stores live there), which is why the bridge terminates in a browser and not in the Next.js server — see the ADR in `docs/decisions/2026-09-02-mcp-editor-bridge-relay.md`.
 
 ```
 AI Client (Claude Desktop / Claude Code)
     ↕  stdio (MCP protocol)
-MCP Server (mcp-server/dist/index.js)
-    ↕  WebSocket (ws://localhost:3001/api/mcp/ws)
-SpawnForge Editor (Next.js dev server)
+MCP Server (mcp-server/dist/index.js)            role=agent
+    ↕  WebSocket ws://127.0.0.1:3001/api/mcp/ws?token=…
+Loopback relay (cd mcp-server && npm run relay)
+    ↕  WebSocket, same token                      role=editor
+SpawnForge editor tab  (…/dev?mcp=<token>)
 ```
+
+The relay refuses non-loopback peers, a wrong token, and a second editor. The editor side is opt-in per tab (the `?mcp=` parameter), is off in production builds unless `NEXT_PUBLIC_MCP_BRIDGE=true`, and refuses commands that spend generation tokens, export, publish, or touch security/economy.
 
 The MCP server starts even when the editor is not running — tool calls will return an error until the editor comes online. It auto-reconnects every 5 seconds.
 
@@ -46,13 +50,15 @@ cd mcp-server
 npm run dev
 ```
 
-### Connecting to a Non-Default Editor URL
-
-By default the server connects to `ws://localhost:3001/api/mcp/ws`. Override this with the `FORGE_EDITOR_WS_URL` environment variable:
+### Starting the relay and the editor
 
 ```bash
-FORGE_EDITOR_WS_URL=ws://localhost:3001/api/mcp/ws node dist/index.js
+cd mcp-server
+MCP_RELAY_TOKEN=$(openssl rand -hex 16) npm run relay      # prints the URLs it serves
+# open http://spawnforge.localhost:1355/dev?mcp=<the same token> in the browser
 ```
+
+The server dials `ws://127.0.0.1:3001/api/mcp/ws` by default; `FORGE_EDITOR_WS_URL` overrides the base and `MCP_RELAY_PORT` moves the relay. `MCP_RELAY_TOKEN` must be the same value on the relay, the editor URL and the server.
 
 ## Connecting from Claude Desktop
 
@@ -65,7 +71,7 @@ Add this to your Claude Desktop MCP configuration (`claude_desktop_config.json`)
       "command": "node",
       "args": ["/absolute/path/to/project-forge/mcp-server/dist/index.js"],
       "env": {
-        "FORGE_EDITOR_WS_URL": "ws://localhost:3001/api/mcp/ws"
+        "MCP_RELAY_TOKEN": "<the token the relay was started with>"
       }
     }
   }
@@ -294,9 +300,11 @@ If a command times out, the error message will name the specific command. Retry 
 
 ## Troubleshooting
 
-**"Not connected to the editor"** — Start the SpawnForge dev server (`cd web && npm run dev`) and wait for it to be ready at `http://localhost:3000`. The MCP server will reconnect automatically within 5 seconds.
+**"Not connected to the MCP relay"** — start the relay (`cd mcp-server && MCP_RELAY_TOKEN=<secret> npm run relay`) with the same token the server was given. The server retries with backoff a bounded number of times and then stops; restart it after the relay is up.
 
-**Tool calls return errors but the editor is running** — Check that `FORGE_EDITOR_WS_URL` points to the correct WebSocket endpoint. The default is `ws://localhost:3001/api/mcp/ws`.
+**"No editor is attached to the MCP relay"** — the relay is up but no tab has attached. Open the editor with `?mcp=<token>` (`http://spawnforge.localhost:1355/dev?mcp=<token>` locally). Only one tab can be attached at a time; a second one is refused.
+
+**A command is refused by the bridge** — the editor-side allowlist refuses commands that spend generation tokens, export, publish, or touch security/economy. That is by design; run those from the editor itself.
 
 **`node dist/index.js` fails with "Cannot find module"** — Run `npm run build` in the `mcp-server` directory first to compile TypeScript to JavaScript.
 
@@ -304,7 +312,7 @@ If a command times out, the error message will name the specific command. Retry 
 
 ## Command Reference
 
-For a complete list of all 322 commands with full parameter schemas, see:
+For a complete list of all 351 commands with full parameter schemas, see:
 
 - [Command Reference](../reference/commands.md)
 - Use the `search_docs` tool to find commands by keyword

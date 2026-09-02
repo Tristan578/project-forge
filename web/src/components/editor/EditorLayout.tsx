@@ -52,6 +52,7 @@ import { Celebration } from '@/components/ui/Celebration';
 import { useCelebrations } from '@/hooks/useCelebrations';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
+import { useEditorBridge } from '@/lib/mcp/useEditorBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher, setCommandDispatcher } from '@/stores/editorStore';
 import type { CommandResponse } from '@/hooks/useEngine';
@@ -404,6 +405,8 @@ function OnboardingGate({ onRequestQuickStart }: { onRequestQuickStart: () => vo
 // ---- Main EditorLayout ----
 
 export function EditorLayout() {
+  // MCP editor bridge (#9293): a no-op unless this tab was opened with ?mcp=<token>.
+  useEditorBridge();
   const rightPanelTab = useChatStore((s) => s.rightPanelTab);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
   const toggleChatOverlay = useWorkspaceStore((s) => s.toggleChatOverlay);

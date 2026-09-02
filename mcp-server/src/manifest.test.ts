@@ -12,6 +12,26 @@ const EXPECTED_CATEGORIES = [
 ];
 
 describe('command manifest', () => {
+  // Doc-truth (#9293): the README and the setup guide quoted 350, 351 and 322
+  // commands for a manifest of 351. Every "N commands" claim in either doc
+  // must equal the manifest, and the sweep must find at least one claim or it
+  // is vacuous.
+  it('every command count quoted in the docs equals the manifest', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const here = resolve(new URL('.', import.meta.url).pathname);
+    const docs = [resolve(here, '../README.md'), resolve(here, '../../docs/guides/mcp-server-setup.md')];
+    let claims = 0;
+    for (const file of docs) {
+      const text = readFileSync(file, 'utf8');
+      for (const m of text.matchAll(/\b(\d{2,4}) (?:SpawnForge editor )?commands\b/g)) {
+        claims += 1;
+        expect(Number(m[1]), `${file} says "${m[0]}"`).toBe(manifest.commands.length);
+      }
+    }
+    expect(claims).toBeGreaterThan(0);
+  });
+
   it('has a version field', () => {
     expect(manifest.version).toBe('1.0');
   });

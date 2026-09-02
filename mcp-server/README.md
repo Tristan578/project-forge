@@ -1,12 +1,24 @@
 # SpawnForge MCP Server
 
-Exposes 350 SpawnForge editor commands as MCP tools over either **stdio** (local
+Exposes 351 SpawnForge editor commands as MCP tools over either **stdio** (local
 subprocess) or **Streamable HTTP** (remote / browser-based hosts).
 
-The server itself does not execute commands — it forwards JSON-RPC messages to
-the editor over a WebSocket bridge (`FORGE_EDITOR_WS_URL`, default
-`ws://localhost:3001/api/mcp/ws`). Tools will return errors until the editor is
-running.
+The server itself does not execute commands — every handler runs in the browser
+tab that has the editor open. The server dials a small **loopback relay**
+(`npm run relay`, `ws://127.0.0.1:3001/api/mcp/ws`) and the editor tab attaches
+to the same relay when opened with `?mcp=<token>`; commands go server → relay →
+tab and results come back the same way. Tools return a clear error until both
+sides are attached. Why a relay and not a route: Vercel cannot hold a
+WebSocket and the handlers cannot run outside the tab — see
+`docs/decisions/2026-09-02-mcp-editor-bridge-relay.md` (#9293).
+
+```bash
+# terminal 1 — the relay (pick any secret; both sides must present it)
+MCP_RELAY_TOKEN=$(openssl rand -hex 16) npm run relay
+# terminal 2 — the editor: open http://spawnforge.localhost:1355/dev?mcp=<that token>
+# terminal 3 — the MCP server (or your MCP host's config), same token
+MCP_RELAY_TOKEN=<that token> node dist/index.js
+```
 
 ## Quick start
 
@@ -112,7 +124,9 @@ TCP remote address.
 | Variable                       | Default                              | Required when               |
 |--------------------------------|--------------------------------------|-----------------------------|
 | `MCP_TRANSPORT`                | `stdio`                              | always                      |
-| `FORGE_EDITOR_WS_URL`          | `ws://localhost:3001/api/mcp/ws`     | always                      |
+| `FORGE_EDITOR_WS_URL`          | `ws://127.0.0.1:3001/api/mcp/ws`     | optional (relay base URL)   |
+| `MCP_RELAY_TOKEN`              | (none — relay refuses to start)      | the relay, and the server   |
+| `MCP_RELAY_PORT`               | `3001`                               | `npm run relay`             |
 | `MCP_HTTP_TOKEN`               | (none — server refuses to start)     | `MCP_TRANSPORT=http`        |
 | `MCP_HTTP_PORT`                | `3030`                               | `MCP_TRANSPORT=http`        |
 | `MCP_HTTP_HOST`                | `0.0.0.0`                            | `MCP_TRANSPORT=http`        |
