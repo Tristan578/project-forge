@@ -874,6 +874,7 @@ jobs:
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
+            scripts/install-playwright-ci.sh scripts/__tests__/install-playwright-ci.test.sh \
             scripts/run-vitest-coverage.sh scripts/__tests__/run-vitest-coverage.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
@@ -924,6 +925,8 @@ jobs:
       - name: Run vitest exit-gate test suite
         run: bash scripts/__tests__/check-vitest-exit.test.sh
 
+      - name: Run Playwright install retry test suite
+        run: bash scripts/__tests__/install-playwright-ci.test.sh
       - name: Run bounded coverage-wrapper test suite
         run: bash scripts/__tests__/run-vitest-coverage.test.sh
 
@@ -1179,13 +1182,15 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh browsers
 
       - name: Install Playwright OS deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh deps
 
       - name: Build for E2E
         working-directory: web
@@ -1275,13 +1280,15 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh browsers
 
       - name: Install Playwright OS deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh deps
 
       # NEXT_PUBLIC_E2E_HOOKS is build-time only (Next.js inlines NEXT_PUBLIC_*
       # at build). It exposes the editor/chat stores on window so the strict
@@ -1453,13 +1460,15 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh browsers
 
       - name: Install Playwright OS deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: bash ../scripts/install-playwright-ci.sh deps
 
       - name: Build for engine-smoke E2E
         working-directory: web

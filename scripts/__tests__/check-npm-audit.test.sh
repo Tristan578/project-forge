@@ -3069,6 +3069,7 @@ OUTPUTS_EOF
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
+            scripts/install-playwright-ci.sh scripts/__tests__/install-playwright-ci.test.sh \
             scripts/run-vitest-coverage.sh scripts/__tests__/run-vitest-coverage.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
@@ -3273,7 +3274,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=568
+readonly SELF_EXEC_EXPECTED_DROP=571
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3577,6 +3578,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
             scripts/check-vitest-exit.sh scripts/__tests__/check-vitest-exit.test.sh \
+            scripts/install-playwright-ci.sh scripts/__tests__/install-playwright-ci.test.sh \
             scripts/run-vitest-coverage.sh scripts/__tests__/run-vitest-coverage.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
@@ -3619,6 +3621,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-ghaw-lock-sync.test.sh
       - name: Run vitest exit-gate test suite
         run: bash scripts/__tests__/check-vitest-exit.test.sh
+      - name: Run Playwright install retry test suite
+        run: bash scripts/__tests__/install-playwright-ci.test.sh
       - name: Run bounded coverage-wrapper test suite
         run: bash scripts/__tests__/run-vitest-coverage.test.sh
       - name: Run npm-audit allowlist gate test suite
