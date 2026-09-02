@@ -22,8 +22,8 @@
     "@storybook/addon-docs": "^10.5.10",
     "@storybook/react": "^10.5.10",
     "@storybook/react-vite": "^10.5.10",
-    "@vitejs/plugin-react": "^6.1.0",
-    "chromatic": "^18.5.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "chromatic": "^18.7.1",
     "storybook": "^10.4.6",
     "vite": "^8.2.2"
   }
