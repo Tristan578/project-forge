@@ -54,23 +54,43 @@
 # the abort here re-enters a rollout, and completing it exits that state. If
 # that start is refused, production is serving the BASE with auto-assign off
 # and nothing will change it — so a refused start after an abort is a hard
-# error naming the base, never a warning. `mutated=true|false` is written to
-# GITHUB_OUTPUT BEFORE any POST so cd.yml can tell "refused, untouched" from
-# "aborted, then failed" and roll back / open the incident for the latter.
+# error naming the base, never a warning. `disposition` (below) is written to
+# GITHUB_OUTPUT so cd.yml can tell "refused, untouched" from "aborted, then
+# failed" and roll back / open the incident for the latter.
 #
 # WHY `superseded` EXISTS
 #
-# Back-to-back merges make this routine: run B's ensure-canary aborts run A's
+# cd.yml serialises production deploys (its concurrency group does not cancel
+# a running deploy), so two merges to main never verify at the same time. An
+# OUT-OF-BAND deploy can: a manual `vercel deploy --prod`, or a
+# `promote_to_production` dispatch on another ref, which lands in a different
+# concurrency group. Then the newer deploy's ensure-canary aborts this run's
 # still-ramping rollout, the forced `_vcrr_` cookie "is good only for the
-# duration of a single rolling release", and A's probe lands on the base or on
-# B's canary — the commit assertion trips. That is not an unhealthy build. If
-# A then rolled back, it would Instant-Rollback production to the pre-A build
-# and abort B's healthy rollout, and B — its cookie now stale too — would fail
-# and roll back as well. So before a rollback, cd.yml asks this question and
-# skips the rollback (and the incident issue) when a newer deployment owns
-# production. The answer is `superseded=true|false` plus `owner=<id>`; a
-# lookup that cannot answer says `false` with a warning — a probe failure
-# whose cause cannot be established is still rolled back.
+# duration of a single rolling release", and this run's probe lands on the
+# base or on the newer canary — the commit assertion trips. That is not an
+# unhealthy build. If this run then rolled back, it would Instant-Rollback
+# production to its own base and abort the newer, healthy rollout, whose
+# probe would fail and roll back in turn. So before a rollback, cd.yml asks
+# this question and skips the rollback (and the incident issue) when a newer
+# deployment owns production. The answer is `superseded=true|false` plus
+# `owner=<id>`; a lookup that cannot answer says `false` with a warning — a
+# probe failure whose cause cannot be established is still rolled back.
+#
+# WHAT `disposition` TELLS cd.yml WHEN ensure-canary FAILS
+#
+# Not every failure exit is equal. Some prove this build is NOT serving (a
+# foreign canary is active, ours is at most queued): `untouched`. Some mean
+# this run changed production: `mutated` (the abort was issued). Some mean
+# this run's own start was accepted, so its unverified canary may be ramping:
+# `started`. And a transport error before or while polling proves nothing —
+# auto-assign starts a rollout the moment a production deployment is READY
+# ("call start again when auto-assign custom domains already started a
+# rollout"), so the build may already be live: `unknown`. cd.yml rolls back to
+# the pre-deploy `prev_url` and opens the incident on every failure except
+# `untouched`; with the live stage schedule (5% for 10 minutes, no approval)
+# an unverified canary otherwise reaches 100% with a red run as the only
+# signal. `disposition` is written at entry (`unknown`) and rewritten as the
+# run learns more; it is meaningful only when ensure-canary exits non-zero.
 #
 # THE RESPONSE SHAPE
 #
@@ -91,8 +111,10 @@
 #   RR_POLL_ATTEMPTS      ensure-canary polling budget (default 20)
 #   RR_POLL_INTERVAL_S    seconds between polls (default 6)
 #   GITHUB_OUTPUT         when set: `lkg` appends prev_url=<url>;
-#                         `ensure-canary` appends mutated=<true|false> (before
-#                         any POST, again when it aborts) and, on success,
+#                         `ensure-canary` appends
+#                         disposition=<unknown|untouched|started|mutated>
+#                         (at entry, then whenever it learns more — the LAST
+#                         value counts) and, on success,
 #                         canary_state=<current|canary>; `superseded` appends
 #                         superseded=<true|false> and owner=<deployment id>
 #
@@ -316,13 +338,13 @@ cmd_ensure_canary() {
   local state cur_id can_id queued can_created target
   local started=false aborted=false
   [ -n "$url" ] || { echo "::error::ensure-canary needs the deployment url" >&2; exit 2; }
+  # Written BEFORE anything else so cd.yml can always read it: until this run
+  # has seen the rollout state, the build may already be live via auto-assign.
+  emit_output disposition unknown
   ours=$(deployment_identity "$url") || exit 1
   ours_id="${ours%% *}"
   ours_created="${ours#* }"
   echo "This deployment: ${ours_id} (${url})"
-  # Written BEFORE any decision so cd.yml can always read it; flipped to true
-  # only once a rollback has been issued.
-  emit_output mutated false
 
   attempt=0
   while [ "$attempt" -lt "$poll_attempts" ]; do
@@ -341,7 +363,7 @@ cmd_ensure_canary() {
           return 0
         fi
         if [ "$started" != true ]; then
-          start_rolling_release "$ours_id" || true
+          start_rolling_release "$ours_id" && emit_output disposition started
           started=true
         fi
         echo "  attempt ${attempt}/${poll_attempts}: production target is ${target:-<none>}, waiting"
@@ -371,12 +393,15 @@ cmd_ensure_canary() {
     # minutes away). Decide by age, once.
     if [ "$RR_KIND" = "active" ] && [ -n "$can_id" ]; then
       can_created=$(jqr "$RR_DOC" '.canaryDeployment.createdAt')
+      # A foreign canary is ACTIVE, so this build is at most queued — provably
+      # not serving. Every refusal below leaves production untouched.
+      if [ "$aborted" != true ]; then emit_output disposition untouched; fi
       if ! is_epoch "$can_created"; then
         echo "::error::Rolling release is ACTIVE with canary ${can_id} but its createdAt is missing or not numeric (${can_created:-<empty>}) — cannot tell whether it is older or newer than this deployment, refusing to abort it" >&2
         exit 1
       fi
       if [ "$can_created" -gt "$ours_created" ]; then
-        echo "::error::Superseded: a newer deployment (${can_id}) is already the canary. This run's deployment (${ours_id}) will not be rolled out — a later merge owns production now." >&2
+        echo "::error::Superseded: a newer deployment (${can_id}) is already the canary. This run's deployment (${ours_id}) will not be rolled out — a later deployment owns production now." >&2
         exit 1
       fi
       if [ "$aborted" = true ]; then
@@ -393,7 +418,7 @@ cmd_ensure_canary() {
       fi
       [ "$queued" = "$ours_id" ] && echo "This deployment is queued behind the older canary ${can_id}; resolving the stale rollout instead of waiting for it"
       echo "A stale rolling release is active (canary ${can_id}, older than this deployment) — aborting it so this deployment can roll out"
-      emit_output mutated true
+      emit_output disposition mutated
       abort_rolling_release "$cur_id" || exit 1
       aborted=true
       if ! start_rolling_release "$ours_id"; then
@@ -407,7 +432,7 @@ cmd_ensure_canary() {
 
     # Idle document (COMPLETE/ABORTED/...) and ours is not current: start ours.
     if [ "$started" != true ]; then
-      start_rolling_release "$ours_id" || true
+      start_rolling_release "$ours_id" && emit_output disposition started
       started=true
     fi
     echo "  attempt ${attempt}/${poll_attempts}: state=${state:-<none>} current=${cur_id:-<none>} canary=${can_id:-<none>}, waiting"
@@ -422,8 +447,10 @@ cmd_ensure_canary() {
 
 # Who owns production right now? Sets OWNER_ID / OWNER_CREATED; non-zero when
 # that cannot be established. The active canary when a rollout is ACTIVE (that
-# is where traffic is heading), else the rolling release's currentDeployment,
-# else the project's production target.
+# is where traffic is heading); otherwise the project's production target —
+# the same source `lkg` uses, because an idle rolling-release document is a
+# record of the LAST rollout, not of what serves now (a hand promote since
+# then would not be in it).
 OWNER_ID=""
 OWNER_CREATED=""
 production_owner() {
@@ -436,11 +463,7 @@ production_owner() {
       OWNER_ID=$(jqr "$RR_DOC" '.canaryDeployment.id')
       OWNER_CREATED=$(jqr "$RR_DOC" '.canaryDeployment.createdAt')
       ;;
-    idle)
-      OWNER_ID=$(jqr "$RR_DOC" '.currentDeployment.id')
-      OWNER_CREATED=$(jqr "$RR_DOC" '.currentDeployment.createdAt')
-      ;;
-    none)
+    idle|none)
       api GET "/v9/projects/${VERCEL_PROJECT_ID}"
       [ "$API_STATUS" = "200" ] || return 1
       OWNER_ID=$(jqr "$API_BODY" '.targets.production.id')
@@ -475,7 +498,7 @@ cmd_superseded() {
     return 0
   fi
   if is_epoch "$OWNER_CREATED" && [ "$OWNER_CREATED" -gt "$ours_created" ]; then
-    echo "::notice::Superseded: a NEWER deployment (${OWNER_ID}) owns production. This run's probe failed because a later merge overtook it, not because the build is unhealthy — no rollback."
+    echo "::notice::Superseded: a NEWER deployment (${OWNER_ID}) owns production. This run's probe failed because a later deployment overtook it, not because the build is unhealthy — no rollback."
     emit_output superseded true
     return 0
   fi

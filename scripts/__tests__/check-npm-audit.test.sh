@@ -1976,7 +1976,7 @@ permissions:
   contents: read
 concurrency:
   group: cd-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: --cfg=web_sys_unstable_apis

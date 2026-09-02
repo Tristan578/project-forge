@@ -42,9 +42,19 @@ on:
 permissions:
   contents: read
 
+# Production deploys are SERIALISED, not cancelled. A run cancelled after
+# `vercel deploy --prod` leaves its unverified canary ramping (auto-assign
+# starts the rollout on READY, and the live stage schedule auto-advances it to
+# 100% in ~10 minutes) with every failure()-gated step skipped — cancelled()
+# is not failure() — so nothing rolls it back or records it, and the NEXT run's
+# `lkg` then captures that unverified build as last-known-good. With
+# cancel-in-progress off, a newer push waits for the running deploy to finish
+# verifying; GitHub keeps at most one PENDING run per group and replaces it
+# with the newest, and main is linear, so nothing is lost. The cost is latency
+# on back-to-back merges (#9624).
 concurrency:
   group: cd-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -990,22 +1000,36 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to staging: $url"
 
-      # Staging is UNVERIFIABLE today and this step says so instead of passing:
-      # the deployment URL sits behind Vercel Authentication, the project has no
-      # automation bypass secret configured, and staging.spawnforge.ai answers
-      # 525 (#7581). The script now fails closed on a protected answer (#9624),
-      # so this step is red until the owner adds the staging project's bypass
-      # secret — `continue-on-error` keeps a red staging probe from blocking the
-      # production deploy, which has its own, working verification below.
+      # Staging is UNVERIFIABLE today: the deployment URL sits behind Vercel
+      # Authentication, the staging project has no automation bypass secret
+      # configured, and staging.spawnforge.ai answers 525 (#7581). The script
+      # fails closed on a protected answer (#9624), so rather than a red step
+      # that `continue-on-error` would hide forever — including the day the
+      # secret exists and staging is genuinely broken — the probe is an
+      # explicit, named skip while the secret is absent, and a REAL gate the
+      # moment `VERCEL_AUTOMATION_BYPASS_STAGING` (the staging project's
+      # Protection Bypass for Automation secret) is added. `if:` cannot read
+      # secrets, so a step turns its presence into an output first.
+      - name: Staging bypass secret present?
+        id: staging-bypass
+        env:
+          STAGING_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
+        run: |
+          if [ -n "$STAGING_BYPASS" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "present=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Staging health check SKIPPED: the repo secret VERCEL_AUTOMATION_BYPASS_STAGING is not set, and the staging deployment URL is SSO-protected, so the probe cannot observe it (#7581). Add the staging project's Protection Bypass for Automation secret under that name to turn this into a gate."
       - name: Post-deploy health check (staging)
         id: health-check-staging
-        continue-on-error: true
+        if: ${{ steps.staging-bypass.outputs.present == 'true' }}
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
-          VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}
+          VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
   # ---- Stage 2: Deploy to Production ----
@@ -1480,25 +1504,31 @@ jobs:
         # Use dedicated smoke config — no local webServer, hits live URL directly
         run: npx playwright test --config playwright.smoke.config.ts --project=chromium
 
-      # A failed probe is not always an unhealthy build. Under Rolling Releases
-      # a later merge's run aborts this run's rollout by design (ensure-canary
-      # above), the forced `_vcrr_` cookie is re-randomised ("good only for the
-      # duration of a single rolling release"), and this run's probe lands on
-      # the base or on the newer canary — the commit assertion trips. Rolling
-      # back THEN would Instant-Rollback production to the pre-this-run build
-      # and abort the newer, healthy rollout, whose own probe would then fail
-      # and roll back too. So before any rollback: does a NEWER deployment own
-      # production? If so this run was superseded — a notice, not an incident.
-      # Also runs when ensure-canary failed AFTER mutating the rollout (abort
-      # issued, start refused): production was changed by this run and must be
-      # restored and recorded. A lookup that cannot answer says `false`, so a
-      # failure whose cause cannot be established is still rolled back. The
-      # rollback and the incident issue below are gated on this step's answer,
-      # so when it does not run (nothing failed, or ensure-canary refused
-      # without touching anything) neither of them fires.
-      - name: Was this run superseded by a later merge?
+      # A failed probe is not always an unhealthy build. Merges to main are
+      # serialised by the concurrency group above, but an OUT-OF-BAND deploy
+      # (a manual `vercel deploy --prod`, or a promote_to_production dispatch
+      # on another ref) is not: its ensure-canary aborts this run's rollout by
+      # design, the forced `_vcrr_` cookie is re-randomised ("good only for
+      # the duration of a single rolling release"), and this run's probe lands
+      # on the base or on the newer canary — the commit assertion trips.
+      # Rolling back THEN would Instant-Rollback production to the pre-this-run
+      # build and abort the newer, healthy rollout, whose own probe would then
+      # fail and roll back too. So before any rollback: does a NEWER deployment
+      # own production? If so this run was superseded — a notice, not an
+      # incident. A lookup that cannot answer says `false`, so a failure whose
+      # cause cannot be established is still rolled back.
+      #
+      # Also runs when ensure-canary itself failed on any exit but a provably
+      # untouched one (`disposition`): an abort followed by a refused start,
+      # a transport error after this run's own start was accepted, or a lookup
+      # that failed before anything was known — on all of those the build may
+      # be live and unverified, and must be rolled back to `prev_url` and
+      # recorded. The rollback and the incident issue below are gated on this
+      # step's answer, so when it does not run (nothing failed, or
+      # ensure-canary refused without touching anything) neither fires.
+      - name: Was this run superseded by a later deployment?
         id: superseded
-        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure' || (steps.canary.outcome == 'failure' && steps.canary.outputs.mutated == 'true')) }}
+        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure' || (steps.canary.outcome == 'failure' && steps.canary.outputs.disposition != 'untouched')) }}
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
@@ -1506,16 +1536,16 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: bash scripts/cd-rolling-release.sh superseded "$DEPLOY_URL"
 
-      - name: Superseded by a later merge (no rollback)
+      - name: Superseded by a later deployment (no rollback)
         if: ${{ failure() && steps.superseded.outputs.superseded == 'true' }}
         env:
           OWNER: ${{ steps.superseded.outputs.owner }}
           NEW_URL: ${{ steps.deploy.outputs.url }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          echo "::notice::This run was superseded: deployment ${OWNER} (a later merge) owns production. ${NEW_URL} (${COMMIT_SHA}) was not verified and is not serving traffic; the later run verifies its own build. No rollback, no incident."
+          echo "::notice::This run was superseded: deployment ${OWNER} (a later deployment) owns production. ${NEW_URL} (${COMMIT_SHA}) was not verified and is not serving traffic; the later deploy's own verification is the gate. No rollback, no incident."
           {
-            echo "### Superseded by a later merge"
+            echo "### Superseded by a later deployment"
             echo
             echo "A newer deployment (\`${OWNER}\`) took over production while this run was verifying \`${COMMIT_SHA}\`."
             echo "The probe failed because it could no longer observe this build, not because the build is unhealthy."
@@ -1523,7 +1553,7 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Rollback production on health check or smoke test failure
+      - name: Rollback production on failed verification
         if: ${{ failure() && steps.superseded.outputs.superseded == 'false' && steps.prev-deploy.outputs.prev_url != '' }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
@@ -1533,11 +1563,11 @@ jobs:
           HEALTH_OUTCOME: ${{ steps.health-check-production.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke-tests.outcome }}
           CANARY_OUTCOME: ${{ steps.canary.outcome }}
-          CANARY_MUTATED: ${{ steps.canary.outputs.mutated }}
+          CANARY_DISPOSITION: ${{ steps.canary.outputs.disposition }}
           SNAPSHOT_BRANCH_ID: ${{ steps.db-snapshot.outputs.snapshot_branch_id }}
           SNAPSHOT_BRANCH_NAME: ${{ steps.db-snapshot.outputs.snapshot_branch_name }}
         run: |
-          echo "::error::Verification failed (health check: ${HEALTH_OUTCOME}, smoke tests: ${SMOKE_OUTCOME}, canary step: ${CANARY_OUTCOME}, rollout mutated before the failure: ${CANARY_MUTATED:-false}) -- rolling back production to $PREV_URL"
+          echo "::error::Verification failed (health check: ${HEALTH_OUTCOME}, smoke tests: ${SMOKE_OUTCOME}, canary step: ${CANARY_OUTCOME}, canary disposition: ${CANARY_DISPOSITION:-n/a}) -- rolling back production to $PREV_URL"
 
           # The schema caveat is emitted BEFORE `vercel rollback`, deliberately.
           # If the rollback itself fails, `set -e` aborts the step -- and the one
@@ -1600,7 +1630,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NOTIFY_KEY: prod-rollback-auto
-          NOTIFY_TITLE: 'Production auto-rollback fired: a deploy failed its health check'
+          NOTIFY_TITLE: 'Production auto-rollback fired: a deploy failed verification'
           NOTIFY_LABELS: priority-p0,area-infra
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
           NEW_URL: ${{ steps.deploy.outputs.url }}
@@ -1609,7 +1639,7 @@ jobs:
           HEALTH_OUTCOME: ${{ steps.health-check-production.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke-tests.outcome }}
           CANARY_OUTCOME: ${{ steps.canary.outcome }}
-          CANARY_MUTATED: ${{ steps.canary.outputs.mutated }}
+          CANARY_DISPOSITION: ${{ steps.canary.outputs.disposition }}
           SNAPSHOT_BRANCH_ID: ${{ steps.db-snapshot.outputs.snapshot_branch_id }}
         run: |
           # The incident issue carries the same caveat the job log does: the
@@ -1627,7 +1657,7 @@ jobs:
           **Rolled back to:** ${PREV_URL}
           **Health check:** ${HEALTH_OUTCOME}
           **Smoke tests:** ${SMOKE_OUTCOME}
-          **Canary step:** ${CANARY_OUTCOME} (rollout mutated before the failure: ${CANARY_MUTATED:-false})
+          **Canary step:** ${CANARY_OUTCOME} (disposition: ${CANARY_DISPOSITION:-n/a} — untouched | started | mutated | unknown; see scripts/cd-rolling-release.sh)
           **Run:** ${RUN_URL}
           ${schema_line}
 
@@ -1635,6 +1665,37 @@ jobs:
 
           Production is serving the PREVIOUS deployment. The commit above is on
           \`main\` and undeployed. See \`docs/production-support.md\`."
+          export NOTIFY_BODY
+          bash scripts/notify-workflow-failure.sh
+
+      # cancelled() is not failure(): none of the rollback path above runs on a
+      # cancelled run. The concurrency group no longer cancels a deploy for a
+      # newer push, so this is a HUMAN cancellation after `vercel deploy --prod`
+      # — and the deployment's rollout may already be ramping unverified
+      # (auto-assign starts it on READY). Do not mutate production behind an
+      # operator who is acting; put what they must check in front of them.
+      - name: Record a cancellation after the production deploy
+        if: ${{ cancelled() && steps.deploy.outputs.url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTIFY_KEY: prod-deploy-cancelled
+          NOTIFY_TITLE: 'CD run cancelled after a production deploy: verify the rollout by hand'
+          NOTIFY_LABELS: priority-p0,area-infra
+          NEW_URL: ${{ steps.deploy.outputs.url }}
+          PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
+          COMMIT_SHA: ${{ github.sha }}
+          CANARY_STATE: ${{ steps.canary.outputs.canary_state }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          NOTIFY_BODY="This run was cancelled AFTER it deployed to production, so its build was never verified — and it may be serving traffic: Vercel starts a rolling release the moment a production deployment is READY, and the stage schedule auto-advances it.
+
+          **Commit:** \`${COMMIT_SHA}\`
+          **Deployment:** ${NEW_URL}
+          **Canary state when cancelled:** ${CANARY_STATE:-unknown}
+          **Last-known-good before this deploy:** ${PREV_URL:-unknown}
+          **Run:** ${RUN_URL}
+
+          Check what is live (\`vercel rolling-release fetch --scope tnolan --cwd web\`; \`curl -s https://www.spawnforge.ai/api/health | jq .commit\`). If this deployment is the canary or current and you did not intend it, Instant-Rollback to the last-known-good above (\`vercel rollback <url> --yes --scope tnolan\`), then undo the rollback with \`vercel promote <fixed-url>\` once a fix is ready. Record the cause here and close this issue."
           export NOTIFY_BODY
           bash scripts/notify-workflow-failure.sh
 
