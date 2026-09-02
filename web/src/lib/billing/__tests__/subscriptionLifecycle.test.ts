@@ -221,8 +221,9 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
 
   it('binds amountRefunded/amountTotal for a tiny refund to the single fallback CTE', async () => {
     // 1 cent refund of $100. Whether that deducts 0 is decided inside the CTE
-    // (bigint integer division truncates 1/10000 of the balance to 0 — there is
-    // no floor() on this path; FLOOR( only exists in the paymentIntentId CTE),
+    // (for a balance under 10 000 tokens, bigint integer division truncates
+    // 1/10000 of it to 0 — there is no floor() on this path; FLOOR( only exists
+    // in the paymentIntentId CTE),
     // which mockNeonSql cannot evaluate: this test pins the binding only.
     await reverseAddonTokens('user_abc', 'ch_tiny', 1, 10000);
     expect(mockNeonTransaction).not.toHaveBeenCalled();
@@ -310,7 +311,8 @@ describe('handleEntitlementsUpdated (PF-911 / #8821)', () => {
   // failed mid-file). vi.clearAllMocks() does NOT drain the once-queue; only
   // mockReset() does. The mock*Once guard (#9542) now fails the enqueueing
   // test itself, so this is the second line of defence: it stages exactly that
-  // leaked state (inside this test, which the guard permits), runs the
+  // leaked state (the guard tolerates it only because the mockReset() below
+  // drains the queue before afterEach runs), runs the
   // hermetic-reset logic the beforeEach applies, and proves the next handler
   // read sees the real user. If someone reverts the beforeEach to
   // clearAllMocks, this fails.

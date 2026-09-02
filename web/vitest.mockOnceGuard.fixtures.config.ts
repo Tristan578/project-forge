@@ -2,8 +2,8 @@
  * Config for the mock*Once guard's fixture run (#9542).
  *
  * The fixtures under src/lib/testing/__fixtures__/onceGuard are deliberately
- * NOT `*.test.ts`: one of them must FAIL (that is what proves the guard fires),
- * so they cannot be picked up by the regular suite. mockOnceGuard.test.ts
+ * NOT `*.test.ts`: several of them must FAIL (that is what proves the guard
+ * fires), so they cannot be picked up by the regular suite. mockOnceGuard.test.ts
  * spawns a child `vitest run --config` on this file and grades the JSON report.
  * The setup file is the real one, so the child exercises the guard exactly as
  * every other test file does.

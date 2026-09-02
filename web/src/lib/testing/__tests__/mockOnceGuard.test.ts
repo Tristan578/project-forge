@@ -10,15 +10,17 @@
  *    real setup file. A logic-only test of "would this report a leak" is the
  *    vacuous trap: the property that matters is that a leaking test FAILS in
  *    an actual run — for a module-scoped vi.fn, a vi.mock factory (static or
- *    lazily triggered inside a test) and a bare automock alike — with a
- *    message naming the still-armed queueing line, and that the balanced /
- *    in-test / beforeEach / reused-implementation shapes do NOT. Only a run
- *    proves that. Two more child runs pin the switch: MOCK_ONCE_GUARD=off is
- *    honoured locally and ignored under CI.
+ *    lazily triggered inside a test) and a bare automock (static or lazy)
+ *    alike — with a message naming the still-armed queueing line, and that
+ *    the balanced / in-test / beforeEach / reused-implementation /
+ *    constructed / already-failed shapes do NOT. Only a run proves that. Two
+ *    more child runs pin the switch: MOCK_ONCE_GUARD=off is honoured locally
+ *    and ignored under CI. Setup-file hooks only attach per file under
+ *    `isolate: true`, so the three web configs are pinned to it.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -96,6 +98,16 @@ describe.skipIf(!ENABLED)('guard helpers (in-process, under the guard)', () => {
     sharedMock.mockReset();
   });
 
+  it('getMockImplementation() still returns the function the test queued, not the wrapper', () => {
+    const impl = () => 'queued';
+    sharedMock.mockImplementationOnce(impl);
+    expect(sharedMock.getMockImplementation()).toBe(impl);
+    expect(findLeaks(testName())).toHaveLength(1); // the wrapper is what sits in the queue
+    expect(sharedMock()).toBe('queued');
+    expect(sharedMock.getMockImplementation()).toBeUndefined();
+    expect(findLeaks(testName())).toEqual([]);
+  });
+
   it('ignores mocks created inside the current test', () => {
     const local = vi.fn().mockName('local');
     local.mockReturnValueOnce('left armed on purpose');
@@ -113,6 +125,14 @@ describe.skipIf(!ENABLED)('guard helpers (in-process, under the guard)', () => {
     expect(captureSite(stack)).toBe('/repo/web/src/lib/foo.test.ts:42:17');
     expect(captureSite('')).toBe('<unknown>');
     expect(captureSite('Error\n    at x (/repo/node_modules/a.js:1:1)')).toBe('<unknown>');
+  });
+
+  it('captureSite keeps a path that contains spaces intact, in both frame shapes', () => {
+    expect(captureSite('Error\n    at fn (C:\\Users\\First Last\\web\\src\\x.test.ts:14:21)')).toBe(
+      'C:\\Users\\First Last\\web\\src\\x.test.ts:14:21',
+    );
+    expect(captureSite('Error\n    at /repo/my dir/web/src/y.test.ts:3:9')).toBe('/repo/my dir/web/src/y.test.ts:3:9');
+    expect(captureSite('Error\n    at async Object.<anonymous> (/repo/web/src/z.test.ts:5:7)')).toBe('/repo/web/src/z.test.ts:5:7');
   });
 
   it('leakError anchors its stack at the queueing line, not at the guard', () => {
@@ -148,6 +168,14 @@ function runFixtures(env: Record<string, string | undefined>): ChildRun {
       [VITEST_CLI, 'run', '--config', 'vitest.mockOnceGuard.fixtures.config.ts', '--reporter=json', `--outputFile=${outFile}`],
       { cwd: WEB_ROOT, env: childEnv, encoding: 'utf8', timeout: 120_000 },
     );
+    // A child that never wrote its report (timeout, signal, config-load or
+    // CLI-resolution error) must fail with the child's own stderr, not with
+    // an ENOENT for a temp path that no longer exists.
+    if (run.error || run.signal || !existsSync(outFile)) {
+      throw new Error(
+        `child vitest produced no report (error=${run.error?.message ?? 'none'}, signal=${run.signal ?? 'none'}, status=${run.status})\n${run.stderr}`,
+      );
+    }
     const report = JSON.parse(readFileSync(outFile, 'utf8')) as JsonReport;
     const byName = new Map<string, JsonAssertion>();
     for (const file of report.testResults) {
@@ -171,72 +199,107 @@ function sitePattern(fixture: string, marker: string): RegExp {
   return new RegExp(`${fixture.replace(/\./g, '\\.')}:${fixtureLine(fixture, marker)}:\\d+`);
 }
 
-const EVERY_FIXTURE_TEST = 16;
+const EVERY_FIXTURE_TEST = 21;
+
+const MUST_PASS = [
+  'the next test consumes the leftover and is not blamed',
+  'the next test consumes the lazy leftover and is not blamed',
+  'the next test consumes the automock leftover and is not blamed',
+  'the next test consumes the lazy automock leftover and is not blamed',
+  'the next test drains the leftover of the failed test and is not blamed',
+  'queues two values and consumes both',
+  'queues via mockResolvedValueOnce and awaits it',
+  'queues, then mockReset drains the queue',
+  'a mock built inside the test may leave a once-value armed',
+  'beforeEach-built mocks may also leave a once-value armed',
+  'reuses a consumed once-implementation as the persistent one',
+  'constructs class and function once-implementations with new',
+];
+
+/** What a run WITH the guard on must look like, whichever pool mode ran it. */
+function expectGuarded(run: ChildRun): void {
+  // The child MUST fail: several fixtures leak by construction. A green
+  // child means the guard did not fire — the vacuous case.
+  expect(run.status, `child vitest exit=${run.status}\n${run.stderr}`).not.toBe(0);
+  // Anti-vacuity: every fixture ran.
+  expect(run.total).toBe(EVERY_FIXTURE_TEST);
+
+  const leaked = (name: string): string => {
+    const a = run.byName.get(name);
+    expect(a?.status, name).toBe('failed');
+    const msg = a?.failureMessages.join('\n') ?? '';
+    expect(msg, name).toContain('mock*Once leak');
+    return msg;
+  };
+
+  // Module-scoped vi.fn.
+  let msg = leaked('queues a once-value on the shared mock and never consumes it');
+  expect(msg).toContain('sharedModuleMock');
+  expect(msg).toMatch(sitePattern('leaks.fixture.ts', '<- leak'));
+
+  // vi.mock factory, statically imported.
+  msg = leaked('arms a once-value on the factory mock without consuming it');
+  expect(msg).toMatch(sitePattern('viMockFactory.fixture.ts', '<- leak'));
+
+  // vi.mock factory first triggered INSIDE a test by a dynamic import.
+  msg = leaked('arms a once-value on a lazily built factory mock without consuming it');
+  expect(msg).toMatch(sitePattern('viMockFactoryLazy.fixture.ts', '<- leak'));
+
+  // Bare automock: never passes through vi.fn.
+  msg = leaked('arms a once-value on a bare automock without consuming it');
+  expect(msg).toMatch(sitePattern('automock.fixture.ts', '<- leak'));
+
+  // Bare automock first materialised INSIDE a test by a dynamic import.
+  msg = leaked('arms a once-value on a lazily built bare automock without consuming it');
+  expect(msg).toMatch(sitePattern('automockLazy.fixture.ts', '<- leak'));
+
+  // The async helpers, and "only the still-armed line is named".
+  msg = leaked('queues mockResolvedValueOnce and never awaits it');
+  expect(msg).toMatch(sitePattern('leaksAsync.fixture.ts', '<- leak'));
+  msg = leaked('queues mockRejectedValueOnce and never awaits it');
+  expect(msg).toMatch(new RegExp(`leaksAsync\\.fixture\\.ts:${fixtureLine('leaksAsync.fixture.ts', 'mockRejectedValueOnce(new Error')}:\\d+`));
+  msg = leaked('queues two values and consumes only the first');
+  expect(msg).toMatch(new RegExp(`leaksAsync\\.fixture\\.ts:${fixtureLine('leaksAsync.fixture.ts', "mockReturnValueOnce('armed')")}:\\d+`));
+  expect(msg).not.toMatch(sitePattern('leaksAsync.fixture.ts', '<- consumed'));
+
+  // A test that already failed keeps its ONE real error; no leak is stacked on it.
+  const failed = run.byName.get('fails on its own assertion after queueing a once-value');
+  expect(failed?.status).toBe('failed');
+  expect(failed?.failureMessages).toHaveLength(1);
+  expect(failed?.failureMessages[0]).toContain('expected 1 to be 2');
+  expect(failed?.failureMessages[0]).not.toContain('mock*Once leak');
+
+  for (const name of MUST_PASS) {
+    expect(run.byName.get(name)?.status, name).toBe('passed');
+  }
+}
 
 describe('guard in a real vitest run over the fixtures', () => {
   it('fails exactly the leaking tests, names the still-armed line, and passes the balanced shapes', () => {
     const run = runFixtures({ CI: 'true', MOCK_ONCE_GUARD: 'on' });
-    // The child MUST fail: several fixtures leak by construction. A green
-    // child means the guard did not fire — the vacuous case.
-    expect(run.status, `child vitest exit=${run.status}\n${run.stderr}`).not.toBe(0);
-    // Anti-vacuity: every fixture ran.
     expect(run.total).toBe(EVERY_FIXTURE_TEST);
-
-    const failed = (name: string): string => {
-      const a = run.byName.get(name);
-      expect(a?.status, name).toBe('failed');
-      const msg = a?.failureMessages.join('\n') ?? '';
-      expect(msg, name).toContain('mock*Once leak');
-      return msg;
-    };
-
-    // Module-scoped vi.fn.
-    let msg = failed('queues a once-value on the shared mock and never consumes it');
-    expect(msg).toContain('sharedModuleMock');
-    expect(msg).toMatch(sitePattern('leaks.fixture.ts', '<- leak'));
-
-    // vi.mock factory, statically imported.
-    msg = failed('arms a once-value on the factory mock without consuming it');
-    expect(msg).toMatch(sitePattern('viMockFactory.fixture.ts', '<- leak'));
-
-    // vi.mock factory first triggered INSIDE a test by a dynamic import.
-    msg = failed('arms a once-value on a lazily built factory mock without consuming it');
-    expect(msg).toMatch(sitePattern('viMockFactoryLazy.fixture.ts', '<- leak'));
-
-    // Bare automock: never passes through vi.fn.
-    msg = failed('arms a once-value on a bare automock without consuming it');
-    expect(msg).toMatch(sitePattern('automock.fixture.ts', '<- leak'));
-
-    // The async helpers, and "only the still-armed line is named".
-    msg = failed('queues mockResolvedValueOnce and never awaits it');
-    expect(msg).toMatch(sitePattern('leaksAsync.fixture.ts', '<- leak'));
-    msg = failed('queues mockRejectedValueOnce and never awaits it');
-    expect(msg).toMatch(new RegExp(`leaksAsync\\.fixture\\.ts:${fixtureLine('leaksAsync.fixture.ts', 'mockRejectedValueOnce(new Error')}:\\d+`));
-    msg = failed('queues two values and consumes only the first');
-    expect(msg).toMatch(new RegExp(`leaksAsync\\.fixture\\.ts:${fixtureLine('leaksAsync.fixture.ts', "mockReturnValueOnce('armed')")}:\\d+`));
-    expect(msg).not.toMatch(sitePattern('leaksAsync.fixture.ts', '<- consumed'));
-
-    for (const name of [
-      'the next test consumes the leftover and is not blamed',
-      'the next test consumes the lazy leftover and is not blamed',
-      'the next test consumes the automock leftover and is not blamed',
-      'queues two values and consumes both',
-      'queues via mockResolvedValueOnce and awaits it',
-      'queues, then mockReset drains the queue',
-      'a mock built inside the test may leave a once-value armed',
-      'beforeEach-built mocks may also leave a once-value armed',
-      'reuses a consumed once-implementation as the persistent one',
-    ]) {
-      expect(run.byName.get(name)?.status, name).toBe('passed');
-    }
+    expectGuarded(run);
   }, 150_000);
 
-  it('MOCK_ONCE_GUARD=off is honoured locally: the leaking fixtures pass and the child exits 0', () => {
+  it('every web config pins isolate: true — setup-file hooks, this guard included, only attach per file under isolation', () => {
+    // Under `--no-isolate` no hook registered by a setup file runs per test
+    // file (verified: the fixture run then fails only the fixture that fails
+    // on its own), so the guard's coverage rests on this setting.
+    for (const config of ['vitest.config.ts', 'vitest.config.node.ts', 'vitest.config.jsdom.ts']) {
+      const source = readFileSync(path.join(WEB_ROOT, config), 'utf8');
+      expect(source, config).toMatch(/^\s*isolate:\s*true,/m);
+    }
+  });
+
+  it('MOCK_ONCE_GUARD=off is honoured locally: the leaking fixtures pass and only the genuine failure remains', () => {
     const run = runFixtures({ MOCK_ONCE_GUARD: 'off', CI: undefined });
-    expect(run.status, `child vitest exit=${run.status}\n${run.stderr}`).toBe(0);
     expect(run.total).toBe(EVERY_FIXTURE_TEST);
     expect(run.byName.get('queues a once-value on the shared mock and never consumes it')?.status).toBe('passed');
     expect(run.byName.get('arms a once-value on a bare automock without consuming it')?.status).toBe('passed');
+    expect(run.byName.get('arms a once-value on a lazily built factory mock without consuming it')?.status).toBe('passed');
+    // The only red test is the one that fails for its own reason.
+    const red = [...run.byName.values()].filter((a) => a.status === 'failed').map((a) => a.fullName);
+    expect(red).toEqual(['fails on its own assertion after queueing a once-value']);
   }, 150_000);
 
   it('MOCK_ONCE_GUARD=off is ignored under CI: the leaking fixtures still fail', () => {

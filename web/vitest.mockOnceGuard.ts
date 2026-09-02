@@ -26,24 +26,29 @@
  * - Bare automocks — `vi.mock(path)` with no factory. Those never pass through
  *   `vi.fn`: the mocker builds them from `@vitest/spy`'s `createMockInstance`,
  *   read off the mocker's `spyModule` field at call time. That field is
- *   replaced with a copy whose `createMockInstance` registers what it makes.
- *   This is the repo's most common mocking shape (86 files bare-automock, 28
- *   of them also queue a `*Once` value); a first cut of this guard was blind
- *   to it while its documentation claimed otherwise.
+ *   replaced with a copy whose `createMockInstance` registers what it makes,
+ *   and the mocker's `mockObject` (module form) is wrapped like the factory
+ *   path so a lazily imported automock is module-scoped too. This is the
+ *   repo's most common mocking shape (86 files bare-automock, 28 of them also
+ *   queue a `*Once` value); a first cut of this guard was blind to it while
+ *   its documentation claimed otherwise.
  *
  * HOW DETECTION WORKS
  *
  * Each registered mock's `mockImplementationOnce` is wrapped to queue a fresh
  * per-call wrapper and record it with the test and the source line that
  * queued it. Every `*Once` helper delegates to `mockImplementationOnce`, so
- * the recorded functions are exactly what sits in the queue — and because
+ * the recorded wrappers are exactly what sits in the queue — and because
  * each wrapper is unique, a persistent implementation can never be mistaken
  * for an armed once-value, even when the same function object is used for
- * both.
+ * both. The wrapper is construct-aware (`new mock()` reaches the queued class
+ * or function through `Reflect.construct`), and `getMockImplementation()` is
+ * wrapped to hand back the function the test queued, never the wrapper, so
+ * the public surface a test can observe is unchanged.
  *
- * `getMockImplementation()` returns the HEAD of the once-queue while one is
- * pending and the persistent implementation otherwise (public API; no vitest
- * internals). So "the head is one of the wrappers we recorded" is precisely
+ * Internally the raw queue head is read instead: it is the HEAD of the
+ * once-queue while one is pending and the persistent implementation
+ * otherwise, so "the head is one of the wrappers we recorded" is precisely
  * "an unconsumed once-value is armed", and everything recorded from the head
  * onward is what is still armed. An `afterEach` fails the test that queued on
  * a mock it did not create, naming the mock and the queueing line(s) that are
@@ -58,6 +63,11 @@
  * - Values queued in an EARLIER test: that test was already failed for them.
  *   The queue is left as-is (the only public drain is `mockReset`, which
  *   would also drop the persistent implementation and break later tests).
+ * - Values queued OUTSIDE any test — at module scope, in `beforeAll` or
+ *   `afterAll`: there is no queueing test to fail, so they are never
+ *   reported, although they leak into every test that follows exactly like
+ *   the #9501 shape. No test in this repo does that today; if one appears,
+ *   the guard will not catch it.
  * - A test that already failed: its consuming call was probably never
  *   reached, so a second "leak" error would point at the wrong fix.
  *
@@ -65,6 +75,14 @@
  * consuming leaves the value armed, so its retry queues a second copy and
  * consumes only one — the retry then fails with THIS guard's message. The
  * original transient error is the one to chase in that case.
+ *
+ * The bookkeeping lives on `globalThis`, and `vi.fn` / the mocker are wrapped
+ * once per worker, so a setup file evaluated twice in one worker cannot
+ * double-wrap and make the queue head unrecognisable. The `afterEach` itself
+ * — like every hook in vitest.setup.ts, `restoreAllMocks` included — attaches
+ * to a test file only under `isolate: true`: with `--no-isolate` no setup-file
+ * hook runs per file and the guard is silent. All three web configs pin
+ * `isolate: true`, and the guard's own test pins that they do.
  *
  * `MOCK_ONCE_GUARD=off` disables the guard for a local run, e.g. while
  * bisecting. It is ignored under CI: a gate that one environment variable can
@@ -76,9 +94,15 @@ import type { Mock } from 'vitest';
 
 type AnyFn = (...args: never[]) => unknown;
 
+/** The unique closure queued in place of the function the test passed. */
+interface OnceWrapper {
+  (...args: never[]): unknown;
+  original: AnyFn;
+}
+
 interface QueuedEntry {
-  /** The unique wrapper actually sitting in the once-queue. */
-  fn: AnyFn;
+  /** The wrapper actually sitting in the once-queue. */
+  fn: OnceWrapper;
   /** Test that queued it (undefined when queued at module scope). */
   test: string | undefined;
   /** `file:line:col` of the queueing call, outside node_modules. */
@@ -89,6 +113,8 @@ interface TrackedMock {
   mock: Mock;
   createdIn: string | undefined;
   entries: QueuedEntry[];
+  /** The unwrapped `getMockImplementation`: the raw queue head. */
+  rawHead: () => AnyFn | undefined;
 }
 
 /** Minimal shape of vitest's mocker, reached through `globalThis.__vitest_mocker__`. */
@@ -101,14 +127,31 @@ export interface MockerLike {
   mockObject?: (...args: unknown[]) => unknown;
 }
 
+interface GuardState {
+  tracked: TrackedMock[];
+  seen: WeakSet<Mock>;
+  wrappers: WeakSet<AnyFn>;
+  /** > 0 while the mocker is building a module mock (factory or automock). */
+  moduleMockDepth: number;
+  /** `vi.fn` and the mocker are wrapped once per worker. */
+  installed: boolean;
+}
+
 const OFF_REQUESTED = process.env.MOCK_ONCE_GUARD === 'off';
 const UNDER_CI = process.env.CI !== undefined && process.env.CI !== '';
 export const ENABLED = !OFF_REQUESTED || UNDER_CI;
 
-const tracked: TrackedMock[] = [];
-const seen = new WeakSet<Mock>();
-/** > 0 while the mocker is building a module mock (factory or automock). */
-let moduleMockDepth = 0;
+const STATE_KEY = '__spawnforgeMockOnceGuard__';
+const globalWithState = globalThis as typeof globalThis & { [STATE_KEY]?: GuardState };
+const state: GuardState =
+  globalWithState[STATE_KEY] ??
+  (globalWithState[STATE_KEY] = {
+    tracked: [],
+    seen: new WeakSet(),
+    wrappers: new WeakSet(),
+    moduleMockDepth: 0,
+    installed: false,
+  });
 
 function currentTest(): string | undefined {
   try {
@@ -127,8 +170,10 @@ export function captureSite(stack: string | undefined = new Error().stack): stri
     const line = raw.trim();
     if (!line.startsWith('at ')) continue;
     if (line.includes('node_modules') || line.includes(GUARD_FILE)) continue;
-    // Both V8 frame shapes: `at fn (/path:1:2)` and `at /path:1:2`.
-    const m = /((?:[A-Za-z]:)?[^\s():]+):(\d+):(\d+)\)?$/.exec(line);
+    // Both V8 frame shapes: `at fn (/path:1:2)` and `at /path:1:2`. The path
+    // is everything up to the trailing `:line:col`, so a directory with a
+    // space in it (`C:\Users\First Last\...`) survives intact.
+    const m = /^at (?:.*? \()?(.+?):(\d+):(\d+)\)?$/.exec(line);
     if (m) return `${m[1]}:${m[2]}:${m[3]}`;
   }
   return '<unknown>';
@@ -139,12 +184,14 @@ export function captureSite(stack: string | undefined = new Error().stack): stri
  * automock) or outside any test; otherwise owned by the test that built it.
  */
 export function track(mock: Mock): void {
-  if (seen.has(mock)) return;
-  seen.add(mock);
+  if (state.seen.has(mock)) return;
+  state.seen.add(mock);
+  const rawHead = mock.getMockImplementation.bind(mock) as () => AnyFn | undefined;
   const rec: TrackedMock = {
     mock,
-    createdIn: moduleMockDepth > 0 ? undefined : currentTest(),
+    createdIn: state.moduleMockDepth > 0 ? undefined : currentTest(),
     entries: [],
+    rawHead,
   };
   const original = {
     once: mock.mockImplementationOnce.bind(mock) as (fn: AnyFn) => Mock,
@@ -156,13 +203,23 @@ export function track(mock: Mock): void {
   };
   mock.mockImplementationOnce = ((fn: AnyFn) => {
     // A fresh wrapper per call: unique identity, so the queue head can never
-    // equal a user-supplied persistent implementation.
-    const wrapper = function (this: unknown, ...args: never[]) {
-      return (fn as (...a: never[]) => unknown).apply(this, args);
-    } as AnyFn;
+    // equal a user-supplied persistent implementation. Construct-aware, so a
+    // class (or `function`) once-implementation still answers `new mock()`.
+    const wrapper = function (this: unknown, ...args: unknown[]) {
+      return new.target
+        ? Reflect.construct(fn as unknown as new (...a: unknown[]) => unknown, args, new.target)
+        : (fn as unknown as (...a: unknown[]) => unknown).apply(this, args);
+    } as unknown as OnceWrapper;
+    wrapper.original = fn;
+    state.wrappers.add(wrapper);
     rec.entries.push({ fn: wrapper, test: currentTest(), site: captureSite() });
     return original.once(wrapper);
   }) as Mock['mockImplementationOnce'];
+  // Tests see what they queued, never the wrapper.
+  mock.getMockImplementation = (() => {
+    const head = rawHead();
+    return head && state.wrappers.has(head) ? (head as OnceWrapper).original : head;
+  }) as Mock['getMockImplementation'];
   mock.mockReset = (() => {
     forget();
     return original.reset();
@@ -171,7 +228,7 @@ export function track(mock: Mock): void {
     forget();
     return original.restore();
   }) as Mock['mockRestore'];
-  tracked.push(rec);
+  state.tracked.push(rec);
 }
 
 export interface Leak {
@@ -186,9 +243,9 @@ export interface Leak {
  */
 export function findLeaks(test: string | undefined): Leak[] {
   const leaks: Leak[] = [];
-  for (const rec of tracked) {
+  for (const rec of state.tracked) {
     if (rec.createdIn !== undefined && rec.createdIn === test) continue;
-    const head = rec.mock.getMockImplementation() as AnyFn | undefined;
+    const head = rec.rawHead();
     const headIndex = head ? rec.entries.findIndex((e) => e.fn === head) : -1;
     if (headIndex < 0) {
       // Drained (or reset): nothing armed. Forget the bookkeeping so a later
@@ -266,11 +323,11 @@ export function hookMocker(mocker: MockerLike | undefined): boolean {
   const callFunctionMock = mocker.callFunctionMock;
   if (typeof callFunctionMock === 'function') {
     mocker.callFunctionMock = async function guardedCallFunctionMock(this: unknown, ...args: unknown[]) {
-      moduleMockDepth += 1;
+      state.moduleMockDepth += 1;
       try {
         return await callFunctionMock.apply(this, args);
       } finally {
-        moduleMockDepth -= 1;
+        state.moduleMockDepth -= 1;
       }
     };
   }
@@ -281,11 +338,11 @@ export function hookMocker(mocker: MockerLike | undefined): boolean {
       // `vi.mockObject(value)` inside a test passes undefined and is owned by
       // that test like any other in-test mock.
       const isModuleMock = args.length >= 2 && args[1] !== undefined;
-      if (isModuleMock) moduleMockDepth += 1;
+      if (isModuleMock) state.moduleMockDepth += 1;
       try {
         return mockObject.apply(this, args);
       } finally {
-        if (isModuleMock) moduleMockDepth -= 1;
+        if (isModuleMock) state.moduleMockDepth -= 1;
       }
     };
   }
@@ -297,15 +354,18 @@ if (OFF_REQUESTED && UNDER_CI) {
 }
 
 if (ENABLED) {
-  const originalFn = vi.fn;
-  vi.fn = function guardedFn(this: unknown, ...args: unknown[]) {
-    const mock = (originalFn as unknown as (...a: unknown[]) => Mock).apply(this, args);
-    track(mock);
-    return mock;
-  } as typeof vi.fn;
+  if (!state.installed) {
+    state.installed = true;
+    const originalFn = vi.fn;
+    vi.fn = function guardedFn(this: unknown, ...args: unknown[]) {
+      const mock = (originalFn as unknown as (...a: unknown[]) => Mock).apply(this, args);
+      track(mock);
+      return mock;
+    } as typeof vi.fn;
+    hookMocker((globalThis as { __vitest_mocker__?: MockerLike }).__vitest_mocker__);
+  }
 
-  hookMocker((globalThis as { __vitest_mocker__?: MockerLike }).__vitest_mocker__);
-
+  // Registered on every evaluation: hooks belong to the file being collected.
   afterEach((ctx) => {
     if (ctx.task.result?.state === 'fail') return;
     const test = currentTest();
