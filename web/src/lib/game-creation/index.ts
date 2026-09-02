@@ -14,6 +14,12 @@ export type { PipelineCallbacks } from './pipelineRunner';
 export { SYSTEM_REGISTRY, registerSystem } from './systems';
 export type { SystemStepInput, SystemDefinition } from './systems';
 export { EXECUTOR_REGISTRY, registerExecutor } from './executors';
+// The closed per-entity behaviour vocabulary (PF-1114). Exported here because
+// anything that constructs or validates a GDD outside this directory needs the
+// same enum the decomposition schema uses -- a second hand-written copy of the
+// verb list is how the two stop agreeing.
+export { BEHAVIOR_VOCAB, BEHAVIOR_PLANS, zBehavior, isBehavior } from './behaviorVocabulary';
+export type { Behavior, BehaviorPlan } from './behaviorVocabulary';
 export type {
   OrchestratorGDD,
   OrchestratorPlan,

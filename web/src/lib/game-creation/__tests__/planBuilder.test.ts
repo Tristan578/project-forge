@@ -1568,7 +1568,8 @@ describe('buildPlan — per-entity behaviour (PF-1114)', () => {
     expect(follower.dependsOn).toContain(enable[0].id);
     // `runPipeline` executes in ARRAY ORDER and dependsOn only gates, so array
     // position is the real ordering.
-    expect(plan.steps.indexOf(follower)).toBeGreaterThan(plan.steps.indexOf(enable[0]));
+    const positionOf = (id: string) => plan.steps.findIndex(step => step.id === id);
+    expect(positionOf(follower.id)).toBeGreaterThan(positionOf(enable[0].id));
   });
 
   it('costs nothing — a template is not a generated script', () => {
