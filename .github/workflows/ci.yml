@@ -1160,6 +1160,17 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      # Renders /dev and exposes the editor stores. Without it this job could
+      # only run specs that never open the editor -- 91 of 422 tests, all
+      # public pages and API routes -- while reading as an application gate
+      # (#9586). The same flag the journey gate already builds with.
+      #
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -1220,19 +1231,22 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: web/.next/cache
-          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
           restore-keys: |
-            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
 
       - name: Build for E2E
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          # Renders /dev and exposes the editor stores. Without it this job could
-          # only run specs that never open the editor -- 91 of 422 tests, all
-          # public pages and API routes -- while reading as an application gate
-          # (#9586). The same flag the journey gate already builds with.
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run UI-only E2E tests (shard ${{ matrix.shard }})
@@ -1284,6 +1298,12 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1338,15 +1358,22 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: web/.next/cache
-          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
           restore-keys: |
-            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
 
       - name: Build for journey E2E (stores exposed)
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run strict interactive-journey gate
@@ -1396,6 +1423,20 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+    env:
+      # The @engine-smoke fixture loads /dev, which renders the editor ONLY
+      # when e2eHooksEnabled() is true. NEXT_PUBLIC_E2E_HOOKS is build-time
+      # inlined (Next.js), so a production `next build` without it leaves the
+      # flag off: /dev then redirects to /sign-in, whose <SignIn> calls
+      # useSession with no <ClerkProvider> in this Clerk-less CI env, throws,
+      # and the engine never boots (__FORGE_ENGINE_READY times out). Mirror
+      # the strict @ui journey gate and build with the flag so /dev renders.
+      #
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1528,22 +1569,22 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: web/.next/cache
-          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
           restore-keys: |
-            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
 
       - name: Build for engine-smoke E2E
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          # The @engine-smoke fixture loads /dev, which renders the editor ONLY
-          # when e2eHooksEnabled() is true. NEXT_PUBLIC_E2E_HOOKS is build-time
-          # inlined (Next.js), so a production `next build` without it leaves the
-          # flag off: /dev then redirects to /sign-in, whose <SignIn> calls
-          # useSession with no <ClerkProvider> in this Clerk-less CI env, throws,
-          # and the engine never boots (__FORGE_ENGINE_READY times out). Mirror
-          # the strict @ui journey gate and build with the flag so /dev renders.
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       # Runs the curated @engine-smoke set (two specs — see the job comment
