@@ -3,7 +3,7 @@ import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../typ
 import { zBehavior, BEHAVIOR_PLANS } from '../behaviorVocabulary';
 import { buildBehaviorScript } from '@/lib/scripting/scriptTemplates';
 import { makeStepError, successResult, failResult } from './shared';
-import { sendCommands } from './engineDispatch';
+import { sendCommands, engineEntityId } from './engineDispatch';
 
 /**
  * Attaches a HAND-WRITTEN behaviour template to an entity (PF-1114).
@@ -33,29 +33,23 @@ import { sendCommands } from './engineDispatch';
  */
 
 /**
- * The engine addresses entities by their `EntityId` component and emits nothing
- * when nothing matches, so a malformed id is a silent no-op rather than an
- * error. Same guard as `gameComponentExecutor`, for the same reason.
+ * The engine's OWN id rule, shared rather than restated.
+ *
+ * `engineEntityId` mirrors `is_valid_override_id` in core/entity_factory.rs
+ * byte-for-byte. That matters here because an id the engine refuses is not an
+ * error there — it silently falls back to a random UUID, so a `set_script`
+ * carrying one attaches to nothing and reports success.
  */
-const zEntityId = z
-  .string()
-  .trim()
-  .min(1)
-  .max(64)
-  .refine(id => !/[\u0000-\u001F\u007F]/.test(id), {
-    message: 'entityId contains control characters',
-  });
-
 const inputSchema = z.object({
   behavior: zBehavior,
-  entityId: zEntityId,
+  entityId: engineEntityId,
   /**
    * The entity this behaviour reacts to. Nullable rather than optional: a
    * behaviour whose plan says `needsTarget` is dropped at plan time when there
    * is nothing to target, so a null arriving here means the plan explicitly
    * decided this behaviour needs no target.
    */
-  targetEntityId: zEntityId.nullable().default(null),
+  targetEntityId: engineEntityId.nullable().default(null),
   projectType: z.enum(['2d', '3d']),
 });
 
