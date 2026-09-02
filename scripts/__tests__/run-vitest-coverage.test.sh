@@ -26,6 +26,7 @@ EOF
   cat >"$dir/npx" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$PWD" >"${COVERAGE_CWD_FILE:?}"
+printf '%s\n' "${NODE_OPTIONS-<unset>}" >"${COVERAGE_NODE_OPTIONS_FILE:?}"
 printf '%s\n' "${COVERAGE_OUTPUT:-}"
 exit "${COVERAGE_EXIT:-0}"
 EOF
@@ -41,6 +42,7 @@ run_fixture() {
     cd "$fixture/caller" || exit 1
     TMPDIR="$fixture/tmp" COVERAGE_ARGS_FILE="$fixture/args" \
       COVERAGE_CWD_FILE="$fixture/cwd" COVERAGE_OUTPUT="$output" \
+      COVERAGE_NODE_OPTIONS_FILE="$fixture/node_options" \
       COVERAGE_EXIT="$code" PATH="$fixture/bin:$PATH" bash "$RUNNER"
   ) 2>&1
 }
@@ -62,6 +64,15 @@ if [ "$(cat "$TEST_ROOT/passing/args")" = "600 npx vitest run --coverage" ]; the
   pass "runner uses the exact bounded Vitest command"
 else
   fail "runner arguments drifted: $(cat "$TEST_ROOT/passing/args")"
+fi
+# The flag has to reach the Vitest process, not merely appear in the script, and
+# it has to arrive as an environment variable so the pinned argv above is
+# untouched. Asserting on what the child actually saw is the only form of this
+# check that can fail.
+if [ "$(cat "$TEST_ROOT/passing/node_options")" = "--no-experimental-webstorage" ]; then
+  pass "runner exports NODE_OPTIONS to the Vitest process"
+else
+  fail "NODE_OPTIONS reached Vitest as: $(cat "$TEST_ROOT/passing/node_options")"
 fi
 if find "$TEST_ROOT/passing/tmp" -type f -print -quit | grep -q .; then
   fail "temporary output file survived runner exit"

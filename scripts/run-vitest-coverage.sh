@@ -27,6 +27,11 @@ OUTPUT_FILE="$(mktemp)" || {
 }
 trap 'rm -f "$OUTPUT_FILE"' EXIT
 
-timeout 600 npx vitest run --coverage 2>&1 | tee "$OUTPUT_FILE"
+# NODE_OPTIONS matches every other local test script in web/package.json. It is
+# an environment assignment, not an argument, so the bounded command line stays
+# exactly `timeout 600 npx vitest run --coverage` — the form the CI coverage
+# invocations use and the form run-vitest-coverage.test.sh pins.
+NODE_OPTIONS='--no-experimental-webstorage' \
+  timeout 600 npx vitest run --coverage 2>&1 | tee "$OUTPUT_FILE"
 EXIT_CODE=${PIPESTATUS[0]}
 bash "$SCRIPT_DIR/check-vitest-exit.sh" "$EXIT_CODE" "$OUTPUT_FILE" --coverage
