@@ -250,7 +250,7 @@ reproduces the bug on the next unrelated PR.
 **Ticket:** #9621
 
 ### 14. A mocked transport test pins whatever contract you believed, right or wrong
-**Applies:** upstash|rateLimit/distributed|healthChecks|mockFetch
+**Applies:** upstash|rateLimit/distributed|healthChecks|responseCache
 **What happens:** A unit test asserts the exact URL and body the code sends,
 passes for four months, and the provider has been refusing every one of those
 requests with 400 the whole time. Here: `distributedRateLimit` posted its Lua

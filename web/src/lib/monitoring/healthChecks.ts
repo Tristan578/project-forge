@@ -35,7 +35,7 @@ import {
 } from '@/lib/config/providers';
 import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
 import { HEALTH_CACHE_TTL_MS, UPSTASH_REST_TIMEOUT_MS } from '@/lib/config/timeouts';
-import { postUpstashCommand } from '@/lib/upstash/restCommand';
+import { isUpstashConfigured, postUpstashCommand } from '@/lib/upstash/restCommand';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
@@ -205,10 +205,7 @@ export async function checkPayments(): Promise<ServiceHealth> {
 }
 
 export async function checkRateLimiting(): Promise<ServiceHealth> {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-  if (!url || !token) {
+  if (!isUpstashConfigured()) {
     return {
       name: 'Rate Limiting (Upstash)',
       status: 'degraded',
