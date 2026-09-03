@@ -120,13 +120,33 @@
 
 ## Rollback Procedure
 
-Vercel provides instant rollback to any previous deployment.
+Vercel provides Instant Rollback to any deployment that has served production.
+Under Rolling Releases, **"Promote to Production" is not a rollback**: a promote
+of the old build starts a staged rollout of it, or is a silent no-op while a
+rollout is active — neither reverts traffic.
 
 **Steps:**
-1. Go to Vercel dashboard > Deployments
-2. Find the last known-good deployment
-3. Click "..." menu > "Promote to Production"
-4. Verify the rollback resolved the issue
+1. Identify the build that is live and the last known-good one. The Deployments
+   list cannot tell you which deployment serves production (`vercel ls` prints
+   `● Ready` for every row):
+   ```bash
+   curl -s https://www.spawnforge.ai/api/health | jq .commit   # what is live
+   vercel rolling-release fetch --scope tnolan --cwd web       # currentDeployment = the base while a rollout is active
+   gh run list --workflow=cd.yml --limit=3                     # the last run logged `Last-known-good production URL:`
+   ```
+2. Roll back with Instant Rollback — one of:
+   - Vercel dashboard > Deployments > `⋮` on the last known-good deployment > **Instant Rollback**
+   - `vercel rollback <last-good-deployment-url> --yes --scope tnolan`
+   - `gh workflow run cd.yml -f rollback_production=<last-good-deployment-url>`
+3. Verify the rollback is live: `curl -s https://www.spawnforge.ai/api/health | jq .commit`
+   must equal the restored deployment's commit (a status code says nothing about
+   which build answered).
+4. Undo the rollback once a fix is ready. Instant Rollback turns **auto-assignment
+   of production domains off**: pushes to `main` do not go live by themselves until
+   a rolling release completes. CD's `ensure-canary` step starts its rollout
+   explicitly; if that run reports it could not become the canary, run
+   `vercel promote <fixed-deployment-url> --scope tnolan`
+   (vercel.com/docs/instant-rollback#undo-a-rollback).
 5. If the issue is in WASM (not web):
    - WASM is served from CDN, not Vercel -- rollback will not help
    - Re-upload previous WASM build using `/deploy-engine` skill

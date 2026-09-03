@@ -85,7 +85,7 @@ Neon branching allows restoring to any point within the retention window by crea
 |------|-----------|-----------|
 | PITR branch creation | Monthly (automated, `pitr-verify.yml`) | Create a Neon branch from the oldest point still inside the plan's PITR retention window (6h today), verify data integrity, drop branch |
 | WASM rebuild from source | Quarterly | Run `build_wasm.ps1`, verify all 4 variants build successfully |
-| Vercel rollback | Quarterly | Promote a previous deployment, verify functionality, re-promote current |
+| Vercel rollback | Quarterly | Instant Rollback (`vercel rollback <previous-url> --yes`) to a previous deployment, verify `/api/health` reports its commit, then undo the rollback with `vercel promote <current-url>`. A promote is NOT a rollback under Rolling Releases, and Instant Rollback turns domain auto-assignment off until undone |
 | Full DR drill | Annually | Simulate complete DB failure, execute PITR, verify RTO < 4 hours |
 
 ## Monitoring Backup Health
