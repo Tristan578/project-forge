@@ -566,3 +566,101 @@ fn physics2d_writers_are_ordered_after_the_mode_restore() {
          that joins the set, or the mode-restore ordering does not apply to it.",
     );
 }
+
+/// The three 2D **joint** appliers must carry `Physics2dWriteSet` membership.
+///
+/// Sibling to `physics2d_writers_are_ordered_after_the_mode_restore` rather than
+/// an extension of it: that test's roster is deliberately scoped to the systems
+/// writing `Physics2dData`/`Physics2dEnabled` ("the joint/force/raycast 2D
+/// systems are deliberately NOT here"), and it pins the literal
+/// `".chain().in_set(Physics2dWriteSet)"` — which matches ONLY the physics2d
+/// toggle/update pair. The joint2d tuple joins the same set with a bare
+/// `.in_set(Physics2dWriteSet)` and no `.chain()`, so deleting the set from that
+/// tuple failed nothing. It must not: `apply_mode_change_requests` inserts and
+/// removes `PhysicsJoint2d` on a Play->Edit restore, so an unordered joint
+/// applier re-opens exactly the race #9550 closed — and
+/// `apply_update_joint2d_requests` loses that race SILENTLY, because it reads
+/// `Query<&mut PhysicsJoint2d>` directly and simply matches nothing.
+///
+/// The roster is DERIVED from `bridge/physics.rs` by function NAME, not by
+/// which component a body mentions: `apply_create_joint2d_requests` inserts
+/// `request.joint_data.clone()` and never names `PhysicsJoint2d` at all, so a
+/// body scan would find two of the three and report the third as absent rather
+/// than unregistered.
+#[test]
+fn joint2d_appliers_carry_the_physics2d_write_set() {
+    let physics_src = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bridge/physics.rs");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+    };
+
+    let mut appliers: Vec<String> = Vec::new();
+    for line in physics_src.lines() {
+        let trimmed = line.trim_start();
+        let after_vis = trimmed
+            .strip_prefix("pub(super) ")
+            .or_else(|| trimmed.strip_prefix("pub "))
+            .unwrap_or(trimmed);
+        if let Some(rest) = after_vis.strip_prefix("fn ") {
+            if let Some(name) = rest.split('(').next().map(|n| n.trim().to_string()) {
+                if name.starts_with("apply_") && name.contains("joint2d") {
+                    if !appliers.contains(&name) {
+                        appliers.push(name);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fail closed. Create/update/remove exist today; finding fewer means the scan
+    // broke, not that the hazard went away — and an empty roster would make the
+    // loop below assert nothing at all (lesson #9).
+    assert!(
+        appliers.len() >= 3,
+        "found only {} `apply_*joint2d*` system(s) in bridge/physics.rs — the scan is \
+         broken, not the code. Found: {appliers:?}",
+        appliers.len(),
+    );
+
+    // Membership is computed from the source, not asserted as a literal, because
+    // the joint2d tuple carries no `.chain()` for a literal to key on. Comments
+    // are stripped FIRST: bridge/mod.rs explains this very set in prose directly
+    // above the registration, so an unstripped scan sees `.in_set(Physics2dWriteSet)`
+    // in a comment and reports every neighbouring registration as a member.
+    let bridge_code: String = BRIDGE_SRC
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let members: String = bridge_code
+        .split(".add_systems(")
+        .filter(|chunk| chunk.contains(".in_set(Physics2dWriteSet)"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !members.is_empty(),
+        "no `add_systems` registration in bridge/mod.rs carries \
+         `.in_set(Physics2dWriteSet)` once comments are stripped — either the set is \
+         gone entirely or this scan no longer matches the registration syntax.",
+    );
+
+    for name in &appliers {
+        assert!(
+            BRIDGE_SRC.contains(name),
+            "`{name}` applies 2D joint commands but is not registered in bridge/mod.rs \
+             at all.",
+        );
+        assert!(
+            members.contains(name),
+            "`{name}` is registered in bridge/mod.rs OUTSIDE any group carrying \
+             `.in_set(Physics2dWriteSet)`, so the `Physics2dWriteSet.after(ModeRestoreSet)` \
+             edge does not apply to it. It writes `PhysicsJoint2d`, which \
+             `apply_mode_change_requests` inserts and removes on a Play->Edit restore, so \
+             a Stop landing in the same frame as a 2D joint command resolves by \
+             topological accident. 2D joint systems found: {appliers:?}.",
+        );
+    }
+}
