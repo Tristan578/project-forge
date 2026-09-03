@@ -16,9 +16,57 @@
  *
  * @tags @smoke @production
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 
 const PROD_URL = process.env.PRODUCTION_URL || 'https://www.spawnforge.ai';
+
+/**
+ * Rolling Releases serve two builds behind the public domain at once. With
+ * SMOKE_FORCE_CANARY=true every request is pinned to the canary — the build CD
+ * just made — via Vercel's documented `vcrrForceCanary` query parameter, which
+ * answers with the `_vcrr_*` cookie; the cookie is carried into both the API
+ * request context and the browser context so all later requests stay pinned.
+ * Without this, the suite exercised whichever build the 95% base bucket served,
+ * i.e. the PREVIOUS deploy (#9624).
+ */
+const FORCE_CANARY = process.env.SMOKE_FORCE_CANARY === 'true';
+/** First 8 chars of the commit /api/health must report; CD passes github.sha. */
+const EXPECT_COMMIT = (process.env.SMOKE_EXPECT_COMMIT || '').slice(0, 8);
+
+/** Cookies from the canary seed, added to the one browser context that needs them. */
+let canaryCookies: Awaited<ReturnType<APIRequestContext['storageState']>>['cookies'] = [];
+
+// Only the `request` fixture here: asking for `page` would launch a browser
+// for every request-only test. The single browser test adds the cookies to
+// its own context below.
+test.beforeEach(async ({ request }) => {
+  canaryCookies = [];
+  if (!FORCE_CANARY) return;
+  const seed = await request.get(`${PROD_URL}/api/health?vcrrForceCanary=true`);
+  expect(seed.status(), 'canary seed request must succeed').toBe(200);
+  const { cookies } = await request.storageState();
+  if (!cookies.some((c) => c.name.startsWith('_vcrr_'))) {
+    // CD set SMOKE_FORCE_CANARY because ensure-canary saw an ACTIVE rollout
+    // minutes ago; it can have resolved since (auto-advanced to 100%,
+    // completed or aborted by hand, or superseded by a later merge), and
+    // Vercel then sets no cookie. The cookie was only ever the vehicle — the
+    // commit assertion below is the proof — so let that decide.
+    console.warn('SMOKE_FORCE_CANARY is set but Vercel set no _vcrr_ cookie: no rollout is active; the commit assertion decides');
+  }
+  canaryCookies = cookies;
+});
+
+test.describe('Deployment identity @smoke @production', () => {
+  test('health endpoint reports the commit this run deployed', async ({ request }) => {
+    test.skip(!EXPECT_COMMIT, 'SMOKE_EXPECT_COMMIT is only set by CD; a manual run has no expected commit');
+    const res = await request.get(`${PROD_URL}/api/health`);
+    expect(res.status()).toBe(200);
+    const data = (await res.json()) as { commit?: string };
+    // Anything else means the suite is grading a different build than the one
+    // this run deployed — the base, or a newer canary.
+    expect((data.commit ?? '').slice(0, 8), `health reports ${data.commit}, expected ${EXPECT_COMMIT}`).toBe(EXPECT_COMMIT);
+  });
+});
 
 test.describe('Production Smoke Tests @smoke @production', () => {
   test('landing page loads with 200', async ({ request }) => {
@@ -57,6 +105,7 @@ test.describe('Production Smoke Tests @smoke @production', () => {
       }
     });
 
+    if (canaryCookies.length > 0) await page.context().addCookies(canaryCookies);
     await page.goto(`${PROD_URL}/sign-in`, { waitUntil: 'networkidle' });
 
     // Page must not be blank — body must have visible content
