@@ -153,15 +153,63 @@ cd "$TARGET" || { echo "::error::could not cd to $TARGET"; exit 2; }
 # npm failure (no lockfile, registry down) yields no parseable JSON and is caught
 # by the validation below as a fail-closed.
 AUDIT_CMD="${NPM_AUDIT_CMD:-npm audit --json}"
-audit_json="$(eval "$AUDIT_CMD" 2>/dev/null)"
 
-if [ -z "$audit_json" ] || ! jq -e . >/dev/null 2>&1 <<<"$audit_json"; then
-  echo "::error::npm audit produced no parseable JSON in $WORKSPACE — failing closed"
-  exit 2
-fi
-report_version="$(jq -r '.auditReportVersion // empty' <<<"$audit_json")"
-if [ "$report_version" != "2" ]; then
-  echo "::error::npm audit output is not a recognized audit report (auditReportVersion '${report_version:-absent}' != 2) — failing closed"
+# A registry hiccup makes `npm audit` emit its own error JSON (or nothing) on
+# stdout, which lands in the same fail-closed branch as a genuinely broken
+# invocation. Two things follow, and both are fixes to a gate that used to be
+# undiagnosable:
+#
+#   1. RETRY. Transport failures are worth one or two more attempts; an actual
+#      advisory result is not, so only the unparseable / not-a-v2-report cases
+#      loop. After the last attempt the gate still fails CLOSED — the retry
+#      shortens an outage, it never converts one into a pass.
+#   2. SURFACE npm's stderr. It used to go to /dev/null, so an operator saw
+#      "auditReportVersion 'absent'" with no cause and nothing to act on
+#      (observed on #9670 and on main: an exactly-5-minute run, then 'absent').
+#
+# Attempts and backoff are overridable so the test suite runs without sleeping.
+audit_attempts="${NPM_AUDIT_ATTEMPTS:-3}"
+audit_retry_delay="${NPM_AUDIT_RETRY_DELAY:-5}"
+audit_err_file="$(mktemp -t npm-audit-stderr.XXXXXX)"
+trap 'rm -f "$audit_err_file"' EXIT
+
+audit_json=""
+audit_failure=""
+report_version=""
+attempt=1
+while [ "$attempt" -le "$audit_attempts" ]; do
+  : > "$audit_err_file"
+  audit_json="$(eval "$AUDIT_CMD" 2>"$audit_err_file")"
+
+  if [ -z "$audit_json" ] || ! jq -e . >/dev/null 2>&1 <<<"$audit_json"; then
+    audit_failure="npm audit produced no parseable JSON in $WORKSPACE"
+  else
+    report_version="$(jq -r '.auditReportVersion // empty' <<<"$audit_json")"
+    if [ "$report_version" != "2" ]; then
+      audit_failure="npm audit output is not a recognized audit report (auditReportVersion '${report_version:-absent}' != 2)"
+    else
+      audit_failure=""
+      break
+    fi
+  fi
+
+  if [ "$attempt" -lt "$audit_attempts" ]; then
+    echo "::warning::${audit_failure} — attempt ${attempt}/${audit_attempts}, retrying in ${audit_retry_delay}s"
+    [ "$audit_retry_delay" -gt 0 ] && sleep "$audit_retry_delay"
+    audit_retry_delay=$((audit_retry_delay * 2))
+  fi
+  attempt=$((attempt + 1))
+done
+
+if [ -n "$audit_failure" ]; then
+  if [ -s "$audit_err_file" ]; then
+    echo "::group::npm audit stderr (last attempt)"
+    tail -n 40 "$audit_err_file"
+    echo "::endgroup::"
+  else
+    echo "npm audit wrote nothing to stderr on the last attempt."
+  fi
+  echo "::error::${audit_failure} after ${audit_attempts} attempt(s) — failing closed"
   exit 2
 fi
 
