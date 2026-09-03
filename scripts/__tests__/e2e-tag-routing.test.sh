@@ -59,6 +59,8 @@ fi
 echo ""
 echo "=== the real Upstash probe must use only CI-scoped credentials ==="
 
+# GitHub expressions are literal fixture text here; single quotes deliberately prevent shell expansion.
+# shellcheck disable=SC2016
 if grep -qF 'UPSTASH_REDIS_REST_URL: ${{ secrets.CI_UPSTASH_REDIS_REST_URL }}' <<<"$ui_job" \
    && grep -qF 'UPSTASH_REDIS_REST_TOKEN: ${{ secrets.CI_UPSTASH_REDIS_REST_TOKEN }}' <<<"$ui_job"; then
   pass "the @ui job maps both CI-scoped Upstash secrets to the runtime names"
