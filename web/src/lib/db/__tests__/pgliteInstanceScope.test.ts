@@ -103,6 +103,35 @@ function importsPgliteHarness(file: string, lines: string[]): boolean {
  * `null` — a false failure on fully compliant code. Pinned by the
  * `enclosingHook` suite below.
  */
+/**
+ * The hook whose call opens `opener`, i.e. the LAST hook call in it.
+ *
+ * `HOOK_NAMES.find(...)` resolved by list order instead, so a line carrying two
+ * hook calls — `beforeAll(seed); afterEach(async () => {` — was credited to
+ * whichever name `HOOK_NAMES` happens to list first, not the one that actually
+ * opens the brace. That misattributes the boot to a compliant hook and the
+ * scanner reports a pass on a per-test boot. Pinned by the `nearestHookCall`
+ * cases in the `enclosingHook` suite below.
+ */
+function nearestHookCall(opener: string): string | null {
+  let best: string | null = null;
+  let bestAt = -1;
+  for (const name of HOOK_NAMES) {
+    const re = new RegExp(`\\b${name}\\s*\\(`, 'g');
+    let last = -1;
+    let m: RegExpExecArray | null = re.exec(opener);
+    while (m !== null) {
+      last = m.index;
+      m = re.exec(opener);
+    }
+    if (last > bestAt) {
+      bestAt = last;
+      best = name;
+    }
+  }
+  return best;
+}
+
 export function enclosingHook(lines: string[], lineIndex: number, column: number): string | null {
   let balance = 0;
   for (let i = lineIndex; i >= 0; i -= 1) {
@@ -114,7 +143,7 @@ export function enclosingHook(lines: string[], lineIndex: number, column: number
         balance -= 1;
         if (balance < 0) {
           const opener = line.slice(0, c);
-          const hook = HOOK_NAMES.find(name => new RegExp(`\\b${name}\\s*\\(`).test(opener));
+          const hook = nearestHookCall(opener);
           if (hook) return hook;
           balance = 0; // Keep climbing past a non-hook block.
         }
@@ -246,5 +275,21 @@ describe('enclosingHook', () => {
   it('returns null at describe scope', () => {
     const lines = ['describe("x", () => {', '  const harness = createTestHarness();', '});'];
     expect(enclosingHook(lines, 1, columnOf(lines[1]))).toBeNull();
+  });
+
+  it('credits the hook that actually opens the brace, not the first one listed', () => {
+    // `beforeAll` is listed before `afterEach` in HOOK_NAMES, so a scan that
+    // resolves by list order reports `beforeAll` here — a per-test boot wearing
+    // a compliant hook's name.
+    const lines = ['  beforeAll(seed); afterEach(async () => { harness = await createTestHarness(); });'];
+    expect(enclosingHook(lines, 0, columnOf(lines[0]))).toBe('afterEach');
+  });
+
+  it('does not over-correct to the LAST hook name in the list', () => {
+    // Guards the fix's other direction: this case already passed before the
+    // fix, and fails on a naive "pick whichever name sorts last in HOOK_NAMES"
+    // repair. Proximity is the rule, not list position in either direction.
+    const lines = ['  afterEach(cleanup); beforeAll(async () => { harness = await createTestHarness(); });'];
+    expect(enclosingHook(lines, 0, columnOf(lines[0]))).toBe('beforeAll');
   });
 });
