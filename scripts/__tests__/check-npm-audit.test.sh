@@ -3062,7 +3062,7 @@ OUTPUTS_EOF
   else
     assert_step_level_keys "$lst_shck_blk" "self-defense shellcheck step" '      - name
         run
-          shellcheck \
+          shellcheck -x \
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
@@ -3096,6 +3096,7 @@ OUTPUTS_EOF
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
             scripts/__tests__/windows-suite-runner.test.sh \
+            scripts/__tests__/lib/platform.sh scripts/__tests__/platform-contract.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3278,7 +3279,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=577
+readonly SELF_EXEC_EXPECTED_DROP=580
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3574,7 +3575,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
           node-version-file: .node-version
       - name: Shellcheck the gate scripts and their suites
         run: |
-          shellcheck \
+          shellcheck -x \
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
@@ -3608,6 +3609,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
             scripts/__tests__/windows-suite-runner.test.sh \
+            scripts/__tests__/lib/platform.sh scripts/__tests__/platform-contract.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -3692,6 +3694,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/e2e-tag-routing.test.sh
       - name: Run Windows suite-runner step test suite
         run: bash scripts/__tests__/windows-suite-runner.test.sh
+      - name: Run platform-contract library test suite
+        run: bash scripts/__tests__/platform-contract.test.sh
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
       - name: Run suite-wiring gate

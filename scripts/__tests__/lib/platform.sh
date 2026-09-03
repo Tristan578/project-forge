@@ -22,6 +22,19 @@
 #       neon-branch.test.sh already implemented locally; it is shared so the
 #       next suite does not reinvent a weaker one.
 #
+#   probe_skip_absent_on <platform> <reason>
+#       A probe gap on a platform that CANNOT close it — Git-for-Windows
+#       without Developer Mode cannot create a symlink at all; NTFS through it
+#       accepts chmod and still reports -rw-r--r--. Probe-first is unchanged:
+#       the caller has already probed and found the capability missing. What
+#       changes is the CI upgrade, which is suppressed only when the run is ON
+#       <platform>, because there the gap belongs to the host and no change to
+#       this repo could clear it. Every OTHER platform still fails in CI, so
+#       the case stays gated wherever it can actually execute — the Windows
+#       sweep exists to prove the harness RUNS there, not to re-verify POSIX
+#       semantics Linux CI already gates. Never reach for this on the platform
+#       a case exists to protect.
+#
 # Both markers start with a fixed token so a log can be grepped for either.
 # Source with:  . "$(dirname "${BASH_SOURCE[0]}")/lib/platform.sh"
 
@@ -40,6 +53,15 @@ unsupported_on() {
   local platform="${1:?platform}" reason="${2:?reason}"
   echo "UNSUPPORTED on ${platform}: ${reason}" >&2
   exit "$PLATFORM_UNSUPPORTED_EXIT"
+}
+
+probe_skip_absent_on() {
+  local platform="${1:?platform}" reason="${2:?reason}"
+  if [ "$(platform_name)" = "$platform" ]; then
+    echo "  SKIP (${platform} cannot provide this): ${reason}"
+    return 0
+  fi
+  probe_skip "$reason"
 }
 
 probe_skip() {
