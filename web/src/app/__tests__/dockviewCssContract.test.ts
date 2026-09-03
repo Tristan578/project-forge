@@ -17,7 +17,7 @@ describe('dockview CSS custom-property contract', () => {
   it('only authors properties consumed by the installed dockview stylesheet', () => {
     const authoredCss = readFileSync(resolve(process.cwd(), 'src/app/globals.css'), 'utf8');
     const dockviewCss = readFileSync(
-      require.resolve('dockview/dist/styles/dockview.css'),
+      require.resolve('dockview-react/dist/styles/dockview.css'),
       'utf8',
     );
     const authored = authoredCustomProperties(authoredCss);

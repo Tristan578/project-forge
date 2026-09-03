@@ -42,9 +42,19 @@ on:
 permissions:
   contents: read
 
+# Production deploys are SERIALISED, not cancelled. A run cancelled after
+# `vercel deploy --prod` leaves its unverified canary ramping (auto-assign
+# starts the rollout on READY, and the live stage schedule auto-advances it to
+# 100% in ~10 minutes) with every failure()-gated step skipped — cancelled()
+# is not failure() — so nothing rolls it back or records it, and the NEXT run's
+# `lkg` then captures that unverified build as last-known-good. With
+# cancel-in-progress off, a newer push waits for the running deploy to finish
+# verifying; GitHub keeps at most one PENDING run per group and replaces it
+# with the newest, and main is linear, so nothing is lost. The cost is latency
+# on back-to-back merges (#9624).
 concurrency:
   group: cd-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -75,7 +85,15 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
-      - name: Promote previous deployment to production
+      # Instant Rollback, not `vercel promote`: with Rolling Releases enabled a
+      # promote of the old build starts a staged rollout of it when nothing is
+      # ramping, and is a silent no-op while a rollout is active — neither
+      # reverts traffic. `vercel rollback` aborts any active rolling release and
+      # points production at the target at once (#9624). Side effect: the
+      # project is then in rolled-back state — auto-assignment of production
+      # domains is off until a rolling release completes — and the record
+      # below says so.
+      - name: Roll production back to the previous deployment (Instant Rollback)
         id: promote-previous
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
@@ -84,8 +102,9 @@ jobs:
           ROLLBACK_URL: ${{ github.event.inputs.rollback_production }}
         run: |
           echo "Rolling back production to: $ROLLBACK_URL"
-          vercel promote "$ROLLBACK_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          vercel rollback "$ROLLBACK_URL" --yes --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "Rollback complete. Production now at: $ROLLBACK_URL"
+          echo "::warning::Instant Rollback turns auto-assignment of production domains OFF: pushes to main no longer go live by themselves until a rolling release completes. The next CD run starts its rollout explicitly; if it reports it could not become the canary, undo by hand: vercel promote <fixed-deployment-url> (vercel.com/docs/instant-rollback#undo-a-rollback)."
 
       # Was a Slack post gated on `vars.SLACK_WEBHOOK_INCIDENTS != ''`. That repo
       # variable has never existed, and an empty-string guard SKIPS rather than
@@ -106,9 +125,11 @@ jobs:
         run: |
           NOTIFY_BODY="Production was manually rolled back by \`${ACTOR}\`.
 
-          **Promoted URL:** ${ROLLBACK_URL}
-          **\`vercel promote\` outcome:** ${PROMOTE_OUTCOME}
+          **Restored URL:** ${ROLLBACK_URL}
+          **\`vercel rollback\` outcome:** ${PROMOTE_OUTCOME}
           **Run:** ${RUN_URL}
+
+          **Auto-assignment of production domains is now OFF** (Instant Rollback side effect): pushes to \`main\` do not go live by themselves until a rolling release completes. The next CD run starts its rollout explicitly (\`rolling-release/start\`); if it reports it could not become the canary, undo by hand with \`vercel promote <fixed-deployment-url>\` (vercel.com/docs/instant-rollback#undo-a-rollback).
 
           A manual rollback means production was serving something bad. Record the
           cause here, then close this issue. See \`docs/production-support.md\`."
@@ -335,7 +356,7 @@ jobs:
 
       - name: Restore or claim the WebGL2 engine cache
         id: engine-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
@@ -584,7 +605,7 @@ jobs:
           echo "Engine WASM cache key: $key"
 
       - name: Publish the WebGL2 engine for PR reuse
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
@@ -646,7 +667,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -979,16 +1000,36 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to staging: $url"
 
+      # Staging is UNVERIFIABLE today: the deployment URL sits behind Vercel
+      # Authentication, the staging project has no automation bypass secret
+      # configured, and staging.spawnforge.ai answers 525 (#7581). The script
+      # fails closed on a protected answer (#9624), so rather than a red step
+      # that `continue-on-error` would hide forever — including the day the
+      # secret exists and staging is genuinely broken — the probe is an
+      # explicit, named skip while the secret is absent, and a REAL gate the
+      # moment `VERCEL_AUTOMATION_BYPASS_STAGING` (the staging project's
+      # Protection Bypass for Automation secret) is added. `if:` cannot read
+      # secrets, so a step turns its presence into an output first.
+      - name: Staging bypass secret present?
+        id: staging-bypass
+        env:
+          STAGING_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
+        run: |
+          if [ -n "$STAGING_BYPASS" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "present=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Staging health check SKIPPED: the repo secret VERCEL_AUTOMATION_BYPASS_STAGING is not set, and the staging deployment URL is SSO-protected, so the probe cannot observe it (#7581). Add the staging project's Protection Bypass for Automation secret under that name to turn this into a gate."
       - name: Post-deploy health check (staging)
         id: health-check-staging
+        if: ${{ steps.staging-bypass.outputs.present == 'true' }}
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
-          # SSO-protected deployments reject bypass tokens. Use vercel curl
-          # which authenticates via VERCEL_TOKEN (already used for deploy).
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
   # ---- Stage 2: Deploy to Production ----
@@ -1037,28 +1078,20 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
+      # The rollback target. Read from the Vercel API, not `vercel ls`: the
+      # previous grep for `READY` matched nothing (the CLI prints `● Ready`),
+      # so every run logged "unknown", `prev_url` was empty, and the two
+      # rollback steps below — both guarded on it — could never fire (#9624).
+      # Under Rolling Releases the live base is `rolling-release.currentDeployment`,
+      # never the newest READY row, which is the canary. The script fails the
+      # job rather than emit an empty target.
       - name: Capture current production URL (last-known-good)
         id: prev-deploy
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          # Retrieve the URL currently aliased to production for rollback purposes.
-          # `vercel ls` lists deployments with a stable tabular format; the first
-          # READY row is the currently live deployment. We take field 2 (the URL).
-          prev_url=$(vercel ls --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN" \
-            2>/dev/null \
-            | grep -E 'READY' \
-            | head -1 \
-            | awk '{print $2}' \
-            | sed 's|/*$||' || echo "")
-          # Ensure the URL has an https:// prefix.
-          if [ -n "$prev_url" ] && [ "${prev_url#https://}" = "$prev_url" ]; then
-            prev_url="https://${prev_url}"
-          fi
-          echo "prev_url=${prev_url}" >> "$GITHUB_OUTPUT"
-          echo "Last-known-good production URL: ${prev_url:-unknown}"
+        run: bash scripts/cd-rolling-release.sh lkg
 
       # Pre-flight: assert the production domain is attached to THIS project in
       # THIS scope. Catches the failure mode in #8518 where the apex+www were
@@ -1415,14 +1448,40 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to production: $url"
 
+      # A production deploy that lands while an older rolling release is still
+      # ramping is never rolled out ("the project's state won't change" —
+      # vercel.com/docs/rolling-releases); main @ 8aee29f9 shipped that way on
+      # 2026-09-02 and never served a byte. Establish that THIS deployment is
+      # the canary (aborting a stale older one — this build is a superset of
+      # it) or already current before anything is verified, and fail if it is
+      # not, so "Deploy to Production: success" means production is serving it.
+      - name: Ensure this deployment is the rolling-release canary
+        id: canary
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: bash scripts/cd-rolling-release.sh ensure-canary "$DEPLOY_URL"
+
+      # Probe the build this run made, through the public domain. The deployment
+      # URL is SSO-protected and the old `vercel curl` path could never
+      # authenticate — every production run since the step existed logged
+      # "could not authenticate ... skipping health check" and passed (#9624).
+      # `vcrrForceCanary` pins the probe to the canary, and the commit assertion
+      # proves the response came from THIS deploy and not the base.
       - name: Post-deploy health check (production)
         id: health-check-production
         env:
-          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOY_URL: https://www.spawnforge.ai
           HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          # Only pin to the canary when there IS one: with no active rollout
+          # (feature off, or the rollout already resolved) Vercel sets no cookie,
+          # and the commit assertion alone carries the proof.
+          HEALTH_CHECK_FORCE_CANARY: ${{ steps.canary.outputs.canary_state == 'canary' }}
+          HEALTH_CHECK_EXPECT_COMMIT: ${{ github.sha }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
       - name: Install Playwright for smoke tests
@@ -1432,36 +1491,93 @@ jobs:
           npm ci
           bash scripts/install-playwright-ci.sh browsers
 
+      # Same canary pin for the browser suite: without it the smoke run hit
+      # whichever build the 95% base bucket served, i.e. the PREVIOUS deploy.
       - name: Run production smoke tests
         if: ${{ success() }}
         id: smoke-tests
         working-directory: web
         env:
           PRODUCTION_URL: https://www.spawnforge.ai
+          SMOKE_FORCE_CANARY: ${{ steps.canary.outputs.canary_state == 'canary' }}
+          SMOKE_EXPECT_COMMIT: ${{ github.sha }}
         # Use dedicated smoke config — no local webServer, hits live URL directly
         run: npx playwright test --config playwright.smoke.config.ts --project=chromium
 
-      - name: Rollback production on health check or smoke test failure
-        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' }}
+      # A failed probe is not always an unhealthy build. Merges to main are
+      # serialised by the concurrency group above, but an OUT-OF-BAND deploy
+      # (a manual `vercel deploy --prod`, or a promote_to_production dispatch
+      # on another ref) is not: its ensure-canary aborts this run's rollout by
+      # design, the forced `_vcrr_` cookie is re-randomised ("good only for
+      # the duration of a single rolling release"), and this run's probe lands
+      # on the base or on the newer canary — the commit assertion trips.
+      # Rolling back THEN would Instant-Rollback production to the pre-this-run
+      # build and abort the newer, healthy rollout, whose own probe would then
+      # fail and roll back too. So before any rollback: does a NEWER deployment
+      # own production? If so this run was superseded — a notice, not an
+      # incident. A lookup that cannot answer says `false`, so a failure whose
+      # cause cannot be established is still rolled back.
+      #
+      # Also runs when ensure-canary itself failed on any exit but a provably
+      # untouched one (`disposition`): an abort followed by a refused start,
+      # a transport error after this run's own start was accepted, or a lookup
+      # that failed before anything was known — on all of those the build may
+      # be live and unverified, and must be rolled back to `prev_url` and
+      # recorded. The rollback and the incident issue below are gated on this
+      # step's answer, so when it does not run (nothing failed, or
+      # ensure-canary refused without touching anything) neither fires.
+      - name: Was this run superseded by a later deployment?
+        id: superseded
+        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure' || (steps.canary.outcome == 'failure' && steps.canary.outputs.disposition != 'untouched')) }}
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: bash scripts/cd-rolling-release.sh superseded "$DEPLOY_URL"
+
+      - name: Superseded by a later deployment (no rollback)
+        if: ${{ failure() && steps.superseded.outputs.superseded == 'true' }}
+        env:
+          OWNER: ${{ steps.superseded.outputs.owner }}
+          NEW_URL: ${{ steps.deploy.outputs.url }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          echo "::notice::This run was superseded: deployment ${OWNER} (a later deployment) owns production. ${NEW_URL} (${COMMIT_SHA}) was not verified and is not serving traffic; the later deploy's own verification is the gate. No rollback, no incident."
+          {
+            echo "### Superseded by a later deployment"
+            echo
+            echo "A newer deployment (\`${OWNER}\`) took over production while this run was verifying \`${COMMIT_SHA}\`."
+            echo "The probe failed because it could no longer observe this build, not because the build is unhealthy."
+            echo "Nothing was rolled back. The later run's own verification is the gate for what is live."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Rollback production on failed verification
+        if: ${{ failure() && steps.superseded.outputs.superseded == 'false' && steps.prev-deploy.outputs.prev_url != '' }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
           NEW_URL: ${{ steps.deploy.outputs.url }}
+          HEALTH_OUTCOME: ${{ steps.health-check-production.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke-tests.outcome }}
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
+          CANARY_DISPOSITION: ${{ steps.canary.outputs.disposition }}
           SNAPSHOT_BRANCH_ID: ${{ steps.db-snapshot.outputs.snapshot_branch_id }}
           SNAPSHOT_BRANCH_NAME: ${{ steps.db-snapshot.outputs.snapshot_branch_name }}
         run: |
-          echo "::error::Health check failed -- rolling back production to $PREV_URL"
+          echo "::error::Verification failed (health check: ${HEALTH_OUTCOME}, smoke tests: ${SMOKE_OUTCOME}, canary step: ${CANARY_OUTCOME}, canary disposition: ${CANARY_DISPOSITION:-n/a}) -- rolling back production to $PREV_URL"
 
-          # The schema caveat is emitted BEFORE `vercel promote`, deliberately.
-          # If the promote itself fails, `set -e` aborts the step -- and the one
+          # The schema caveat is emitted BEFORE `vercel rollback`, deliberately.
+          # If the rollback itself fails, `set -e` aborts the step -- and the one
           # message an operator most needs in that exact situation (the code
           # rollback did NOT happen and the schema is still migrated) would
           # never be printed. Be explicit about the half of the deploy this
           # cannot undo: a green "Rollback complete" next to a migrated database
           # is how an operator ends up debugging old code against a new schema.
           if [ -n "$SNAPSHOT_BRANCH_ID" ]; then
-            echo "::error::vercel promote reverted the CODE ONLY. It does NOT revert the database schema."
+            echo "::error::vercel rollback reverted the CODE ONLY. It does NOT revert the database schema."
             echo "::error::A schema migration ran earlier in this job and is STILL APPLIED to production."
             echo "::error::The restored code is now running against the NEW schema. If they are incompatible, production is still broken."
             echo "::error::Pre-migration snapshot branch: ${SNAPSHOT_BRANCH_ID} (${SNAPSHOT_BRANCH_NAME})"
@@ -1470,7 +1586,7 @@ jobs:
             {
               echo "### Rollback: code reverted, schema NOT reverted"
               echo
-              echo "\`vercel promote\` restored the previous deployment, but it does NOT revert the database schema."
+              echo "\`vercel rollback\` restored the previous deployment, but it does NOT revert the database schema."
               echo "The migration applied in this run is still live."
               echo
               echo "| | |"
@@ -1486,8 +1602,23 @@ jobs:
             echo "No schema migration ran in this deploy -- reverting the code is a complete rollback."
           fi
 
-          vercel promote "$PREV_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          # Instant Rollback, not `vercel promote`: with Rolling Releases enabled
+          # a promote of the old build either starts a staged rollout of it (5%
+          # for 10 min, 25% for 30 min...) or, while our canary is still ramping,
+          # is a silent no-op ("the project's state won't change") — neither
+          # reverts traffic. `vercel rollback` aborts the active rolling release
+          # and routes 100% of traffic to the target at once
+          # (vercel.com/docs/rolling-releases#aborting-a-rolling-release).
+          vercel rollback "$PREV_URL" --yes --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "Code rollback complete. Production code restored to: $PREV_URL"
+          echo "::warning::Instant Rollback turns auto-assignment of production domains OFF until a rolling release completes. The next CD run's ensure-canary step starts its rollout explicitly; if that run reports it could not become the canary, undo by hand: vercel promote <fixed-deployment-url> (vercel.com/docs/instant-rollback#undo-a-rollback)."
+          {
+            echo "### Auto-assignment of production domains is now OFF"
+            echo
+            echo "Instant Rollback side effect: pushes to \`main\` do not go live by themselves until a rolling release completes."
+            echo "The next CD run starts its rollout explicitly (\`rolling-release/start\`). If it reports it could not become the canary, undo by hand: \`vercel promote <fixed-deployment-url>\`."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Same replacement as the manual-rollback record above: the previous Slack
       # step's `vars.SLACK_WEBHOOK_INCIDENTS != ''` clause silently skipped it in
@@ -1495,11 +1626,11 @@ jobs:
       # deliberately keeps only the clauses that describe the ROLLBACK, so this
       # fires exactly when the rollback step above ran.
       - name: Open the auto-rollback incident issue
-        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' }}
+        if: ${{ failure() && steps.superseded.outputs.superseded == 'false' && steps.prev-deploy.outputs.prev_url != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           NOTIFY_KEY: prod-rollback-auto
-          NOTIFY_TITLE: 'Production auto-rollback fired: a deploy failed its health check'
+          NOTIFY_TITLE: 'Production auto-rollback fired: a deploy failed verification'
           NOTIFY_LABELS: priority-p0,area-infra
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
           NEW_URL: ${{ steps.deploy.outputs.url }}
@@ -1507,6 +1638,8 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
           HEALTH_OUTCOME: ${{ steps.health-check-production.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke-tests.outcome }}
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
+          CANARY_DISPOSITION: ${{ steps.canary.outputs.disposition }}
           SNAPSHOT_BRANCH_ID: ${{ steps.db-snapshot.outputs.snapshot_branch_id }}
         run: |
           # The incident issue carries the same caveat the job log does: the
@@ -1517,18 +1650,52 @@ jobs:
           else
             schema_line="**Schema:** no migration ran in this deploy."
           fi
-          NOTIFY_BODY="CD promoted production back to the previous deployment.
+          NOTIFY_BODY="CD rolled production back to the previous deployment (Instant Rollback via \`vercel rollback\`).
 
           **Commit:** \`${COMMIT_SHA}\`
           **Failed deployment:** ${NEW_URL}
           **Rolled back to:** ${PREV_URL}
           **Health check:** ${HEALTH_OUTCOME}
           **Smoke tests:** ${SMOKE_OUTCOME}
+          **Canary step:** ${CANARY_OUTCOME} (disposition: ${CANARY_DISPOSITION:-n/a} — untouched | started | mutated | unknown; see scripts/cd-rolling-release.sh)
           **Run:** ${RUN_URL}
           ${schema_line}
 
+          **Auto-assignment of production domains is now OFF** (Instant Rollback side effect): pushes to \`main\` do not go live by themselves until a rolling release completes. The next CD run starts its rollout explicitly; if it reports it could not become the canary, undo by hand with \`vercel promote <fixed-deployment-url>\` (vercel.com/docs/instant-rollback#undo-a-rollback).
+
           Production is serving the PREVIOUS deployment. The commit above is on
           \`main\` and undeployed. See \`docs/production-support.md\`."
+          export NOTIFY_BODY
+          bash scripts/notify-workflow-failure.sh
+
+      # cancelled() is not failure(): none of the rollback path above runs on a
+      # cancelled run. The concurrency group no longer cancels a deploy for a
+      # newer push, so this is a HUMAN cancellation after `vercel deploy --prod`
+      # — and the deployment's rollout may already be ramping unverified
+      # (auto-assign starts it on READY). Do not mutate production behind an
+      # operator who is acting; put what they must check in front of them.
+      - name: Record a cancellation after the production deploy
+        if: ${{ cancelled() && steps.deploy.outputs.url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTIFY_KEY: prod-deploy-cancelled
+          NOTIFY_TITLE: 'CD run cancelled after a production deploy: verify the rollout by hand'
+          NOTIFY_LABELS: priority-p0,area-infra
+          NEW_URL: ${{ steps.deploy.outputs.url }}
+          PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
+          COMMIT_SHA: ${{ github.sha }}
+          CANARY_STATE: ${{ steps.canary.outputs.canary_state }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          NOTIFY_BODY="This run was cancelled AFTER it deployed to production, so its build was never verified — and it may be serving traffic: Vercel starts a rolling release the moment a production deployment is READY, and the stage schedule auto-advances it.
+
+          **Commit:** \`${COMMIT_SHA}\`
+          **Deployment:** ${NEW_URL}
+          **Canary state when cancelled:** ${CANARY_STATE:-unknown}
+          **Last-known-good before this deploy:** ${PREV_URL:-unknown}
+          **Run:** ${RUN_URL}
+
+          Check what is live (\`vercel rolling-release fetch --scope tnolan --cwd web\`; \`curl -s https://www.spawnforge.ai/api/health | jq .commit\`). If this deployment is the canary or current and you did not intend it, Instant-Rollback to the last-known-good above (\`vercel rollback <url> --yes --scope tnolan\`), then undo the rollback with \`vercel promote <fixed-url>\` once a fix is ready. Record the cause here and close this issue."
           export NOTIFY_BODY
           bash scripts/notify-workflow-failure.sh
 

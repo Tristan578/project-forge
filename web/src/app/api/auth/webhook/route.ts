@@ -1,14 +1,21 @@
 /**
- * POST /api/auth/webhook — Clerk webhook handler (svix signature verification).
+ * POST /api/auth/webhook — Clerk webhook handler.
  *
  * Processes user.created, user.updated, and user.deleted events.
  * On user.created/updated, upserts the user row in the database.
  * On user.deleted, removes user data and cancels any active subscriptions.
+ *
+ * Signature verification is Clerk's own `verifyWebhook()` (#9629): it reads
+ * the `svix-*` headers and the raw body itself, verifies through
+ * `standardwebhooks` (already a transitive of @clerk/backend), and returns a
+ * typed, discriminated `WebhookEvent`. The hand-rolled header extraction and
+ * `svix` dependency it replaces shipped svix 2.0.0 — deprecated on npm for an
+ * incorrect `verify()` signature — and 2.2.0 changed `verify()` to return
+ * `undefined`, so any future bump would have been a type error.
  */
 
-import { Webhook } from 'svix';
-import { headers } from 'next/headers';
-import { NextResponse } from 'next/server';
+import { verifyWebhook } from '@clerk/nextjs/webhooks';
+import { NextResponse, type NextRequest } from 'next/server';
 import { syncUserFromClerk, getUserByClerkId, deleteUserAccount } from '@/lib/auth/user-service';
 import {
   enqueueRetry,
@@ -49,9 +56,13 @@ async function handleWebhookEvent(
   }
 }
 
-export async function POST(req: Request) {
-  const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
-  if (!WEBHOOK_SECRET) {
+export async function POST(req: NextRequest) {
+  // Passed explicitly: verifyWebhook's own env fallback is
+  // CLERK_WEBHOOK_SIGNING_SECRET, while this deployment's variable is
+  // CLERK_WEBHOOK_SECRET (web/.env.example). Relying on the fallback would
+  // verify nothing and 400 every delivery.
+  const signingSecret = process.env.CLERK_WEBHOOK_SECRET;
+  if (!signingSecret) {
     return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
   }
 
@@ -60,27 +71,13 @@ export async function POST(req: Request) {
     // Fire-and-forget — failures are re-enqueued internally
   });
 
-  const headerPayload = await headers();
-  const svixId = headerPayload.get('svix-id');
-  const svixTimestamp = headerPayload.get('svix-timestamp');
-  const svixSignature = headerPayload.get('svix-signature');
-
-  if (!svixId || !svixTimestamp || !svixSignature) {
-    return NextResponse.json({ error: 'Missing svix headers' }, { status: 400 });
-  }
-
-  const payload = await req.json();
-  const body = JSON.stringify(payload);
-
-  const wh = new Webhook(WEBHOOK_SECRET);
   let event: { type: string; data: Record<string, unknown> };
-
   try {
-    event = wh.verify(body, {
-      'svix-id': svixId,
-      'svix-timestamp': svixTimestamp,
-      'svix-signature': svixSignature,
-    }) as { type: string; data: Record<string, unknown> };
+    // Missing svix-* headers, a bad signature and a stale timestamp all
+    // reject here; none of them is distinguishable to a caller and none
+    // should be, so one 400 covers them.
+    const verified = await verifyWebhook(req, { signingSecret });
+    event = { type: verified.type, data: verified.data as unknown as Record<string, unknown> };
   } catch {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
