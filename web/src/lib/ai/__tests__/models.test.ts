@@ -9,6 +9,8 @@ import {
   GATEWAY_MODEL_DEEP,
   gatewayFallbackModels,
   isPremiumModel,
+  supportsEffort,
+  thinkingModeFor,
 } from '../models';
 
 describe('AI model constants', () => {
@@ -168,6 +170,52 @@ describe('isPremiumModel', () => {
     expect(isPremiumModel('claude-opus-5-0')).toBe(false);
     expect(isPremiumModel('anthropic/claude-opus-9-9')).toBe(false);
     expect(isPremiumModel('opus-pretender')).toBe(false);
+  });
+});
+
+describe('thinkingModeFor / supportsEffort (#9626)', () => {
+  // The request shape is a property of the MODEL, not the backend: the wrong
+  // shape is an HTTP 400 from Anthropic. Table from the 2026-09-01 review.
+  const cases: Array<[string, 'adaptive' | 'budget' | 'none']> = [
+    [AI_MODEL_PREMIUM, 'adaptive'], // claude-opus-4-8 rejects the budget form
+    ['anthropic/claude-opus-4-8', 'adaptive'], // gateway spelling
+    [AI_MODEL_PRIMARY, 'adaptive'], // claude-sonnet-4-6
+    ['claude-sonnet-4.6', 'adaptive'],
+    ['claude-opus-4-7', 'adaptive'],
+    ['claude-haiku-4-7', 'adaptive'], // anything 4.7+ regardless of family
+    ['claude-fable-5-1', 'adaptive'],
+    ['claude-opus-5', 'adaptive'],
+    [AI_MODEL_FAST, 'budget'], // claude-haiku-4-5-20251001 rejects adaptive
+    ['claude-haiku-4.5', 'budget'],
+    ['claude-sonnet-4-5', 'budget'],
+    ['claude-sonnet-4.5', 'budget'],
+    ['claude-opus-4-1', 'budget'],
+    ['claude-3-7-sonnet-20250219', 'budget'],
+    ['claude-3-5-sonnet-20241022', 'none'],
+    ['gpt-4o-mini', 'none'],
+    ['anthropic/gpt-4o-mini', 'none'],
+    ['', 'none'],
+  ];
+
+  it.each(cases)('%s → %s', (model, expected) => {
+    expect(thinkingModeFor(model)).toBe(expected);
+  });
+
+  it('returns none for undefined and null', () => {
+    expect(thinkingModeFor(undefined)).toBe('none');
+    expect(thinkingModeFor(null)).toBe('none');
+  });
+
+  it('supportsEffort is exactly the adaptive set', () => {
+    for (const [model, mode] of cases) {
+      expect(supportsEffort(model), model).toBe(mode === 'adaptive');
+    }
+  });
+
+  it('the three user-selectable models each resolve to a shape the API accepts', () => {
+    expect(thinkingModeFor(AI_MODEL_PREMIUM)).toBe('adaptive');
+    expect(thinkingModeFor(AI_MODEL_PRIMARY)).toBe('adaptive');
+    expect(thinkingModeFor(AI_MODEL_FAST)).toBe('budget');
   });
 });
 
