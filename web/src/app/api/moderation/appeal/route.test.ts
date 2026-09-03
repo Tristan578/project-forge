@@ -60,6 +60,16 @@ describe('/api/moderation/appeal', () => {
     expect(JSON.stringify(data.details)).toContain('contentType');
   });
 
+  // min(10) is counted in code points (#9637): nine emoji is rejected on purpose.
+  it('returns 422 for a nine-emoji reason (18 UTF-16 units, 9 code points)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'c1', user } });
+
+    const res = await POST(makeRequest({ contentId: '1', contentType: 'comment', reason: '\u{1F625}'.repeat(9) }));
+    expect(res.status).toBe(422);
+    expect(JSON.stringify((await res.json()).details)).toContain('reason');
+  });
+
   it('returns 422 if reason is too short', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'c1', user } });

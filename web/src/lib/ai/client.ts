@@ -67,6 +67,14 @@ function mapError(err: unknown): Error {
       msg.toLowerCase().includes('rate limit') ||
       msg.toLowerCase().includes('too many requests')
     ) {
+      // A 429 from our own routes already says how long to wait
+      // (`rateLimitResponse()`, e.g. "Too many requests. Try again in 5
+      // minutes."). Keep that sentence: replacing it with the generic one threw
+      // the wait away and left the nine fetchAI surfaces telling users
+      // something vaguer than the generate dialogs do (#9623).
+      if (/try again in \d+ (second|minute)s?\b/i.test(msg)) {
+        return new Error(msg);
+      }
       return new Error('Rate limit reached — please wait a moment and try again.');
     }
     if (msg.includes('401') || msg.toLowerCase().includes('unauthorized')) {

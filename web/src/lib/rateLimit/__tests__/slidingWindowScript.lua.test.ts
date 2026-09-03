@@ -37,6 +37,11 @@ interface RunResult {
   allowed: number;
   /** Second element of the script's return table. */
   count: number;
+  /**
+   * Third element: the oldest in-window score on deny (a NUMBER — the script
+   * must `tonumber()` the string Redis returns), `null` on allow.
+   */
+  oldest: number | string | null;
   zaddCalled: boolean;
   expireCalls: number;
   /**
@@ -112,6 +117,24 @@ function runScript(opts: RunOptions): RunResult {
         expireCalls += 1;
         expireTtlRaw = args[2];
         return 0;
+      case 'ZRANGE': {
+        // Only the shape the script uses: `ZRANGE key 0 0 WITHSCORES` — the
+        // lowest-scored entry as a flat [member, score] array, scores as
+        // STRINGS, which is how Redis returns them to Lua.
+        if (String(args[2]) !== '0' || String(args[3]) !== '0' || String(args[4]) !== 'WITHSCORES') {
+          unexpectedCommands.push(`ZRANGE ${args.slice(2).join(' ')}`);
+          return 0;
+        }
+        const sorted = [...zset].sort((a, b) => a.score - b.score);
+        lua.lua_newtable(S);
+        if (sorted.length > 0) {
+          lua.lua_pushstring(S, to_luastring(sorted[0].member));
+          lua.lua_seti(S, -2, 1);
+          lua.lua_pushstring(S, to_luastring(String(sorted[0].score)));
+          lua.lua_seti(S, -2, 2);
+        }
+        return 1;
+      }
       default:
         unexpectedCommands.push(command);
         return 0;
@@ -160,9 +183,23 @@ function runScript(opts: RunOptions): RunResult {
   const count = lua.lua_tointeger(L, -1);
   lua.lua_pop(L, 1);
 
+  // Third element: the oldest in-window score on the deny branch, absent on
+  // allow. Read raw so a script that returned the string Redis handed it (or
+  // nil) is visible as such rather than laundered by a JS-side Number().
+  lua.lua_geti(L, top, 3);
+  const oldestType = lua.lua_type(L, -1);
+  const oldest: number | string | null =
+    oldestType === lua.LUA_TNUMBER
+      ? lua.lua_tonumber(L, -1)
+      : oldestType === lua.LUA_TNIL
+        ? null
+        : lua.lua_tojsstring(L, -1);
+  lua.lua_pop(L, 1);
+
   return {
     allowed,
     count,
+    oldest,
     zaddCalled,
     expireCalls,
     zaddScoreRaw,
@@ -199,6 +236,8 @@ describe('SLIDING_WINDOW_SCRIPT — executed in a real Lua VM', () => {
     expect(result.unexpectedCommands).toEqual([]);
     expect(result.allowed).toBe(1);
     expect(result.count).toBe(4);
+    // Nothing to wait for on allow, so no oldest score is reported.
+    expect(result.oldest).toBeNull();
     expect(result.zaddCalled).toBe(true);
     expect(result.expireCalls).toBe(1);
     expect(result.finalMembers).toHaveLength(4);
@@ -223,6 +262,12 @@ describe('SLIDING_WINDOW_SCRIPT — executed in a real Lua VM', () => {
     expect(result.unexpectedCommands).toEqual([]);
     expect(result.allowed).toBe(0);
     expect(result.count).toBe(5);
+    // The deny branch reports WHEN the window reopens: the oldest in-window
+    // score, coerced to a number (Redis hands Lua a string). The caller turns
+    // it into the wait the user is shown, so a stale or string-typed value
+    // here becomes a wrong sentence in a toast.
+    expect(result.oldest).toBe(1_500);
+    expect(typeof result.oldest).toBe('number');
     expect(result.zaddCalled).toBe(false);
     // The deny path still refreshes the TTL, so a saturated key cannot become
     // immortal or expire early.
@@ -297,6 +342,7 @@ describe('SLIDING_WINDOW_SCRIPT — executed in a real Lua VM', () => {
     expect(result.unexpectedCommands).toEqual([]);
     expect(result.allowed).toBe(0);
     expect(result.count).toBe(7);
+    expect(result.oldest).toBe(Math.min(...result.finalMembers.map((e) => e.score)));
     expect(result.zaddCalled).toBe(false);
     expect(result.expireCalls).toBe(1);
     expect(result.finalMembers).toHaveLength(7);

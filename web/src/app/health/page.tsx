@@ -14,8 +14,8 @@ import { HealthDashboard } from '@/components/health/HealthDashboard';
  */
 
 /**
- * Rendering this page costs four outbound probes (Neon, the engine CDN, Clerk,
- * Anthropic) — see `getCachedHealthReport()`. That cache collapses bursts, but
+ * Rendering this page costs five outbound probes (Neon, the engine CDN, Clerk,
+ * the chat backend, Upstash) — see `getCachedHealthReport()`. That cache collapses bursts, but
  * its state is per-lambda-instance, so it bounds one instance rather than the
  * aggregate: under a distributed burst Vercel scales instances and the fan-out
  * scales with them. The Clerk probe is the one that matters most, since it

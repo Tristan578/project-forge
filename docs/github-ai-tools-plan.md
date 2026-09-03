@@ -12,7 +12,7 @@
 | Asset | Location | Notes |
 |-------|----------|-------|
 | Copilot custom instructions | `.github/copilot-instructions.md` | Root-level project overview, build commands, architecture rules |
-| Copilot file-scoped instructions | `.github/instructions/copilot.instructions.md` | Detailed coding standards, security, testing patterns (applies to `**`) |
+| ~~Copilot file-scoped instructions~~ | ~~`.github/instructions/copilot.instructions.md`~~ | Removed in #9627: it was a forked copy of the root file plus stale agent-session directives that went live when the 4,000-char cap was lifted |
 | PR review instructions | `.github/instructions/review.instructions.md` | Architecture boundaries, security, perf review checklist |
 | CI pipeline | `.github/workflows/ci.yml` | 7 jobs: lint, typecheck, web tests, MCP tests, WASM build, Next.js build, E2E, security audit |
 | CD pipeline | `.github/workflows/cd.yml` | Deploy to Vercel on main |
@@ -315,7 +315,6 @@ Scan for documentation that may be out of date.
 
 ## What to check
 - .github/copilot-instructions.md vs actual Bevy version in engine/Cargo.toml
-- .github/instructions/copilot.instructions.md MCP command count vs actual
 - docs/coverage-plan.md thresholds vs web/vitest.config.ts actual thresholds
 - README.md feature claims vs implemented features
 - Any TODO/FIXME/HACK comments added in the last week
@@ -329,11 +328,10 @@ Scan for documentation that may be out of date.
 
 ### 4a. Fix stale copilot instructions
 - Update `.github/copilot-instructions.md`: verify Bevy 0.18 and 322 MCP commands
-- Update `.github/instructions/copilot.instructions.md`: verify 322 MCP commands, Bevy 0.18
 - Add coverage thresholds reference
 
 ### 4b. Consolidate copilot instructions
-- `.github/copilot-instructions.md` (root) and `.github/instructions/copilot.instructions.md` overlap significantly. Consider merging into a single source of truth at `.github/copilot-instructions.md` (the root file that both Copilot Chat and coding agent read).
+- **Done in #9627.** `.github/instructions/copilot.instructions.md` was a forked copy of the root file and has been removed, leaving `.github/copilot-instructions.md` as the single source of truth that both Copilot Chat and the coding agent read.
 
 ### 4c. Connect our MCP server to Copilot coding agent
 - Configure the SpawnForge MCP server as an MCP integration for the coding agent, giving it access to engine commands during sessions. This is optional and advanced but could let the coding agent actually test engine commands.

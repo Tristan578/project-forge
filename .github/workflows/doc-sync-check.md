@@ -25,12 +25,10 @@ Scan the repository for documentation that may be out of date with the actual co
 
 ### Version Numbers
 - `.github/copilot-instructions.md` — verify Bevy version matches `engine/Cargo.toml`
-- `.github/instructions/copilot.instructions.md` — verify Bevy version and MCP command count
 - `README.md` — verify any version claims match reality
 
 ### Build Commands
 - Verify build commands in `.github/copilot-instructions.md` actually work with current tooling
-- Verify build commands in `.github/instructions/copilot.instructions.md` match CI workflow steps
 
 ### Coverage Thresholds
 - Compare `docs/coverage-plan.md` stated targets with actual thresholds in `web/vitest.config.ts`

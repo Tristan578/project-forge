@@ -151,6 +151,7 @@ Include a summary of what changed, how to test it, and screenshots for visual ch
 - Store slices: use the `sliceTestTemplate.ts` pattern with `createSliceStore()` and `createMockDispatch()`. See `web/src/stores/slices/__tests__/` for examples.
 - Script worker tests: stub `self` with a mock `postMessage`, use `vi.resetModules()` + dynamic import to reload the worker module.
 - Mock paths: always use `@/lib/...` aliases in `vi.mock()`, never relative paths from `__tests__/` directories.
+- `mock*Once` values: queue them only on a mock you built inside the test, or consume them — a `*Once` value left armed on a shared mock (module-scoped `vi.fn`, `vi.mock` factory mock, or bare automock) fails the test that queued it (`web/vitest.mockOnceGuard.ts`, #9542). `vi.clearAllMocks()` does not drain the once-queue. `MOCK_ONCE_GUARD=off` silences the guard locally only.
 - New user-facing features must add cases to `TESTING.md`.
 
 ---

@@ -19,7 +19,13 @@ import { gateway } from '@ai-sdk/gateway';
 import { anthropic } from '@ai-sdk/anthropic';
 import { convertManifestToolsToSdkTools, type ManifestTool } from '@/lib/ai/toolAdapter';
 import { modelToolSchema } from '@/lib/ai/modelToolSchema';
-import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
+import {
+  AI_MODEL_PRIMARY,
+  AI_MODELS,
+  gatewayFallbackModels,
+  supportsEffort,
+  thinkingModeFor,
+} from '@/lib/ai/models';
 import { buildAnthropicCacheControl, type CacheTtlTier } from '@/lib/ai/cachedContext';
 import manifestJson from '@/data/commands.json';
 
@@ -163,22 +169,30 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
 
   const canonicalModel = model || AI_MODEL_PRIMARY;
 
-  const modelInstance = isDirectBackend
-    ? anthropic(canonicalModel)
-    : gateway(
-        canonicalModel.includes('/') ? canonicalModel : AI_MODELS.gatewayChat,
-      );
+  const gatewayModelId = canonicalModel.includes('/') ? canonicalModel : AI_MODELS.gatewayChat;
+  const modelInstance = isDirectBackend ? anthropic(canonicalModel) : gateway(gatewayModelId);
 
-  // Provider options for thinking + effort (Anthropic direct only). Both fields
-  // are independent in the Anthropic provider schema — thinking sets a hard token
-  // budget, effort lets the SDK pick a sensible default. Gateway routes ignore
-  // these fields, so we only emit them on the direct backend.
-  const anthropicOptions: { thinking?: { type: 'enabled'; budgetTokens: number }; effort?: 'low' | 'medium' | 'high' } = {};
+  // Provider options for thinking + effort (Anthropic direct only). Gateway
+  // routes ignore these fields, so we only emit them on the direct backend —
+  // and the SHAPE depends on the model, not just the backend (#9626): Opus
+  // 4.7+ / Sonnet 4.6+ / Claude 5 accept only `{ type: 'adaptive' }` and
+  // answer the budget form with HTTP 400, Haiku 4.5 and earlier accept only
+  // `{ type: 'enabled', budgetTokens }` and answer adaptive with HTTP 400, and
+  // `effort` is accepted exactly where adaptive is. Emitting one shape for
+  // every model 400'd a Pro user with the thinking toggle on and the premium
+  // model selected. Unsupported fields are dropped rather than forwarded.
+  const anthropicOptions: {
+    thinking?: { type: 'adaptive' } | { type: 'enabled'; budgetTokens: number };
+    effort?: 'low' | 'medium' | 'high';
+  } = {};
   if (isDirectBackend) {
-    if (thinking) {
+    const mode = thinkingModeFor(canonicalModel);
+    if (thinking && mode === 'adaptive') {
+      anthropicOptions.thinking = { type: 'adaptive' };
+    } else if (thinking && mode === 'budget') {
       anthropicOptions.thinking = { type: 'enabled', budgetTokens: 10000 };
     }
-    if (effort) {
+    if (effort && supportsEffort(canonicalModel)) {
       anthropicOptions.effort = effort;
     }
   }
@@ -187,7 +201,12 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
   // they identify who/what a request belongs to for cost breakdowns, never
   // affect model selection or output. Anthropic direct calls bypass the
   // Gateway entirely, so these fields have no effect there and are omitted.
-  const gatewayOptions: { user?: string; tags?: string[] } = {};
+  //
+  // `models` (ordered fallback list) and `caching: 'auto'` (#9631) are Gateway
+  // routing fields: a provider outage becomes a degraded-model answer instead
+  // of a 500, and repeated prefixes are cached where the provider supports it.
+  // Both are validated server-side; the Gateway ignores what it does not know.
+  const gatewayOptions: { user?: string; tags?: string[]; models?: string[]; caching?: 'auto' } = {};
   if (!isDirectBackend) {
     if (userId) {
       gatewayOptions.user = userId;
@@ -195,6 +214,11 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
     if (tags && tags.length > 0) {
       gatewayOptions.tags = tags;
     }
+    const fallbacks = gatewayFallbackModels(gatewayModelId);
+    if (fallbacks.length > 0) {
+      gatewayOptions.models = fallbacks;
+    }
+    gatewayOptions.caching = 'auto';
   }
 
   const providerOptions = {
