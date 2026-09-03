@@ -35,6 +35,7 @@ Analyze the newly opened issue and classify it.
    - `documentation` — Documentation, README, or architecture decisions
    - `testing` — Test coverage or test infrastructure
    - `pipeline` — CI/CD, deployment, release, or automation
+   - `stability` — Reliability, crash, data-integrity, or operational-resilience work where preventing recurrence is a material part of the issue
    - There is currently no generic `mcp` label; do not invent one
    - `security` — Auth, encryption, sanitization, dependency vulnerabilities
 3. Classify the issue type:
