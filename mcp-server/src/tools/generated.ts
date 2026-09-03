@@ -81,6 +81,13 @@ export function deriveAnnotations(
   manifestDestructive?: boolean,
 ): ToolAnnotations {
   const isRead = scope.endsWith(':read');
+  // `destructiveHint` is deliberately BROADER than the manifest's `destructive`
+  // flag and the two must not be collapsed. MCP's hint means "this tool may
+  // perform a non-additive update", so detaching a component (`remove_audio`)
+  // and `undo`/`redo` belong in it. The manifest flag means "undoing this would
+  // make the user re-author content", which is the criterion the chat approval
+  // gate needs and which those same commands fail. A manifest `true` therefore
+  // always implies the hint; a manifest `false` does not clear it.
   const isDestructive = manifestDestructive === true ||
     name.startsWith('despawn_') ||
     name.startsWith('delete_') ||
