@@ -72,7 +72,7 @@ pub(super) fn apply_component_resyncs(mut pending: ResMut<PendingCommands>) {
                 events::emit_physics_changed(&entity_id, &data, enabled);
             }
             ComponentResync::Joint { entity_id, data } => match data {
-                Some(joint) => events::emit_joint_changed(&joint),
+                Some(joint) => events::emit_joint_changed(&entity_id, &joint),
                 None => events::emit_joint_removed(&entity_id),
             },
             ComponentResync::Audio { entity_id, data } => {

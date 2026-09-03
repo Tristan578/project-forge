@@ -198,22 +198,32 @@ pub fn emit_debug_physics_changed(enabled: bool) {
     emit_event("DEBUG_PHYSICS_CHANGED", &DebugPhysicsPayload { enabled });
 }
 
-/// Emit a joint changed event.
+/// Emit a joint changed event for an entity.
 ///
-/// Undo, redo and REMOVAL do not come through here: `emit_joint_on_selection`
-/// is gated on `selection.primary` and `Changed<JointData>`, neither of which
-/// can see a write to a non-selected entity or a component that no longer
-/// exists. Those go through `bridge::component_resync::apply_component_resyncs`,
-/// which calls this for a restore and `emit_joint_removed` for a removal.
-pub fn emit_joint_changed(joint_data: &crate::core::physics::JointData) {
+/// REMOVAL does not come through here: the payload IS the flattened
+/// `JointData`, so there is no field left to say "gone" — that is
+/// `emit_joint_removed`. Undo and redo DO, via
+/// `bridge::component_resync::apply_component_resyncs`, because
+/// `emit_joint_on_selection` is gated on `selection.primary` and
+/// `Changed<JointData>` and can see neither a write to a non-selected entity
+/// nor a component that no longer exists.
+///
+/// `entity_id` is what makes that safe. Without it the listener wrote whatever
+/// arrived into `primaryJoint`, so an undo touching a NON-selected entity put
+/// that entity's joint in the selected entity's inspector — and the next edit
+/// there wrote the foreign body back onto the selection. The wire now matches
+/// a `QUERY_JOINTS_LIST` entry exactly, so both go through one parser (#9291).
+pub fn emit_joint_changed(entity_id: &str, joint_data: &crate::core::physics::JointData) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct JointPayload<'a> {
+        entity_id: &'a str,
         #[serde(flatten)]
         data: &'a crate::core::physics::JointData,
     }
 
     emit_event("JOINT_CHANGED", &JointPayload {
+        entity_id,
         data: joint_data,
     });
 }
@@ -221,8 +231,8 @@ pub fn emit_joint_changed(joint_data: &crate::core::physics::JointData) {
 /// Emit a joint removed event for an entity.
 ///
 /// `JOINT_CHANGED` cannot express a removal: its payload IS the flattened
-/// `JointData`, so there is no field left to say "gone", and it carries no
-/// entity id at all. Mirrors `emit_reverb_zone_removed`.
+/// `JointData`, so there is no field left to say "gone". Mirrors
+/// `emit_reverb_zone_removed`.
 pub fn emit_joint_removed(entity_id: &str) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]

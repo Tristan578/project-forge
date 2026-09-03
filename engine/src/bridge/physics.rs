@@ -240,7 +240,7 @@ pub(super) fn apply_create_joint_requests(
                 });
 
                 // Emit change event
-                events::emit_joint_changed(&request.joint_data);
+                events::emit_joint_changed(&request.entity_id, &request.joint_data);
                 break;
             }
         }
@@ -290,7 +290,7 @@ pub(super) fn apply_update_joint_requests(
                 });
 
                 // Emit change event
-                events::emit_joint_changed(&current_joint);
+                events::emit_joint_changed(&update.entity_id, &current_joint);
                 break;
             }
         }
@@ -884,16 +884,16 @@ pub(super) fn emit_joint_on_selection(
     // Emit on selection change
     for _event in selection_events.read() {
         if let Some(primary) = selection.primary {
-            if let Ok((_, Some(jd))) = selection_query.get(primary) {
-                events::emit_joint_changed(jd);
+            if let Ok((entity_id, Some(jd))) = selection_query.get(primary) {
+                events::emit_joint_changed(&entity_id.0, jd);
             }
         }
     }
 
     // Emit when joint data changes on selected entity
     if let Some(primary) = selection.primary {
-        if let Ok((_, joint_data)) = query.get(primary) {
-            events::emit_joint_changed(joint_data);
+        if let Ok((entity_id, joint_data)) = query.get(primary) {
+            events::emit_joint_changed(&entity_id.0, joint_data);
         }
     }
 }

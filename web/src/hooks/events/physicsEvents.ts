@@ -7,6 +7,7 @@ import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 import { audioManager } from '@/lib/audio/audioManager';
 import { parseJoint2dWire, parsePhysics2dWire } from '@/lib/physics/physics2dPayload';
 import { castPayload, type SetFn, type GetFn, type EventPayload } from './types';
+import { applyWhenPrimary } from './primaryGate';
 
 /** Prefix used to identify audio occlusion raycast requests. */
 const OCCLUSION_RAYCAST_PREFIX = 'audio_occlusion:';
@@ -245,9 +246,20 @@ export function handlePhysicsEvent(
       return true;
     }
 
+    /**
+     * The payload used to be the bare flattened `JointData`, so this wrote
+     * whatever arrived into `primaryJoint` no matter which entity it described
+     * — and the undo/redo resync drain reports joints on NON-selected entities.
+     * The engine now stamps `entityId` (#9291), making the wire identical to a
+     * `QUERY_JOINTS_LIST` entry, so it goes through the same parser and the
+     * same primary gate the sibling handlers use.
+     */
     case 'JOINT_CHANGED': {
-      const payload = castPayload<JointData | null>(data);
-      useEditorStore.getState().setPrimaryJoint(payload);
+      const parsed = parseJointWire(data);
+      if (!parsed) return true;
+      applyWhenPrimary(parsed.entityId, () => {
+        useEditorStore.getState().setPrimaryJoint(parsed.data);
+      });
       return true;
     }
 
@@ -255,9 +267,7 @@ export function handlePhysicsEvent(
      * `JOINT_CHANGED` cannot express a removal: its payload IS the flattened
      * `JointData`, so there is no field left to mean "gone". Emitted by the
      * undo/redo resync drain, which is also the only thing that ever reports a
-     * joint on a NON-selected entity — hence the primary check that
-     * `JOINT_CHANGED` itself cannot make, its payload carrying no entity id at
-     * all (#9290).
+     * joint on a NON-selected entity (#9290).
      */
     case 'JOINT_REMOVED': {
       const payload = castPayload<{ entityId?: string }>(data);

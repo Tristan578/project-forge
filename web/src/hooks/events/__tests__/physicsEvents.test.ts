@@ -261,35 +261,103 @@ describe('handlePhysicsEvent', () => {
   });
 
   describe('JOINT_CHANGED', () => {
-    it('calls setPrimaryJoint with joint data', () => {
-      const jointData = {
-        jointType: 'revolute',
-        targetEntity: 'entity-2',
-        anchor: [0, 1, 0],
-        axis: [0, 1, 0],
-      };
-
-      const result = handlePhysicsEvent(
-        'JOINT_CHANGED',
-        jointData,
-        mockSetGet.set,
-        mockSetGet.get
-      );
-
-      expect(result).toBe(true);
-      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(jointData);
+    /**
+     * The wire is a flattened `JointData` stamped with `entityId` — identical
+     * to a `QUERY_JOINTS_LIST` entry, which is why both go through
+     * `parseJointWire`. The previous fixtures here (`targetEntity`, `anchor`)
+     * were a shape the engine has never emitted; the handler cast rather than
+     * parsed, so they passed anyway (the PF-1141 class).
+     */
+    const wire = (entityId: string) => ({
+      entityId,
+      jointType: 'revolute',
+      connectedEntityId: 'entity-2',
+      anchorSelf: [0, 1, 0],
+      anchorOther: [0, 0, 0],
+      axis: [0, 1, 0],
     });
 
-    it('handles null joint data (joint removed)', () => {
+    const parsedData = {
+      jointType: 'revolute',
+      connectedEntityId: 'entity-2',
+      anchorSelf: [0, 1, 0],
+      anchorOther: [0, 0, 0],
+      axis: [0, 1, 0],
+      limits: null,
+      motor: null,
+    };
+
+    it('calls setPrimaryJoint when the event describes the selected entity', () => {
+      actions.primaryId = 'entity-1';
+
       const result = handlePhysicsEvent(
         'JOINT_CHANGED',
-        null as unknown as Record<string, unknown>,
+        wire('entity-1'),
         mockSetGet.set,
         mockSetGet.get
       );
 
       expect(result).toBe(true);
-      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(parsedData);
+    });
+
+    /**
+     * The bug this fixes (#9291): the undo/redo resync drain reports joints on
+     * NON-selected entities, and the old handler wrote every one of them into
+     * `primaryJoint`. The joint inspector then edits with the foreign body as
+     * its base, so the next change writes another entity's joint onto the
+     * selection.
+     */
+    it('does NOT write a foreign entity joint into the selected inspector', async () => {
+      actions.primaryId = 'entity-1';
+
+      const result = handlePhysicsEvent(
+        'JOINT_CHANGED',
+        wire('entity-9'),
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+    });
+
+    it('applies a late-resolving selection change (viewport pick)', async () => {
+      actions.primaryId = 'old-entity';
+
+      handlePhysicsEvent('JOINT_CHANGED', wire('new-entity'), mockSetGet.set, mockSetGet.get);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+
+      actions.primaryId = 'new-entity';
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(parsedData);
+    });
+
+    /**
+     * `JOINT_CHANGED` cannot express a removal — its payload IS the joint — so
+     * a malformed or null body is dropped rather than written through as
+     * "removed". `JOINT_REMOVED` is the removal channel.
+     */
+    it('drops a payload it cannot parse instead of clearing the inspector', () => {
+      actions.primaryId = 'entity-1';
+
+      for (const bad of [null, {}, { ...wire('entity-1'), entityId: '' }, { ...wire('entity-1'), jointType: 'nope' }]) {
+        const result = handlePhysicsEvent(
+          'JOINT_CHANGED',
+          bad as unknown as Record<string, unknown>,
+          mockSetGet.set,
+          mockSetGet.get
+        );
+        expect(result).toBe(true);
+      }
+
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
     });
   });
 
