@@ -112,6 +112,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every PR:
 
 - Web tests: `foo.ts` → `foo.test.ts` alongside source. Use `describe`/`it`/`expect`. Mock WASM bridge with `vi.mock()`.
 - Store slice tests: Use `sliceTestTemplate.ts` pattern with `createSliceStore()` and `createMockDispatch()`.
+- mock*Once leak guard (`web/vitest.mockOnceGuard.ts`): a test that queues `mock*Once` on a mock it did not create (module-scoped `vi.fn`, `vi.mock` factory mock, or bare automock) and never consumes it FAILS, naming the still-armed line. Consume the value or build the mock inside the test; `vi.clearAllMocks()` does not drain the once-queue.
 - MCP tests: Test command manifests, search, tool registration.
 
 ## CI Pipeline

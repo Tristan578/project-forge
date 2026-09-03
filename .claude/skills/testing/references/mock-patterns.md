@@ -178,6 +178,7 @@ it('debounces rapid input', async () => {
 |---------|-----|
 | `vi.mock()` with relative path | Use `@/lib/...` alias |
 | Forgetting `vi.clearAllMocks()` in `afterEach` | Add to `afterEach` or use `clearMocks: true` in vitest config |
+| Queuing `mock*Once` on a shared mock (module-scoped `vi.fn`, `vi.mock` factory mock, or bare automock) and never consuming it | The mock*Once guard (`web/vitest.mockOnceGuard.ts`, #9542) fails the test and names the still-armed line. `vi.clearAllMocks()` does NOT drain the once-queue: consume the value, build the mock inside the test, or `mockReset()` |
 | Mocking return value with `mockReturnValue` on an async function | Use `mockResolvedValue` for promises |
 | Missing `await` on `vi.runAllTimersAsync()` | It returns a Promise |
 | `vi.spyOn` on a read-only property | Use `vi.stubGlobal` or restructure the code |
