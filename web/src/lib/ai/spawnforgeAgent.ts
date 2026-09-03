@@ -32,12 +32,31 @@ interface ManifestEntry extends ManifestTool {
   tokenCost: number;
   requiredScope: string;
   /**
-   * True when the command destroys or wholesale-replaces content the user
-   * already has, or has an irreversible effect outside the editor session.
-   * Absent (not `false`) on the ~92% of commands that are ordinary edits.
-   * Drives the agent's `toolApproval` map — see `getAgentToolApproval()`.
+   * Whether undoing this command would make the user re-AUTHOR content, rather
+   * than re-issue the inverse command with the same arguments. Three families
+   * are `true`:
+   *
+   *   1. it deletes or overwrites authored content — an entity, scene, prefab,
+   *      cutscene, dialogue tree, tilemap layer (or the tiles painted into one,
+   *      including a resize that discards what falls outside the new bounds),
+   *      UI screen or widget, library asset, animation clip, or script source;
+   *   2. it wholesale replaces the current scene — `new_scene`, `load_scene`,
+   *      `switch_scene`, `load_template`, and the `*_from_description` /
+   *      `start_from_idea` scaffolders;
+   *   3. it has an irreversible effect outside the editor session —
+   *      `publish_game`, `delete_leaderboard`, `delete_asset`.
+   *
+   * Detaching a COMPONENT from an entity is `false`: re-attaching it is a
+   * single command carrying the same parameters. That is the line
+   * `remove_physics2d` (false) and `remove_script` (true) sit either side of.
+   *
+   * Mandatory on every command — an absent flag used to be indistinguishable
+   * from a deliberate `false`, which is how `remove_script` shipped ungated.
+   * `mcp-server/src/manifest.test.ts` enforces both the explicit boolean and a
+   * naming RULE that fails when a new `delete_*`/`remove_*` command is neither
+   * flagged nor exempted with a reason.
    */
-  destructive?: boolean;
+  destructive: boolean;
 }
 
 const manifest = manifestJson as { version: string; commands: ManifestEntry[] };
@@ -96,8 +115,20 @@ export const AGENT_TOOLS = getAgentTools();
  *
  * `'user-approval'` makes the SDK stop the step loop for that call, emit a
  * `tool-approval-request` UI chunk and add the toolCallId to
- * `blockedToolCallIds` — no `tool-input-available` follows, so a destructive
- * call cannot reach the client executor at all until the user answers.
+ * `blockedToolCallIds`, so the tool is never executed server-side and the loop
+ * does not advance until the user answers.
+ *
+ * What it does NOT do — verified against `ai@7.0.84` and pinned by
+ * `toolApprovalResume.integration.test.ts`: the gated call's
+ * `tool-input-available` chunk IS still emitted, immediately before the
+ * `tool-approval-request`. The stream therefore hands the browser everything it
+ * needs to run a destructive tool on its own. The security-load-bearing check
+ * is the CLIENT-side one in `chatStore.drainBufferedToolInputs()`, which
+ * withholds every buffered input until a terminal `finish` chunk arrives and
+ * refuses outright to execute a `DESTRUCTIVE_COMMANDS` member that carries no
+ * approvalId. This map is what makes the server stop calling the model; that
+ * drain is what stops the tool running.
+ *
  * `'not-applicable'` is the SDK's "no gate" status and leaves a call on
  * exactly today's path.
  *
@@ -127,6 +158,39 @@ function getAgentToolApproval(): Record<string, 'user-approval' | 'not-applicabl
  * Exported so a test can assert the map against the tool set it must mirror.
  */
 export const AGENT_TOOL_APPROVAL = getAgentToolApproval();
+
+// ---------------------------------------------------------------------------
+// Approval signing key
+// ---------------------------------------------------------------------------
+
+/**
+ * HMAC key the SDK uses to sign and verify tool approvals.
+ *
+ * Must be STABLE across instances: the approval is signed by whichever
+ * serverless instance streamed the turn and verified by whichever instance
+ * handles the resume. A per-process random value would therefore fail every
+ * cross-instance resume, so there is deliberately no random fallback.
+ *
+ * `TOOL_APPROVAL_SECRET` is the dedicated variable. Absent it, the key is
+ * derived from `CLERK_SECRET_KEY` (required in every deployed environment —
+ * see the root CLAUDE.md) with a domain-separating prefix, so the gate is
+ * signed by default rather than only where someone remembered to add a
+ * variable. HMAC never exposes its key material, and the value is never sent
+ * to the client — only the 32-byte digest is.
+ *
+ * Returns undefined only in a bare local/test environment with neither
+ * variable set; the agent then omits the option and behaves as before, which
+ * is why the client-side destructive check is the load-bearing one.
+ */
+export function resolveToolApprovalSecret(): string | undefined {
+  const explicit = process.env.TOOL_APPROVAL_SECRET?.trim();
+  if (explicit) return explicit;
+
+  const derived = process.env.CLERK_SECRET_KEY?.trim();
+  if (derived) return `spawnforge-tool-approval-v1:${derived}`;
+
+  return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Agent factory
@@ -216,6 +280,8 @@ export function buildAgentInstructions(
 export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
   const { isDirectBackend, model, instructions, thinking, effort, maxSteps = 10, userId, tags } = options;
 
+  const toolApprovalSecret = resolveToolApprovalSecret();
+
   const canonicalModel = model || AI_MODEL_PRIMARY;
 
   const modelInstance = isDirectBackend
@@ -263,20 +329,22 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
     model: modelInstance,
     instructions: buildAgentInstructions(instructions, isDirectBackend),
     tools: AGENT_TOOLS,
-    // Server-side gate on destructive calls (PF-8860). This is the only place
-    // the gate is enforced — the client-side `approvalMode` toggle in
-    // chatStore is a user convenience that never talks back to the model.
-    //
-    // `experimental_toolApprovalSecret` is deliberately NOT set. Setting it
-    // makes a missing/incorrect `signature` on the resumed approval-request a
-    // hard throw, and our resume history is reconstructed by the browser, so
-    // enabling it requires echoing the signature through the whole client
-    // resume path. Without it, the approval is not cryptographically bound to
-    // the arguments the user saw — acceptable here only because the browser
-    // executes every tool anyway (the client is the user), and because the SDK
-    // still rejects an `approvalId` it never issued. Revisit if tools ever
-    // gain server-side `execute` functions.
+    // Server-side gate on which destructive calls the model may proceed past
+    // (PF-8860). It stops the step loop; it does NOT stop the browser running
+    // the tool — see the note on AGENT_TOOL_APPROVAL for where that happens.
     toolApproval: AGENT_TOOL_APPROVAL,
+    // Binds each approval to the exact (approvalId, toolCallId, toolName,
+    // canonical-hashed input) the server issued, via HMAC-SHA256. The resume
+    // history is reconstructed by the browser, so without this a client could
+    // widen the arguments after the user approved a narrow call — approve
+    // `delete_entities({ids:["a"]})`, resume with `{ids:["a","b","c"]}`. The
+    // signature round-trips: the SDK emits it on the `tool-approval-request` UI
+    // chunk, `chatStore` records it, `appendToolTurn` puts it back on the
+    // assistant part, and `validateApprovedToolApprovals` verifies it here.
+    // When the secret is set a missing or altered signature is a hard throw
+    // (`InvalidToolApprovalSignatureError`), which `/api/chat`'s `onError`
+    // surfaces — the failure mode is fail-CLOSED.
+    ...(toolApprovalSecret ? { experimental_toolApprovalSecret: toolApprovalSecret } : {}),
     stopWhen: stepCountIs(maxSteps),
     ...(hasProviderOptions ? { providerOptions } : {}),
     experimental_telemetry: { isEnabled: true },
