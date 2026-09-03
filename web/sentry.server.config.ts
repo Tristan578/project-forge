@@ -106,19 +106,15 @@ if (DSN) {
       // so Turbopack leaves it external instead of trying to bundle the binary.
       // Both constraints are pinned by sentry-regressions.test.ts.
       nodeProfilingIntegration(),
-      // Captures AI token usage, model IDs, latency, and errors for every
-      // Anthropic SDK call made from server-side route handlers. Input/output
-      // recording is disabled in production to avoid capturing PII.
-      Sentry.anthropicAIIntegration({
-        recordInputs: !IS_PROD,
-        recordOutputs: !IS_PROD,
-        // 10.61 flipped the truncation default OFF; restore it so the dev/preview
-        // spans (where recordInputs/Outputs are on) stay size-capped as before.
-        enableTruncation: true,
-      }),
       // Captures AI SDK (Vercel AI) spans: model name, token usage, latency,
       // and tool call traces for every streamText/generateText call.
       // Requires experimental_telemetry: { isEnabled: true } on each call.
+      // This is the ONLY AI integration: every Claude call goes through
+      // @ai-sdk/anthropic or @ai-sdk/gateway. The Anthropic-SDK Sentry
+      // integration used to be registered here for a @anthropic-ai/sdk that
+      // had no import sites, so it could never produce a span — a named
+      // observability source that reads as coverage and is not (#9632). The
+      // regression suite pins it absent.
       Sentry.vercelAIIntegration({ enableTruncation: true }),
       // Auto-collects runtime health metrics: RSS, heap, CPU, event loop.
       // Enabled on Vercel production + preview only.
