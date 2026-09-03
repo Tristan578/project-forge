@@ -117,9 +117,11 @@ that still needs the legacy thinking shape (below).
 
 ### The part that is not a rename
 
-The same ticket fixed a live HTTP 400. `spawnforgeAgent.ts` and
-`aiSdkAdapter.ts` emitted `thinking: { type: 'enabled', budgetTokens: 10000 }`
-gated on the BACKEND (`isDirectBackend`) and never on the model, and
+A separate ticket, #9626 (shipped in #9650, just ahead of this migration),
+fixed a live HTTP 400 — this migration did not fix it, and does not re-claim
+it. `spawnforgeAgent.ts` and `aiSdkAdapter.ts` emitted
+`thinking: { type: 'enabled', budgetTokens: 10000 }` gated on the BACKEND
+(`isDirectBackend`) and never on the model, and
 `providerOptions.anthropic.effort` was forwarded from the request body for any
 creator/pro caller with no model check at all. There is no single literal that
 is valid across the models this app routes:
@@ -129,12 +131,18 @@ is valid across the models this app routes:
 | Claude 5 family, Opus 4.7/4.8, Sonnet 4.6 | `{ type: 'adaptive' }` | accepted |
 | Haiku 4.5 and earlier | `{ type: 'enabled', budgetTokens }` | **rejected (400)** |
 
-Claude 4.7+ rejects `type: 'enabled'`; Haiku 4.5 rejects `adaptive`. Both
-decisions now live in one table in `web/src/lib/ai/models.ts`
-(`thinkingModeFor()`, `supportsEffort()`, `anthropicThinkingOption()`), and an
-unmapped model resolves to "send no `thinking` field" — a silent no-op rather
-than a 400. `models.test.ts` fails if any model the product actually ships
-lands on that default, so the fail-safe cannot quietly become the answer.
+Claude 4.7+ rejects `type: 'enabled'`; Haiku 4.5 rejects `adaptive`. #9650 put
+both decisions in one table in `web/src/lib/ai/models.ts` (`thinkingModeFor()`,
+`supportsEffort()`), with an unmapped model resolving to "send no `thinking`
+field" — a silent no-op rather than a 400. `models.test.ts` fails if any model
+the product actually ships lands on that default, so the fail-safe cannot
+quietly become the answer.
+
+This migration (#9339) builds on that table rather than re-deriving it:
+`anthropicThinkingOption()` wraps `thinkingModeFor()` into the single
+`providerOptions.anthropic.thinking` literal each call site needs, so
+`spawnforgeAgent.ts` / `aiSdkAdapter.ts` stop duplicating the `adaptive` /
+`budget` / `none` switch themselves.
 
 **Deep-tier generations were never affected by the 400** — they pass
 `thinking: false`. The exposure was the Pro/creator extended-thinking toggle on

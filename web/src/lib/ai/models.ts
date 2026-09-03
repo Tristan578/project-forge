@@ -23,11 +23,16 @@
 
 /**
  * The 4.x ids this file pointed at before the Claude 5 migration (PF-1216 /
- * #9339). They stay exported, stay in every backend MODEL_MAP, and stay in the
- * thinking-mode table below, so rolling the product back is a one-line edit —
- * point `AI_MODEL_PRIMARY` / `AI_MODEL_PREMIUM` at these and nothing else has
- * to change. A caller that passes one of these explicitly still routes and
- * still gets the `{ type: 'enabled', budgetTokens }` shape 4.x accepted.
+ * #9339). They stay exported and stay in every backend MODEL_MAP, so rolling
+ * the product back is a one-line edit — point `AI_MODEL_PRIMARY` /
+ * `AI_MODEL_PREMIUM` at these and nothing else has to change.
+ *
+ * That rollback does NOT revert the `thinking` request shape, and should not:
+ * `thinkingModeFor()` keys off the model string, not this constant, and
+ * `claude-sonnet-4-6` / `claude-opus-4-8` both already resolve to `adaptive`
+ * there (Sonnet 4.6+, Opus 4.7+) — the same shape their Claude 5
+ * replacements get. Neither 4.x id ever accepted the legacy
+ * `{ type: 'enabled', budgetTokens }` form.
  */
 export const AI_MODEL_PRIMARY_4X = 'claude-sonnet-4-6' as const;
 /** @see AI_MODEL_PRIMARY_4X */
@@ -42,8 +47,8 @@ export const AI_MODEL_PRIMARY = 'claude-sonnet-5';
  * Deliberately NOT migrated to the Claude 5 family: there is no Haiku 5 in the
  * installed provider's model union (`@ai-sdk/anthropic` 4.0.45), and Haiku 4.5
  * is the only chat model we route that still requires the legacy
- * `{ type: 'enabled', budgetTokens }` thinking shape — see
- * `THINKING_MODE_BY_MODEL` below.
+ * `{ type: 'enabled', budgetTokens }` thinking shape — see `thinkingModeFor()`
+ * below.
  */
 export const AI_MODEL_FAST = 'claude-haiku-4-5-20251001';
 
@@ -69,14 +74,19 @@ export const AI_MODEL_DEEP = AI_MODEL_PREMIUM;
 // Gateway-format model strings (for use with AI SDK gateway() provider)
 // ---------------------------------------------------------------------------
 
-/** Primary chat model via Vercel AI Gateway — gateway('anthropic/claude-sonnet-5') */
-export const GATEWAY_MODEL_CHAT = 'anthropic/claude-sonnet-5' as const;
+/**
+ * Primary chat model via Vercel AI Gateway — gateway('anthropic/claude-sonnet-5').
+ * Derived from `AI_MODEL_PRIMARY` so the rollback documented on
+ * `AI_MODEL_PRIMARY_4X` actually changes the gateway route too, not just the
+ * direct-backend one.
+ */
+export const GATEWAY_MODEL_CHAT = `anthropic/${AI_MODEL_PRIMARY}` as const;
 
 /**
  * Fast chat model via Vercel AI Gateway.
  *
- * NOTE (unverified, flagged in #9339): the `GatewayModelId` union in the
- * installed `@ai-sdk/gateway` spells Anthropic point releases with a DOT —
+ * NOTE (unverified): the `GatewayModelId` union in the installed
+ * `@ai-sdk/gateway` spells Anthropic point releases with a DOT —
  * `anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.6`,
  * `anthropic/claude-opus-4.8` — while this constant and both backend
  * MODEL_MAPs have always used a dash. The union has a `(string & {})` escape
@@ -85,11 +95,16 @@ export const GATEWAY_MODEL_CHAT = 'anthropic/claude-sonnet-5' as const;
  * the union exactly either way; only this Haiku string is still ambiguous.
  * Left as-is deliberately — it is a pre-existing production routing string
  * and nothing in this repo can prove which spelling the live Gateway accepts.
+ * Not derived from `AI_MODEL_FAST` like the other two: that constant carries
+ * a `-20251001` date suffix this gateway string must not repeat.
  */
 export const GATEWAY_MODEL_FAST = 'anthropic/claude-haiku-4-5' as const;
 
-/** Premium chat model via Vercel AI Gateway (Pro tier only) */
-export const GATEWAY_MODEL_PREMIUM = 'anthropic/claude-opus-5' as const;
+/**
+ * Premium chat model via Vercel AI Gateway (Pro tier only). Derived from
+ * `AI_MODEL_PREMIUM` — see `GATEWAY_MODEL_CHAT` above for why.
+ */
+export const GATEWAY_MODEL_PREMIUM = `anthropic/${AI_MODEL_PREMIUM}` as const;
 
 /** Deep chat model via Vercel AI Gateway — alias of GATEWAY_MODEL_PREMIUM */
 export const GATEWAY_MODEL_DEEP = GATEWAY_MODEL_PREMIUM;
@@ -140,15 +155,6 @@ export function bareModelId(model: string): string {
 }
 
 /**
- * True when the model identifier names a premium-tier (Pro-only) model.
- *
- * Accepts both bare canonical IDs (`claude-opus-5`) and gateway-format
- * IDs (`anthropic/claude-opus-5`). Compares against a known set rather
- * than a substring so future Opus minor revisions must be opted in
- * explicitly — prevents accidental routing of new models that might be
- * priced differently.
- */
-/**
  * Ordered fallback models the AI Gateway may route to when `model` is
  * unavailable (#9631): premium falls back to chat then fast; chat falls back
  * to fast; fast has nothing cheaper to fall back to. Unknown ids (another
@@ -160,9 +166,22 @@ export function gatewayFallbackModels(model: string | undefined | null): string[
   return index < 0 ? [] : chain.slice(index + 1);
 }
 
+/**
+ * True when the model identifier names a premium-tier (Pro-only) model.
+ *
+ * Accepts both bare canonical IDs (`claude-opus-5`) and gateway-format
+ * IDs (`anthropic/claude-opus-5`). Compares against a known set rather
+ * than a substring so future Opus minor revisions must be opted in
+ * explicitly — prevents accidental routing of new models that might be
+ * priced differently. That known set includes `AI_MODEL_PREMIUM_4X`: a
+ * caller that explicitly requests the pre-migration Opus id (a rollback, or
+ * a stale request replayed from before this PR) must still gate on the
+ * premium tier, not slip through as a non-premium model.
+ */
 export function isPremiumModel(model: string | undefined | null): boolean {
   if (!model) return false;
-  return bareModelId(model) === AI_MODEL_PREMIUM;
+  const bare = bareModelId(model);
+  return bare === AI_MODEL_PREMIUM || bare === AI_MODEL_PREMIUM_4X;
 }
 
 // ---------------------------------------------------------------------------
