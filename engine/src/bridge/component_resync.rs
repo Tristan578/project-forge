@@ -33,7 +33,16 @@ pub(super) fn apply_component_resyncs(mut pending: ResMut<PendingCommands>) {
         return;
     }
 
-    let resyncs: Vec<ComponentResync> = pending.component_resyncs.drain(..).collect();
+    // Bounded per frame: a scene restore can queue thousands, and each one below
+    // becomes a synchronous JS callback whose handler spreads a whole Zustand
+    // map. Whatever does not fit stays queued and drains next frame — these are
+    // state reports with no ordering requirement, so late is fine and frozen is
+    // not (`MAX_RESYNC_DRAIN_PER_FRAME`).
+    let take = pending
+        .component_resyncs
+        .len()
+        .min(crate::core::pending::resync::MAX_RESYNC_DRAIN_PER_FRAME);
+    let resyncs: Vec<ComponentResync> = pending.component_resyncs.drain(..take).collect();
 
     for resync in resyncs {
         match resync {

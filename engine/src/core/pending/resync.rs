@@ -9,6 +9,22 @@
 use super::PendingCommands;
 use crate::core::component_resync::ComponentResync;
 
+/// The most component re-reports one frame may turn into JS callbacks.
+///
+/// Each resync becomes one synchronous callback and most of the handlers behind
+/// them write a whole-map spread into a Zustand slice, so the cost of draining
+/// K of them in a frame is superlinear in K. A restore path is free to queue
+/// more than this — Play → Stop respawns every entity the running game deleted,
+/// and that count belongs to the game, not to us — so the queue is drained over
+/// as many frames as it takes. The resyncs are state reports with no ordering
+/// requirement between them, so arriving a frame later is invisible; a frozen
+/// tab is not.
+///
+/// Not a tuning knob anyone has measured: it is the order of magnitude at which
+/// a single frame's callbacks stay under a frame budget, chosen so that the
+/// pathological case degrades instead of hanging.
+pub const MAX_RESYNC_DRAIN_PER_FRAME: usize = 256;
+
 impl PendingCommands {
     pub fn queue_component_resync(&mut self, resync: ComponentResync) {
         self.component_resyncs.push(resync);

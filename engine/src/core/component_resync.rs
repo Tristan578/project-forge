@@ -245,6 +245,30 @@ impl ComponentResync {
     }
 }
 
+/// Whether a `spawn_from_snapshot` call owes the browser per-component re-reports.
+///
+/// Restoring one entity and restoring a whole scene are the same function call
+/// with very different costs. Each resync becomes one synchronous JS callback
+/// and most of the handlers behind them write a whole-map spread into a Zustand
+/// slice, so N entities carrying up to fifteen components each is O(N^2)
+/// main-thread work — and scene JSON crosses a user boundary through the remix
+/// route, so the N is not the local user's to choose.
+///
+/// The bulk restore paths do not need them: a scene load already tells the
+/// browser to rebuild its mirror wholesale (`SCENE_LOADED` clears the inspector
+/// buffers and the per-entity state is staged off the same JSON), so a
+/// per-entity re-report there is duplicated work, not new information.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResyncReport {
+    /// Queue one `ComponentResync` per component the snapshot carries. The
+    /// default: undo/redo, mesh ops, and any other single-entity restore.
+    Each,
+    /// Queue nothing. Only for a caller that restores many entities at once AND
+    /// already tells the browser about the result some other way. Choosing this
+    /// for a single-entity path reinstates the #9290 desync.
+    Silent,
+}
+
 /// Every re-report `spawn_from_snapshot` owes the browser for `snapshot`.
 ///
 /// `spawn_from_snapshot` restores a dozen components onto a freshly spawned

@@ -786,3 +786,126 @@ fn spawn_from_snapshot_queues_re_reports() {
         );
     }
 }
+
+/// The bulk restore paths must not pay the per-entity re-report cost (#9673).
+///
+/// Both halves again, because they fail differently: the runtime test proves
+/// the flag actually gates the queue, and the source pins prove the two bulk
+/// call sites still pass the flag the cost analysis assumed.
+mod bulk_restore_stays_silent {
+    use super::*;
+    use crate::core::component_resync::ResyncReport;
+    use crate::core::entity_factory::spawn_from_snapshot;
+    use crate::core::history::EntitySnapshot;
+    use crate::core::pending_commands::EntityType;
+
+    const SCENE_IO_SRC: &str = include_str!("../bridge/scene_io.rs");
+    const DRAIN_SRC: &str = include_str!("../bridge/component_resync.rs");
+
+    /// A snapshot carrying enough component data that `Each` has something to
+    /// report. A bare snapshot yields only `Transform`, which would make the
+    /// `Each` half of the comparison weak enough to pass on a broken flag.
+    fn snapshot() -> EntitySnapshot {
+        let mut snap = EntitySnapshot::new(
+            "bulk-1".to_string(),
+            EntityType::Cube,
+            "Bulk".to_string(),
+            TransformSnapshot {
+                position: [1.0, 2.0, 3.0],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0, 1.0, 1.0],
+            },
+        );
+        snap.material_data = Some(MaterialData::default());
+        snap.physics_data = Some(PhysicsData::default());
+        snap.audio_data = Some(AudioData::default());
+        snap
+    }
+
+    /// Spawn one entity from `snapshot()` and hand back what it queued.
+    fn resyncs_for(report: ResyncReport) -> Vec<ComponentResync> {
+        resyncs_from(|| {
+            let mut world = World::new();
+            world.insert_resource(Assets::<Mesh>::default());
+            world.insert_resource(Assets::<StandardMaterial>::default());
+            let snap = snapshot();
+            let mut schedule = Schedule::default();
+            schedule.add_systems(
+                move |mut commands: Commands,
+                      mut meshes: ResMut<Assets<Mesh>>,
+                      mut materials: ResMut<Assets<StandardMaterial>>| {
+                    spawn_from_snapshot(&mut commands, &mut meshes, &mut materials, &snap, report);
+                },
+            );
+            schedule.run(&mut world);
+        })
+    }
+
+    #[test]
+    fn silent_queues_nothing_and_each_still_queues() {
+        let each = resyncs_for(ResyncReport::Each);
+        // Non-vacuity: if `Each` queued nothing the `Silent` assertion below
+        // would pass against a function that reports for nobody.
+        assert!(
+            each.len() > 1,
+            "`ResyncReport::Each` queued {} re-report(s) for a snapshot carrying material, \
+             physics and audio — the single-entity restore path is broken, and the \
+             `Silent` assertion below would pass vacuously",
+            each.len(),
+        );
+
+        let silent = resyncs_for(ResyncReport::Silent);
+        assert!(
+            silent.is_empty(),
+            "`ResyncReport::Silent` queued {:?}. A bulk caller spawns once per entity in \
+             the scene, so each queued resync is one synchronous JS callback whose handler \
+             spreads a whole Zustand map — O(N^2) main-thread work on a scene the local \
+             user did not necessarily author (the remix route copies sceneData across a \
+             user boundary)",
+            silent.iter().map(|r| r.kind()).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn the_scene_load_path_passes_silent() {
+        let call = SCENE_IO_SRC
+            .split("entity_factory::spawn_from_snapshot(")
+            .nth(1)
+            .expect(
+                "no `entity_factory::spawn_from_snapshot(` call in bridge/scene_io.rs — the \
+                 scan is broken, or the scene loader was rewritten and this gate needs to \
+                 follow it",
+            );
+        let args = call
+            .split_once(");")
+            .map(|(args, _)| args)
+            .expect("unterminated spawn_from_snapshot call in bridge/scene_io.rs");
+        assert!(
+            args.contains("ResyncReport::Silent"),
+            "the scene loader's per-entity `spawn_from_snapshot` no longer passes \
+             `ResyncReport::Silent`, so loading a scene now emits up to fifteen events per \
+             entity in one frame. The browser already rebuilds its whole mirror from \
+             `SCENE_LOADED` plus the staged JSON, so those events buy nothing and cost \
+             O(N^2) (#9673). Args seen: {args}",
+        );
+    }
+
+    #[test]
+    fn the_drain_is_bounded_per_frame() {
+        assert!(
+            crate::core::pending::resync::MAX_RESYNC_DRAIN_PER_FRAME > 0,
+            "a zero budget would drain nothing, forever",
+        );
+        let body = crate::core::parity_util::block_of(
+            DRAIN_SRC,
+            "pub(super) fn apply_component_resyncs(",
+        );
+        assert!(
+            body.contains("MAX_RESYNC_DRAIN_PER_FRAME"),
+            "`apply_component_resyncs` drains the resync queue without applying \
+             `MAX_RESYNC_DRAIN_PER_FRAME`. Play → Stop respawns every entity the running \
+             game deleted and that count belongs to the game, so an unbounded drain lets a \
+             game freeze the editor on Stop (#9673)",
+        );
+    }
+}

@@ -21,7 +21,7 @@ use super::physics::{JointData, PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::{Selection, SelectionChangedEvent};
 use super::shader_effects::ShaderEffectData;
-use super::component_resync::ComponentResync;
+use super::component_resync::{ComponentResync, ResyncReport};
 use super::component_carry::{
     build_aux_index, insert_aux_components, insert_base_components, snapshot_entity,
     AuxComponentData, AuxQueries, BaseComponentData,
@@ -1090,11 +1090,15 @@ pub fn apply_terrain_to_snapshot(
 }
 
 /// Spawn an entity from a snapshot (for undo/redo).
+///
+/// `report` says whether this call owes the browser one re-report per component
+/// the snapshot carries — see [`ResyncReport`] for why a bulk caller must not.
 pub fn spawn_from_snapshot(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     snapshot: &EntitySnapshot,
+    report: ResyncReport,
 ) -> Entity {
     let transform = snapshot.transform.to_transform();
     let entity_id = EntityId(snapshot.entity_id.clone());
@@ -1544,6 +1548,9 @@ pub fn spawn_from_snapshot(
     // a full-replace command built from a default (#9291).
     //
     // Only what the snapshot CARRIES is re-reported — see `resyncs_for_snapshot`.
+    if report == ResyncReport::Silent {
+        return entity;
+    }
     for resync in super::component_resync::resyncs_for_snapshot(snapshot) {
         queue_resync(resync, "restore");
     }
@@ -1840,7 +1847,7 @@ fn execute_undo(
         }
         UndoableAction::Delete { snapshot } => {
             // Respawn the deleted entity with its original entity_id
-            spawn_from_snapshot(commands, meshes, materials, snapshot);
+            spawn_from_snapshot(commands, meshes, materials, snapshot, ResyncReport::Each);
         }
         UndoableAction::Duplicate { snapshot, .. } => {
             // Delete the duplicated entity
@@ -2010,10 +2017,10 @@ fn execute_undo(
             // 2. Restore source entities if they were deleted
             if *sources_deleted {
                 if let Some(ref snap_a) = source_a_snapshot {
-                    spawn_from_snapshot(commands, meshes, materials, snap_a);
+                    spawn_from_snapshot(commands, meshes, materials, snap_a, ResyncReport::Each);
                 }
                 if let Some(ref snap_b) = source_b_snapshot {
-                    spawn_from_snapshot(commands, meshes, materials, snap_b);
+                    spawn_from_snapshot(commands, meshes, materials, snap_b, ResyncReport::Each);
                 }
             }
         }
@@ -2070,7 +2077,7 @@ fn execute_undo(
             }
             // Restore source entities
             for snap in source_snapshots {
-                spawn_from_snapshot(commands, meshes, materials, snap);
+                spawn_from_snapshot(commands, meshes, materials, snap, ResyncReport::Each);
             }
         }
         UndoableAction::JointChange { entity_id, old_joint, .. } => {
@@ -2428,7 +2435,7 @@ fn execute_redo(
         }
         UndoableAction::Spawn { snapshot } => {
             // Respawn the entity with its original ID
-            spawn_from_snapshot(commands, meshes, materials, snapshot);
+            spawn_from_snapshot(commands, meshes, materials, snapshot, ResyncReport::Each);
         }
         UndoableAction::Delete { snapshot } => {
             // Delete the entity again
@@ -2441,7 +2448,7 @@ fn execute_redo(
         }
         UndoableAction::Duplicate { snapshot, .. } => {
             // Recreate the duplicate with its original ID
-            spawn_from_snapshot(commands, meshes, materials, snapshot);
+            spawn_from_snapshot(commands, meshes, materials, snapshot, ResyncReport::Each);
         }
         UndoableAction::VisibilityChange { entity_id, new_visible, .. } => {
             for (_, eid, _, _, mut visible) in query.iter_mut() {
@@ -2611,7 +2618,7 @@ fn execute_redo(
             }
 
             // 2. Restore the result entity from snapshot
-            spawn_from_snapshot(commands, meshes, materials, result_snapshot);
+            spawn_from_snapshot(commands, meshes, materials, result_snapshot, ResyncReport::Each);
         }
         UndoableAction::TerrainChange { entity_id, new_terrain, new_mesh_data, .. } => {
             // Apply new terrain data and rebuild mesh
@@ -2629,16 +2636,16 @@ fn execute_redo(
         }
         UndoableAction::ExtrudeShape { snapshot } => {
             // Re-create the extruded entity
-            spawn_from_snapshot(commands, meshes, materials, snapshot);
+            spawn_from_snapshot(commands, meshes, materials, snapshot, ResyncReport::Each);
         }
         UndoableAction::LatheShape { snapshot } => {
             // Re-create the lathed entity
-            spawn_from_snapshot(commands, meshes, materials, snapshot);
+            spawn_from_snapshot(commands, meshes, materials, snapshot, ResyncReport::Each);
         }
         UndoableAction::ArrayEntity { created_snapshots, .. } => {
             // Re-create all array copies
             for snap in created_snapshots {
-                spawn_from_snapshot(commands, meshes, materials, snap);
+                spawn_from_snapshot(commands, meshes, materials, snap, ResyncReport::Each);
             }
         }
         UndoableAction::CombineMeshes { source_snapshots, result_snapshot } => {
@@ -2652,7 +2659,7 @@ fn execute_redo(
                 }
             }
             // Re-create the combined result entity
-            spawn_from_snapshot(commands, meshes, materials, result_snapshot);
+            spawn_from_snapshot(commands, meshes, materials, result_snapshot, ResyncReport::Each);
         }
         UndoableAction::JointChange { entity_id, new_joint, .. } => {
             for (entity, eid, _, _, _) in query.iter() {
@@ -4539,7 +4546,7 @@ mod terrain_drain_tests {
 /// and the right `EntityType::Terrain`, just as a flat 2x2 plane.
 #[cfg(test)]
 mod terrain_snapshot_round_trip_tests {
-    use super::{spawn_from_snapshot, EntitySnapshot, EntityType, TransformSnapshot};
+    use super::{spawn_from_snapshot, EntitySnapshot, EntityType, ResyncReport, TransformSnapshot};
     use crate::core::terrain::{generate_heightmap, TerrainData, TerrainEnabled, TerrainMeshData};
     use bevy::prelude::*;
 
@@ -4577,7 +4584,7 @@ mod terrain_snapshot_round_trip_tests {
             move |mut commands: Commands,
                   mut meshes: ResMut<Assets<Mesh>>,
                   mut materials: ResMut<Assets<StandardMaterial>>| {
-                spawn_from_snapshot(&mut commands, &mut meshes, &mut materials, &snapshot);
+                spawn_from_snapshot(&mut commands, &mut meshes, &mut materials, &snapshot, ResyncReport::Each);
             },
         );
         schedule.run(&mut world);
