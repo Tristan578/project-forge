@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { createRouteMatcher } from '@clerk/nextjs/server';
-import { PUBLIC_ROUTES, config } from '../../proxy';
+import { PUBLIC_ROUTES, buildAuthorizedParties, config } from '../../proxy';
 
 function reqFor(pathname: string) {
   const url = `https://docs.spawnforge.ai${pathname}`;
@@ -75,5 +75,19 @@ describe('docs proxy public routes', () => {
     // Structural guard: every wildcard entry must be anchored at a path segment.
     const bare = PUBLIC_ROUTES.filter((r) => r.endsWith('(.*)') && !r.endsWith('/(.*)'));
     expect(bare).toEqual([]);
+  });
+});
+
+describe('authorizedParties — the azp claim is enforced (#9630)', () => {
+  it('names the canonical docs origin and the Vercel deployment origins', () => {
+    const parties = buildAuthorizedParties({
+      NODE_ENV: 'production',
+      VERCEL_URL: 'spawnforge-docs-abc123-tnolan.vercel.app',
+    } as NodeJS.ProcessEnv);
+    expect(parties).toEqual(['https://docs.spawnforge.ai', 'https://spawnforge-docs-abc123-tnolan.vercel.app']);
+  });
+
+  it('is never empty in production with no optional env', () => {
+    expect(buildAuthorizedParties({ NODE_ENV: 'production' } as NodeJS.ProcessEnv)).toEqual(['https://docs.spawnforge.ai']);
   });
 });

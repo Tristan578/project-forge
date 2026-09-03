@@ -22,6 +22,7 @@ declare module 'fengari' {
 
   export const lua: {
     readonly LUA_OK: number;
+    readonly LUA_TNIL: number;
     readonly LUA_TNUMBER: number;
     readonly LUA_TTABLE: number;
     lua_createtable(L: LuaState, narr: number, nrec: number): void;
