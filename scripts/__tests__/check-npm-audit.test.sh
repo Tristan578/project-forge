@@ -3082,6 +3082,7 @@ OUTPUTS_EOF
             scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/resolve-ci-diff-range.sh scripts/__tests__/resolve-ci-diff-range.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/deploy-drift-dispatch.sh scripts/__tests__/deploy-drift-dispatch.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
@@ -3274,7 +3275,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=571
+readonly SELF_EXEC_EXPECTED_DROP=574
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3591,6 +3592,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/resolve-ci-diff-range.sh scripts/__tests__/resolve-ci-diff-range.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/deploy-drift-dispatch.sh scripts/__tests__/deploy-drift-dispatch.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
@@ -3609,6 +3611,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
+      - name: Run deploy-drift dispatcher test suite
+        run: bash scripts/__tests__/deploy-drift-dispatch.test.sh
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
       - name: Run agentic-config gate test suite

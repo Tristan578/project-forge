@@ -28,8 +28,8 @@ import type { ManifestTool } from '@/lib/ai/toolAdapter';
 
 /**
  * A single Anthropic-style content block carried in a message.
- * Typed inline to avoid importing @anthropic-ai/sdk in this module —
- * the AI SDK adapter handles the actual Anthropic types internally.
+ * Typed inline — the repo has no @anthropic-ai/sdk dependency (#9632); the
+ * AI SDK adapter handles the actual Anthropic types internally.
  */
 export type AnthropicContentBlock = Record<string, unknown>;
 
@@ -40,7 +40,7 @@ export interface ChatMessage {
 
 /**
  * Minimal representation of an Anthropic text block used for system prompts.
- * Typed inline so resolveChat.ts has no dependency on @anthropic-ai/sdk.
+ * Typed inline; nothing in the repo depends on @anthropic-ai/sdk (#9632).
  */
 export interface SystemTextBlock {
   type: 'text';
