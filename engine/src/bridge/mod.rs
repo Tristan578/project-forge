@@ -399,10 +399,32 @@ impl Plugin for SelectionPlugin {
                 physics::apply_update_joint_requests,
                 physics::apply_remove_joint_requests,
             ))
+            // `.in_set(Physics2dWriteSet)` for the same reason the
+            // physics2d toggle/update pair carries it (PF-1172 / #9274): these
+            // three write `PhysicsJoint2d`, and `apply_mode_change_requests`
+            // inserts and removes that very component on a Play->Edit snapshot
+            // restore (`core_systems.rs`, the `joint2d_data` arm). All four
+            // take `ResMut<PendingCommands>`, so Bevy must order them, and
+            // before this edit NOTHING said which way — a Stop landing in the
+            // same frame as a `create_joint_2d` resolved by topological
+            // accident. `apply_update_joint2d_requests` makes the failure
+            // silent rather than loud: it reads `Query<&mut PhysicsJoint2d>`
+            // directly, so ordered before the restore's `ApplyDeferred` it
+            // matches nothing and `set_joint_2d` returns Ok having done
+            // nothing at all.
+            //
+            // The set's `.after(ModeRestoreSet)` edge also inserts an
+            // `ApplyDeferred`, so the restore's deferred inserts are flushed
+            // before these systems read. #9550 relocated these three out of
+            // the editor-only block, which moved them from after
+            // `apply_mode_change_requests` to before it; that tie-break was
+            // never pinned on either side of the move, so this is the pin.
             .add_systems(Update, (
                 physics::apply_create_joint2d_requests,
                 physics::apply_update_joint2d_requests,
                 physics::apply_remove_joint2d_requests,
+            ).in_set(Physics2dWriteSet))
+            .add_systems(Update, (
                 physics::apply_gravity2d_updates,
                 physics::apply_debug_physics2d_toggle,
                 physics::handle_physics2d_query,
