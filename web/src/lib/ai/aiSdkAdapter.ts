@@ -24,7 +24,7 @@ import type { ResolveChatStreamEvent, ChatMessage, ResolveChatOptions } from '@/
 import type { ResolvedRoute } from '@/lib/providers/types';
 import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
 import type { ManifestTool } from '@/lib/ai/toolAdapter';
-import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
+import { AI_MODEL_PRIMARY, AI_MODELS, thinkingModeFor } from '@/lib/ai/models';
 import { DEFAULT_MAX_TOKENS, THINKING_MAX_TOKENS } from '@/lib/constants';
 
 // ---------------------------------------------------------------------------
@@ -145,11 +145,17 @@ export async function* streamViaSdk(
       maxOutputTokens: maxTokens,
       tools,
       experimental_telemetry: { isEnabled: true },
-      ...(route.backendId === 'direct' && options.thinking
+      // The thinking shape is a property of the model (#9626): adaptive for
+      // Opus 4.7+ / Sonnet 4.6+ / Claude 5, budget for Haiku 4.5 and earlier,
+      // nothing for a model that has no extended thinking.
+      ...(route.backendId === 'direct' && options.thinking && thinkingModeFor(canonicalModel) !== 'none'
         ? {
             providerOptions: {
               anthropic: {
-                thinking: { type: 'enabled', budgetTokens: 10000 },
+                thinking:
+                  thinkingModeFor(canonicalModel) === 'adaptive'
+                    ? { type: 'adaptive' }
+                    : { type: 'enabled', budgetTokens: 10000 },
               },
             },
           }

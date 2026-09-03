@@ -122,6 +122,77 @@ export function isPremiumModel(model: string | undefined | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Extended thinking / effort support per model (#9626)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which extended-thinking request shape a Claude model accepts.
+ *
+ * The Anthropic API is not uniform across the Claude 4 family. Opus 4.7+,
+ * Sonnet 4.6+ and every model from 4.7 onward (Claude 5 included) accept only
+ * the adaptive form (`{ type: 'adaptive' }`) and answer the legacy budget form
+ * with HTTP 400; Haiku 4.5 and earlier accept only the budget form
+ * (`{ type: 'enabled', budgetTokens }`) and answer adaptive with HTTP 400.
+ * Emitting one shape for every model — which is what the chat route did —
+ * 400s a Pro user with the thinking toggle on and the premium model selected.
+ *
+ * - `adaptive`: emit `{ type: 'adaptive' }`
+ * - `budget`:   emit `{ type: 'enabled', budgetTokens }`
+ * - `none`:     not a Claude model that supports extended thinking; emit nothing
+ */
+export type ThinkingMode = 'adaptive' | 'budget' | 'none';
+
+interface ClaudeVersion {
+  family: string;
+  major: number;
+  minor: number;
+}
+
+/**
+ * Parse `claude-<family>-<major>-<minor>[-date]` (and the dotted
+ * `claude-<family>-<major>.<minor>` spelling used in some fixtures) from a bare
+ * or gateway-format id. Legacy `claude-3-x-<family>` ids parse with the numbers
+ * first. Returns null for anything that is not a Claude id.
+ */
+function parseClaudeVersion(model: string): ClaudeVersion | null {
+  const bare = model.includes('/') ? model.split('/').slice(1).join('/') : model;
+  const modern = /^claude-([a-z]+)-(\d+)(?:[.-](\d+))?(?:$|[-.])/.exec(bare);
+  if (modern) {
+    return { family: modern[1], major: Number(modern[2]), minor: modern[3] === undefined ? 0 : Number(modern[3]) };
+  }
+  const legacy = /^claude-(\d+)(?:[.-](\d+))?-([a-z]+)/.exec(bare);
+  if (legacy) {
+    return { family: legacy[3], major: Number(legacy[1]), minor: legacy[2] === undefined ? 0 : Number(legacy[2]) };
+  }
+  return null;
+}
+
+export function thinkingModeFor(model: string | undefined | null): ThinkingMode {
+  if (!model) return 'none';
+  const v = parseClaudeVersion(model);
+  if (!v) return 'none';
+  if (v.major >= 5) return 'adaptive';
+  if (v.major === 4) {
+    if (v.minor >= 7) return 'adaptive';
+    if (v.family === 'sonnet' && v.minor >= 6) return 'adaptive';
+    return 'budget';
+  }
+  // Claude 3.7 introduced extended thinking (budget form); nothing older has it.
+  if (v.major === 3 && v.minor >= 7) return 'budget';
+  return 'none';
+}
+
+/**
+ * `providerOptions.anthropic.effort` is accepted exactly where adaptive
+ * thinking is (Opus 4.7+, Sonnet 4.6+, Claude 5); Haiku 4.5 answers it with
+ * HTTP 400. The chat route accepts `effort` from any Creator/Pro request body,
+ * so the agent must drop it for models that reject it.
+ */
+export function supportsEffort(model: string | undefined | null): boolean {
+  return thinkingModeFor(model) === 'adaptive';
+}
+
+// ---------------------------------------------------------------------------
 // Image generation models (Replicate)
 // ---------------------------------------------------------------------------
 
