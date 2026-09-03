@@ -363,6 +363,151 @@ describe('chatStore — server-side tool approval (PF-8860)', () => {
     expect(store.getState().messages[1].toolCalls?.[0].status).toBe('denied');
   });
 
+  // -------------------------------------------------------------------------
+  // Fail-closed drain (arch#1 / sec#1)
+  // -------------------------------------------------------------------------
+  it('does NOT execute a destructive call when the stream is severed before the approval chunk', async () => {
+    // The exact window the SDK leaves open: `tool-input-available` is emitted
+    // BEFORE `tool-approval-request`, so a stream that dies in between (a
+    // dropped connection, a truncated proxy response, a stripped chunk) hands
+    // the client a fully-formed destructive call carrying no approvalId. The
+    // drain must refuse it rather than treat "no gate arrived" as "not gated".
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockSSEResponse(gatedTurn({ severAfterInput: true })))
+      .mockResolvedValue(mockSSEResponse(makeChatSSEEvents({ text: 'Stopped.' })));
+
+    const { useChatStore: store } = await import('../chatStore');
+    store.setState(INITIAL);
+
+    await store.getState().sendMessage('delete the enemies');
+
+    expect(executeToolCall).not.toHaveBeenCalled();
+
+    const call = store.getState().messages[1].toolCalls?.find((t) => t.id === 'tc-del');
+    expect(call?.status).toBe('error');
+    expect(call?.error).toMatch(/ended before the server confirmed/i);
+    // Nothing to approve — a truncated stream is not a pending decision.
+    expect(store.getState().pausedTurnState).toBeNull();
+  });
+
+  it('does NOT execute an UNGATED destructive call even on a complete stream', async () => {
+    // Second axis of the same failure: the stream finishes cleanly but the
+    // server never issued an approval for a command the manifest marks
+    // destructive. Every such command is `user-approval` in AGENT_TOOL_APPROVAL,
+    // so an ungated one is a contradiction (downgraded server, forged stream).
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        mockSSEResponse(
+          makeChatSSEEvents({
+            toolCalls: [{ id: 'tc-raw', name: 'delete_entities', input: { entityIds: ['7'] } }],
+          }),
+        ),
+      )
+      .mockResolvedValue(mockSSEResponse(makeChatSSEEvents({ text: 'Stopped.' })));
+
+    const { useChatStore: store } = await import('../chatStore');
+    store.setState(INITIAL);
+
+    await store.getState().sendMessage('delete the enemies');
+
+    expect(executeToolCall).not.toHaveBeenCalled();
+    const call = store.getState().messages[1].toolCalls?.find((t) => t.id === 'tc-raw');
+    expect(call?.status).toBe('error');
+    expect(call?.error).toMatch(/requires approval/i);
+  });
+
+  it('still executes a NON-destructive call on a complete ungated stream', async () => {
+    // The counterweight: fail-closed must not become fail-always. Without this
+    // the two tests above would pass against a drain that refuses everything.
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        mockSSEResponse(
+          makeChatSSEEvents({ toolCalls: [{ id: 'tc-ok', name: 'get_scene_graph', input: {} }] }),
+        ),
+      )
+      .mockResolvedValue(mockSSEResponse(makeChatSSEEvents({ text: 'Done.' })));
+
+    const { useChatStore: store } = await import('../chatStore');
+    store.setState(INITIAL);
+
+    await store.getState().sendMessage('what is here');
+
+    expect(executeToolCall).toHaveBeenCalledWith('get_scene_graph', {}, expect.any(Object));
+    expect(store.getState().messages[1].toolCalls?.[0].status).toBe('success');
+  });
+
+  // -------------------------------------------------------------------------
+  // Signature echo (sec#3)
+  // -------------------------------------------------------------------------
+  it('echoes the approval signature back on resume so the route can verify it', async () => {
+    // `experimental_toolApprovalSecret` binds (approvalId, toolCallId, toolName,
+    // input) into an HMAC on the request chunk. The route re-derives it before
+    // streaming, so a client that drops the signature — or widens the input
+    // under a signature minted for a narrower one — is rejected. That check is
+    // only reachable if the store carries the signature through the pause.
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockSSEResponse(gatedTurn({ signature: 'sig-abc123' })))
+      .mockResolvedValue(
+        mockSSEResponse(
+          makeApprovalResumeSSEEvents({
+            approvalId: 'ap-1',
+            toolCallId: 'tc-del',
+            approved: true,
+            text: 'Deleted them.',
+            echoResponse: true,
+          }),
+        ),
+      );
+
+    const { useChatStore: store } = await import('../chatStore');
+    store.setState(INITIAL);
+
+    await store.getState().sendMessage('delete the enemies');
+    expect(
+      store.getState().messages[1].toolCalls?.find((t) => t.id === 'tc-del')?.approvalSignature,
+    ).toBe('sig-abc123');
+
+    const msgId = store.getState().messages[1].id;
+    await store.getState().resumeAfterApproval(msgId, [{ toolCallId: 'tc-del', approved: true }]);
+
+    const assistant = requestBody(fetchSpy, 1).messages.at(-2) as {
+      content: Array<Record<string, unknown>>;
+    };
+    expect(assistant.content).toContainEqual({
+      type: 'tool-approval-request',
+      approvalId: 'ap-1',
+      toolCallId: 'tc-del',
+      signature: 'sig-abc123',
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Stranded pending calls (arch#4)
+  // -------------------------------------------------------------------------
+  it('promotes client-deferred calls to preview instead of stranding them at pending', async () => {
+    // With approvalMode on, the ungated calls of a turn are deferred to the
+    // client preview queue. If that turn ALSO carries a server-gated call the
+    // loop pauses, and the preview queue is discarded — leaving every deferred
+    // card spinning at 'pending' with no control that can ever resolve it.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      mockSSEResponse(
+        gatedTurn({ ungatedToolCall: { id: 'tc-q', name: 'spawn_entity', input: { entityType: 'cube' } } }),
+      ),
+    );
+
+    const { useChatStore: store } = await import('../chatStore');
+    store.setState({ ...INITIAL, approvalMode: true });
+
+    await store.getState().sendMessage('spawn a cube, then delete the enemies');
+
+    const toolCalls = store.getState().messages[1].toolCalls ?? [];
+    expect(toolCalls.find((t) => t.id === 'tc-q')?.status).toBe('preview');
+    expect(toolCalls.find((t) => t.id === 'tc-del')?.status).toBe('approval-required');
+    expect(toolCalls.some((t) => t.status === 'pending')).toBe(false);
+    expect(executeToolCall).not.toHaveBeenCalled();
+  });
+
   it('abandons the paused turn when a new message is sent', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(mockSSEResponse(gatedTurn()))
@@ -374,7 +519,46 @@ describe('chatStore — server-side tool approval (PF-8860)', () => {
     await store.getState().sendMessage('delete the enemies');
     expect(store.getState().pausedTurnState).not.toBeNull();
 
+    const abandonedId = store.getState().messages[1].id;
+
     await store.getState().sendMessage('actually, never mind');
     expect(store.getState().pausedTurnState).toBeNull();
+
+    // ux#2 — dropping only `pausedTurnState` left the old card reading
+    // "Blocked — needs your approval" with Approve/Deny buttons that hit a
+    // silent guard. The abandonment has to be visible ON the card.
+    const abandoned = store
+      .getState()
+      .messages.find((m) => m.id === abandonedId)
+      ?.toolCalls?.find((t) => t.id === 'tc-del');
+    expect(abandoned?.status).toBe('error');
+    expect(abandoned?.error).toMatch(/cancelled by a new message/i);
+    expect(executeToolCall).not.toHaveBeenCalled();
+  });
+
+  it('reports a stale approval instead of silently ignoring it', async () => {
+    // The guard above returns early for a message that is not the paused turn.
+    // Returning early is right; returning SILENTLY is not — the user pressed
+    // Approve and nothing at all happened.
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockSSEResponse(gatedTurn()))
+      .mockResolvedValue(mockSSEResponse(makeChatSSEEvents({ text: 'Sure.' })));
+
+    const { useChatStore: store } = await import('../chatStore');
+    store.setState(INITIAL);
+
+    await store.getState().sendMessage('delete the enemies');
+    const staleId = store.getState().messages[1].id;
+    await store.getState().sendMessage('actually, never mind');
+
+    await store.getState().resumeAfterApproval(staleId, [{ toolCallId: 'tc-del', approved: true }]);
+
+    expect(executeToolCall).not.toHaveBeenCalled();
+    const call = store
+      .getState()
+      .messages.find((m) => m.id === staleId)
+      ?.toolCalls?.find((t) => t.id === 'tc-del');
+    expect(call?.status).toBe('error');
+    expect(call?.error).toBeTruthy();
   });
 });

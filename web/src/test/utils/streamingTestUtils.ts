@@ -150,6 +150,15 @@ export function makeApprovalRequestSSEEvents(opts: {
   /** An additional, ungated call that must execute normally in the same turn. */
   ungatedToolCall?: { id: string; name: string; input: Record<string, unknown> };
   approvalRequestFirst?: boolean;
+  /** The HMAC the SDK stamps on the request when a signing secret is set. */
+  signature?: string;
+  /**
+   * Cut the stream immediately after `tool-input-available` — no
+   * `tool-approval-request`, no `finish`. This is the real window the SDK
+   * leaves open (it emits the input chunk first), and the shape the
+   * fail-closed drain in `chatStore` exists for.
+   */
+  severAfterInput?: boolean;
   inputTokens?: number;
   outputTokens?: number;
 }): unknown[] {
@@ -186,10 +195,11 @@ export function makeApprovalRequestSSEEvents(opts: {
     inputTextDelta: JSON.stringify(opts.input),
   });
 
-  const approvalRequest = {
+  const approvalRequest: Record<string, unknown> = {
     type: 'tool-approval-request',
     approvalId: opts.approvalId,
     toolCallId: opts.toolCallId,
+    ...(opts.signature ? { signature: opts.signature } : {}),
   };
   const inputAvailable = {
     type: 'tool-input-available',
@@ -197,6 +207,10 @@ export function makeApprovalRequestSSEEvents(opts: {
     toolName: opts.toolName,
     input: opts.input,
   };
+  if (opts.severAfterInput) {
+    events.push(inputAvailable);
+    return events;
+  }
   if (opts.approvalRequestFirst) {
     events.push(approvalRequest, inputAvailable);
   } else {

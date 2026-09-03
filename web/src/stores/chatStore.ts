@@ -3,6 +3,7 @@ import { estimateMessageTokens } from '../lib/chat/tokenCounter';
 import { showError } from '@/lib/toast';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
 import { detectGameCreationIntent } from '@/lib/chat/intentDetector';
+import { isDestructiveCommand } from '@/lib/chat/destructiveCommands';
 
 /**
  * Confidence at or above which a message is routed to the game-creation
@@ -45,6 +46,14 @@ export interface ToolCallStatus {
    * decision whose call has no `approvalId` is dropped rather than sent.
    */
   approvalId?: string;
+  /**
+   * The HMAC the server stamped on the `tool-approval-request` chunk. Carried
+   * back verbatim on the resume so `/api/chat` can prove the (approvalId,
+   * toolCallId, toolName, input) tuple is the one it signed — the client
+   * rebuilds the approval history, so without this a modified client could
+   * approve a narrow call and resume with a wider one.
+   */
+  approvalSignature?: string;
 }
 
 /** A tool call the server blocked pending the user's explicit approval. */
@@ -53,6 +62,8 @@ export interface ApprovalRequiredTool {
   name: string;
   input: Record<string, unknown>;
   approvalId: string;
+  /** See `ToolCallStatus.approvalSignature`. */
+  approvalSignature?: string;
 }
 
 /** One user decision on a blocked call, as handed to `resumeAfterApproval`. */
@@ -250,8 +261,16 @@ async function streamOneTurn(
   // a destructive call whose approval-request simply arrived second. Inputs
   // are buffered here and resolved once, after the whole turn has streamed.
   const bufferedToolInputs = new Map<string, { name: string; input: Record<string, unknown> }>();
-  /** toolCallId → approvalId, for every call the server gated. */
-  const gatedApprovalIds = new Map<string, string>();
+  /** toolCallId → the approval the server issued, signature included. */
+  const gatedApprovalIds = new Map<string, { approvalId: string; signature?: string }>();
+
+  /**
+   * Set only by a terminal `finish` chunk. The drain executes NOTHING without
+   * it: a stream that was cut short, aborted, or ended on `error` never
+   * reaches a state where the client can prove which calls the server gated,
+   * so the only safe reading of a missing `finish` is "do not run anything".
+   */
+  let terminalFinishSeen = false;
 
   const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -305,25 +324,46 @@ async function streamOneTurn(
   };
 
   // Resolve every buffered tool input once the turn has finished streaming.
-  // Gated calls become 'approval-required' cards carrying their approvalId and
-  // are NOT executed; everything else runs exactly as it did before, in stream
-  // order (Map preserves insertion order), so execution stays serialized.
   //
-  // Idempotent: the map is cleared, so the post-loop safety call after a stream
-  // that ended without a `finish` chunk cannot double-execute anything.
+  // FAIL-CLOSED (PF-8860). Two independent conditions must both hold before a
+  // buffered input is executed:
+  //
+  //   1. a terminal `finish` chunk was observed. Anything short of that — a
+  //      truncated response, an abort, a stream that ended on `error` — means
+  //      the `tool-approval-request` chunks that WOULD have gated these calls
+  //      may simply never have arrived. The SDK emits a gated call's
+  //      `tool-input-available` BEFORE its `tool-approval-request`, so a cut
+  //      between the two is exactly the window where the browser holds a
+  //      complete destructive call with no gate attached. Those inputs are
+  //      reported as errors, never run.
+  //   2. the call is not a `DESTRUCTIVE_COMMANDS` member without an
+  //      approvalId. Every destructive command the agent advertises is
+  //      `user-approval` in AGENT_TOOL_APPROVAL, so an ungated one is a
+  //      contradiction — a stripped chunk, a downgraded server, or a forged
+  //      stream — and running it is the failure this whole gate exists to
+  //      prevent.
+  //
+  // Gated calls become 'approval-required' cards carrying their approvalId and
+  // are NOT executed either way; everything else runs in stream order (Map
+  // preserves insertion order), so execution stays serialized.
+  //
+  // Idempotent: `bufferDrained` latches, so the post-loop safety call after a
+  // stream that ended without a `finish` chunk cannot double-execute anything.
   let bufferDrained = false;
   const drainBufferedToolInputs = async () => {
     if (bufferDrained) return;
     bufferDrained = true;
     for (const [id, { name, input }] of bufferedToolInputs) {
-      const approvalId = gatedApprovalIds.get(id);
-      if (approvalId) {
-        approvalRequiredTools.push({ id, name, input, approvalId });
+      const gate = gatedApprovalIds.get(id);
+      if (gate) {
+        const { approvalId, signature } = gate;
+        approvalRequiredTools.push({ id, name, input, approvalId, approvalSignature: signature });
         onUpdate((msg) => {
           const existing = (msg.toolCalls ?? []).some((t) => t.id === id);
           const gated = {
             status: 'approval-required' as const,
             approvalId,
+            approvalSignature: signature,
             input,
             name,
           };
@@ -332,7 +372,15 @@ async function streamOneTurn(
               ...msg,
               toolCalls: [
                 ...(msg.toolCalls ?? []),
-                { id, name, input, status: 'approval-required' as const, undoable: true, approvalId },
+                {
+                  id,
+                  name,
+                  input,
+                  status: 'approval-required' as const,
+                  undoable: true,
+                  approvalId,
+                  approvalSignature: signature,
+                },
               ],
             };
           }
@@ -343,6 +391,38 @@ async function streamOneTurn(
         });
         continue;
       }
+
+      const refusal = !terminalFinishSeen
+        ? 'Not executed: the response ended before the server confirmed which calls needed approval.'
+        : isDestructiveCommand(name)
+          ? `Not executed: ${name} requires approval and the server did not issue one.`
+          : null;
+
+      if (refusal) {
+        onUpdate((msg) => {
+          const existing = (msg.toolCalls ?? []).some((t) => t.id === id);
+          if (!existing) {
+            return {
+              ...msg,
+              toolCalls: [
+                ...(msg.toolCalls ?? []),
+                { id, name, input, status: 'error' as const, undoable: false, error: refusal },
+              ],
+            };
+          }
+          return {
+            ...msg,
+            toolCalls: (msg.toolCalls ?? []).map((t) =>
+              t.id === id ? { ...t, input, status: 'error' as const, undoable: false, error: refusal } : t,
+            ),
+          };
+        });
+        // A refused call still means the turn USED tools — the model is owed a
+        // tool-result, and `stopReason` drives whether the loop sends one.
+        stopReason = 'tool_use';
+        continue;
+      }
+
       await handleToolInput(id, name, input);
     }
     bufferedToolInputs.clear();
@@ -421,7 +501,10 @@ async function streamOneTurn(
         // The server gated this call. Named (not `default`) so a future chunk
         // rename fails a test instead of silently disabling the gate.
         case 'tool-approval-request':
-          gatedApprovalIds.set(str(event.toolCallId), str(event.approvalId));
+          gatedApprovalIds.set(str(event.toolCallId), {
+            approvalId: str(event.approvalId),
+            signature: typeof event.signature === 'string' ? event.signature : undefined,
+          });
           break;
 
         // The SDK echoing back a decision this client just sent. Deliberate
@@ -462,6 +545,7 @@ async function streamOneTurn(
           break;
 
         case 'finish':
+          terminalFinishSeen = true;
           await drainBufferedToolInputs();
           readUsage(event.messageMetadata);
           break;
@@ -479,8 +563,10 @@ async function streamOneTurn(
   }
 
   // Safety net for a stream that ends without a terminal `finish` chunk (an
-  // older server, or a truncated response). Idempotent — a stream that did
-  // emit `finish` already drained.
+  // abort, or a truncated response). Idempotent — a stream that did emit
+  // `finish` already drained. On THIS path `terminalFinishSeen` is false, so
+  // the drain reports every ungated buffered input as an error instead of
+  // executing it.
   await drainBufferedToolInputs();
 
   return { stopReason, deferredTools, approvalRequiredTools };
@@ -537,6 +623,11 @@ function appendToolTurn(
         type: 'tool-approval-request',
         approvalId: tc.approvalId,
         toolCallId: tc.id,
+        // Echoed verbatim so the route can re-derive the HMAC over this exact
+        // (approvalId, toolCallId, toolName, input). Dropping it makes the
+        // resume unverifiable, and `/api/chat` rejects an approved resume
+        // whose request carries no signature.
+        ...(tc.approvalSignature ? { signature: tc.approvalSignature } : {}),
       });
     }
   }
@@ -670,6 +761,22 @@ async function runAgenticLoop(params: AgenticLoopParams): Promise<void> {
     // pause would be lost. Their resume semantics also differ: this one has to
     // go back to the model, approvalMode never does.
     if (approvalRequiredTools.length > 0) {
+      // With approvalMode ON, the same turn can produce both server-gated
+      // calls and client-deferred ones. This `return` happens BEFORE the
+      // approvalMode branch below, so without this promotion every ungated
+      // call of the turn would be stranded at 'pending' forever: the loop
+      // never comes back here, and approveToolCalls/rejectToolCalls only act
+      // on 'preview'. Promoting them makes them resolvable exactly as they
+      // would have been had no call been gated — the user answers the server
+      // gate and the previews independently.
+      if (currentApprovalMode && deferredTools.length > 0) {
+        updateAssistant((msg) => ({
+          ...msg,
+          toolCalls: (msg.toolCalls ?? []).map((t) =>
+            t.status === 'pending' ? { ...t, status: 'preview' as const } : t,
+          ),
+        }));
+      }
       set({
         pausedTurnState: {
           assistantMsgId,
@@ -739,7 +846,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setShowTokenDepletedModal: (show) => set({ showTokenDepletedModal: show }),
 
   sendMessage: async (text: string, images?: string[], entityRefs?: Record<string, string>) => {
-    const { messages, activeModel, isStreaming, thinkingEnabled, rightPanelTab } = get();
+    const { messages, activeModel, isStreaming, thinkingEnabled, rightPanelTab, pausedTurnState } = get();
     if (isStreaming) return;
 
     // Check token balance before sending — show depletion modal if zero
@@ -822,16 +929,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const abortController = new AbortController();
 
+    // Sending a new message abandons any turn parked on an approval — the
+    // paused history no longer ends where the SDK expects, so a later resume
+    // of it would throw InvalidToolApprovalError. The abandonment must be
+    // VISIBLE: dropping only `pausedTurnState` left the old card sitting at
+    // 'approval-required' with live Approve/Deny buttons that silently did
+    // nothing, so the user could not tell the destructive call had been
+    // cancelled rather than quietly performed. Retire those cards to a
+    // terminal state here, in the same `set` as the abandonment itself.
+    const abandonedMsgId = pausedTurnState?.assistantMsgId;
+    const priorMessages = abandonedMsgId
+      ? messages.map((m) =>
+          m.id === abandonedMsgId
+            ? {
+                ...m,
+                toolCalls: (m.toolCalls ?? []).map((tc) =>
+                  tc.status === 'approval-required'
+                    ? {
+                        ...tc,
+                        status: 'error' as const,
+                        undoable: false,
+                        error: 'Not executed: approval cancelled by a new message.',
+                      }
+                    : tc,
+                ),
+              }
+            : m,
+        )
+      : messages;
+
     set({
-      messages: [...messages, userMessage, assistantMessage],
+      messages: [...priorMessages, userMessage, assistantMessage],
       isStreaming: true,
       error: null,
       abortController,
       loopIteration: 0,
       hasUnreadMessages: rightPanelTab !== 'chat',
-      // Sending a new message abandons any turn parked on an approval — the
-      // paused history no longer ends where the SDK expects, so a later
-      // resume of it would throw InvalidToolApprovalError.
       pausedTurnState: null,
     });
 
@@ -1046,8 +1179,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     const paused = state.pausedTurnState;
     // Stale-call guard: the pause may have been abandoned by a new message, or
-    // this may be a card from an older turn.
-    if (!paused || paused.assistantMsgId !== messageId) return;
+    // this may be a card from an older turn. `sendMessage` retires the card at
+    // the same moment it drops the pause, so reaching here means the UI is out
+    // of step with the store — say so rather than no-op'ing, which is how a
+    // dead Approve button reads as "nothing happened".
+    if (!paused || paused.assistantMsgId !== messageId) {
+      set({ error: 'That approval is no longer active — the turn it belonged to has ended.' });
+      return;
+    }
     if (state.isStreaming) return;
 
     const idx = msgIndexMap.get(messageId);
