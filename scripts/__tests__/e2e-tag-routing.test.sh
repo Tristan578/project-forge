@@ -57,6 +57,29 @@ else
 fi
 
 echo ""
+echo "=== the real Upstash probe must use only CI-scoped credentials ==="
+
+if grep -qF 'UPSTASH_REDIS_REST_URL: ${{ secrets.CI_UPSTASH_REDIS_REST_URL }}' <<<"$ui_job" \
+   && grep -qF 'UPSTASH_REDIS_REST_TOKEN: ${{ secrets.CI_UPSTASH_REDIS_REST_TOKEN }}' <<<"$ui_job"; then
+  pass "the @ui job maps both CI-scoped Upstash secrets to the runtime names"
+else
+  fail "the @ui job does not map both CI_UPSTASH secrets — the real integration probe cannot run"
+fi
+
+if grep -qE 'secrets\.UPSTASH_REDIS_REST_(URL|TOKEN)' "$CI_YML"; then
+  fail "ci.yml references production-named Upstash secrets — only CI_UPSTASH_* is allowed"
+else
+  pass "ci.yml never references production-named Upstash secrets"
+fi
+
+if grep -qF 'E2E_UPSTASH_TEST_REQUIRED:' <<<"$ui_job" \
+   && grep -rqF -- "@ui real Upstash rate limit" "$E2E_DIR"; then
+  pass "trusted CI requires the tagged real-Upstash probe"
+else
+  fail "the real-Upstash spec or its trusted-CI requirement is missing"
+fi
+
+echo ""
 echo "=== no tag may be excluded from the @ui job without another job running it ==="
 
 invert="$(grep -oE "grep-invert '[^']+'" "$CI_YML" | head -1 | sed -E "s/grep-invert '([^']+)'/\1/")"

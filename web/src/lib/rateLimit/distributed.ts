@@ -122,13 +122,18 @@ async function upstashSlidingWindow(
  * @param key - Unique bucket key (e.g. `billing-checkout:user-123`)
  * @param limit - Maximum requests per window
  * @param windowSeconds - Window size in seconds
+ * @param options.fallbackOnError - Set false for health checks that must fail closed
  */
 export async function distributedRateLimit(
   key: string,
   limit: number,
   windowSeconds: number,
+  options: { fallbackOnError?: boolean } = {},
 ): Promise<DistributedRateLimitResult> {
   if (!isUpstashConfigured()) {
+    if (options.fallbackOnError === false) {
+      throw new Error('Upstash Redis is not configured');
+    }
     // Fall back to in-memory rate limiter
     const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;
@@ -147,6 +152,9 @@ export async function distributedRateLimit(
       limit,
       windowSeconds,
     });
+    if (options.fallbackOnError === false) {
+      throw err;
+    }
     // Degrade to rateLimit(): the @upstash/ratelimit SDK limiter when the same
     // env vars are set (still distributed, approximate window), per-instance
     // memory otherwise. Never reject the request over a limiter failure.

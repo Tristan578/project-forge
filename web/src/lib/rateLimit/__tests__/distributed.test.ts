@@ -66,6 +66,15 @@ describe('distributedRateLimit — fallback (Upstash not configured)', () => {
     expect(result.remaining).toBe(4);
   });
 
+  it('throws when Upstash is missing and strict failure handling is requested', async () => {
+    const { rateLimit } = await import('@/lib/rateLimit');
+
+    await expect(
+      distributedRateLimit('ci-integration:missing-config', 2, 300, { fallbackOnError: false })
+    ).rejects.toThrow('Upstash Redis is not configured');
+    expect(rateLimit).not.toHaveBeenCalled();
+  });
+
   it('passes through denied result from in-memory fallback', async () => {
     const { rateLimit } = await import('@/lib/rateLimit');
     vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 });
@@ -329,6 +338,17 @@ describe('distributedRateLimit — Upstash path', () => {
 
     expect(rateLimit).toHaveBeenCalled();
     expect(result.allowed).toBe(false);
+  });
+
+  it('throws instead of falling back when strict failure handling is requested', async () => {
+    mockFetch.mockRejectedValue(new Error('Invalid Upstash credential'));
+
+    const { rateLimit } = await import('@/lib/rateLimit');
+
+    await expect(
+      distributedRateLimit('ci-integration:strict-key', 2, 300, { fallbackOnError: false })
+    ).rejects.toThrow('Invalid Upstash credential');
+    expect(rateLimit).not.toHaveBeenCalled();
   });
 
   it('makes exactly one fetch call (atomic EVAL) regardless of allow/deny', async () => {
