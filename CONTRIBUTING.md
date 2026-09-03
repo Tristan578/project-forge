@@ -120,7 +120,9 @@ python .claude/skills/arch-validator/check_arch.py
 
 E2E tests require the WASM build:
 ```bash
-cd web && npx playwright test
+cd web && npm run e2e:install      # chromium + firefox + webkit, once
+cd web && npx playwright test      # chromium, the blocking CI selection
+cd web && npm run e2e:crossbrowser # the same @ui specs on firefox/webkit/mobile
 ```
 
 ### 5. Open a pull request
@@ -141,6 +143,7 @@ Include a summary of what changed, how to test it, and screenshots for visual ch
 | Unit (web) | `cd web && npx vitest run` | 4700+ |
 | Unit (MCP) | `cd mcp-server && npx vitest run` | 25+ |
 | E2E | `cd web && npx playwright test` | 81 |
+| E2E (cross-browser) | `cd web && npm run e2e:crossbrowser` | @ui specs x 4 engines |
 | Manual | See [TESTING.md](TESTING.md) | checklist |
 
 **Writing new tests:**

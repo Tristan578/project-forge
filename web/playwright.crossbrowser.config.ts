@@ -9,9 +9,12 @@
  * the same production server (`next build` + `next start`).
  *
  * There is deliberately NO global `launchOptions`: `--disable-gpu` and
- * `--no-sandbox` are Chromium flags, and a Firefox/WebKit launch given them
- * fails before the first test. Only the Pixel 7 project (a Chromium
- * emulation) carries them.
+ * `--no-sandbox` are Chromium flags, so passing them to a Firefox or WebKit
+ * launch is at best meaningless and at worst a launch failure. Only the
+ * Pixel 7 project (a Chromium emulation) carries them. playwright.config.ts
+ * set them globally and overrode them per project, which is how its
+ * `mobile-iphone` project — an iPhone 14, i.e. WebKit — ended up inheriting
+ * them; that project has since been removed there (#9610).
  *
  * Linux WebKit is what Playwright ships and installs (`e2e:install` already
  * pulls it); no macOS runner is involved. The engine's SwiftShader flags are
@@ -35,8 +38,15 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: true,
   retries: 1,
-  // Four engines share one runner; two workers keeps WebKit from starving.
+  // ci.yml runs ONE project per job (matrix), so a runner hosts a single
+  // engine's 385 specs rather than all four's 1540. Two workers on the 4-core
+  // ubuntu-latest runner leaves headroom for WebKit, which is the memory-
+  // hungriest of the four; raising this is a measured change, not a guess.
   workers: 2,
+  // Per-project budget, not a suite-wide one: a browser that is broken outright
+  // stops after 20 failures instead of burning the full 30-minute timeout, and
+  // because the job is per-project that truncation is attributable to the
+  // engine that caused it.
   maxFailures: 20,
   reporter: [['github'], ['html', { open: 'never', outputFolder: 'playwright-report-crossbrowser' }]],
   timeout: CI_TEST_TIMEOUT_MS,

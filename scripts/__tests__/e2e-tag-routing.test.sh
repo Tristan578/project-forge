@@ -29,6 +29,22 @@ FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 
+# A `run: |` block may spread one command over several physical lines with a
+# trailing backslash (quality-gates.yml does exactly this). grep hands back a
+# single physical line, so any --config/--project sitting past the break is
+# invisible and the scan below silently falls back to its defaults -- which
+# credit every project the default config declares. Join the continuations
+# first so a flag is found wherever the author wrapped the command.
+join_continuations() {
+  awk '{
+    line = $0
+    sub(/[[:space:]]+$/, "", line)
+    if (line ~ /\\$/) { sub(/\\$/, "", line); buf = buf line " "; next }
+    print buf line
+    buf = ""
+  } END { if (buf != "") print buf }' "$1"
+}
+
 if [ ! -f "$CI_YML" ]; then
   echo "  FAIL: ci.yml not found at $CI_YML"
   echo "SUITE FAILED"
@@ -140,11 +156,17 @@ echo "=== every declared Playwright project is executed by some workflow (#9610)
 # for months and were executed by nothing: every workflow passed
 # --project=chromium or a chromium-only config, so cross-browser coverage was
 # a label. Declared-but-unrun is the #9586 shape again — nothing red, nothing
-# run. A project NAME counts as executed when some workflow either names it
-# with --project, or invokes its config without --project (all of that
-# config's projects run). Names are matched globally: a project is a
-# browser/device target, and running `firefox` from the cross-browser config
-# is running firefox.
+# run. A project counts as executed when some workflow either names it with
+# --project, or invokes its config without --project (all of that config's
+# projects run).
+#
+# The unit is the (config, project) PAIR, not the bare name. Two configs may
+# declare the same name — `firefox` exists in both playwright.config.ts and
+# playwright.crossbrowser.config.ts — and they are different projects: they
+# carry different `use` blocks, different webServers and different timeouts.
+# Matching on the bare name would credit an unrun project because a DIFFERENT
+# file's same-named project runs, which is precisely the coverage-that-reads-
+# as-present condition this block exists to catch.
 WEB_DIR="$(cd "$E2E_DIR/.." 2>/dev/null && pwd)"
 declared=""
 for cfg in "$WEB_DIR"/playwright*.config.ts; do
@@ -155,53 +177,177 @@ for cfg in "$WEB_DIR"/playwright*.config.ts; do
   done < <(grep -oE "^[[:space:]]*name: '[^']+'" "$cfg" | sed -E "s/.*name: '([^']+)'/\1/")
 done
 executed=""
+unresolved=""
+# The literal three bytes that open a GitHub Actions expression. Assembled
+# rather than written as '${{' so shellcheck does not read the case pattern
+# below as an expansion someone forgot to double-quote (SC2016) -- the CI
+# CI lint step runs at default severity, where an info finding is a red job.
+matrix_ref_prefix='$'"{{"
 for wf in "$CI_YML" "$CD_YML" "$(dirname "$CI_YML")/quality-gates.yml"; do
   [ -f "$wf" ] || continue
   while IFS= read -r line; do
     cfg="$(grep -oE -- '--config[= ]+[^ ]+' <<<"$line" | head -1 | sed -E 's/--config[= ]+//')"
     cfg="$(basename "${cfg:-playwright.config.ts}")"
-    projects="$(grep -oE -- '--project[= ]+[^ ]+' <<<"$line" | sed -E 's/--project[= ]+//')"
-    if [ -n "$projects" ]; then
+    raw="$(grep -oE -- '--project[= ]+[^ ]+' <<<"$line" | sed -E 's/--project[= ]+//')"
+    projects=""
+    for p in $raw; do
+      case "$p" in
+        "$matrix_ref_prefix"*)
+          # `--project=${{ matrix.<key> }}`. Splitting the line on spaces leaves
+          # only the opening brace, so re-read the key from the whole line and
+          # expand it from that workflow's own `<key>: [a, b, c]`. Without this
+          # the flag resolves to a name no config declares, and every real
+          # project silently reports as unexecuted.
+          key="$(grep -oE -- '--project[= ]*\$\{\{[[:space:]]*matrix\.[A-Za-z0-9_]+' <<<"$line" | head -1 | sed -E 's/.*matrix\.//')"
+          vals=""
+          [ -n "$key" ] && vals="$(grep -oE "^[[:space:]]*${key}:[[:space:]]*\[[^]]*\]" "$wf" \
+            | sed -E "s/^[[:space:]]*${key}:[[:space:]]*\[//; s/\]$//" | tr ',' ' ' | tr -d "'\"")"
+          if [ -n "${vals// /}" ]; then
+            for v in $vals; do projects="${projects} ${v}"; done
+          else
+            # Fail CLOSED. Falling through to the no-flag branch below would
+            # credit every project the config declares -- the exact fail-open
+            # this block exists to prevent.
+            unresolved="${unresolved} ${cfg}"
+          fi
+          ;;
+        *) projects="${projects} ${p}" ;;
+      esac
+    done
+    if [ -n "${projects// /}" ] || [ -n "${unresolved// /}" ]; then
       for p in $projects; do executed="${executed}${cfg}:${p}"$'\n'; done
     else
       while IFS= read -r entry; do
         [ -n "$entry" ] && executed="${executed}${entry}"$'\n'
       done < <(grep "^${cfg}:" <<<"$declared" || true)
     fi
-  done < <(grep -h 'playwright test' "$wf" | grep -vE '^[[:space:]]*#')
+  done < <(join_continuations "$wf" | grep 'playwright test' | grep -vE '^[[:space:]]*#')
 done
-names="$(sed -E 's/^[^:]+://' <<<"$declared" | sort -u | grep . || true)"
-exec_names="$(sed -E 's/^[^:]+://' <<<"$executed" | sort -u | grep . || true)"
+if [ -z "${unresolved// /}" ]; then
+  pass "every --project flag resolved to a concrete project name"
+else
+  fail "could not resolve a --project value for:${unresolved} — an unresolvable flag must not be treated as 'runs everything' (#9610)"
+fi
+pairs="$(sort -u <<<"$declared" | grep . || true)"
+exec_pairs="$(sort -u <<<"$executed" | grep . || true)"
 # Declared projects that no workflow runs, each with the reason on record.
-#   agent-chromium — playwright.agent.config.ts is the agentic browser harness,
+# Entries are `<config basename>:<project name>` — the same pair form as
+# $declared, so an allowlist cannot accidentally cover a same-named project
+# in a different config.
+#   playwright.agent.config.ts:agent-chromium — the agentic browser harness,
 #                    driven by hand against a dev server; no workflow runs it
 #                    by design (#9610 records this as a policy decision).
-ALLOWLIST_UNEXECUTED="agent-chromium"
-name_count="$(grep -c . <<<"$names" || true)"
-if [ "${name_count:-0}" -ge 5 ]; then
-  pass "enumerated ${name_count} distinct Playwright project names across the configs (a walk over zero names would pass vacuously)"
+ALLOWLIST_UNEXECUTED="playwright.agent.config.ts:agent-chromium"
+pair_count="$(grep -c . <<<"$pairs" || true)"
+# Floor, not a pin: adding a config or a project may only raise this. Measured
+# at 10 when written. A walk over zero pairs would otherwise pass vacuously.
+if [ "${pair_count:-0}" -ge 8 ]; then
+  pass "enumerated ${pair_count} (config, project) pairs across the configs (a walk over zero pairs would pass vacuously)"
 else
-  fail "enumerated only ${name_count:-0} project names — the config glob or the name: pattern no longer matches"
+  fail "enumerated only ${pair_count:-0} (config, project) pairs — the config glob or the name: pattern no longer matches"
 fi
 missing=""
-for n in $names; do
-  if grep -qx "$n" <<<"$exec_names"; then continue; fi
+for n in $pairs; do
+  if grep -qx "$n" <<<"$exec_pairs"; then continue; fi
   allowed=false
   for a in $ALLOWLIST_UNEXECUTED; do [ "$a" = "$n" ] && allowed=true; done
   [ "$allowed" = true ] || missing="${missing} ${n}"
 done
 if [ -z "$missing" ]; then
-  pass "every declared project is executed by a workflow or allowlisted with a reason (executed: $(tr '\n' ' ' <<<"$exec_names"))"
+  pass "every declared project is executed by a workflow or allowlisted with a reason (executed: $(tr '\n' ' ' <<<"$exec_pairs"))"
 else
   fail "declared but executed by NO workflow:${missing} — a project that runs nowhere is coverage that reads as present (#9610)"
 fi
 for a in $ALLOWLIST_UNEXECUTED; do
-  if grep -qx "$a" <<<"$names"; then
+  if grep -qx "$a" <<<"$pairs"; then
     pass "allowlisted project '${a}' still exists (the allowlist is not stale)"
   else
     fail "allowlisted project '${a}' is no longer declared anywhere — drop it from ALLOWLIST_UNEXECUTED"
   fi
 done
+
+echo ""
+echo "=== a playwright step whose webServer runs \`next start\` must set SKIP_ENV_VALIDATION (#9610) ==="
+# web/src/instrumentation.ts throws "Server startup aborted: missing required
+# environment variables" when NODE_ENV === 'production' and SKIP_ENV_VALIDATION
+# is unset, and CI has no Clerk/Stripe keys. Playwright's webServer inherits the
+# environment of the step that INVOKES playwright, not the step that built the
+# app -- so setting the flag only on `next build` leaves the server dead, the
+# health-check URL unanswered, and the run dies at the webServer timeout having
+# executed zero tests. On a continue-on-error job that reads as green. Shipped
+# on the first cut of the cross-browser job (#9663) and caught in review.
+prod_checked=0
+for wf in "$CI_YML" "$CD_YML" "$(dirname "$CI_YML")/quality-gates.yml"; do
+  [ -f "$wf" ] || continue
+  while IFS=: read -r lineno _; do
+    [ -n "$lineno" ] || continue
+    logical="$(tail -n "+${lineno}" "$wf" | join_continuations /dev/stdin | head -1)"
+    cfg="$(grep -oE -- '--config[= ]+[^ ]+' <<<"$logical" | head -1 | sed -E 's/--config[= ]+//')"
+    cfg="$(basename "${cfg:-playwright.config.ts}")"
+    cfg_path="$WEB_DIR/$cfg"
+    [ -f "$cfg_path" ] || continue
+    # Only the webServer stanza counts -- `next start` in a comment is not a
+    # server.
+    grep -A8 'webServer' "$cfg_path" | grep -q "command:.*next start" || continue
+    prod_checked=$((prod_checked + 1))
+    # Walk back to the top of the enclosing step (a `- ` list item at step
+    # indentation) and look for the flag anywhere in it.
+    step_start="$(head -n "$lineno" "$wf" | grep -nE '^[[:space:]]{6}- ' | tail -1 | cut -d: -f1)"
+    step_start="${step_start:-1}"
+    step="$(sed -n "${step_start},${lineno}p" "$wf")"
+    if grep -q 'SKIP_ENV_VALIDATION' <<<"$step"; then
+      pass "$(basename "$wf"):${lineno} runs ${cfg} (next start) and sets SKIP_ENV_VALIDATION"
+    else
+      fail "$(basename "$wf"):${lineno} runs ${cfg}, whose webServer is \`next start\`, without SKIP_ENV_VALIDATION on the step — the server aborts at boot and the job runs ZERO tests (#9610)"
+    fi
+  done < <(grep -n 'playwright test' "$wf" | grep -vE ':[[:space:]]*#')
+done
+# The floor is the MEASURED count, not a token non-zero: at 4 or less this
+# section still reported green when join_continuations was removed and one
+# wrapped invocation went invisible. Adding a playwright job raises this;
+# removing one lowers it, and either way the number is checked by a human.
+EXPECTED_PROD_WEBSERVER_INVOCATIONS=5
+if [ "$prod_checked" -eq "$EXPECTED_PROD_WEBSERVER_INVOCATIONS" ]; then
+  pass "checked ${prod_checked} playwright invocations against a production webServer (a walk over zero would pass vacuously)"
+else
+  fail "found ${prod_checked} playwright invocation(s) against a \`next start\` config, expected ${EXPECTED_PROD_WEBSERVER_INVOCATIONS} — a job was added or removed, or the scan stopped seeing one (update EXPECTED_PROD_WEBSERVER_INVOCATIONS deliberately)"
+fi
+
+echo ""
+echo "=== a non-blocking e2e job must still be un-disableable in one line (#9610) ==="
+# test-e2e-crossbrowser is deliberately continue-on-error for its first landing,
+# so it is NOT in ci-success's `needs:` and therefore NOT in check-ci-success.sh's
+# check_triggered map -- the anti-tamper pass that makes `if: false` on a mapped
+# gate go red. Without a substitute the job could be switched off by one line
+# with every required check still green, which is lessons-learned #4's family.
+# Deleting the run step is already caught (the executed-projects scan above turns
+# firefox/webkit/mobile-* into unexecuted declared projects). What is left is the
+# `if:` itself, so pin it here. When the job becomes blocking -- drop
+# continue-on-error, add it to ci-success's needs: and to check_triggered -- this
+# section becomes redundant, not wrong.
+xb_job="$(awk '/^  test-e2e-crossbrowser:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:$/ && !/test-e2e-crossbrowser/{exit}' "$CI_YML")"
+if [ -z "$xb_job" ]; then
+  fail "no test-e2e-crossbrowser job in ci.yml — firefox/webkit/mobile specs have no execution site (#9610)"
+else
+  xb_if="$(grep -E '^    if:' <<<"$xb_job" | head -1)"
+  if grep -q 'needs-web' <<<"$xb_if"; then
+    pass "test-e2e-crossbrowser is gated on the ci-gate needs-web output, not a literal"
+  else
+    fail "test-e2e-crossbrowser's job-level if: does not reference needs-web (found: ${xb_if:-none}) — a non-blocking job with an unpinned gate can be disabled in one line (#9610)"
+  fi
+fi
+
+disabled=""
+for wf in "$CI_YML" "$CD_YML" "$(dirname "$CI_YML")/quality-gates.yml"; do
+  [ -f "$wf" ] || continue
+  hits="$(grep -nE '^    if:[[:space:]]*(false|\$\{\{[[:space:]]*false[[:space:]]*\}\})[[:space:]]*$' "$wf" || true)"
+  [ -n "$hits" ] && disabled="${disabled} $(basename "$wf"):$(cut -d: -f1 <<<"$hits" | tr '\n' ',')"
+done
+if [ -z "${disabled// /}" ]; then
+  pass "no job in ci.yml/cd.yml/quality-gates.yml is gated on a literal false"
+else
+  fail "job(s) gated on a literal false:${disabled} — a disabled job still resolves in needs: and reports as a legitimate skip"
+fi
 
 echo ""
 echo "  PASS=$PASS FAIL=$FAIL"
