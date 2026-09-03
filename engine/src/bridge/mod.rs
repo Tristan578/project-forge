@@ -413,6 +413,20 @@ impl Plugin for SelectionPlugin {
             // the queues are filled unconditionally, and an exported game's
             // autoplay clips are what the authoring is for. The playback
             // sampler itself is `AnimationClipPlugin` in core.
+            // `.chain()` is load-bearing, for two independent reasons. A JS tick
+            // can enqueue `create_animation_clip` and its keyframes before the
+            // next engine frame, so both land in `PendingCommands` together:
+            // (1) an unordered tuple picks an arbitrary relative order, and that
+            // order reshuffles whenever ANY system is added to `Update`, so the
+            // keyframes silently drop on the frame the clip is created; and
+            // (2) `apply_animation_clip_updates` inserts the component through
+            // `Commands`, which is deferred — the edit drains query
+            // `Option<&mut AnimationClipData>` and would see `None` even if the
+            // order happened to be right. Chaining fixes both: it pins
+            // create -> keyframe edits -> properties -> preview -> removal, and
+            // Bevy's `auto_insert_apply_deferred` puts a sync point after the
+            // system that owns the `Commands`. Same hazard the skeleton2d
+            // registration below documents (#9278).
             .add_systems(Update, (
                 animation::apply_animation_clip_updates,
                 animation::apply_animation_clip_add_keyframes,
@@ -421,7 +435,7 @@ impl Plugin for SelectionPlugin {
                 animation::apply_animation_clip_property_updates,
                 animation::apply_animation_clip_previews,
                 animation::apply_animation_clip_removals,
-            ));
+            ).chain());
 
         app
             .add_systems(Update, scripts::emit_play_tick_system)
