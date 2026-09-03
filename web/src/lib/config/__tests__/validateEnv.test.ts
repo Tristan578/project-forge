@@ -142,6 +142,20 @@ describe('validateEnv', () => {
   });
 
   describe('Clerk key format validation', () => {
+    it('accepts test Clerk keys in the explicitly identified staging environment', async () => {
+      stubAllRequired();
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_staging');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_staging');
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.valid).toBe(true);
+      expect(result.missing).not.toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
+      expect(result.warnings.every((warning) => !warning.includes('Clerk'))).toBe(true);
+    });
+
     it('flags pk_test_ Clerk key as invalid in production', async () => {
       stubAllRequired();
       vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_xxx');
