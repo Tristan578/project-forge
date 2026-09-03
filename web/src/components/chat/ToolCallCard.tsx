@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Check, X, Loader2, ChevronDown, ChevronRight, Undo2, RotateCcw, Eye, XCircle, ShieldAlert, Ban } from 'lucide-react';
 import type { ToolCallStatus } from '@/stores/chatStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { describeToolAction } from '@/lib/chat/approvalSummary';
 
 interface ToolCallCardProps {
   toolCall: ToolCallStatus;
@@ -368,9 +369,15 @@ export function ToolCallCard({
 }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const undo = useEditorStore((s) => s.undo);
+  const sceneNodes = useEditorStore((s) => s.sceneGraph.nodes);
 
   const label = TOOL_LABELS[toolCall.name] || toolCall.name;
-  const summary = summarizeInput(toolCall.name, toolCall.input);
+  // Names, not ids — see `describeToolAction`. Read straight off the scene
+  // graph the editor is already subscribed to, so a renamed entity is
+  // described by its current name.
+  const lookupEntityName = (entityId: string) => sceneNodes[entityId]?.name;
+  const action = describeToolAction(toolCall.name, toolCall.input, lookupEntityName);
+  const summary = action || summarizeInput(toolCall.name, toolCall.input);
 
   const statusIcon = (() => {
     switch (toolCall.status) {
@@ -387,7 +394,7 @@ export function ToolCallCard({
       case 'undone':
         return <RotateCcw size={14} className="text-zinc-400" />;
       case 'approval-required':
-        return <ShieldAlert size={14} className="text-amber-400" />;
+        return <ShieldAlert size={14} className="text-rose-300" />;
       case 'denied':
         return <Ban size={14} className="text-red-400/60" />;
     }
@@ -400,9 +407,16 @@ export function ToolCallCard({
   const isDenied = toolCall.status === 'denied';
 
   return (
-    <div className={`my-1 rounded border text-xs ${
+    <div
+      data-testid={needsApproval ? 'server-approval-gate' : undefined}
+      className={`my-1 rounded text-xs ${
       needsApproval
-        ? 'border-amber-500/70 bg-amber-950/30'
+        // The SERVER gate and the client-only 'preview' card can sit side by
+        // side in one turn, and amber-on-amber made them indistinguishable —
+        // the two have completely different consequences (one is a blocked
+        // destructive call, the other a routine edit awaiting a local OK), so
+        // the gate gets its own colour, a heavier ring and a header band.
+        ? 'border-2 border-rose-500/80 bg-rose-950/40 ring-1 ring-rose-500/30'
         : isDenied
           ? 'border-red-900/30 bg-red-950/10 opacity-60'
           : isPreview
@@ -410,9 +424,16 @@ export function ToolCallCard({
             : isRejected
               ? 'border-red-900/30 bg-red-950/10 opacity-60'
               : isUndone
-                ? 'border-zinc-700/50 bg-zinc-800/30 opacity-50'
-                : 'border-zinc-700 bg-zinc-800/50'
-    }`}>
+                ? 'border border-zinc-700/50 bg-zinc-800/30 opacity-50'
+                : 'border border-zinc-700 bg-zinc-800/50'
+    }`}
+    >
+      {needsApproval && (
+        <div className="flex items-center gap-1.5 rounded-t bg-rose-900/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-200">
+          <ShieldAlert size={12} />
+          <span>Blocked — needs your approval</span>
+        </div>
+      )}
       <button
         className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
         onClick={() => setExpanded(!expanded)}
@@ -423,9 +444,9 @@ export function ToolCallCard({
         </span>
         {summary && <span className="truncate text-zinc-400">{summary}</span>}
         <span className="ml-auto flex items-center gap-1">
-          {needsApproval && (
+          {isPreview && (
             <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-400">
-              Approval required
+              Preview
             </span>
           )}
           {isDenied && (
@@ -465,9 +486,14 @@ export function ToolCallCard({
           No keyboard default, no timeout, no batch auto-approve — each
           blocked call is answered explicitly. */}
       {needsApproval && (
-        <div className="border-t border-amber-600/40">
+        <div className="border-t border-rose-600/40">
           <div className="px-2 py-1.5">
-            <p className="mb-1 text-[10px] uppercase tracking-wide text-amber-300/80">
+            {action && (
+              <p data-testid="approval-action" className="mb-1.5 text-[12px] font-medium text-rose-100">
+                {action}
+              </p>
+            )}
+            <p className="mb-1 text-[10px] uppercase tracking-wide text-rose-200/80">
               This action will run with these arguments
             </p>
             <pre
@@ -477,31 +503,35 @@ export function ToolCallCard({
               {JSON.stringify(toolCall.input, null, 2)}
             </pre>
           </div>
-          <div className="flex items-center gap-2 border-t border-amber-600/30 px-2 py-1.5">
+          {/* min-h-11 / min-w-[88px] = 44px, the WCAG 2.5.5 (AAA) and
+              iOS/Android minimum touch target. These two buttons decide
+              whether a destructive action runs, so they are the last controls
+              in the app that should be hard to hit accurately on a phone. */}
+          <div className="flex items-center gap-2 border-t border-rose-600/30 px-2 py-2">
             <button
               onClick={() => onApproveGated?.(toolCall.id)}
               disabled={gatedDecision !== undefined}
               aria-label={`Approve ${label}`}
-              className={`flex items-center gap-1 rounded px-2 py-1 ${
+              className={`flex min-h-11 min-w-[88px] items-center justify-center gap-1 rounded px-3 py-2 text-[13px] font-medium ${
                 gatedDecision === true
                   ? 'bg-green-600/40 text-green-300'
                   : 'bg-green-600/20 text-green-400 hover:bg-green-600/30 disabled:opacity-40'
               }`}
             >
-              <Check size={12} />
+              <Check size={14} />
               <span>Approve</span>
             </button>
             <button
               onClick={() => onDenyGated?.(toolCall.id)}
               disabled={gatedDecision !== undefined}
               aria-label={`Deny ${label}`}
-              className={`flex items-center gap-1 rounded px-2 py-1 ${
+              className={`flex min-h-11 min-w-[88px] items-center justify-center gap-1 rounded px-3 py-2 text-[13px] font-medium ${
                 gatedDecision === false
                   ? 'bg-red-600/40 text-red-300'
                   : 'bg-red-600/20 text-red-400 hover:bg-red-600/30 disabled:opacity-40'
               }`}
             >
-              <X size={12} />
+              <X size={14} />
               <span>Deny</span>
             </button>
             {gatedDecision !== undefined && (
