@@ -8,7 +8,7 @@
  * Two naming conventions are used:
  *
  * 1. Short names (`AI_MODEL_PRIMARY`, `AI_MODEL_FAST`): provider-agnostic IDs
- *    used by the legacy @anthropic-ai/sdk path and the provider registry's
+ *    used by the direct @ai-sdk/anthropic path and the provider registry's
  *    MODEL_MAP translation layer.
  *
  * 2. Gateway-format names (`GATEWAY_MODEL_CHAT`, etc.): fully-qualified
@@ -103,6 +103,18 @@ export type AiModelKey = keyof typeof AI_MODELS;
  * explicitly — prevents accidental routing of new models that might be
  * priced differently.
  */
+/**
+ * Ordered fallback models the AI Gateway may route to when `model` is
+ * unavailable (#9631): premium falls back to chat then fast; chat falls back
+ * to fast; fast has nothing cheaper to fall back to. Unknown ids (another
+ * provider's model) get no fallback rather than a guess.
+ */
+export function gatewayFallbackModels(model: string | undefined | null): string[] {
+  const chain: string[] = [GATEWAY_MODEL_PREMIUM, GATEWAY_MODEL_CHAT, GATEWAY_MODEL_FAST];
+  const index = model ? chain.indexOf(model) : -1;
+  return index < 0 ? [] : chain.slice(index + 1);
+}
+
 export function isPremiumModel(model: string | undefined | null): boolean {
   if (!model) return false;
   const bare = model.includes('/') ? model.split('/').slice(1).join('/') : model;
