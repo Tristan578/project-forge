@@ -350,6 +350,67 @@ else
 fi
 
 echo ""
+echo "=== every per-project testMatch must select at least one spec (#9663) ==="
+# The two mobile projects narrow to the compact-layout suite rather than running
+# the whole @ui selection, because below 1024px getLayoutConfig() returns
+# mode 'compact' and EditorLayout renders no Dockview at all -- the desktop
+# editor specs assert markup that deliberately does not exist there.
+#
+# The cost of that narrowing is a new fail-open: rename or move the spec files
+# and the glob matches nothing, the project runs ZERO tests, and it reports
+# green. That is #9586's shape exactly -- nothing red, nothing run -- so the
+# selection is asserted rather than trusted.
+# Emit one effective glob per per-project `testMatch:` in $1. A testMatch whose
+# value is a bare identifier is looked up as a top-level `const NAME = '...'` in
+# the same file, so hoisting the literal into a named constant does not make the
+# entry invisible to this scan -- an invisible entry is an unchecked one.
+resolve_test_match_globs() {
+  local cfg="$1" raw
+  while IFS= read -r raw; do
+    [ -n "$raw" ] || continue
+    case "$raw" in
+      "'"*) sed -E "s/^'(.*)'$/\1/" <<<"$raw" ;;
+      *) grep -oE "^const ${raw} = '[^']+'" "$cfg" | sed -E "s/.*= '([^']+)'/\1/" | head -1 ;;
+    esac
+  done < <(grep -oE "^[[:space:]]{4,}testMatch: ('[^']+'|[A-Za-z_][A-Za-z0-9_]*)" "$cfg" \
+    | sed -E 's/.*testMatch: //')
+}
+
+match_count=0
+empty_globs=""
+for cfg in "$WEB_DIR"/playwright*.config.ts; do
+  [ -f "$cfg" ] || continue
+  while IFS= read -r glob; do
+    [ -n "$glob" ] || continue
+    match_count=$((match_count + 1))
+    # Only the leading `**/` form is used here; anything else is reported so a
+    # new shape cannot pass unchecked.
+    case "$glob" in
+      '**/'*) pattern="${glob#'**/'}" ;;
+      *) empty_globs="${empty_globs} $(basename "$cfg"):${glob}(unsupported-shape)"; continue ;;
+    esac
+    n="$(find "$E2E_DIR" -name "$pattern" -type f 2>/dev/null | grep -c . || true)"
+    if [ "${n:-0}" -gt 0 ]; then
+      pass "$(basename "$cfg") testMatch '${glob}' selects ${n} spec file(s)"
+    else
+      empty_globs="${empty_globs} $(basename "$cfg"):${glob}"
+    fi
+  done < <(resolve_test_match_globs "$cfg")
+done
+if [ -n "${empty_globs// /}" ]; then
+  fail "per-project testMatch selecting NO spec file:${empty_globs} — that project runs zero tests and reports green (#9586's shape)"
+fi
+# Floor, not a pin: measured at 2 (mobile-iphone, mobile-pixel) when written.
+# A walk over zero testMatch entries would report a clean section while every
+# narrowed project ran nothing.
+EXPECTED_PROJECT_TESTMATCH=2
+if [ "$match_count" -ge "$EXPECTED_PROJECT_TESTMATCH" ]; then
+  pass "inspected ${match_count} per-project testMatch entrie(s) (a walk over zero would pass vacuously)"
+else
+  fail "found ${match_count} per-project testMatch entrie(s), expected at least ${EXPECTED_PROJECT_TESTMATCH} — the grep no longer sees them, so this whole section is vacuous"
+fi
+
+echo ""
 echo "  PASS=$PASS FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
   echo "SUITE PASSED"
