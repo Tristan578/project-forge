@@ -136,6 +136,32 @@ All files |   75.21 |    64.03 |   70.11 |   76.42 |
 
 Error: A worker process has failed to exit gracefully'
 
+# The PGlite/V8 WASM-teardown crash (#9643, seen on #9590): a CHECK failure in
+# ThreadIsolation::UnregisterWasmAllocation aborts the process with SIGILL, so
+# vitest exits 132. Two distinct shapes, and the gate must treat them
+# differently — the reason `.claude/rules/gotchas-build-ci.md` may not say "132
+# always fails closed". Shape A kills the run mid-flight: no summary, no proof.
+V8_CRASH_TRUNCATED_OUTPUT=' RUN  v4.1.7 /home/runner/work/project-forge/web
+
+ ✓ src/stores/slices/selectionSlice.test.ts (8 tests) 21ms
+#
+# Fatal error in , line 0
+# Check failed: jit_page_->allocations_.erase(addr) == 1.
+#
+ ==== C stack trace ===============================
+ v8::internal::ThreadIsolation::UnregisterWasmAllocation(unsigned long, unsigned long)
+Illegal instruction (core dumped)'
+
+# Shape B is the same crash arriving AFTER both phases completed — the teardown
+# runs once every suite has reported. Nothing was left unadjudicated, so this is
+# the #3077 class and must be swallowed even in --coverage mode.
+V8_CRASH_AFTER_GREEN_OUTPUT="$COVERAGE_PASS_OUTPUT
+#
+# Fatal error in , line 0
+# Check failed: jit_page_->allocations_.erase(addr) == 1.
+#
+Illegal instruction (core dumped)"
+
 echo "== check-vitest-exit.sh =="
 
 # 1. Clean pass (exit 0) → gate passes.
@@ -347,9 +373,29 @@ f="$(mkfile badflag.txt "$PASS_OUTPUT")"
 bash "$GATE" 1 "$f" "--coverag" >/dev/null 2>&1; rc=$?
 if [ "$rc" = "2" ]; then pass "unknown third arg → exit 2 (usage)"; else fail "unknown third arg → expected 2, got $rc"; fi
 
+# ── Exit 132 (SIGILL) is the PGlite/V8 WASM-teardown crash of #9643. It is NOT
+#    special-cased anywhere in the gate, and these two cases are what makes that
+#    checkable: the SAME exit code adjudicates opposite ways purely on the
+#    evidence. A doc entry (or a reader) claiming "132 always fails closed" is
+#    contradicted by case 33; one claiming "132 is known noise, re-run it" is
+#    contradicted by case 32. ──────────────────────────────────────────────────
+
+# 32. Fail closed: 132 + the V8 crash killing the run mid-flight (no summary) →
+#     propagate 132. This is the shape that reddens Web Tests, and it must.
+f="$(mkfile v8-trunc.txt "$V8_CRASH_TRUNCATED_OUTPUT")"
+rc="$(run_gate 132 "$f")"
+if [ "$rc" = "132" ]; then pass "132 + truncated V8 crash → gate 132 (no positive proof)"; else fail "132 + truncated V8 crash → expected 132, got $rc (REGRESSION: SIGILL half-run swallowed)"; fi
+
+# 33. The converse: 132 arriving AFTER both phases completed, in --coverage mode
+#     (green summary + coverage report marker) → swallowed as #3077-class noise.
+#     Nothing was left unadjudicated, so failing closed here would be over-block.
+f="$(mkfile v8-green.txt "$V8_CRASH_AFTER_GREEN_OUTPUT")"
+rc="$(run_gate 132 "$f" --coverage)"
+if [ "$rc" = "0" ]; then pass "--coverage: 132 after both phases complete → gate 0 (132 is not special-cased)"; else fail "--coverage: 132 after both phases → expected 0, got $rc"; fi
+
 # --- Call-site wiring pins -------------------------------------------------
 #
-# Cases 1-31 prove the gate adjudicates correctly when it is CALLED correctly.
+# Cases 1-33 prove the gate adjudicates correctly when it is CALLED correctly.
 # They say nothing about whether the workflows call it correctly, and that is
 # where this gate has actually been defeated before: cd.yml ran `npx vitest run`
 # with no --coverage at all, so the deploy path — the one that re-validates a
