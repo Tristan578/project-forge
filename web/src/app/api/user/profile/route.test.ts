@@ -119,6 +119,37 @@ describe('/api/user/profile', () => {
       expect(data.code).toBe('VALIDATION_ERROR');
     });
 
+    // zod >= 4.5 counts .min()/.max() in Unicode code points, not UTF-16 units
+    // (#9637). A single emoji is 2 UTF-16 units and used to pass min(2); it is
+    // one character and is now rejected — which is what min(2) always meant.
+    it('returns 422 for a single-emoji displayName (one code point, two UTF-16 units)', async () => {
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
+
+      const req = new NextRequest('http://localhost/api/user/profile', {
+        method: 'PUT',
+        body: JSON.stringify({ displayName: '\u{1F642}' }),
+      });
+      const res = await PUT(req);
+
+      expect(res.status).toBe(422);
+      expect((await res.json()).code).toBe('VALIDATION_ERROR');
+    });
+
+    it('accepts a two-emoji displayName (two code points)', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(updateDisplayName).mockResolvedValue({ ...user, displayName: '\u{1F642}\u{1F642}' } as never);
+
+      const req = new NextRequest('http://localhost/api/user/profile', {
+        method: 'PUT',
+        body: JSON.stringify({ displayName: '\u{1F642}\u{1F642}' }),
+      });
+      const res = await PUT(req);
+
+      expect(res.status).toBe(200);
+      expect(updateDisplayName).toHaveBeenCalledWith(user.id, '\u{1F642}\u{1F642}');
+    });
+
     it('returns 422 for whitespace-only displayName (regression: Sentry #13124255)', async () => {
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
 

@@ -14,6 +14,7 @@ import {
   RATE_LIMIT_ADMIN_WINDOW_MS,
   RATE_LIMIT_PUBLIC_MAX,
   RATE_LIMIT_ADMIN_MAX,
+  UPSTASH_REST_TIMEOUT_MS,
 } from '@/lib/config/timeouts';
 import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
 
@@ -85,11 +86,27 @@ async function doInitUpstash(): Promise<UpstashRateLimiter | false> {
             redis,
             limiter: Ratelimit.slidingWindow(opts.rate, opts.window as Parameters<typeof Ratelimit.slidingWindow>[1]),
             prefix: '@spawnforge/ratelimit',
+            // The SDK's default is 5 s, and on expiry it RESOLVES
+            // `{ success: true, reason: 'timeout' }` rather than throwing —
+            // so the catch in rateLimit() never sees a stalled Upstash. Bound
+            // it the same way the REST transport is bounded, and report the
+            // resolved-open case below.
+            timeout: UPSTASH_REST_TIMEOUT_MS,
           });
           cache.set(configKey, rl);
         }
 
         const res = await rl.limit(key);
+        if (res.reason === 'timeout') {
+          // Allowed-by-timeout is a fail-open with no exception to catch.
+          // Sampled like the other degrade paths so a sustained stall cannot
+          // become a Sentry storm (#8666).
+          sampledCaptureException(
+            'rateLimit.timeoutFailOpen',
+            new Error(`Upstash rate limit timed out after ${UPSTASH_REST_TIMEOUT_MS}ms; request allowed`),
+            { keyPrefix: key.split(':')[0] },
+          );
+        }
         return {
           allowed: res.success,
           remaining: res.remaining,
@@ -281,11 +298,23 @@ export function getClientIpFromHeaders(headers: Pick<Headers, 'get'>): string {
 // Response helpers
 // ---------------------------------------------------------------------------
 
-export function rateLimitResponse(remaining: number, resetAt: number): NextResponse {
-  const resetInSeconds = Math.ceil((resetAt - Date.now()) / 1000);
+/** "45 seconds", "1 minute", "15 minutes" — the unit a person would say. */
+export function formatWait(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
 
+export function rateLimitResponse(remaining: number, resetAt: number): NextResponse {
+  const resetInSeconds = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000));
+
+  // Every generate dialog surfaces `error` verbatim in a toast, and nothing on
+  // the client reads Retry-After, so the wait has to be in the sentence or the
+  // user gets an unexplained lockout of up to 15 minutes (#9623 review).
   return NextResponse.json(
-    { error: 'Too many requests. Please try again later.' },
+    { error: `Too many requests. Try again in ${formatWait(resetInSeconds)}.` },
     {
       status: 429,
       headers: {

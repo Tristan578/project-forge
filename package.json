@@ -30,11 +30,11 @@
     "node": ">=24.15 <25"
   },
   "overrides": {
-    "@clerk/nextjs": "^7.5.12",
-    "@clerk/shared": "^4.25.5",
+    "@clerk/nextjs": "^7.8.4",
+    "@clerk/shared": "^4.30.2",
     "@hono/node-server": "^2.0.5",
     "dompurify": ">=3.4.13",
-    "esbuild": ">=0.25.0",
+    "esbuild": ">=0.28.2",
     "fast-xml-parser": ">=5.7.2",
     "hono": "4.13.0",
     "js-cookie": ">=3.0.7",
