@@ -23,7 +23,7 @@ Find open pull requests that have gone stale and leave a brief, constructive rem
 
 1. A PR is "stale" if it has had no activity (comments, reviews, commits, or status changes) in the last 3 days
 2. **Do NOT** comment on draft PRs
-3. **Do NOT** comment on PRs labeled `on-hold` or `blocked`
+3. **Do NOT** comment on PRs labeled `blocked` (and honor `on-hold` too if that label is added later)
 4. **Do NOT** comment on PRs created by bots (Dependabot, etc.)
 5. **Do NOT** nudge the same PR more than once per week — check if you've already commented in the last 7 days
 6. Keep messages brief (2-3 sentences), constructive, and non-judgmental
