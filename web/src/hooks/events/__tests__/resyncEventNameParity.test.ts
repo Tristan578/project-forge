@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 vi.mock('@/stores/editorStore', () => ({
@@ -17,10 +17,17 @@ import { handleAnimationEvent } from '../animationEvents';
 import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 /**
- * Cross-language pin for the removal events the undo/redo re-report drain emits
+ * Cross-language pin for the events the undo/redo re-report drain emits
  * (#9290, #9291).
  *
- * These five names exist because a flattened payload cannot say "gone":
+ * Two halves. The first walks EVERY arm of `apply_component_resyncs` and pins
+ * the exact set of event names that arm produces — scoped to the arm, so
+ * routing `Physics2d`'s removal to `emit_joint2d_removed` fails here instead of
+ * shipping. A whole-file `toContain` cannot see that: every emitter is present
+ * somewhere in the file no matter which arm calls it.
+ *
+ * The second is the older removal-name check. Those names exist because a
+ * flattened payload cannot say "gone":
  * `JOINT_CHANGED` IS the joint, `PHYSICS2D_CHANGED` IS the body,
  * `ANIMATION_CLIP_CHANGED` IS the clip. Nothing else can see both sides of the
  * name at once — `cargo test` cannot read `physicsEvents.ts`, and the TS suite
@@ -50,6 +57,117 @@ describe('component re-report event names match the engine', () => {
     expect(emit, `${fnName} does not emit`).not.toBeNull();
     return emit![1];
   }
+
+  /** Every `emit_*` and inline `emit_event` name inside `arm`, deduped. */
+  function namesEmittedBy(events: string, arm: string): string[] {
+    const names = new Set<string>();
+    for (const [, fn] of arm.matchAll(/events::(emit_[a-z0-9_]+)\(/g)) {
+      // `emit_event` is the raw sink, not a named wrapper; the literal it is
+      // called with is picked up below.
+      if (fn === 'emit_event') continue;
+      names.add(emittedName(events, fn));
+    }
+    // The Transform arm builds its payload inline rather than going through an
+    // `emit_*` wrapper, so it names the event itself.
+    for (const [, literal] of arm.matchAll(/emit_event\(\s*"([A-Z0-9_]+)"/g)) {
+      names.add(literal);
+    }
+    return [...names].sort();
+  }
+
+  /**
+   * `apply_component_resyncs`'s match arms, keyed by `ComponentResync` variant.
+   *
+   * Arms sit at twelve-space indent inside the `for … { match resync {`, which
+   * is what makes the split unambiguous — the same shape
+   * `component_resync_tests.rs` uses on the Rust side.
+   */
+  function drainArms(drain: string): Map<string, string> {
+    const start = drain.indexOf('pub(super) fn apply_component_resyncs(');
+    expect(start, 'apply_component_resyncs is missing from bridge/component_resync.rs').toBeGreaterThan(-1);
+    const arms = new Map<string, string>();
+    const pieces = drain.slice(start).split('\n            ComponentResync::');
+    // Everything before the first arm is the signature, the drain and the `match`.
+    pieces.shift();
+    for (const piece of pieces) {
+      const name = /^[A-Za-z0-9_]+/.exec(piece)?.[0];
+      if (name) arms.set(name, piece);
+    }
+    return arms;
+  }
+
+  /** The `ComponentResyncKind` variants — the kinds the drain owes a route. */
+  function resyncKinds(core: string): string[] {
+    const start = core.indexOf('pub enum ComponentResyncKind {');
+    expect(start, 'ComponentResyncKind is missing from core/component_resync.rs').toBeGreaterThan(-1);
+    const body = core.slice(start, core.indexOf('\n}', start));
+    return [...body.matchAll(/^ {4}([A-Z][A-Za-z0-9]*),$/gm)].map((m) => m[1]);
+  }
+
+  /**
+   * The complete arm → event-name routing. Every entry is the contract a
+   * browser handler is written against; a wrong one is a silent no-op, because
+   * an event nobody listens for looks exactly like an entity that simply has no
+   * joint / clip / body.
+   */
+  const DRAIN_ROUTING: Record<string, readonly string[]> = {
+    Transform: ['TRANSFORM_CHANGED'],
+    Material: ['MATERIAL_CHANGED'],
+    Light: ['LIGHT_CHANGED'],
+    Physics: ['PHYSICS_CHANGED'],
+    Joint: ['JOINT_CHANGED', 'JOINT_REMOVED'],
+    Audio: ['AUDIO_CHANGED'],
+    Particle: ['PARTICLE_CHANGED'],
+    Shader: ['SHADER_CHANGED'],
+    Script: ['SCRIPT_CHANGED'],
+    GameComponents: ['GAME_COMPONENT_CHANGED'],
+    AnimationClip: ['ANIMATION_CLIP_CHANGED', 'ANIMATION_CLIP_REMOVED'],
+    Sprite: ['SPRITE_CHANGED'],
+    Physics2d: ['PHYSICS2D_CHANGED', 'PHYSICS2D_REMOVED'],
+    Joint2d: ['JOINT2D_CHANGED', 'JOINT2D_REMOVED'],
+    Tilemap: ['TILEMAP_CHANGED'],
+  };
+
+  describe('every drain arm routes to exactly the events it claims', () => {
+    it('the routing table covers every ComponentResync kind, and no others', () => {
+      const kinds = resyncKinds(read(join('core', 'component_resync.rs')));
+      // A parser that finds nothing makes every case below vacuous.
+      expect(kinds.length, 'ComponentResyncKind parsed as empty — the scan broke').toBeGreaterThan(10);
+      expect([...kinds].sort()).toEqual(Object.keys(DRAIN_ROUTING).sort());
+    });
+
+    it('the drain has one arm per kind', () => {
+      const arms = drainArms(read(join('bridge', 'component_resync.rs')));
+      expect([...arms.keys()].sort()).toEqual(Object.keys(DRAIN_ROUTING).sort());
+    });
+
+    it.each(Object.keys(DRAIN_ROUTING))(
+      'the %s arm emits exactly its own events',
+      (kind) => {
+        const events = read(join('bridge', 'events.rs'));
+        const arm = drainArms(read(join('bridge', 'component_resync.rs'))).get(kind);
+        expect(arm, `no ComponentResync::${kind} arm in the drain`).toBeDefined();
+        expect(namesEmittedBy(events, arm!)).toEqual([...DRAIN_ROUTING[kind]].sort());
+      },
+    );
+
+    /**
+     * The inbound half. An event name the engine emits and no handler answers is
+     * indistinguishable from an entity that never had the component —
+     * `ANIMATION_CLIP_CHANGED` lived that way for its whole life (#9290).
+     */
+    it.each([...new Set(Object.values(DRAIN_ROUTING).flat())].sort())(
+      '%s is handled by a browser event handler',
+      (name) => {
+        const handlers = readdirSync(join(__dirname, '..'))
+          .filter((f) => f.endsWith('.ts'))
+          .map((f) => readFileSync(join(__dirname, '..', f), 'utf8'))
+          .join('\n');
+        expect(handlers.length, 'no handler sources were read').toBeGreaterThan(0);
+        expect(handlers).toContain(`case '${name}':`);
+      },
+    );
+  });
 
   const EMITTERS = [
     'emit_joint_removed',
