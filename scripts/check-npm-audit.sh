@@ -168,6 +168,16 @@ AUDIT_CMD="${NPM_AUDIT_CMD:-npm audit --json}"
 #      (observed on #9670 and on main: an exactly-5-minute run, then 'absent').
 #
 # Attempts and backoff are overridable so the test suite runs without sleeping.
+#
+# And the 5-minute wall: npm's default `fetch-timeout` is 300000ms, and the bulk
+# advisory POST for this repo's lockfile has been landing right on it inside
+# GitHub-hosted runners. #9670 (23:19:09 -> 23:24:10) and #9664 (23:28:35 ->
+# 23:33:35) each ran EXACTLY 5:00 before reporting 'absent', on two unrelated
+# PRs, while the registry probed healthy and the same command succeeded locally.
+# That precision is a timeout expiring, not a flake: npm aborts the request and
+# emits its own error object instead of a v2 report. Give the request real
+# headroom -- the retry above is the backstop, this is the fix.
+export npm_config_fetch_timeout="${NPM_AUDIT_FETCH_TIMEOUT:-900000}"
 audit_attempts="${NPM_AUDIT_ATTEMPTS:-3}"
 audit_retry_delay="${NPM_AUDIT_RETRY_DELAY:-5}"
 audit_err_file="$(mktemp -t npm-audit-stderr.XXXXXX)"

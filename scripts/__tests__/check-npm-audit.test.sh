@@ -826,6 +826,36 @@ res="$(run_gate "printf 'NPM-STDERR-MARKER\n' >&2; printf 'not json{{{'")"; rc="
 if [ "$rc" = "2" ]; then pass "stderr-only failure still fails closed (exit 2)"; else fail "stderr-only failure should exit 2, got $rc"; fi
 if grep -qF "NPM-STDERR-MARKER" <<<"$out"; then pass "npm's stderr is surfaced in the failure output (the cause, not just the symptom)"; else fail "npm stderr was swallowed -- the gate reports 'absent' with no diagnosable cause"; fi
 
+# --- 9e. The audit request gets more than npm's default 5-minute timeout ------
+# #9670 (23:19:09 -> 23:24:10) and #9664 (23:28:35 -> 23:33:35) each ran EXACTLY
+# 5:00 on the `web` workspace and then reported 'absent'. npm's default
+# `fetch-timeout` is 300000ms; that precision is the timeout expiring, not a
+# registry flake -- and a retry alone would just spend 15 minutes reaching the
+# same wall. The gate must therefore RAISE the timeout, not only retry.
+#
+# Asserted behaviourally: this stub emits a valid report only when the timeout
+# npm would actually use exceeds its own default, so the check fails if the
+# export is dropped, left at the default, or set below it.
+slow="$FIX/timeout-probe.sh"
+{
+  printf '#!/usr/bin/env bash\n'
+  # shellcheck disable=SC2016  # literal text of the GENERATED stub, expanded there
+  printf 'if [ "${npm_config_fetch_timeout:-300000}" -gt 300000 ]; then\n'
+  printf '  cat %s\n' "$f"
+  printf 'else\n'
+  printf '  echo "npm ERR! request to registry timed out" >&2\n'
+  printf '  exit 1\n'
+  printf 'fi\n'
+} > "$slow"
+chmod +x "$slow"
+
+res="$(run_gate "bash $slow")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "the gate raises npm_config_fetch_timeout above npm's 300000ms default"; else fail "the audit still runs on npm's default 5-minute fetch-timeout -- that is the exact wall #9670 and #9664 hit (rc=$rc). Output: $out"; fi
+
+# The override seam exists so an operator can lower it without editing the gate.
+res="$(NPM_AUDIT_FETCH_TIMEOUT=1000 run_gate "bash $slow")"; rc="${res%%|*}"
+if [ "$rc" = "2" ]; then pass "NPM_AUDIT_FETCH_TIMEOUT overrides the default headroom"; else fail "NPM_AUDIT_FETCH_TIMEOUT is not honored (rc=$rc) -- the value is hardcoded"; fi
+
 # --- 10. Missing workspace dir → fail-closed (exit 2) ------------------------
 out="$(cd "$REPO" && NPM_AUDIT_CMD="true" bash "$SCRIPT" no_such_ws 2>&1)"; rc=$?
 if [ "$rc" = "2" ]; then pass "missing workspace dir fails closed (exit 2)"; else fail "missing workspace should exit 2, got $rc"; fi
