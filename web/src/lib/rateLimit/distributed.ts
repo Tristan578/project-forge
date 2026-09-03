@@ -142,6 +142,12 @@ export async function distributedRateLimit(
   try {
     return await upstashSlidingWindow(key, limit, windowSeconds);
   } catch (err) {
+    // Health/integration probes must expose the original distributed-store
+    // failure. They are not fail-open events and must not consume the sampled
+    // alert budget reserved for production fallback behavior.
+    if (options.fallbackOnError === false) {
+      throw err;
+    }
     // Report the Upstash failure so this silent fallback is visible (#8210), but
     // through the per-action throttle: during a sustained outage this path can
     // fire on every request, and an unconditional capture would become its own
@@ -152,9 +158,6 @@ export async function distributedRateLimit(
       limit,
       windowSeconds,
     });
-    if (options.fallbackOnError === false) {
-      throw err;
-    }
     // Degrade to rateLimit(): the @upstash/ratelimit SDK limiter when the same
     // env vars are set (still distributed, approximate window), per-instance
     // memory otherwise. Never reject the request over a limiter failure.

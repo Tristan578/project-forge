@@ -344,11 +344,13 @@ describe('distributedRateLimit — Upstash path', () => {
     mockFetch.mockRejectedValue(new Error('Invalid Upstash credential'));
 
     const { rateLimit } = await import('@/lib/rateLimit');
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
 
     await expect(
       distributedRateLimit('ci-integration:strict-key', 2, 300, { fallbackOnError: false })
     ).rejects.toThrow('Invalid Upstash credential');
     expect(rateLimit).not.toHaveBeenCalled();
+    expect(sampledCaptureException).not.toHaveBeenCalled();
   });
 
   it('makes exactly one fetch call (atomic EVAL) regardless of allow/deny', async () => {
