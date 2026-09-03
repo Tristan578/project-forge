@@ -35,6 +35,8 @@ export default defineConfig({
         'src/**/*.test.tsx',
         'src/**/*.spec.ts',
         'src/**/__tests__/**',
+        // Guard fixtures: run only by vitest.mockOnceGuard.fixtures.config.ts (#9542)
+        'src/**/__fixtures__/**',
         'src/**/*.d.ts',
       ],
     },
