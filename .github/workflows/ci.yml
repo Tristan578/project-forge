@@ -387,7 +387,7 @@ jobs:
       # whichever job builds packages/ui first warms the cache for the others.
       - name: Cache @spawnforge/ui build
         id: ui-cache-design
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/ui/dist
           key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
@@ -1197,7 +1197,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Key on the REAL root lockfile. This is a single-root-lockfile
@@ -1324,7 +1324,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
@@ -1488,7 +1488,7 @@ jobs:
 
       - name: Restore a prebuilt WebGL2 engine
         id: engine-wasm-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
@@ -1540,7 +1540,7 @@ jobs:
       # --- Playwright ---------------------------------------------------------
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
