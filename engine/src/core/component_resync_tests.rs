@@ -7,9 +7,12 @@
 //!   `PendingCommands` and assert the queue holds exactly the re-report the arm
 //!   owes, in BOTH directions. This is the half that can prove the payload
 //!   carries the post-state.
-//! - **Source parity** — scan `entity_factory.rs` and fail if an arm writes a
-//!   component kind `ComponentResync` covers without queueing one. This is the
-//!   half that catches the NEXT arm, the one nobody wrote a runtime test for.
+//! - **Source parity** — parse EVERY `UndoableAction` arm out of
+//!   `entity_factory.rs` and require each one to queue a re-report or to appear
+//!   in `EXEMPT_ARMS` with a written reason. Iterating the parsed arms rather
+//!   than a list of names is what makes this the half that catches the NEXT arm,
+//!   the one nobody wrote a runtime test for: a table-driven loop only examines
+//!   the rows someone remembered to add.
 //!
 //! The file lives in `core/` because that is the only place `cargo test`
 //! compiles: `bridge/` is `wasm32`-only, so a test there matches zero cases and
@@ -585,8 +588,12 @@ fn particle_and_2d_physics_enablement_are_read_from_their_markers() {
 /// compile error here instead of a gate that quietly stops covering anything.
 const FACTORY_SRC: &str = include_str!("entity_factory.rs");
 
-/// Every `UndoableAction` arm that writes a component kind `ComponentResync`
-/// covers, and the marker its body must contain.
+/// The re-report marker each `UndoableAction` arm's body must contain.
+///
+/// This table does NOT drive the loop — [`assert_arms_report`] iterates the arms
+/// it parsed out of the source and looks each one up here, so an arm nobody
+/// listed fails instead of going unexamined. The table only says WHICH marker a
+/// listed arm owes; [`EXEMPT_ARMS`] says which arms owe none.
 ///
 /// `ComponentResync::Joint {` carries the brace deliberately: without it the
 /// needle also matches `ComponentResync::Joint2d {`, and the 3D arm would pass
@@ -616,6 +623,42 @@ const ARM_MARKERS: [(&str, &str); 17] = [
 const OWN_QUEUE_ARMS: [(&str, &str); 2] = [
     ("ReverbZoneChange", "queue_reverb_zone_resync_pending"),
     ("SkeletonChange", "queue_skeleton2d_resync_pending"),
+];
+
+/// Arms that owe NO re-report, each with the reason it does not.
+///
+/// A reason, not a name: an entry here is the only way to make a new arm pass
+/// this gate, so the cost of adding one has to be writing down why the browser
+/// already learns about the write. Two shapes, both verified in-tree:
+///
+/// - **A `Changed<T>` system already reports it.** Those systems are not gated
+///   on selection, so unlike the `emit_*_on_selection` emitters this gate exists
+///   for, they DO see a write to a non-selected entity.
+/// - **The entity itself appears or disappears.** A despawn or a
+///   `spawn_from_snapshot` moves the whole entity, and the scene-graph event
+///   plus `resyncs_for_snapshot` cover it — the latter pinned by
+///   [`spawn_from_snapshot_queues_re_reports`] below.
+const EXEMPT_ARMS: [(&str, &str); 11] = [
+    (
+        "Rename",
+        "writes EntityName; scene_graph::detect_name_changed is Query<&EntityId, Changed<EntityName>>",
+    ),
+    (
+        "VisibilityChange",
+        "writes EntityVisible; scene_graph::detect_visibility_changed is Query<&EntityId, Changed<EntityVisible>>",
+    ),
+    (
+        "TerrainChange",
+        "writes TerrainData; terrain::collect_terrain_changes is Changed<TerrainData> and covers insertion as well as mutation",
+    ),
+    ("Spawn", "despawns or respawns the entity via spawn_from_snapshot"),
+    ("Delete", "despawns or respawns the entity via spawn_from_snapshot"),
+    ("Duplicate", "despawns or respawns the entity via spawn_from_snapshot"),
+    ("CsgOperation", "despawns or respawns the entity via spawn_from_snapshot"),
+    ("ExtrudeShape", "despawns or respawns the entity via spawn_from_snapshot"),
+    ("LatheShape", "despawns or respawns the entity via spawn_from_snapshot"),
+    ("ArrayEntity", "despawns or respawns the entity via spawn_from_snapshot"),
+    ("CombineMeshes", "despawns or respawns the entity via spawn_from_snapshot"),
 ];
 
 /// Split one `execute_*` body into `(variant name, arm source)` pairs.
@@ -655,19 +698,45 @@ fn assert_arms_report(function_marker: &str, direction: &str) {
         arms.len(),
     );
 
-    for (arm_name, marker) in ARM_MARKERS {
-        let arm = arms
+    // Iterate the arms the PARSE found, not a hand-written list of names. A
+    // table-driven loop only ever examines the rows someone remembered to add,
+    // so a new arm — the one nobody wrote a runtime test for either — is never
+    // looked at and the #9290 desync ships again behind a gate named after
+    // preventing it.
+    for (arm_name, body) in &arms {
+        if let Some((_, reason)) = EXEMPT_ARMS.iter().find(|(name, _)| name == arm_name) {
+            // Sanity: an exempt arm that HAS started queueing a resync means the
+            // reason is stale. That is not a failure — the queue is harmless —
+            // but leaving both in place is how a reason rots into fiction.
+            assert!(
+                !body.contains("ComponentResync::"),
+                "{direction}: the `{arm_name}` arm now queues a `ComponentResync`, but \
+                 EXEMPT_ARMS still claims it owes none ({reason}). Drop the exemption.",
+            );
+            continue;
+        }
+
+        let marker = ARM_MARKERS
             .iter()
+            .chain(OWN_QUEUE_ARMS.iter())
             .find(|(name, _)| name == arm_name)
+            .map(|(_, marker)| *marker)
             .unwrap_or_else(|| {
                 panic!(
-                    "{direction}: no `UndoableAction::{arm_name}` arm found in \
-                     `{function_marker}`. If the variant was renamed, rename it here too — \
-                     dropping the row would silently retire the gate.",
+                    "{direction}: `UndoableAction::{arm_name}` is a new (or renamed) history \
+                     arm and this gate does not know what it owes the browser. Add it to \
+                     ARM_MARKERS with the `ComponentResync::` variant it must queue, to \
+                     OWN_QUEUE_ARMS if it has its own resync queue, or to EXEMPT_ARMS with \
+                     the reason the browser already learns about the write. Do not delete \
+                     this panic: the bridge emitters are gated on `selection.primary` AND \
+                     `Changed<T>`, so an unreported write leaves the store holding state \
+                     the engine dropped and the next edit sends a full-replace built from a \
+                     default (#9290, #9291).",
                 )
             });
+
         assert!(
-            arm.1.contains(marker),
+            body.contains(marker),
             "{direction}: the `{arm_name}` arm writes a component the browser mirrors but \
              queues no `{marker}` re-report. The bridge emitters are gated on \
              `selection.primary` AND `Changed<T>`, so without this the store keeps state \
@@ -677,15 +746,14 @@ fn assert_arms_report(function_marker: &str, direction: &str) {
         );
     }
 
-    for (arm_name, marker) in OWN_QUEUE_ARMS {
-        let arm = arms
-            .iter()
-            .find(|(name, _)| name == arm_name)
-            .unwrap_or_else(|| panic!("{direction}: no `UndoableAction::{arm_name}` arm"));
+    // The other direction: a row naming an arm that no longer exists is a gate
+    // that silently stopped covering anything. Renames must be made here too.
+    for (arm_name, _) in ARM_MARKERS.iter().chain(OWN_QUEUE_ARMS.iter()).chain(EXEMPT_ARMS.iter()) {
         assert!(
-            arm.1.contains(marker),
-            "{direction}: the `{arm_name}` arm no longer calls `{marker}`, so its own \
-             re-report is gone and nothing in `ComponentResync` covers it either",
+            arms.iter().any(|(name, _)| name == arm_name),
+            "{direction}: no `UndoableAction::{arm_name}` arm found in `{function_marker}`, \
+             but a row still names it. If the variant was renamed, rename it here too — \
+             dropping the row would silently retire the gate.",
         );
     }
 }
