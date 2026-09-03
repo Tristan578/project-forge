@@ -40,17 +40,24 @@ if [ "$count" -le "${PLAYWRIGHT_TEST_FAILS:-0}" ]; then exit "${PLAYWRIGHT_TEST_
 "$@"
 STUB
 chmod +x "$STUB/timeout"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/sleep"
+cat > "$STUB/sleep" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$PLAYWRIGHT_SLEEP_LOG"
+exit 0
+STUB
 chmod +x "$STUB/sleep"
 
 run_case() {
   local mode="$1" fails="$2" final_exit="${3:-124}"
   : > "$TMP/log"
   : > "$TMP/timeout-log"
+  : > "$TMP/sleep-log"
   rm -f "$TMP/count"
   PLAYWRIGHT_TEST_LOG="$TMP/log" PLAYWRIGHT_TEST_COUNT="$TMP/count" \
     PLAYWRIGHT_TIMEOUT_LOG="$TMP/timeout-log" \
+    PLAYWRIGHT_SLEEP_LOG="$TMP/sleep-log" \
     PLAYWRIGHT_TEST_FAILS="$fails" PLAYWRIGHT_TEST_EXIT="$final_exit" \
+    PLAYWRIGHT_INSTALL_BUDGET_SECONDS="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-600}" \
     PATH="$STUB:$PATH" bash "$SCRIPT" "$mode" >"$TMP/out" 2>"$TMP/err"
 }
 
@@ -83,11 +90,35 @@ assert_eq "filename-only invocation still runs npx from web" \
   "$REPO_ROOT/web|playwright install --with-deps chromium" "$(cat "$TMP/log")"
 
 set +e
-run_case browsers 2 124
+run_case browsers 5 124
 rc=$?
 set -e
-assert_eq "two timeouts propagate exit 124" "124" "$rc"
-assert_eq "a permanent hang is attempted exactly twice" "2" "$(cat "$TMP/count")"
+assert_eq "an unrecoverable failure propagates exit 124" "124" "$rc"
+# Five, not two: a lost dpkg-frontend lock fails in seconds, so attempts are
+# cheap in exactly the case that needs more of them (#9675). The wall-clock
+# budget asserted below is what keeps a genuine hang bounded.
+assert_eq "an unrecoverable failure is attempted five times" "5" "$(cat "$TMP/count")"
+assert_eq "the backoff escalates between attempts" "15 30 60 90" \
+  "$(tr '\n' ' ' < "$TMP/sleep-log" | sed 's/ *$//')"
+
+# The budget, not the attempt count, is what bounds a genuine hang — each of its
+# attempts burns the full 300s, so five of them would outlast the workflow's
+# outer `timeout-minutes: 12` and replace this script's diagnostic with a bare
+# "step timed out". Driving the budget to zero proves the check is load-bearing:
+# without it this case would run all five attempts like the one above.
+set +e
+PLAYWRIGHT_INSTALL_BUDGET_SECONDS=0 run_case browsers 5 124
+rc=$?
+set -e
+assert_eq "an exhausted retry budget still propagates exit 124" "124" "$rc"
+assert_eq "an exhausted retry budget stops after the first attempt" "1" \
+  "$(cat "$TMP/count")"
+assert_eq "an exhausted retry budget sleeps not at all" "" "$(cat "$TMP/sleep-log")"
+if grep -q "exhausted its 0s retry budget" "$TMP/out"; then
+  pass "budget exhaustion is reported distinctly from a retry"
+else
+  fail "budget exhaustion is not reported distinctly from a retry"
+fi
 
 set +e
 PATH="$STUB:$PATH" bash "$SCRIPT" invalid >"$TMP/out" 2>"$TMP/err"
