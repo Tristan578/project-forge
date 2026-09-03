@@ -1137,13 +1137,37 @@ describe('handlePhysicsEvent', () => {
       expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
     });
 
-    it('JOINT_REMOVED for another entity leaves the inspector alone', () => {
+    it('JOINT_REMOVED for another entity leaves the inspector alone', async () => {
       actions.primaryId = 'entity-1';
 
       expect(
         handlePhysicsEvent('JOINT_REMOVED', { entityId: 'other' }, mockSetGet.set, mockSetGet.get)
       ).toBe(true);
+      // Drain the gate's microtask re-check before asserting the negative — the
+      // clear is deferred, so a synchronous assertion would pass even with no gate.
+      await Promise.resolve();
       expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `JOINT_REMOVED` used a synchronous `primaryId ===` read while its sibling
+     * handlers deferred. Selection resolves one microtask late — SELECTION_CHANGED
+     * is coalesced by `createSelectionBatcher` while this handler runs
+     * synchronously — so on a viewport pick the read saw the PREVIOUS primary and
+     * dropped the clear, leaving a joint the engine had already removed in the
+     * inspector for the next full-replace edit to write back (#9291).
+     */
+    it('JOINT_REMOVED clears once the entity becomes primary on the next microtask', async () => {
+      actions.primaryId = 'old';
+
+      expect(
+        handlePhysicsEvent('JOINT_REMOVED', { entityId: 'new' }, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+
+      actions.primaryId = 'new';
+      await Promise.resolve();
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
     });
 
     it.each(['PHYSICS2D_REMOVED', 'JOINT2D_REMOVED', 'JOINT_REMOVED'])(

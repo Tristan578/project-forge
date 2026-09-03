@@ -5,6 +5,7 @@
 import { useEditorStore, type AnimationPlaybackState, type AnimationClipData } from '@/stores/editorStore';
 import { parseSkeletonWire2d } from '@/lib/skeleton2d/skeletonPayload';
 import { castPayload, type SetFn, type GetFn } from './types';
+import { applyWhenPrimary } from './primaryGate';
 
 export function handleAnimationEvent(
   type: string,
@@ -25,13 +26,21 @@ export function handleAnimationEvent(
       return true;
     }
 
+    /**
+     * Gated through `applyWhenPrimary` rather than a bare `primaryId ===` read:
+     * the undo/redo resync drain reports clips on NON-selected entities, and
+     * selection resolves one microtask late (SELECTION_CHANGED is coalesced by
+     * `createSelectionBatcher`; this handler is synchronous). A synchronous
+     * check therefore compares against the PREVIOUS primary on a viewport pick
+     * and silently drops the clip for the entity just selected.
+     */
     case 'ANIMATION_CLIP_CHANGED': {
       const clipPayload = castPayload<AnimationClipData & { entityId: string }>(data);
-      const state = useEditorStore.getState();
-      if (state.primaryId === clipPayload.entityId) {
-        const { entityId: _entityId, ...clipData } = clipPayload;
+      if (typeof clipPayload.entityId !== 'string') return true;
+      const { entityId: _entityId, ...clipData } = clipPayload;
+      applyWhenPrimary(clipPayload.entityId, () => {
         useEditorStore.setState({ primaryAnimationClip: clipData });
-      }
+      });
       return true;
     }
 
@@ -51,13 +60,17 @@ export function handleAnimationEvent(
      * `setState` is state-only by construction; routing this through a
      * dispatching action would send a command back at the engine that just
      * reported the removal.
+     *
+     * Same deferred gate as its `_CHANGED` sibling, and for the same reason:
+     * a synchronous `primaryId ===` read loses the same-tick selection race and
+     * leaves a removed clip on screen.
      */
     case 'ANIMATION_CLIP_REMOVED': {
       const payload = castPayload<{ entityId?: string }>(data);
       if (typeof payload.entityId !== 'string') return true;
-      if (useEditorStore.getState().primaryId === payload.entityId) {
+      applyWhenPrimary(payload.entityId, () => {
         useEditorStore.setState({ primaryAnimationClip: null });
-      }
+      });
       return true;
     }
 

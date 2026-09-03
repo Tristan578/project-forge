@@ -268,13 +268,21 @@ export function handlePhysicsEvent(
      * `JointData`, so there is no field left to mean "gone". Emitted by the
      * undo/redo resync drain, which is also the only thing that ever reports a
      * joint on a NON-selected entity (#9290).
+     *
+     * Gated through `applyWhenPrimary`, not a bare `primaryId ===` read, for
+     * the reason that module documents: selection resolves one microtask late
+     * because SELECTION_CHANGED is coalesced by `createSelectionBatcher` while
+     * this is handled synchronously. A synchronous check therefore compares
+     * against the PREVIOUS primary on a viewport pick, and this handler would
+     * drop the clear — leaving a joint the engine has removed on screen, which
+     * the next inspector edit writes back as a full replace.
      */
     case 'JOINT_REMOVED': {
       const payload = castPayload<{ entityId?: string }>(data);
       if (typeof payload.entityId !== 'string') return true;
-      if (useEditorStore.getState().primaryId === payload.entityId) {
+      applyWhenPrimary(payload.entityId, () => {
         useEditorStore.getState().setPrimaryJoint(null);
-      }
+      });
       return true;
     }
 
