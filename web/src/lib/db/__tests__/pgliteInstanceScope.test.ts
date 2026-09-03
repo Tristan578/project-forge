@@ -86,25 +86,6 @@ function importsPgliteHarness(file: string, lines: string[]): boolean {
 }
 
 /**
- * The hook enclosing the call that starts at `column` on `lineIndex`, or `null`
- * at file/describe scope.
- *
- * Walks upward tracking brace balance: each `}` seen going up owes a `{`, so
- * the first `{` that drives the balance negative opens the block we are inside.
- * If that line names a hook, that is the answer; otherwise keep climbing, which
- * is what lets a call nested in an `if` inside a `beforeAll` still resolve to
- * `beforeAll`. Operates on comment-stripped lines, so a brace in a comment
- * cannot skew the count.
- *
- * `column` is load-bearing, not decorative. On the call's own line the scan must
- * start at the character BEFORE the call; starting at end-of-line counts the
- * hook's own trailing `}`, which then cancels its opening `{` so the balance
- * never goes negative and the hook is never named. That made every single-line
- * `beforeAll(async () => { harness = await createTestHarness(); });` resolve to
- * `null` — a false failure on fully compliant code. Pinned by the
- * `enclosingHook` suite below.
- */
-/**
  * The hook whose call actually OPENS the brace that follows `opener`, or `null`
  * when a non-hook callee (or nothing at all) opens it.
  *
@@ -155,6 +136,25 @@ function hookOpeningBrace(opener: string): string | null {
   return null;
 }
 
+/**
+ * The hook enclosing the call that starts at `column` on `lineIndex`, or `null`
+ * at file/describe scope.
+ *
+ * Walks upward tracking brace balance: each `}` seen going up owes a `{`, so
+ * the first `{` that drives the balance negative opens the block we are inside.
+ * If that line names a hook, that is the answer; otherwise keep climbing, which
+ * is what lets a call nested in an `if` inside a `beforeAll` still resolve to
+ * `beforeAll`. Operates on comment-stripped lines, so a brace in a comment
+ * cannot skew the count.
+ *
+ * `column` is load-bearing, not decorative. On the call's own line the scan must
+ * start at the character BEFORE the call; starting at end-of-line counts the
+ * hook's own trailing `}`, which then cancels its opening `{` so the balance
+ * never goes negative and the hook is never named. That made every single-line
+ * `beforeAll(async () => { harness = await createTestHarness(); });` resolve to
+ * `null` — a false failure on fully compliant code. Pinned by the
+ * `enclosingHook` suite below.
+ */
 export function enclosingHook(lines: string[], lineIndex: number, column: number): string | null {
   let balance = 0;
   for (let i = lineIndex; i >= 0; i -= 1) {
