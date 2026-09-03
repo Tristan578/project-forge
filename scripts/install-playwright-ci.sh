@@ -19,11 +19,34 @@ MAX_ATTEMPTS=5
 #
 # So: more attempts with escalating backoff for the fast case, bounded by a
 # wall-clock budget so the slow case still terminates before the workflow's
-# outer `timeout-minutes: 12` fires and replaces this script's diagnostic with a
-# bare "step timed out". A real hang spends 300s an attempt and trips the budget
-# after two, exactly as before; a lock race spends seconds an attempt and gets
-# the full ~195s of backoff.
-TOTAL_BUDGET_SECONDS="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-600}"
+# outer `timeout-minutes: 12` (720s) fires and replaces this script's diagnostic
+# with a bare "step timed out". A real hang spends 300s an attempt and trips the
+# budget after two; a lock race spends seconds an attempt and gets the full
+# ~195s of backoff.
+#
+# The budget is checked as a LOOK-AHEAD -- "would the rest of another round
+# overrun it" -- not as "have we overrun it already". Checking after the fact
+# bounds nothing, because the check is what gates starting the attempt that
+# would blow past it: three fast lock failures cost ~120s including backoff,
+# leaving elapsed=120 well under any budget, and the two 300s hangs that can
+# follow put the total at 810s -- past the outer timeout, i.e. exactly the
+# failure this budget exists to prevent.
+#
+# The look-ahead must count the backoff as well as the attempt, because the
+# sleep happens after the check and before the attempt it gates. Counting only
+# the attempt leaves the largest backoff outside the bound, and that gap is
+# reachable: three instant failures then a 254s one puts elapsed at 359, which
+# clears a 300s-only look-ahead against a 660s budget, after which the 90s
+# backoff and a final 300s hang land at 764s -- past the outer timeout again.
+# Counting both means a round starts only while
+# elapsed + backoff + ATTEMPT_TIMEOUT_SECONDS < TOTAL_BUDGET_SECONDS, so the
+# total is bounded by TOTAL_BUDGET_SECONDS (plus timeout's 15s SIGKILL grace,
+# i.e. 675s) no matter how the fast and slow shapes interleave.
+#
+# 660 rather than 600 so the look-ahead still permits the second attempt of a
+# pure hang: after the first, elapsed=300 and 300 + 15 + 300 < 660. That case
+# ends at ~615s, and the bound above keeps every other case under 675s.
+TOTAL_BUDGET_SECONDS="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-660}"
 BACKOFF_SECONDS=(15 30 60 90)
 
 case "${1:-}" in
@@ -51,11 +74,11 @@ for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
   if [ "$exit_code" -eq 0 ]; then exit 0; fi
   if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
     elapsed=$((SECONDS - started_at))
-    if [ "$elapsed" -ge "$TOTAL_BUDGET_SECONDS" ]; then
-      echo "::warning::Playwright ${1} install exhausted its ${TOTAL_BUDGET_SECONDS}s retry budget after ${elapsed}s; not retrying"
+    backoff="${BACKOFF_SECONDS[attempt - 1]}"
+    if [ "$((elapsed + backoff + ATTEMPT_TIMEOUT_SECONDS))" -ge "$TOTAL_BUDGET_SECONDS" ]; then
+      echo "::warning::Playwright ${1} install exhausted its ${TOTAL_BUDGET_SECONDS}s retry budget after ${elapsed}s; a further ${backoff}s backoff plus a ${ATTEMPT_TIMEOUT_SECONDS}s attempt would overrun it, so not retrying"
       break
     fi
-    backoff="${BACKOFF_SECONDS[attempt - 1]}"
     echo "::warning::Playwright ${1} install failed with exit ${exit_code}; retrying in ${backoff}s"
     sleep "$backoff"
   fi

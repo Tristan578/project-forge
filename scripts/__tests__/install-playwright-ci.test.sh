@@ -120,6 +120,67 @@ else
   fail "budget exhaustion is not reported distinctly from a retry"
 fi
 
+# The budget must be spent as a LOOK-AHEAD -- "would another full-length
+# attempt overrun it" -- not as "have we overrun it already". The zero case
+# above cannot tell those two apart: 0 >= 0 and 0 + 300 >= 0 both break. 299
+# can. Under the look-ahead the first failure ends the loop (0 + 300 >= 299);
+# under an after-the-fact check it does not (elapsed is ~0, and 0 >= 299 is
+# false), so all five attempts run. That difference is the whole defect: three
+# fast apt-lock failures leave elapsed well under the budget, and the two 300s
+# hangs that may follow then run to ~810s -- past the outer `timeout-minutes:
+# 12` this budget exists to stay inside.
+set +e
+PLAYWRIGHT_INSTALL_BUDGET_SECONDS=299 run_case browsers 5 124
+rc=$?
+set -e
+assert_eq "a budget below one attempt still propagates exit 124" "124" "$rc"
+assert_eq "a budget below one attempt stops before the second attempt" "1" \
+  "$(cat "$TMP/count")"
+assert_eq "a budget below one attempt sleeps not at all" "" "$(cat "$TMP/sleep-log")"
+if grep -q "would overrun it" "$TMP/out"; then
+  pass "the look-ahead names the round it declined to start"
+else
+  fail "the look-ahead does not name the round it declined to start"
+fi
+
+# The look-ahead must count the BACKOFF too, because the sleep happens after
+# the check and before the attempt the check gates. 310 separates the two: an
+# attempt-only look-ahead sees 0 + 300 < 310 and runs all five, while the
+# backoff-inclusive one sees 0 + 15 + 300 >= 310 and stops at the first. The
+# gap that discriminator stands for is reachable in CI -- three instant lock
+# failures then a 254s one leave elapsed at 359, which clears an attempt-only
+# look-ahead against the 660s budget, after which the 90s backoff and a 300s
+# hang land at 764s, past the outer `timeout-minutes: 12`.
+set +e
+PLAYWRIGHT_INSTALL_BUDGET_SECONDS=310 run_case browsers 5 124
+rc=$?
+set -e
+assert_eq "a budget that cannot fit backoff plus an attempt propagates exit 124" \
+  "124" "$rc"
+assert_eq "the look-ahead counts the backoff, not just the attempt" "1" \
+  "$(cat "$TMP/count")"
+assert_eq "a budget that cannot fit backoff plus an attempt sleeps not at all" \
+  "" "$(cat "$TMP/sleep-log")"
+if grep -q "a further 15s backoff plus a 300s attempt would overrun it" "$TMP/out"; then
+  pass "the warning names both the backoff and the attempt it declined"
+else
+  fail "the warning does not name both the backoff and the attempt it declined"
+fi
+
+# ...and it must read the ESCALATING backoff for the round it is about to run,
+# not a constant. At 340 the first two rounds fit (0 + 15 + 300 and
+# 0 + 30 + 300) and the third does not (0 + 60 + 300 >= 340), so the loop stops
+# after three attempts having slept 15 then 30. A look-ahead hardcoding the
+# first backoff would clear all five rounds at 315 < 340.
+set +e
+PLAYWRIGHT_INSTALL_BUDGET_SECONDS=340 run_case browsers 5 124
+rc=$?
+set -e
+assert_eq "an escalating-backoff budget still propagates exit 124" "124" "$rc"
+assert_eq "the look-ahead uses each round's own backoff" "3" "$(cat "$TMP/count")"
+assert_eq "the rounds it did run slept their own escalating backoffs" "15 30" \
+  "$(tr '\n' ' ' < "$TMP/sleep-log" | sed 's/ *$//')"
+
 set +e
 PATH="$STUB:$PATH" bash "$SCRIPT" invalid >"$TMP/out" 2>"$TMP/err"
 rc=$?
