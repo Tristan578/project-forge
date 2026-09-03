@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { UPSTASH_REST_TIMEOUT_MS } from '@/lib/config/timeouts';
+import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
 import {
   cachedGenerate,
   getCachedResult,
@@ -9,10 +11,17 @@ import {
   _inFlight,
 } from '../responseCache';
 
+vi.mock('@/lib/monitoring/sampledCapture', () => ({
+  sampledCaptureException: vi.fn(),
+  SAMPLE_THROTTLE_MS: 60_000,
+}));
+const mockSampledCapture = vi.mocked(sampledCaptureException);
+
 // Clear cache and in-flight state between tests
 beforeEach(() => {
   _memoryCache.clear();
   _inFlight.clear();
+  mockSampledCapture.mockClear();
 });
 
 describe('responseCache', () => {
@@ -455,5 +464,121 @@ describe('responseCache', () => {
       const lastResult = await getCachedResult('sfx_generation', { prompt: 'sound_30' });
       expect(lastResult.hit).toBe(true);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Upstash layer — goes through the shared body-form transport (#9623)
+// ---------------------------------------------------------------------------
+describe('responseCache Upstash layer', () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    vi.stubGlobal('fetch', mockFetch);
+    vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
+    vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'test-token');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  function reply(status: number, body: string) {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? 'OK' : 'Bad Request',
+      text: async () => body,
+      json: async () => JSON.parse(body) as unknown,
+    };
+  }
+
+  function bodyOf(call: number): unknown[] {
+    const [, init] = mockFetch.mock.calls[call] as [string, RequestInit];
+    return JSON.parse(init.body as string) as unknown[];
+  }
+
+  it('writes with a body-form SET ... EX to the base url, bounded by the shared timeout', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout');
+    mockFetch
+      .mockResolvedValueOnce(reply(200, '{"result":null}')) // GET on miss
+      .mockResolvedValueOnce(reply(200, '{"result":"OK"}')); // SET
+
+    const outcome = await cachedGenerate('sfx_generation', { p: 1 }, async () => ({ v: 42 }));
+
+    expect(outcome).toEqual({ result: { v: 42 }, cached: false });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const [getUrl] = mockFetch.mock.calls[0] as [string];
+    expect(getUrl).toBe('https://redis.upstash.io');
+    expect(bodyOf(0)[0]).toBe('GET');
+    const set = bodyOf(1);
+    expect(set[0]).toBe('SET');
+    expect(set[2]).toBe(JSON.stringify({ v: 42 }));
+    expect(set[3]).toBe('EX');
+    expect(typeof set[4]).toBe('number');
+    // Both the GET and the SET are bounded — one signal per call, both from
+    // the shared constant. A SET that bypassed the transport would leave the
+    // spy at one call and the second request without a signal.
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenNthCalledWith(2, UPSTASH_REST_TIMEOUT_MS);
+    const [, setInit] = mockFetch.mock.calls[1] as [string, RequestInit];
+    expect(setInit.signal).toBeInstanceOf(AbortSignal);
+    spy.mockRestore();
+  });
+
+  it('returns the cached value from a body-form GET', async () => {
+    mockFetch.mockResolvedValueOnce(reply(200, JSON.stringify({ result: JSON.stringify({ hit: 'yes' }) })));
+
+    const hit = await getCachedResult('sfx_generation', { p: 2 });
+
+    expect(hit).toEqual({ hit: true, result: { hit: 'yes' } });
+    expect(bodyOf(0)[0]).toBe('GET');
+  });
+
+  it('reports a refused GET through the sampler and still misses cleanly', async () => {
+    mockFetch.mockResolvedValueOnce(reply(400, '{"error":"ERR wrong number of arguments"}'));
+
+    const hit = await getCachedResult('sfx_generation', { p: 3 });
+
+    expect(hit).toEqual({ hit: false });
+    expect(mockSampledCapture).toHaveBeenCalledWith(
+      'responseCache.redisGet',
+      expect.objectContaining({ message: 'Upstash GET failed: 400 Bad Request — {"error":"ERR wrong number of arguments"}' }),
+      expect.objectContaining({ keyPrefix: 'sfx_generation' }),
+    );
+  });
+
+  it('reports a refused SET through the sampler while the generation still resolves', async () => {
+    mockFetch
+      .mockResolvedValueOnce(reply(200, '{"result":null}'))
+      .mockResolvedValueOnce(reply(400, '{"error":"OOM"}'));
+
+    const outcome = await cachedGenerate('sfx_generation', { p: 4 }, async () => 'made');
+
+    expect(outcome).toEqual({ result: 'made', cached: false });
+    // The write is fire-and-forget, so the refusal lands after the caller has
+    // already been answered — which is the point: a broken cache never blocks
+    // a paid generation.
+    await vi.waitFor(() => expect(mockSampledCapture).toHaveBeenCalled());
+    expect(mockSampledCapture).toHaveBeenCalledWith(
+      'responseCache.redisSet',
+      expect.objectContaining({ message: 'Upstash SET failed: 400 Bad Request — {"error":"OOM"}' }),
+      expect.objectContaining({ keyPrefix: 'sfx_generation' }),
+    );
+  });
+
+  it('treats a transport stall as a miss and reports it, never a throw to the caller', async () => {
+    mockFetch.mockRejectedValueOnce(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+
+    const hit = await getCachedResult('sfx_generation', { p: 5 });
+
+    expect(hit).toEqual({ hit: false });
+    expect(mockSampledCapture).toHaveBeenCalledWith(
+      'responseCache.redisGet',
+      expect.objectContaining({ name: 'TimeoutError' }),
+      expect.anything(),
+    );
   });
 });

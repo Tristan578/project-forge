@@ -37,10 +37,15 @@ vi.mock('@/lib/ai/toolAdapter', () => ({
   convertManifestToolsToSdkTools: vi.fn(() => ({})),
 }));
 
-vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
-  AI_MODELS: { gatewayChat: 'anthropic/claude-sonnet-4.6' },
-}));
+vi.mock('@/lib/ai/models', async () => {
+  // Real thinkingModeFor / supportsEffort (#9626); only the ids are stubbed.
+  const actual = await vi.importActual<typeof import('@/lib/ai/models')>('@/lib/ai/models');
+  return {
+    ...actual,
+    AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
+    AI_MODELS: { gatewayChat: 'anthropic/claude-sonnet-4.6' },
+  };
+});
 
 vi.mock('@/data/commands.json', () => ({
   default: { version: '1', commands: [] },
@@ -183,15 +188,16 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     });
   });
 
-  it('does not emit providerOptions for gateway backend even with thinking/effort', () => {
+  it('does not emit anthropic thinking/effort for the gateway backend (only the gateway routing fields)', () => {
     createSpawnforgeAgent({
       ...baseOptions,
       isDirectBackend: false,
       thinking: true,
       effort: 'medium',
     });
-    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
-    expect(args.providerOptions).toBeUndefined();
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic?: unknown; gateway?: unknown } };
+    expect(args.providerOptions?.anthropic).toBeUndefined();
+    expect(args.providerOptions).toEqual({ gateway: { caching: 'auto' } });
   });
 
   it('forwards effort=low and effort=high without modification', () => {
@@ -217,36 +223,56 @@ describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', (
     mockToolLoopAgent.mockClear();
   });
 
-  it('omits providerOptions on the gateway backend when neither userId nor tags is set', () => {
+  // The stubbed gatewayChat id is not in the fallback chain, so these cases
+  // see caching only; the fallback list is covered below with real ids (#9631).
+  it('always emits gateway.caching on the gateway backend, even with neither userId nor tags', () => {
     createSpawnforgeAgent(gatewayBase);
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
-    expect(args.providerOptions).toBeUndefined();
+    expect(args.providerOptions).toEqual({ gateway: { caching: 'auto' } });
   });
 
   it('emits providerOptions.gateway.user on the gateway backend when userId is set', () => {
     createSpawnforgeAgent({ ...gatewayBase, userId: 'user_123' });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
-    expect(args.providerOptions).toEqual({ gateway: { user: 'user_123' } });
+    expect(args.providerOptions).toEqual({ gateway: { user: 'user_123', caching: 'auto' } });
   });
 
   it('emits providerOptions.gateway.tags on the gateway backend when tags is set', () => {
     createSpawnforgeAgent({ ...gatewayBase, tags: ['route:chat', 'tier:pro'] });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
-    expect(args.providerOptions).toEqual({ gateway: { tags: ['route:chat', 'tier:pro'] } });
+    expect(args.providerOptions).toEqual({ gateway: { tags: ['route:chat', 'tier:pro'], caching: 'auto' } });
   });
 
   it('emits both userId and tags together on the gateway backend', () => {
     createSpawnforgeAgent({ ...gatewayBase, userId: 'user_123', tags: ['route:chat'] });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
     expect(args.providerOptions).toEqual({
-      gateway: { user: 'user_123', tags: ['route:chat'] },
+      gateway: { user: 'user_123', tags: ['route:chat'], caching: 'auto' },
     });
   });
 
   it('ignores an empty tags array (does not emit an empty gateway.tags field)', () => {
     createSpawnforgeAgent({ ...gatewayBase, tags: [] });
-    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
-    expect(args.providerOptions).toBeUndefined();
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: Record<string, unknown> } };
+    expect(args.providerOptions?.gateway).not.toHaveProperty('tags');
+  });
+
+  it.each([
+    ['anthropic/claude-opus-4-8', ['anthropic/claude-sonnet-4-6', 'anthropic/claude-haiku-4-5']],
+    ['anthropic/claude-sonnet-4-6', ['anthropic/claude-haiku-4-5']],
+  ])('emits the ordered fallback list for %s (#9631)', (model, models) => {
+    createSpawnforgeAgent({ ...gatewayBase, model });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
+    expect(args.providerOptions).toEqual({ gateway: { models, caching: 'auto' } });
+  });
+
+  it('emits no fallback list for the cheapest model or an unknown provider model', () => {
+    for (const model of ['anthropic/claude-haiku-4-5', 'openai/gpt-4o-mini']) {
+      mockToolLoopAgent.mockClear();
+      createSpawnforgeAgent({ ...gatewayBase, model });
+      const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
+      expect(args.providerOptions).toEqual({ gateway: { caching: 'auto' } });
+    }
   });
 
   it('never emits providerOptions.gateway on the direct backend, even with userId/tags set', () => {
