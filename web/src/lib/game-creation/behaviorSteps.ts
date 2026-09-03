@@ -17,14 +17,28 @@
  * specific than a system-level default, and the design that bothered to say
  * "this one patrols" should not be overruled by "all enemies chase".
  *
+ * That rule runs BOTH ways, and the second direction is the one that is easy
+ * to forget. Per-entity intent beats a system-level DEFAULT, but it does not
+ * beat a system naming this entity EXPLICITLY: an entity the challenge system's
+ * `spawners` list points at by name is claimed, and this pass yields to it (see
+ * `spawnerEntityIdsFor`). Without that half, an entity named as a spawner and
+ * given a `behavior` came out carrying `SpawnerData` and `FollowerData` at
+ * once — a nest that walks away from the enemies it is producing.
+ *
  * The tuning still comes from the challenge system where there is one
- * (`chaseTuningFor`), so an explicit `behavior: 'chase'` does not silently
- * discard a `chaseSpeed` the same design asked for.
+ * (`chaseTuningFor`, `patrolTuningFor`), so an explicit `behavior` does not
+ * silently discard the `chaseSpeed` or `platformSpeed` the same design asked
+ * for.
  */
 
 import type { OrchestratorGDD, ExecutorName } from './types';
 import type { PlannedEntity } from './systems';
-import { chaseTuningFor } from './systems';
+import {
+  chaseTuningFor,
+  patrolTuningFor,
+  travelsVertically,
+  spawnerEntityIdsFor,
+} from './systems';
 import { BEHAVIOR_PLANS } from './behaviorVocabulary';
 import type { Behavior } from './behaviorVocabulary';
 
@@ -41,11 +55,13 @@ export interface BehaviorStepInput {
  * computes `origin + waypoint` — so `[0, 0, 0]` first means "start where the
  * design placed me". A world-space route would teleport every patroller to the
  * origin on its first frame. Same convention as `systems/challenge.ts`.
+ *
+ * The speed, pause and distance themselves come from `patrolTuningFor`, not
+ * from constants here: the challenge system reads `platformSpeed`/`moveSpeed`,
+ * `pauseDuration` and `distance` off the same GDD, and hardcoding them here
+ * would silently discard a route the same design asked for — the defect
+ * `chaseTuningFor` already closes on the chase side.
  */
-const PATROL_DISTANCE = 4;
-/** `MovingPlatformData::default()`; an unstated value stays the engine's own. */
-const PATROL_SPEED = 2;
-const PATROL_PAUSE = 0.5;
 
 /**
  * The entity a behaviour reacts to.
@@ -90,19 +106,25 @@ function followerStep(
   };
 }
 
-function patrolStep(entity: PlannedEntity): BehaviorStepInput {
+function patrolStep(
+  entity: PlannedEntity,
+  tuning: { speed: number; pauseDuration: number; distance: number },
+): BehaviorStepInput {
+  // An "Elevator" patrols UP, not across — the same signal `planMovingPlatforms`
+  // reads, off the same shared predicate.
+  const vertical = travelsVertically(entity.entity.name);
   return {
     executor: 'game_component',
     input: {
       entityId: entity.entityId,
       type: 'movingPlatform',
-      speed: PATROL_SPEED,
-      // Offsets, not world positions. See PATROL_DISTANCE above.
+      speed: tuning.speed,
+      // Offsets, not world positions. See the note above.
       waypoints: [
         [0, 0, 0],
-        [PATROL_DISTANCE, 0, 0],
+        vertical ? [0, tuning.distance, 0] : [tuning.distance, 0, 0],
       ],
-      pauseDuration: PATROL_PAUSE,
+      pauseDuration: tuning.pauseDuration,
       // Back and forth: a patrol that walks one way and stops is a patroller
       // standing at the far end of the level for the rest of the game.
       loopMode: 'pingPong',
@@ -141,6 +163,14 @@ export function planBehaviorSteps(
 ): BehaviorStepInput[] {
   const steps: BehaviorStepInput[] = [];
   const chase = chaseTuningFor(gdd);
+  const patrol = patrolTuningFor(gdd);
+  // The other half of the ownership rule. Per-entity intent beats a system
+  // DEFAULT (that is the skip in `planFollowers` / `planMovingPlatforms`), but
+  // it does not beat a system naming this entity explicitly: a spawner is a
+  // thing the design pointed at by name, and giving it a `follower` too puts
+  // `SpawnerData` and `FollowerData` on one body — the walking nest
+  // `planSpawners`' `excluded` set exists to prevent.
+  const spawners = spawnerEntityIdsFor(gdd, entities);
 
   for (let i = 0; i < entities.length; i += 1) {
     const planned = entities[i];
@@ -150,6 +180,16 @@ export function planBehaviorSteps(
 
     const plan = BEHAVIOR_PLANS[behavior];
     if (plan.substrate === 'none') continue;
+
+    if (spawners.has(planned.entityId)) {
+      // Said out loud rather than dropped: the design asked for two things that
+      // cannot both be true of one object, and the user would otherwise be left
+      // wondering why the nest stands still.
+      warn(
+        `"${planned.entity.name}" was designed so that it ${plan.summary}, but the design also named it as a spawner. One object cannot both be the nest and act like what comes out of it, so it was left as a spawner.`,
+      );
+      continue;
+    }
 
     let targetEntityId: string | null = null;
     if (plan.needsTarget) {
@@ -173,7 +213,7 @@ export function planBehaviorSteps(
         if (targetEntityId === null) continue;
         steps.push(followerStep(planned, targetEntityId, chase.speed, chase.stopDistance));
       } else {
-        steps.push(patrolStep(planned));
+        steps.push(patrolStep(planned, patrol));
       }
       continue;
     }

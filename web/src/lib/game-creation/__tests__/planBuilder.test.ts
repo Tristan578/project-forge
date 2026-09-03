@@ -1638,4 +1638,150 @@ describe('buildPlan — per-entity behaviour (PF-1114)', () => {
     expect(new Set(boundTo)).toEqual(new Set([mintedId(plan, 'Bat'), mintedId(plan, 'Ghost')]));
     expect(componentsOfType(plan, 'movingPlatform')).toHaveLength(1);
   });
+
+  it('does not double-write the OTHER way: a named spawner keeps spawning and gets no behaviour', () => {
+    // The mirror of the test above, and the half that was missing. The
+    // challenge system does not merely DEFAULT this entity into a spawner —
+    // the design named it — so the behaviour pass has to yield, or the nest
+    // ends up carrying `SpawnerData` and `FollowerData` at once and walks away
+    // from the enemies it is producing.
+    const plan = buildPlan(
+      gddWith(
+        { Player: undefined, Nest: 'chase' },
+        [
+          {
+            category: 'challenge',
+            type: 'enemies',
+            config: { spawners: ['Nest'] },
+            priority: 'core',
+            dependsOn: [],
+          },
+        ],
+      ),
+      'p',
+      'creator',
+      10_000,
+    );
+
+    const nestId = mintedId(plan, 'Nest');
+    expect(componentsOfType(plan, 'spawner').map(s => s.input.entityId)).toEqual([nestId]);
+    // The behaviour was dropped, not merely outvoted: NO follower anywhere
+    // names this entity.
+    expect(componentsOfType(plan, 'follower').map(f => f.input.entityId)).not.toContain(nestId);
+
+    // ...and the drop is said out loud rather than swallowed.
+    const gate = plan.approvalGates.find(g => g.id === 'gate_final');
+    const warnings = (gate?.displayData?.completionSummary as { warnings: string[] }).warnings;
+    expect(warnings.some(w => w.includes('Nest') && w.includes('spawner'))).toBe(true);
+  });
+
+  it('a patrol honours the platform tuning the SAME design asked for', () => {
+    // `planMovingPlatforms` reads these keys off the challenge system; a patrol
+    // planned from an explicit `behavior` used to ignore all three and travel
+    // 4 units at speed 2 regardless of what the design said.
+    const plan = buildPlan(
+      gddWith(
+        { Player: undefined, Guard: 'patrol' },
+        [
+          {
+            category: 'challenge',
+            type: 'platforms',
+            config: { platformSpeed: 6, pauseDuration: 2, distance: 9 },
+            priority: 'core',
+            dependsOn: [],
+          },
+        ],
+      ),
+      'p',
+      'creator',
+      10_000,
+    );
+
+    const platform = componentsOfType(plan, 'movingPlatform').find(
+      p => p.input.entityId === mintedId(plan, 'Guard'),
+    );
+    expect(platform).toBeDefined();
+    expect(platform!.input.speed).toBe(6);
+    expect(platform!.input.pauseDuration).toBe(2);
+    expect(platform!.input.waypoints).toEqual([
+      [0, 0, 0],
+      [9, 0, 0],
+    ]);
+  });
+
+  it('a patrol named like a lift travels UP, on the same predicate the platform system uses', () => {
+    const plan = buildPlan(
+      gddWith({ Player: undefined, Elevator: 'patrol' }),
+      'p',
+      'creator',
+      10_000,
+    );
+
+    const platform = componentsOfType(plan, 'movingPlatform').find(
+      p => p.input.entityId === mintedId(plan, 'Elevator'),
+    );
+    expect(platform).toBeDefined();
+    expect(platform!.input.waypoints).toEqual([
+      [0, 0, 0],
+      [0, 4, 0],
+    ]);
+  });
+
+  it('behaviour steps are OPTIONAL, so a behaviour that will not attach cannot cost the win condition', () => {
+    // Phase 2.6 runs before Phase 3b's win-condition guarantee, and
+    // `runPipeline` skips every remaining step after a NON-optional failure. A
+    // required behaviour step therefore used to leave a scene the pre-play
+    // winnability gate refuses to Play. See the runner test for the executed
+    // proof; this pins the plan-side property that makes it possible.
+    const plan = buildPlan(
+      gddWith({ Player: undefined, Rabbit: 'flee', Bat: 'chase', Guard: 'patrol' }),
+      'p',
+      'creator',
+      10_000,
+    );
+
+    const behaviorStepIds = new Set([
+      ...stepsWith(plan, 'behavior_script').map(s => s.id),
+      ...componentsOfType(plan, 'follower').map(s => s.id),
+      ...componentsOfType(plan, 'movingPlatform').map(s => s.id),
+    ]);
+    // A vacuous pass here would be an empty set, so the count is asserted too.
+    expect(behaviorStepIds.size).toBe(3);
+    for (const step of plan.steps) {
+      if (!behaviorStepIds.has(step.id)) continue;
+      expect((step as unknown as { optional: boolean }).optional).toBe(true);
+    }
+
+    // And the win condition is genuinely planned AFTER them, which is what
+    // makes `optional` the thing standing between the two.
+    const winStep = componentsOfType(plan, 'winCondition')[0];
+    expect(winStep).toBeDefined();
+    const positionOf = (id: string) => plan.steps.findIndex(step => step.id === id);
+    for (const id of behaviorStepIds) {
+      expect(positionOf(winStep!.id)).toBeGreaterThan(positionOf(id));
+    }
+  });
+
+  it('NOTHING depends on an optional step, or `optional` is decorative', () => {
+    // `dependenciesMet` requires a dependency to be `completed`, and a skipped
+    // optional step never is. So a single dependent naming one converts the
+    // skip straight back into `DEPENDENCY_FAILED` and a failed plan — which is
+    // what `verify_all_scenes` used to do to every optional step in the plan,
+    // behaviours and nice-to-have assets alike, by depending on all of them.
+    const plan = buildPlan(
+      gddWith({ Player: undefined, Rabbit: 'flee', Bat: 'chase', Guard: 'patrol' }),
+      'p',
+      'creator',
+      10_000,
+    );
+
+    const optionalIds = new Set(plan.steps.filter(s => s.optional).map(s => s.id));
+    // A plan with no optional steps would pass this vacuously.
+    expect(optionalIds.size).toBeGreaterThan(0);
+    for (const step of plan.steps) {
+      for (const dep of step.dependsOn) {
+        expect(optionalIds.has(dep)).toBe(false);
+      }
+    }
+  });
 });

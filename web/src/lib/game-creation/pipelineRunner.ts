@@ -69,6 +69,19 @@ const EMPTY_STEP_WARNING_PLURAL =
   'Some of the planned steps were missing from the plan and were not run — regenerate the plan to fill them in.';
 
 /**
+ * The marker every notice `recordSkippedOptionalSteps` writes begins with.
+ *
+ * An optional step that fails is skipped and the plan carries on — which is the
+ * whole point of `optional`, but it also means the game the user gets is
+ * quietly missing something they asked for. The step's own `userFacingMessage`
+ * already says WHAT was lost; this prefix is what makes the notice
+ * recognisable as this function's own on a re-run, so the de-duplication below
+ * can be a `startsWith` rather than a parse. It is deliberately not a fixed
+ * full string the way the empty-slot notices are: the tail varies per executor.
+ */
+const SKIPPED_OPTIONAL_WARNING_PREFIX = 'Not everything in the plan could be applied: ';
+
+/**
  * Record every empty slot in `plan.steps` on the plan itself.
  *
  * The runner does not build the plan it is handed: `runPipeline` is exported
@@ -129,6 +142,54 @@ function recordEmptyStepSlots(plan: OrchestratorPlan): void {
   );
   withoutOwnNotice.push(empty.length === 1 ? EMPTY_STEP_WARNING_SINGULAR : EMPTY_STEP_WARNING_PLURAL);
   plan.warnings = withoutOwnNotice;
+}
+
+/**
+ * Record every optional step that failed and was skipped, on the plan itself.
+ *
+ * Without this, `optional: true` is indistinguishable from success at the only
+ * place the user looks. A behaviour the design asked for silently does not
+ * exist, and the pipeline reports "completed" — the same class of lie as a
+ * green check over a broken artifact.
+ *
+ * Only steps carrying an `error` are reported. An optional step skipped because
+ * a DEPENDENCY did not complete gets no error (see `dependenciesMet` above), and
+ * reporting it would name a consequence rather than a cause: the step that
+ * actually failed is the one that writes a notice.
+ *
+ * Idempotent for the same reason and in the same shape as
+ * `recordEmptyStepSlots`: `runPipeline` can be handed the same plan object
+ * twice, so this strips its own prior notices before writing fresh ones and
+ * leaves every other producer's warnings untouched.
+ */
+function recordSkippedOptionalSteps(plan: OrchestratorPlan): void {
+  const notices: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < plan.steps.length; i += 1) {
+    const step = plan.steps[i];
+    if (!step || !step.optional || step.status !== 'skipped' || !step.error) continue;
+    const notice =
+      SKIPPED_OPTIONAL_WARNING_PREFIX + (step.error.userFacingMessage || step.error.message);
+    // Ten enemies that all failed the same way is one thing the user needs to
+    // know, not ten lines of the same sentence.
+    if (seen.has(notice)) continue;
+    seen.add(notice);
+    notices.push(notice);
+  }
+
+  const original = plan.warnings;
+  const withoutOwnNotices = (original ?? []).filter(
+    w => !w.startsWith(SKIPPED_OPTIONAL_WARNING_PREFIX),
+  );
+  if (notices.length === 0) {
+    // An untouched `undefined` (nothing was ever recorded) must stay
+    // `undefined`, not become `[]`.
+    if (withoutOwnNotices.length !== (original ?? []).length) {
+      plan.warnings = withoutOwnNotices;
+    }
+    return;
+  }
+  plan.warnings = [...withoutOwnNotices, ...notices];
 }
 
 /**
@@ -450,6 +511,13 @@ export async function runPipeline(
       }
     }
   }
+
+  // Every optional step has had its chance by now, so this is the first moment
+  // the full list of quiet drops exists. A plan that returned early is already
+  // reporting `failed` or `cancelled` with the offending step's own error, so
+  // the notice would be redundant there — it is the plan that finishes
+  // "completed" while missing pieces that needs saying out loud.
+  recordSkippedOptionalSteps(plan);
 
   // If we reach here without failure or cancellation, plan is complete
   if (plan.status !== 'failed' && plan.status !== 'cancelled') {
