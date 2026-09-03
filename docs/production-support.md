@@ -140,8 +140,11 @@ Vercel Edge (CDN, routing, headers)
 curl -sS -o /dev/null -w "HTTP %{http_code} | TTFB: %{time_starttransfer}s\n" \
   --max-time 10 https://spawnforge.ai/api/health
 
-# Check Vercel deployment status:
-vercel ls --scope=<team> --token=$VERCEL_TOKEN | head -5
+# Which build is live? (`vercel ls` prints `● Ready` for every row and cannot say)
+curl -s https://www.spawnforge.ai/api/health | jq .commit
+vercel rolling-release fetch --scope=<team> --cwd web   # currentDeployment = the base while a rollout is active
+# The last CD run logged the rollback target as `Last-known-good production URL:`
+gh run list --workflow=cd.yml --limit=3
 
 # Check if it's a DNS issue:
 dig spawnforge.ai +short
@@ -155,10 +158,14 @@ nslookup spawnforge.ai
 gh run list --workflow=cd.yml --limit=5
 
 # 3. If last deploy is the cause, rollback:
-# Option A: Vercel Dashboard > Deployments > find last-known-good > "Promote to Production"
-# Option B: Manual rollback via CLI:
-vercel ls --scope=<team> --token=$VERCEL_TOKEN
-vercel promote <last-good-deployment-url> --scope=<team> --token=$VERCEL_TOKEN
+# Option A: Vercel Dashboard > Deployments > find last-known-good > "Instant Rollback"
+#   (NOT "Promote to Production": under Rolling Releases a promote starts a staged
+#   rollout of the old build, or no-ops while a rollout is active)
+# Option B: Manual rollback via CLI (or dispatch cd.yml with rollback_production=<url>):
+vercel rollback <last-good-deployment-url> --yes --scope=<team> --token=$VERCEL_TOKEN
+#   Afterwards auto-assignment of production domains is OFF until a rolling release
+#   completes (Instant Rollback side effect): CD's ensure-canary starts the next
+#   rollout explicitly; if it cannot, undo by hand: vercel promote <fixed-url>
 
 # 4. If Vercel itself is down, there is no self-remediation.
 #    Post in #incidents: "Vercel outage affecting SpawnForge. Monitoring Vercel status page."
@@ -471,7 +478,7 @@ gh workflow run cd.yml
 | Cloudflare R2 | No built-in versioning | Last upload | < 30 min (re-upload from source) | Asset files can be re-uploaded. WASM binaries regenerated from CI |
 | Clerk | Managed by Clerk | N/A | N/A | User accounts managed externally. No backup needed from our side |
 | Stripe | Managed by Stripe | N/A | N/A | Subscription data managed externally |
-| Vercel | Git-based (deploy from any commit) | Last commit | < 10 min | Rollback by promoting previous deployment |
+| Vercel | Git-based (deploy from any commit) | Last commit | < 10 min | Rollback via Instant Rollback (`vercel rollback`); a promote is not a rollback under Rolling Releases, and Instant Rollback turns domain auto-assignment off until undone |
 | Code | GitHub (git) | Last push | Immediate | Protected main branch, PR reviews |
 
 ### Database Recovery Procedure
@@ -671,10 +678,13 @@ push to main
 ### Rollback Procedure
 ```bash
 # Option 1: Vercel Dashboard
-# Deployments > select last-known-good > "Promote to Production"
+# Deployments > select last-known-good > "Instant Rollback" (not "Promote" — see above)
 
 # Option 2: CLI
-vercel promote <deployment-url> --scope=<team> --token=$VERCEL_TOKEN
+vercel rollback <deployment-url> --yes --scope=<team> --token=$VERCEL_TOKEN
+#   Then: auto-assignment of production domains is OFF until a rolling release
+#   completes. CD's ensure-canary starts the next rollout explicitly; if it
+#   reports it could not become the canary, undo by hand: vercel promote <fixed-url>
 
 # Option 3: Re-run CD from a good commit
 git log --oneline -10  # Find the last good commit
@@ -735,8 +745,10 @@ entirely green.
 - No AI cost anomaly detection (PF-612)
 - No structured log aggregation (PF-613)
 - ~~No automated rollback (PF-614)~~ — shipped: `cd.yml`'s deploy-production job
-  promotes the previous deployment when the production health check or smoke
-  tests fail, and now files the P0 issue in the table above
+  Instant-Rollbacks to the last-known-good deployment (`vercel rollback`, never a
+  promote) when the production health check or smoke tests fail — unless a later
+  merge already owns production, which is a superseded run, not an incident — and
+  files the P0 issue in the table above
 - Duplicate checkAuthentication() function (PF-615)
 - No DB query monitoring (PF-616)
 - No CDN cache metrics (PF-617)
