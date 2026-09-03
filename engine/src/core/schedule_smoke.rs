@@ -875,3 +875,105 @@ fn joint3d_appliers_are_chained_in_create_update_remove_order() {
          state the update left. Found (name, byte offset): {positions:?}",
     );
 }
+
+/// The skybox appliers must be registered as ONE chained group, creators first.
+///
+/// `apply_set_skybox_requests` and `apply_custom_skybox_requests` insert
+/// `bevy::core_pipeline::Skybox` through deferred `Commands`;
+/// `apply_update_skybox_requests` and `apply_environment_updates` mutate it
+/// through an immediate `Query<&mut Skybox>`. Bevy gives a bare tuple no ordering
+/// edge and therefore no `ApplyDeferred` flush, and shared `EditorApplySet`
+/// membership is not an edge either — a set orders its members against OTHER
+/// sets, never against each other. So before this was chained, a same-frame
+/// `set_skybox` + `update_skybox` silently lost the brightness: the mutator
+/// matched nothing while `EnvironmentSettings` still updated and still emitted,
+/// leaving the inspector reading the new value over a stale render until the next
+/// `set_skybox`. That resolution is stable-but-unspecified, so it does not
+/// surface by repeating a test run — it flips when any unrelated system is added.
+///
+/// Same hazard family as `joint3d_appliers_are_chained_in_create_update_remove_order`.
+#[test]
+fn skybox_appliers_are_chained_with_the_creators_before_the_mutators() {
+    let material_src = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bridge/material.rs");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+    };
+
+    // Roster from the source, so a fifth skybox applier joins the assertion
+    // instead of being silently outside it. NB these are `pub(super) fn`: a scan
+    // matching only `pub fn` returns an empty roster and reads as "nothing found"
+    // rather than as a broken parser.
+    let mut appliers: Vec<String> = Vec::new();
+    for line in material_src.lines() {
+        let trimmed = line.trim_start();
+        let after_vis = trimmed
+            .strip_prefix("pub(super) ")
+            .or_else(|| trimmed.strip_prefix("pub "))
+            .unwrap_or(trimmed);
+        if let Some(rest) = after_vis.strip_prefix("fn ") {
+            if let Some(name) = rest.split('(').next().map(|n| n.trim().to_string()) {
+                if name.starts_with("apply_") && name.contains("skybox") && !appliers.contains(&name)
+                {
+                    appliers.push(name);
+                }
+            }
+        }
+    }
+
+    // Fail closed (lesson #9): set/custom/update/remove all exist today, so fewer
+    // than four means the scan broke rather than the hazard going away — and an
+    // empty roster would make `add_systems_group_containing` match every group.
+    assert!(
+        appliers.len() >= 4,
+        "found only {} `apply_*skybox*` system(s) in bridge/material.rs — the scan is \
+         broken, not the code. Found: {appliers:?}",
+        appliers.len(),
+    );
+
+    let bridge_code = bridge_code_without_comments();
+    let skybox_group = add_systems_group_containing(&bridge_code, &appliers, "skybox appliers");
+
+    assert!(
+        skybox_group.contains(".chain()"),
+        "the skybox applier tuple in bridge/mod.rs carries no `.chain()`. Membership in \
+         `EditorApplySet` is NOT an ordering edge between the tuple's own members, so \
+         without `.chain()` Bevy inserts no `ApplyDeferred` between the deferred \
+         `Commands::insert` of the setters and the immediate `Query<&mut Skybox>` of the \
+         updaters: a `set_skybox` and an `update_skybox` in the same frame lose the \
+         brightness, and `EnvironmentSettings` still emits the new value so the UI reads \
+         correct over a stale render. Group found: {skybox_group:?}",
+    );
+
+    let expected_order = [
+        "apply_set_skybox_requests",
+        "apply_custom_skybox_requests",
+        "apply_update_skybox_requests",
+        "apply_environment_updates",
+        "apply_remove_skybox_requests",
+    ];
+    let positions: Vec<(&str, usize)> = expected_order
+        .iter()
+        .map(|name| {
+            let at = skybox_group.find(name).unwrap_or_else(|| {
+                panic!(
+                    "`{name}` is not in the chained skybox group. `apply_environment_updates` \
+                     belongs there because it writes `skybox.brightness` too — outside the \
+                     chain it is the same lost-mutation bug under a different command. The \
+                     roster scan above accepts any `apply_*skybox*` name, so a miss here \
+                     means one of these was renamed or moved and this order assertion needs \
+                     updating with it. Group found: {skybox_group:?}"
+                )
+            });
+            (*name, at)
+        })
+        .collect();
+
+    assert!(
+        positions.windows(2).all(|w| w[0].1 < w[1].1),
+        "the chained skybox appliers are registered in the wrong order. `.chain()` orders \
+         them exactly as written, so every system that INSERTS `Skybox` must precede every \
+         system that mutates it, and the remove must come last so it acts on the state the \
+         mutators left. Found (name, byte offset): {positions:?}",
+    );
+}

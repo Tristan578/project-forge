@@ -692,13 +692,23 @@ impl Plugin for SelectionPlugin {
                     entity_factory::apply_material_updates,
                     entity_factory::apply_light_updates,
                     entity_factory::apply_ambient_light_updates,
-                    material::apply_environment_updates,
-                    material::apply_set_skybox_requests,
                 ).in_set(EditorApplySet))
+                // The skybox appliers MUST stay ONE chained group. The setters insert
+                // `Skybox` through deferred `Commands`; the updaters read it through an
+                // immediate `Query<&mut Skybox>`. Bevy inserts an `ApplyDeferred` only at
+                // an explicit ordering edge, and shared `EditorApplySet` membership is NOT
+                // one — so unchained, a same-frame `set_skybox` + `update_skybox` silently
+                // loses the brightness while `EnvironmentSettings` still updates and still
+                // emits, leaving the inspector ahead of the render until the next
+                // `set_skybox`. Order is create -> mutate -> remove.
                 .add_systems(Update, (
-                    material::apply_remove_skybox_requests,
-                    material::apply_update_skybox_requests,
+                    material::apply_set_skybox_requests,
                     material::apply_custom_skybox_requests,
+                    material::apply_update_skybox_requests,
+                    material::apply_environment_updates,
+                    material::apply_remove_skybox_requests,
+                ).chain().in_set(EditorApplySet))
+                .add_systems(Update, (
                     material::apply_post_processing_updates,
                     material::apply_shader_updates,
                     material::apply_shader_removals,
