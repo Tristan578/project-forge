@@ -536,8 +536,14 @@ jobs:
           unsupported=0
           for suite in "${suites[@]}"; do
             echo "::group::$suite"
-            bash "$suite"
-            code=$?
+            # `shell: bash` runs `bash --noprofile --norc -eo pipefail {0}`, so
+            # errexit is ON. A bare `bash "$suite"` that exits non-zero kills the
+            # step right there: `code=$?` is never reached, the exit-3 UNSUPPORTED
+            # tolerance below never fires, and the loop reports only the first
+            # failing suite instead of all of them. `|| code=$?` puts the call in a
+            # compound command, which errexit does not act on.
+            code=0
+            bash "$suite" || code=$?
             echo "::endgroup::"
             if [ "$code" -eq 3 ]; then
               unsupported=$((unsupported + 1))
@@ -970,6 +976,7 @@ jobs:
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
+            scripts/__tests__/windows-suite-runner.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -1090,6 +1097,8 @@ jobs:
         run: bash scripts/__tests__/claude-refs-resolve.test.sh
       - name: Run E2E tag-routing gate test suite
         run: bash scripts/__tests__/e2e-tag-routing.test.sh
+      - name: Run Windows suite-runner step test suite
+        run: bash scripts/__tests__/windows-suite-runner.test.sh
 
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
