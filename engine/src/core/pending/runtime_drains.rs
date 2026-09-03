@@ -85,6 +85,10 @@ pub(super) mod scan {
         pub gated_def: bool,
         /// Text from the signature to the next function (approximate body).
         pub body: String,
+        /// The same span taken from `runtime_view`, so an inner block gated by
+        /// `EDITOR_ONLY` reads as blank. A drain inside such a block is NOT a
+        /// runtime drain, and `body` alone cannot tell the two apart.
+        pub runtime_body: String,
     }
 
     /// The source with everything from its first `#[cfg(test)]` on removed.
@@ -143,6 +147,12 @@ pub(super) mod scan {
     pub fn functions(file: &'static str, source: &str) -> Vec<Func> {
         let source = without_tests(source);
         let lines: Vec<&str> = source.lines().collect();
+        // `runtime_view` blanks bytes in place and never touches a newline, and
+        // `without_tests` is idempotent (it returns a prefix slice), so this
+        // view has exactly the same line indices as `lines` above.
+        let blanked = runtime_view(source);
+        let blanked_lines: Vec<&str> = blanked.lines().collect();
+        debug_assert_eq!(lines.len(), blanked_lines.len());
         let mut starts: Vec<(usize, String)> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
             if let Some(name) = fn_name(line) {
@@ -173,6 +183,7 @@ pub(super) mod scan {
                 name: name.clone(),
                 gated_def: gated,
                 body: lines[*i..end].join("\n"),
+                runtime_body: blanked_lines[*i..end].join("\n"),
             });
         }
         out
@@ -186,44 +197,60 @@ pub(super) mod scan {
         let mut ranges = Vec::new();
         for (idx, _) in source.match_indices(EDITOR_ONLY) {
             let mut pos = idx + EDITOR_ONLY.len();
-            // Skip to the first non-blank byte on a later line.
-            while pos < bytes.len() && (bytes[pos] as char).is_whitespace() {
-                pos += 1;
+            // Skip to the item this attribute gates: blank space, line/doc
+            // comments, and any FURTHER attributes stacked on the same item
+            // (`#[allow(dead_code)]` under an `EDITOR_ONLY` is routine). Without
+            // the last of those, the head below matches no item keyword, the
+            // statement branch hunts for a depth-0 `;` that a function body
+            // never has, and the scan panics on perfectly ordinary source.
+            loop {
+                while pos < bytes.len() && (bytes[pos] as char).is_whitespace() {
+                    pos += 1;
+                }
+                if pos >= bytes.len() {
+                    break;
+                }
+                let ahead = &source[pos..];
+                if ahead.starts_with("//") {
+                    pos += ahead.find('\n').map_or(ahead.len(), |n| n + 1);
+                    continue;
+                }
+                if ahead.starts_with("#[") || ahead.starts_with("#![") {
+                    pos = matching_bracket(bytes, pos + ahead.find('[').unwrap());
+                    continue;
+                }
+                break;
             }
             if pos >= bytes.len() {
                 break;
             }
-            let rest = &source[pos..];
-            let end = if rest.starts_with('{') {
-                matching_brace(bytes, pos)
-            } else {
-                let head: String = rest.chars().take(20).collect();
-                let item_with_body = ["pub", "fn", "impl", "struct", "enum", "mod "]
-                    .iter()
-                    .any(|k| head.starts_with(k))
-                    && !rest.starts_with("mod ")
-                    || head.starts_with("fn ");
-                if item_with_body && rest.find('{').is_some_and(|b| b < rest.find(';').unwrap_or(usize::MAX)) {
-                    let open = pos + rest.find('{').unwrap();
-                    matching_brace(bytes, open)
-                } else {
-                    // A statement: `mod x;`, `use ..;`, `app.add_systems(..);`
-                    let mut depth = 0i32;
-                    let mut end = None;
-                    for (off, b) in bytes[pos..].iter().enumerate() {
-                        match b {
-                            b'(' | b'{' | b'[' => depth += 1,
-                            b')' | b'}' | b']' => depth -= 1,
-                            b';' if depth == 0 => {
-                                end = Some(pos + off + 1);
-                                break;
-                            }
-                            _ => {}
-                        }
+            // Whichever comes first OUTSIDE any `(..)`/`[..]` decides the shape:
+            // a `{` opens a body (`fn`, `impl`, `mod x { .. }`, a bare block), a
+            // `;` ends a declaration or statement (`mod x;`, `use ..;`,
+            // `app.add_systems(..);`, `struct Foo;`). Deciding on the leading
+            // keyword instead is what broke here: a signature such as
+            // `fn f(v: &[[f32; 2]]) -> T {` carries a `;` before its `{`, so the
+            // keyword branch handed a whole function to the statement scanner,
+            // which then found no depth-0 `;` and panicked on valid source.
+            let mut depth = 0i32;
+            let mut end = None;
+            for (off, b) in bytes[pos..].iter().enumerate() {
+                match b {
+                    b'(' | b'[' => depth += 1,
+                    b')' | b']' => depth -= 1,
+                    b'{' if depth == 0 => {
+                        end = Some(matching_brace(bytes, pos + off));
+                        break;
                     }
-                    end.unwrap_or_else(|| panic!("unterminated statement after {EDITOR_ONLY} at byte {idx}"))
+                    b';' if depth == 0 => {
+                        end = Some(pos + off + 1);
+                        break;
+                    }
+                    _ => {}
                 }
-            };
+            }
+            let end = end
+                .unwrap_or_else(|| panic!("unterminated item after {EDITOR_ONLY} at byte {idx}"));
             ranges.push((idx, end));
         }
         ranges
@@ -244,6 +271,24 @@ pub(super) mod scan {
             }
         }
         panic!("unbalanced braces after byte {open}");
+    }
+
+    /// Byte just past the `]` closing the `[` at `open`.
+    fn matching_bracket(bytes: &[u8], open: usize) -> usize {
+        let mut depth = 0i32;
+        for (off, b) in bytes[open..].iter().enumerate() {
+            match b {
+                b'[' => depth += 1,
+                b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return open + off + 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unbalanced brackets after byte {open}");
     }
 
     /// `source` with every editor-only range blanked, so a text search over it
@@ -555,6 +600,47 @@ pub fn open(mut pending: ResMut<PendingCommands>) {
     }
 
     #[test]
+    fn the_gated_range_ends_at_the_item_not_at_the_first_semicolon() {
+        // A signature carrying a `;` inside brackets — `&[[f32; 2]]` is the real
+        // shape from bridge/skeleton2d.rs. Deciding the item's extent from the
+        // first `;` anywhere sends the scan hunting for a depth-0 terminator a
+        // function body never has, which panics instead of blanking the body.
+        let src = "\
+#[cfg(not(feature = \"runtime\"))]
+/// doc between the attribute and the item
+#[allow(dead_code)]
+fn gated(v: &[[f32; 2]]) -> Vec<u8> {
+    editor_only_call();
+}
+
+fn kept() {
+    runtime_call();
+}
+";
+        let view = runtime_view(src);
+        assert!(!mentions_ident(&view, "editor_only_call"), "gated body survived: {view}");
+        assert!(mentions_ident(&view, "runtime_call"), "runtime body was blanked: {view}");
+
+        // A declaration with no body still ends at its own `;`.
+        for decl in ["mod gone;", "use crate::gone;", "struct Gone;"] {
+            let src = format!("#[cfg(not(feature = \"runtime\"))]\n{decl}\nfn kept() {{ runtime_call(); }}\n");
+            let view = runtime_view(&src);
+            assert!(!mentions_ident(&view, "Gone") && !mentions_ident(&view, "gone"), "{decl}: {view}");
+            assert!(mentions_ident(&view, "runtime_call"), "{decl} swallowed the next item: {view}");
+        }
+
+        // A `{` inside a call is not a body: the statement ends at its `;`.
+        let src = "\
+#[cfg(not(feature = \"runtime\"))]
+app.add_systems(Update, (|w: &mut World| { editor_only_call(w); },));
+app.add_systems(Update, runtime_call);
+";
+        let view = runtime_view(src);
+        assert!(!mentions_ident(&view, "editor_only_call"), "closure body survived: {view}");
+        assert!(mentions_ident(&view, "runtime_call"), "the following statement was blanked: {view}");
+    }
+
+    #[test]
     fn extraction_floors() {
         let fields = pending_fields();
         assert!(fields.len() >= 120, "only {} PendingCommands fields parsed", fields.len());
@@ -587,7 +673,12 @@ pub fn open(mut pending: ResMut<PendingCommands>) {
             let drainers: Vec<&Func> = fns.iter().filter(|f| drained_fields(&f.body).contains(&field)).collect();
             if drainers.is_empty() {
                 undrained_anywhere.push(field.clone());
-            } else if drainers.iter().any(|f| runtime_reachable(f, &gated_modules)) {
+            } else if drainers.iter().any(|f| {
+                // The drain must survive BOTH gates: the function's own
+                // definition must be reachable, and the statement that drains
+                // must not sit inside an `EDITOR_ONLY` block within it.
+                runtime_reachable(f, &gated_modules) && drained_fields(&f.runtime_body).contains(&field)
+            }) {
                 runtime_drained.push(field.clone());
             } else {
                 editor_drained.push(field.clone());
