@@ -19,7 +19,13 @@ import { gateway } from '@ai-sdk/gateway';
 import { anthropic } from '@ai-sdk/anthropic';
 import { convertManifestToolsToSdkTools, type ManifestTool } from '@/lib/ai/toolAdapter';
 import { modelToolSchema } from '@/lib/ai/modelToolSchema';
-import { AI_MODEL_PRIMARY, AI_MODELS, supportsEffort, thinkingModeFor } from '@/lib/ai/models';
+import {
+  AI_MODEL_PRIMARY,
+  AI_MODELS,
+  gatewayFallbackModels,
+  supportsEffort,
+  thinkingModeFor,
+} from '@/lib/ai/models';
 import { buildAnthropicCacheControl, type CacheTtlTier } from '@/lib/ai/cachedContext';
 import manifestJson from '@/data/commands.json';
 
@@ -163,11 +169,8 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
 
   const canonicalModel = model || AI_MODEL_PRIMARY;
 
-  const modelInstance = isDirectBackend
-    ? anthropic(canonicalModel)
-    : gateway(
-        canonicalModel.includes('/') ? canonicalModel : AI_MODELS.gatewayChat,
-      );
+  const gatewayModelId = canonicalModel.includes('/') ? canonicalModel : AI_MODELS.gatewayChat;
+  const modelInstance = isDirectBackend ? anthropic(canonicalModel) : gateway(gatewayModelId);
 
   // Provider options for thinking + effort (Anthropic direct only). Gateway
   // routes ignore these fields, so we only emit them on the direct backend —
@@ -198,7 +201,12 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
   // they identify who/what a request belongs to for cost breakdowns, never
   // affect model selection or output. Anthropic direct calls bypass the
   // Gateway entirely, so these fields have no effect there and are omitted.
-  const gatewayOptions: { user?: string; tags?: string[] } = {};
+  //
+  // `models` (ordered fallback list) and `caching: 'auto'` (#9631) are Gateway
+  // routing fields: a provider outage becomes a degraded-model answer instead
+  // of a 500, and repeated prefixes are cached where the provider supports it.
+  // Both are validated server-side; the Gateway ignores what it does not know.
+  const gatewayOptions: { user?: string; tags?: string[]; models?: string[]; caching?: 'auto' } = {};
   if (!isDirectBackend) {
     if (userId) {
       gatewayOptions.user = userId;
@@ -206,6 +214,11 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
     if (tags && tags.length > 0) {
       gatewayOptions.tags = tags;
     }
+    const fallbacks = gatewayFallbackModels(gatewayModelId);
+    if (fallbacks.length > 0) {
+      gatewayOptions.models = fallbacks;
+    }
+    gatewayOptions.caching = 'auto';
   }
 
   const providerOptions = {

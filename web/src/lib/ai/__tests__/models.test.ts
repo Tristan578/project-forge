@@ -7,6 +7,7 @@ import {
   AI_MODELS,
   GATEWAY_MODEL_PREMIUM,
   GATEWAY_MODEL_DEEP,
+  gatewayFallbackModels,
   isPremiumModel,
   supportsEffort,
   thinkingModeFor,
@@ -215,5 +216,19 @@ describe('thinkingModeFor / supportsEffort (#9626)', () => {
     expect(thinkingModeFor(AI_MODEL_PREMIUM)).toBe('adaptive');
     expect(thinkingModeFor(AI_MODEL_PRIMARY)).toBe('adaptive');
     expect(thinkingModeFor(AI_MODEL_FAST)).toBe('budget');
+  });
+});
+
+describe('gatewayFallbackModels (#9631)', () => {
+  it('premium falls back to chat then fast, chat to fast, fast to nothing', () => {
+    expect(gatewayFallbackModels(GATEWAY_MODEL_PREMIUM)).toEqual([AI_MODELS.gatewayChat, 'anthropic/claude-haiku-4-5']);
+    expect(gatewayFallbackModels(AI_MODELS.gatewayChat)).toEqual(['anthropic/claude-haiku-4-5']);
+    expect(gatewayFallbackModels('anthropic/claude-haiku-4-5')).toEqual([]);
+  });
+
+  it('never guesses a fallback for an unknown id', () => {
+    expect(gatewayFallbackModels('openai/gpt-4o-mini')).toEqual([]);
+    expect(gatewayFallbackModels(undefined)).toEqual([]);
+    expect(gatewayFallbackModels(null)).toEqual([]);
   });
 });
