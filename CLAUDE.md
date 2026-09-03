@@ -109,6 +109,7 @@ drops the prior dismissal.
 - Vitest workspace splits: `vitest.config.node.ts` (node) and `vitest.config.jsdom.ts` (jsdom)
 - Store slices: `sliceTestTemplate.ts` pattern with `createSliceStore()` and `createMockDispatch()`
 - Script workers: Stub `self` with mock `postMessage`, use `vi.resetModules()` + dynamic import
+- **mock*Once leak guard** (`web/vitest.mockOnceGuard.ts`, loaded by `vitest.setup.ts`): a test that queues `mock*Once` on a mock it did not create — a module-scoped `vi.fn`, a `vi.mock` factory mock (however lazily the factory ran), or a bare automock — and never consumes it FAILS, naming the still-armed queueing line. Consume the value, or build the mock inside the test. `MOCK_ONCE_GUARD=off` disables it for a local run (bisecting); it is ignored under CI. Under CI's `retry: 1`, a transient failure between queueing and consuming shows up on the retry as this guard's error — chase the original failure.
 
 ## Taskboard
 
