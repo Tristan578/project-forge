@@ -57,6 +57,7 @@ vi.mock('@/lib/chat/tools', () => ({
 
 vi.mock('@/lib/chat/sanitizer', () => ({
   sanitizeChatInput: vi.fn((s: string) => s),
+  sanitizeToolText: vi.fn((s: string) => s),
   validateBodySize: vi.fn(() => true),
   detectPromptInjection: vi.fn(() => false),
 }));
@@ -91,6 +92,7 @@ const mockNegAgent = { stream: mockNegStream };
 
 vi.mock('@/lib/ai/spawnforgeAgent', () => ({
   createSpawnforgeAgent: vi.fn(() => mockNegAgent),
+  resolveToolApprovalSecret: vi.fn(() => undefined),
 }));
 
 vi.mock('@/lib/costs/costLogger', () => ({

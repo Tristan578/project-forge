@@ -14,10 +14,11 @@ import { readdir, readFile } from 'fs/promises';
 import path from 'path';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
-import { refundTokens } from '@/lib/tokens/service';
+import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import {
   sanitizeChatInput,
   sanitizeSystemPrompt,
+  sanitizeToolText,
   validateBodySize,
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
@@ -30,7 +31,11 @@ import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/postho
 import { DEEP_GEN_SURFACES, type DeepGenSurface } from '@/lib/ai/surfaces';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
-import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
+import { createSpawnforgeAgent, resolveToolApprovalSecret } from '@/lib/ai/spawnforgeAgent';
+import {
+  verifyApprovedToolApprovals,
+  deniedApprovalsAreAuthentic,
+} from '@/lib/ai/toolApprovalSignature';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { isPremiumModel, AI_MODEL_DEEP, AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { isDeepTierEnabled } from '@/lib/ai/deepTier';
@@ -371,7 +376,16 @@ export function buildModelMessages(messages: IncomingMessage[]): BuiltModelMessa
               type: 'tool-approval-request' as const,
               approvalId: p.approvalId,
               toolCallId: p.toolCallId,
-            });
+              // The HMAC the SDK stamped on this request when it was issued.
+              // It is what binds the approved input to the input the user
+              // actually saw — `verifyApprovedToolApprovals` below re-derives
+              // it. Dropping it here would silently disarm that check, so it
+              // is carried verbatim. `ToolApprovalRequestPart` does not
+              // declare the field, but `standardizePrompt` returns the
+              // ORIGINAL message array rather than its parsed copy, so the
+              // extra key survives to the validator (ai@7 dist/index.js:2577).
+              ...(isNonEmptyString(p.signature) ? { signature: p.signature } : {}),
+            } as Extract<AssistantModelMessage['content'], unknown[]>[number]);
           }
         }
         if (parts.length > 0) {
@@ -588,7 +602,22 @@ export async function POST(request: NextRequest) {
         if (b.type === 'text' && typeof b.text === 'string') {
           const screened = screenText(b.text, msg.role);
           if (screened instanceof Response) return screened;
-          b.text = screened;
+          // Assistant text is replayed from the client's own history, so it is
+          // as forgeable as a tool result — redact injection patterns there
+          // too (screenText's injection check is user-role only).
+          b.text = msg.role === 'user' ? screened : sanitizeToolText(screened);
+        } else if (b.type === 'tool-result') {
+          // THE TOOL CHANNEL. `chatStore.appendToolTurn` stringifies whatever
+          // the engine returned into `output.value`, so an entity the user
+          // named "ignore previous instructions…" reaches the model as text,
+          // and a modified client can put anything at all here. Before
+          // PF-8860's review this span was the one model-visible input that
+          // passed through completely unscreened.
+          const output = b.output;
+          if (typeof output === 'object' && output !== null) {
+            const o = output as Record<string, unknown>;
+            if (typeof o.value === 'string') o.value = sanitizeToolText(o.value);
+          }
         }
       }
     }
@@ -786,6 +815,38 @@ export async function POST(request: NextRequest) {
   // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
 
+  // 8b. Bind every approved approval to the input the user actually approved.
+  //
+  // The approval history is rebuilt in the browser, so an approved
+  // `delete_entities({entityIds:['1']})` can come back asking for ten. The SDK
+  // signs each request it issues, but its own validator never runs on our
+  // resume: an approved response that ships its own `tool-result` — which ours
+  // always does, because these tools have no server-side `execute` — is
+  // skipped before validation (see `toolApprovalSignature.ts` for the measured
+  // proof). This is therefore the ONLY place the binding is checked.
+  //
+  // Fails closed: a missing, unknown, or mismatched signature is a 400, not a
+  // downgrade to unverified execution.
+  const toolApprovalSecret = resolveToolApprovalSecret();
+  let deniedResume = false;
+  if (toolApprovalSecret) {
+    const failure = await verifyApprovedToolApprovals(modelMessages, toolApprovalSecret);
+    if (failure) {
+      captureException(
+        new Error(`Tool approval verification failed: ${failure.reason}`),
+        { route: '/api/chat', phase: 'tool-approval-verify', reason: failure.reason },
+      );
+      return Response.json(
+        {
+          error: 'Tool approval could not be verified. Start the request again.',
+          code: 'INVALID_TOOL_APPROVAL',
+        },
+        { status: 400 },
+      );
+    }
+    deniedResume = await deniedApprovalsAreAuthentic(modelMessages, toolApprovalSecret);
+  }
+
   // Resolve analytics consent + one trace id for this turn, before streaming.
   // Every step's `$ai_generation` event below shares this trace. Consent is
   // resolved once (request scope) rather than per step; capture itself is
@@ -794,10 +855,17 @@ export async function POST(request: NextRequest) {
   const aiTraceId = usageId ?? crypto.randomUUID();
 
   // 9. Stream via Agent and return UI message stream response
+  let resumeProducedToolCalls = false;
   try {
     const result = await agent.stream({
       messages: modelMessages,
-      onStepFinish: async ({ usage }) => {
+      onStepFinish: async ({ usage, toolCalls }) => {
+        // Tracks whether the turn did any real work, for the paused-turn
+        // refund below. A denial resume that only narrates "I didn't do that"
+        // is the double-charge case; one that goes on to call more tools is a
+        // normal turn and stays billed.
+        if (toolCalls && toolCalls.length > 0) resumeProducedToolCalls = true;
+
         // Log actual LLM token usage to the cost ledger once each step completes.
         // usage.inputTokens and usage.outputTokens are the actual values from
         // the model (not the estimated cost charged upfront via resolveApiKey).
@@ -915,7 +983,30 @@ export async function POST(request: NextRequest) {
         return undefined;
       },
       onFinish: async ({ finishReason }) => {
-        if (finishReason === 'error' && usageId) {
+        // Double billing (PF-8860): a turn the server pauses on an approval
+        // has already been charged an upfront `estimatedCost`, and the resume
+        // is a SECOND HTTP request that is charged again — so the user pays
+        // twice for one logical turn, and pays it for a turn whose destructive
+        // call they refused. Refund the resume when every decision in the
+        // history was a denial and the resumed turn called nothing new.
+        //
+        // Not free chat: `deniedApprovalsAreAuthentic` requires each denial to
+        // trace back to a correctly signed request THIS server issued, so a
+        // refund can only exist where a genuine (already billed) gated turn
+        // did. The two refund helpers use different idempotency namespaces and
+        // a usageId must be claimed by exactly one, hence the else-if.
+        if (finishReason !== 'error' && deniedResume && !resumeProducedToolCalls && usageId) {
+          await refundTokenAmount(
+            auth.ctx.user.id,
+            estimatedCost,
+            'chat_denied_approval_resume',
+            usageId,
+          ).catch((refundErr: unknown) => {
+            captureException(refundErr, {
+              route: '/api/chat', phase: 'refund_denied_resume', usageId,
+            });
+          });
+        } else if (finishReason === 'error' && usageId) {
           captureException(new Error('Stream finished with error'), {
             route: '/api/chat', model, phase: 'mid-stream',
           });
