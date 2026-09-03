@@ -24,9 +24,10 @@
  *
  * 2. **`createTestHarness` is an ambiguous name.** `src/__integration__/harness.ts`
  *    exports its own `createTestHarness()`, a Zustand store harness that boots
- *    no WASM at all; six files call it from `beforeEach`, correctly. Matching
- *    the bare identifier produces six false positives and would fail this suite
- *    on healthy code, so every match is keyed on the IMPORT SPECIFIER resolving
+ *    no WASM at all; five files call it from `beforeEach` across six call
+ *    sites, correctly. Matching the bare identifier produces six false
+ *    positives and would fail this suite on healthy code, so every match is
+ *    keyed on the IMPORT SPECIFIER resolving
  *    to `lib/db/__tests__/pgliteHarness` (or a direct `new PGlite(`) instead.
  */
 
@@ -104,32 +105,54 @@ function importsPgliteHarness(file: string, lines: string[]): boolean {
  * `enclosingHook` suite below.
  */
 /**
- * The hook whose call opens `opener`, i.e. the LAST hook call in it.
+ * The hook whose call actually OPENS the brace that follows `opener`, or `null`
+ * when a non-hook callee (or nothing at all) opens it.
  *
- * `HOOK_NAMES.find(...)` resolved by list order instead, so a line carrying two
- * hook calls — `beforeAll(seed); afterEach(async () => {` — was credited to
- * whichever name `HOOK_NAMES` happens to list first, not the one that actually
- * opens the brace. That misattributes the boot to a compliant hook and the
- * scanner reports a pass on a per-test boot. Pinned by the `nearestHookCall`
- * cases in the `enclosingHook` suite below.
+ * Two wrong rules were tried before this one, and both fail OPEN — they name a
+ * compliant hook for a boot that is not in one:
+ *
+ * - **List order.** `HOOK_NAMES.find(...)` credited
+ *   `beforeAll(seed); afterEach(async () => {` to `beforeAll`, because that is
+ *   what `HOOK_NAMES` lists first.
+ * - **Textual proximity.** Taking the LAST hook name anywhere in `opener`
+ *   credited `beforeAll(() => register(afterEach)); describe('x', () => {` to
+ *   `afterEach` — a name that appears only as an ARGUMENT, inside a call that
+ *   had already closed before the brace. The truthful answer is `null`
+ *   (describe scope), so a per-file rule reports a pass on a boot that sits in
+ *   no hook at all.
+ *
+ * Neither the order of the names nor their distance from the brace carries the
+ * information; only whether a call is still OPEN there does. So this keeps a
+ * paren stack (skipping quoted text, since a `(` inside a string literal is not
+ * a call) and walks it innermost-outward, returning the first callee that is a
+ * hook name. Walking outward rather than stopping at the innermost frame is
+ * what keeps `beforeAll(() => wrap(() => {` resolving to `beforeAll`: the boot
+ * really does run once, inside that hook.
+ *
+ * Pinned by the `enclosingHook` suite below, which carries a case for each of
+ * the two wrong rules.
  */
-function nearestHookCall(opener: string): string | null {
-  let best: string | null = null;
-  let bestAt = -1;
-  for (const name of HOOK_NAMES) {
-    const re = new RegExp(`\\b${name}\\s*\\(`, 'g');
-    let last = -1;
-    let m: RegExpExecArray | null = re.exec(opener);
-    while (m !== null) {
-      last = m.index;
-      m = re.exec(opener);
+function hookOpeningBrace(opener: string): string | null {
+  const openParens: number[] = [];
+  let quote: string | null = null;
+
+  for (let i = 0; i < opener.length; i += 1) {
+    const ch = opener[i];
+    if (quote !== null) {
+      if (ch === '\\') i += 1;
+      else if (ch === quote) quote = null;
+      continue;
     }
-    if (last > bestAt) {
-      bestAt = last;
-      best = name;
-    }
+    if (ch === "'" || ch === '"' || ch === '`') quote = ch;
+    else if (ch === '(') openParens.push(i);
+    else if (ch === ')') openParens.pop();
   }
-  return best;
+
+  for (let k = openParens.length - 1; k >= 0; k -= 1) {
+    const callee = /([A-Za-z_$][\w$]*)\s*$/.exec(opener.slice(0, openParens[k]))?.[1];
+    if (callee !== undefined && HOOK_NAMES.includes(callee)) return callee;
+  }
+  return null;
 }
 
 export function enclosingHook(lines: string[], lineIndex: number, column: number): string | null {
@@ -143,7 +166,7 @@ export function enclosingHook(lines: string[], lineIndex: number, column: number
         balance -= 1;
         if (balance < 0) {
           const opener = line.slice(0, c);
-          const hook = nearestHookCall(opener);
+          const hook = hookOpeningBrace(opener);
           if (hook) return hook;
           balance = 0; // Keep climbing past a non-hook block.
         }
@@ -290,6 +313,40 @@ describe('enclosingHook', () => {
     // fix, and fails on a naive "pick whichever name sorts last in HOOK_NAMES"
     // repair. Proximity is the rule, not list position in either direction.
     const lines = ['  afterEach(cleanup); beforeAll(async () => { harness = await createTestHarness(); });'];
+    expect(enclosingHook(lines, 0, columnOf(lines[0]))).toBe('beforeAll');
+  });
+
+  it('ignores a hook name that is only an ARGUMENT to an already-closed call', () => {
+    // The case that broke the proximity rule. `afterEach` is the last hook name
+    // on the line, but its call closed before the brace — `describe` opens it,
+    // so the boot is at describe scope and the honest answer is null. Reporting
+    // `afterEach` here fails OPEN: a boot in no hook wears a hook's name and
+    // the per-file rule reports a pass. Fails on the shipped version.
+    const lines = [
+      "  beforeAll(() => register(afterEach)); describe('x', () => { const h = createTestHarness(); });",
+    ];
+    expect(enclosingHook(lines, 0, columnOf(lines[0]))).toBeNull();
+  });
+
+  it('resolves through a non-hook call nested inside the hook', () => {
+    // The reason the paren stack is walked outward instead of stopping at the
+    // innermost frame: `wrap` opens the brace, but the boot still runs once per
+    // file because `beforeAll` is the frame that is still open around it.
+    const lines = ['  beforeAll(() => wrap(() => { harness = createTestHarness(); }));'];
+    expect(enclosingHook(lines, 0, columnOf(lines[0]))).toBe('beforeAll');
+  });
+
+  it('does not read a paren inside a string literal as a call boundary', () => {
+    // A shaped fixture, not a shape lifted from a real test file: it exists to
+    // make the quote-skipping falsifiable, and the assertion is chosen because
+    // it is the one that CAN fail. A `)` inside a string closes no call, but a
+    // stack that does not skip quoted spans pops `beforeAll`'s frame on it,
+    // reads the frame as already closed, and answers `null` — hiding a real
+    // hook rather than inventing one. Most unbalanced-paren fixtures cannot
+    // fail here at all, because walking the stack outward absorbs the error;
+    // this one puts the stray `)` INSIDE the hook's own argument list, where it
+    // removes the frame the answer depends on.
+    const lines = ["  beforeAll(register(')'), async () => { harness = await createTestHarness(); });"];
     expect(enclosingHook(lines, 0, columnOf(lines[0]))).toBe('beforeAll');
   });
 });
