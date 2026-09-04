@@ -51,6 +51,7 @@ export const STEP_LABELS: Record<ExecutorName, string> = {
   camera_setup: 'Positioning camera',
   character_setup: 'Building characters',
   game_component: 'Adding game rules',
+  behavior_script: 'Teaching things how to act',
   entity_setup: 'Setting up entities',
   world_build: 'Building the world',
   asset_generate: 'Generating assets',

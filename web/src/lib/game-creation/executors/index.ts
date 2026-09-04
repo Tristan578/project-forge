@@ -5,6 +5,7 @@ import { physicsProfileExecutor } from './physicsProfileExecutor';
 import { cameraSetupExecutor } from './cameraSetupExecutor';
 import { characterSetupExecutor } from './characterSetupExecutor';
 import { gameComponentExecutor } from './gameComponentExecutor';
+import { behaviorScriptExecutor } from './behaviorScriptExecutor';
 import { entitySetupExecutor } from './entitySetupExecutor';
 import { worldBuildExecutor } from './worldBuildExecutor';
 import { assetGenerateExecutor } from './assetGenerateExecutor';
@@ -21,6 +22,7 @@ export const EXECUTOR_REGISTRY = new Map<ExecutorName, ExecutorDefinition>([
   [cameraSetupExecutor.name, cameraSetupExecutor],
   [characterSetupExecutor.name, characterSetupExecutor],
   [gameComponentExecutor.name, gameComponentExecutor],
+  [behaviorScriptExecutor.name, behaviorScriptExecutor],
   [entitySetupExecutor.name, entitySetupExecutor],
   [worldBuildExecutor.name, worldBuildExecutor],
   [assetGenerateExecutor.name, assetGenerateExecutor],

@@ -46,6 +46,7 @@ import type {
   PlanStep,
 } from '../types';
 import { zSystemCategory, zEntityRole } from '../types';
+import { zBehavior } from '../behaviorVocabulary';
 import { GDD_SCOPES } from '@/lib/config/enums';
 import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
 import { setWinnabilityStateReader } from '@/stores/slices';
@@ -197,6 +198,11 @@ const zOrchestratorGdd = z
                 role: zEntityRole,
                 systems: z.array(zSystemCategory),
                 appearance: z.string(),
+                // Optional and CLOSED (PF-1114). Declared here so the shared
+                // fixture CAN carry one: `.strict()` would otherwise reject a
+                // behaviour added to `crystal-run-3d.json` for the live-engine
+                // gate, at module load, with the whole file red.
+                behavior: zBehavior.optional(),
               })
               .strict()
           ),
@@ -676,5 +682,145 @@ describe('generated game is playable (end to end)', () => {
     const before = recorded.length;
     harness.getState().play();
     expect(recorded.slice(before).some(r => r.command === 'play')).toBe(false);
+  });
+});
+
+/**
+ * PF-1114 — per-entity behaviour, through the REAL pipeline.
+ *
+ * The unit suites prove the plan SHAPE. This proves the plan RUNS: real
+ * `buildPlan`, real system registry, real executors, real store, and the same
+ * fake bridge every other case in this file uses. The three assertions that
+ * matter are the ones a unit test cannot make —
+ *
+ *  - the follower command reaches the store bound to an id the scene graph can
+ *    resolve (a component bound to a name is a silent no-op in the engine);
+ *  - `fetchAI` is never called, which is what makes this the cheap path;
+ *  - the game is still winnable afterwards, so behaviour is additive rather
+ *    than something that displaces the win condition.
+ */
+describe('generated behaviour runs end to end (PF-1114)', () => {
+  let harness: TestHarness;
+  let recorded: Recorded[];
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(fetchAI).mockClear();
+    harness = createTestHarness();
+    recorded = attachFakeEngine(harness);
+    setWinnabilityStateReader(() => {
+      const state = harness.getState();
+      return { sceneGraph: state.sceneGraph, allGameComponents: state.allGameComponents };
+    });
+  });
+
+  afterEach(() => {
+    setWinnabilityStateReader(null);
+    harness.cleanup();
+  });
+
+  /**
+   * Crystal Run plus a cast that DOES things: one chaser, one patroller, one
+   * deliberately-still statue, and a challenge system so the follower pass that
+   * plans by default is live at the same time. That overlap is the point — it
+   * is where a double writer would show up.
+   */
+  function crystalRunWithBehaviors(): OrchestratorGDD {
+    const gdd = crystalRun3d();
+    return {
+      ...gdd,
+      id: 'gdd-crystal-run-behaviors',
+      systems: [
+        ...gdd.systems,
+        { category: 'challenge', type: 'enemies', config: {}, priority: 'core', dependsOn: [] },
+      ],
+      scenes: gdd.scenes.map(scene => ({
+        ...scene,
+        systems: [...scene.systems, 'challenge' as const],
+        entities: [
+          ...scene.entities,
+          { name: 'Bat', role: 'enemy' as const, systems: [], appearance: 'primitive:sphere', behavior: 'chase' as const },
+          { name: 'Guard', role: 'enemy' as const, systems: [], appearance: 'primitive:cube', behavior: 'patrol' as const },
+          { name: 'Statue', role: 'enemy' as const, systems: [], appearance: 'primitive:cube', behavior: 'idle' as const },
+          { name: 'Rabbit', role: 'npc' as const, systems: [], appearance: 'primitive:capsule', behavior: 'flee' as const },
+        ],
+      })),
+    };
+  }
+
+  async function build(gdd: OrchestratorGDD): Promise<OrchestratorPlan> {
+    const plan = buildPlan(gdd, 'project-under-test', 'creator', 1_000_000);
+    return runPipeline(plan, EXECUTOR_REGISTRY, makeContext(harness, gdd.projectType));
+  }
+
+  it('every step runs, and the behaviours reach the engine bound to real ids', async () => {
+    const plan = await build(crystalRunWithBehaviors());
+
+    expect(plan.status).toBe('completed');
+    expect(plan.steps.filter(s => s.status !== 'completed')).toEqual([]);
+
+    const nodes = harness.getState().sceneGraph.nodes;
+    const batId = spawnedIdByName(recorded, 'Bat');
+    const playerId = spawnedIdByName(recorded, 'Player');
+    if (typeof batId !== 'string' || typeof playerId !== 'string') {
+      throw new Error('the behaviour cast was never spawned');
+    }
+
+    // ONE follower for the chaser, bound to the player, and the id resolves in
+    // the scene graph the engine would match against.
+    const followers = wireComponentsOfType(recorded, 'follower');
+    const chaser = followers.filter(f => f['entityId'] === batId);
+    expect(chaser).toHaveLength(1);
+    const target = (chaser[0]['properties'] as Record<string, unknown>)['targetEntityId'];
+    expect(target).toBe(playerId);
+    expect(nodes[target as string]).toBeDefined();
+
+    // The patroller travels; the statue does not.
+    const platforms = wireComponentsOfType(recorded, 'moving_platform');
+    expect(platforms.map(p => p['entityId'])).toEqual([spawnedIdByName(recorded, 'Guard')]);
+    const statueId = spawnedIdByName(recorded, 'Statue');
+    expect(followers.some(f => f['entityId'] === statueId)).toBe(false);
+    expect(platforms.some(p => p['entityId'] === statueId)).toBe(false);
+
+    // The fleeing NPC gets a script, attached by id.
+    const scripts = recorded.filter(entry => entry.command === 'set_script');
+    expect(scripts).toHaveLength(1);
+    const scriptPayload = scripts[0].payload as Record<string, unknown>;
+    expect(scriptPayload['entityId']).toBe(spawnedIdByName(recorded, 'Rabbit'));
+    expect(String(scriptPayload['source'])).toContain(playerId);
+  });
+
+  it('makes no network call — a template is not a generated script', async () => {
+    await build(crystalRunWithBehaviors());
+    expect(fetchAI).not.toHaveBeenCalled();
+  });
+
+  it('plans exactly one follower per enemy despite two would-be writers', async () => {
+    // The challenge system plans a follower for every enemy by default; the
+    // behaviour pass plans one for every `chase`. Two components on one entity
+    // is the regression this pins.
+    await build(crystalRunWithBehaviors());
+
+    const followers = wireComponentsOfType(recorded, 'follower');
+    const byEntity = new Map<string, number>();
+    for (const follower of followers) {
+      const id = String(follower['entityId']);
+      byEntity.set(id, (byEntity.get(id) ?? 0) + 1);
+    }
+    for (const [entityId, count] of byEntity) {
+      expect({ entityId, count }).toEqual({ entityId, count: 1 });
+    }
+    // Bat chases (behaviour pass). Guard patrols and Statue idles, so the
+    // challenge default must not have claimed either.
+    expect(byEntity.size).toBe(1);
+    expect([...byEntity.keys()]).toEqual([spawnedIdByName(recorded, 'Bat')]);
+  });
+
+  it('is still winnable with a behaving cast in it', async () => {
+    await build(crystalRunWithBehaviors());
+    const state = harness.getState();
+    const report = validateWinnability(state.sceneGraph, state.allGameComponents);
+    expect(report.winnable).toBe(true);
+    expect(report.issues).toEqual([]);
   });
 });

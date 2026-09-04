@@ -23,6 +23,7 @@ import { FALLBACK_SCHEMA } from './types';
 import { SYSTEM_REGISTRY, defaultWinConditionStep } from './systems';
 import type { PlannedEntity } from './systems';
 import { physicsProfileForRole } from './physicsRoles';
+import { planBehaviorSteps } from './behaviorSteps';
 import { resolveEntityShape } from './entityShape';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
 
@@ -122,6 +123,12 @@ const PLAN_COST_ESTIMATES: Record<string, { base: number; variance: number }> = 
   camera_setup: { base: 0, variance: 0 },
   character_setup: { base: 0, variance: 0 },
   game_component: { base: 0, variance: 0 },
+  // ZERO, and deliberately unlike `custom_script_generate` below. A behaviour
+  // step attaches a template that ships in the repo: no model call, no network,
+  // no tokens. Pricing it like a generated script would put a cost on the
+  // approval gate that the run never incurs, and would make the engine-native
+  // path look like the expensive one.
+  behavior_script: { base: 0, variance: 0 },
   entity_setup: { base: PRICING.plan_entity_setup, variance: 0.1 },
   // Spawns the ground/platforms/walls the world system planned. Pure engine
   // dispatch — the geometry was decided at plan time, so no model is called.
@@ -312,6 +319,59 @@ export function buildPlan(
     );
     physicsEnableStepIds.push(physicsEnableStep.id);
     steps.push(physicsEnableStep);
+  }
+
+  // --- Phase 2.6: Per-entity behaviour (PF-1114) ---
+  //
+  // The GDD's `behavior` verb becomes a `follower` / `movingPlatform` component
+  // or a parameterized script, per `BEHAVIOR_PLANS`. It sits HERE, after Phase
+  // 2.5, because every behaviour acts on a body: `system_follower` writes the
+  // Transform of an entity the physics pass has already made solid, and a
+  // behaviour script that translates an entity with no collider moves a thing
+  // nothing can touch.
+  //
+  // It also sits BEFORE Phase 3 so the ownership rule reads in execution order:
+  // `systems/challenge.ts` skips any entity carrying a `behavior` (see
+  // `hasAuthoredBehavior`), so the per-entity intent is planned first and the
+  // system-level default fills in around it. Two writers for one component is
+  // the bug that rule exists to prevent, not a redundancy.
+  const behaviorDeps = [...allEntityStepIds, ...physicsEnableStepIds];
+  const behaviorSteps = planBehaviorSteps(gdd, plannedEntities, message =>
+    planWarnings.push(message),
+  );
+  for (let i = 0; i < behaviorSteps.length; i += 1) {
+    const behaviorStep = behaviorSteps[i];
+    if (!behaviorStep) continue;
+    steps.push(
+      makeStep(
+        behaviorStep.executor,
+        {
+          ...behaviorStep.input,
+          // Same two fields Phase 3 injects into every system step.
+          // `gameComponentExecutor`'s discriminated union strips both; the
+          // behaviour script executor reads `projectType` and strips the rest.
+          projectType: gdd.projectType,
+          feelDirective: gdd.feelDirective,
+        },
+        behaviorDeps,
+        // OPTIONAL, and this is load-bearing — not a relaxation of standards.
+        //
+        // Phase 2.6 runs BEFORE Phase 3b's win-condition guarantee, and
+        // `pipelineRunner` reacts to a non-optional failure by marking the plan
+        // `failed` and skipping EVERY remaining step. So one behaviour that
+        // could not be attached used to take the win condition down with it,
+        // and the pre-play winnability gate then refused to let the user press
+        // Play at all: a scene they could look at and never run, over a
+        // decoration.
+        //
+        // A behaviour is what an object DOES; a win condition is whether the
+        // thing is a game. Losing the first must never cost the second. The
+        // drop is not silent — `recordSkippedOptionalSteps` puts the executor's
+        // user-facing message on `plan.warnings`, which the orchestrator panel
+        // renders.
+        true,
+      ),
+    );
   }
 
   // --- Phase 3: System configuration (depends on entities) ---
@@ -519,7 +579,19 @@ export function buildPlan(
 
   // --- Phase 4: Asset generation (depends on entities + systems) ---
   // [S2] Truncate asset manifest to tier cap
-  const allPriorStepIds = steps.map(s => s.id);
+  //
+  // OPTIONAL steps are deliberately NOT listed as dependencies here or at the
+  // verification step below. `dependenciesMet` requires a dependency to be
+  // `completed`, and a skipped optional step never is — so naming one turns
+  // `DEPENDENCY_FAILED` on the dependent, which is a plan failure, which is the
+  // exact outcome `optional: true` exists to prevent. Left as it was, the flag
+  // was decorative: a nice-to-have asset that failed still took the whole plan
+  // down through this list, and so did a behaviour (PF-1114).
+  //
+  // Nothing is reordered by the omission: `runPipeline` executes in ARRAY
+  // order and `dependsOn` only gates, so every step still runs after the
+  // optional ones that precede it in the array.
+  const allPriorStepIds = steps.filter(s => !s.optional).map(s => s.id);
   const tierCap = ASSET_TIER_CAPS[userTier];
   // Copy before sorting to avoid mutating gdd.assetManifest in-place
   const cappedAssets = [...gdd.assetManifest]
@@ -549,7 +621,8 @@ export function buildPlan(
   }
 
   // --- Phase 5: Verification + polish ---
-  const allBeforeVerify = steps.map(s => s.id);
+  // Same rule as `allPriorStepIds` above, and the same reason.
+  const allBeforeVerify = steps.filter(s => !s.optional).map(s => s.id);
   const verifyStep = makeStep('verify_all_scenes', {}, allBeforeVerify);
   steps.push(verifyStep);
 

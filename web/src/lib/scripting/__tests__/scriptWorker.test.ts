@@ -280,6 +280,93 @@ describe('scriptWorker', () => {
     );
   });
 
+  /**
+   * The id `forge.spawn` returns has to name a REAL engine entity.
+   *
+   * `spawn_entity` mints its own `EntityId` unless the payload carries an `id`
+   * the engine accepts (`is_valid_override_id`, core/entity_factory.rs). The
+   * worker used to return a `runtime_N` it never put on the wire, so the
+   * projectile templates' `translate`/`destroy` on that id resolved against
+   * nothing: `translate` returned silently (no `entityStates` entry) and
+   * `delete_entities` matched no `EntityId`, leaving every shot ever fired
+   * parked at the muzzle for the length of the play session.
+   *
+   * Asserting the METHODS EXIST (as `forgeApiConformance.test.ts` does) cannot
+   * see that — this asserts the id is addressable, which is the property the
+   * templates depend on.
+   */
+  it('forge.spawn returns an id the engine will honour, and translate/destroy carry it', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      var id = forge.spawn("sphere", { name: "Shot", position: [1, 2, 3] });
+      forge.log(id);
+      forge.translate(id, 0.5, 0, 0);
+      forge.destroy(id);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    const logged = mockPostMessage.mock.calls.find(
+      (c) => c[0]?.type === 'log' && typeof c[0]?.message === 'string' && c[0].message.startsWith('runtime_'),
+    );
+    expect(logged).toBeTruthy();
+    const spawnedId = logged![0].message as string;
+
+    const commands = pushedCommands();
+
+    // 1. The engine is TOLD the id, not just the script.
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        cmd: 'spawn_entity',
+        id: spawnedId,
+        entityType: 'sphere',
+        name: 'Shot',
+        position: [1, 2, 3],
+      }),
+    );
+
+    // 2. The shot can be moved: `translate` needs a base position, which only
+    //    exists because `spawn` seeded the mirror at the requested position.
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        cmd: 'update_transform',
+        entityId: spawnedId,
+        position: [1.5, 2, 3],
+      }),
+    );
+
+    // 3. ...and removed, by the same id the engine was given.
+    expect(commands).toContainEqual(
+      expect.objectContaining({ cmd: 'delete_entities', entityIds: [spawnedId] }),
+    );
+  });
+
+  /**
+   * `spawnCounter` resets to 0 on every `init`, so without a uniqueness check
+   * the first spawn after a scene reload re-mints `runtime_1` — an id the
+   * engine may already hold. Two entities sharing one `EntityId` means every
+   * later command for it hits whichever the engine's match loop reaches first.
+   */
+  it('forge.spawn never re-mints an id the engine already holds', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() { forge.log(forge.spawn("cube", { position: [0, 0, 0] })); }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      {
+        entities: {
+          runtime_1: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          runtime_2: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        },
+      },
+    ));
+
+    const logged = mockPostMessage.mock.calls.find(
+      (c) => c[0]?.type === 'log' && typeof c[0]?.message === 'string' && c[0].message.startsWith('runtime_'),
+    );
+    expect(logged![0].message).toBe('runtime_3');
+  });
+
   it('forge.destroy pushes delete_entities command', async () => {
     const handler = await setupWorker();
     const code = 'function onStart() { forge.destroy("e2"); }';

@@ -258,6 +258,27 @@ const gameWinCallbacks: Map<string, () => void> = new Map();
 // the editor store (for the HUD) whenever a script calls forge.game.setScore().
 let gameScore = 0;
 
+/**
+ * The next id `forge.spawn` will hand to a script AND put on the wire.
+ *
+ * The engine accepts this as an `EntityId` override, so it has to satisfy
+ * `is_valid_override_id` (non-empty, <= 64 bytes, no control characters) —
+ * `runtime_<n>` does — and it has to be UNIQUE among the ids the engine already
+ * holds. Uniqueness is not free here: `spawnCounter` resets to 0 on every
+ * `init`, so after a scene reload the counter would re-mint `runtime_1` for an
+ * entity id that may still be live, and the engine would then carry two
+ * entities with the same `EntityId` — every `set_script`, `update_transform`
+ * and `delete_entities` for that id would hit whichever matched first. The
+ * mirror is the authority on what the engine holds, so skip anything in it.
+ */
+function nextSpawnId(): string {
+  let id = `runtime_${++spawnCounter}`;
+  while (entityStates[id] !== undefined || entityInfos[id] !== undefined) {
+    id = `runtime_${++spawnCounter}`;
+  }
+  return id;
+}
+
 function distanceBetween(a: [number, number, number], b: [number, number, number]): number {
   const dx = a[0] - b[0];
   const dy = a[1] - b[1];
@@ -301,12 +322,39 @@ function buildForgeApi(scriptEntityId: string) {
       }
     },
     spawn: (type: string, options?: { name?: string; position?: [number, number, number] }) => {
-      const id = `runtime_${++spawnCounter}`;
-      pendingCommands.push({ cmd: 'spawn_entity', entityType: type, name: options?.name, position: options?.position });
+      const id = nextSpawnId();
+      // `id` goes ON THE WIRE, not just into the return value. `spawn_entity`
+      // honours a caller-supplied id (`is_valid_override_id` in
+      // core/entity_factory.rs) and otherwise mints its own UUID — so without
+      // this field the id handed back to the script named NOTHING in the
+      // engine, and every later `forge.translate` / `forge.destroy` on it was a
+      // silent no-op while the engine accumulated entities the script could
+      // never move or remove (PF-1114).
+      pendingCommands.push({ cmd: 'spawn_entity', id, entityType: type, name: options?.name, position: options?.position });
+      if (options?.position) {
+        // Seed the local mirror so `translate` — which needs a base position
+        // and returns silently without one — works on the very frame the entity
+        // is spawned, rather than only after the engine's next state sync.
+        // Seeded ONLY when the caller stated a position: the engine's default
+        // differs per entity type (0.5 for a cube, 0 for a plane, 3 for a
+        // light), and a guess here would be a base position that is wrong by
+        // exactly that offset. A positionless spawn resolves on the next sync.
+        entityStates[id] = {
+          position: [options.position[0], options.position[1], options.position[2]],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+        };
+      }
       return id;
     },
     destroy: (eid: string) => {
       pendingCommands.push({ cmd: 'delete_entities', entityIds: [eid] });
+      // Drop the local mirror entry too. The engine removes the entity on its
+      // next frame and the following sync would clear it anyway, but until then
+      // `getTransform` would keep reporting a live transform for something that
+      // is already gone — and, worse, `nextSpawnId` would keep treating the id
+      // as taken.
+      delete entityStates[eid];
     },
     log: (msg: string) => {
       (self as unknown as Worker).postMessage({ type: 'log', level: 'info', entityId: scriptEntityId, message: String(msg) });
