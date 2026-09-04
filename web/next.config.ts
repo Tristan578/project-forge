@@ -97,6 +97,14 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/changelog': ['../CHANGELOG.md'],
   },
+  // The Aseprite bridge executes a desktop binary and never reads the browser
+  // engine bundles. Its dynamic filesystem calls otherwise make Next's tracer
+  // conservatively attach all four public WASM variants to this function,
+  // pushing it beyond Vercel's 250 MB uncompressed limit. These exclusions only
+  // affect the function trace; the same files remain deployed as public assets.
+  outputFileTracingExcludes: {
+    '/api/bridges/aseprite/execute': ['./public/engine-pkg-*/**'],
+  },
   images: {
     remotePatterns: [
       {
