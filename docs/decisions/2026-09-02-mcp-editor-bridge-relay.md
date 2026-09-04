@@ -65,9 +65,23 @@ covers it without touching the byte-pinned workflow blocks.
   relay` and opening the editor with `?mcp=<token>`.
 - The default `FORGE_EDITOR_WS_URL` becomes the relay's real address, so a
   stock install no longer points at nothing.
-- The editor-side bridge is default-off and allowlisted: commands that spend
-  tokens (`ai:generate`, the `generation` category), export or publish, or
-  touch security/economy are refused at the bridge, not merely undocumented.
+- The editor-side bridge is default-off and runs a true **allowlist**: 293 of
+  the 351 manifest commands are permitted by enumerated category, and anything
+  unnamed — including a category added to the manifest later — is refused. The
+  first draft was a deny-list that permitted 308 commands including
+  `create_script`, whose source reaches `Function(...)` in the tab (SEC-2), so
+  the direction was inverted to fail closed. Scripting, generation, export,
+  publish and security/economy categories are named as denied with reasons.
+- Attaching requires an explicit consent prompt in the tab, an attached tab
+  carries a persistent indicator naming each command that ran or was refused,
+  and Detach is one click. A remote agent mutating the live scene must not be
+  indistinguishable from ordinary editing.
+- The relay's loopback binding is not by itself a boundary: a WebSocket
+  handshake is exempt from the same-origin policy, so any page the user visits
+  is also a loopback peer. The handshake therefore requires a loopback peer and
+  `Host`, no `Origin` on `role=agent`, an allowlisted `Origin` on `role=editor`,
+  and a ≥32-character token compared in constant time with a five-failure
+  lockout. Rejections are HTTP 403 at the upgrade, before a socket exists.
 - Multi-machine setups are explicitly out of scope until B.
 - The in-process relay integration test in `mcp-server` is the proof; there is
   no Playwright path that can drive a tab, a relay and a stdio client together.

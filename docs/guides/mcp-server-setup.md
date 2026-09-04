@@ -30,7 +30,39 @@ Loopback relay (cd mcp-server && npm run relay)
 SpawnForge editor tab  (…/dev?mcp=<token>)
 ```
 
-The relay refuses non-loopback peers, a wrong token, and a second editor. The editor side is opt-in per tab (the `?mcp=` parameter), is off in production builds unless `NEXT_PUBLIC_MCP_BRIDGE=true`, and refuses commands that spend generation tokens, export, publish, or touch security/economy.
+### What the relay enforces at the handshake
+
+A WebSocket handshake is exempt from the same-origin policy, so any page you
+visit while the relay is running is also a loopback peer. The relay therefore
+checks five things before a socket exists at all; a failure is answered with
+**HTTP 403** at the upgrade, so nothing is ever forwarded:
+
+1. **Loopback peer** — the connecting socket's address is `127.0.0.1` or `::1`.
+2. **Loopback `Host` header** — blocks DNS rebinding, where a hostile name
+   resolves to `127.0.0.1` and the browser dials the relay for the attacker.
+3. **`role=agent` must send no `Origin`** — browsers always send one, the Node
+   client never does. A page cannot forge its absence, so a web origin cannot
+   impersonate the MCP server.
+4. **`role=editor` must send an allowlisted `Origin`** — `localhost`,
+   `127.0.0.1`, `[::1]`, `spawnforge.localhost` and its subdomains (worktrees).
+   Add others with `MCP_RELAY_EDITOR_ORIGINS` (comma-separated).
+5. **A shared token of at least 32 characters**, compared in constant time. The
+   relay refuses to start without one, or with a shorter one. Five failed
+   attempts lock the peer out for 60 seconds.
+
+After the handshake the relay keeps **one editor at a time** (a second is closed
+with `4409`), and closes an unknown `role` with `4400`.
+
+The editor side is opt-in per tab (the `?mcp=` parameter), is off in production
+builds unless `NEXT_PUBLIC_MCP_BRIDGE=true`, and asks for your consent in the tab
+before it attaches — a small dialog naming what the agent can and cannot do.
+Once attached, a persistent indicator names each command that ran or was
+refused, with a one-click **Detach**. The bridge runs an **allowlist**: 293 of
+the 351 commands are permitted by name, and anything not enumerated — including
+any command added to the manifest later — is refused. Scripting is denied
+outright: `create_script` source reaches `Function(...)` in the editor (see SEC-2
+in the root `CLAUDE.md`), as are commands that spend generation tokens, export,
+publish, or touch security/economy.
 
 The MCP server starts even when the editor is not running — tool calls will return an error until the editor comes online. It auto-reconnects every 5 seconds.
 
@@ -302,9 +334,19 @@ If a command times out, the error message will name the specific command. Retry 
 
 **"Not connected to the MCP relay"** — start the relay (`cd mcp-server && MCP_RELAY_TOKEN=<secret> npm run relay`) with the same token the server was given. The server retries with backoff a bounded number of times and then stops; restart it after the relay is up.
 
-**"No editor is attached to the MCP relay"** — the relay is up but no tab has attached. Open the editor with `?mcp=<token>` (`http://spawnforge.localhost:1355/dev?mcp=<token>` locally). Only one tab can be attached at a time; a second one is refused.
+**"No editor is attached to the MCP relay"** — the relay is up but no tab has attached. Open the editor with `?mcp=<token>` (`http://spawnforge.localhost:1355/dev?mcp=<token>` locally), then **approve the consent prompt in the tab** — the bridge does not attach until you do. Only one tab can be attached at a time; a second one is refused.
 
-**A command is refused by the bridge** — the editor-side allowlist refuses commands that spend generation tokens, export, publish, or touch security/economy. That is by design; run those from the editor itself.
+**The relay exits immediately with "MCP_RELAY_TOKEN is required" or "…is N characters; at least 32 are required"** — the token is missing or too short. Generate one with `openssl rand -hex 32`.
+
+**The tab reads "The relay rejected this token" (close code `4401`)** — the `?mcp=` value does not match the relay's `MCP_RELAY_TOKEN`. The tab does not retry this one. Five wrong attempts lock that peer out for 60 seconds, so fix the token and wait a minute before reloading.
+
+**The tab reads "Gave up reconnecting after 5 attempts"** — the relay kept closing the socket. The usual cause is close code `4409`, "an editor is already attached": another tab holds the editor slot. Detach it with the indicator's **Detach** button, or close it, then reload this one. The relay logs the close code it sent.
+
+**The connection fails with HTTP 403 before any WebSocket opens** — the handshake was rejected: a non-loopback peer, a `Host` header that is not loopback, an `Origin` on the agent connection, or an editor `Origin` that is not allowlisted. The relay logs which one. If you serve the editor from an origin other than `localhost`, `127.0.0.1` or `*.spawnforge.localhost`, add it to `MCP_RELAY_EDITOR_ORIGINS`.
+
+**The tab reads "The relay refused this tab (close code 4400)"** — the URL carried a `role` other than `editor` or `agent`. Nothing retries; fix the URL.
+
+**A command is refused by the bridge** — the editor side runs an allowlist, not a blocklist: only enumerated categories are permitted, so a newly added command is refused until it is classified. Scripting (`create_script` and friends) is denied permanently — its source reaches `Function(...)` in the tab — as are commands that spend generation tokens, export, publish, or touch security/economy. That is by design; run those from the editor itself.
 
 **`node dist/index.js` fails with "Cannot find module"** — Run `npm run build` in the `mcp-server` directory first to compile TypeScript to JavaScript.
 
