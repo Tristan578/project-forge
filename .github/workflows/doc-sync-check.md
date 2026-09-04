@@ -8,7 +8,7 @@ permissions:
 safe-outputs:
   create-issue:
     title-prefix: "[doc-drift] "
-    labels: [docs]
+    labels: [documentation]
     close-older-issues: true
     max: 1
 ---
@@ -33,6 +33,7 @@ Scan the repository for documentation that may be out of date with the actual co
 ### Coverage Thresholds
 - Compare `docs/coverage-plan.md` stated targets with actual thresholds in `web/vitest.config.ts`
 - Note any coverage milestones that have been achieved but not documented
+- Read the values from those files at run time; do not rely on thresholds quoted in this workflow
 
 ### Feature Claims
 - Check `README.md` for features listed as available that may not be implemented yet

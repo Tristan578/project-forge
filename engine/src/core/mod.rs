@@ -14,6 +14,11 @@ pub mod camera_presets;
 pub mod character_controller;
 pub mod commands;
 pub mod component_carry;
+pub mod component_resync;
+/// Runtime + source-parity coverage for the component re-report path (#9290,
+/// #9291). Carries its own `#![cfg(test)]`, which keeps it out of the wasm
+/// build without a duplicated attribute here.
+mod component_resync_tests;
 pub mod csg;
 pub mod custom_wgsl;
 pub mod edit_mode;
