@@ -549,7 +549,10 @@ jobs:
   security:
     name: Rust Security Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Three independently retried npm audits can each consume more than five
+    # minutes during registry degradation; leave enough time for the subsequent
+    # cargo audit instead of cancelling a still-valid retry sequence.
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -605,7 +608,13 @@ jobs:
   lighthouse-delta:
     name: Lighthouse Effects Delta Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25, not 15: this job does TWO full Next.js production builds and six
+    # Lighthouse runs on top of a cold npm install. On run 33820181562 the
+    # installs alone ate 13m10s of a 15m budget and the runner killed
+    # `lhci collect` 36s in, reporting a red required check for a gate that
+    # had not yet measured anything. It passes on a fast runner and dies on a
+    # slow one, which makes it a coin flip rather than a gate.
+    timeout-minutes: 25
     permissions:
       contents: read
     # NO `if:` — this job runs whenever quality-gates is called.
@@ -648,9 +657,6 @@ jobs:
       - name: Build @spawnforge/ui
         if: steps.ui-cache-lighthouse.outputs.cache-hit != 'true'
         run: cd packages/ui && npm run build
-
-      - name: Install web dependencies
-        run: cd web && npm ci
 
       - name: Install @lhci/cli and Chrome
         run: |

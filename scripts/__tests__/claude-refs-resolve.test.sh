@@ -70,14 +70,31 @@ echo ""
 echo "=== no harness file may reference the retired path ==="
 # The hook and the lessons file both describe the migration, so both legitimately
 # name the old file. Nothing else may.
-STALE="$(grep -rl 'project_lessons_learned' "$ROOT/.claude" 2>/dev/null \
-  | grep -v 'inject-lessons-learned.sh' \
-  | grep -v 'rules/lessons-learned.md' || true)"
-if [ -z "$STALE" ]; then
-  pass "no file points at the retired project_lessons_learned.md"
+# Only files git TRACKS. github_project_sync.py writes an untracked
+# github-project-map.json cache under .claude/hooks/, and GitHub issue titles
+# mirrored into it name the retired path verbatim. Letting an untracked local
+# artifact decide this result reproduces #9605's own defect: harness behaviour
+# that differs per machine. It also makes the suite unfixable — green in CI,
+# where the cache does not exist, and red locally for reasons no commit can
+# address.
+TRACKED="$(git -C "$ROOT" ls-files -- '.claude/*' 2>/dev/null || true)"
+if [ -z "$TRACKED" ]; then
+  fail "git tracks no files under .claude/ — this sweep would pass vacuously"
 else
-  fail "these still reference the retired path, and read nothing at runtime:"
-  printf '%s\n' "$STALE" | sed "s|^$ROOT/|    |"
+  STALE="$(printf '%s\n' "$TRACKED" \
+    | grep -v 'inject-lessons-learned.sh' \
+    | grep -v 'rules/lessons-learned.md' \
+    | while IFS= read -r f; do
+        if [ -f "$ROOT/$f" ] && grep -q 'project_lessons_learned' "$ROOT/$f"; then
+          echo "$f"
+        fi
+      done)"
+  if [ -z "$STALE" ]; then
+    pass "no tracked file points at the retired project_lessons_learned.md"
+  else
+    fail "these still reference the retired path, and read nothing at runtime:"
+    printf '%s\n' "$STALE" | sed 's|^|    |'
+  fi
 fi
 
 echo ""
