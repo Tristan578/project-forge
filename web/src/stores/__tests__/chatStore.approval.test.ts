@@ -20,7 +20,7 @@ import {
 const INITIAL = {
   messages: [],
   isStreaming: false,
-  activeModel: 'claude-sonnet-4-6' as const,
+  activeModel: 'claude-sonnet-5' as const,
   rightPanelTab: 'chat' as const,
   error: null,
   abortController: null,
