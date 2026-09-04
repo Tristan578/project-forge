@@ -105,10 +105,15 @@ describe('chatStore deep tests', () => {
     });
 
     it('sets model to the primary model', () => {
-      // `beforeEach` already seeds activeModel as AI_MODEL_PRIMARY, so calling
-      // setModel(AI_MODEL_PRIMARY) directly would pass even if setModel were a
-      // no-op. Transition away first so the assertion can actually fail.
+      // `beforeEach` already seeds activeModel as AI_MODEL_PRIMARY, so a
+      // no-op setModel can't be caught by only asserting the final state --
+      // it never has to leave AI_MODEL_PRIMARY at all (confirmed live: a
+      // total no-op mutation of setModel still passed this test until the
+      // intermediate assertion below was added). Assert the transition away
+      // actually took effect first, THEN assert setModel(AI_MODEL_PRIMARY)
+      // changes it back.
       useChatStore.getState().setModel('claude-haiku-4-5-20251001');
+      expect(useChatStore.getState().activeModel).toBe('claude-haiku-4-5-20251001');
       useChatStore.getState().setModel(AI_MODEL_PRIMARY);
       expect(useChatStore.getState().activeModel).toBe(AI_MODEL_PRIMARY);
     });
