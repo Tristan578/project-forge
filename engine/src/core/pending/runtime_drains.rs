@@ -784,13 +784,6 @@ app.add_systems(Update, runtime_call);
         // entry that gains a drain fails, and a new drain-less queue fails, so a
         // command arm wired to one of these without a system is caught here.
         const DEAD_QUEUES: &[&str] = &[
-            "animation_clip_updates",
-            "animation_clip_add_keyframes",
-            "animation_clip_remove_keyframes",
-            "animation_clip_update_keyframes",
-            "animation_clip_property_updates",
-            "animation_clip_previews",
-            "animation_clip_removals",
             "get_skeleton2d_requests",
             "import_skeleton_json_requests",
         ];

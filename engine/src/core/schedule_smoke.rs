@@ -54,6 +54,7 @@ use bevy::scene::ScenePlugin;
 use bevy::time::TimePlugin;
 
 use super::animation::AnimationPlugin;
+use super::animation_clip::AnimationClipPlugin;
 use super::asset_manager::{AssetRegistry, TextureHandleMap};
 use super::audio::AudioBusConfig;
 use super::camera::CameraControlPlugin;
@@ -155,6 +156,7 @@ const THIRD_PARTY_PLUGINS: &[&str] = &["MeshPickingPlugin", "HanabiPlugin"];
 /// `ForgeMaterialPlugin`, `ForgeInputPlugin` — because `core::material` and
 /// `core::input` shadow Bevy's own types).
 const REGISTERED_PLUGINS: &[&str] = &[
+    "AnimationClipPlugin",
     "AnimationPlugin",
     "CameraControlPlugin",
     "CustomWgslPlugin",
@@ -346,6 +348,7 @@ fn build_full_app() -> App {
         ForgeInputPlugin,
         PhysicsPlugin,
         Physics2dPlugin,
+        AnimationClipPlugin,
         ShaderEffectsPlugin,
         CustomWgslPlugin,
         CameraControlPlugin,

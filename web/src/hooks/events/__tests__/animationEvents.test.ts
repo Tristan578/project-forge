@@ -141,6 +141,8 @@ describe('handleAnimationEvent', () => {
       });
     });
 
+    // `remove_animation_clip` and "the selected entity has no clip" both arrive
+    // here: the CHANGED payload is a clip, so it cannot say none.
     it('ANIMATION_CLIP_REMOVED clears once the entity becomes primary', async () => {
       actions.primaryId = 'old';
 

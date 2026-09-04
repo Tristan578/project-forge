@@ -70,6 +70,7 @@ use crate::core::{
     pending_commands::PendingCommands,
     physics::PhysicsPlugin,
     physics_2d_sim::Physics2dPlugin,
+    animation_clip::AnimationClipPlugin,
     post_processing::PostProcessingPlugin,
     quality::QualitySettings,
     scene,
@@ -228,6 +229,7 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(InputPlugin)
         .add_plugins(PhysicsPlugin)
         .add_plugins(Physics2dPlugin)
+        .add_plugins(AnimationClipPlugin)
         .add_plugins(ShaderEffectsPlugin)
         .add_plugins(CustomWgslPlugin)
         .add_plugins(CameraControlPlugin)
@@ -462,7 +464,34 @@ impl Plugin for SelectionPlugin {
                 physics::apply_gravity2d_updates,
                 physics::apply_debug_physics2d_toggle,
                 physics::handle_physics2d_query,
-            ));
+            ))
+            // Keyframe-clip authoring drains (PF-1174 / #9278). Both builds:
+            // the queues are filled unconditionally, and an exported game's
+            // autoplay clips are what the authoring is for. The playback
+            // sampler itself is `AnimationClipPlugin` in core.
+            // `.chain()` is load-bearing, for two independent reasons. A JS tick
+            // can enqueue `create_animation_clip` and its keyframes before the
+            // next engine frame, so both land in `PendingCommands` together:
+            // (1) an unordered tuple picks an arbitrary relative order, and that
+            // order reshuffles whenever ANY system is added to `Update`, so the
+            // keyframes silently drop on the frame the clip is created; and
+            // (2) `apply_animation_clip_updates` inserts the component through
+            // `Commands`, which is deferred — the edit drains query
+            // `Option<&mut AnimationClipData>` and would see `None` even if the
+            // order happened to be right. Chaining fixes both: it pins
+            // create -> keyframe edits -> properties -> preview -> removal, and
+            // Bevy's `auto_insert_apply_deferred` puts a sync point after the
+            // system that owns the `Commands`. Same hazard the skeleton2d
+            // registration below documents (#9278).
+            .add_systems(Update, (
+                animation::apply_animation_clip_updates,
+                animation::apply_animation_clip_add_keyframes,
+                animation::apply_animation_clip_remove_keyframes,
+                animation::apply_animation_clip_update_keyframes,
+                animation::apply_animation_clip_property_updates,
+                animation::apply_animation_clip_previews,
+                animation::apply_animation_clip_removals,
+            ).chain());
 
         app
             .add_systems(Update, scripts::emit_play_tick_system)
@@ -751,6 +780,7 @@ impl Plugin for SelectionPlugin {
                     particles::emit_particle_on_selection,
                     material::emit_shader_on_selection,
                     animation::emit_animation_on_selection,
+                    animation::emit_animation_clip_on_selection,
                     game::emit_game_camera_on_selection,
                     skeleton2d::emit_skeleton2d_on_selection,
                     sprite::emit_sprite_on_selection,
