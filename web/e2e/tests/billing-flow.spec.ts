@@ -4,7 +4,8 @@ import { test, expect } from '@playwright/test';
  * Billing flow E2E tests — verifies key billing API endpoints
  * return correct auth/validation errors without requiring browser state.
  *
- * Uses Playwright's request context (no browser or WASM build needed).
+ * Uses Playwright's request context (no browser or WASM build needed) and is
+ * intentionally part of the required `test-e2e-api` PR gate.
  */
 test.describe('Billing Flow @api', () => {
   test.describe('Checkout endpoint', () => {
