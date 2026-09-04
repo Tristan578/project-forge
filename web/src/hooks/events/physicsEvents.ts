@@ -7,6 +7,7 @@ import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 import { audioManager } from '@/lib/audio/audioManager';
 import { parseJoint2dWire, parsePhysics2dWire } from '@/lib/physics/physics2dPayload';
 import { castPayload, type SetFn, type GetFn, type EventPayload } from './types';
+import { applyWhenPrimary } from './primaryGate';
 
 /** Prefix used to identify audio occlusion raycast requests. */
 const OCCLUSION_RAYCAST_PREFIX = 'audio_occlusion:';
@@ -245,9 +246,43 @@ export function handlePhysicsEvent(
       return true;
     }
 
+    /**
+     * The payload used to be the bare flattened `JointData`, so this wrote
+     * whatever arrived into `primaryJoint` no matter which entity it described
+     * — and the undo/redo resync drain reports joints on NON-selected entities.
+     * The engine now stamps `entityId` (#9291), making the wire identical to a
+     * `QUERY_JOINTS_LIST` entry, so it goes through the same parser and the
+     * same primary gate the sibling handlers use.
+     */
     case 'JOINT_CHANGED': {
-      const payload = castPayload<JointData | null>(data);
-      useEditorStore.getState().setPrimaryJoint(payload);
+      const parsed = parseJointWire(data);
+      if (!parsed) return true;
+      applyWhenPrimary(parsed.entityId, () => {
+        useEditorStore.getState().setPrimaryJoint(parsed.data);
+      });
+      return true;
+    }
+
+    /**
+     * `JOINT_CHANGED` cannot express a removal: its payload IS the flattened
+     * `JointData`, so there is no field left to mean "gone". Emitted by the
+     * undo/redo resync drain, which is also the only thing that ever reports a
+     * joint on a NON-selected entity (#9290).
+     *
+     * Gated through `applyWhenPrimary`, not a bare `primaryId ===` read, for
+     * the reason that module documents: selection resolves one microtask late
+     * because SELECTION_CHANGED is coalesced by `createSelectionBatcher` while
+     * this is handled synchronously. A synchronous check therefore compares
+     * against the PREVIOUS primary on a viewport pick, and this handler would
+     * drop the clear — leaving a joint the engine has removed on screen, which
+     * the next inspector edit writes back as a full replace.
+     */
+    case 'JOINT_REMOVED': {
+      const payload = castPayload<{ entityId?: string }>(data);
+      if (typeof payload.entityId !== 'string') return true;
+      applyWhenPrimary(payload.entityId, () => {
+        useEditorStore.getState().setPrimaryJoint(null);
+      });
       return true;
     }
 
@@ -295,6 +330,31 @@ export function handlePhysicsEvent(
       const parsed = parseJoint2dWire(data);
       if (!parsed) return true;
       useEditorStore.getState().applyJoint2dFromEngine(parsed.entityId, parsed.data);
+      return true;
+    }
+
+    /**
+     * `PHYSICS2D_CHANGED` FLATTENS a `Physics2dData`, so it cannot describe a
+     * body that is gone. The undo arm used to paper over that by emitting a
+     * `Physics2dData::default()` — which `applyPhysics2dFromEngine` then merged
+     * into the store, leaving a default 2D body behind on the entity whose body
+     * had just been undone away.
+     *
+     * Routes to the state-only removal action, not `removePhysics2d`, which
+     * dispatches `remove_physics_2d` back at the engine that reported it.
+     */
+    case 'PHYSICS2D_REMOVED': {
+      const payload = castPayload<{ entityId?: string }>(data);
+      if (typeof payload.entityId !== 'string') return true;
+      useEditorStore.getState().applyPhysics2dRemovalFromEngine(payload.entityId);
+      return true;
+    }
+
+    /** The 2D sibling of `JOINT_REMOVED`; `JOINT2D_CHANGED` is equally flat. */
+    case 'JOINT2D_REMOVED': {
+      const payload = castPayload<{ entityId?: string }>(data);
+      if (typeof payload.entityId !== 'string') return true;
+      useEditorStore.getState().applyJoint2dRemovalFromEngine(payload.entityId);
       return true;
     }
 

@@ -10,7 +10,7 @@ permissions:
 safe-outputs:
   create-issue:
     title-prefix: "[health] "
-    labels: [report]
+    labels: [pipeline]
     close-older-issues: true
     max: 1
 ---
@@ -33,8 +33,9 @@ Create a concise Monday morning health report as a GitHub issue.
 
 ### Issue Backlog
 - Total open issues
-- Breakdown by priority label (P0, P1, P2)
-- Breakdown by area label (engine, web, mcp, docs, test, security)
+- Breakdown by the repository's current priority labels (`priority-p0` through `priority-p3`)
+- Breakdown by current area labels (`Engine`, `Frontend`, `2D`, `3D`, `Audio`, `Physics`, `documentation`, `testing`, `security`, `pipeline`)
+- Do not invent labels that are absent from the repository
 - Issues opened vs. closed in the past week
 
 ### CI Health
@@ -43,9 +44,9 @@ Create a concise Monday morning health report as a GitHub issue.
 - Average CI run duration trend
 
 ### Test Coverage
-- Reference the coverage thresholds in `web/vitest.config.ts`
-- Current targets: 44% statements, 36% branches, 39% functions, 45% lines
-- Final goal: 55/45/50/55 (from `docs/coverage-plan.md`)
+- Read and report the enforced coverage thresholds directly from `web/vitest.config.ts`
+- Compare them with the target and status currently documented in `docs/coverage-plan.md`
+- If those sources disagree, flag documentation drift instead of choosing a hard-coded value
 
 ### Dependency Health
 - Count of open Dependabot PRs

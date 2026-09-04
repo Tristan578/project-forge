@@ -253,6 +253,13 @@ pub(super) fn apply_selection_requests(
 }
 
 /// System that emits transform data when the primary selection changes.
+///
+/// This covers ONLY the selected-entity path, and deliberately still does. The
+/// two cases it cannot see — an undo/redo of a NON-selected entity, and a
+/// component REMOVAL (`Changed<T>` cannot fire for a component that no longer
+/// exists, and there is no `RemovedComponents` watcher in `bridge/`) — are
+/// covered by `bridge::component_resync::apply_component_resyncs`, which the
+/// history arms feed through `core::component_resync::ComponentResync` (#9290).
 #[cfg(not(feature = "runtime"))]
 pub(super) fn emit_transform_on_selection(
     selection: Res<Selection>,
