@@ -138,6 +138,22 @@ describe('buildPhysicsFromPartial', () => {
   });
 });
 
+describe('partial builder schema hardening (PF-1163)', () => {
+  it('keeps deprecated passthrough schemas out of the model-input boundary', () => {
+    const source = readFileSync(join(__dirname, '..', 'helpers.ts'), 'utf8');
+
+    expect(source).not.toContain('.passthrough()');
+  });
+
+  it('continues to discard unknown model-supplied fields', () => {
+    const unknownFields = { promptInjection: 'retain me', nested: { unsafe: true } };
+
+    expect(buildMaterialFromPartial(unknownFields)).toEqual(buildMaterialFromPartial({}));
+    expect(buildLightFromPartial(unknownFields)).toEqual(buildLightFromPartial({}));
+    expect(buildPhysicsFromPartial(unknownFields)).toEqual(buildPhysicsFromPartial({}));
+  });
+});
+
 describe('inferEntityType', () => {
   it('should detect point light', () => {
     expect(inferEntityType({ components: ['PointLight'] } as never)).toBe('point_light');

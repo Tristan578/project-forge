@@ -129,7 +129,7 @@ const zPartialMaterial = z.object({
   thickness: zNum(0),
   attenuationDistance: zNum(0),
   attenuationColor: zOpt(zVec3),
-}).passthrough();
+});
 
 const zPartialLight = z.object({
   lightType: zOpt(z.enum(['point', 'directional', 'spot'])),
@@ -144,7 +144,7 @@ const zPartialLight = z.object({
   // no longer a cone at all.
   innerAngle: zNum(0, Math.PI / 2),
   outerAngle: zNum(0, Math.PI / 2),
-}).passthrough();
+});
 
 const zPartialPhysics = z.object({
   bodyType: zOpt(z.enum(['dynamic', 'fixed', 'kinematic_position', 'kinematic_velocity'])),
@@ -163,7 +163,7 @@ const zPartialPhysics = z.object({
   lockRotationY: zOpt(z.boolean()),
   lockRotationZ: zOpt(z.boolean()),
   isSensor: zOpt(z.boolean()),
-}).passthrough();
+});
 
 // ===== Builder Functions =====
 
