@@ -33,6 +33,9 @@ const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m
 const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
 const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
+// MCP editor bridge (#9293): the hook, the command manifest and the chat
+// executor all hang off this import, so an ordinary tab never loads them.
+const McpBridgeIndicator = lazy(() => import('./McpBridgeIndicator').then(m => ({ default: m.McpBridgeIndicator })));
 const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
 const OnboardingWizard = lazy(() => import('../onboarding/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })));
 const QuickStartDialog = lazy(() => import('../onboarding/QuickStartDialog').then(m => ({ default: m.QuickStartDialog })));
@@ -52,7 +55,7 @@ import { Celebration } from '@/components/ui/Celebration';
 import { useCelebrations } from '@/hooks/useCelebrations';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { e2eHooksEnabled } from '@/lib/e2e/testHooks';
-import { useEditorBridge } from '@/lib/mcp/useEditorBridge';
+import { useMcpBridgeRequested } from '@/lib/mcp/bridgeOptIn';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher, setCommandDispatcher } from '@/stores/editorStore';
 import type { CommandResponse } from '@/hooks/useEngine';
@@ -405,8 +408,9 @@ function OnboardingGate({ onRequestQuickStart }: { onRequestQuickStart: () => vo
 // ---- Main EditorLayout ----
 
 export function EditorLayout() {
-  // MCP editor bridge (#9293): a no-op unless this tab was opened with ?mcp=<token>.
-  useEditorBridge();
+  // MCP editor bridge (#9293): nothing is loaded unless this tab was opened
+  // with ?mcp=<token>, and nothing attaches until the indicator is approved.
+  const mcpBridgeAsked = useMcpBridgeRequested();
   const rightPanelTab = useChatStore((s) => s.rightPanelTab);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
   const toggleChatOverlay = useWorkspaceStore((s) => s.toggleChatOverlay);
@@ -760,6 +764,11 @@ export function EditorLayout() {
         <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
         <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       </Suspense>
+      {mcpBridgeAsked && (
+        <Suspense fallback={null}>
+          <McpBridgeIndicator />
+        </Suspense>
+      )}
       <PerformanceProfiler />
       {activeCelebration && (
         <Celebration
