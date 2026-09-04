@@ -1373,6 +1373,56 @@ jobs:
           path: web/blob-report/
           retention-days: 7
 
+  # API-only PR gate (#8633). These specs use Playwright's request fixture,
+  # so they need a production build but no browser binary.
+  test-e2e-api:
+    name: E2E API Tests
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Build for E2E
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx next build
+
+      - name: Run API-only E2E tests
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          # The webhook rejects missing/invalid signatures only after confirming
+          # a signing secret exists. This inert test value enables that guard.
+          STRIPE_WEBHOOK_SECRET: 'whsec_ci_api_contract_only'
+        run: npx playwright test --grep '@api' --project=chromium --config playwright.ci.config.ts
+
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: blob-report-api
+          path: web/blob-report/
+          retention-days: 7
+
   # Strict interactive-journey gate (#8601 F09 + #8604 F12). Proves the core
   # new-user journey — idea -> generated scene -> entities spawn -> Play ->
   # winnable -> export — survives on the SAME production server users hit
@@ -1902,6 +1952,7 @@ jobs:
       - openapi-route-sync
       - actions-pin-check
       - test-e2e-ui
+      - test-e2e-api
       - test-e2e-journey
       - test-e2e-engine-smoke
     runs-on: ubuntu-latest
