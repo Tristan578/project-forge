@@ -31,38 +31,22 @@ export default defineConfig({
     launchOptions: { args: ['--disable-gpu', '--no-sandbox'] },
   },
 
+  // Chromium only. firefox, webkit, mobile-iphone and mobile-pixel used to be
+  // declared here and were executed by no workflow for months (#9610) — the
+  // cross-browser coverage this file advertised was a label. They now live in
+  // playwright.crossbrowser.config.ts, which CI actually runs, and are matched
+  // per-config by scripts/__tests__/e2e-tag-routing.test.sh so a name declared
+  // in one file can no longer be credited by another file's execution.
+  //
+  // Removing them also removed a live defect: the global launchOptions below
+  // are Chromium flags, and every project overrode them EXCEPT mobile-iphone —
+  // an iPhone 14 device descriptor whose defaultBrowserType is 'webkit'. Anyone
+  // running `--project=mobile-iphone` handed --disable-gpu/--no-sandbox to a
+  // WebKit launch.
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      name: 'firefox',
-      use: {
-        ...devices['Desktop Firefox'],
-        // Override global launchOptions — --disable-gpu and --no-sandbox are Chromium-only
-        launchOptions: { args: [] },
-      },
-    },
-    {
-      name: 'webkit',
-      use: {
-        ...devices['Desktop Safari'],
-        // Override global launchOptions — --disable-gpu and --no-sandbox are Chromium-only
-        launchOptions: { args: [] },
-      },
-    },
-    {
-      name: 'mobile-iphone',
-      use: {
-        ...devices['iPhone 14'],
-      },
-    },
-    {
-      name: 'mobile-pixel',
-      use: {
-        ...devices['Pixel 7'],
-      },
     },
   ],
 

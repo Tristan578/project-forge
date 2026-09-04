@@ -2621,6 +2621,7 @@ STEPS_EOF
   test-e2e-ui:
   test-e2e-journey:
   test-e2e-engine-smoke:
+  test-e2e-crossbrowser:
   merge-e2e-reports:
   ci-success:"
 

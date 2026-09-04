@@ -1626,6 +1626,116 @@ jobs:
           path: web/playwright-report/
           retention-days: 14
 
+  # Cross-browser E2E (#9610). firefox, webkit and the two mobile projects had
+  # been declared in playwright.config.ts for months and executed by nothing:
+  # every workflow passed --project=chromium or a chromium-only config, so the
+  # cross-browser coverage the config advertised was a label. This job runs
+  # the same @ui selection as test-e2e-ui on Firefox, WebKit and the two mobile
+  # emulations (Linux WebKit — Playwright ships and installs it; no macOS
+  # runner is involved).
+  #
+  # NON-BLOCKING for its first window: continue-on-error keeps a browser-
+  # specific failure from turning CI Success red until the never-run corpus has
+  # been triaged. Follow-up on #9610: add this job to ci-success.needs once it
+  # has been green on main for a week. scripts/__tests__/e2e-tag-routing.test.sh
+  # pins that every declared project is executed by SOME workflow, so this job
+  # cannot be quietly dropped without that guard going red.
+  test-e2e-crossbrowser:
+    # One job per engine, so a WebKit-only regression produces a red check that
+    # SAYS webkit -- #9610's acceptance criteria ask for a job that fails and
+    # names the browser, which a single four-engine job cannot do.
+    name: E2E Cross-Browser (${{ matrix.project }})
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Non-blocking for its FIRST landing only. These 385 specs have never
+    # executed on firefox/webkit, so their pass rate is unmeasured, and gating
+    # the merge queue on an unmeasured suite is lessons-learned #10. The
+    # measured pass rate and CI minutes get recorded on #9610; flipping this to
+    # blocking (drop this key, add the job to ci-success.needs and to
+    # check_triggered in scripts/check-ci-success.sh) is a follow-up with a
+    # number behind it. Until then this job sits outside that anti-tamper map,
+    # so scripts/__tests__/e2e-tag-routing.test.sh pins the `if:` above and the
+    # --project flags below instead -- a one-line unwire has to go red
+    # somewhere.
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [firefox, webkit, mobile-iphone, mobile-pixel]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Cache Playwright browsers (all engines)
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          # A browser-set segment in the key: the chromium-only jobs cache
+          # under `playwright-<os>-<lockfile>`, and restoring THAT here would
+          # report cache-hit and skip the Firefox/WebKit install (#9610).
+          key: playwright-all-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers (chromium, firefox, webkit)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh browsers chromium firefox webkit
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh deps chromium firefox webkit
+
+      - name: Build for cross-browser E2E
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          # Same flag as test-e2e-ui: without it /dev redirects to /sign-in and
+          # every editor spec is unrunnable (#9586).
+          NEXT_PUBLIC_E2E_HOOKS: 'true'
+        run: npx next build
+
+      - name: Run @ui specs on ${{ matrix.project }}
+        working-directory: web
+        env:
+          # `next start` boots with NODE_ENV=production, and
+          # web/src/instrumentation.ts THROWS on a failed validateEnvironment()
+          # unless this is set. Playwright's webServer inherits THIS step's
+          # environment, not the build step's -- so omitting it here aborts the
+          # server, /api/health never answers, playwright dies at the 30s
+          # webServer timeout having run zero tests, and continue-on-error
+          # turns that into a green job. scripts/__tests__/e2e-tag-routing.test.sh
+          # pins this for every config whose webServer runs `next start`.
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=${{ matrix.project }} --config playwright.crossbrowser.config.ts
+
+      - name: Upload cross-browser report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-crossbrowser-report-${{ matrix.project }}
+          path: web/playwright-report-crossbrowser/
+          retention-days: 14
+
   # Merge sharded E2E reports into a single HTML report
   merge-e2e-reports:
     name: Merge E2E Reports
