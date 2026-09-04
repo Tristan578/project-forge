@@ -21,12 +21,14 @@
 import { useEffect, useRef } from 'react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { useUserStore } from '@/stores/userStore';
 import { getStatusEndpoint } from '@/lib/generation/statusEndpoints';
 import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
 import { analyzeModelQuality } from '@/lib/generate/modelQuality';
 import { detectGridDimensions, sliceSheet, buildSpriteSheetData } from '@/lib/sprites/sheetImporter';
 import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
+import { showSuccess } from '@/lib/toast';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -52,9 +54,11 @@ export function useGenerationPolling() {
 
   // On mount: drain any refunds that failed in a previous session
   useEffect(() => {
-    processFailedRefunds().catch((err) => {
-      console.error('processFailedRefunds error:', err);
-    });
+    processFailedRefunds()
+      .then(() => useUserStore.getState().fetchBalance())
+      .catch((err) => {
+        console.error('processFailedRefunds error:', err);
+      });
   }, []);
 
 
@@ -505,6 +509,8 @@ export function useGenerationPolling() {
           },
         },
       );
+      await useUserStore.getState().fetchBalance();
+      showSuccess('Tokens refunded for the failed generation.');
     } catch (err) {
       console.error('Token refund failed after retries — queuing for next session:', err);
       enqueueFailedRefund({
