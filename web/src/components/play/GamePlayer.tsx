@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, Maximize, Minimize, Loader2, RotateCw } from 'lucide-react';
 import { ShareButtons } from './ShareButtons';
 import { RemixButton } from './RemixButton';
+import { ReportGameDialog } from './ReportGameDialog';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
 import { captureException } from '@/lib/monitoring/sentry-client';
@@ -357,6 +358,17 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
             <ShareButtons
               gameTitle={gameData.title}
               gameUrl={shareUrl}
+            />
+          )}
+          {/* gameData.id is the published_games row id, which is what the
+              report route keys off. userId/slug are only for the sign-in
+              return URL when the viewer is signed out. */}
+          {gameData && (
+            <ReportGameDialog
+              gameId={gameData.id}
+              userId={userId}
+              slug={slug}
+              isAuthenticated={isAuthenticated}
             />
           )}
           <button

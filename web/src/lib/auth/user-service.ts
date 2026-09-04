@@ -255,6 +255,10 @@ export async function deleteUserAccount(userId: string): Promise<void> {
     statements.push(neonSql`DELETE FROM game_likes    WHERE game_id  = ${gameId}`);
     statements.push(neonSql`DELETE FROM game_tags     WHERE game_id  = ${gameId}`);
     statements.push(neonSql`DELETE FROM game_forks    WHERE original_game_id = ${gameId}`);
+    // game_reports.game_id FK -> published_games.id (NOT NULL, no cascade):
+    // reports filed by OTHER users against this user's games must go before
+    // the published_games delete below or the whole transaction rolls back.
+    statements.push(neonSql`DELETE FROM game_reports  WHERE game_id  = ${gameId}`);
     // featured_games FK → published_games: must delete before published_games
     statements.push(neonSql`DELETE FROM featured_games WHERE game_id = ${gameId}`);
   }
@@ -264,6 +268,10 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   statements.push(neonSql`DELETE FROM game_comments WHERE user_id      = ${userId}`);
   statements.push(neonSql`DELETE FROM game_likes    WHERE user_id      = ${userId}`);
   statements.push(neonSql`DELETE FROM game_forks    WHERE user_id      = ${userId}`);
+  // game_reports.reporter_id FK -> users.id: reports this user filed against
+  // OTHER creators' games. Without this the final `DELETE FROM users` violates
+  // the FK and account deletion fails outright.
+  statements.push(neonSql`DELETE FROM game_reports WHERE reporter_id = ${userId}`);
   statements.push(neonSql`DELETE FROM user_follows  WHERE follower_id  = ${userId}`);
   statements.push(neonSql`DELETE FROM user_follows  WHERE following_id = ${userId}`);
 

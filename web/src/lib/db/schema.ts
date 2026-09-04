@@ -262,7 +262,20 @@ export const creditTransactions = pgTable(
   ]
 );
 
-export const publishStatusEnum = pgEnum('publish_status', ['published', 'unpublished', 'processing']);
+// 'flagged' = hidden pending moderation review after viewer reports crossed
+// REPORT_AUTOHIDE_THRESHOLD. Distinct from 'unpublished' (creator-initiated or
+// admin takedown) so an appeal can restore the game to 'published' (#8354).
+//
+// APPEND ONLY, AND 'flagged' MUST STAY LAST. Production DDL is applied by
+// `npx drizzle-kit push --verbose --force` from THIS FILE on merge to main
+// (.github/workflows/cd.yml), not by replaying web/drizzle/*.sql — those files
+// only build the PGlite test harness. See
+// docs/decisions/2026-08-29-drizzle-push-vs-migrate.md. Push diffs the enum and
+// emits `ALTER TYPE ... ADD VALUE`, which can only append; reordering or
+// inserting a value mid-list makes the diff unrepresentable and the deploy
+// either fails or (worse, with --force) drops and recreates the type, taking
+// published_games.status with it.
+export const publishStatusEnum = pgEnum('publish_status', ['published', 'unpublished', 'processing', 'flagged']);
 
 export const publishedGames = pgTable(
   'published_games',
@@ -278,6 +291,18 @@ export const publishedGames = pgTable(
     cdnUrl: text('cdn_url'),
     thumbnail: text('thumbnail'),
     playCount: integer('play_count').notNull().default(0),
+    // Distinct reporters SINCE THE LAST MODERATOR REVIEW (one row per reporter
+    // in game_reports, which keeps the full history). Reset to 0 by an admin
+    // approve and by a won appeal, so REPORT_AUTOHIDE_THRESHOLD means the same
+    // thing at every point in a game's life; a monotonic counter would leave a
+    // reviewed game parked one report below the threshold forever (#8354).
+    reportCount: integer('report_count').notNull().default(0),
+    // THE MODERATION HOLD. Set when status flips to 'flagged'; cleared ONLY by
+    // an admin approve or a won appeal. POST /api/publish refuses to republish
+    // any row of the creator's whose flagged_at is non-null, which is why it —
+    // not `status` — is the field every recovery path must clear: an admin
+    // takedown leaves the row 'unpublished' with the hold still on.
+    flaggedAt: timestamp('flagged_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -287,6 +312,45 @@ export const publishedGames = pgTable(
     index('idx_published_games_slug').on(table.slug),
   ]
 );
+
+/**
+ * Reason taxonomy for viewer-initiated game reports (#8354).
+ * Mirrors the `reason` union accepted by POST /api/community/games/[id]/report
+ * and the labels rendered by ReportGameDialog.
+ */
+export const gameReportReasonEnum = pgEnum('game_report_reason', [
+  'sexual_content',
+  'violence',
+  'hate_speech',
+  'copyright',
+  'spam',
+  'other',
+]);
+
+/**
+ * One row per (game, reporter). The unique index is the ON CONFLICT arbiter
+ * that makes a repeat report from the same account a no-op — it is the only
+ * thing stopping a single user from inflating `publishedGames.reportCount`
+ * past REPORT_AUTOHIDE_THRESHOLD by resubmitting.
+ */
+export const gameReports = pgTable(
+  'game_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id),
+    reporterId: uuid('reporter_id').notNull().references(() => users.id),
+    reason: gameReportReasonEnum('reason').notNull(),
+    details: text('details'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_game_reports_reporter_game').on(table.gameId, table.reporterId),
+    index('idx_game_reports_game').on(table.gameId),
+  ]
+);
+
+export type GameReport = typeof gameReports.$inferSelect;
+export type NewGameReport = typeof gameReports.$inferInsert;
 
 // --- Community Gallery Tables ---
 

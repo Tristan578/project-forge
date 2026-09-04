@@ -30,6 +30,7 @@ vi.mock('lucide-react', () => ({
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
   GitFork: (props: Record<string, unknown>) => <span data-testid="fork-icon" {...props} />,
   RotateCw: (props: Record<string, unknown>) => <span data-testid="retry-icon" {...props} />,
+  Flag: (props: Record<string, unknown>) => <span data-testid="flag-icon" {...props} />,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -109,6 +110,54 @@ describe('GamePlayer', () => {
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
     await waitFor(() => {
       expect(screen.getByText('Click to play')).toBeDefined();
+    });
+  });
+
+  /**
+   * The <ReportGameDialog> in the header had zero coverage from here: every
+   * prop it takes is computed in GamePlayer, so a wrong gameId (project id
+   * instead of the published_games row id) or a dropped isAuthenticated would
+   * only show up in production. These render the REAL dialog — no mock — and
+   * assert on what it does with what GamePlayer handed it.
+   */
+  describe('report wiring', () => {
+    function loadedFetch() {
+      return vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ game: mockGame }),
+      });
+    }
+
+    it('passes the published_games row id, not the slug, to the report route', async () => {
+      const fetchMock = loadedFetch();
+      global.fetch = fetchMock as unknown as typeof global.fetch;
+
+      render(<GamePlayer userId="user-1" slug="my-awesome-game" isAuthenticated />);
+      await waitFor(() => expect(screen.getByText('My Awesome Game')).toBeDefined());
+
+      fireEvent.click(screen.getByLabelText('Report this game'));
+      fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'spam' } });
+      fireEvent.click(screen.getByText('Submit report').closest('button')!);
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      // mockGame.id — the row id. The slug shares this component's props and
+      // would look just as plausible at the call site.
+      expect(fetchMock.mock.calls[1][0]).toBe('/api/community/games/game-1/report');
+    });
+
+    it('gives a signed-out viewer a sign-in link that returns to this game', async () => {
+      global.fetch = loadedFetch() as unknown as typeof global.fetch;
+
+      render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await waitFor(() => expect(screen.getByText('My Awesome Game')).toBeDefined());
+
+      // isAuthenticated defaults to false — a form here could only ever 401.
+      expect(screen.queryByLabelText('Report this game')).toBeNull();
+      const link = screen.getByLabelText('Sign in to report this game');
+      expect(link.getAttribute('href')).toBe(
+        '/sign-in?redirect_url=/play/user-1/my-awesome-game'
+      );
     });
   });
 

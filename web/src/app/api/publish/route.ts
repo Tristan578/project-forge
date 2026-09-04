@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, ne, and, or, isNotNull, inArray, sql } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { checkTrademark } from '@/lib/moderation/trademarkFilter';
 import { PUBLISH_LIMITS } from '@/lib/projects/limits';
@@ -21,6 +21,11 @@ const publishSchema = z.object({
   thumbnail: z.unknown().optional(),
   tags: z.unknown().optional(),
 });
+
+// projects.id and published_games.project_id are uuid columns, but publishSchema
+// accepts any 1-100 char string for projectId (legacy callers). Used to decide
+// whether a projectId is safe to compare against a uuid column.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest) {
   try {
@@ -122,21 +127,104 @@ export async function POST(request: NextRequest) {
 
   // Check tier publish limits. An unrecognized tier falls back to the free
   // tier's allowance — never to a more generous one.
+  //
+  // WHICH ROWS OCCUPY A SLOT
+  // 'flagged' counts. A moderation hold is not a slot the creator gave up: the
+  // game goes back to 'published' the moment an admin approves it or the
+  // creator wins an appeal. Counting only 'published' freed the slot while the
+  // game was hidden, so a starter-tier creator (limit 1) whose game was
+  // auto-hidden could publish a replacement and then be restored to TWO
+  // published games, permanently over the limit with no path back under it.
+  // 'unpublished' does not count — that one IS the creator's own choice — and
+  // 'processing' never has, which this keeps unchanged.
+  //
+  // The row that owns THIS slug is excluded, because the limit gates how many
+  // games exist and not how many times one is updated. Counting the target of a
+  // republish against its own republish made the starter tier's single
+  // publication un-updatable: every re-POST of the only slug the account owns
+  // saw 1 >= 1 and 403'd with a limit error. A row of someone else's with this
+  // slug cannot be matched — the user scope below is on the same `and`.
   const maxPublished = PUBLISH_LIMITS[user.tier as keyof typeof PUBLISH_LIMITS] ?? PUBLISH_LIMITS.starter;
   const existingPublished = await queryWithResilience(() => getDb().select({ id: publishedGames.id })
     .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.status, 'published'))));
+    .where(and(
+      eq(publishedGames.userId, user.id),
+      inArray(publishedGames.status, ['published', 'flagged']),
+      ne(publishedGames.slug, slug),
+    )));
 
   if (existingPublished.length >= maxPublished) {
     reqLogAuth.warn('Publish limit reached', { tier: user.tier, maxPublished });
     return NextResponse.json({ error: `Publish limit reached (${maxPublished} for ${user.tier} tier)` }, { status: 403 });
   }
 
-  // Check slug availability (for this user)
-  const existingSlug = await queryWithResilience(() => getDb().select({ id: publishedGames.id, version: publishedGames.version })
+  // Slug availability for this user AND the moderation hold, in one query.
+  //
+  // THE HOLD IS KEYED ON THE PROJECT, NOT THE SLUG. `uq_published_games_slug`
+  // is on (user_id, slug) and nothing is unique on project_id, so a slug-scoped
+  // check let the creator of a taken-down game republish the SAME project under
+  // a new slug — one API call, a fresh row with status 'published' and
+  // flagged_at NULL, and the takedown was undone. The `or` below therefore
+  // matches either the row that owns this slug or ANY held row of this
+  // creator's for this project.
+  //
+  // The project arm is only added when projectId is a uuid: published_games
+  // .project_id is a uuid column, and comparing it against a free-form string
+  // (the schema accepts any 1-100 char string) raises `invalid input syntax for
+  // type uuid`. A non-uuid can never be the project_id of an existing row, so
+  // skipping the arm cannot let a held row through.
+  const projectIdIsUuid = UUID_RE.test(projectId);
+  const existingRows = await queryWithResilience(() => getDb().select({
+      id: publishedGames.id,
+      slug: publishedGames.slug,
+      version: publishedGames.version,
+      flaggedAt: publishedGames.flaggedAt,
+    })
     .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
-    .limit(1));
+    .where(and(
+      eq(publishedGames.userId, user.id),
+      projectIdIsUuid
+        ? or(
+            eq(publishedGames.slug, slug),
+            and(
+              eq(publishedGames.projectId, projectId),
+              isNotNull(publishedGames.flaggedAt),
+            ),
+          )
+        : eq(publishedGames.slug, slug),
+    ))
+    // The slug half can match at most one row (unique index). The project half
+    // is bounded by how many times this creator has published this project;
+    // 50 is a ceiling for a pathological case, and every held row 403s anyway,
+    // so a truncated page can only fail closed.
+    .limit(50));
+
+  // A game under a moderation hold cannot be republished by its creator
+  // (#8354). Without this the auto-hide is trivially bypassable: republish
+  // sets status back to 'published' unconditionally, and DELETE /api/publish/[id]
+  // (creator unpublish) only moves the row to 'unpublished', so a reported game
+  // could be restored in two calls. flaggedAt — not status — is the gate,
+  // because it is the one field that survives that round trip; an admin approve
+  // and a won appeal both clear it, which is what re-enables republishing.
+  const heldRow = existingRows.find((row) => row.flaggedAt !== null);
+
+  // Only rows that actually own this slug drive the republish-vs-create branch
+  // below; a held row for a DIFFERENT slug of the same project must 403, never
+  // be mistaken for the target publication.
+  const existingSlug = existingRows.filter((row) => row.slug === slug);
+
+  if (heldRow) {
+    reqLogAuth.warn('Republish blocked by moderation hold', { gameId: heldRow.id });
+    return NextResponse.json(
+      {
+        error:
+          'This game is under moderation review and cannot be republished. ' +
+          'You can appeal the decision at /api/moderation/appeal.',
+        code: 'MODERATION_HOLD',
+      },
+      { status: 403 },
+    );
+  }
 
   // Get project data (verify ownership)
   const [project] = await queryWithResilience(() => getDb().select().from(projects)
