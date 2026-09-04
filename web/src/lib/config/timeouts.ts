@@ -195,6 +195,16 @@ export function deriveGenerationStepTimeoutMs(
 /** External API call timeout (e.g., OpenAI, Replicate image generation) */
 export const EXTERNAL_API_TIMEOUT_MS = 60_000;
 
+/**
+ * Upper bound on one Upstash REST round-trip (`lib/upstash/restCommand.ts`):
+ * the distributed rate limiter, its `/api/health` probe, the SDK limiter's own
+ * `timeout`, and the response cache all use it. The limiter runs in front of
+ * every rate-limited route and its degrade path only engages when the call
+ * THROWS, so a stalled connection would otherwise hold the route for the
+ * function's whole maxDuration.
+ */
+export const UPSTASH_REST_TIMEOUT_MS = 3_000;
+
 /** Replicate status poll timeout */
 export const REPLICATE_STATUS_TIMEOUT_MS = 15_000;
 
@@ -225,6 +235,31 @@ export const RATE_LIMIT_ADMIN_MAX = 10;
 
 /** Default max requests for play/game routes per window */
 export const RATE_LIMIT_PLAY_MAX = 60;
+
+/**
+ * Rate limit window for the Core Web Vitals beacon (`/api/vitals`): 1 minute.
+ *
+ * Deliberately shorter than the 5-minute public default so a burst of page
+ * views recovers quickly instead of locking a visitor out for minutes.
+ */
+export const RATE_LIMIT_VITALS_WINDOW_MS = 60_000;
+
+/**
+ * Max `/api/vitals` beacons per window, per IP.
+ *
+ * Derived from the endpoint's real traffic shape rather than picked round.
+ * `web-vitals` reports five metrics per page view (LCP, FCP, CLS, INP, TTFB),
+ * and CLS and INP are re-reported on each visibility-change flush, so a single
+ * page view costs roughly 5-8 beacons. The previous budget of 10/minute was
+ * therefore under two page views: a visitor who opened a third page inside a
+ * minute had their telemetry silently dropped, and every visitor behind one
+ * shared egress IP (corporate NAT, carrier CGNAT, a campus) shared that same
+ * budget, so vitals from those networks were mostly 429s.
+ *
+ * 60/minute covers a heavy ~10-page-view burst with headroom while still
+ * bounding abuse — the endpoint persists nothing and only emits a log line.
+ */
+export const RATE_LIMIT_VITALS_MAX = 60;
 
 // ---------------------------------------------------------------------------
 // Debounce / cooldown intervals

@@ -27,7 +27,7 @@ You are the senior reviewer for SpawnForge — an AI-native 2D/3D game engine (R
 ## Mandate
 
 1. **Read @.claude/CLAUDE.md** — understand architecture rules, workflow requirements, and quality bar.
-2. **Load the SpawnForge review checklist** from the `pr-code-review` skill's @.claude/skills/pr-code-review/references/spawnforge-checklist.md — this encodes 40+ documented failure patterns from past agent PRs.
+2. **Load the SpawnForge review checklist** from the `pr-code-review` skill — @.claude/skills/pr-code-review/references/review-checklist.md (32 checks across architecture, security, developer experience, UX/frontend, and testing) plus @.claude/skills/pr-code-review/references/common-antipatterns.md (15 recurring bugs caught in past agent PRs).
 3. **Read the full diff** and every changed file in its entirety (not just the diff hunk).
 4. **Score against the checklist AND the lessons learned doc** — group findings by severity (BLOCK / WARN / INFO).
 5. **Verify each finding** against actual code before reporting — false positives erode trust.

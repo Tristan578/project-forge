@@ -85,7 +85,7 @@ jobs:
 
       - name: Cache @spawnforge/ui build
         id: ui-cache-lint
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/ui/dist
           key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
@@ -117,7 +117,7 @@ jobs:
 
       - name: Cache @spawnforge/ui build
         id: ui-cache-typecheck
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/ui/dist
           key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
@@ -149,7 +149,7 @@ jobs:
 
       - name: Cache @spawnforge/ui build
         id: ui-cache-test-web
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/ui/dist
           key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
@@ -297,6 +297,15 @@ jobs:
       - name: Run native engine unit tests
         working-directory: engine
         run: cargo test --lib --features bevy/x11
+
+      # `runtime` compiles a DIFFERENT program (editor-only definitions vanish
+      # and `core/commands/performance.rs` takes its `feature = "runtime"`
+      # arms), and until #9550 no job ran a single test under it — the
+      # queue/no-drain asymmetry that ticket found was invisible to every gate.
+      # Dependencies are already built by the step above, so this is cheap.
+      - name: Run native engine unit tests (runtime)
+        working-directory: engine
+        run: cargo test --lib --features bevy/x11,runtime
 
       # `cargo test --lib` above runs the NATIVE target, and `engine/src/lib.rs`
       # declares `bridge` under `#[cfg(target_arch = "wasm32")]` — so every
@@ -508,7 +517,7 @@ jobs:
       # key that never invalidates -- the stale-browser failure from #8589.
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -540,7 +549,10 @@ jobs:
   security:
     name: Rust Security Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Three independently retried npm audits can each consume more than five
+    # minutes during registry degradation; leave enough time for the subsequent
+    # cargo audit instead of cancelling a still-valid retry sequence.
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -596,7 +608,13 @@ jobs:
   lighthouse-delta:
     name: Lighthouse Effects Delta Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25, not 15: this job does TWO full Next.js production builds and six
+    # Lighthouse runs on top of a cold npm install. On run 33820181562 the
+    # installs alone ate 13m10s of a 15m budget and the runner killed
+    # `lhci collect` 36s in, reporting a red required check for a gate that
+    # had not yet measured anything. It passes on a fast runner and dies on a
+    # slow one, which makes it a coin flip rather than a gate.
+    timeout-minutes: 25
     permissions:
       contents: read
     # NO `if:` — this job runs whenever quality-gates is called.
@@ -631,7 +649,7 @@ jobs:
 
       - name: Cache @spawnforge/ui build
         id: ui-cache-lighthouse
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/ui/dist
           key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
@@ -639,9 +657,6 @@ jobs:
       - name: Build @spawnforge/ui
         if: steps.ui-cache-lighthouse.outputs.cache-hit != 'true'
         run: cd packages/ui && npm run build
-
-      - name: Install web dependencies
-        run: cd web && npm ci
 
       - name: Install @lhci/cli and Chrome
         run: |

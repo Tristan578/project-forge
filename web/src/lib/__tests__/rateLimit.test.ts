@@ -167,6 +167,41 @@ describe('Upstash integration', () => {
     delete process.env['UPSTASH_REDIS_REST_URL'];
     delete process.env['UPSTASH_REDIS_REST_TOKEN'];
   });
+
+  it('bounds the SDK limiter with UPSTASH_REST_TIMEOUT_MS and reports its resolve-as-allowed timeout', async () => {
+    vi.resetModules();
+    const ctorArgs: unknown[] = [];
+    vi.doMock('@upstash/redis', () => ({ Redis: class { constructor(_o: unknown) {} } }));
+    vi.doMock('@upstash/ratelimit', () => {
+      class Ratelimit {
+        static slidingWindow = vi.fn(() => 'sliding');
+        constructor(opts: unknown) { ctorArgs.push(opts); }
+        // @upstash/ratelimit 2.x RESOLVES on its internal timeout — success:true,
+        // reason:'timeout' — instead of throwing, so nothing in the catch path
+        // ever sees a stalled Upstash.
+        limit = vi.fn(async () => ({ success: true, remaining: 4, reset: 123, reason: 'timeout', limit: 5 }));
+      }
+      return { Ratelimit };
+    });
+    process.env['UPSTASH_REDIS_REST_URL'] = 'https://test-redis.upstash.io';
+    process.env['UPSTASH_REDIS_REST_TOKEN'] = 'test-token-123';
+
+    const { sampledCaptureException } = await import('@/lib/monitoring/sampledCapture');
+    const { UPSTASH_REST_TIMEOUT_MS } = await import('@/lib/config/timeouts');
+    const mod = await import('../rateLimit');
+    const result = await mod.rateLimit('stall:user-1', 5, 60_000);
+
+    expect(result.allowed).toBe(true);
+    expect(ctorArgs[0]).toEqual(expect.objectContaining({ timeout: UPSTASH_REST_TIMEOUT_MS }));
+    expect(sampledCaptureException).toHaveBeenCalledWith(
+      'rateLimit.timeoutFailOpen',
+      expect.objectContaining({ message: expect.stringContaining('timed out') }),
+      { keyPrefix: 'stall' },
+    );
+
+    delete process.env['UPSTASH_REDIS_REST_URL'];
+    delete process.env['UPSTASH_REDIS_REST_TOKEN'];
+  });
 });
 
 describe('rateLimit — Upstash per-call failure observability (PF-842)', () => {
@@ -402,5 +437,37 @@ describe('rateLimitAdminRoute', () => {
     expect(result!.headers.get('X-RateLimit-Remaining')).toBe('0');
     expect(result!.headers.get('Retry-After')).not.toBeNull();
     expect(result!.headers.get('X-RateLimit-Reset')).not.toBeNull();
+  });
+});
+
+describe('rateLimitResponse / formatWait', () => {
+  // Every generate dialog toasts `error` verbatim and nothing on the client
+  // reads Retry-After, so the wait must be IN the sentence (#9623 review).
+  it('tells the user how long to wait, in the unit a person would say', async () => {
+    const { rateLimitResponse, formatWait } = await import('../rateLimit');
+    const now = Date.now();
+
+    const short = rateLimitResponse(0, now + 45_000);
+    expect(short.status).toBe(429);
+    expect(await short.json()).toEqual({ error: 'Too many requests. Try again in 45 seconds.' });
+    expect(short.headers.get('Retry-After')).toBe('45');
+
+    const long = rateLimitResponse(0, now + 15 * 60_000);
+    expect(await long.json()).toEqual({ error: 'Too many requests. Try again in 15 minutes.' });
+
+    expect(formatWait(1)).toBe('1 second');
+    expect(formatWait(59)).toBe('59 seconds');
+    expect(formatWait(60)).toBe('1 minute');
+    expect(formatWait(61)).toBe('2 minutes');
+    expect(formatWait(900)).toBe('15 minutes');
+  });
+
+  it('never tells the user to wait zero seconds', async () => {
+    const { rateLimitResponse } = await import('../rateLimit');
+    // A resetAt already in the past (clock skew, a window that just closed)
+    // must not render "try again in 0 seconds" or a negative Retry-After.
+    const past = rateLimitResponse(0, Date.now() - 5_000);
+    expect(await past.json()).toEqual({ error: 'Too many requests. Try again in 1 second.' });
+    expect(past.headers.get('Retry-After')).toBe('1');
   });
 });

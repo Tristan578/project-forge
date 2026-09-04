@@ -7,7 +7,7 @@ memory: project
 mcpServers:
   - playwright
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
-skills: [web-accessibility, game-ui-design, playwright-best-practices, game-engine-ux-patterns, developer-tool-ux-patterns, creative-tool-ux-patterns, audio-tool-ux-patterns, storybook-audit]
+skills: [web-accessibility, game-ui-design, playwright-best-practices]
 maxTurns: 25
 hooks:
   Stop:
@@ -61,28 +61,37 @@ SpawnForge's vision is "Canva for games" — the UX must be as approachable as C
 
 ## Domain Analysis (run relevant audits)
 
-When reviewing editor UX, run the domain audit scripts that apply to the changes:
+**Only cite a script you have confirmed is present.** If an audit you want does not
+exist, say so and review the domain by hand — do not invent a script path. This
+section previously listed nine audit scripts under five skill directories that were
+never created; a reviewer following it produced "no findings" from commands that had
+all failed to run.
+
+The accessibility audit is real and runs:
 
 ```bash
-# Game engine patterns (hierarchy, inspector, play/test)
-bash .claude/skills/game-engine-ux-patterns/scripts/audit-hierarchy-ux.sh packages/ui/src
-bash .claude/skills/game-engine-ux-patterns/scripts/audit-play-test-loop.sh web/src
-
-# Developer tool patterns (command palette, panels, keyboard)
-bash .claude/skills/developer-tool-ux-patterns/scripts/audit-command-palette.sh web/src
-bash .claude/skills/developer-tool-ux-patterns/scripts/audit-panel-layout.sh web/src
-bash .claude/skills/developer-tool-ux-patterns/scripts/audit-keyboard-shortcuts.sh web/src
-
-# Creative tool patterns (onboarding, export)
-bash .claude/skills/creative-tool-ux-patterns/scripts/audit-onboarding.sh web/src
-bash .claude/skills/creative-tool-ux-patterns/scripts/audit-export-sharing.sh web/src
-
-# Audio tool patterns (mixer, parameter controls)
-bash .claude/skills/audio-tool-ux-patterns/scripts/audit-mixer-ux.sh web/src
-bash .claude/skills/audio-tool-ux-patterns/scripts/audit-parameter-controls.sh packages/ui/src web/src
+bash .claude/skills/web-accessibility/scripts/axe-audit.sh
 ```
 
-Read the `references/competitor-analysis.md` in each skill directory for context on what professionals praise and criticize in competing tools.
+Read `.claude/skills/web-accessibility/references/wcag-checklist.md` and
+`aria-patterns.md` for the criteria, and `.claude/skills/game-ui-design/SKILL.md`
+for in-game HUD and menu conventions.
+
+The remaining domains have no audit scripts. Review them by hand against the
+FAIL triggers below, using Read/Grep over the paths named:
+
+| Domain | What to check | Where |
+| --- | --- | --- |
+| Game engine UX | Hierarchy and inspector affordances, play/test loop latency and escape hatches | `packages/ui/src/`, `web/src/lib/workspace/` |
+| Developer tool UX | Command palette coverage, panel layout, keyboard shortcuts. Shared with `dx-guardian` — coordinate rather than duplicating. | `web/src/lib/workspace/`, `packages/ui/src/` |
+| Creative tool UX | First-run onboarding, template → create → result path, export and sharing | `web/src/components/`, publish and remix flows |
+| Audio tool UX | Mixer layout, parameter control precision and keyboard access | `packages/ui/src/`, `web/src/lib/` |
+
+Verify interaction claims in the browser through the `playwright` MCP server rather
+than by reading markup alone. Drive real `Tab` presses when checking focus
+indicators — Chromium does not apply `:focus-visible` to programmatic `el.focus()`
+after a pointer event, and measuring the wrong way reports missing focus rings on
+healthy controls (lessons-learned #11).
 
 ## Doc Verification (MANDATORY)
 

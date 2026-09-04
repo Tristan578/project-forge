@@ -70,14 +70,31 @@ echo ""
 echo "=== no harness file may reference the retired path ==="
 # The hook and the lessons file both describe the migration, so both legitimately
 # name the old file. Nothing else may.
-STALE="$(grep -rl 'project_lessons_learned' "$ROOT/.claude" 2>/dev/null \
-  | grep -v 'inject-lessons-learned.sh' \
-  | grep -v 'rules/lessons-learned.md' || true)"
-if [ -z "$STALE" ]; then
-  pass "no file points at the retired project_lessons_learned.md"
+# Only files git TRACKS. github_project_sync.py writes an untracked
+# github-project-map.json cache under .claude/hooks/, and GitHub issue titles
+# mirrored into it name the retired path verbatim. Letting an untracked local
+# artifact decide this result reproduces #9605's own defect: harness behaviour
+# that differs per machine. It also makes the suite unfixable — green in CI,
+# where the cache does not exist, and red locally for reasons no commit can
+# address.
+TRACKED="$(git -C "$ROOT" ls-files -- '.claude/*' 2>/dev/null || true)"
+if [ -z "$TRACKED" ]; then
+  fail "git tracks no files under .claude/ — this sweep would pass vacuously"
 else
-  fail "these still reference the retired path, and read nothing at runtime:"
-  printf '%s\n' "$STALE" | sed "s|^$ROOT/|    |"
+  STALE="$(printf '%s\n' "$TRACKED" \
+    | grep -v 'inject-lessons-learned.sh' \
+    | grep -v 'rules/lessons-learned.md' \
+    | while IFS= read -r f; do
+        if [ -f "$ROOT/$f" ] && grep -q 'project_lessons_learned' "$ROOT/$f"; then
+          echo "$f"
+        fi
+      done)"
+  if [ -z "$STALE" ]; then
+    pass "no tracked file points at the retired project_lessons_learned.md"
+  else
+    fail "these still reference the retired path, and read nothing at runtime:"
+    printf '%s\n' "$STALE" | sed 's|^|    |'
+  fi
 fi
 
 echo ""
@@ -99,6 +116,39 @@ if [ "$checked" -eq 0 ]; then
   fail "no .claude/rules/*.md references found at all — the extractor is broken, and this rule would pass vacuously"
 elif [ "$missing" -eq 0 ]; then
   pass "all ${checked} referenced rules file(s) exist"
+fi
+
+echo ""
+echo "=== every .claude/skills/... path referenced by the harness exists ==="
+# This file's header claims EVERY harness path is checked; for its whole life it
+# checked only .claude/rules/*.md. The skills tree was the uncovered half, and it
+# was where the damage was: dx-guardian.md and ux-reviewer.md named eight skills
+# that were never created and told the reviewer to run ten audit scripts and read
+# five reference docs under them. A reviewer following those instructions reported
+# "no findings" from commands that had all failed to run — the #9605 failure mode
+# exactly, in the directory this rule did not look at.
+#
+# Directories count as resolved: an agent's `skills:` frontmatter names a skill by
+# directory, while prose cites files inside it. Placeholder forms in docs
+# (`.claude/skills/<name>/`, `.claude/skills/*/SKILL.md`, `.claude/skills/$s`) do
+# not match the extractor, which requires a literal path character after the
+# prefix — so they are neither checked nor falsely reported.
+missing=0
+checked=0
+while IFS= read -r ref; do
+  [ -n "$ref" ] || continue
+  checked=$((checked + 1))
+  if [ ! -e "$ROOT/$ref" ]; then
+    fail "referenced but missing: $ref"
+    missing=$((missing + 1))
+  fi
+done < <(grep -rhoE '\.claude/skills/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*' "$ROOT/.claude" 2>/dev/null \
+  | sed 's/[.,`)]*$//' | sort -u)
+
+if [ "$checked" -eq 0 ]; then
+  fail "no .claude/skills/* references found at all — the extractor is broken, and this rule would pass vacuously"
+elif [ "$missing" -eq 0 ]; then
+  pass "all ${checked} referenced skills path(s) exist"
 fi
 
 echo ""

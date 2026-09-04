@@ -119,7 +119,7 @@ describe('GET /api/health — negative cases', () => {
   describe('rate limiting', () => {
     it('returns 429 when rate limit is exceeded', async () => {
       const mockResponse = new Response(
-        JSON.stringify({ error: 'Too many requests. Please try again later.' }),
+        JSON.stringify({ error: 'Too many requests. Try again in 30 seconds.' }),
         { status: 429, headers: { 'Retry-After': '30' } },
       );
       // rateLimitPublicRoute returns a response when rate limited
@@ -166,7 +166,7 @@ describe('GET /api/health — negative cases', () => {
 
       const res = await GET(makeReq());
 
-      // The budget bounds the four OUTBOUND probes, not the act of reading a
+      // The budget bounds the five OUTBOUND probes, not the act of reading a
       // report we already hold. Charging on a hit would let a warm cache burn
       // an allowance it never consumed.
       expect(res.status).toBe(200);

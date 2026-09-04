@@ -1,6 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { DOCS_URL } from './lib/site';
 
 /**
  * Every pattern is an exact path plus an explicit `/(.*)` subtree. Clerk's
@@ -32,15 +33,36 @@ export const PUBLIC_ROUTES = [
 
 const isPublicRoute = createRouteMatcher(PUBLIC_ROUTES);
 
+/**
+ * Origins whose Clerk session tokens the docs deployment accepts — Clerk's
+ * `authorizedParties`, checked against the token's `azp` claim (#9630). The
+ * canonical docs origin plus whatever Vercel says this deployment is served
+ * as, so preview deployments keep signing in; localhost outside production.
+ */
+export function buildAuthorizedParties(env: NodeJS.ProcessEnv = process.env): string[] {
+  const parties = new Set<string>([new URL(env.NEXT_PUBLIC_DOCS_URL ?? DOCS_URL).origin]);
+  for (const host of [env.VERCEL_URL, env.VERCEL_BRANCH_URL, env.VERCEL_PROJECT_PRODUCTION_URL]) {
+    if (host) parties.add(`https://${host.replace(/^https?:\/\//, '')}`);
+  }
+  if (env.NODE_ENV !== 'production') {
+    parties.add('http://localhost:3000');
+    parties.add('http://localhost:3001');
+  }
+  return [...parties];
+}
+
 function passThrough() {
   return NextResponse.next();
 }
 
-const clerkHandler = clerkMiddleware(async (auth, req) => {
-  if (!isPublicRoute(req)) {
-    await auth.protect();
-  }
-});
+const clerkHandler = clerkMiddleware(
+  async (auth, req) => {
+    if (!isPublicRoute(req)) {
+      await auth.protect();
+    }
+  },
+  { authorizedParties: buildAuthorizedParties() },
+);
 
 export default async function proxy(request: NextRequest) {
   // Without Clerk keys, allow all access (dev/CI)
