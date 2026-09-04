@@ -91,6 +91,17 @@ describe('buildBehaviorScript', () => {
     }
   });
 
+  it('consumes a projectile firing interval even when target and shooter overlap', () => {
+    const source = buildBehaviorScript('projectile_fire', {
+      targetEntityId: TARGET,
+      projectType: '3d',
+    })!;
+
+    // The reset must sit outside the positive-distance branch. Keeping it
+    // inside that branch lets cooldown run negative while the entities overlap.
+    expect(source).toMatch(/if \(len > 0\) \{[\s\S]*?\n    \}\n[\s\S]*?cooldown = FIRE_INTERVAL;\n  \}/);
+  });
+
   it('refuses an id it cannot embed safely rather than escaping it', () => {
     const hostile = [
       '"; forge.destroy(entityId); //',

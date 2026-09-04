@@ -470,8 +470,11 @@ function onUpdate(dt) {
         ],
       });
       shots.push({ id: id, life: PROJECTILE_LIFETIME, dir: dir });
-      cooldown = FIRE_INTERVAL;
     }
+    // A firing opportunity consumes the interval even when both entities are
+    // co-located and no direction can be calculated. Otherwise cooldown keeps
+    // running negative and the turret fires immediately when they separate.
+    cooldown = FIRE_INTERVAL;
   }
 
   // Reverse order: splice() during a forward walk skips the next element.
