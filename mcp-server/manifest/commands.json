@@ -48,6 +48,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -68,6 +69,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -91,6 +93,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -111,6 +114,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -157,6 +161,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -181,6 +186,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -209,6 +215,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -232,6 +239,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -260,6 +268,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -290,6 +299,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -302,6 +312,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -467,6 +478,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -550,6 +562,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -638,6 +651,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -658,6 +672,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -670,6 +685,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -694,6 +710,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -714,6 +731,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -751,6 +769,7 @@
       },
       "tokenCost": 1,
       "requiredScope": "shaders:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -783,6 +802,7 @@
       },
       "tokenCost": 1,
       "requiredScope": "shaders:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -803,6 +823,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "shaders:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -861,6 +882,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -888,6 +910,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -936,6 +959,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -976,6 +1000,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -988,6 +1013,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1013,6 +1039,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1038,6 +1065,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1301,6 +1329,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "rendering:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -1313,6 +1342,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "rendering:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -1337,6 +1367,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1360,6 +1391,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1392,6 +1424,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1404,6 +1437,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1430,6 +1464,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1447,6 +1482,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1490,6 +1526,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1502,6 +1539,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1514,6 +1552,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1526,6 +1565,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1545,6 +1585,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1557,6 +1598,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1569,6 +1611,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1581,6 +1624,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1593,6 +1637,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1605,6 +1650,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1617,6 +1663,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1629,6 +1676,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1683,6 +1731,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1703,6 +1752,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1729,6 +1779,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1741,6 +1792,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1753,6 +1805,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1837,6 +1890,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1862,6 +1916,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1874,6 +1929,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1891,6 +1947,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1938,6 +1995,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1981,6 +2039,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -1993,6 +2052,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2013,6 +2073,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -2025,6 +2086,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -2037,6 +2099,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2062,6 +2125,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2104,6 +2168,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2136,6 +2201,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2156,6 +2222,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2176,6 +2243,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -2188,6 +2256,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2220,6 +2289,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2253,6 +2323,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -2273,6 +2344,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -2293,6 +2365,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2305,6 +2378,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2341,6 +2415,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2401,6 +2476,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2421,6 +2497,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2441,6 +2518,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2461,6 +2539,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2481,6 +2560,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2501,6 +2581,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2526,6 +2607,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2558,6 +2640,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2582,6 +2665,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2602,6 +2686,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -2614,6 +2699,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2668,6 +2754,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2699,6 +2786,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2725,6 +2813,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2751,6 +2840,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2796,6 +2886,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2840,6 +2931,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2865,6 +2957,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2906,6 +2999,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -2983,6 +3077,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3003,6 +3098,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3025,6 +3121,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3059,6 +3156,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3093,6 +3191,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3117,6 +3216,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3137,6 +3237,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3161,6 +3262,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3186,6 +3288,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3289,6 +3392,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3309,6 +3413,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3334,6 +3439,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3370,6 +3476,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3390,6 +3497,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3410,6 +3518,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3434,6 +3543,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3454,6 +3564,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3483,6 +3594,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3503,6 +3615,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3523,6 +3636,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3543,6 +3657,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3568,6 +3683,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3593,6 +3709,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3618,6 +3735,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3638,6 +3756,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3658,6 +3777,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3690,6 +3810,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3720,6 +3841,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3740,6 +3862,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3770,6 +3893,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3782,6 +3906,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3812,6 +3937,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3842,6 +3968,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3882,6 +4009,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3910,6 +4038,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3943,6 +4072,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -3976,6 +4106,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4009,6 +4140,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4076,6 +4208,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4124,6 +4257,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4193,6 +4327,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4225,6 +4360,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4249,6 +4385,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4277,6 +4414,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4301,6 +4439,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4330,6 +4469,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4401,6 +4541,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4458,6 +4599,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4498,6 +4640,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4518,6 +4661,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4542,6 +4686,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "docs:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -4562,6 +4707,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "docs:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -4575,6 +4721,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "docs:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -4603,6 +4750,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4623,6 +4771,7 @@
       },
       "tokenCost": 1,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4643,6 +4792,7 @@
       },
       "tokenCost": 1,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -4655,6 +4805,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4681,6 +4832,7 @@
       },
       "tokenCost": 1,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4694,6 +4846,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4727,6 +4880,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4758,6 +4912,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4775,6 +4930,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4795,6 +4951,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -4815,6 +4972,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4835,6 +4993,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4855,6 +5014,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -4879,6 +5039,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4899,6 +5060,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -4924,6 +5086,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -4944,6 +5107,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5032,6 +5196,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5125,6 +5290,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5145,6 +5311,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5162,6 +5329,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5174,6 +5342,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5214,6 +5383,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -5247,6 +5417,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5290,6 +5461,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5334,6 +5506,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5373,6 +5546,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5393,6 +5567,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5405,6 +5580,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5530,6 +5706,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5550,6 +5727,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5580,6 +5758,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5600,6 +5779,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -5654,6 +5834,7 @@
       },
       "tokenCost": 100,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -5690,6 +5871,7 @@
       },
       "tokenCost": 150,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -5754,6 +5936,7 @@
       },
       "tokenCost": 80,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -5796,6 +5979,7 @@
       },
       "tokenCost": 60,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -5824,6 +6008,7 @@
       },
       "tokenCost": 50,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -5863,6 +6048,7 @@
       },
       "tokenCost": 40,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -5893,6 +6079,7 @@
       },
       "tokenCost": 70,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -5933,6 +6120,7 @@
       },
       "tokenCost": 100,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -5991,6 +6179,7 @@
       },
       "tokenCost": 15,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6035,6 +6224,7 @@
       },
       "tokenCost": 60,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6084,6 +6274,7 @@
       },
       "tokenCost": 80,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6123,6 +6314,7 @@
       },
       "tokenCost": 50,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6143,6 +6335,7 @@
       },
       "tokenCost": 5,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6174,6 +6367,7 @@
       },
       "tokenCost": 10,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6200,6 +6394,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6220,6 +6415,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "generation:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6255,6 +6451,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -6325,6 +6522,7 @@
       },
       "tokenCost": 10,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6352,6 +6550,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6385,6 +6584,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "generation:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6430,6 +6630,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -6467,6 +6668,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -6515,6 +6717,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -6556,6 +6759,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -6605,6 +6809,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6625,6 +6830,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": true,
       "visibility": "internal"
     },
     {
@@ -6637,6 +6843,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6657,6 +6864,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6724,6 +6932,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6807,6 +7016,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6861,6 +7071,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6886,6 +7097,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": true,
       "visibility": "internal"
     },
     {
@@ -6931,6 +7143,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6958,6 +7171,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -6992,6 +7206,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -7016,6 +7231,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -7039,6 +7255,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -7072,6 +7289,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -7095,6 +7313,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "ui:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -7308,6 +7527,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -7521,6 +7741,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -7640,6 +7861,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -7739,6 +7961,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -7773,6 +7996,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -7866,6 +8090,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8004,6 +8229,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8033,6 +8259,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8057,6 +8284,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8081,6 +8309,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8114,6 +8343,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -8134,6 +8364,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8175,6 +8406,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8220,6 +8452,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8249,6 +8482,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8295,6 +8529,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8331,6 +8566,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8363,6 +8599,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8382,6 +8619,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8401,6 +8639,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -8437,6 +8676,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8476,6 +8716,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -8496,6 +8737,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -8513,6 +8755,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8538,6 +8781,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8558,6 +8802,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8583,6 +8828,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8603,6 +8849,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8623,6 +8870,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8643,6 +8891,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8678,6 +8927,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8690,6 +8940,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8702,6 +8953,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8714,6 +8966,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8738,6 +8991,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8782,6 +9036,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8816,6 +9071,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8836,6 +9092,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -8856,6 +9113,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8886,6 +9144,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8906,6 +9165,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8926,6 +9186,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -8955,6 +9216,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage",
+      "destructive": true,
       "visibility": "internal"
     },
     {
@@ -8975,6 +9237,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -8987,6 +9250,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -9007,6 +9271,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -9063,6 +9328,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9088,6 +9354,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9113,6 +9380,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9141,6 +9409,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9169,6 +9438,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9205,6 +9475,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9225,6 +9496,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9262,6 +9534,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9286,6 +9559,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9311,6 +9585,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9397,6 +9672,7 @@
       },
       "tokenCost": 1,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9438,6 +9714,7 @@
       },
       "tokenCost": 1,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9475,6 +9752,7 @@
       },
       "tokenCost": 1,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9500,6 +9778,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9606,6 +9885,7 @@
       },
       "tokenCost": 2,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9635,6 +9915,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9742,6 +10023,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9762,6 +10044,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9782,6 +10065,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9804,6 +10088,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9824,6 +10109,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9863,6 +10149,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9902,6 +10189,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9941,6 +10229,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -9991,6 +10280,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10043,6 +10333,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "asset:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -10090,6 +10381,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10149,6 +10441,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10195,6 +10488,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -10224,6 +10518,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10250,6 +10545,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -10288,6 +10584,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10320,6 +10617,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -10340,6 +10638,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10360,6 +10659,7 @@
       },
       "tokenCost": 15,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10406,6 +10706,7 @@
       },
       "tokenCost": 10,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10431,6 +10732,7 @@
       },
       "tokenCost": 10,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10482,6 +10784,7 @@
       },
       "tokenCost": 10,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10520,6 +10823,7 @@
       },
       "tokenCost": 20,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10579,6 +10883,7 @@
       },
       "tokenCost": 10,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10616,6 +10921,7 @@
       },
       "tokenCost": 5,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10641,6 +10947,7 @@
       },
       "tokenCost": 5,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10695,6 +11002,7 @@
       },
       "tokenCost": 15,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10715,6 +11023,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10747,6 +11056,7 @@
       },
       "tokenCost": 25,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10767,6 +11077,7 @@
       },
       "tokenCost": 20,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10859,6 +11170,7 @@
       },
       "tokenCost": 30,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10879,6 +11191,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10891,6 +11204,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10916,6 +11230,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10952,6 +11267,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10976,6 +11292,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -10993,6 +11310,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11006,6 +11324,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "security:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11019,6 +11338,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "security:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11037,6 +11357,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "shaders:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11114,6 +11435,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "shaders:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11149,6 +11471,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "shaders:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11167,6 +11490,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "shaders:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11191,6 +11515,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "shaders:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11211,6 +11536,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "shaders:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11224,6 +11550,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "shaders:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11266,6 +11593,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11286,6 +11614,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11316,6 +11645,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11329,6 +11659,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:read",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11342,6 +11673,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11367,6 +11699,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11391,6 +11724,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:write",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11436,6 +11770,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11456,6 +11791,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11501,6 +11837,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11526,6 +11863,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage",
+      "destructive": true,
       "visibility": "internal"
     },
     {
@@ -11562,6 +11900,7 @@
       },
       "tokenCost": 3,
       "requiredScope": "ai:generate",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11574,6 +11913,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11586,6 +11926,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     },
     {
@@ -11599,6 +11940,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11627,6 +11969,7 @@
       },
       "tokenCost": 5,
       "requiredScope": "ai:generate",
+      "destructive": false,
       "visibility": "internal"
     },
     {
@@ -11650,6 +11993,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11663,6 +12007,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11698,6 +12043,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11722,6 +12068,7 @@
       },
       "tokenCost": 20,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11742,6 +12089,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11754,6 +12102,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11766,6 +12115,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
       "visibility": "public"
     },
     {
@@ -11786,6 +12136,7 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write",
+      "destructive": true,
       "visibility": "public"
     }
   ],
