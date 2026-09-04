@@ -540,7 +540,10 @@ jobs:
   security:
     name: Rust Security Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Three independently retried npm audits can each consume more than five
+    # minutes during registry degradation; leave enough time for the subsequent
+    # cargo audit instead of cancelling a still-valid retry sequence.
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
