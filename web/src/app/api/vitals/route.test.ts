@@ -14,6 +14,10 @@ vi.mock('next/server', async () => {
 });
 
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import {
+  RATE_LIMIT_VITALS_MAX,
+  RATE_LIMIT_VITALS_WINDOW_MS,
+} from '@/lib/config/timeouts';
 
 const BASE_URL = 'http://localhost:3000/api/vitals';
 
@@ -133,5 +137,54 @@ describe('POST /api/vitals', () => {
     const res = await POST(req);
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/vitals rate-limit budget', () => {
+  // Regression guard for the 429 storm that #9682 exposed once CI began
+  // exercising the real Upstash limiter: the endpoint was pinned at 10
+  // requests/minute while its own client emits one beacon per metric per page
+  // view, so a visitor's third page view inside a minute was dropped. These
+  // assertions fail if the budget is ever narrowed back below what one
+  // ordinary browsing burst actually costs.
+
+  /**
+   * `web-vitals` re-reports CLS and INP on each visibility-change flush, so a
+   * page view costs more than one beacon per metric. Two is the conservative
+   * multiplier: enough to model the re-reports without pretending to predict
+   * how many flushes a given session produces.
+   */
+  const RE_REPORTS_PER_METRIC = 2;
+
+  /** A visitor clicking through a site can easily open this many pages a minute. */
+  const PAGE_VIEWS_PER_WINDOW = 5;
+
+  it('covers a realistic browsing burst within one window', async () => {
+    const { VITALS_METRIC_NAMES } = await import('./route');
+    const beaconsPerPageView = VITALS_METRIC_NAMES.length * RE_REPORTS_PER_METRIC;
+
+    expect(beaconsPerPageView).toBeGreaterThan(0);
+    expect(RATE_LIMIT_VITALS_MAX).toBeGreaterThanOrEqual(
+      beaconsPerPageView * PAGE_VIEWS_PER_WINDOW,
+    );
+  });
+
+  it('recovers within a minute so a burst never locks a visitor out for long', () => {
+    expect(RATE_LIMIT_VITALS_WINDOW_MS).toBeLessThanOrEqual(60_000);
+  });
+
+  it('applies the centralized budget rather than a hardcoded literal', async () => {
+    vi.mocked(rateLimitPublicRoute).mockClear();
+    vi.mocked(rateLimitPublicRoute).mockResolvedValue(null);
+    const { POST } = await import('./route');
+    const req = makeReq({ name: 'LCP', value: 100, id: 'v1-budget', delta: 10 });
+    await POST(req);
+
+    expect(rateLimitPublicRoute).toHaveBeenCalledWith(
+      expect.anything(),
+      'vitals',
+      RATE_LIMIT_VITALS_MAX,
+      RATE_LIMIT_VITALS_WINDOW_MS,
+    );
   });
 });
