@@ -49,6 +49,20 @@ MAX_ATTEMPTS=5
 TOTAL_BUDGET_SECONDS="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-660}"
 BACKOFF_SECONDS=(15 30 60 90)
 
+# apt-get exits 100 the *instant* another process holds the dpkg frontend lock,
+# so a retry after a timeout can fail in under a second having installed
+# nothing: `timeout` signals its own process group as a non-root user, and
+# Playwright's apt-get runs under sudo, so the ROOT-owned grandchild survives
+# TERM with EPERM and keeps the lock. That is exactly how #9665's E2E Journey
+# Gate died -- attempt 1 hit the attempt timeout mid-download, attempt 2 hit
+# "Could not get lock /var/lib/dpkg/lock-frontend ... held by process 2778
+# (apt-get)" and exit 100. The escalating backoff above buys time for that; this
+# makes apt WAIT for the lock rather than give up, and it reaches the apt-get
+# Playwright runs on our behalf, which we never invoke directly. It also covers
+# the unattended-upgrades timer, the usual cause of this on a fresh runner.
+APT_CONF_DIR="${APT_CONF_DIR:-/etc/apt/apt.conf.d}"
+APT_LOCK_TIMEOUT_SECONDS="${APT_LOCK_TIMEOUT_SECONDS:-180}"
+
 case "${1:-}" in
   browsers) playwright_args=(install --with-deps chromium) ;;
   deps) playwright_args=(install-deps chromium) ;;
@@ -60,6 +74,30 @@ esac
 
 command -v timeout >/dev/null 2>&1 || { echo "install-playwright-ci: 'timeout' is required" >&2; exit 2; }
 command -v npx >/dev/null 2>&1 || { echo "install-playwright-ci: 'npx' is required" >&2; exit 2; }
+
+# Say which branch was taken every time. A helper that silently no-ops on a
+# host without apt reads as "configured" in the log, and this one is only
+# load-bearing on the one host shape nobody runs it on locally.
+configure_apt_lock_wait() {
+  local conf="$APT_CONF_DIR/99-spawnforge-lock-timeout"
+  local body="DPkg::Lock::Timeout \"${APT_LOCK_TIMEOUT_SECONDS}\";"
+  if [ ! -d "$APT_CONF_DIR" ]; then
+    echo "install-playwright-ci: no $APT_CONF_DIR; skipping apt lock-wait config (non-apt host)"
+    return 0
+  fi
+  if printf '%s\n' "$body" > "$conf" 2>/dev/null; then
+    echo "install-playwright-ci: apt will wait up to ${APT_LOCK_TIMEOUT_SECONDS}s for the dpkg lock"
+    return 0
+  fi
+  if command -v sudo >/dev/null 2>&1 && printf '%s\n' "$body" | sudo tee "$conf" >/dev/null 2>&1; then
+    echo "install-playwright-ci: apt will wait up to ${APT_LOCK_TIMEOUT_SECONDS}s for the dpkg lock (via sudo)"
+    return 0
+  fi
+  echo "::warning::install-playwright-ci: could not write $conf; a retry may hit a held dpkg lock"
+  return 0
+}
+
+configure_apt_lock_wait
 
 cd "$REPO_ROOT/web" || {
   echo "install-playwright-ci: cannot enter $REPO_ROOT/web" >&2
