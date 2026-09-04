@@ -5,6 +5,10 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
+concurrency:
+  group: changeset-check-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

@@ -987,6 +987,7 @@ jobs:
             scripts/__tests__/lib/platform.sh scripts/__tests__/platform-contract.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
+            scripts/__tests__/pr-workflow-concurrency.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
@@ -1083,6 +1084,9 @@ jobs:
 
       - name: Run PR work-item check test suite
         run: bash scripts/__tests__/pr-workitem-check.test.sh
+
+      - name: Run PR workflow concurrency test suite
+        run: bash scripts/__tests__/pr-workflow-concurrency.test.sh
 
       - name: Run WASM variant integrity test suite
         run: bash scripts/__tests__/wasm-variant-integrity.test.sh

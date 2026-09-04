@@ -3,7 +3,11 @@ name: PR Work Item Check
 on:
   pull_request:
     branches: [main]
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-workitem-check-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
