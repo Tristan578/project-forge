@@ -331,7 +331,7 @@ done
 # section still reported green when join_continuations was removed and one
 # wrapped invocation went invisible. Adding a playwright job raises this;
 # removing one lowers it, and either way the number is checked by a human.
-EXPECTED_PROD_WEBSERVER_INVOCATIONS=5
+EXPECTED_PROD_WEBSERVER_INVOCATIONS=6
 if [ "$prod_checked" -eq "$EXPECTED_PROD_WEBSERVER_INVOCATIONS" ]; then
   pass "checked ${prod_checked} playwright invocations against a production webServer (a walk over zero would pass vacuously)"
 else
