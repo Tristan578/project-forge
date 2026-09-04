@@ -57,6 +57,7 @@ vi.mock('@/lib/chat/tools', () => ({
 
 vi.mock('@/lib/chat/sanitizer', () => ({
   sanitizeChatInput: vi.fn((s: string) => s),
+  sanitizeToolText: vi.fn((s: string) => s),
   validateBodySize: vi.fn(() => true),
   detectPromptInjection: vi.fn(() => false),
 }));
@@ -64,14 +65,6 @@ vi.mock('@/lib/chat/sanitizer', () => ({
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
-
-// Keep @anthropic-ai/sdk mock for modules that still import it indirectly
-vi.mock('@anthropic-ai/sdk', () => {
-  class MockAnthropic {
-    messages = { create: vi.fn() };
-  }
-  return { default: MockAnthropic };
-});
 
 // Mock the SpawnForge agent module — route.ts calls createSpawnforgeAgent().stream()
 function makeMockNegStreamResponse() {
@@ -91,6 +84,7 @@ const mockNegAgent = { stream: mockNegStream };
 
 vi.mock('@/lib/ai/spawnforgeAgent', () => ({
   createSpawnforgeAgent: vi.fn(() => mockNegAgent),
+  resolveToolApprovalSecret: vi.fn(() => undefined),
 }));
 
 vi.mock('@/lib/costs/costLogger', () => ({
@@ -430,4 +424,85 @@ describe('POST /api/chat — negative cases', () => {
 
   // Model selection tests removed — this PR migrates the route to resolveChat,
   // making mockCreate assertions invalid. Model defaults are tested in route.test.ts.
+
+  // -------------------------------------------------------------------------
+  // PF-8860 — malformed tool-approval resume input
+  //
+  // A stale or half-written resume from an old client tab must degrade, never
+  // 500: the request still streams, and the bad parts simply do not reach the
+  // model.
+  // -------------------------------------------------------------------------
+  describe('tool-approval resume — malformed input', () => {
+    const streamedMessages = () =>
+      (mockNegStream.mock.calls[0]?.[0] as { messages: Array<{ role: string; content: unknown }> })
+        ?.messages ?? [];
+
+    it('drops an approval-response with a missing approvalId and still streams', async () => {
+      const res = await POST(makeRequest({
+        messages: [
+          { role: 'user', content: 'hello' },
+          { role: 'tool', content: [{ type: 'tool-approval-response', approved: true }] },
+        ],
+        model: 'claude-sonnet-4.6',
+        sceneContext: '',
+      }));
+
+      expect(res.status).toBe(200);
+      expect(streamedMessages().some((m) => m.role === 'tool')).toBe(false);
+    });
+
+    it('drops an approval-response with a non-boolean approved', async () => {
+      const res = await POST(makeRequest({
+        messages: [
+          { role: 'user', content: 'hello' },
+          { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'ap_1', approved: 'yes' }] },
+        ],
+        model: 'claude-sonnet-4.6',
+        sceneContext: '',
+      }));
+
+      expect(res.status).toBe(200);
+      expect(streamedMessages().some((m) => m.role === 'tool')).toBe(false);
+    });
+
+    it('never pushes an all-malformed tool message, and never returns 500', async () => {
+      const res = await POST(makeRequest({
+        messages: [
+          { role: 'user', content: 'hello' },
+          { role: 'tool', content: [{ nonsense: true }, 'string part', null] },
+          { role: 'tool', content: 'not an array' },
+        ],
+        model: 'claude-sonnet-4.6',
+        sceneContext: '',
+      }));
+
+      expect(res.status).toBe(200);
+      expect(streamedMessages()).toEqual([{ role: 'user', content: 'hello' }]);
+    });
+
+    it('forwards a well-formed approval-response unchanged', async () => {
+      const res = await POST(makeRequest({
+        messages: [
+          { role: 'user', content: 'hello' },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool-call', toolCallId: 'tc_1', toolName: 'delete_entities', input: {} },
+              { type: 'tool-approval-request', approvalId: 'ap_1', toolCallId: 'tc_1' },
+            ],
+          },
+          { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'ap_1', approved: true }] },
+        ],
+        model: 'claude-sonnet-4.6',
+        sceneContext: '',
+      }));
+
+      expect(res.status).toBe(200);
+      const msgs = streamedMessages();
+      expect(msgs.at(-1)).toEqual({
+        role: 'tool',
+        content: [{ type: 'tool-approval-response', approvalId: 'ap_1', approved: true }],
+      });
+    });
+  });
 });

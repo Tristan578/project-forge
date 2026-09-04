@@ -30,6 +30,8 @@ export default defineConfig({
         'src/**/*.test.ts',
         'src/**/*.spec.ts',
         'src/**/__tests__/**',
+        // Guard fixtures: run only by vitest.mockOnceGuard.fixtures.config.ts (#9542)
+        'src/**/__fixtures__/**',
         'src/**/*.d.ts',
         'src/app/**/layout.tsx',
         'src/app/**/page.tsx',
@@ -39,7 +41,7 @@ export default defineConfig({
       thresholds: {
         statements: 83,
         branches: 75,
-        functions: 77,
+        functions: 78,
         lines: 84,
       },
     },

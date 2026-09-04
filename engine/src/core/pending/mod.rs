@@ -30,6 +30,7 @@ pub mod performance;
 pub mod physics;
 pub mod procedural;
 pub mod query;
+pub mod resync;
 pub mod scene;
 pub mod sprites;
 pub mod transform;
@@ -50,6 +51,7 @@ pub use performance::*;
 pub use physics::*;
 pub use procedural::*;
 pub use query::*;
+pub use resync::*;
 pub use scene::*;
 pub use sprites::*;
 pub use transform::*;
@@ -195,6 +197,11 @@ pub struct PendingCommands {
     pub reverb_zone_commands: Vec<crate::core::reverb_zone::ReverbZoneCommand>,
     /// Re-reports from undo/redo, which write reverb state without a command.
     pub reverb_zone_resyncs: Vec<crate::core::reverb_zone::ReverbZoneResync>,
+    /// Cross-domain re-reports from the undo/redo arms and `spawn_from_snapshot`
+    /// — see `crate::core::component_resync::ComponentResync`. Cross-domain, so
+    /// it is declared beside the other resync queues rather than under any one
+    /// domain's block.
+    pub component_resyncs: Vec<crate::core::component_resync::ComponentResync>,
     // animation domain
     pub animation_requests: Vec<AnimationRequest>,
     pub animation_clip_updates: Vec<AnimationClipUpdate>,

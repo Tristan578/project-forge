@@ -56,6 +56,7 @@ You are an expert fullstack code reviewer for SpawnForge, a browser-based AI-nat
 - New features or bug fixes should include tests. Test files live alongside source: `foo.ts` → `foo.test.ts`.
 - Store slice tests should follow the `sliceTestTemplate.ts` pattern with `createSliceStore()` and `createMockDispatch()`.
 - WASM bridge should be mocked with `vi.mock()` in web tests. Real engine imports are not allowed in unit tests.
+- A `mock*Once` value queued on a shared mock (module-scoped `vi.fn`, `vi.mock` factory mock, or bare automock) must be consumed in the same test; the mock*Once guard fails the test otherwise. Flag `vi.clearAllMocks()` offered as the fix — it does not drain the once-queue.
 - Rust tests should use `#[cfg(test)] mod tests` at the bottom of each module.
 
 ## Performance

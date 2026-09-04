@@ -9,6 +9,9 @@ vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { modelMessageSchema } from 'ai';
+import { safeValidateTypes } from '@ai-sdk/provider-utils';
+import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -49,7 +52,17 @@ vi.mock('@/lib/tokens/pricing', () => ({
 
 vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
+  refundTokenAmount: vi.fn().mockResolvedValue({ refunded: true }),
 }));
+
+// Partial mock: the REAL verifier runs (it is what the 400 tests exercise), but
+// `deniedApprovalsAreAuthentic` can be forced for the refund test, which would
+// otherwise need an SDK-minted HMAC. Its real behaviour is pinned against the
+// live SDK in `lib/ai/__tests__/toolApprovalResume.integration.test.ts`.
+vi.mock('@/lib/ai/toolApprovalSignature', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ai/toolApprovalSignature')>();
+  return { ...actual, deniedApprovalsAreAuthentic: vi.fn(actual.deniedApprovalsAreAuthentic) };
+});
 
 vi.mock('@/lib/chat/tools', () => ({
   getChatTools: vi.fn(() => []),
@@ -85,6 +98,7 @@ vi.mock('@/lib/ai/deepTier', () => ({
 vi.mock('@/lib/chat/sanitizer', () => ({
   sanitizeChatInput: vi.fn((s: string) => s),
   sanitizeSystemPrompt: vi.fn((s: string) => s),
+  sanitizeToolText: vi.fn((s: string) => s),
   validateBodySize: vi.fn(() => true),
   detectPromptInjection: vi.fn(() => false),
 }));
@@ -137,15 +151,8 @@ const mockAgent = { stream: mockStream };
 
 vi.mock('@/lib/ai/spawnforgeAgent', () => ({
   createSpawnforgeAgent: vi.fn(() => mockAgent),
+  resolveToolApprovalSecret: vi.fn(() => undefined),
 }));
-
-// Keep @anthropic-ai/sdk mock for modules that still import it indirectly
-vi.mock('@anthropic-ai/sdk', () => {
-  class MockAnthropic {
-    messages = { create: vi.fn() };
-  }
-  return { default: MockAnthropic };
-});
 
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
@@ -155,7 +162,9 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { validateBodySize, detectPromptInjection, sanitizeChatInput } from '@/lib/chat/sanitizer';
-import { refundTokens } from '@/lib/tokens/service';
+import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
+import { resolveToolApprovalSecret } from '@/lib/ai/spawnforgeAgent';
+import { deniedApprovalsAreAuthentic } from '@/lib/ai/toolApprovalSignature';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
@@ -1152,6 +1161,154 @@ describe('POST /api/chat', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Tool-approval verification (PF-8860 sec#3 / arch#5)
+  // -------------------------------------------------------------------------
+  describe('tool approval verification', () => {
+    /** A resume history: gated call, its signed request, and the approval. */
+    const resumeBody = (signature: string | undefined) => ({
+      messages: [
+        { role: 'user', content: 'delete the enemies' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool-call', toolCallId: 'tc-1', toolName: 'delete_entities', input: { entityIds: ['1'] } },
+            {
+              type: 'tool-approval-request',
+              approvalId: 'ap-1',
+              toolCallId: 'tc-1',
+              ...(signature ? { signature } : {}),
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          content: [
+            { type: 'tool-approval-response', approvalId: 'ap-1', approved: true },
+            {
+              type: 'tool-result',
+              toolCallId: 'tc-1',
+              toolName: 'delete_entities',
+              output: { type: 'text', value: 'Deleted 1 entity' },
+            },
+          ],
+        },
+      ],
+      model: 'claude-sonnet-4.6',
+      sceneContext: '',
+    });
+
+    it('rejects a resume whose approval signature does not verify', async () => {
+      vi.mocked(resolveToolApprovalSecret).mockReturnValue('test-secret');
+
+      const res = await POST(makeRequest(resumeBody('not-the-real-hmac')));
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).code).toBe('INVALID_TOOL_APPROVAL');
+      // Fails CLOSED — the turn must not reach the model at all.
+      expect(mockStream).not.toHaveBeenCalled();
+    });
+
+    it('rejects a resume that carries no signature at all', async () => {
+      vi.mocked(resolveToolApprovalSecret).mockReturnValue('test-secret');
+
+      const res = await POST(makeRequest(resumeBody(undefined)));
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).code).toBe('INVALID_TOOL_APPROVAL');
+      expect(mockStream).not.toHaveBeenCalled();
+    });
+
+    it('lets an ordinary turn through with the secret configured', async () => {
+      // The counterweight: without this, a verifier that rejected EVERY request
+      // would satisfy both tests above.
+      vi.mocked(resolveToolApprovalSecret).mockReturnValue('test-secret');
+
+      const res = await POST(makeRequest(validBody()));
+
+      expect(res.status).toBe(200);
+      expect(mockStream).toHaveBeenCalled();
+    });
+
+    it('refunds the resume of a turn whose gated call was denied', async () => {
+      // Double billing: the paused turn was charged upfront, and the resume is
+      // a second charged request. When every decision was a denial and the
+      // resumed turn called nothing new, the user paid twice for one turn and
+      // got nothing for the second charge.
+      vi.mocked(resolveToolApprovalSecret).mockReturnValue('test-secret');
+      vi.mocked(deniedApprovalsAreAuthentic).mockResolvedValue(true);
+      let finished: Promise<void> | undefined;
+      mockStreamResult.toUIMessageStreamResponse.mockImplementationOnce(
+        (opts: { onFinish?: (a: { finishReason: string }) => Promise<void> }) => {
+          // Hold the callback's promise so the assertions run AFTER the refund
+          // decision settles — a sleep would pass whether or not it had.
+          finished = opts.onFinish?.({ finishReason: 'stop' });
+          return makeMockStreamResponse();
+        },
+      );
+
+      const res = await POST(makeRequest(validBody()));
+      expect(res.status).toBe(200);
+      await finished;
+
+      expect(refundTokenAmount).toHaveBeenCalledWith(
+        'user-1',
+        expect.any(Number),
+        'chat_denied_approval_resume',
+        'usage-1',
+      );
+      // The two refund helpers use different idempotency namespaces and one
+      // usageId must be claimed by exactly one of them.
+      expect(refundTokens).not.toHaveBeenCalled();
+    });
+
+    it('does NOT refund a resume that went on to call more tools', async () => {
+      vi.mocked(resolveToolApprovalSecret).mockReturnValue('test-secret');
+      vi.mocked(deniedApprovalsAreAuthentic).mockResolvedValue(true);
+      mockStream.mockImplementationOnce(async (opts: {
+        onStepFinish?: (a: Record<string, unknown>) => Promise<void>;
+      }) => {
+        await opts.onStepFinish?.({ usage: undefined, toolCalls: [{ toolName: 'spawn_entity' }] });
+        return mockStreamResult;
+      });
+      let finished: Promise<void> | undefined;
+      mockStreamResult.toUIMessageStreamResponse.mockImplementationOnce(
+        (opts: { onFinish?: (a: { finishReason: string }) => Promise<void> }) => {
+          // Hold the callback's promise so the assertions run AFTER the refund
+          // decision settles — a sleep would pass whether or not it had.
+          finished = opts.onFinish?.({ finishReason: 'stop' });
+          return makeMockStreamResponse();
+        },
+      );
+
+      await POST(makeRequest(validBody()));
+      await finished;
+
+      expect(refundTokenAmount).not.toHaveBeenCalled();
+    });
+
+    it('does NOT refund when the denials are not authentically signed', async () => {
+      // Otherwise the refund is free chat: a client could mint denials for
+      // turns the server never gated.
+      vi.mocked(resolveToolApprovalSecret).mockReturnValue('test-secret');
+      vi.mocked(deniedApprovalsAreAuthentic).mockResolvedValue(false);
+      let finished: Promise<void> | undefined;
+      mockStreamResult.toUIMessageStreamResponse.mockImplementationOnce(
+        (opts: { onFinish?: (a: { finishReason: string }) => Promise<void> }) => {
+          // Hold the callback's promise so the assertions run AFTER the refund
+          // decision settles — a sleep would pass whether or not it had.
+          finished = opts.onFinish?.({ finishReason: 'stop' });
+          return makeMockStreamResponse();
+        },
+      );
+
+      await POST(makeRequest(validBody()));
+      await finished;
+
+      expect(refundTokenAmount).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Error handling
   // -------------------------------------------------------------------------
   describe('error handling', () => {
@@ -1274,6 +1431,278 @@ describe('POST /api/chat', () => {
       expect(arg).not.toHaveProperty('$ai_output_choices');
       expect(arg).not.toHaveProperty('messages');
       expect(arg).not.toHaveProperty('prompt');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PF-8860 — buildModelMessages and the SDK schema guard
+//
+// THE point of this block: nothing in the suite used to validate a real message
+// array. `createSpawnforgeAgent` is mocked wholesale above and the store tests
+// mock `fetch`, so the follow-up shape the client had been sending for months
+// — Anthropic `tool_result` blocks inside a `role:'user'` message — reached
+// `agent.stream()` and was rejected by the SDK's own `modelMessageSchema` with
+// nobody noticing. It surfaces as a stream `error` chunk (standardization runs
+// inside streamText's detached async body), not an HTTP failure, so the second
+// iteration of every tool-calling turn failed quietly.
+//
+// Every shape `buildModelMessages` can emit is validated against that schema
+// here. Do not add an emitted shape without adding it to this block.
+// ---------------------------------------------------------------------------
+describe('buildModelMessages (PF-8860)', () => {
+  let buildModelMessages: typeof import('../route').buildModelMessages;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('../route');
+    buildModelMessages = mod.buildModelMessages;
+  });
+
+  const validate = async (value: unknown) =>
+    safeValidateTypes({ value, schema: z.array(modelMessageSchema) });
+
+  const APPROVAL_HISTORY = [
+    { role: 'user', content: 'delete the enemies' },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'Deleting them now.' },
+        { type: 'tool-call', toolCallId: 'tc_1', toolName: 'delete_entities', input: { ids: ['4294967299'] } },
+        { type: 'tool-approval-request', approvalId: 'ap_1', toolCallId: 'tc_1' },
+      ],
+    },
+    {
+      role: 'tool',
+      content: [
+        { type: 'tool-approval-response', approvalId: 'ap_1', approved: true },
+        {
+          type: 'tool-result',
+          toolCallId: 'tc_1',
+          toolName: 'delete_entities',
+          output: { type: 'text', value: 'Deleted 1 entity' },
+        },
+      ],
+    },
+  ];
+
+  describe('assistant reconstruction', () => {
+    it('preserves tool-call and tool-approval-request parts instead of stringifying them', () => {
+      const out = buildModelMessages(APPROVAL_HISTORY);
+      const assistant = out[1] as { role: string; content: Array<Record<string, unknown>> };
+      expect(assistant.role).toBe('assistant');
+      expect(assistant.content).toEqual([
+        { type: 'text', text: 'Deleting them now.' },
+        { type: 'tool-call', toolCallId: 'tc_1', toolName: 'delete_entities', input: { ids: ['4294967299'] } },
+        { type: 'tool-approval-request', approvalId: 'ap_1', toolCallId: 'tc_1' },
+      ]);
+    });
+
+    it('still wraps a plain string assistant message in a text part', () => {
+      const out = buildModelMessages([{ role: 'assistant', content: 'hi' }]);
+      expect(out).toEqual([{ role: 'assistant', content: [{ type: 'text', text: 'hi' }] }]);
+    });
+
+    it('drops unrecognised assistant parts rather than forwarding them', () => {
+      const out = buildModelMessages([
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'tc_1', name: 'delete_entities', input: {} },
+            { type: 'text', text: 'ok' },
+          ],
+        },
+      ]);
+      expect(out).toEqual([{ role: 'assistant', content: [{ type: 'text', text: 'ok' }] }]);
+    });
+  });
+
+  describe('tool message branch', () => {
+    it('maps a tool-approval-response to the exact SDK shape', () => {
+      const out = buildModelMessages([
+        {
+          role: 'tool',
+          content: [
+            { type: 'tool-approval-response', approvalId: 'ap_1', approved: false, reason: 'nope' },
+          ],
+        },
+      ]);
+      expect(out).toEqual([
+        {
+          role: 'tool',
+          content: [
+            { type: 'tool-approval-response', approvalId: 'ap_1', approved: false, reason: 'nope' },
+          ],
+        },
+      ]);
+    });
+
+    it('maps a tool-result with a valid ToolResultOutput', () => {
+      const out = buildModelMessages([
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'tc_1',
+              toolName: 'get_scene_graph',
+              output: { type: 'error-text', value: 'Error: boom' },
+            },
+          ],
+        },
+      ]);
+      expect(out[0]).toEqual({
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'tc_1',
+            toolName: 'get_scene_graph',
+            output: { type: 'error-text', value: 'Error: boom' },
+          },
+        ],
+      });
+    });
+
+    it('drops a malformed approval-response and does not push an all-malformed tool message', () => {
+      expect(
+        buildModelMessages([
+          { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: '', approved: true }] },
+        ]),
+      ).toEqual([]);
+      expect(
+        buildModelMessages([
+          { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'ap_1', approved: 'yes' }] },
+        ]),
+      ).toEqual([]);
+      expect(
+        buildModelMessages([
+          { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'tc_1', toolName: 'x', output: 'raw' }] },
+        ]),
+      ).toEqual([]);
+      expect(buildModelMessages([{ role: 'tool', content: 'not an array' }])).toEqual([]);
+    });
+
+    it('keeps the well-formed parts of a partly-malformed tool message', () => {
+      const out = buildModelMessages([
+        {
+          role: 'tool',
+          content: [
+            { type: 'tool-approval-response', approvalId: 'ap_1', approved: true },
+            { type: 'garbage' },
+          ],
+        },
+      ]) as Array<{ content: unknown[] }>;
+      expect(out[0].content).toHaveLength(1);
+    });
+  });
+
+  describe('user branch', () => {
+    it('drops Anthropic tool_result blocks smuggled into a user message', () => {
+      // The exact shape the old client sent. It is invalid against
+      // modelMessageSchema, so forwarding it broke the whole turn.
+      expect(
+        buildModelMessages([
+          { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tc_1', content: 'Success' }] },
+        ]),
+      ).toEqual([]);
+    });
+
+    it('keeps multimodal text + image parts', () => {
+      const out = buildModelMessages([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'look' },
+            { type: 'image', image: 'data:image/png;base64,AAAA' },
+          ],
+        },
+      ]) as Array<{ content: unknown[] }>;
+      expect(out[0].content).toHaveLength(2);
+    });
+  });
+
+  describe('SCHEMA GUARD — every emitted shape validates against the SDK', () => {
+    it('accepts the full approval resume history', async () => {
+      const res = await validate(buildModelMessages(APPROVAL_HISTORY));
+      expect(res.success, JSON.stringify(res.success ? {} : res.error, null, 2)).toBe(true);
+    });
+
+    it('accepts a deny resume (approval-response with no tool-result)', async () => {
+      const res = await validate(
+        buildModelMessages([
+          { role: 'user', content: 'delete everything' },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool-call', toolCallId: 'tc_1', toolName: 'new_scene', input: {} },
+              { type: 'tool-approval-request', approvalId: 'ap_1', toolCallId: 'tc_1' },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [{ type: 'tool-approval-response', approvalId: 'ap_1', approved: false }],
+          },
+        ]),
+      );
+      expect(res.success).toBe(true);
+    });
+
+    it('accepts an ordinary ungated tool round trip', async () => {
+      const res = await validate(
+        buildModelMessages([
+          { role: 'user', content: 'what is in the scene' },
+          {
+            role: 'assistant',
+            content: [{ type: 'tool-call', toolCallId: 'tc_1', toolName: 'get_scene_graph', input: {} }],
+          },
+          {
+            role: 'tool',
+            content: [
+              {
+                type: 'tool-result',
+                toolCallId: 'tc_1',
+                toolName: 'get_scene_graph',
+                output: { type: 'text', value: 'Success' },
+              },
+            ],
+          },
+        ]),
+      );
+      expect(res.success).toBe(true);
+    });
+
+    it('accepts plain string and multimodal messages', async () => {
+      const res = await validate(
+        buildModelMessages([
+          { role: 'user', content: 'hi' },
+          { role: 'assistant', content: 'hello' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'look' },
+              { type: 'image', image: 'data:image/png;base64,AAAA' },
+            ],
+          },
+        ]),
+      );
+      expect(res.success).toBe(true);
+    });
+
+    it('REGRESSION: the old Anthropic-block follow-up is rejected by the schema', async () => {
+      // If someone reverts the client to Anthropic blocks, this fails loudly
+      // instead of the turn dying silently in production.
+      const res = await validate([
+        {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'tc_1', name: 'spawn_entity', input: {} }],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'tc_1', content: 'Success', is_error: false }],
+        },
+      ]);
+      expect(res.success).toBe(false);
     });
   });
 });

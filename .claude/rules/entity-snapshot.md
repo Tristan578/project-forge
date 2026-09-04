@@ -32,9 +32,46 @@ paths:
 - Struct fields: `SelectionChangedEvent { selected_ids, primary_id, primary_name }` — NOT a unit struct. New systems must construct it properly
 
 ## History System
-- `UndoableAction` enum (29 variants): TransformChange, MultiTransformChange, Rename, Spawn, Delete, Duplicate, VisibilityChange, MaterialChange, LightChange, PhysicsChange, ScriptChange, AudioChange, ReverbZoneChange, ParticleChange, ShaderChange, CsgOperation, TerrainChange, ExtrudeShape, LatheShape, ArrayEntity, CombineMeshes, JointChange, GameComponentChange, AnimationClipChange, SpriteChange, Physics2dChange, Joint2dChange, TilemapChange, SkeletonChange
+- `UndoableAction` enum (30 variants): TransformChange, MultiTransformChange, Rename, Spawn, Delete, Duplicate, VisibilityChange, MaterialChange, LightChange, PhysicsChange, ScriptChange, AudioChange, ReverbZoneChange, ParticleChange, ShaderChange, CsgOperation, TerrainChange, ExtrudeShape, LatheShape, ArrayEntity, CombineMeshes, JointChange, GameComponentChange, AnimationClipChange, SpriteChange, Physics2dChange, Physics2dToggle, Joint2dChange, TilemapChange, SkeletonChange
 - Entity IDs preserved on undo/redo for reference stability
 - `GizmoInteractionState` tracks drag start/end for transform history
+
+## Every history arm owes the browser a re-report (#9290, #9291)
+
+An undo/redo arm writes the ECS directly, so nothing in `bridge/` notices. The
+per-component emitters (`emit_material_on_selection` and its fourteen siblings)
+are gated on `selection.primary` **and** `Changed<T>`, so undoing an edit to a
+NON-selected entity leaves the Zustand mirror holding state the engine has
+already dropped — and the next inspector edit sends a full-replace command built
+from that stale value.
+
+`core/` cannot emit (bridge isolation), so the arms queue instead:
+
+- **Every `UndoableAction` arm in both `execute_undo` and `execute_redo`** pushes
+  a `ComponentResync` through `queue_resync(...)` — `core/component_resync.rs`
+  for the enum, `core/entity_factory.rs` for the helper. Two arms
+  (`ReverbZoneChange`, `SkeletonChange`) use their own older resync queues
+  instead; both are equally valid, neither is optional.
+- **`spawn_from_snapshot`** pushes everything `resyncs_for_snapshot` finds in the
+  snapshot, plus the two own-queue pushes — unless the caller passes
+  `ResyncReport::Silent`. That flag is ONLY for a bulk caller that restores many
+  entities at once and already tells the browser wholesale (the scene loader,
+  which emits `SCENE_LOADED`). Each resync is one synchronous JS callback whose
+  handler spreads a whole Zustand map, so per-entity reporting on a bulk path is
+  O(N^2) main-thread work. Choosing `Silent` on a single-entity path reinstates
+  the desync above.
+- `bridge/component_resync.rs` drains the queue, bounded by
+  `MAX_RESYNC_DRAIN_PER_FRAME`, and turns each resync into the event the browser
+  already handles. Any handler it reaches that writes a `primary*` store field
+  must go through `applyWhenPrimary(entityId, ...)`, which means the event
+  payload has to carry an `entity_id`.
+
+An arm that owes nothing must say why in `EXEMPT_ARMS`
+(`core/component_resync_tests.rs`) — there are only two valid reasons today: an
+ungated `Changed<T>` system already reports the write (Rename,
+VisibilityChange, TerrainChange), or the whole entity despawns/respawns. That
+gate iterates the arms parsed out of the source, so a new arm fails the build
+until it is queued or exempted.
 
 ## Merging Queries
 - When a new query pushes a system to 17 params, merge related queries (e.g. combine `csg_export_query` + `procedural_mesh_export_query` into one `Query<(&EntityId, Option<&CsgMeshData>, Option<&ProceduralMeshData>)>`)

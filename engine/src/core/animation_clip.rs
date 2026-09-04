@@ -588,6 +588,7 @@ pub fn autoplay_clips_on_play(
 /// is the timeline's whole job.
 pub fn advance_animation_clips(
     time: Res<Time>,
+    mode: Res<EngineMode>,
     mut clips: Query<(
         &mut AnimationClipData,
         &mut Transform,
@@ -595,6 +596,12 @@ pub fn advance_animation_clips(
         Option<&mut LightData>,
     )>,
 ) {
+    // Edit mode intentionally samples authored preview/seek changes, while a
+    // paused game must freeze both its clock and its rendered pose.
+    if *mode == EngineMode::Paused {
+        return;
+    }
+
     let dt = time.delta_secs();
     for (mut clip, mut transform, material, light) in clips.iter_mut() {
         let touched = clip.is_changed();
@@ -812,6 +819,26 @@ mod tests {
         // Staying in Play does not restart it.
         schedule.run(&mut world);
         assert!((world.get::<AnimationClipData>(entity).unwrap().current_time - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn engine_pause_freezes_a_playing_clip_and_its_pose() {
+        let mut world = World::new();
+        world.insert_resource(EngineMode::Paused);
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_millis(500));
+        world.insert_resource(time);
+        let mut clip = clip_with(PropertyTarget::PositionX, &[(0.0, 0.0), (2.0, 10.0)]);
+        clip.playing = true;
+        clip.current_time = 0.5;
+        let entity = world.spawn((clip, Transform::from_xyz(2.5, 0.0, 0.0))).id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(advance_animation_clips);
+
+        schedule.run(&mut world);
+
+        assert!((world.get::<AnimationClipData>(entity).unwrap().current_time - 0.5).abs() < 1e-6);
+        assert!((world.get::<Transform>(entity).unwrap().translation.x - 2.5).abs() < 1e-6);
     }
 
     #[test]

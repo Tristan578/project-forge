@@ -10,18 +10,38 @@ import {
  * Allowed origins for API requests in production.
  * In development, allow localhost variants.
  */
-const ALLOWED_ORIGINS =
-  process.env.NODE_ENV === 'production'
+export function allowedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
+  return env.NODE_ENV === 'production'
     ? [
         'https://spawnforge.ai',
         'https://www.spawnforge.ai',
-        ...(process.env.STAGING_URL ? [process.env.STAGING_URL] : []),
+        ...(env.STAGING_URL ? [env.STAGING_URL] : []),
       ]
     : [
         'http://localhost:3000',
         'http://127.0.0.1:3000',
         'http://localhost:3001',
       ];
+}
+
+const ALLOWED_ORIGINS = allowedOrigins();
+
+/**
+ * Origins whose Clerk session tokens this deployment accepts — Clerk's
+ * `authorizedParties`, checked against the token's `azp` claim on every
+ * request (#9630). Without it a session token minted for ANOTHER Clerk-hosted
+ * origin replays here. The list is the CORS allow-list plus whatever Vercel
+ * says this deployment is served as, so preview and branch deployments (which
+ * sign in on their own `*.vercel.app` origin) keep working. `@clerk/backend`
+ * 3.11.1+ rejects a token whose `azp` is missing or empty once this is set.
+ */
+export function buildAuthorizedParties(env: NodeJS.ProcessEnv = process.env): string[] {
+  const parties = new Set<string>(allowedOrigins(env));
+  for (const host of [env.VERCEL_URL, env.VERCEL_BRANCH_URL, env.VERCEL_PROJECT_PRODUCTION_URL]) {
+    if (host) parties.add(`https://${host.replace(/^https?:\/\//, '')}`);
+  }
+  return [...parties];
+}
 
 /**
  * Shared CORS + security header logic.
@@ -386,6 +406,10 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return clerkMiddleware((auth: any, req: NextRequest) =>
     applyAuthDecision(auth, req, isPublicRoute),
+    // Enforce the token's `azp` claim (#9630). The list is exported and tested
+    // as a pure function because clerkMiddleware itself is required at
+    // runtime and cannot be intercepted from the unit tests.
+    { authorizedParties: buildAuthorizedParties() },
   );
 }
 

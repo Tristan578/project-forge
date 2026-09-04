@@ -8,7 +8,7 @@
  * Two naming conventions are used:
  *
  * 1. Short names (`AI_MODEL_PRIMARY`, `AI_MODEL_FAST`): provider-agnostic IDs
- *    used by the legacy @anthropic-ai/sdk path and the provider registry's
+ *    used by the direct @ai-sdk/anthropic path and the provider registry's
  *    MODEL_MAP translation layer.
  *
  * 2. Gateway-format names (`GATEWAY_MODEL_CHAT`, etc.): fully-qualified
@@ -103,10 +103,93 @@ export type AiModelKey = keyof typeof AI_MODELS;
  * explicitly — prevents accidental routing of new models that might be
  * priced differently.
  */
+/**
+ * Ordered fallback models the AI Gateway may route to when `model` is
+ * unavailable (#9631): premium falls back to chat then fast; chat falls back
+ * to fast; fast has nothing cheaper to fall back to. Unknown ids (another
+ * provider's model) get no fallback rather than a guess.
+ */
+export function gatewayFallbackModels(model: string | undefined | null): string[] {
+  const chain: string[] = [GATEWAY_MODEL_PREMIUM, GATEWAY_MODEL_CHAT, GATEWAY_MODEL_FAST];
+  const index = model ? chain.indexOf(model) : -1;
+  return index < 0 ? [] : chain.slice(index + 1);
+}
+
 export function isPremiumModel(model: string | undefined | null): boolean {
   if (!model) return false;
   const bare = model.includes('/') ? model.split('/').slice(1).join('/') : model;
   return bare === AI_MODEL_PREMIUM;
+}
+
+// ---------------------------------------------------------------------------
+// Extended thinking / effort support per model (#9626)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which extended-thinking request shape a Claude model accepts.
+ *
+ * The Anthropic API is not uniform across the Claude 4 family. Opus 4.7+,
+ * Sonnet 4.6+ and every model from 4.7 onward (Claude 5 included) accept only
+ * the adaptive form (`{ type: 'adaptive' }`) and answer the legacy budget form
+ * with HTTP 400; Haiku 4.5 and earlier accept only the budget form
+ * (`{ type: 'enabled', budgetTokens }`) and answer adaptive with HTTP 400.
+ * Emitting one shape for every model — which is what the chat route did —
+ * 400s a Pro user with the thinking toggle on and the premium model selected.
+ *
+ * - `adaptive`: emit `{ type: 'adaptive' }`
+ * - `budget`:   emit `{ type: 'enabled', budgetTokens }`
+ * - `none`:     not a Claude model that supports extended thinking; emit nothing
+ */
+export type ThinkingMode = 'adaptive' | 'budget' | 'none';
+
+interface ClaudeVersion {
+  family: string;
+  major: number;
+  minor: number;
+}
+
+/**
+ * Parse `claude-<family>-<major>-<minor>[-date]` (and the dotted
+ * `claude-<family>-<major>.<minor>` spelling used in some fixtures) from a bare
+ * or gateway-format id. Legacy `claude-3-x-<family>` ids parse with the numbers
+ * first. Returns null for anything that is not a Claude id.
+ */
+function parseClaudeVersion(model: string): ClaudeVersion | null {
+  const bare = model.includes('/') ? model.split('/').slice(1).join('/') : model;
+  const modern = /^claude-([a-z]+)-(\d+)(?:[.-](\d+))?(?:$|[-.])/.exec(bare);
+  if (modern) {
+    return { family: modern[1], major: Number(modern[2]), minor: modern[3] === undefined ? 0 : Number(modern[3]) };
+  }
+  const legacy = /^claude-(\d+)(?:[.-](\d+))?-([a-z]+)/.exec(bare);
+  if (legacy) {
+    return { family: legacy[3], major: Number(legacy[1]), minor: legacy[2] === undefined ? 0 : Number(legacy[2]) };
+  }
+  return null;
+}
+
+export function thinkingModeFor(model: string | undefined | null): ThinkingMode {
+  if (!model) return 'none';
+  const v = parseClaudeVersion(model);
+  if (!v) return 'none';
+  if (v.major >= 5) return 'adaptive';
+  if (v.major === 4) {
+    if (v.minor >= 7) return 'adaptive';
+    if (v.family === 'sonnet' && v.minor >= 6) return 'adaptive';
+    return 'budget';
+  }
+  // Claude 3.7 introduced extended thinking (budget form); nothing older has it.
+  if (v.major === 3 && v.minor >= 7) return 'budget';
+  return 'none';
+}
+
+/**
+ * `providerOptions.anthropic.effort` is accepted exactly where adaptive
+ * thinking is (Opus 4.7+, Sonnet 4.6+, Claude 5); Haiku 4.5 answers it with
+ * HTTP 400. The chat route accepts `effort` from any Creator/Pro request body,
+ * so the agent must drop it for models that reject it.
+ */
+export function supportsEffort(model: string | undefined | null): boolean {
+  return thinkingModeFor(model) === 'adaptive';
 }
 
 // ---------------------------------------------------------------------------

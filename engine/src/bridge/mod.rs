@@ -16,6 +16,11 @@
 //! you need CI to actually execute in `core/`, which the native job does run.
 
 pub mod events;
+/// Drain for the cross-domain component re-report queue the history arms
+/// fill. Always-active: undo and redo are editor actions, but the drain itself
+/// is a plain queue-to-event mapping and registering it inside the editor-only
+/// block would make its ordering constraint disappear in `runtime` builds.
+mod component_resync;
 mod core_systems;
 mod material;
 mod performance;
@@ -541,6 +546,11 @@ impl Plugin for SelectionPlugin {
             // deferred-Commands ordering decided who won. It also drains
             // `reverb_zone_resyncs`, which is why it is in `ResyncDrainSet`.
             .add_systems(Update, audio::apply_reverb_zone_commands.in_set(ResyncDrainSet))
+            // The cross-domain re-report drain. `ResyncDrainSet` is what orders
+            // it after `EditorApplySet`, where the undo/redo arms fill the
+            // queue; without that, Bevy is free to run this first and the
+            // editor mirror silently lags one frame behind every undo.
+            .add_systems(Update, component_resync::apply_component_resyncs.in_set(ResyncDrainSet))
             // Audio bus systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 audio::apply_audio_bus_creates,
