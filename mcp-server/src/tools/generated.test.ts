@@ -139,6 +139,21 @@ describe('deriveAnnotations', () => {
     expect(deriveAnnotations('scene:write', 'redo').destructiveHint).toBe(true);
   });
 
+  it("honours the manifest's destructive flag for names the heuristic cannot see", () => {
+    // The prefix heuristic has no way to know a whole-scene replacement is
+    // destructive; the manifest flag (PF-8860) does.
+    expect(deriveAnnotations('scene:write', 'new_scene').destructiveHint).toBe(false);
+    expect(deriveAnnotations('scene:write', 'new_scene', true).destructiveHint).toBe(true);
+    expect(deriveAnnotations('scene:write', 'load_scene', true).destructiveHint).toBe(true);
+  });
+
+  it('does not un-flag a name the heuristic already covered', () => {
+    // The flag widens; it never narrows. `remove_script` is not marked
+    // destructive in the manifest but the heuristic still catches it.
+    expect(deriveAnnotations('scene:write', 'remove_script', false).destructiveHint).toBe(true);
+    expect(deriveAnnotations('scene:write', 'remove_script', undefined).destructiveHint).toBe(true);
+  });
+
   it('sets openWorldHint to false', () => {
     const ann = deriveAnnotations('scene:write', 'spawn_entity');
     expect(ann.openWorldHint).toBe(false);
