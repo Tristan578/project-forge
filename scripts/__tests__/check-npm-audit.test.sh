@@ -167,7 +167,7 @@ trap 'rm -rf "$FIX" "$REPO"' EXIT
 # read as a WAIVED verdict for the wrong reason, invisibly.
 run_gate_script() {
   local script="$1" auditcmd="$2" ws_arg="${3:-ws}" out rc
-  out="$(cd "$REPO" && NPM_AUDIT_CMD="$auditcmd" bash "$script" "$ws_arg" 2>&1)"
+  out="$(cd "$REPO" && NPM_AUDIT_CMD="$auditcmd" NPM_AUDIT_RETRY_DELAY=0 bash "$script" "$ws_arg" 2>&1)"
   rc=$?
   grep -E 'unbound variable|bad substitution|syntax error' <<<"$out" >> "$FIX/bash-errors.log" || true
   printf '%s|%s' "$rc" "$out"
@@ -775,6 +775,86 @@ JSON
 res="$(run_gate "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "2" ]; then pass "auditReportVersion 1 fails closed (exit 2)"; else fail "v1 report should exit 2, got $rc"; fi
 if grep -qF "not a recognized audit report" <<<"$out"; then pass "v1 report prints the not-recognized message"; else fail "not-recognized message missing for v1 report"; fi
+
+# --- 9d. Transport failure retries, then fails CLOSED ------------------------
+# A registry hiccup makes `npm audit` emit its own error JSON (or nothing) on
+# stdout. That used to be one shot: whatever the single attempt produced decided
+# the gate, and npm's stderr went to /dev/null, so an operator saw
+# "auditReportVersion 'absent'" with no cause. Observed on #9670 and on main --
+# an exactly-five-minute run, then 'absent', on a PR touching no JS at all.
+#
+# The retry must shorten an outage WITHOUT ever converting one into a pass, so
+# both halves are asserted: a stub that recovers on attempt 2 passes, and a stub
+# that never recovers still exits 2 after exhausting its attempts.
+
+# Recovers on the second attempt. The stub is built with printf, not a heredoc:
+# this suite's executable-line filter recognizes exactly one heredoc opener
+# shape, and an unrecognized one fails the suite closed by design.
+counter="$FIX/retry-counter"; : > "$counter"
+f="$(fixture retry-good.json <<'JSON'
+{"auditReportVersion":2,"vulnerabilities":{}}
+JSON
+)"
+flaky="$FIX/flaky-audit.sh"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'echo x >> %s\n' "$counter"
+  # shellcheck disable=SC2016  # the $(...) is literal text of the GENERATED stub
+  printf 'if [ "$(wc -l < %s | tr -d " ")" -lt 2 ]; then\n' "$counter"
+  printf '  echo "npm ERR! network request to registry failed" >&2\n'
+  printf '  printf %s\n' "'{\"error\":{\"code\":\"ENETUNREACH\"}}'"
+  printf '  exit 1\n'
+  printf 'fi\n'
+  printf 'cat %s\n' "$f"
+} > "$flaky"
+chmod +x "$flaky"
+
+res="$(run_gate "bash $flaky")"; rc="${res%%|*}"; out="${res#*|}"
+attempts="$(wc -l < "$counter" | tr -d ' ')"
+if [ "$rc" = "0" ]; then pass "a transport failure that recovers on attempt 2 passes the gate (exit 0)"; else fail "flaky-then-good audit should exit 0, got $rc -- output: $out"; fi
+if [ "$attempts" = "2" ]; then pass "the gate retried exactly once before succeeding (2 invocations)"; else fail "expected 2 audit invocations, saw $attempts -- the retry loop either did not run or did not stop at the first good report"; fi
+if grep -qF "retrying in" <<<"$out"; then pass "the retry is announced, so a slow-but-passing gate is visible in the log"; else fail "no retry warning in the output -- a silent retry hides a degrading registry"; fi
+
+# Never recovers: still fails closed, and now says how many attempts it made.
+res="$(run_gate "printf '{\"error\":{\"code\":\"ENETUNREACH\"}}'")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "a transport failure that never recovers still fails closed (exit 2)"; else fail "exhausted retries must exit 2, got $rc -- the retry converted an outage into a pass"; fi
+if grep -qE "attempt\(s\)" <<<"$out"; then pass "the fail-closed message reports the attempt count"; else fail "attempt count missing from the fail-closed message"; fi
+
+# npm's stderr must reach the log. Without it the operator has the symptom
+# ('absent') and nothing to act on.
+res="$(run_gate "printf 'NPM-STDERR-MARKER\n' >&2; printf 'not json{{{'")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "2" ]; then pass "stderr-only failure still fails closed (exit 2)"; else fail "stderr-only failure should exit 2, got $rc"; fi
+if grep -qF "NPM-STDERR-MARKER" <<<"$out"; then pass "npm's stderr is surfaced in the failure output (the cause, not just the symptom)"; else fail "npm stderr was swallowed -- the gate reports 'absent' with no diagnosable cause"; fi
+
+# --- 9e. The audit request gets more than npm's default 5-minute timeout ------
+# #9670 (23:19:09 -> 23:24:10) and #9664 (23:28:35 -> 23:33:35) each ran EXACTLY
+# 5:00 on the `web` workspace and then reported 'absent'. npm's default
+# `fetch-timeout` is 300000ms; that precision is the timeout expiring, not a
+# registry flake -- and a retry alone would just spend 15 minutes reaching the
+# same wall. The gate must therefore RAISE the timeout, not only retry.
+#
+# Asserted behaviourally: this stub emits a valid report only when the timeout
+# npm would actually use exceeds its own default, so the check fails if the
+# export is dropped, left at the default, or set below it.
+slow="$FIX/timeout-probe.sh"
+{
+  printf '#!/usr/bin/env bash\n'
+  # shellcheck disable=SC2016  # literal text of the GENERATED stub, expanded there
+  printf 'if [ "${npm_config_fetch_timeout:-300000}" -gt 300000 ]; then\n'
+  printf '  cat %s\n' "$f"
+  printf 'else\n'
+  printf '  echo "npm ERR! request to registry timed out" >&2\n'
+  printf '  exit 1\n'
+  printf 'fi\n'
+} > "$slow"
+chmod +x "$slow"
+
+res="$(run_gate "bash $slow")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "the gate raises npm_config_fetch_timeout above npm's 300000ms default"; else fail "the audit still runs on npm's default 5-minute fetch-timeout -- that is the exact wall #9670 and #9664 hit (rc=$rc). Output: $out"; fi
+
+# The override seam exists so an operator can lower it without editing the gate.
+res="$(NPM_AUDIT_FETCH_TIMEOUT=1000 run_gate "bash $slow")"; rc="${res%%|*}"
+if [ "$rc" = "2" ]; then pass "NPM_AUDIT_FETCH_TIMEOUT overrides the default headroom"; else fail "NPM_AUDIT_FETCH_TIMEOUT is not honored (rc=$rc) -- the value is hardcoded"; fi
 
 # --- 10. Missing workspace dir → fail-closed (exit 2) ------------------------
 out="$(cd "$REPO" && NPM_AUDIT_CMD="true" bash "$SCRIPT" no_such_ws 2>&1)"; rc=$?
@@ -3276,7 +3356,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=577
+readonly SELF_EXEC_EXPECTED_DROP=580
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3417,6 +3497,7 @@ f="$(fixture unidentified-id.json @@'JSON'
 f="$(fixture low-waived.json @@'JSON'
 f="$(fixture jq-abort.json @@'JSON'
 f="$(fixture v1-report.json @@'JSON'
+f="$(fixture retry-good.json @@'JSON'
 f="$(fixture multi-pinned.json @@'JSON'
 f="$(fixture multi-third.json @@'JSON'
   IFS= read -r -d '' expected_preamble_qg @@'STEPS_EOF' || true

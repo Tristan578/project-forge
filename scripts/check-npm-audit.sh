@@ -153,15 +153,73 @@ cd "$TARGET" || { echo "::error::could not cd to $TARGET"; exit 2; }
 # npm failure (no lockfile, registry down) yields no parseable JSON and is caught
 # by the validation below as a fail-closed.
 AUDIT_CMD="${NPM_AUDIT_CMD:-npm audit --json}"
-audit_json="$(eval "$AUDIT_CMD" 2>/dev/null)"
 
-if [ -z "$audit_json" ] || ! jq -e . >/dev/null 2>&1 <<<"$audit_json"; then
-  echo "::error::npm audit produced no parseable JSON in $WORKSPACE — failing closed"
-  exit 2
-fi
-report_version="$(jq -r '.auditReportVersion // empty' <<<"$audit_json")"
-if [ "$report_version" != "2" ]; then
-  echo "::error::npm audit output is not a recognized audit report (auditReportVersion '${report_version:-absent}' != 2) — failing closed"
+# A registry hiccup makes `npm audit` emit its own error JSON (or nothing) on
+# stdout, which lands in the same fail-closed branch as a genuinely broken
+# invocation. Two things follow, and both are fixes to a gate that used to be
+# undiagnosable:
+#
+#   1. RETRY. Transport failures are worth one or two more attempts; an actual
+#      advisory result is not, so only the unparseable / not-a-v2-report cases
+#      loop. After the last attempt the gate still fails CLOSED — the retry
+#      shortens an outage, it never converts one into a pass.
+#   2. SURFACE npm's stderr. It used to go to /dev/null, so an operator saw
+#      "auditReportVersion 'absent'" with no cause and nothing to act on
+#      (observed on #9670 and on main: an exactly-5-minute run, then 'absent').
+#
+# Attempts and backoff are overridable so the test suite runs without sleeping.
+#
+# And the 5-minute wall: npm's default `fetch-timeout` is 300000ms, and the bulk
+# advisory POST for this repo's lockfile has been landing right on it inside
+# GitHub-hosted runners. #9670 (23:19:09 -> 23:24:10) and #9664 (23:28:35 ->
+# 23:33:35) each ran EXACTLY 5:00 before reporting 'absent', on two unrelated
+# PRs, while the registry probed healthy and the same command succeeded locally.
+# That precision is a timeout expiring, not a flake: npm aborts the request and
+# emits its own error object instead of a v2 report. Give the request real
+# headroom -- the retry above is the backstop, this is the fix.
+export npm_config_fetch_timeout="${NPM_AUDIT_FETCH_TIMEOUT:-900000}"
+audit_attempts="${NPM_AUDIT_ATTEMPTS:-3}"
+audit_retry_delay="${NPM_AUDIT_RETRY_DELAY:-5}"
+audit_err_file="$(mktemp -t npm-audit-stderr.XXXXXX)"
+trap 'rm -f "$audit_err_file"' EXIT
+
+audit_json=""
+audit_failure=""
+report_version=""
+attempt=1
+while [ "$attempt" -le "$audit_attempts" ]; do
+  : > "$audit_err_file"
+  audit_json="$(eval "$AUDIT_CMD" 2>"$audit_err_file")"
+
+  if [ -z "$audit_json" ] || ! jq -e . >/dev/null 2>&1 <<<"$audit_json"; then
+    audit_failure="npm audit produced no parseable JSON in $WORKSPACE"
+  else
+    report_version="$(jq -r '.auditReportVersion // empty' <<<"$audit_json")"
+    if [ "$report_version" != "2" ]; then
+      audit_failure="npm audit output is not a recognized audit report (auditReportVersion '${report_version:-absent}' != 2)"
+    else
+      audit_failure=""
+      break
+    fi
+  fi
+
+  if [ "$attempt" -lt "$audit_attempts" ]; then
+    echo "::warning::${audit_failure} — attempt ${attempt}/${audit_attempts}, retrying in ${audit_retry_delay}s"
+    [ "$audit_retry_delay" -gt 0 ] && sleep "$audit_retry_delay"
+    audit_retry_delay=$((audit_retry_delay * 2))
+  fi
+  attempt=$((attempt + 1))
+done
+
+if [ -n "$audit_failure" ]; then
+  if [ -s "$audit_err_file" ]; then
+    echo "::group::npm audit stderr (last attempt)"
+    tail -n 40 "$audit_err_file"
+    echo "::endgroup::"
+  else
+    echo "npm audit wrote nothing to stderr on the last attempt."
+  fi
+  echo "::error::${audit_failure} after ${audit_attempts} attempt(s) — failing closed"
   exit 2
 fi
 
