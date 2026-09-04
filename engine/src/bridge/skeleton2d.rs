@@ -12,20 +12,14 @@ use crate::core::{
     skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d, EasingType2d, BoneKeyframe},
 };
 
-// Editor-only imports. The rig appliers, the query handler and the selection
-// emit are all `#[cfg(not(feature = "runtime"))]`; what survives in a runtime
-// build is the animation/skinning half (`advance_skeleton_animation`,
-// `init_skinned_meshes_2d`, `compute_bone_world_transforms_2d`,
-// `apply_vertex_skinning_2d`, `solve_ik_constraints_2d`), which touches none of
-// these names.
-#[cfg(not(feature = "runtime"))]
 use crate::core::{
     entity_factory,
     pending_commands::{PendingCommands, QueryRequest},
     history::UndoableAction,
 };
+use crate::bridge::events;
 #[cfg(not(feature = "runtime"))]
-use crate::bridge::{events, Selection, SelectionChangedEvent};
+use crate::bridge::{Selection, SelectionChangedEvent};
 use std::collections::HashMap;
 
 /// Tracks the Mesh and ColorMaterial handles most recently created for a skinned-mesh entity.
@@ -39,7 +33,6 @@ pub(crate) struct SkinnedMeshHandles {
 
 // ========== Skeleton 2D Systems ==========
 
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_skeleton2d_creates(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -131,7 +124,6 @@ pub(super) fn apply_skeleton2d_removes(
     }
 }
 
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_bone2d_adds(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -160,7 +152,6 @@ pub(super) fn apply_bone2d_adds(
     }
 }
 
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_bone2d_removes(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -191,7 +182,6 @@ pub(super) fn apply_bone2d_removes(
     }
 }
 
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_bone2d_updates(
     mut pending: ResMut<PendingCommands>,
     mut skeleton_query: Query<(&EntityId, &mut SkeletonData2d, Option<&SkeletonEnabled2d>)>,
@@ -264,7 +254,6 @@ pub(super) fn apply_keyframe2d_adds(
     }
 }
 
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_skeletal_animation2d_plays(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -286,7 +275,6 @@ pub(super) fn apply_skeletal_animation2d_plays(
     }
 }
 
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_skeleton2d_skin_sets(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -316,7 +304,6 @@ pub(super) fn apply_ik_chain2d_creates(
     }
 }
 
-#[cfg(not(feature = "runtime"))]
 pub(super) fn handle_skeleton2d_query(
     mut pending: ResMut<PendingCommands>,
     skeleton_query: Query<(&EntityId, Option<&SkeletonData2d>, Option<&SkeletonEnabled2d>)>,

@@ -415,7 +415,6 @@ pub(super) fn register_history_stack_resource(
 }
 
 /// System that applies pending transform updates from the bridge.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_pending_transforms(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut Transform)>,
@@ -494,7 +493,6 @@ pub(super) fn apply_pending_snap_settings(
 }
 
 /// System that applies pending visibility requests from the bridge.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_pending_visibility(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut EntityVisible)>,

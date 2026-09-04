@@ -706,7 +706,29 @@ impl Plugin for SelectionPlugin {
             // LOD runtime: distance-based LOD level switching + performance metrics
             .add_systems(Update, performance::update_lod_levels)
             .add_systems(Update, performance::regenerate_missing_lod_meshes)
-            .add_systems(Update, performance::collect_performance_metrics);
+            .add_systems(Update, performance::collect_performance_metrics)
+            // Script-facing command drains must stay active in exported games.
+            .add_systems(Update, (
+                core_systems::apply_pending_transforms,
+                core_systems::apply_pending_visibility,
+                entity_factory::apply_material_updates,
+                game::process_game_component_queries,
+            ))
+            .add_systems(Update, (
+                game::apply_set_game_camera_requests,
+                game::apply_set_active_game_camera_requests,
+                game::apply_camera_shake_requests,
+                game::process_game_camera_queries,
+            ))
+            .add_systems(Update, (
+                skeleton2d::apply_skeleton2d_creates,
+                skeleton2d::apply_bone2d_adds,
+                skeleton2d::apply_bone2d_removes,
+                skeleton2d::apply_bone2d_updates,
+                skeleton2d::apply_skeletal_animation2d_plays,
+                skeleton2d::apply_skeleton2d_skin_sets,
+                skeleton2d::handle_skeleton2d_query,
+            ));
 
         // Editor-only systems and observers
         #[cfg(not(feature = "runtime"))]
@@ -723,12 +745,10 @@ impl Plugin for SelectionPlugin {
                 // the drains themselves stay unconditional.
                 .configure_sets(Update, ResyncDrainSet.after(EditorApplySet))
                 .add_systems(Update, (
-                    core_systems::apply_pending_transforms,
                     core_systems::apply_pending_renames,
                     core_systems::apply_pending_snap_settings,
                     material::apply_pending_coordinate_mode,
                     entity_factory::apply_duplicate_requests,
-                    entity_factory::apply_material_updates,
                     entity_factory::apply_light_updates,
                     entity_factory::apply_ambient_light_updates,
                 ).in_set(EditorApplySet))
@@ -762,7 +782,6 @@ impl Plugin for SelectionPlugin {
                 .add_systems(Update, material::apply_remove_custom_shader_slot_requests.in_set(EditorApplySet))
                 .add_systems(Update, material::restitch_custom_shaders.in_set(EditorApplySet))
                 .add_systems(Update, (
-                    core_systems::apply_pending_visibility,
                     core_systems::apply_pending_clear_selection,
                     core_systems::apply_pending_gizmo_mode,
                 ).in_set(EditorApplySet))
@@ -828,29 +847,15 @@ impl Plugin for SelectionPlugin {
                     game::apply_game_component_adds,
                     game::apply_game_component_updates,
                     game::apply_game_component_removals,
-                    game::process_game_component_queries,
-                ))
-                .add_systems(Update, (
-                    game::apply_set_game_camera_requests,
-                    game::apply_set_active_game_camera_requests,
-                    game::apply_camera_shake_requests,
-                    game::process_game_camera_queries,
                 ))
                 .add_systems(Update, (
                     edit_mode::apply_edit_mode_requests,
                     edit_mode::emit_edit_mode_selection,
                 ))
                 .add_systems(Update, (
-                    skeleton2d::apply_skeleton2d_creates,
-                    skeleton2d::apply_bone2d_adds,
-                    skeleton2d::apply_bone2d_removes,
-                    skeleton2d::apply_bone2d_updates,
                     skeleton2d::apply_skeletal_animation2d_creates,
                     skeleton2d::apply_keyframe2d_adds,
-                    skeleton2d::apply_skeletal_animation2d_plays,
-                    skeleton2d::apply_skeleton2d_skin_sets,
                     skeleton2d::apply_ik_chain2d_creates,
-                    skeleton2d::handle_skeleton2d_query,
                     skeleton2d::apply_auto_weight_skeleton2d,
                     skeleton2d::apply_add_mesh_attachment_requests,
                 ))

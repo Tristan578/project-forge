@@ -376,11 +376,7 @@ mod tests {
     /// exported game (#9550). Checked in both directions: an entry that gains
     /// a runtime-reachable claimant fails, and an unanswered variant missing
     /// from the list fails.
-    const RUNTIME_UNANSWERED: &[(&str, &str)] = &[
-        ("GameComponentState", "process_game_component_queries is editor-only; follow-up to #9550"),
-        ("GameCameraState", "process_game_camera_queries is editor-only; follow-up to #9550"),
-        ("Skeleton2dState", "handle_skeleton2d_query is editor-only; follow-up to #9550"),
-    ];
+    const RUNTIME_UNANSWERED: &[(&str, &str)] = &[];
 
     #[test]
     fn runtime_build_claims_every_deferred_variant_or_waives_it() {
