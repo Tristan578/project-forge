@@ -38,7 +38,20 @@ export const AI_MODEL_PRIMARY_4X = 'claude-sonnet-4-6' as const;
 /** @see AI_MODEL_PRIMARY_4X */
 export const AI_MODEL_PREMIUM_4X = 'claude-opus-4-8' as const;
 
-/** Primary model for complex generation (GDD, world building, tutorials) */
+/**
+ * Primary model for complex generation (GDD, world building, tutorials).
+ *
+ * This is the incident-response lever (PR #9672 review, dx finding): a
+ * runtime `process.env` override was deliberately NOT added here. Doing so
+ * would make this a plain `string` instead of a literal type, which widens
+ * `ChatModel` (`chatStore.ts`) — `typeof AI_MODEL_PRIMARY | typeof
+ * AI_MODEL_FAST | typeof AI_MODEL_PREMIUM` — to effectively `string`,
+ * silently defeating the type it exists to constrain (`ChatInput.tsx`'s
+ * model-select prop, `setModel()`'s parameter). The rollback path above
+ * (repoint this constant at `AI_MODEL_PRIMARY_4X`) stays a code edit on
+ * purpose: it goes through review and keeps the literal type intact, at the
+ * cost of a deploy instead of an env var flip.
+ */
 export const AI_MODEL_PRIMARY = 'claude-sonnet-5';
 
 /**
