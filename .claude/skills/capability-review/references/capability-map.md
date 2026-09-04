@@ -72,7 +72,7 @@ Per-provider inventory for `capability-review`. For each provider: the **changel
 
 ### Anthropic / model tier
 - Models + pricing: https://docs.anthropic.com/en/docs/about-claude/models · https://www.anthropic.com/pricing
-- We currently wire: Sonnet 4.6 default, Opus deep tier (`AI_MODEL_DEEP`, flag `NEXT_PUBLIC_USE_DEEP_GENERATION`).
+- We currently wire: Sonnet 5 default, Opus 5 deep tier (`AI_MODEL_DEEP`, flag `NEXT_PUBLIC_USE_DEEP_GENERATION`). Haiku 4.5 stays the fast tier.
 - Opportunity surface: newer models, prompt-cache pricing tiers, tool streaming, citations, batch API (50% discount), extended context.
 - Grep markers: `AI_MODEL`, `claude-`, `anthropic`, `cache_control`.
 

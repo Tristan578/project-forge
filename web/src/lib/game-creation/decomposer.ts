@@ -1,17 +1,21 @@
 /**
  * Phase 2A — Game Creation Orchestrator: Decomposer Layer.
  *
- * Converts a natural language game description into an OrchestratorGDD via
- * LLM call + Zod schema validation. Retries up to MAX_RETRIES times on
- * invalid JSON or schema failures. Sanitizes all string fields to prevent
- * second-stage prompt injection.
+ * Converts a natural language game description into an OrchestratorGDD via a
+ * STRUCTURED-OUTPUT model call + Zod validation. Retries up to MAX_RETRIES
+ * times when the model call fails or the result misses a cross-field
+ * invariant. Sanitizes all string fields to prevent second-stage prompt
+ * injection.
+ *
+ * The model returns a typed object (`Output.object`, see `decomposerLlm.ts`),
+ * not prose — there is no markdown-fence stripping and no `JSON.parse` here
+ * any more (PF-1216 / #9339).
  *
  * Spec: specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md (lines 322–578)
  */
 
 import { z } from 'zod';
-import { fetchAI } from '@/lib/ai/client';
-import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { generateDecomposition } from './decomposerLlm';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 // [FIX: V4-4] Import zSystemCategory from types.ts (single source of truth)
 import { zSystemCategory, zEntityRole } from './types';
@@ -88,7 +92,14 @@ const zAssetNeed = z.object({
   fallback: z.string().regex(/^(primitive|builtin):[a-z][a-z0-9_-]{0,63}$/),
 });
 
-const zDecompositionOutput = z.object({
+/**
+ * The plain object shape, handed to the provider as the structured-output
+ * schema. Kept separate from `zDecompositionOutput` below because the
+ * cross-field refinement it carries is not expressible in JSON Schema — the
+ * provider would silently drop it. Splitting the two makes the split
+ * deliberate: the provider enforces the shape, we enforce the invariant.
+ */
+const zDecompositionShape = z.object({
   title: z.string().min(1).max(200),
   systems: z.array(zGameSystem).min(1),
   scenes: z.array(zSceneBlueprint).min(1),
@@ -97,7 +108,9 @@ const zDecompositionOutput = z.object({
   styleDirective: z.string().max(500),
   feelDirective: zFeelDirective,
   constraints: z.array(z.string().max(200)),
-}).superRefine((gdd, ctx) => {
+});
+
+const zDecompositionOutput = zDecompositionShape.superRefine((gdd, ctx) => {
   // A movement system needs something to move. `role` and `category` are each
   // valid in isolation, so nothing below this point can tell that the design is
   // internally nonsense: the plan builder drops the character_setup step and
@@ -197,15 +210,16 @@ export async function decomposeIntoSystems(
         : '',
     ].filter(Boolean).join('\n');
 
-    let content: string;
+    // The provider validates the object against `zDecompositionShape` before
+    // returning it, so a shape failure surfaces here as a throw rather than as
+    // unparseable text. Same retry, one fewer way to lose an attempt.
+    let parsed: unknown;
     try {
-      content = await fetchAI(userMessage, {
-        model: AI_MODEL_PRIMARY,
-        sceneContext: '',
-        thinking: false,
-        systemOverride: DECOMPOSITION_SYSTEM_PROMPT,
-        priority: 2,
-      });
+      parsed = await generateDecomposition(
+        userMessage,
+        DECOMPOSITION_SYSTEM_PROMPT,
+        zDecompositionShape,
+      );
     } catch (err) {
       lastError = new Error(
         `Attempt ${attempt + 1}: LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -213,24 +227,10 @@ export async function decomposeIntoSystems(
       continue;
     }
 
-    // Parse JSON from response — strip markdown fences if present
-    let jsonStr = content.trim();
-    const fenceMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    if (fenceMatch) {
-      jsonStr = fenceMatch[1].trim();
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      lastError = new Error(
-        `Attempt ${attempt + 1}: Failed to parse JSON from LLM response`,
-      );
-      continue;
-    }
-
-    // Validate against Zod schema
+    // Re-validate locally. The provider enforced the SHAPE; this run adds the
+    // cross-field invariant that JSON Schema cannot express (a movement system
+    // needs a player entity), and re-narrows an `unknown` the seam's mock could
+    // otherwise smuggle a wrong type through in tests.
     const result = zDecompositionOutput.safeParse(parsed);
     if (!result.success) {
       const issues = result.error.issues

@@ -22,9 +22,10 @@ import { modelToolSchema } from '@/lib/ai/modelToolSchema';
 import {
   AI_MODEL_PRIMARY,
   AI_MODELS,
+  anthropicThinkingOption,
   gatewayFallbackModels,
   supportsEffort,
-  thinkingModeFor,
+  type AnthropicThinkingOption,
 } from '@/lib/ai/models';
 import { buildAnthropicCacheControl, type CacheTtlTier } from '@/lib/ai/cachedContext';
 import manifestJson from '@/data/commands.json';
@@ -226,13 +227,21 @@ export interface SpawnforgeAgentOptions {
    * Caller must sanitize text before passing.
    */
   instructions: string | InstructionBlock[];
-  /** Enable Claude thinking mode (direct backend only). */
+  /**
+   * Enable Claude thinking mode (direct backend only).
+   *
+   * The request SHAPE is chosen per model by `anthropicThinkingOption()` —
+   * adaptive for Claude 4.6+/5, the legacy hard budget for Haiku 4.5, and
+   * omitted entirely for a model with no known shape. Passing `true` for a
+   * model with no supported shape is a no-op, never a 400.
+   */
   thinking?: boolean;
   /**
    * Reasoning effort hint (direct Anthropic backend only). Replaces hand-tuned
    * `thinking.budgetTokens` for callers that want the SDK to manage the budget.
    * Independent of `thinking`; both can be set, though setting `effort` alone is
-   * preferred for non-chat generators.
+   * preferred for non-chat generators. Dropped for models that do not accept it
+   * (`supportsEffort()`) rather than forwarded into a 400.
    */
   effort?: 'low' | 'medium' | 'high';
   /** Maximum tool-calling steps before stopping. Default: 10. */
@@ -293,25 +302,25 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
   const gatewayModelId = canonicalModel.includes('/') ? canonicalModel : AI_MODELS.gatewayChat;
   const modelInstance = isDirectBackend ? anthropic(canonicalModel) : gateway(gatewayModelId);
 
-  // Provider options for thinking + effort (Anthropic direct only). Gateway
-  // routes ignore these fields, so we only emit them on the direct backend —
-  // and the SHAPE depends on the model, not just the backend (#9626): Opus
-  // 4.7+ / Sonnet 4.6+ / Claude 5 accept only `{ type: 'adaptive' }` and
-  // answer the budget form with HTTP 400, Haiku 4.5 and earlier accept only
-  // `{ type: 'enabled', budgetTokens }` and answer adaptive with HTTP 400, and
-  // `effort` is accepted exactly where adaptive is. Emitting one shape for
-  // every model 400'd a Pro user with the thinking toggle on and the premium
-  // model selected. Unsupported fields are dropped rather than forwarded.
+  // Provider options for thinking + effort (Anthropic direct only). Both fields
+  // are independent in the Anthropic provider schema. Gateway routes ignore
+  // these fields, so we only emit them on the direct backend.
+  //
+  // BOTH are model-gated, not backend-gated (PF-1216 / #9339). Emitting one
+  // literal for every Claude is what produced the HTTP 400s this migration
+  // fixes: Claude 4.7+ rejects `{ type: 'enabled' }` and Haiku 4.5 rejects both
+  // `{ type: 'adaptive' }` and `effort`. `models.ts` owns the per-model
+  // decision so there is exactly one table to update for a new model.
   const anthropicOptions: {
-    thinking?: { type: 'adaptive' } | { type: 'enabled'; budgetTokens: number };
+    thinking?: AnthropicThinkingOption;
     effort?: 'low' | 'medium' | 'high';
   } = {};
   if (isDirectBackend) {
-    const mode = thinkingModeFor(canonicalModel);
-    if (thinking && mode === 'adaptive') {
-      anthropicOptions.thinking = { type: 'adaptive' };
-    } else if (thinking && mode === 'budget') {
-      anthropicOptions.thinking = { type: 'enabled', budgetTokens: 10000 };
+    if (thinking) {
+      const thinkingOption = anthropicThinkingOption(canonicalModel);
+      if (thinkingOption) {
+        anthropicOptions.thinking = thinkingOption;
+      }
     }
     if (effort && supportsEffort(canonicalModel)) {
       anthropicOptions.effort = effort;

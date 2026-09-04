@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useChatStore } from '../chatStore';
 import type { ChatMessage, ToolCallStatus } from '../chatStore';
+import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 
 // Helper to build a message with tool calls
 function makeAssistantMessage(
@@ -46,7 +47,7 @@ describe('chatStore deep tests', () => {
     useChatStore.setState({
       messages: [],
       isStreaming: false,
-      activeModel: 'claude-sonnet-4-6',
+      activeModel: AI_MODEL_PRIMARY,
       rightPanelTab: 'inspector',
       error: null,
       abortController: null,
@@ -103,9 +104,18 @@ describe('chatStore deep tests', () => {
       expect(useChatStore.getState().activeModel).toBe('claude-haiku-4-5-20251001');
     });
 
-    it('sets model to claude-sonnet', () => {
-      useChatStore.getState().setModel('claude-sonnet-4-6');
-      expect(useChatStore.getState().activeModel).toBe('claude-sonnet-4-6');
+    it('sets model to the primary model', () => {
+      // `beforeEach` already seeds activeModel as AI_MODEL_PRIMARY, so a
+      // no-op setModel can't be caught by only asserting the final state --
+      // it never has to leave AI_MODEL_PRIMARY at all (confirmed live: a
+      // total no-op mutation of setModel still passed this test until the
+      // intermediate assertion below was added). Assert the transition away
+      // actually took effect first, THEN assert setModel(AI_MODEL_PRIMARY)
+      // changes it back.
+      useChatStore.getState().setModel('claude-haiku-4-5-20251001');
+      expect(useChatStore.getState().activeModel).toBe('claude-haiku-4-5-20251001');
+      useChatStore.getState().setModel(AI_MODEL_PRIMARY);
+      expect(useChatStore.getState().activeModel).toBe(AI_MODEL_PRIMARY);
     });
   });
 
@@ -516,7 +526,9 @@ describe('chatStore deep tests', () => {
       const state = useChatStore.getState();
       expect(state.messages).toEqual([]);
       expect(state.isStreaming).toBe(false);
-      expect(state.activeModel).toBe('claude-sonnet-4-6');
+      // `beforeEach` sets activeModel, so the live value here is the fixture.
+      // The store's own default is asserted against the product constant.
+      expect(useChatStore.getInitialState().activeModel).toBe(AI_MODEL_PRIMARY);
       expect(state.rightPanelTab).toBe('inspector');
       expect(state.error).toBeNull();
       expect(state.abortController).toBeNull();

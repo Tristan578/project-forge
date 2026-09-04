@@ -29,6 +29,11 @@ const MODEL_MAP: Record<string, string> = {
   // model quality they're paying for. On the fast path it runs the other
   // way: a Haiku request gets upgraded to Sonnet, inflating upstream
   // per-request cost for what was meant to be the cheap tier.
+  'claude-sonnet-5': 'anthropic/claude-sonnet-5',
+  'claude-opus-5': 'anthropic/claude-opus-5',
+  // 4.x ids stay mapped after the Claude 5 migration (PF-1216 / #9339) so an
+  // explicitly-requested legacy model still routes to itself, and so pointing
+  // AI_MODEL_PRIMARY/AI_MODEL_PREMIUM back at them needs no edit here.
   'claude-sonnet-4-6': 'anthropic/claude-sonnet-4-6',
   'claude-opus-4-8': 'anthropic/claude-opus-4-8',
   'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',

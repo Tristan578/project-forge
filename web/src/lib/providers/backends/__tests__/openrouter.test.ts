@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { GATEWAY_MODEL_CHAT } from '@/lib/ai/models';
 
 describe('openrouterBackend', () => {
   beforeEach(() => {
@@ -59,6 +60,8 @@ describe('openrouterBackend', () => {
   describe('resolveModelId', () => {
     it('maps Anthropic canonical models to OpenRouter format', async () => {
       const { openrouterBackend } = await import('@/lib/providers/backends/openrouter');
+      expect(openrouterBackend.resolveModelId('claude-sonnet-5')).toBe('anthropic/claude-sonnet-5');
+      expect(openrouterBackend.resolveModelId('claude-opus-5')).toBe('anthropic/claude-opus-5');
       expect(openrouterBackend.resolveModelId('claude-sonnet-4-6')).toBe('anthropic/claude-sonnet-4-6');
       expect(openrouterBackend.resolveModelId('claude-opus-4-8')).toBe('anthropic/claude-opus-4-8');
       expect(openrouterBackend.resolveModelId('claude-haiku-4-5')).toBe('anthropic/claude-haiku-4-5');
@@ -74,8 +77,8 @@ describe('openrouterBackend', () => {
       // modelMapCoverage.test.ts is what keeps every current canonical id off
       // this path.
       const { openrouterBackend } = await import('@/lib/providers/backends/openrouter');
-      expect(openrouterBackend.resolveModelId('claude-opus-4')).toBe('anthropic/claude-sonnet-4-6');
-      expect(openrouterBackend.resolveModelId('claude-haiku-3-5')).toBe('anthropic/claude-sonnet-4-6');
+      expect(openrouterBackend.resolveModelId('claude-opus-4')).toBe(GATEWAY_MODEL_CHAT);
+      expect(openrouterBackend.resolveModelId('claude-haiku-3-5')).toBe(GATEWAY_MODEL_CHAT);
     });
 
     it('maps OpenAI canonical models to OpenRouter format', async () => {
@@ -111,12 +114,12 @@ describe('openrouterBackend', () => {
 
     it('falls back to default model for unknown non-namespaced models', async () => {
       const { openrouterBackend } = await import('@/lib/providers/backends/openrouter');
-      expect(openrouterBackend.resolveModelId('unknown-model')).toBe('anthropic/claude-sonnet-4-6');
+      expect(openrouterBackend.resolveModelId('unknown-model')).toBe(GATEWAY_MODEL_CHAT);
     });
 
     it('falls back to default model for empty string', async () => {
       const { openrouterBackend } = await import('@/lib/providers/backends/openrouter');
-      expect(openrouterBackend.resolveModelId('')).toBe('anthropic/claude-sonnet-4-6');
+      expect(openrouterBackend.resolveModelId('')).toBe(GATEWAY_MODEL_CHAT);
     });
   });
 

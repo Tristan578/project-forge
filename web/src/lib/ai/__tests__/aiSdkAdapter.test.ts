@@ -28,23 +28,14 @@ vi.mock('@/lib/ai/toolAdapter', () => ({
   convertManifestToolsToSdkTools: vi.fn(() => ({})),
 }));
 
-vi.mock('@/lib/ai/models', async () => {
-  // Real thinkingModeFor (#9626); only the ids are stubbed.
-  const actual = await vi.importActual<typeof import('@/lib/ai/models')>('@/lib/ai/models');
-  return {
-    ...actual,
-    AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
-    AI_MODELS: {
-      chat: 'claude-sonnet-4.5',
-      fast: 'claude-haiku-4-5',
-      deep: 'claude-opus-4-8',
-      gatewayChat: 'anthropic/claude-sonnet-4.6',
-      gatewayDeep: 'anthropic/claude-opus-4-8',
-    },
-  };
-});
+// `@/lib/ai/models` is deliberately NOT mocked. It used to be replaced with a
+// fixture set of invented ids, which meant this suite could not see the
+// per-model thinking table the adapter now consults — the shape it asserted
+// was decoupled from the shape production sends, which is how a literal that
+// 400s on Claude 4.7+ survived here as a passing test (PF-1216 / #9339).
 
 import { streamText } from 'ai';
+import { AI_MODEL_DEEP, AI_MODEL_PRIMARY, GATEWAY_MODEL_CHAT, GATEWAY_MODEL_DEEP } from '@/lib/ai/models';
 import { gateway } from '@ai-sdk/gateway';
 import { anthropic } from '@ai-sdk/anthropic';
 import { streamViaSdk } from '@/lib/ai/aiSdkAdapter';
@@ -451,21 +442,33 @@ describe('streamViaSdk — provider selection', () => {
   it('uses gateway() provider for vercel-gateway backend', async () => {
     await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {
-        model: 'claude-sonnet-4.6',
+        model: AI_MODEL_PRIMARY,
       }),
     );
 
-    expect(gateway).toHaveBeenCalledWith('anthropic/claude-sonnet-4.6');
+    expect(gateway).toHaveBeenCalledWith(GATEWAY_MODEL_CHAT);
     expect(anthropic).not.toHaveBeenCalled();
   });
 
-  it('routes Opus deep-tier model through gateway as anthropic/claude-opus-4-8', async () => {
+  it('routes the deep-tier model through gateway as its own gateway id', async () => {
+    await collectEvents(
+      streamViaSdk(gatewayRoute, simpleMessages, { model: AI_MODEL_DEEP }),
+    );
+
+    expect(gateway).toHaveBeenCalledWith(GATEWAY_MODEL_DEEP);
+    expect(anthropic).not.toHaveBeenCalled();
+  });
+
+  it('does not substring-swap an explicitly requested legacy model', async () => {
+    // `claude-opus-4-8` shares the substring "opus" with the deep-tier model.
+    // Resolving it to the deep-tier gateway id would hand the caller a
+    // different model than they named (PF-1216 / #9339).
     await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, { model: 'claude-opus-4-8' }),
     );
 
     expect(gateway).toHaveBeenCalledWith('anthropic/claude-opus-4-8');
-    expect(anthropic).not.toHaveBeenCalled();
+    expect(gateway).not.toHaveBeenCalledWith(GATEWAY_MODEL_DEEP);
   });
 
   it('uses gateway() provider for openrouter backend', async () => {
@@ -481,6 +484,21 @@ describe('streamViaSdk — provider selection', () => {
 
     expect(gateway).toHaveBeenCalled();
     expect(anthropic).not.toHaveBeenCalled();
+  });
+
+  it('passes thinking providerOptions for direct backend with thinking=true', async () => {
+    await collectEvents(
+      streamViaSdk(directRoute, simpleMessages, { thinking: true }),
+    );
+
+    const callArgs = vi.mocked(streamText).mock.calls[0][0];
+    // Adaptive, not `{ type: 'enabled', budgetTokens }` — the primary model is
+    // in the Claude 5 family and rejects the legacy shape with HTTP 400.
+    expect(callArgs.providerOptions).toEqual({
+      anthropic: {
+        thinking: { type: 'adaptive' },
+      },
+    });
   });
 
   it('passes the budget thinking form for a direct-backend model that rejects adaptive (Haiku 4.5)', async () => {
@@ -518,11 +536,48 @@ describe('streamViaSdk — provider selection', () => {
     expect(callArgs.providerOptions).toBeUndefined();
   });
 
-  it('enables experimental_telemetry', async () => {
+  it('enables experimental_telemetry and records that no thinking literal was sent for a gateway route', async () => {
     await collectEvents(streamViaSdk(gatewayRoute, simpleMessages, {}));
 
     const callArgs = vi.mocked(streamText).mock.calls[0][0];
-    expect(callArgs.experimental_telemetry).toEqual({ isEnabled: true });
+    expect(callArgs.experimental_telemetry).toEqual({
+      isEnabled: true,
+      functionId: 'aiSdkAdapter.streamViaSdk:thinking=none',
+    });
+  });
+
+  it('records the adaptive thinking literal in telemetry functionId for a direct route with thinking=true', async () => {
+    await collectEvents(
+      streamViaSdk(directRoute, simpleMessages, { thinking: true }),
+    );
+
+    const callArgs = vi.mocked(streamText).mock.calls[0][0];
+    expect(callArgs.experimental_telemetry).toEqual({
+      isEnabled: true,
+      functionId: 'aiSdkAdapter.streamViaSdk:thinking=adaptive',
+    });
+  });
+
+  it('records the budget thinking literal in telemetry functionId for a direct route on a model that rejects adaptive (Haiku 4.5)', async () => {
+    await collectEvents(
+      streamViaSdk(directRoute, simpleMessages, { thinking: true, model: 'claude-haiku-4-5-20251001' }),
+    );
+
+    const callArgs = vi.mocked(streamText).mock.calls[0][0];
+    expect(callArgs.experimental_telemetry).toEqual({
+      isEnabled: true,
+      functionId: 'aiSdkAdapter.streamViaSdk:thinking=enabled',
+    });
+  });
+
+  it('records "none" in telemetry functionId for a direct route with thinking left off', async () => {
+    await collectEvents(streamViaSdk(directRoute, simpleMessages, {}));
+
+    const callArgs = vi.mocked(streamText).mock.calls[0][0];
+    expect(callArgs.experimental_telemetry).toEqual({
+      isEnabled: true,
+      functionId: 'aiSdkAdapter.streamViaSdk:thinking=none',
+    });
   });
 });
 

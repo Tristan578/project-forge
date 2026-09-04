@@ -476,6 +476,39 @@ describe('deleteUserAccount', () => {
     expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * game_reports carries two NOT NULL foreign keys with no ON DELETE CASCADE:
+   * game_id -> published_games.id and reporter_id -> users.id (#8354). Miss
+   * either delete and the whole account-deletion transaction rolls back with
+   * an FK violation, so assert the statement text AND its ordering rather than
+   * just a statement count.
+   */
+  it('deletes game_reports for the user\'s games and for reports they filed, before the parent rows', async () => {
+    let selectCallCount = 0;
+    mockSelect.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) return buildSelectChain([{ id: 'game-uuid-1' }]);
+      return buildSelectChain([]);
+    });
+
+    await deleteUserAccount('user-uuid-1');
+
+    const sqlText = mockNeonSql.mock.calls.map((c) => (c[0] as TemplateStringsArray).join('?'));
+    const indexOf = (needle: string): number => {
+      const i = sqlText.findIndex((t) => t.replace(/\s+/g, ' ').includes(needle));
+      expect(i, `expected a statement containing "${needle}"`).toBeGreaterThanOrEqual(0);
+      return i;
+    };
+
+    const byGame = indexOf('DELETE FROM game_reports WHERE game_id');
+    const byReporter = indexOf('DELETE FROM game_reports WHERE reporter_id');
+    const games = indexOf('DELETE FROM published_games');
+    const users = indexOf('DELETE FROM users');
+
+    expect(byGame).toBeLessThan(games);
+    expect(byReporter).toBeLessThan(users);
+  });
+
   it('the user DELETE statement is last in the transaction', async () => {
     mockSelect.mockImplementation(() => buildSelectChain([]));
 

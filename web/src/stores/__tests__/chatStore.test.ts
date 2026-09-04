@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useChatStore, flushConversationSaveForTesting, type ChatMessage, type ToolCallStatus } from '../chatStore';
+import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { mockSSEResponse, makeChatSSEEvents } from '@/test/utils/streamingTestUtils';
 
 describe('chatStore', () => {
@@ -18,7 +19,7 @@ describe('chatStore', () => {
     useChatStore.setState({
       messages: [],
       isStreaming: false,
-      activeModel: 'claude-sonnet-4-6',
+      activeModel: AI_MODEL_PRIMARY,
       rightPanelTab: 'inspector',
       error: null,
       abortController: null,
@@ -45,9 +46,11 @@ describe('chatStore', () => {
       expect(state.messages).toEqual([]);
     });
 
-    it('should initialize with sonnet model', () => {
-      const state = useChatStore.getState();
-      expect(state.activeModel).toBe('claude-sonnet-4-6');
+    it('should initialize activeModel to the product primary model', () => {
+      // Read the store's INITIAL state, not the live one: `beforeEach` assigns
+      // activeModel itself, so `getState()` here asserted the fixture and could
+      // not fail whatever the store actually defaulted to.
+      expect(useChatStore.getInitialState().activeModel).toBe(AI_MODEL_PRIMARY);
     });
 
     it('should initialize with inspector tab', () => {
@@ -672,7 +675,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -705,7 +708,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -733,7 +736,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: true,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -761,7 +764,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'inspector', // not 'chat'
         error: null,
         abortController: null,
@@ -789,7 +792,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -819,7 +822,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'inspector',
         error: null,
         abortController: null,
@@ -848,7 +851,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -877,7 +880,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -908,7 +911,7 @@ describe('chatStore', () => {
           { id: 'usr1', role: 'user', content: 'Hello', timestamp: 2000 },
         ] as ChatMessage[],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -939,7 +942,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -1000,7 +1003,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -1054,7 +1057,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -1091,7 +1094,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -1145,7 +1148,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,
@@ -1183,7 +1186,7 @@ describe('chatStore', () => {
       store.setState({
         messages: [],
         isStreaming: false,
-        activeModel: 'claude-sonnet-4-6',
+        activeModel: AI_MODEL_PRIMARY,
         rightPanelTab: 'chat',
         error: null,
         abortController: null,

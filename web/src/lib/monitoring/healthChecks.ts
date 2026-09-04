@@ -36,6 +36,7 @@ import {
 import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
 import { HEALTH_CACHE_TTL_MS, UPSTASH_REST_TIMEOUT_MS } from '@/lib/config/timeouts';
 import { isUpstashConfigured, postUpstashCommand } from '@/lib/upstash/restCommand';
+import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
@@ -487,7 +488,21 @@ export async function checkChatBackend(): Promise<ServiceHealth> {
     };
   }
 
-  const details = { configured: true, backend: backend.id, backendName: backend.name };
+  // `AI_MODEL_PRIMARY` (not per-backend `resolveModelId`) — deliberately: the
+  // per-backend translation lives on the LIVE registry (`providers/registry.ts`),
+  // and this file's own header already rules out calling that from a health
+  // check (it would grade recent circuit-breaker state, not configuration).
+  // This is the canonical id the migration in PF-1216 / #9339 configured this
+  // deploy to request — surfaced so a wrong or stale id (e.g. a rollback that
+  // missed a call site) is at least VISIBLE in the health report. It is not
+  // verification: nothing here confirms the Gateway actually serves it, which
+  // would require a billable call this check is intentionally not making.
+  const details = {
+    configured: true,
+    backend: backend.id,
+    backendName: backend.name,
+    configuredModel: AI_MODEL_PRIMARY,
+  };
 
   try {
     // HEAD request to the backend host — no tokens consumed, just connectivity.
