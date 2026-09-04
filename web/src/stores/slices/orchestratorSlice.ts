@@ -256,7 +256,13 @@ export const createOrchestratorSlice: StateCreator<
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(body.error ?? body.message ?? `Decomposition failed (${res.status})`);
+        // `message` before `error`: /api/game/decompose sends a machine code in
+        // `error` (e.g. 'decomposition_failed', 'validation_error') and the
+        // human-readable text in `message` — picking `error` first showed users
+        // the code itself. Falls back to `error` for the one response shape
+        // that has no `message` (the ApiKeyError branch, where `error` IS the
+        // human-readable text), then to the generic status-code string.
+        throw new Error(body.message ?? body.error ?? `Decomposition failed (${res.status})`);
       }
 
       const { gdd } = await res.json();
