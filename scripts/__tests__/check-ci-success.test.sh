@@ -89,7 +89,7 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 # rather than parameterised — they are constant for essentially every fixture, and
 # mk's positional list is already 26 long. Flip them with a jq post-filter (see the
 # docs-internal-gate and quality-gates cases) instead of adding a 27th arg.
-# `command-parity`, `build-nextjs` and `test-e2e-ui` are hardcoded to success for
+# `command-parity`, `build-nextjs`, `test-e2e-ui` and `test-e2e-api` are hardcoded to success for
 # the same reason and overridden with jq in the #9437 cases at the end.
 mk() {
   local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}"
@@ -119,6 +119,7 @@ mk() {
       "openapi-route-sync":   { result: $ors },
       "actions-pin-check":    { result: $apc },
       "test-e2e-ui":          { result: "success" },
+      "test-e2e-api":         { result: "success" },
       "test-e2e-journey":     { result: $te2ej },
       "test-e2e-engine-smoke": { result: $te2es }
     }'
@@ -458,6 +459,17 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "journey gate failure fails (exit 1)"; else fail "journey failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "test-e2e-journey"; then pass "the failing journey gate is named"; else fail "failing journey gate not named"; fi
+
+# --- 34b. TAMPER: test-e2e-api skipped while needs-web=true → exit 1 -----------
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c '."test-e2e-api".result = "skipped"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "API gate skipped while needs-web=true fails (exit 1)"; else fail "tamper (API gate) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-api ("; then pass "the unwired API gate is named"; else fail "unwired API gate not named"; fi
+
+# --- 34c. API gate legit-skips (needs-web=false) → exit 0 ---------------------
+res="$(run_verify "$(mk true true success success | jq -c '."test-e2e-api".result = "skipped"')")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "API gate legit-skip (needs-web=false) passes (exit 0)"; else fail "API gate legit skip should exit 0, got $rc"; fi
 
 # --- 35. TAMPER: skills-lint skipped while needs-skills=true → exit 1 ----------
 # skills-lint is self-defending: a PR editing .claude/skills/** sets
@@ -1065,12 +1077,17 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   else
     fail "verifier anti-tamper map lost its test-e2e-ui/needs-web entry — the only per-PR run of the Playwright UI shards stops being observed"
   fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-api"[[:space:]]+"needs-web"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-api <-> needs-web"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-api/needs-web entry — billing and token-guard API coverage stops being observed"
+  fi
   # And pin the real `if:` each new entry is paired with, matching the
   # quality-gates caller pin below: a map entry paired with a trigger that no
   # longer gates the job is decorative. Whole expression, on the `if:` line only,
   # comments stripped — so `!= 'true'` inversion and trailing-comment survival
   # both fail (the three vectors documented at the quality-gates pin).
-  for pair in "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web"; do
+  for pair in "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web"; do
     pj="${pair%%:*}"; ptrigs="${pair#*:}"
     pblk="$(awk -v j="  $pj:" '$0==j{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && $0!=j{exit}' "$CI_YML")"
     pif="$(grep -v '^[[:space:]]*#' <<<"$pblk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"

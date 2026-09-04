@@ -145,6 +145,9 @@ check_triggered "design-internal-gate"      "needs-design"
 # proof that the core new-user journey stays winnable + exportable. Protect it
 # from a silent `if: false` skip like the self-defending gates above.
 check_triggered "test-e2e-journey"          "needs-web"
+# The request-only API gate is the only pre-merge execution of billing and
+# token-guard endpoint coverage. It must run on every web-touching PR.
+check_triggered "test-e2e-api"              "needs-web"
 # The engine-smoke gate is the ONLY per-PR job that boots the real WASM engine
 # (load -> spawn -> play -> export under SwiftShader software WebGL2), closing the
 # F10 gap where rendering/ECS journeys ran only post-merge. It fires on
