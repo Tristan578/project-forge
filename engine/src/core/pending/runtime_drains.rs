@@ -37,9 +37,15 @@ pub(super) mod scan {
     /// Where drains are written: every bridge system file, plus the `core/`
     /// files that drain a queue themselves (their systems are registered by
     /// `bridge/mod.rs` or by a plugin in the same file).
+    ///
+    /// `include_str!` takes a literal path, so this list cannot be a glob and
+    /// is maintained by hand — which makes a NEWLY ADDED source invisible to
+    /// every assertion below, in both directions. `every_source_that_drains_a_queue_is_scanned`
+    /// walks `src/` and fails when a file that drains a queue is missing here.
     pub const DRAIN_SOURCES: &[(&str, &str)] = &[
         ("bridge/animation.rs", include_str!("../../bridge/animation.rs")),
         ("bridge/audio.rs", include_str!("../../bridge/audio.rs")),
+        ("bridge/component_resync.rs", include_str!("../../bridge/component_resync.rs")),
         ("bridge/core_systems.rs", include_str!("../../bridge/core_systems.rs")),
         ("bridge/edit_mode.rs", include_str!("../../bridge/edit_mode.rs")),
         ("bridge/game.rs", include_str!("../../bridge/game.rs")),
@@ -655,6 +661,94 @@ app.add_systems(Update, runtime_call);
         assert!(registered_in_runtime("process_query_requests"));
         assert!(!registered_in_runtime("emit_selection_events"));
         assert!(!registered_in_runtime("no_such_system_anywhere"));
+    }
+
+    /// Every `.rs` file under `src/` that drains a `PendingCommands` queue must
+    /// be listed in [`DRAIN_SOURCES`], and that list must describe the tree this
+    /// test is running against.
+    ///
+    /// The list is hand-maintained (no glob is possible — `include_str!` takes a
+    /// literal path), and a hand-maintained list of FILES is precisely what a
+    /// new file is invisible to. #9673 added `bridge/component_resync.rs` and
+    /// the `component_resyncs` queue it drains while this module was being
+    /// written on another branch; merging the two produced a correctly-drained
+    /// queue that every assertion below read as drained by NOTHING. The same
+    /// blindness runs the other way — a genuinely undrained queue in an
+    /// unlisted file would read as fine — so the list cannot be trusted to
+    /// check itself. This walks the tree instead.
+    #[test]
+    fn every_source_that_drains_a_queue_is_scanned() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        fn rust_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+            for entry in entries {
+                let path = entry.expect("directory entry").path();
+                if path.is_dir() {
+                    rust_sources(&path, out);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let mut files = Vec::new();
+        rust_sources(&src, &mut files);
+        // Floor: a walk that finds nothing must fail, not report nothing missing.
+        assert!(
+            files.len() >= 100,
+            "only {} .rs files walked under {} — the walk is broken",
+            files.len(),
+            src.display()
+        );
+
+        let key = |p: &std::path::Path| {
+            p.strip_prefix(&src)
+                .expect("walked path is under src/")
+                .to_string_lossy()
+                .replace('\\', "/")
+        };
+
+        // The walk must see the same bytes `include_str!` embedded, or the
+        // comparison below is between two different trees.
+        for (name, embedded) in DRAIN_SOURCES {
+            let (name, embedded) = (*name, *embedded);
+            let path = src.join(name);
+            let on_disk = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!("DRAIN_SOURCES names {name}, unreadable at {}: {e}", path.display())
+            });
+            assert_eq!(
+                on_disk.as_str(),
+                embedded,
+                "{name} on disk differs from the text include_str! embedded"
+            );
+            assert!(
+                files.iter().any(|f| key(f) == name),
+                "DRAIN_SOURCES names {name}, which the walk did not find — the path convention has drifted"
+            );
+        }
+
+        let mut draining: Vec<String> = Vec::new();
+        for path in &files {
+            let text = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            if !drained_fields(without_tests(&text)).is_empty() {
+                draining.push(key(path));
+            }
+        }
+        assert!(
+            draining.len() >= 20,
+            "only {} sources drain a queue — the detector is broken: {draining:?}",
+            draining.len()
+        );
+        let listed: Vec<&str> = DRAIN_SOURCES.iter().map(|(n, _)| *n).collect();
+        let unscanned: Vec<&String> = draining.iter().filter(|f| !listed.contains(&f.as_str())).collect();
+        assert!(
+            unscanned.is_empty(),
+            "sources drain a PendingCommands queue but are not in DRAIN_SOURCES, so every queue they drain \
+             reads as drained by nothing: {unscanned:?}"
+        );
     }
 
     #[test]
