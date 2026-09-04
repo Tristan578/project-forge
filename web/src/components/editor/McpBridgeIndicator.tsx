@@ -16,8 +16,21 @@
  * import, so neither this component nor the hook is in the editor's eager
  * chunk on the ordinary path.
  */
+import { useSyncExternalStore } from 'react';
 import { Button } from '@spawnforge/ui';
 import { useEditorBridge, type BridgeStatus } from '@/lib/mcp/useEditorBridge';
+import {
+  subscribeBridgeActivity,
+  getLastBridgeActivity,
+  noBridgeActivityOnServer,
+  type BridgeOutcome,
+} from '@/lib/mcp/bridgeActivity';
+
+const OUTCOME: Record<BridgeOutcome, string> = {
+  ran: 'ran',
+  failed: 'failed',
+  refused: 'refused',
+};
 
 const LABEL: Record<BridgeStatus, string> = {
   'off': 'MCP bridge off',
@@ -41,6 +54,11 @@ const DOT: Record<BridgeStatus, string> = {
 
 export function McpBridgeIndicator() {
   const { status, detail, approve, detach } = useEditorBridge();
+  const activity = useSyncExternalStore(
+    subscribeBridgeActivity,
+    getLastBridgeActivity,
+    noBridgeActivityOnServer,
+  );
   if (status === 'off') return null;
 
   if (status === 'awaiting-consent') {
@@ -84,6 +102,11 @@ export function McpBridgeIndicator() {
     >
       <span aria-hidden="true" className={`h-2 w-2 rounded-full ${DOT[status]}`} />
       <span>{LABEL[status]}</span>
+      {activity && (
+        <span className="text-neutral-400" data-testid="mcp-bridge-activity">
+          {`${OUTCOME[activity.outcome]} ${activity.name}`}
+        </span>
+      )}
       {(status === 'attached' || status === 'connecting' || status === 'reconnecting') && (
         <button
           type="button"

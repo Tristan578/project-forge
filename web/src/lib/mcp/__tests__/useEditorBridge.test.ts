@@ -21,6 +21,7 @@ import {
   BRIDGE_DENIED_CATEGORIES,
 } from '../bridgeAllowlist';
 import { handleBridgeFrame } from '../bridgeFrame';
+import { getLastBridgeActivity, resetBridgeActivity } from '../bridgeActivity';
 import { mcpBridgeEnabled, mcpBridgeToken, mcpBridgeUrl, mcpBridgeRequested } from '../bridgeOptIn';
 
 const manifest = manifestJson as {
@@ -196,6 +197,18 @@ describe('handleBridgeFrame', () => {
     vi.mocked(executeToolCall).mockResolvedValue({ success: false, error: 'Unknown tool: spawn_entity' } as never);
     await handleBridgeFrame(JSON.stringify({ type: 'command', requestId: 'r3', name: 'spawn_entity' }), send);
     expect(sent).toEqual([{ type: 'command_result', requestId: 'r3', error: 'Unknown tool: spawn_entity' }]);
+  });
+
+  // The UX finding was that a remote agent could mutate the live scene with
+  // nothing on screen to distinguish it from ordinary editing. The indicator
+  // can only show what the handler announces.
+  it('records every command it ran and every one it refused', async () => {
+    resetBridgeActivity();
+    vi.mocked(executeToolCall).mockResolvedValue({ success: true, message: 'spawned' } as never);
+    await handleBridgeFrame(JSON.stringify({ type: 'command', requestId: 'a1', name: 'spawn_entity', payload: {} }), send);
+    expect(getLastBridgeActivity()).toMatchObject({ name: 'spawn_entity', outcome: 'ran' });
+    await handleBridgeFrame(JSON.stringify({ type: 'command', requestId: 'a2', name: 'create_script', payload: {} }), send);
+    expect(getLastBridgeActivity()).toMatchObject({ name: 'create_script', outcome: 'refused' });
   });
 
   it('ignores malformed and non-command frames', async () => {

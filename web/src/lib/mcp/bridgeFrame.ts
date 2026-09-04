@@ -9,6 +9,7 @@
 import { useEditorStore } from '@/stores/editorStore';
 import { executeToolCall } from '@/lib/chat/executor';
 import { bridgeVerdict } from './bridgeAllowlist';
+import { announceBridgeActivity } from './bridgeActivity';
 
 interface CommandFrame {
   type: 'command';
@@ -46,10 +47,14 @@ export async function handleBridgeFrame(
   const { requestId, name } = parsed;
   const verdict = bridgeVerdict(name);
   if (!verdict.allowed) {
+    announceBridgeActivity(name, 'refused');
     send({ type: 'command_result', requestId, error: verdict.reason });
     return;
   }
   const result = await executeToolCall(name, parsed.payload ?? {}, useEditorStore.getState());
+  // Announced whichever way it went: the point of the record is that the
+  // person at the keyboard can see the agent acting on their scene.
+  announceBridgeActivity(name, result.success ? 'ran' : 'failed');
   if (result.success) {
     send({ type: 'command_result', requestId, result });
   } else {
