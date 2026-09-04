@@ -361,8 +361,16 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
             />
           )}
           {/* gameData.id is the published_games row id, which is what the
-              report route keys off — no new GamePlayer prop is needed. */}
-          {gameData && <ReportGameDialog gameId={gameData.id} />}
+              report route keys off. userId/slug are only for the sign-in
+              return URL when the viewer is signed out. */}
+          {gameData && (
+            <ReportGameDialog
+              gameId={gameData.id}
+              userId={userId}
+              slug={slug}
+              isAuthenticated={isAuthenticated}
+            />
+          )}
           <button
             onClick={toggleFullscreen}
             className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"

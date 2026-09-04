@@ -12,6 +12,19 @@ vi.mock('lucide-react', () => ({
 }));
 
 const GAME_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const USER_ID = 'user_2abcDEF';
+const SLUG = 'my awesome/game';
+
+function renderDialog(over: { isAuthenticated?: boolean } = {}) {
+  return render(
+    <ReportGameDialog
+      gameId={GAME_ID}
+      userId={USER_ID}
+      slug={SLUG}
+      isAuthenticated={over.isAuthenticated ?? true}
+    />
+  );
+}
 
 function mockFetch(response: { status?: number; body?: unknown }) {
   const fn = vi.fn().mockResolvedValue({
@@ -24,7 +37,7 @@ function mockFetch(response: { status?: number; body?: unknown }) {
 }
 
 function openDialog() {
-  render(<ReportGameDialog gameId={GAME_ID} />);
+  renderDialog();
   fireEvent.click(screen.getByLabelText('Report this game'));
 }
 
@@ -43,7 +56,7 @@ describe('ReportGameDialog', () => {
   });
 
   it('renders nothing but the trigger until the button is clicked', () => {
-    render(<ReportGameDialog gameId={GAME_ID} />);
+    renderDialog();
     expect(screen.queryByText('Report this game', { selector: 'h2' })).toBeNull();
 
     fireEvent.click(screen.getByLabelText('Report this game'));
@@ -148,6 +161,40 @@ describe('ReportGameDialog', () => {
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeDefined());
     expect(screen.getByRole('alert').textContent).toMatch(/could not submit/i);
+  });
+
+  it('warns BEFORE submitting that enough reports hide the game', () => {
+    openDialog();
+    // The consequence has to be visible while the viewer can still back out —
+    // it was previously only in the post-submission confirmation.
+    expect(screen.getByText(/hidden from the gallery/i)).toBeDefined();
+  });
+
+  it('does not publish the auto-hide threshold', () => {
+    openDialog();
+    // Naming the number tells a brigade exactly how many accounts to bring.
+    const body = document.body.textContent ?? '';
+    expect(body).not.toMatch(/\b3 (?:more )?reports?\b/i);
+  });
+
+  it('offers a sign-in link instead of the form when the viewer is signed out', () => {
+    const fetchMock = mockFetch({ body: {} });
+    renderDialog({ isAuthenticated: false });
+
+    // No form: the route resolves a reporter id, so an anonymous submit can
+    // only ever come back 401.
+    expect(screen.queryByLabelText('Report this game')).toBeNull();
+    const link = screen.getByLabelText('Sign in to report this game') as HTMLAnchorElement;
+
+    fireEvent.click(link);
+    expect(screen.queryByText('Report this game', { selector: 'h2' })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Returns the viewer to the game they were reporting, with both segments
+    // encoded (the slug here contains a '/' and a space).
+    expect(link.getAttribute('href')).toBe(
+      '/sign-in?redirect_url=/play/user_2abcDEF/my%20awesome%2Fgame'
+    );
   });
 
   it('resets the form when the dialog is closed and reopened', async () => {
