@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
-import { eq, and, or, isNotNull, sql } from 'drizzle-orm';
+import { eq, ne, and, or, isNotNull, inArray, sql } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { checkTrademark } from '@/lib/moderation/trademarkFilter';
 import { PUBLISH_LIMITS } from '@/lib/projects/limits';
@@ -127,10 +127,31 @@ export async function POST(request: NextRequest) {
 
   // Check tier publish limits. An unrecognized tier falls back to the free
   // tier's allowance — never to a more generous one.
+  //
+  // WHICH ROWS OCCUPY A SLOT
+  // 'flagged' counts. A moderation hold is not a slot the creator gave up: the
+  // game goes back to 'published' the moment an admin approves it or the
+  // creator wins an appeal. Counting only 'published' freed the slot while the
+  // game was hidden, so a starter-tier creator (limit 1) whose game was
+  // auto-hidden could publish a replacement and then be restored to TWO
+  // published games, permanently over the limit with no path back under it.
+  // 'unpublished' does not count — that one IS the creator's own choice — and
+  // 'processing' never has, which this keeps unchanged.
+  //
+  // The row that owns THIS slug is excluded, because the limit gates how many
+  // games exist and not how many times one is updated. Counting the target of a
+  // republish against its own republish made the starter tier's single
+  // publication un-updatable: every re-POST of the only slug the account owns
+  // saw 1 >= 1 and 403'd with a limit error. A row of someone else's with this
+  // slug cannot be matched — the user scope below is on the same `and`.
   const maxPublished = PUBLISH_LIMITS[user.tier as keyof typeof PUBLISH_LIMITS] ?? PUBLISH_LIMITS.starter;
   const existingPublished = await queryWithResilience(() => getDb().select({ id: publishedGames.id })
     .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.status, 'published'))));
+    .where(and(
+      eq(publishedGames.userId, user.id),
+      inArray(publishedGames.status, ['published', 'flagged']),
+      ne(publishedGames.slug, slug),
+    )));
 
   if (existingPublished.length >= maxPublished) {
     reqLogAuth.warn('Publish limit reached', { tier: user.tier, maxPublished });

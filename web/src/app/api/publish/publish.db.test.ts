@@ -290,4 +290,93 @@ describe('POST /api/publish — moderation hold against real Postgres', () => {
     expect(res.status).toBe(403);
     expect(res.json.code).toBe('MODERATION_HOLD');
   });
+
+  /**
+   * The tier limit and the moderation hold are two gates on the same statement,
+   * and the hold introduced a status the limit had never had to think about.
+   *
+   * `PUBLISH_LIMITS.starter` is 1, so the free tier is where both edges of the
+   * counter are reachable in a single row — which is exactly why the counting
+   * predicate belongs in a real-Postgres test rather than the sibling mock
+   * suite, whose `.where()` is a passthrough that returns the same rows no
+   * matter what the query asks for.
+   */
+  describe('tier publish limit vs. the moderation hold', () => {
+    it('counts a game under a moderation hold against the tier limit', async () => {
+      // Auto-hide flips 'published' -> 'flagged'. Counting only 'published'
+      // freed the creator's single starter slot the moment their game was
+      // hidden, so they published a replacement — and an admin approve (or a
+      // won appeal) then put the hidden game back to 'published', leaving the
+      // account permanently at 2 games on a 1-game tier with no path back
+      // under the limit. A hold is not a slot the creator gave up.
+      const owner = await seedUser(harness().neonSql); // starter: limit 1
+      const heldProject = await seedProject(owner.id);
+      await seedPublication({ ownerId: owner.id, projectId: heldProject, slug: 'held-slug' });
+
+      const freshProject = await seedProject(owner.id);
+      const res = await publish(
+        owner,
+        validBody({ projectId: freshProject, slug: 'replacement-slug' })
+      );
+
+      expect(res.status).toBe(403);
+      expect(res.json.error).toContain('Publish limit reached');
+
+      // The 403 has to mean nothing was written. A refusal alongside a fresh
+      // 'published' row is the bug wearing the fix's response body.
+      const rows = await publicationRows(owner.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].slug).toBe('held-slug');
+      expect(rows[0].status).toBe('flagged');
+    });
+
+    it('does not count a game the creator unpublished themselves', async () => {
+      // The other edge: 'unpublished' IS a slot the creator gave up, so it must
+      // stay free. Without this case a counter that simply counted every row
+      // would pass the test above.
+      const owner = await seedUser(harness().neonSql); // starter: limit 1
+      const retiredProject = await seedProject(owner.id);
+      await seedPublication({
+        ownerId: owner.id,
+        projectId: retiredProject,
+        slug: 'retired-slug',
+        status: 'unpublished',
+        flagged: false,
+      });
+
+      const freshProject = await seedProject(owner.id);
+      const res = await publish(
+        owner,
+        validBody({ projectId: freshProject, slug: 'a-new-slug' })
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.json.publication?.status).toBe('published');
+    });
+
+    it('lets a creator at their tier limit republish a game they already own', async () => {
+      // The limit gates how many games exist, not how many times one is
+      // updated. Counting the target row against its own republish made the
+      // starter tier's single publication permanently un-updatable: every
+      // re-POST of the only slug the account owns saw 1 >= 1 and 403'd.
+      const owner = await seedUser(harness().neonSql); // starter: limit 1
+      const projectId = await seedProject(owner.id);
+      await seedPublication({
+        ownerId: owner.id,
+        projectId,
+        slug: 'only-slug',
+        status: 'published',
+        flagged: false,
+      });
+
+      const res = await publish(owner, validBody({ projectId, slug: 'only-slug' }));
+
+      expect(res.status).toBe(200);
+      expect(res.json.publication?.version).toBe(2);
+
+      const rows = await publicationRows(owner.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('published');
+    });
+  });
 });
