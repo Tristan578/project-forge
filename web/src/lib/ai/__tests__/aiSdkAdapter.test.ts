@@ -536,11 +536,52 @@ describe('streamViaSdk — provider selection', () => {
     expect(callArgs.providerOptions).toBeUndefined();
   });
 
-  it('enables experimental_telemetry', async () => {
+  it('enables experimental_telemetry and records that no thinking literal was sent for a gateway route', async () => {
     await collectEvents(streamViaSdk(gatewayRoute, simpleMessages, {}));
 
     const callArgs = vi.mocked(streamText).mock.calls[0][0];
-    expect(callArgs.experimental_telemetry).toEqual({ isEnabled: true });
+    expect(callArgs.experimental_telemetry).toEqual({
+      isEnabled: true,
+      functionId: 'aiSdkAdapter.streamViaSdk',
+      metadata: { thinkingSent: 'none' },
+    });
+  });
+
+  it('records the adaptive thinking literal in telemetry metadata for a direct route with thinking=true', async () => {
+    await collectEvents(
+      streamViaSdk(directRoute, simpleMessages, { thinking: true }),
+    );
+
+    const callArgs = vi.mocked(streamText).mock.calls[0][0];
+    expect(callArgs.experimental_telemetry).toEqual({
+      isEnabled: true,
+      functionId: 'aiSdkAdapter.streamViaSdk',
+      metadata: { thinkingSent: 'adaptive' },
+    });
+  });
+
+  it('records the budget thinking literal in telemetry metadata for a direct route on a model that rejects adaptive (Haiku 4.5)', async () => {
+    await collectEvents(
+      streamViaSdk(directRoute, simpleMessages, { thinking: true, model: 'claude-haiku-4-5-20251001' }),
+    );
+
+    const callArgs = vi.mocked(streamText).mock.calls[0][0];
+    expect(callArgs.experimental_telemetry).toEqual({
+      isEnabled: true,
+      functionId: 'aiSdkAdapter.streamViaSdk',
+      metadata: { thinkingSent: 'enabled' },
+    });
+  });
+
+  it('records "none" in telemetry metadata for a direct route with thinking left off', async () => {
+    await collectEvents(streamViaSdk(directRoute, simpleMessages, {}));
+
+    const callArgs = vi.mocked(streamText).mock.calls[0][0];
+    expect(callArgs.experimental_telemetry).toEqual({
+      isEnabled: true,
+      functionId: 'aiSdkAdapter.streamViaSdk',
+      metadata: { thinkingSent: 'none' },
+    });
   });
 });
 

@@ -168,7 +168,18 @@ export async function* streamViaSdk(
       messages: convertMessages(messages),
       maxOutputTokens: maxTokens,
       tools,
-      experimental_telemetry: { isEnabled: true },
+      // `metadata` attaches to the Sentry AI span as `ai.telemetry.metadata.*`
+      // (Phase 5 wiring above). Records which `thinking` literal actually went
+      // on the wire for this request -- 'adaptive' / 'enabled' (budget) /
+      // 'none' (backend isn't direct, thinking was off, or the model has no
+      // known shape) -- so a wrong shape for a given model/route combination
+      // is visible in the trace instead of only surfacing as an HTTP 400 from
+      // Anthropic (dx finding, PR #9672 review).
+      experimental_telemetry: {
+        isEnabled: true,
+        functionId: 'aiSdkAdapter.streamViaSdk',
+        metadata: { thinkingSent: thinkingOption?.type ?? 'none' },
+      },
       ...(thinkingOption
         ? { providerOptions: { anthropic: { thinking: thinkingOption } } }
         : {}),
