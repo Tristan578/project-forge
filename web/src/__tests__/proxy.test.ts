@@ -29,7 +29,8 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createRouteMatcher } from '@clerk/nextjs/server';
 
-import { buildPublicRoutes, applyAuthDecision, passthroughMiddleware, config } from '../proxy';
+import { buildPublicRoutes, applyAuthDecision, buildAuthorizedParties, passthroughMiddleware, config } from '../proxy';
+import { readFileSync } from 'node:fs';
 // isPlayPath lives with the route source it is derived from; the proxy imports it
 // from there so the nonce minter and the static rule cannot disagree on scope.
 import { isPlayPath, PLAY_ROUTE_SOURCE } from '@/lib/security/csp';
@@ -514,4 +515,46 @@ describe('cron routes self-enforce auth (guard for the public-at-proxy decision)
       }
     });
   }
+});
+
+describe('authorizedParties — the azp claim is enforced (#9630)', () => {
+  const env = (extra: Record<string, string | undefined>) =>
+    ({ NODE_ENV: 'production', ...extra }) as NodeJS.ProcessEnv;
+
+  it('names the production origins, so a token minted for another Clerk origin is rejected', () => {
+    expect(buildAuthorizedParties(env({ STAGING_URL: 'https://staging.spawnforge.ai' }))).toEqual([
+      'https://spawnforge.ai',
+      'https://www.spawnforge.ai',
+      'https://staging.spawnforge.ai',
+    ]);
+  });
+
+  it('is never empty in production, even with no optional env at all', () => {
+    const parties = buildAuthorizedParties(env({}));
+    expect(parties.length).toBeGreaterThan(0);
+    expect(parties).toContain('https://spawnforge.ai');
+  });
+
+  it('adds the Vercel deployment and branch origins so preview deployments can sign in', () => {
+    const parties = buildAuthorizedParties(
+      env({ VERCEL_URL: 'spawnforge-abc123-tnolan.vercel.app', VERCEL_BRANCH_URL: 'https://spawnforge-git-feat-tnolan.vercel.app' }),
+    );
+    expect(parties).toContain('https://spawnforge-abc123-tnolan.vercel.app');
+    expect(parties).toContain('https://spawnforge-git-feat-tnolan.vercel.app');
+    expect(new Set(parties).size).toBe(parties.length);
+  });
+
+  it('uses the localhost origins outside production', () => {
+    expect(buildAuthorizedParties({ NODE_ENV: 'development' } as NodeJS.ProcessEnv)).toEqual([
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:3001',
+    ]);
+  });
+
+  it('is wired into clerkMiddleware (source pin — the middleware is required at runtime and cannot be intercepted here)', () => {
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../proxy.ts'), 'utf8');
+    const call = source.slice(source.indexOf('return clerkMiddleware('));
+    expect(call).toContain('{ authorizedParties: buildAuthorizedParties() }');
+  });
 });

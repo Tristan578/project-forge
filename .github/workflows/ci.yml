@@ -387,7 +387,7 @@ jobs:
       # whichever job builds packages/ui first warms the cache for the others.
       - name: Cache @spawnforge/ui build
         id: ui-cache-design
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/ui/dist
           key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
@@ -471,7 +471,10 @@ jobs:
           # separately (see .claude/rules/agent-operations.md §12) — linting all
           # of it here would fail this gate on unrelated, untouched debt. Newly
           # added or edited hooks MUST be shellcheck-clean, so they go here.
-          shellcheck \
+          # -x follows `.`-sourced files (scripts/__tests__/lib/platform.sh);
+          # without it every sourcing suite reports SC1091 and the library's own
+          # definitions stay invisible to the analysis.
+          shellcheck -x \
             .claude/hooks/reject-incomplete-review.sh \
             .claude/hooks/review-quality-gate.sh \
             .claude/hooks/auto-approve-safe-commands.sh \
@@ -496,6 +499,66 @@ jobs:
   # its own `skills` output (NOT any-code) so a skill-only PR pays only this ~2s
   # gate. Wired into ci-success below so it is REQUIRED when it runs yet skips
   # cleanly on PRs that touch no skill — the safe path-filter + required pattern.
+  # The same suites, on Windows (#9611). Every runs-on in the repo is Linux, so
+  # the Windows/macOS harness (#9614's Git-Bash fixes, the msvcrt lock path)
+  # was verified only on the author's box. Public repo: standard windows-latest
+  # runners are free — the cost is wall-clock, which is why this runs in
+  # PARALLEL with hook-tests, not after it. `shell: bash` = Git Bash. A suite
+  # that exits 3 has declared itself UNSUPPORTED on this platform through
+  # scripts/__tests__/lib/platform.sh — tolerated here, counted and warned in
+  # the open; anything else non-zero is a failure.
+  hook-tests-windows:
+    name: Hook and Script Tests (Windows)
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show the tool surface the suites depend on
+        run: |
+          for tool in bash jq perl python3 python node gh git; do
+            printf '%-8s %s\n' "$tool" "$(command -v "$tool" 2>/dev/null || echo MISSING)"
+          done
+
+      - name: Run every bash suite on Windows (Git Bash)
+        run: |
+          shopt -s nullglob
+          suites=(.claude/hooks/__tests__/*.test.sh scripts/__tests__/*.test.sh)
+          if [ ${#suites[@]} -eq 0 ]; then
+            echo "::error::No test suites found"
+            exit 1
+          fi
+          rc=0
+          unsupported=0
+          for suite in "${suites[@]}"; do
+            echo "::group::$suite"
+            # `shell: bash` runs `bash --noprofile --norc -eo pipefail {0}`, so
+            # errexit is ON. A bare `bash "$suite"` that exits non-zero kills the
+            # step right there: `code=$?` is never reached, the exit-3 UNSUPPORTED
+            # tolerance below never fires, and the loop reports only the first
+            # failing suite instead of all of them. `|| code=$?` puts the call in a
+            # compound command, which errexit does not act on.
+            code=0
+            bash "$suite" || code=$?
+            echo "::endgroup::"
+            if [ "$code" -eq 3 ]; then
+              unsupported=$((unsupported + 1))
+              echo "::warning::$suite declared itself UNSUPPORTED on windows (exit 3)"
+            elif [ "$code" -ne 0 ]; then
+              rc=1
+              echo "::error::$suite failed on windows (exit $code)"
+            fi
+          done
+          echo "suites: ${#suites[@]}, unsupported on windows: ${unsupported}"
+          exit "$rc"
+
   skills-lint:
     name: Skills Lint
     needs: [ci-gate]
@@ -883,7 +946,10 @@ jobs:
 
       - name: Shellcheck the gate scripts and their suites
         run: |
-          shellcheck \
+          # -x follows `.`-sourced files (scripts/__tests__/lib/platform.sh);
+          # without it every sourcing suite reports SC1091 and the library's own
+          # definitions stay invisible to the analysis.
+          shellcheck -x \
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
@@ -904,16 +970,20 @@ jobs:
             scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/resolve-ci-diff-range.sh scripts/__tests__/resolve-ci-diff-range.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/deploy-drift-dispatch.sh scripts/__tests__/deploy-drift-dispatch.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
-            scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
+            scripts/__tests__/windows-suite-runner.test.sh \
+            scripts/__tests__/lib/platform.sh scripts/__tests__/platform-contract.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
@@ -923,6 +993,9 @@ jobs:
 
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
+
+      - name: Run deploy-drift dispatcher test suite
+        run: bash scripts/__tests__/deploy-drift-dispatch.test.sh
 
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
@@ -1014,6 +1087,8 @@ jobs:
 
       - name: Run post-deploy health gate test suite
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
+      - name: Run CD rolling-release helper test suite
+        run: bash scripts/__tests__/cd-rolling-release.test.sh
       - name: Run CD tree-validation gate test suite
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run engine WASM cache-key test suite
@@ -1029,6 +1104,13 @@ jobs:
         run: bash scripts/__tests__/claude-refs-resolve.test.sh
       - name: Run E2E tag-routing gate test suite
         run: bash scripts/__tests__/e2e-tag-routing.test.sh
+      - name: Run Windows suite-runner step test suite
+        run: bash scripts/__tests__/windows-suite-runner.test.sh
+      # The shared platform contract decides, for every other bash suite,
+      # whether a capability gap is tolerated or blocks the merge — so it is
+      # the one library here that must not be the only thing without a gate.
+      - name: Run platform-contract library test suite
+        run: bash scripts/__tests__/platform-contract.test.sh
 
       - name: Run suite-wiring gate test suite
         run: bash scripts/__tests__/check-suite-wiring.test.sh
@@ -1059,7 +1141,10 @@ jobs:
       needs.quality-gates.result == 'success' &&
       (needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-mcp == 'true')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Vercel builds remotely, so the CLI can legitimately wait longer than the
+    # local Next.js build job. Recent healthy uploads were still building when
+    # GitHub cancelled this job at its former 15-minute ceiling (#9697).
+    timeout-minutes: 30
     permissions:
       contents: read
       deployments: write
@@ -1160,6 +1245,23 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      # Renders /dev and exposes the editor stores. Without it this job could
+      # only run specs that never open the editor -- 91 of 422 tests, all
+      # public pages and API routes -- while reading as an application gate
+      # (#9586). The same flag the journey gate already builds with.
+      #
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
+      # The integration probe is compiled in only for this CI build. Credentials
+      # belong to a CI-only Upstash database and must never be production values.
+      E2E_UPSTASH_TEST_ENABLED: 'true'
+      E2E_UPSTASH_TEST_REQUIRED: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+      UPSTASH_REDIS_REST_URL: ${{ secrets.CI_UPSTASH_REDIS_REST_URL }}
+      UPSTASH_REDIS_REST_TOKEN: ${{ secrets.CI_UPSTASH_REDIS_REST_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -1186,7 +1288,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Key on the REAL root lockfile. This is a single-root-lockfile
@@ -1209,15 +1311,33 @@ jobs:
         working-directory: web
         run: bash ../scripts/install-playwright-ci.sh deps
 
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
+
       - name: Build for E2E
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          # Renders /dev and exposes the editor stores. Without it this job could
-          # only run specs that never open the editor -- 91 of 422 tests, all
-          # public pages and API routes -- while reading as an application gate
-          # (#9586). The same flag the journey gate already builds with.
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run UI-only E2E tests (shard ${{ matrix.shard }})
@@ -1269,6 +1389,12 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1289,7 +1415,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
@@ -1312,11 +1438,33 @@ jobs:
       # journey specs can drive a representative generated game without WASM/AI.
       # cd.yml never sets this flag, so prod/staging/preview deploys never expose
       # stores — this is a CI-only build.
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
+
       - name: Build for journey E2E (stores exposed)
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run strict interactive-journey gate
@@ -1366,6 +1514,20 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+    env:
+      # The @engine-smoke fixture loads /dev, which renders the editor ONLY
+      # when e2eHooksEnabled() is true. NEXT_PUBLIC_E2E_HOOKS is build-time
+      # inlined (Next.js), so a production `next build` without it leaves the
+      # flag off: /dev then redirects to /sign-in, whose <SignIn> calls
+      # useSession with no <ClerkProvider> in this Clerk-less CI env, throws,
+      # and the engine never boots (__FORGE_ENGINE_READY times out). Mirror
+      # the strict @ui journey gate and build with the flag so /dev renders.
+      #
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1417,7 +1579,7 @@ jobs:
 
       - name: Restore a prebuilt WebGL2 engine
         id: engine-wasm-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
@@ -1469,7 +1631,7 @@ jobs:
       # --- Playwright ---------------------------------------------------------
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
@@ -1487,18 +1649,33 @@ jobs:
         working-directory: web
         run: bash ../scripts/install-playwright-ci.sh deps
 
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
+
       - name: Build for engine-smoke E2E
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          # The @engine-smoke fixture loads /dev, which renders the editor ONLY
-          # when e2eHooksEnabled() is true. NEXT_PUBLIC_E2E_HOOKS is build-time
-          # inlined (Next.js), so a production `next build` without it leaves the
-          # flag off: /dev then redirects to /sign-in, whose <SignIn> calls
-          # useSession with no <ClerkProvider> in this Clerk-less CI env, throws,
-          # and the engine never boots (__FORGE_ENGINE_READY times out). Mirror
-          # the strict @ui journey gate and build with the flag so /dev renders.
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       # Runs the curated @engine-smoke set (two specs — see the job comment
@@ -1527,13 +1704,131 @@ jobs:
           path: web/playwright-report/
           retention-days: 14
 
+  # Cross-browser E2E (#9610). firefox, webkit and the two mobile projects had
+  # been declared in playwright.config.ts for months and executed by nothing:
+  # every workflow passed --project=chromium or a chromium-only config, so the
+  # cross-browser coverage the config advertised was a label. This job runs
+  # the same @ui selection as test-e2e-ui on Firefox, WebKit and the two mobile
+  # emulations (Linux WebKit — Playwright ships and installs it; no macOS
+  # runner is involved).
+  #
+  # NON-BLOCKING for its first window: continue-on-error keeps a browser-
+  # specific failure from turning CI Success red until the never-run corpus has
+  # been triaged. Follow-up on #9610: add this job to ci-success.needs once it
+  # has been green on main for a week. scripts/__tests__/e2e-tag-routing.test.sh
+  # pins that every declared project is executed by SOME workflow, so this job
+  # cannot be quietly dropped without that guard going red.
+  test-e2e-crossbrowser:
+    # One job per engine, so a WebKit-only regression produces a red check that
+    # SAYS webkit -- #9610's acceptance criteria ask for a job that fails and
+    # names the browser, which a single four-engine job cannot do.
+    name: E2E Cross-Browser (${{ matrix.project }})
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Non-blocking for its FIRST landing only. These 385 specs have never
+    # executed on firefox/webkit, so their pass rate is unmeasured, and gating
+    # the merge queue on an unmeasured suite is lessons-learned #10. The
+    # measured pass rate and CI minutes get recorded on #9610; flipping this to
+    # blocking (drop this key, add the job to ci-success.needs and to
+    # check_triggered in scripts/check-ci-success.sh) is a follow-up with a
+    # number behind it. Until then this job sits outside that anti-tamper map,
+    # so scripts/__tests__/e2e-tag-routing.test.sh pins the `if:` above and the
+    # --project flags below instead -- a one-line unwire has to go red
+    # somewhere.
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [firefox, webkit, mobile-iphone, mobile-pixel]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Cache Playwright browsers (all engines)
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          # A browser-set segment in the key: the chromium-only jobs cache
+          # under `playwright-<os>-<lockfile>`, and restoring THAT here would
+          # report cache-hit and skip the Firefox/WebKit install (#9610).
+          key: playwright-all-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers (chromium, firefox, webkit)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh browsers chromium firefox webkit
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh deps chromium firefox webkit
+
+      - name: Build for cross-browser E2E
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          # Same flag as test-e2e-ui: without it /dev redirects to /sign-in and
+          # every editor spec is unrunnable (#9586).
+          NEXT_PUBLIC_E2E_HOOKS: 'true'
+        run: npx next build
+
+      - name: Run @ui specs on ${{ matrix.project }}
+        working-directory: web
+        env:
+          # `next start` boots with NODE_ENV=production, and
+          # web/src/instrumentation.ts THROWS on a failed validateEnvironment()
+          # unless this is set. Playwright's webServer inherits THIS step's
+          # environment, not the build step's -- so omitting it here aborts the
+          # server, /api/health never answers, playwright dies at the 30s
+          # webServer timeout having run zero tests, and continue-on-error
+          # turns that into a green job. scripts/__tests__/e2e-tag-routing.test.sh
+          # pins this for every config whose webServer runs `next start`.
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=${{ matrix.project }} --config playwright.crossbrowser.config.ts
+
+      - name: Upload cross-browser report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-crossbrowser-report-${{ matrix.project }}
+          path: web/playwright-report-crossbrowser/
+          retention-days: 14
+
   # Merge sharded E2E reports into a single HTML report
   merge-e2e-reports:
     name: Merge E2E Reports
     needs: [test-e2e-ui]
     if: ${{ !cancelled() && needs.test-e2e-ui.result != 'skipped' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15, not 5: the only real work here is `npx playwright merge-reports`,
+    # but it needs `npm ci` first, and that is a full single-root monorepo
+    # install -- measured at 262s in the Lighthouse job on the same runner
+    # image. A 5-minute budget leaves under 40s of headroom, so this job
+    # died at exactly 5m04s on runs 33820965748 and 33820823628 with `npm ci`
+    # reported as `cancelled`. It is excluded from `ci-success` and so never
+    # blocked a merge, but it painted a red X on every PR and produced no
+    # report, which is worse than either passing or being absent.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -1592,6 +1887,7 @@ jobs:
       - docs-internal-gate
       - design-internal-gate
       - hook-tests
+      - hook-tests-windows
       - skills-lint
       - lockfile-sync
       - lockfile-sync-tests

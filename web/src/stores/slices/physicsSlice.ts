@@ -36,10 +36,12 @@ export interface PhysicsSlice {
     data: Partial<Physics2dData>,
     enabled: boolean,
   ) => void;
+  applyPhysics2dRemovalFromEngine: (entityId: string) => void;
   removePhysics2d: (entityId: string) => void;
   togglePhysics2d: (entityId: string, enabled: boolean) => void;
   setJoint2d: (entityId: string, data: Joint2dData) => void;
   applyJoint2dFromEngine: (entityId: string, data: Joint2dData) => void;
+  applyJoint2dRemovalFromEngine: (entityId: string) => void;
   removeJoint2d: (entityId: string) => void;
   setGravity2d: (gravityX: number, gravityY: number) => void;
   setDebugPhysics2d: (enabled: boolean) => void;
@@ -123,6 +125,25 @@ export const createPhysicsSlice: StateCreator<PhysicsSlice, [], [], PhysicsSlice
       };
     });
   },
+  /**
+   * Drop engine-reported 2D physics from the store WITHOUT dispatching.
+   *
+   * The inbound `PHYSICS2D_REMOVED` handler must not call `removePhysics2d`:
+   * that dispatches `remove_physics_2d` straight back at the engine that just
+   * reported the removal, so an undo of "add 2D physics" would echo a second
+   * removal command at an entity that already has none.
+   *
+   * Both maps are cleared. Leaving `physics2dEnabled[entityId]` behind would
+   * leave the inspector showing an enabled body with no data under it — a state
+   * no command can produce.
+   */
+  applyPhysics2dRemovalFromEngine: (entityId) => {
+    set(state => {
+      const { [entityId]: _data, ...rest } = state.physics2d;
+      const { [entityId]: _enabled, ...restEnabled } = state.physics2dEnabled;
+      return { physics2d: rest, physics2dEnabled: restEnabled };
+    });
+  },
   removePhysics2d: (entityId) => {
     set(state => {
       const { [entityId]: _, ...rest } = state.physics2d;
@@ -152,6 +173,18 @@ export const createPhysicsSlice: StateCreator<PhysicsSlice, [], [], PhysicsSlice
    */
   applyJoint2dFromEngine: (entityId, data) => {
     set(state => ({ joints2d: { ...state.joints2d, [entityId]: data } }));
+  },
+  /**
+   * Drop an engine-reported 2D joint from the store WITHOUT dispatching.
+   *
+   * Same reason as `applyPhysics2dRemovalFromEngine`: `removeJoint2d` dispatches
+   * `remove_joint_2d` back at the engine.
+   */
+  applyJoint2dRemovalFromEngine: (entityId) => {
+    set(state => {
+      const { [entityId]: _removed, ...rest } = state.joints2d;
+      return { joints2d: rest };
+    });
   },
   removeJoint2d: (entityId) => {
     set(state => {

@@ -16,11 +16,12 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { SYSTEM_REGISTRY } from '../index';
+import { SYSTEM_REGISTRY, chaseTuningFor } from '../index';
 import type { SystemStepContext, SystemStepInput, PlannedEntity } from '../index';
 import { gameComponentExecutor } from '../../executors/gameComponentExecutor';
 import type { ExecutorContext, GameSystem, OrchestratorGDD, EntityBlueprint } from '../../types';
 import type { GameComponentData } from '@/stores/slices/types';
+import type { Behavior } from '../../behaviorVocabulary';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -836,5 +837,102 @@ describe('challenge system — the things that keep producing more things', () =
         },
       },
     ]);
+  });
+});
+
+/**
+ * The ownership rule between this system and the per-entity behaviour pass
+ * (PF-1114).
+ *
+ * `planFollowers` plans a `follower` for EVERY enemy by default, and
+ * `planBehaviorSteps` plans one for every entity carrying `behavior: 'chase'`.
+ * Both writing means one entity gets two `follower` components — the second
+ * overwrites the first on the engine side, so which tuning survives depends on
+ * step order, which nothing pins. The rule is that per-entity intent wins and
+ * this system steps back; these cases are what stops the rule being deleted by
+ * someone who reads the skip as a redundant guard.
+ */
+describe('challenge system yields to per-entity behaviour (PF-1114)', () => {
+  const definition = SYSTEM_REGISTRY.get('challenge')!;
+
+  function plannedWithBehavior(
+    entityId: string,
+    name: string,
+    role: EntityBlueprint['role'],
+    behavior: Behavior,
+  ): PlannedEntity {
+    return { entityId, scene: 'Level1', entity: { ...makeEntity(name, role), behavior } };
+  }
+
+  it('plans no follower for an enemy that carries its own behaviour', () => {
+    const ctx = makeCtx([
+      planned('player-1', 'Player', 'player'),
+      plannedWithBehavior('bat-1', 'Bat', 'enemy', 'chase'),
+    ]);
+    const steps = definition.setupSteps(makeSystem('enemies'), makeGdd(), ctx);
+
+    const followers = steps.filter(s => s.input.type === 'follower');
+    expect(followers).toEqual([]);
+    // The enemy is still made dangerous — only the MOTION component moved
+    // owners. Dropping the damage zone too would be a silent regression.
+    expect(steps.filter(s => s.input.type === 'damageZone')).toHaveLength(1);
+  });
+
+  it('still plans followers for the enemies that carry none', () => {
+    const ctx = makeCtx([
+      planned('player-1', 'Player', 'player'),
+      plannedWithBehavior('bat-1', 'Bat', 'enemy', 'patrol'),
+      planned('ghost-1', 'Ghost', 'enemy'),
+    ]);
+    const steps = definition.setupSteps(makeSystem('enemies'), makeGdd(), ctx);
+
+    const followers = steps.filter(s => s.input.type === 'follower');
+    expect(followers).toHaveLength(1);
+    expect(followers[0].input.entityId).toBe('ghost-1');
+  });
+
+  it('honours `idle` as a decision, not as an absence', () => {
+    const ctx = makeCtx([
+      planned('player-1', 'Player', 'player'),
+      plannedWithBehavior('statue-1', 'Statue', 'enemy', 'idle'),
+    ]);
+    const steps = definition.setupSteps(makeSystem('enemies'), makeGdd(), ctx);
+
+    expect(steps.filter(s => s.input.type === 'follower')).toEqual([]);
+  });
+
+  it('leaves a named moving platform alone when it carries a behaviour', () => {
+    const ctx = makeCtx([
+      planned('player-1', 'Player', 'player'),
+      plannedWithBehavior('lift-1', 'Lift', 'decoration', 'patrol'),
+      planned('slab-1', 'Slab', 'decoration'),
+    ]);
+    const steps = definition.setupSteps(
+      makeSystem('platforms', { movingPlatforms: ['Lift', 'Slab'] }),
+      makeGdd(),
+      ctx,
+    );
+
+    const platforms = steps.filter(s => s.input.type === 'movingPlatform');
+    expect(platforms).toHaveLength(1);
+    expect(platforms[0].input.entityId).toBe('slab-1');
+  });
+});
+
+describe('chaseTuningFor', () => {
+  it('reads the tuning the design asked for', () => {
+    const gdd = makeGdd([makeSystem('pursuit', { chaseSpeed: 7, stopDistance: 3 })]);
+    expect(chaseTuningFor(gdd)).toEqual({ speed: 7, stopDistance: 3 });
+  });
+
+  it('falls back to the engine defaults when no challenge system exists', () => {
+    // `FollowerData::default()` — an unstated value must stay the engine's own,
+    // not a second guess that drifts from it.
+    expect(chaseTuningFor(makeGdd())).toEqual({ speed: 3, stopDistance: 1.5 });
+  });
+
+  it('clamps a runaway speed the same way the follower pass does', () => {
+    const gdd = makeGdd([makeSystem('pursuit', { chaseSpeed: 10_000_000 })]);
+    expect(chaseTuningFor(gdd).speed).toBe(1000);
   });
 });

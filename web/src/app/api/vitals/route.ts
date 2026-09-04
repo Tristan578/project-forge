@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import {
+  RATE_LIMIT_VITALS_MAX,
+  RATE_LIMIT_VITALS_WINDOW_MS,
+} from '@/lib/config/timeouts';
 
 /**
  * POST /api/vitals
@@ -8,18 +12,33 @@ import { rateLimitPublicRoute } from '@/lib/rateLimit';
  * Receives Core Web Vitals metrics from the client.
  * Validates the payload and logs structured data for monitoring.
  *
- * Rate limited to 10 requests per minute per IP.
+ * Rate limited per IP to RATE_LIMIT_VITALS_MAX beacons per
+ * RATE_LIMIT_VITALS_WINDOW_MS — sized against the five metrics a single
+ * page view reports, not a round number. See the constant for why.
  */
 
+/**
+ * The metrics `web-vitals` reports for a single page view. Exported so the
+ * rate-limit budget can be asserted against the real list rather than a copy
+ * of it — adding a sixth metric raises the per-page-view cost, and the test
+ * that guards RATE_LIMIT_VITALS_MAX must see that immediately.
+ */
+export const VITALS_METRIC_NAMES = ['LCP', 'FCP', 'CLS', 'INP', 'TTFB'] as const;
+
 const vitalsSchema = z.object({
-  name: z.enum(['LCP', 'FCP', 'CLS', 'INP', 'TTFB']),
+  name: z.enum(VITALS_METRIC_NAMES),
   value: z.number().finite(),
   id: z.string().min(1).max(200),
   delta: z.number().finite(),
 });
 
 export async function POST(request: NextRequest) {
-  const rateLimited = await rateLimitPublicRoute(request, 'vitals', 10, 60_000);
+  const rateLimited = await rateLimitPublicRoute(
+    request,
+    'vitals',
+    RATE_LIMIT_VITALS_MAX,
+    RATE_LIMIT_VITALS_WINDOW_MS,
+  );
   if (rateLimited) return rateLimited;
 
   let raw: unknown;

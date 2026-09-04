@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useChatStore, buildTruncatedApiMessages, flushConversationSaveForTesting } from '../chatStore';
 import type { ChatMessage, Conversation } from '../chatStore';
+import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 
 const CONVERSATIONS_KEY = 'forge-conversations';
 const ACTIVE_CONVERSATION_KEY = 'forge-active-conversation';
@@ -27,7 +28,7 @@ function resetStore() {
   useChatStore.setState({
     messages: [],
     isStreaming: false,
-    activeModel: 'claude-sonnet-4-6',
+    activeModel: AI_MODEL_PRIMARY,
     rightPanelTab: 'inspector',
     error: null,
     abortController: null,

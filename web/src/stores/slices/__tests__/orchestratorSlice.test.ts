@@ -230,6 +230,28 @@ describe('orchestratorSlice', () => {
       expect(store.getState().orchestratorError).toBe('LLM failure');
     });
 
+    it('prefers the human-readable message over the machine code when the response carries both', async () => {
+      // /api/game/decompose's generic failure branch sends both fields:
+      // `error: 'decomposition_failed'` (a machine code) and `message` (the
+      // human-readable text). Picking `error` first surfaced the code itself
+      // to the user instead of the sentence meant for them.
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({
+          error: 'decomposition_failed',
+          message: 'Failed to generate game design. Please try again.',
+        }),
+      });
+
+      await store.getState().startDecomposition('bad prompt', '3d');
+
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorError).toBe(
+        'Failed to generate game design. Please try again.',
+      );
+    });
+
     it('sets status to failed on network error', async () => {
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 

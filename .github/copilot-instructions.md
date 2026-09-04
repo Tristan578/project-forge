@@ -75,7 +75,7 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 **Pinned versions:** Next.js 16.2.0 · React 19.2.4 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 83 · branches 75 · functions 77 · lines 84
+**Coverage thresholds (CI-enforced):** statements 83 · branches 75 · functions 78 · lines 85
 
 **Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
 <!-- AGENTIC-SYNC:END -->
@@ -112,6 +112,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every PR:
 
 - Web tests: `foo.ts` → `foo.test.ts` alongside source. Use `describe`/`it`/`expect`. Mock WASM bridge with `vi.mock()`.
 - Store slice tests: Use `sliceTestTemplate.ts` pattern with `createSliceStore()` and `createMockDispatch()`.
+- mock*Once leak guard (`web/vitest.mockOnceGuard.ts`): a test that queues `mock*Once` on a mock it did not create (module-scoped `vi.fn`, `vi.mock` factory mock, or bare automock) and never consumes it FAILS, naming the still-armed line. Consume the value or build the mock inside the test; `vi.clearAllMocks()` does not drain the once-queue.
 - MCP tests: Test command manifests, search, tool registration.
 
 ## CI Pipeline

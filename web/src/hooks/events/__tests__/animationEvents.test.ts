@@ -27,6 +27,54 @@ describe('handleAnimationEvent', () => {
     expect(handleAnimationEvent('UNKNOWN', {}, mockSetGet.set, mockSetGet.get)).toBe(false);
   });
 
+  /**
+   * `ANIMATION_CLIP_CHANGED` is a clip FLATTENED next to `entityId`, so it has
+   * no key left to mean "gone". The undo/redo re-report drain emits this
+   * instead when a clip is removed (#9290).
+   */
+  describe('ANIMATION_CLIP_REMOVED', () => {
+    it('clears the inspector clip for the primary entity', () => {
+      actions.primaryId = 'ent-1';
+
+      const result = handleAnimationEvent(
+        'ANIMATION_CLIP_REMOVED',
+        { entityId: 'ent-1' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ primaryAnimationClip: null });
+    });
+
+    it('leaves the inspector alone for another entity', async () => {
+      actions.primaryId = 'ent-1';
+
+      const result = handleAnimationEvent(
+        'ANIMATION_CLIP_REMOVED',
+        { entityId: 'other' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      // Drain the gate's microtask re-check before asserting the negative — the
+      // clear is deferred, so a synchronous assertion would pass even if the
+      // gate were gone.
+      await Promise.resolve();
+      expect(useEditorStore.setState).not.toHaveBeenCalled();
+    });
+
+    it('drops a payload with no entityId', () => {
+      actions.primaryId = 'ent-1';
+
+      expect(
+        handleAnimationEvent('ANIMATION_CLIP_REMOVED', {}, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(useEditorStore.setState).not.toHaveBeenCalled();
+    });
+  });
+
   it('ANIMATION_STATE_CHANGED: calls setEntityAnimation', () => {
     const payload = { entityId: 'ent-1', playing: true, clipName: 'walk', time: 0.5 };
     const result = handleAnimationEvent('ANIMATION_STATE_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
@@ -54,13 +102,62 @@ describe('handleAnimationEvent', () => {
     });
   });
 
-  it('ANIMATION_CLIP_CHANGED: ignores when different entity is selected', () => {
+  it('ANIMATION_CLIP_CHANGED: ignores when different entity is selected', async () => {
     actions.primaryId = 'other-ent';
     const payload = { entityId: 'ent-1', duration: 5.0, keyframes: [] };
     const result = handleAnimationEvent('ANIMATION_CLIP_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
 
     expect(result).toBe(true);
+    await Promise.resolve();
     expect(useEditorStore.setState).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Both clip handlers used a synchronous `primaryId ===` read while their
+   * sibling handlers deferred. Selection resolves one microtask late —
+   * `useEngineEvents` routes SELECTION_CHANGED through `createSelectionBatcher`,
+   * which coalesces via `queueMicrotask`, while these events are handled
+   * synchronously in the same tick — so on a viewport pick the synchronous read
+   * saw the PREVIOUS primary and dropped the write for the entity the user had
+   * just selected: a stale clip left in the inspector, which the next edit
+   * writes back to the engine as a full replace (#9291).
+   */
+  describe('same-tick SELECTION_CHANGED race', () => {
+    it('ANIMATION_CLIP_CHANGED applies once the entity becomes primary', async () => {
+      actions.primaryId = 'old';
+
+      handleAnimationEvent(
+        'ANIMATION_CLIP_CHANGED',
+        { entityId: 'new', duration: 3.0, keyframes: [] } as never,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(useEditorStore.setState).not.toHaveBeenCalled();
+      actions.primaryId = 'new';
+      await Promise.resolve();
+      expect(useEditorStore.setState).toHaveBeenCalledWith({
+        primaryAnimationClip: { duration: 3.0, keyframes: [] },
+      });
+    });
+
+    // `remove_animation_clip` and "the selected entity has no clip" both arrive
+    // here: the CHANGED payload is a clip, so it cannot say none.
+    it('ANIMATION_CLIP_REMOVED clears once the entity becomes primary', async () => {
+      actions.primaryId = 'old';
+
+      handleAnimationEvent(
+        'ANIMATION_CLIP_REMOVED',
+        { entityId: 'new' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(useEditorStore.setState).not.toHaveBeenCalled();
+      actions.primaryId = 'new';
+      await Promise.resolve();
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ primaryAnimationClip: null });
+    });
   });
 
   // The emitted payload is `{ entityId, data, enabled }` — the rig is under

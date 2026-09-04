@@ -14,10 +14,11 @@ import { readdir, readFile } from 'fs/promises';
 import path from 'path';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
-import { refundTokens } from '@/lib/tokens/service';
+import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import {
   sanitizeChatInput,
   sanitizeSystemPrompt,
+  sanitizeToolText,
   validateBodySize,
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
@@ -30,12 +31,20 @@ import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/postho
 import { DEEP_GEN_SURFACES, type DeepGenSurface } from '@/lib/ai/surfaces';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
-import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
+import { createSpawnforgeAgent, resolveToolApprovalSecret } from '@/lib/ai/spawnforgeAgent';
+import {
+  verifyApprovedToolApprovals,
+  deniedApprovalsAreAuthentic,
+} from '@/lib/ai/toolApprovalSignature';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { isPremiumModel, AI_MODEL_DEEP, AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { isDeepTierEnabled } from '@/lib/ai/deepTier';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
-import type { UserModelMessage, AssistantModelMessage } from '@ai-sdk/provider-utils';
+import type {
+  UserModelMessage,
+  AssistantModelMessage,
+  ToolModelMessage,
+} from '@ai-sdk/provider-utils';
 
 // ---------------------------------------------------------------------------
 // Docs loading (server-side, filesystem)
@@ -256,26 +265,174 @@ Generate assets concurrently where possible (each generate_* job runs async with
 
 type IncomingMessage = { role: string; content: unknown };
 
-function buildModelMessages(
-  messages: IncomingMessage[],
-): Array<UserModelMessage | AssistantModelMessage> {
-  const result: Array<UserModelMessage | AssistantModelMessage> = [];
+/** Every message shape `buildModelMessages` is allowed to emit. */
+export type BuiltModelMessage =
+  | UserModelMessage
+  | AssistantModelMessage
+  | ToolModelMessage;
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null;
+
+const isNonEmptyString = (v: unknown): v is string =>
+  typeof v === 'string' && v.length > 0;
+
+/**
+ * The `ToolResultOutput` variants the client is allowed to send back. The SDK
+ * accepts several more (json, content, execution-denied); we accept only the
+ * two the client executor can actually produce, so a malformed `output` is
+ * dropped rather than reaching the provider.
+ */
+function toToolResultOutput(
+  value: unknown,
+): { type: 'text'; value: string } | { type: 'error-text'; value: string } | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.value !== 'string') return undefined;
+  if (value.type === 'text') return { type: 'text', value: value.value };
+  if (value.type === 'error-text') return { type: 'error-text', value: value.value };
+  return undefined;
+}
+
+/**
+ * Translate the client's conversation history into AI SDK `ModelMessage`s.
+ *
+ * Every message this returns is fed straight to `agent.stream({ messages })`,
+ * which runs it through the SDK's `modelMessageSchema` (`standardizePrompt`).
+ * A shape the schema rejects throws `InvalidPromptError` from inside
+ * `streamText`'s detached async body, which surfaces as a stream `error` chunk
+ * — an HTTP 200 with a broken turn, not a 500. `route.test.ts` therefore
+ * validates every shape emitted here against that schema directly; do not add
+ * an emitted shape without extending that test.
+ *
+ * PF-8860 widened this from `user`/`assistant` to carry the structured parts
+ * the tool-approval resume depends on:
+ *   - assistant `tool-call` + `tool-approval-request` parts, which the SDK
+ *     scans (`collectToolApprovals`) to correlate an approval by `approvalId`;
+ *     the old branch `JSON.stringify`d them into one text part, which destroyed
+ *     exactly that correlation.
+ *   - a `role:'tool'` message carrying `tool-approval-response` and
+ *     `tool-result` parts.
+ *
+ * Malformed parts are DROPPED, never rejected: a stale or half-written resume
+ * from an old client tab must not 500 the route. A message left with no usable
+ * parts is not pushed at all.
+ */
+export function buildModelMessages(messages: IncomingMessage[]): BuiltModelMessage[] {
+  const result: BuiltModelMessage[] = [];
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      // Pass structured content (image + text parts) directly to AI SDK
-      // Only stringify if it's not already a string or valid content array
-      const content = typeof msg.content === 'string'
-        ? msg.content
-        : Array.isArray(msg.content)
-          ? msg.content
-          : String(msg.content);
-      result.push({ role: 'user' as const, content });
+      if (typeof msg.content === 'string') {
+        result.push({ role: 'user' as const, content: msg.content });
+      } else if (Array.isArray(msg.content)) {
+        // Keep only the parts `UserContent` actually admits. Older clients
+        // built tool follow-ups as Anthropic `tool_result` blocks inside a
+        // USER message — a shape `modelMessageSchema` rejects outright, which
+        // broke every multi-turn tool call. Dropping them keeps such a client
+        // degraded rather than erroring.
+        const parts = msg.content.filter(
+          (p) => isRecord(p) && (p.type === 'text' || p.type === 'image' || p.type === 'file'),
+        );
+        if (parts.length > 0) {
+          result.push({ role: 'user' as const, content: parts as UserModelMessage['content'] });
+        }
+      } else {
+        result.push({ role: 'user' as const, content: String(msg.content) });
+      }
     } else if (msg.role === 'assistant') {
-      const text = typeof msg.content === 'string'
-        ? msg.content
-        : JSON.stringify(msg.content);
-      result.push({ role: 'assistant' as const, content: [{ type: 'text' as const, text }] });
+      if (typeof msg.content === 'string') {
+        result.push({
+          role: 'assistant' as const,
+          content: [{ type: 'text' as const, text: msg.content }],
+        });
+        continue;
+      }
+
+      // Array content: pass AI-SDK-shaped parts through verbatim so the
+      // tool-call / approval-request correlation survives the round trip.
+      if (Array.isArray(msg.content)) {
+        const parts: AssistantModelMessage['content'] = [];
+        for (const p of msg.content) {
+          if (!isRecord(p)) continue;
+          if (p.type === 'text' && typeof p.text === 'string') {
+            parts.push({ type: 'text' as const, text: p.text });
+          } else if (
+            p.type === 'tool-call' &&
+            isNonEmptyString(p.toolCallId) &&
+            isNonEmptyString(p.toolName)
+          ) {
+            parts.push({
+              type: 'tool-call' as const,
+              toolCallId: p.toolCallId,
+              toolName: p.toolName,
+              input: p.input ?? {},
+            });
+          } else if (
+            p.type === 'tool-approval-request' &&
+            isNonEmptyString(p.approvalId) &&
+            isNonEmptyString(p.toolCallId)
+          ) {
+            parts.push({
+              type: 'tool-approval-request' as const,
+              approvalId: p.approvalId,
+              toolCallId: p.toolCallId,
+              // The HMAC the SDK stamped on this request when it was issued.
+              // It is what binds the approved input to the input the user
+              // actually saw — `verifyApprovedToolApprovals` below re-derives
+              // it. Dropping it here would silently disarm that check, so it
+              // is carried verbatim. `ToolApprovalRequestPart` does not
+              // declare the field, but `standardizePrompt` returns the
+              // ORIGINAL message array rather than its parsed copy, so the
+              // extra key survives to the validator (ai@7 dist/index.js:2577).
+              ...(isNonEmptyString(p.signature) ? { signature: p.signature } : {}),
+            } as Extract<AssistantModelMessage['content'], unknown[]>[number]);
+          }
+        }
+        if (parts.length > 0) {
+          result.push({ role: 'assistant' as const, content: parts });
+        }
+        continue;
+      }
+
+      result.push({
+        role: 'assistant' as const,
+        content: [{ type: 'text' as const, text: JSON.stringify(msg.content) }],
+      });
+    } else if (msg.role === 'tool' && Array.isArray(msg.content)) {
+      const parts: ToolModelMessage['content'] = [];
+      for (const p of msg.content) {
+        if (!isRecord(p)) continue;
+        if (
+          p.type === 'tool-approval-response' &&
+          isNonEmptyString(p.approvalId) &&
+          typeof p.approved === 'boolean'
+        ) {
+          parts.push({
+            type: 'tool-approval-response' as const,
+            approvalId: p.approvalId,
+            approved: p.approved,
+            ...(isNonEmptyString(p.reason) ? { reason: p.reason } : {}),
+          });
+        } else if (
+          p.type === 'tool-result' &&
+          isNonEmptyString(p.toolCallId) &&
+          isNonEmptyString(p.toolName)
+        ) {
+          const output = toToolResultOutput(p.output);
+          if (!output) continue;
+          parts.push({
+            type: 'tool-result' as const,
+            toolCallId: p.toolCallId,
+            toolName: p.toolName,
+            output,
+          });
+        }
+      }
+      // An all-malformed tool message is not pushed: an empty `content` array
+      // would make the SDK's approval scan read the wrong "last message".
+      if (parts.length > 0) {
+        result.push({ role: 'tool' as const, content: parts });
+      }
     }
   }
 
@@ -364,7 +521,7 @@ export async function POST(request: NextRequest) {
     model = deepTierGranted ? AI_MODEL_DEEP : AI_MODEL_PRIMARY;
   }
 
-  // Premium model gate: claude-opus-4-8 is restricted to Pro tier. Reject
+  // Premium model gate: claude-opus-5 is restricted to Pro tier. Reject
   // before billing so non-Pro users requesting premium are not charged the
   // estimated cost. The gate only blocks the model — it does not silently
   // downgrade, so the client gets an explicit signal to update its UI.
@@ -375,7 +532,7 @@ export async function POST(request: NextRequest) {
   // into 403s on every deep-gen surface instead of the intended upgrade.
   if (isPremiumModel(model) && auth.ctx.user.tier !== 'pro' && !deepTierGranted) {
     return Response.json(
-      { error: 'The premium model (Opus 4.8) requires a Pro subscription.' },
+      { error: 'The premium model (Opus 5) requires a Pro subscription.' },
       { status: 403 },
     );
   }
@@ -445,7 +602,22 @@ export async function POST(request: NextRequest) {
         if (b.type === 'text' && typeof b.text === 'string') {
           const screened = screenText(b.text, msg.role);
           if (screened instanceof Response) return screened;
-          b.text = screened;
+          // Assistant text is replayed from the client's own history, so it is
+          // as forgeable as a tool result — redact injection patterns there
+          // too (screenText's injection check is user-role only).
+          b.text = msg.role === 'user' ? screened : sanitizeToolText(screened);
+        } else if (b.type === 'tool-result') {
+          // THE TOOL CHANNEL. `chatStore.appendToolTurn` stringifies whatever
+          // the engine returned into `output.value`, so an entity the user
+          // named "ignore previous instructions…" reaches the model as text,
+          // and a modified client can put anything at all here. Before
+          // PF-8860's review this span was the one model-visible input that
+          // passed through completely unscreened.
+          const output = b.output;
+          if (typeof output === 'object' && output !== null) {
+            const o = output as Record<string, unknown>;
+            if (typeof o.value === 'string') o.value = sanitizeToolText(o.value);
+          }
         }
       }
     }
@@ -503,6 +675,17 @@ export async function POST(request: NextRequest) {
             totalChars += b.text.length;
           } else if (b.type === 'tool_result' && typeof b.content === 'string') {
             totalChars += b.content.length;
+          } else if (b.type === 'tool-call') {
+            // AI-SDK-shaped tool call (PF-8860). The serialized `input` is
+            // billed input just like text, so it must be counted here or a
+            // client could smuggle unbounded payload past the budget guard by
+            // wrapping it in a tool call.
+            totalChars += JSON.stringify(b.input ?? {}).length;
+          } else if (b.type === 'tool-result') {
+            const out = b.output;
+            if (typeof out === 'object' && out !== null && typeof (out as Record<string, unknown>).value === 'string') {
+              totalChars += ((out as Record<string, unknown>).value as string).length;
+            }
           } else if ('source' in b) {
             const src = b.source;
             if (typeof src === 'object' && src !== null && 'data' in src && typeof (src as Record<string, unknown>).data === 'string') {
@@ -601,7 +784,7 @@ export async function POST(request: NextRequest) {
   // Tier gate: thinking mode (10k extra tokens per step) restricted to creator/pro,
   // consistent with the systemOverride gate. Prevents amplified token burn on free tiers.
   const canUseThinking = auth.ctx.user.tier === 'creator' || auth.ctx.user.tier === 'pro';
-  // Use the route's translated modelId (e.g. 'anthropic/claude-opus-4-8' for
+  // Use the route's translated modelId (e.g. 'anthropic/claude-opus-5' for
   // the gateway) when available, falling back to the bare canonical model.
   // Without this, the gateway path silently downgrades unmapped premium IDs
   // to Sonnet inside createSpawnforgeAgent. The gateway/openrouter path is
@@ -632,6 +815,38 @@ export async function POST(request: NextRequest) {
   // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
 
+  // 8b. Bind every approved approval to the input the user actually approved.
+  //
+  // The approval history is rebuilt in the browser, so an approved
+  // `delete_entities({entityIds:['1']})` can come back asking for ten. The SDK
+  // signs each request it issues, but its own validator never runs on our
+  // resume: an approved response that ships its own `tool-result` — which ours
+  // always does, because these tools have no server-side `execute` — is
+  // skipped before validation (see `toolApprovalSignature.ts` for the measured
+  // proof). This is therefore the ONLY place the binding is checked.
+  //
+  // Fails closed: a missing, unknown, or mismatched signature is a 400, not a
+  // downgrade to unverified execution.
+  const toolApprovalSecret = resolveToolApprovalSecret();
+  let deniedResume = false;
+  if (toolApprovalSecret) {
+    const failure = await verifyApprovedToolApprovals(modelMessages, toolApprovalSecret);
+    if (failure) {
+      captureException(
+        new Error(`Tool approval verification failed: ${failure.reason}`),
+        { route: '/api/chat', phase: 'tool-approval-verify', reason: failure.reason },
+      );
+      return Response.json(
+        {
+          error: 'Tool approval could not be verified. Start the request again.',
+          code: 'INVALID_TOOL_APPROVAL',
+        },
+        { status: 400 },
+      );
+    }
+    deniedResume = await deniedApprovalsAreAuthentic(modelMessages, toolApprovalSecret);
+  }
+
   // Resolve analytics consent + one trace id for this turn, before streaming.
   // Every step's `$ai_generation` event below shares this trace. Consent is
   // resolved once (request scope) rather than per step; capture itself is
@@ -640,10 +855,17 @@ export async function POST(request: NextRequest) {
   const aiTraceId = usageId ?? crypto.randomUUID();
 
   // 9. Stream via Agent and return UI message stream response
+  let resumeProducedToolCalls = false;
   try {
     const result = await agent.stream({
       messages: modelMessages,
-      onStepFinish: async ({ usage }) => {
+      onStepFinish: async ({ usage, toolCalls }) => {
+        // Tracks whether the turn did any real work, for the paused-turn
+        // refund below. A denial resume that only narrates "I didn't do that"
+        // is the double-charge case; one that goes on to call more tools is a
+        // normal turn and stays billed.
+        if (toolCalls && toolCalls.length > 0) resumeProducedToolCalls = true;
+
         // Log actual LLM token usage to the cost ledger once each step completes.
         // usage.inputTokens and usage.outputTokens are the actual values from
         // the model (not the estimated cost charged upfront via resolveApiKey).
@@ -722,6 +944,28 @@ export async function POST(request: NextRequest) {
     // stream fires after the stream completes (success or failure). We check
     // the finish reason to detect errors and issue refunds.
     return result.toUIMessageStreamResponse({
+      // Without an `onError` the SDK masks every stream error as the literal
+      // string "An error occurred." A resume whose approval history does not
+      // correlate (`InvalidToolApprovalError`,
+      // `ToolCallNotFoundForApprovalError`) or whose message array is
+      // malformed (`InvalidPromptError`) then produces a chat that silently
+      // stops, with the cause visible only in server logs. Named SDK errors
+      // are surfaced verbatim — they carry no user data, only ids the client
+      // itself sent. Everything else keeps the masked default so provider
+      // errors cannot leak keys or prompt content (PF-8860).
+      onError: (error: unknown) => {
+        const name = error instanceof Error ? error.name : '';
+        if (
+          name === 'AI_InvalidToolApprovalError' ||
+          name === 'AI_ToolCallNotFoundForApprovalError' ||
+          name === 'AI_InvalidPromptError' ||
+          name === 'AI_MissingToolResultsError'
+        ) {
+          captureException(error, { route: '/api/chat', phase: 'tool-approval-resume' });
+          return (error as Error).message;
+        }
+        return 'An error occurred.';
+      },
       // Surface token usage to the client on the terminal `finish` chunk. The
       // chat client (chatStore.streamOneTurn) reads `messageMetadata.usage` to
       // drive session token accounting. v6 has no standalone `usage` chunk, so
@@ -739,7 +983,30 @@ export async function POST(request: NextRequest) {
         return undefined;
       },
       onFinish: async ({ finishReason }) => {
-        if (finishReason === 'error' && usageId) {
+        // Double billing (PF-8860): a turn the server pauses on an approval
+        // has already been charged an upfront `estimatedCost`, and the resume
+        // is a SECOND HTTP request that is charged again — so the user pays
+        // twice for one logical turn, and pays it for a turn whose destructive
+        // call they refused. Refund the resume when every decision in the
+        // history was a denial and the resumed turn called nothing new.
+        //
+        // Not free chat: `deniedApprovalsAreAuthentic` requires each denial to
+        // trace back to a correctly signed request THIS server issued, so a
+        // refund can only exist where a genuine (already billed) gated turn
+        // did. The two refund helpers use different idempotency namespaces and
+        // a usageId must be claimed by exactly one, hence the else-if.
+        if (finishReason !== 'error' && deniedResume && !resumeProducedToolCalls && usageId) {
+          await refundTokenAmount(
+            auth.ctx.user.id,
+            estimatedCost,
+            'chat_denied_approval_resume',
+            usageId,
+          ).catch((refundErr: unknown) => {
+            captureException(refundErr, {
+              route: '/api/chat', phase: 'refund_denied_resume', usageId,
+            });
+          });
+        } else if (finishReason === 'error' && usageId) {
           captureException(new Error('Stream finished with error'), {
             route: '/api/chat', model, phase: 'mid-stream',
           });

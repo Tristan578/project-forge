@@ -1,4 +1,4 @@
-.github/workflows/*.lock.yml linguist-generated=true merge=ours
+.github/workflows/*.lock.yml linguist-generated=true
 
 # Agentic-sync targets: the generator (tools/agentic-sync/sync.mjs) emits LF, so
 # pin the committed form to LF. Without this a CRLF checkout could drift the
@@ -7,3 +7,11 @@
 # .cursorrules is the only non-.md target.
 *.md            text eol=lf
 .cursorrules    text eol=lf
+
+# Shell and Python sources run as-is on every platform the suites target
+# (#9611): a CRLF checkout breaks every bash suite at the shebang and every
+# hook at its first line. check-source-encoding.sh rejects a stray CR in
+# these files as a belt.
+*.sh            text eol=lf
+*.bash          text eol=lf
+*.py            text eol=lf

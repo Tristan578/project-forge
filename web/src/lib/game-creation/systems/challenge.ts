@@ -35,6 +35,11 @@
 import { registerSystem } from './registry';
 import type { SystemStepInput, SystemStepContext, PlannedEntity } from './registry';
 import type { GameSystem, OrchestratorGDD } from '../types';
+// The ownership rule for entities that carry their own `behavior` (PF-1114).
+// See the note on `planBehaviorSteps` in `../behaviorSteps.ts`: per-entity
+// intent wins, so this system leaves those entities' motion components alone
+// rather than planning a second writer for the same component.
+import { hasAuthoredBehavior } from '../behaviorVocabulary';
 // Reused rather than restated: a second copy of the health bag or of the
 // health-shaped predicate is a copy that drifts, and the bag must stay COMPLETE
 // (the engine merges a partial one onto `HealthData::default()` and reports
@@ -305,6 +310,10 @@ function planFollowers(
     if (entity.entity.role !== 'enemy') continue;
     // A nest that walks is a design error, not a chase.
     if (excluded.has(entity.entityId)) continue;
+    // The design said what THIS enemy does, so the behaviour pass owns it —
+    // including when it said `idle` or `patrol`, which mean "do not chase".
+    // Planning a follower here too would give one entity two writers.
+    if (hasAuthoredBehavior(entity.entity)) continue;
     enemies.push(entity);
   }
 
@@ -337,6 +346,101 @@ function planFollowers(
     steps.push(followerStep(enemy, player.entityId, speed, stopDistance));
   }
   return steps;
+}
+
+/**
+ * The chase tuning a GDD asked for, for a caller outside this system.
+ *
+ * `planBehaviorSteps` plans the follower for an entity carrying
+ * `behavior: 'chase'`, so without this the same design saying
+ * `config: { chaseSpeed: 8 }` on its challenge system would silently get the
+ * engine default instead. The clamps and the key aliases are the ones
+ * `planFollowers` uses, read off the same constants rather than restated.
+ *
+ * Indexed loop: `.find` skips array holes, and a missed challenge system here
+ * is a speed the design asked for and did not get.
+ */
+export function chaseTuningFor(gdd: OrchestratorGDD): {
+  speed: number;
+  stopDistance: number;
+} {
+  for (let i = 0; i < gdd.systems.length; i += 1) {
+    const system = gdd.systems[i];
+    if (!system || system.category !== 'challenge') continue;
+    return {
+      speed: clamp(
+        readPositiveNumber(system.config, CHASE_SPEED_KEYS) ?? DEFAULT_CHASE_SPEED,
+        0,
+        MAX_CHASE_SPEED,
+      ),
+      stopDistance: clamp(
+        readPositiveNumber(system.config, STOP_DISTANCE_KEYS) ?? DEFAULT_STOP_DISTANCE,
+        0,
+        MAX_STOP_DISTANCE,
+      ),
+    };
+  }
+  return { speed: DEFAULT_CHASE_SPEED, stopDistance: DEFAULT_STOP_DISTANCE };
+}
+
+/**
+ * The patrol-route tuning a GDD asked for, for a caller outside this system.
+ *
+ * Exactly `chaseTuningFor`'s reason, for the other component this system and
+ * the behaviour pass both plan: `planBehaviorSteps` owns `movingPlatform` for
+ * an entity carrying `behavior: 'patrol'`, so a design saying
+ * `config: { platformSpeed: 6 }` alongside it would otherwise get the engine
+ * default — the same silent discard `chaseTuningFor` was written to end.
+ * Aliases, defaults and clamps are `planMovingPlatforms`' own constants, read
+ * rather than restated.
+ *
+ * Indexed loop: `.find` skips array holes, and a missed challenge system here
+ * is a speed the design asked for and did not get.
+ */
+export function patrolTuningFor(gdd: OrchestratorGDD): {
+  speed: number;
+  pauseDuration: number;
+  distance: number;
+} {
+  for (let i = 0; i < gdd.systems.length; i += 1) {
+    const system = gdd.systems[i];
+    if (!system || system.category !== 'challenge') continue;
+    return {
+      speed: clamp(
+        readPositiveNumber(system.config, PLATFORM_SPEED_KEYS) ?? DEFAULT_PLATFORM_SPEED,
+        0,
+        MAX_PLATFORM_SPEED,
+      ),
+      pauseDuration: clamp(
+        readPositiveNumber(system.config, PLATFORM_PAUSE_KEYS) ?? DEFAULT_PLATFORM_PAUSE,
+        0,
+        MAX_PLATFORM_PAUSE,
+      ),
+      distance: clamp(
+        readPositiveNumber(system.config, PLATFORM_DISTANCE_KEYS) ?? DEFAULT_PLATFORM_DISTANCE,
+        0,
+        MAX_PLATFORM_TRAVEL,
+      ),
+    };
+  }
+  return {
+    speed: DEFAULT_PLATFORM_SPEED,
+    pauseDuration: DEFAULT_PLATFORM_PAUSE,
+    distance: DEFAULT_PLATFORM_DISTANCE,
+  };
+}
+
+/**
+ * True when a name describes something that goes UP rather than across.
+ *
+ * Shared with the behaviour pass so an entity named "Guard Elevator" rides the
+ * same route whether its `movingPlatform` was planned from an explicit
+ * `behavior: 'patrol'` or from this system's `movingPlatforms` config. A second
+ * copy of the pattern is a copy that drifts, and the drift is invisible: the
+ * platform simply travels along the wrong axis.
+ */
+export function travelsVertically(name: string): boolean {
+  return VERTICAL_NAME_PATTERN.test(name);
 }
 
 /**
@@ -384,7 +488,11 @@ function planMovingPlatforms(system: GameSystem, ctx: SystemStepContext): System
   for (let i = 0; i < platforms.length; i += 1) {
     const platform = platforms[i];
     if (!platform) continue;
-    const vertical = VERTICAL_NAME_PATTERN.test(platform.entity.name);
+    // Same ownership rule as the follower pass: an entity carrying its own
+    // `behavior` already had its `movingPlatform` planned (or deliberately not
+    // planned) by `planBehaviorSteps`.
+    if (hasAuthoredBehavior(platform.entity)) continue;
+    const vertical = travelsVertically(platform.entity.name);
     const waypoints: [number, number, number][] = [
       [0, 0, 0],
       vertical ? [0, distance, 0] : [distance, 0, 0],
@@ -414,6 +522,90 @@ function asSpawnableType(raw: string): SpawnableType | null {
 }
 
 /**
+ * The entities this challenge system will turn into spawners.
+ *
+ * Split out of `planSpawners` so the answer can be asked for TWICE: once here
+ * when the steps are planned, and once ahead of Phase 2.6 by
+ * `spawnerEntityIdsFor` — which needs the same set to keep the behaviour pass
+ * off these entities. Two copies of this resolution would drift, and a drifted
+ * copy re-opens exactly the walking nest the exclusion exists to prevent.
+ */
+function resolveSpawnerEntities(
+  system: GameSystem,
+  entities: PlannedEntity[],
+  warn: (message: string) => void,
+): PlannedEntity[] {
+  const names = readNameList(system.config, SPAWNER_NAME_KEYS);
+
+  if (names.length > 0) {
+    return resolveNames(
+      names,
+      entities,
+      warn,
+      name =>
+        `The design named "${name}" as a spawner, but no such object was placed in the world, so it was left out.`,
+      (entity, name) =>
+        entity.entity.role === 'player'
+          ? `The design named the player "${name}" as a spawner, so it was left out.`
+          : null,
+    );
+  }
+
+  // Nothing named: only an unmistakable name counts. Guessing wider would
+  // turn scenery into an endless enemy source nobody asked for.
+  const spawners: PlannedEntity[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < entities.length; i += 1) {
+    const entity = entities[i];
+    if (!entity || entity.entity.role === 'player') continue;
+    if (!SPAWNER_NAME_PATTERN.test(entity.entity.name)) continue;
+    if (seen.has(entity.entityId)) continue;
+    seen.add(entity.entityId);
+    spawners.push(entity);
+  }
+  return spawners;
+}
+
+/**
+ * The entities a challenge system claims as spawners, for a caller outside it.
+ *
+ * `planBehaviorSteps` runs BEFORE this system (Phase 2.6 precedes Phase 3), so
+ * without this the ownership rule would only run one way: `planFollowers` and
+ * `planMovingPlatforms` yield to an entity that carries its own `behavior`, but
+ * nothing stopped the behaviour pass from planning a `follower` for an entity
+ * this system is simultaneously turning into a spawner. The result is
+ * `SpawnerData` and `FollowerData` on one body — the walking nest the
+ * `excluded` set inside `planFollowers` exists to prevent, arrived at from the
+ * other direction.
+ *
+ * Silent by construction: `warn` is a no-op here because `planSpawners` asks
+ * the same question later with the real `ctx.warn`, and a name that resolves to
+ * nothing must be reported ONCE, not twice.
+ *
+ * Indexed loop: `.filter`/`.find` skip array holes, and a missed challenge
+ * system here is an entity that gets two writers.
+ */
+export function spawnerEntityIdsFor(
+  gdd: OrchestratorGDD,
+  entities: PlannedEntity[],
+): Set<string> {
+  const ids = new Set<string>();
+  if (entities.length === 0) return ids;
+
+  for (let i = 0; i < gdd.systems.length; i += 1) {
+    const system = gdd.systems[i];
+    if (!system || system.category !== 'challenge') continue;
+    const spawners = resolveSpawnerEntities(system, entities, () => {});
+    for (let j = 0; j < spawners.length; j += 1) {
+      const spawner = spawners[j];
+      if (!spawner) continue;
+      ids.add(spawner.entityId);
+    }
+  }
+  return ids;
+}
+
+/**
  * The things that keep producing more things.
  *
  * Returns the steps AND the entities they were planned for, so the follower
@@ -423,36 +615,8 @@ function planSpawners(
   system: GameSystem,
   ctx: SystemStepContext,
 ): { steps: SystemStepInput[]; entityIds: Set<string> } {
-  const names = readNameList(system.config, SPAWNER_NAME_KEYS);
   const entityIds = new Set<string>();
-
-  let spawners: PlannedEntity[];
-  if (names.length > 0) {
-    spawners = resolveNames(
-      names,
-      ctx.entities,
-      ctx.warn,
-      name =>
-        `The design named "${name}" as a spawner, but no such object was placed in the world, so it was left out.`,
-      (entity, name) =>
-        entity.entity.role === 'player'
-          ? `The design named the player "${name}" as a spawner, so it was left out.`
-          : null,
-    );
-  } else {
-    // Nothing named: only an unmistakable name counts. Guessing wider would
-    // turn scenery into an endless enemy source nobody asked for.
-    spawners = [];
-    const seen = new Set<string>();
-    for (let i = 0; i < ctx.entities.length; i += 1) {
-      const entity = ctx.entities[i];
-      if (!entity || entity.entity.role === 'player') continue;
-      if (!SPAWNER_NAME_PATTERN.test(entity.entity.name)) continue;
-      if (seen.has(entity.entityId)) continue;
-      seen.add(entity.entityId);
-      spawners.push(entity);
-    }
-  }
+  const spawners = resolveSpawnerEntities(system, ctx.entities, ctx.warn);
 
   if (spawners.length === 0) return { steps: [], entityIds };
 

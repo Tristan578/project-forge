@@ -215,13 +215,105 @@ describe('healthChecks', () => {
       expect(result.status).toBe('degraded');
     });
 
-    it('returns healthy when Upstash vars are set', async () => {
+    // The probe must EXECUTE a command in the limiter's own body-form shape.
+    // Until #9623 this check returned 'healthy' on env-var presence while every
+    // real EVAL was being refused with 400 — the lesson-#1 pattern.
+    function stubUpstash(status: number, body: string) {
+      const fetchMock = vi.fn(async () => ({
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: status === 200 ? 'OK' : status === 400 ? 'Bad Request' : 'Error',
+        text: async () => body,
+        json: async () => JSON.parse(body) as unknown,
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    }
+
+    async function probeWith(status: number, body: string) {
       vi.resetModules();
       vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
       vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'token_abc');
+      const fetchMock = stubUpstash(status, body);
       const { checkRateLimiting } = await import('@/lib/monitoring/healthChecks');
       const result = await checkRateLimiting();
+      return { result, fetchMock };
+    }
+
+    it('returns healthy only after a real EVAL answers {"result":1}', async () => {
+      const { result, fetchMock } = await probeWith(200, '{"result":1}');
       expect(result.status).toBe('healthy');
+      expect(result.details).toEqual({ probe: 'EVAL return 1' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [calledUrl, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      // Body form to the BASE url — never the path form that Upstash refuses.
+      expect(calledUrl).toBe('https://redis.upstash.io');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body as string)).toEqual(['EVAL', 'return 1', 0]);
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token_abc');
+    });
+
+    it('reports degraded with the Upstash error body when the command is refused', async () => {
+      const { result } = await probeWith(400, '{"error":"ERR wrong number of arguments for \'eval\' command"}');
+      expect(result.status).toBe('degraded');
+      // The exact message the limiter's own transport produces — same code path.
+      expect(result.error).toBe(
+        'Upstash EVAL failed: 400 Bad Request — {"error":"ERR wrong number of arguments for \'eval\' command"}',
+      );
+    });
+
+    it('reports degraded with a bare status line when the refusal body is empty', async () => {
+      const { result } = await probeWith(400, '');
+      expect(result.status).toBe('degraded');
+      expect(result.error).toBe('Upstash EVAL failed: 400 Bad Request');
+    });
+
+    it('reports degraded when the answer is not the script result', async () => {
+      const { result } = await probeWith(200, '{"result":"PONG"}');
+      expect(result.status).toBe('degraded');
+      expect(result.error).toBe('Upstash answered EVAL with "PONG" instead of 1');
+    });
+
+    it('reports degraded on a non-JSON body', async () => {
+      const { result } = await probeWith(200, '<html>maintenance</html>');
+      expect(result.status).toBe('degraded');
+      expect(result.error).toBe('Upstash EVAL answered with a non-JSON body');
+    });
+
+    it('reports degraded with the abort error when Upstash stalls past the transport timeout', async () => {
+      vi.resetModules();
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'token_abc');
+      // The bound is AbortSignal.timeout inside postUpstashCommand; when it
+      // fires, fetch rejects with this exact DOMException. Node's internal
+      // timer is out of reach of vitest's fake timers, so the stub reproduces
+      // the rejection fetch produces rather than the clock that causes it.
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      }));
+      const { checkRateLimiting } = await import('@/lib/monitoring/healthChecks');
+      const { UPSTASH_REST_TIMEOUT_MS } = await import('@/lib/config/timeouts');
+
+      const result = await checkRateLimiting();
+
+      // runAllHealthChecks applies no outer bound, so the transport's signal is
+      // the only thing between a stalled Upstash and a hung /api/health.
+      expect(timeoutSpy).toHaveBeenCalledWith(UPSTASH_REST_TIMEOUT_MS);
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('The operation was aborted due to timeout');
+      timeoutSpy.mockRestore();
+    });
+
+    it('reports degraded when fetch throws', async () => {
+      vi.resetModules();
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'token_abc');
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET'); }));
+      const { checkRateLimiting } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkRateLimiting();
+      expect(result.status).toBe('degraded');
+      expect(result.error).toBe('ECONNRESET');
     });
   });
 
@@ -569,6 +661,21 @@ describe('healthChecks', () => {
       expect(mockFetch).toHaveBeenCalledWith('https://ai-gateway.vercel.sh/v1', {
         method: 'HEAD',
       });
+    });
+
+    it('surfaces the configured primary model id so a stale/wrong id is visible in the report (PF-1216 / #9339)', async () => {
+      vi.resetModules();
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+
+      const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+      const { AI_MODEL_PRIMARY } = await import('@/lib/ai/models');
+      const result = await checkChatBackend();
+
+      // Configuration visibility, not verification — this check never confirms
+      // the Gateway actually serves the model, only what this deploy asks for.
+      expect(result.details?.configuredModel).toBe(AI_MODEL_PRIMARY);
     });
 
     it('probes api.anthropic.com when the direct backend is the one resolved', async () => {

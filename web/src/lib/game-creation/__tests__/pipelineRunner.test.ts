@@ -18,6 +18,7 @@ import type {
   TokenEstimate,
 } from '@/lib/game-creation/types';
 import { runPipeline } from '@/lib/game-creation/pipelineRunner';
+import { buildPlan } from '@/lib/game-creation/planBuilder';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1128,5 +1129,188 @@ describe('runPipeline', () => {
     const result = await runPipeline(plan, makeRegistry(successExecutor, verifyExecutor), ctx);
     expect(result.status).toBe('completed');
     expect(result.steps[1].status).toBe('completed');
+  });
+
+  describe('a skipped optional step is reported, not swallowed', () => {
+    it("puts the step's user-facing message on plan.warnings", async () => {
+      // `optional: true` is what keeps one failure from taking the rest of the
+      // plan down with it. Without a notice it is also what makes the loss
+      // invisible: the plan reports `completed` and the thing the user asked
+      // for is simply not in the game.
+      const plan = makePlan({
+        steps: [
+          makeStep('step_0', 'physics_profile', { optional: true }),
+          makeStep('step_1', 'verify_all_scenes'),
+        ],
+      });
+      const ctx = makeContext(controller.signal);
+      const result = await runPipeline(plan, makeRegistry(failureExecutor, verifyExecutor), ctx);
+
+      expect(result.status).toBe('completed');
+      expect(result.warnings).toBeDefined();
+      expect(result.warnings!.some(w => w.includes('Physics failed'))).toBe(true);
+    });
+
+    it('says nothing at all when every step succeeded', async () => {
+      const plan = makePlan({ steps: [makeStep('step_0', 'scene_create')] });
+      const ctx = makeContext(controller.signal);
+      const result = await runPipeline(plan, makeRegistry(successExecutor), ctx);
+
+      expect(result.status).toBe('completed');
+      // Untouched, not an empty array: nothing was ever recorded.
+      expect(result.warnings).toBeUndefined();
+    });
+
+    it("does not grow the notice on a re-run, and keeps another producer's warnings", async () => {
+      // `runPipeline` can be handed the same plan object twice (a retry, a
+      // re-run after a fix), and `planBuilder` writes its own warnings onto the
+      // same array.
+      const plan = makePlan({
+        steps: [
+          makeStep('step_0', 'physics_profile', { optional: true }),
+          makeStep('step_1', 'verify_all_scenes'),
+        ],
+        warnings: ['A planning warning from somewhere else'],
+      });
+      const ctx = makeContext(controller.signal);
+      const registry = makeRegistry(failureExecutor, verifyExecutor);
+
+      await runPipeline(plan, registry, ctx);
+      const afterFirst = [...(plan.warnings ?? [])];
+      // Reset the statuses the way a re-run would.
+      for (const step of plan.steps) {
+        step.status = 'pending';
+        step.error = undefined;
+      }
+      plan.status = 'executing';
+      await runPipeline(plan, registry, ctx);
+
+      expect(plan.warnings).toEqual(afterFirst);
+      expect(plan.warnings).toContain('A planning warning from somewhere else');
+      expect(plan.warnings!.filter(w => w.includes('Physics failed'))).toHaveLength(1);
+    });
+
+    it('stays quiet about a step skipped only because its dependency did not run', async () => {
+      // The optional step at index 1 never had a chance and carries no error of
+      // its own. Reporting it would name a consequence; the step that actually
+      // failed is the one with something to say.
+      const plan = makePlan({
+        steps: [
+          makeStep('step_0', 'physics_profile', { optional: true }),
+          makeStep('step_1', 'verify_all_scenes', { dependsOn: ['step_0'], optional: true }),
+        ],
+      });
+      const ctx = makeContext(controller.signal);
+      const result = await runPipeline(plan, makeRegistry(failureExecutor, verifyExecutor), ctx);
+
+      expect(result.steps[1].status).toBe('skipped');
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0]).toContain('Physics failed');
+      expect(result.warnings![0]).not.toContain('Verify failed');
+    });
+  });
+
+  describe('a failing behaviour never costs the win condition (PF-1114)', () => {
+    /**
+     * The REAL `buildPlan`, run against a registry in which every executor
+     * succeeds except the one under test. Nothing here is a hand-built plan:
+     * the phase ordering, the `dependsOn` edges and the `optional` flag all
+     * come from the production planner, because those are precisely the
+     * properties that used to combine into the dead end.
+     *
+     * Before the fix the behaviour step was required, `runPipeline` marked the
+     * plan `failed` on its first failure and skipped every later step —
+     * including Phase 3b's win-condition guarantee — so the user was handed a
+     * scene the pre-play winnability gate refuses to Play, over a decoration.
+     */
+    function registryFor(
+      plan: OrchestratorPlan,
+      failing: ExecutorName,
+    ): Map<ExecutorName, ExecutorDefinition> {
+      const map = new Map<ExecutorName, ExecutorDefinition>();
+      for (const step of plan.steps) {
+        if (map.has(step.executor)) continue;
+        const name = step.executor;
+        map.set(name, {
+          name,
+          inputSchema: z.object({}),
+          execute: async (): Promise<ExecutorResult> =>
+            name === failing
+              ? {
+                  success: false,
+                  error: {
+                    code: 'ERR',
+                    message: 'behaviour did not attach',
+                    userFacingMessage:
+                      'Could not attach this behavior. The object was still created, but it will not move on its own.',
+                    retryable: false,
+                  },
+                }
+              : { success: true, output: {} },
+          userFacingErrorMessage: 'failed',
+        });
+      }
+      return map;
+    }
+
+    function behaviourGdd(): OrchestratorGDD {
+      const base = makePlan().gdd;
+      return {
+        ...base,
+        projectType: '3d',
+        scenes: [
+          {
+            name: 'Main',
+            purpose: 'the level',
+            systems: [],
+            entities: [
+              { name: 'Player', role: 'player', systems: [], appearance: 'primitive:cube' },
+              {
+                name: 'Rabbit',
+                role: 'enemy',
+                systems: [],
+                appearance: 'primitive:cube',
+                behavior: 'flee',
+              },
+            ],
+            transitions: [],
+          },
+        ],
+      };
+    }
+
+    it('still reaches the win condition, and says what was lost', async () => {
+      const plan = buildPlan(behaviourGdd(), 'proj-1', 'creator', 10_000);
+      const behaviourStep = plan.steps.find(s => s.executor === 'behavior_script');
+      const winStep = plan.steps.find(
+        s => s.executor === 'game_component' && s.input.type === 'winCondition',
+      );
+      // A vacuous pass here would be "neither step exists"; both are required
+      // for the scenario to be the one that used to break.
+      expect(behaviourStep).toBeDefined();
+      expect(winStep).toBeDefined();
+
+      const ctx = makeContext(controller.signal);
+      const result = await runPipeline(plan, registryFor(plan, 'behavior_script'), ctx);
+
+      expect(behaviourStep!.status).toBe('skipped');
+      // The whole point: the guarantee that makes the scene playable ran anyway.
+      expect(winStep!.status).toBe('completed');
+      expect(result.status).toBe('completed');
+      expect(
+        (result.warnings ?? []).some(w => w.includes('Could not attach this behavior')),
+      ).toBe(true);
+    });
+
+    it('a genuinely required step still stops the plan', async () => {
+      // The counter-test, so the one above cannot be passed by making
+      // everything optional: `entity_setup` is not a decoration, and a plan
+      // that carries on without the objects in it is worse than one that stops.
+      const plan = buildPlan(behaviourGdd(), 'proj-1', 'creator', 10_000);
+      const ctx = makeContext(controller.signal);
+      const result = await runPipeline(plan, registryFor(plan, 'entity_setup'), ctx);
+
+      expect(result.status).toBe('failed');
+    });
   });
 });

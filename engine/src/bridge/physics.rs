@@ -13,19 +13,27 @@ use crate::core::{
     engine_mode::EngineMode,
 };
 
-// Editor-only imports. `DebugPhysicsEnabled` serves only
-// `apply_debug_physics_toggle`, `PhysicsJoint2d` only the 2D joint appliers, and
-// `Selection`/`SelectionChangedEvent` only the selection-emit systems — every
-// one of them `#[cfg(not(feature = "runtime"))]`. Split out of the groups above
-// rather than gating those whole: the names left behind stay live in a runtime
-// build.
-#[cfg(not(feature = "runtime"))]
+// `DebugPhysicsEnabled`, `PhysicsJoint2d` and `pending_commands` serve the
+// joint / gravity / debug-toggle drains, which run in BOTH builds since #9550:
+// `core::commands::physics::dispatch` queues those commands unconditionally,
+// so a runtime build with no drain grew the queues for the life of the process
+// (a script calling `forge.physics2d.setGravity` every frame leaked one entry
+// per frame in every exported game). The consuming layer — `Physics2dPlugin`'s
+// `sync_gravity2d` / `manage_joint2d_lifecycle`, `PhysicsPlugin`'s
+// `DebugPhysicsEnabled`, and `HistoryStack` — was always registered in both
+// builds; only the drains were missing.
 use crate::core::{
     pending_commands,
     physics::DebugPhysicsEnabled,
     physics_2d::PhysicsJoint2d,
-    selection::{Selection, SelectionChangedEvent},
 };
+
+// Editor-only imports: `Selection`/`SelectionChangedEvent` serve only the
+// selection-emit systems, which stay `#[cfg(not(feature = "runtime"))]`. Split
+// out of the group above rather than gating it whole: the names left behind
+// stay live in a runtime build.
+#[cfg(not(feature = "runtime"))]
+use crate::core::selection::{Selection, SelectionChangedEvent};
 
 use super::events;
 
@@ -156,7 +164,6 @@ pub(super) fn apply_physics_toggles(
 }
 
 /// System that applies pending debug physics toggle requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_debug_physics_toggle(
     mut pending: ResMut<PendingCommands>,
     mut debug_enabled: ResMut<DebugPhysicsEnabled>,
@@ -219,7 +226,6 @@ pub(super) fn apply_force_applications(
 }
 
 /// System that applies pending create joint requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_create_joint_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -240,7 +246,7 @@ pub(super) fn apply_create_joint_requests(
                 });
 
                 // Emit change event
-                events::emit_joint_changed(&request.joint_data);
+                events::emit_joint_changed(&request.entity_id, &request.joint_data);
                 break;
             }
         }
@@ -248,7 +254,6 @@ pub(super) fn apply_create_joint_requests(
 }
 
 /// System that applies pending update joint requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_update_joint_requests(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut crate::core::physics::JointData)>,
@@ -290,7 +295,7 @@ pub(super) fn apply_update_joint_requests(
                 });
 
                 // Emit change event
-                events::emit_joint_changed(&current_joint);
+                events::emit_joint_changed(&update.entity_id, &current_joint);
                 break;
             }
         }
@@ -298,7 +303,6 @@ pub(super) fn apply_update_joint_requests(
 }
 
 /// System that applies pending remove joint requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_remove_joint_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -492,8 +496,7 @@ pub(super) fn apply_physics2d_toggles(
     }
 }
 
-/// System that applies 2D joint creation requests (editor-only, metadata-only).
-#[cfg(not(feature = "runtime"))]
+/// System that applies 2D joint creation requests (both builds — see #9550).
 pub(super) fn apply_create_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -521,8 +524,7 @@ pub(super) fn apply_create_joint2d_requests(
     }
 }
 
-/// System that applies 2D joint update requests (editor-only, metadata-only).
-#[cfg(not(feature = "runtime"))]
+/// System that applies 2D joint update requests (both builds — see #9550).
 pub(super) fn apply_update_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut PhysicsJoint2d)>,
@@ -549,8 +551,7 @@ pub(super) fn apply_update_joint2d_requests(
     }
 }
 
-/// System that applies 2D joint removal requests (editor-only, metadata-only).
-#[cfg(not(feature = "runtime"))]
+/// System that applies 2D joint removal requests (both builds — see #9550).
 pub(super) fn apply_remove_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -683,7 +684,6 @@ pub(super) fn apply_raycast2d_requests(
 }
 
 /// System that applies 2D gravity updates to the Gravity2d resource.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_gravity2d_updates(
     mut pending: ResMut<PendingCommands>,
     mut gravity: ResMut<crate::core::physics_2d_sim::Gravity2d>,
@@ -700,7 +700,6 @@ pub(super) fn apply_gravity2d_updates(
 }
 
 /// System that applies 2D debug physics toggles.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_debug_physics2d_toggle(
     mut pending: ResMut<PendingCommands>,
     mut debug_enabled: ResMut<crate::core::physics_2d_sim::DebugPhysics2dEnabled>,
@@ -711,8 +710,7 @@ pub(super) fn apply_debug_physics2d_toggle(
     }
 }
 
-/// System that handles 2D physics query requests (editor-only).
-#[cfg(not(feature = "runtime"))]
+/// System that handles 2D physics query requests (both builds — see #9550).
 pub(super) fn handle_physics2d_query(
     mut pending: ResMut<PendingCommands>,
     physics_query: Query<(&EntityId, &Physics2dData, Option<&Physics2dEnabled>)>,
@@ -835,6 +833,13 @@ pub(super) fn apply_raycast_queries(
 // ============================================================================
 
 /// System that emits physics data when the primary selection changes or physics data changes.
+///
+/// This covers ONLY the selected-entity path, and deliberately still does. The
+/// two cases it cannot see — an undo/redo of a NON-selected entity, and a
+/// component REMOVAL (`Changed<T>` cannot fire for a component that no longer
+/// exists, and there is no `RemovedComponents` watcher in `bridge/`) — are
+/// covered by `bridge::component_resync::apply_component_resyncs`, which the
+/// history arms feed through `core::component_resync::ComponentResync` (#9290).
 #[cfg(not(feature = "runtime"))]
 pub(super) fn emit_physics_on_selection(
     selection: Res<Selection>,
@@ -860,6 +865,13 @@ pub(super) fn emit_physics_on_selection(
 }
 
 /// System that emits joint data when selection changes or joint changes.
+///
+/// This covers ONLY the selected-entity path, and deliberately still does. The
+/// two cases it cannot see — an undo/redo of a NON-selected entity, and a
+/// component REMOVAL (`Changed<T>` cannot fire for a component that no longer
+/// exists, and there is no `RemovedComponents` watcher in `bridge/`) — are
+/// covered by `bridge::component_resync::apply_component_resyncs`, which the
+/// history arms feed through `core::component_resync::ComponentResync` (#9290).
 #[cfg(not(feature = "runtime"))]
 pub(super) fn emit_joint_on_selection(
     selection: Res<Selection>,
@@ -870,16 +882,16 @@ pub(super) fn emit_joint_on_selection(
     // Emit on selection change
     for _event in selection_events.read() {
         if let Some(primary) = selection.primary {
-            if let Ok((_, Some(jd))) = selection_query.get(primary) {
-                events::emit_joint_changed(jd);
+            if let Ok((entity_id, Some(jd))) = selection_query.get(primary) {
+                events::emit_joint_changed(&entity_id.0, jd);
             }
         }
     }
 
     // Emit when joint data changes on selected entity
     if let Some(primary) = selection.primary {
-        if let Ok((_, joint_data)) = query.get(primary) {
-            events::emit_joint_changed(joint_data);
+        if let Ok((entity_id, joint_data)) = query.get(primary) {
+            events::emit_joint_changed(&entity_id.0, joint_data);
         }
     }
 }

@@ -11,6 +11,7 @@
 import { z } from 'zod';
 import type { GddScope } from '@/lib/config/enums';
 import type { EditorState } from '@/stores/editorStore';
+import type { Behavior } from './behaviorVocabulary';
 
 // ---------------------------------------------------------------------------
 // Executor names (type-safe union — compile-time checked)
@@ -24,6 +25,10 @@ export type ExecutorName =
   | 'camera_setup'
   | 'character_setup'
   | 'game_component'
+  // A parameterized behaviour template bound to an entity (PF-1114). Distinct
+  // from `custom_script_generate`: it makes no model call and costs no tokens,
+  // and its source is hand-written and pinned against `forgeTypes.ts`.
+  | 'behavior_script'
   | 'entity_setup'
   | 'world_build'
   | 'asset_generate'
@@ -116,6 +121,17 @@ export interface EntityBlueprint {
   systems: SystemCategory[];
   /** Free text; `primitive:<shape>` selects the spawned mesh (see entitySetupExecutor). */
   appearance: string;
+  /**
+   * What this entity DOES, from the closed vocabulary in `behaviorVocabulary.ts`
+   * (PF-1114). Optional: most entities are scenery, and every GDD written before
+   * the field existed stays valid.
+   *
+   * SINGULAR on purpose. The plural `behaviors` was a free-text array the model
+   * filled with prose no executor read (PF-1111); `decomposer.test.ts` asserts
+   * the decomposition prompt never contains that word, so the plural cannot come
+   * back without a deliberate test change.
+   */
+  behavior?: Behavior;
 }
 
 // ---------------------------------------------------------------------------

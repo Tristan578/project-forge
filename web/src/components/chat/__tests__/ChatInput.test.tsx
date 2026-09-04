@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { ChatInput } from '../ChatInput';
 import { useChatStore } from '@/stores/chatStore';
+import { useUserStore } from '@/stores/userStore';
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(vi.fn(() => ({})), {
@@ -66,12 +67,17 @@ function setupStore(overrides: {
 }
 
 describe('ChatInput', () => {
+  const userStoreInitialState = useUserStore.getState();
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     cleanup();
+    // Real (unmocked) singleton store — reset so a test that changes
+    // tier/profileLoaded can't leak into a later test in this file.
+    useUserStore.setState(userStoreInitialState, true);
   });
 
   // ── Basic rendering ───────────────────────────────────────────────────
@@ -207,6 +213,25 @@ describe('ChatInput', () => {
     const select = screen.getByLabelText('AI model') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'claude-haiku-4-5-20251001' } });
     expect(mockSetModel).toHaveBeenCalledWith('claude-haiku-4-5-20251001');
+  });
+
+  it('disables the Pro-only model option while the tier profile is still loading (Boy Scout fix, PR #9672)', () => {
+    // Before /api/user/profile resolves, tier reads as its 'starter' default.
+    // A free-tier user must not be able to select (and submit) the Pro-only
+    // model during that window.
+    useUserStore.setState({ tier: 'starter', profileLoaded: false });
+    setupStore();
+    render(<ChatInput />);
+    const proOption = screen.getByText('Opus 5 (Pro)') as HTMLOptionElement;
+    expect(proOption.disabled).toBe(true);
+  });
+
+  it('enables the Pro-only model option once the profile has loaded and confirms pro tier', () => {
+    useUserStore.setState({ tier: 'pro', profileLoaded: true });
+    setupStore();
+    render(<ChatInput />);
+    const proOption = screen.getByText('Opus 5 (Pro)') as HTMLOptionElement;
+    expect(proOption.disabled).toBe(false);
   });
 
   // ── Think / Review toggles ────────────────────────────────────────────

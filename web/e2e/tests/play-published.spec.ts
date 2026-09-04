@@ -80,9 +80,9 @@ test.describe('Play Published Game — public page @ui', () => {
   test('mounts the GamePlayer shell on the real page route', async ({ page }) => {
     // What E2E uniquely verifies here is the PAGE-ROUTE WIRING: that
     // /play/[userId]/[slug] actually mounts GamePlayer (and not a hard 404, a
-    // redirect to sign-in, or the editor) for a missing game. GamePlayer's
-    // initial render is its loading shell ("Loading game..."), which is part of
-    // the SSR output and therefore deterministic in the DB-less @ui gate.
+    // redirect to sign-in, or the editor) for a missing game. The route owns a
+    // stable mount marker around GamePlayer so the assertion does not race its
+    // short-lived loading state on faster browser engines.
     //
     // The CLIENT error block (":(" face, "Game Not Found" / "Something Went
     // Wrong" heading, "Back to SpawnForge" link) is asserted at the component
@@ -94,8 +94,9 @@ test.describe('Play Published Game — public page @ui', () => {
     await page.goto(PAGE_PATH);
     await page.waitForLoadState('domcontentloaded');
 
-    // GamePlayer mounted in its loading state -> the page wired the player.
-    await expect(page.getByText('Loading game...')).toBeVisible({
+    // The route-owned mount stays present after hydration. The loading copy can
+    // disappear before WebKit observes it when the DB-less request fails fast.
+    await expect(page.getByTestId('game-player-route-mount')).toBeVisible({
       timeout: E2E_TIMEOUT_LOAD_MS,
     });
   });

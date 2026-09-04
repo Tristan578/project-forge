@@ -22,10 +22,9 @@ use crate::core::{
     post_processing::PostProcessingSettings,
     animation::AnimationRegistry,
 };
-// Split out of the `physics::{..}` group above, whose other two members the
-// always-active `process_query_requests` still needs. `JointData`'s only
-// consumer is the runtime-gated `process_joint_queries`.
-#[cfg(not(feature = "runtime"))]
+// `JointData` serves `process_joint_queries`, which runs in both builds since
+// #9550 (the joint commands were always dispatchable in a runtime build; only
+// their drains and readers were editor-gated).
 use crate::core::physics::JointData;
 use super::{
     events,
@@ -472,11 +471,8 @@ pub(super) fn process_reverb_zone_queries(
 /// An entity with no `PhysicsJoint2d` emits nothing. That is deliberate: the
 /// alternative is a null payload the store would have to distinguish from a real
 /// joint, and every other per-entity query here answers the same way.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn process_joint2d_queries(
     mut pending: ResMut<PendingCommands>,
-    // Named in full rather than imported: the import would be unused under the
-    // `runtime` feature, which gates this system out.
     joint_query: Query<(&EntityId, &crate::core::physics_2d::PhysicsJoint2d)>,
 ) {
     use crate::core::pending_commands::QueryRequest;
@@ -512,7 +508,6 @@ pub(super) fn process_joint2d_queries(
 }
 
 /// Process joint list query requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn process_joint_queries(
     mut pending: ResMut<PendingCommands>,
     joint_query: Query<(&EntityId, &JointData)>,

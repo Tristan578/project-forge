@@ -13,7 +13,8 @@
     "meta": "Meta/introspection endpoint (the OpenAPI spec itself, capability + status probes).",
     "moderation": "Content-moderation/appeal endpoint — trust-and-safety surface, not a public content API.",
     "marketplace": "Marketplace seller-only operation (asset upload) gated to the seller.",
-    "growth": "Growth/marketing capture endpoint (waitlist, feedback) — form ingestion, not a documented API."
+    "growth": "Growth/marketing capture endpoint (waitlist, feedback) — form ingestion, not a documented API.",
+    "ci-test": "CI-only integration probe compiled behind an explicit server-side flag."
   },
   "routes": {
     "/api/admin/circuit-breaker": "admin",
@@ -59,6 +60,7 @@
     "/api/sentry": "telemetry",
     "/api/status": "meta",
     "/api/stripe/webhook": "webhook",
+    "/api/test/upstash-rate-limit": "ci-test",
     "/api/user/delete": "account",
     "/api/user/export-data": "account",
     "/api/user/profile": "account",

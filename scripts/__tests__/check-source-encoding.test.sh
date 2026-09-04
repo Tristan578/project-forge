@@ -32,6 +32,28 @@ run_on() {
 }
 rc_of() { printf '%s' "${1##*|}"; }
 
+# A CRLF shell source dies at its shebang (`$'\r': command not found`) on every
+# platform the suites run on; a Windows checkout with core.autocrlf=true
+# produces exactly that (#9611). CR stays tolerated in other files.
+RES="$(run_on 'echo hi\r\n' sh)"
+if [ "$(rc_of "$RES")" -ne 0 ] && grep -q '0x0D' <<<"$RES"; then
+  pass "a CR (0x0D) in a .sh file is rejected and named"
+else
+  fail "a CRLF shell script passed the gate — on Windows every suite would die at the shebang: $RES"
+fi
+RES="$(run_on 'echo hi\r\n' bash)"
+if [ "$(rc_of "$RES")" -ne 0 ]; then
+  pass "a CR in a .bash file is rejected too"
+else
+  fail "a CRLF .bash file passed the gate"
+fi
+RES="$(run_on 'const a = 1;\r\n' ts)"
+if [ "$(rc_of "$RES")" -eq 0 ]; then
+  pass "a CR in a non-shell file is still tolerated (only shell sources gained the CR rule)"
+else
+  fail "the CR rule leaked into non-shell files: $RES"
+fi
+
 echo "=== control bytes must be rejected ==="
 
 # The exact byte that made a MIME regex match nothing while every test passed.

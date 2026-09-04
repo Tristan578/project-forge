@@ -120,7 +120,9 @@ python .claude/skills/arch-validator/check_arch.py
 
 E2E tests require the WASM build:
 ```bash
-cd web && npx playwright test
+cd web && npm run e2e:install      # chromium + firefox + webkit, once
+cd web && npx playwright test      # chromium, the blocking CI selection
+cd web && npm run e2e:crossbrowser # the same @ui specs on firefox/webkit/mobile
 ```
 
 ### 5. Open a pull request
@@ -141,6 +143,7 @@ Include a summary of what changed, how to test it, and screenshots for visual ch
 | Unit (web) | `cd web && npx vitest run` | 4700+ |
 | Unit (MCP) | `cd mcp-server && npx vitest run` | 25+ |
 | E2E | `cd web && npx playwright test` | 81 |
+| E2E (cross-browser) | `cd web && npm run e2e:crossbrowser` | @ui specs x 4 engines |
 | Manual | See [TESTING.md](TESTING.md) | checklist |
 
 **Writing new tests:**
@@ -148,6 +151,7 @@ Include a summary of what changed, how to test it, and screenshots for visual ch
 - Store slices: use the `sliceTestTemplate.ts` pattern with `createSliceStore()` and `createMockDispatch()`. See `web/src/stores/slices/__tests__/` for examples.
 - Script worker tests: stub `self` with a mock `postMessage`, use `vi.resetModules()` + dynamic import to reload the worker module.
 - Mock paths: always use `@/lib/...` aliases in `vi.mock()`, never relative paths from `__tests__/` directories.
+- `mock*Once` values: queue them only on a mock you built inside the test, or consume them — a `*Once` value left armed on a shared mock (module-scoped `vi.fn`, `vi.mock` factory mock, or bare automock) fails the test that queued it (`web/vitest.mockOnceGuard.ts`, #9542). `vi.clearAllMocks()` does not drain the once-queue. `MOCK_ONCE_GUARD=off` silences the guard locally only.
 - New user-facing features must add cases to `TESTING.md`.
 
 ---

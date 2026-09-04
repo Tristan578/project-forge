@@ -431,6 +431,7 @@ pub(super) fn apply_instantiate_prefab(
             &mut meshes,
             &mut materials,
             &modified_snapshot,
+            crate::core::component_resync::ResyncReport::Each,
         );
 
         // Mark scene graph as dirty to trigger update event

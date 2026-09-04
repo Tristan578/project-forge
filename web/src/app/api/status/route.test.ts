@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 vi.mock('server-only', () => ({}));
 
-// The route charges a shared fan-out budget before it will pay for the four
+// The route charges a shared fan-out budget before it will pay for the five
 // outbound probes a cold report costs. Default it to permissive so the mapping
 // tests below exercise the report path; the budget's own behaviour is asserted
 // in the two dedicated tests at the bottom of this file.
@@ -310,7 +310,7 @@ describe('GET /api/status', () => {
       getClientIp: vi.fn(() => '1.2.3.4'),
       rateLimitResponse: vi.fn(),
       rateLimitPublicRoute: vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: 'Too many requests. Please try again later.' }), {
+        new Response(JSON.stringify({ error: 'Too many requests. Try again in 5 minutes.' }), {
           status: 429,
           headers: {
             'X-RateLimit-Remaining': '0',
@@ -422,7 +422,7 @@ describe('GET /api/status', () => {
     expect(res.status).toBe(429);
     expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
     expect(res.headers.get('Retry-After')).not.toBeNull();
-    // The four outbound probes are exactly what the budget exists to withhold.
+    // The five outbound probes are exactly what the budget exists to withhold.
     expect(getCachedHealthReport).not.toHaveBeenCalled();
   });
 });

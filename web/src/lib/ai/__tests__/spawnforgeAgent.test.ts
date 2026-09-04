@@ -37,10 +37,9 @@ vi.mock('@/lib/ai/toolAdapter', () => ({
   convertManifestToolsToSdkTools: vi.fn(() => ({})),
 }));
 
-vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
-  AI_MODELS: { gatewayChat: 'anthropic/claude-sonnet-4.6' },
-}));
+// `@/lib/ai/models` is deliberately NOT mocked. Replacing it with a fixture
+// set of invented ids decoupled the providerOptions this suite asserts from
+// the per-model table production actually consults (PF-1216 / #9339).
 
 vi.mock('@/data/commands.json', () => ({
   default: { version: '1', commands: [] },
@@ -50,6 +49,13 @@ import {
   buildAgentInstructions,
   createSpawnforgeAgent,
 } from '@/lib/ai/spawnforgeAgent';
+import {
+  AI_MODEL_PREMIUM,
+  AI_MODEL_PRIMARY,
+  GATEWAY_MODEL_CHAT,
+  GATEWAY_MODEL_FAST,
+  GATEWAY_MODEL_PREMIUM,
+} from '@/lib/ai/models';
 
 describe('buildAgentInstructions', () => {
   it('passes a plain string through unchanged', () => {
@@ -139,9 +145,12 @@ describe('buildAgentInstructions', () => {
   });
 });
 
+// The model id is load-bearing now: the thinking/effort shape is chosen per
+// model by `models.ts`, not per backend (PF-1216 / #9339). Use the live
+// primary constant so this base case tracks whatever the product ships.
 const baseOptions = {
   isDirectBackend: true,
-  model: 'claude-sonnet-4.5',
+  model: AI_MODEL_PRIMARY,
   instructions: 'system text',
 };
 
@@ -150,18 +159,70 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     mockToolLoopAgent.mockClear();
   });
 
+  // Both are Claude 5 (adaptive + effort); the per-model table below is what
+  // covers the families that answer a different shape.
+  const premiumOptions = { ...baseOptions, model: AI_MODEL_PREMIUM };
+
   it('omits providerOptions when neither thinking nor effort is set', () => {
     createSpawnforgeAgent(baseOptions);
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
     expect(args.providerOptions).toBeUndefined();
   });
 
-  it('emits anthropic.thinking when thinking=true on direct backend', () => {
+  it('emits the adaptive thinking shape for a Claude 5 model on the direct backend', () => {
     createSpawnforgeAgent({ ...baseOptions, thinking: true });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
     expect(args.providerOptions).toEqual({
-      anthropic: { thinking: { type: 'enabled', budgetTokens: 10000 } },
+      anthropic: { thinking: { type: 'adaptive' } },
     });
+  });
+
+  // The regression this whole table exists for: Claude 4.7+ answers
+  // `{ type: 'enabled' }` with HTTP 400, and Haiku 4.5 answers
+  // `{ type: 'adaptive' }` with HTTP 400. Asserting the ABSENCE of the wrong
+  // key is the half that would have caught the live bug.
+  it.each([
+    ['claude-sonnet-5', { type: 'adaptive' }],
+    ['claude-opus-5', { type: 'adaptive' }],
+    ['claude-sonnet-4-6', { type: 'adaptive' }],
+    ['claude-opus-4-8', { type: 'adaptive' }],
+    ['claude-haiku-4-5', { type: 'enabled', budgetTokens: 10000 }],
+    ['claude-haiku-4-5-20251001', { type: 'enabled', budgetTokens: 10000 }],
+    // The dotted spelling parses the same as the dashed one (#9626).
+    ['claude-sonnet-4.5', { type: 'enabled', budgetTokens: 10000 }],
+  ])('emits the right thinking shape for %s', (model, expected) => {
+    createSpawnforgeAgent({ ...baseOptions, model, thinking: true });
+    const args = mockToolLoopAgent.mock.calls[0][0] as {
+      providerOptions?: { anthropic: { thinking?: Record<string, unknown> } };
+    };
+    expect(args.providerOptions?.anthropic.thinking).toEqual(expected);
+  });
+
+  it('never sends budgetTokens to a Claude 5 model', () => {
+    for (const model of ['claude-sonnet-5', 'claude-opus-5']) {
+      mockToolLoopAgent.mockClear();
+      createSpawnforgeAgent({ ...baseOptions, model, thinking: true, effort: 'high' });
+      const args = mockToolLoopAgent.mock.calls[0][0] as {
+        providerOptions?: { anthropic: { thinking?: Record<string, unknown> } };
+      };
+      expect(args.providerOptions?.anthropic.thinking).not.toHaveProperty('budgetTokens');
+      expect(args.providerOptions?.anthropic.thinking).not.toHaveProperty('type', 'enabled');
+    }
+  });
+
+  it('omits thinking entirely for a model with no known shape rather than 400-ing', () => {
+    // Fail-safe direction: an unmapped id degrades the feature to a no-op.
+    createSpawnforgeAgent({ ...baseOptions, model: 'gpt-4o-mini', thinking: true });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
+    expect(args.providerOptions).toBeUndefined();
+  });
+
+  it('drops effort for a model that does not accept it (Haiku 4.5)', () => {
+    createSpawnforgeAgent({ ...baseOptions, model: 'claude-haiku-4-5', effort: 'high' });
+    const args = mockToolLoopAgent.mock.calls[0][0] as {
+      providerOptions?: { anthropic?: { effort?: string } };
+    };
+    expect(args.providerOptions).toBeUndefined();
   });
 
   it('emits anthropic.effort when effort is set on direct backend', () => {
@@ -172,37 +233,48 @@ describe('createSpawnforgeAgent — providerOptions', () => {
     });
   });
 
-  it('emits both thinking and effort together when both are set', () => {
-    createSpawnforgeAgent({ ...baseOptions, thinking: true, effort: 'high' });
+  it('drops effort for a model that 400s on it (Haiku 4.5), keeping the budget thinking form', () => {
+    createSpawnforgeAgent({ ...baseOptions, model: 'claude-haiku-4-5-20251001', thinking: true, effort: 'high' });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
+    expect(args.providerOptions).toEqual({
+      anthropic: { thinking: { type: 'enabled', budgetTokens: 10000 } },
+    });
+  });
+
+  it('emits both adaptive thinking and effort together on the premium model', () => {
+    createSpawnforgeAgent({ ...premiumOptions, thinking: true, effort: 'high' });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic: unknown } };
     expect(args.providerOptions).toEqual({
       anthropic: {
-        thinking: { type: 'enabled', budgetTokens: 10000 },
+        thinking: { type: 'adaptive' },
         effort: 'high',
       },
     });
   });
 
-  it('does not emit providerOptions for gateway backend even with thinking/effort', () => {
+  it('does not emit anthropic thinking/effort for the gateway backend (only the gateway routing fields)', () => {
     createSpawnforgeAgent({
       ...baseOptions,
       isDirectBackend: false,
       thinking: true,
       effort: 'medium',
     });
-    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
-    expect(args.providerOptions).toBeUndefined();
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic?: unknown; gateway?: unknown } };
+    expect(args.providerOptions?.anthropic).toBeUndefined();
+    expect(args.providerOptions).toEqual({
+      gateway: { models: [GATEWAY_MODEL_FAST], caching: 'auto' },
+    });
   });
 
   it('forwards effort=low and effort=high without modification', () => {
-    createSpawnforgeAgent({ ...baseOptions, effort: 'low' });
+    createSpawnforgeAgent({ ...premiumOptions, effort: 'low' });
     expect(
       (mockToolLoopAgent.mock.calls[0][0] as { providerOptions: { anthropic: { effort: string } } })
         .providerOptions.anthropic.effort,
     ).toBe('low');
 
     mockToolLoopAgent.mockClear();
-    createSpawnforgeAgent({ ...baseOptions, effort: 'high' });
+    createSpawnforgeAgent({ ...premiumOptions, effort: 'high' });
     expect(
       (mockToolLoopAgent.mock.calls[0][0] as { providerOptions: { anthropic: { effort: string } } })
         .providerOptions.anthropic.effort,
@@ -217,36 +289,60 @@ describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', (
     mockToolLoopAgent.mockClear();
   });
 
-  it('omits providerOptions on the gateway backend when neither userId nor tags is set', () => {
+  // These cases run on the real primary model, which sits mid-chain, so each
+  // one carries the ordered fallback list alongside the field under test.
+  it('always emits gateway.caching on the gateway backend, even with neither userId nor tags', () => {
     createSpawnforgeAgent(gatewayBase);
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
-    expect(args.providerOptions).toBeUndefined();
+    expect(args.providerOptions).toEqual({ gateway: { models: [GATEWAY_MODEL_FAST], caching: 'auto' } });
   });
 
   it('emits providerOptions.gateway.user on the gateway backend when userId is set', () => {
     createSpawnforgeAgent({ ...gatewayBase, userId: 'user_123' });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
-    expect(args.providerOptions).toEqual({ gateway: { user: 'user_123' } });
+    expect(args.providerOptions).toEqual({
+      gateway: { user: 'user_123', models: [GATEWAY_MODEL_FAST], caching: 'auto' },
+    });
   });
 
   it('emits providerOptions.gateway.tags on the gateway backend when tags is set', () => {
     createSpawnforgeAgent({ ...gatewayBase, tags: ['route:chat', 'tier:pro'] });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
-    expect(args.providerOptions).toEqual({ gateway: { tags: ['route:chat', 'tier:pro'] } });
+    expect(args.providerOptions).toEqual({
+      gateway: { tags: ['route:chat', 'tier:pro'], models: [GATEWAY_MODEL_FAST], caching: 'auto' },
+    });
   });
 
   it('emits both userId and tags together on the gateway backend', () => {
     createSpawnforgeAgent({ ...gatewayBase, userId: 'user_123', tags: ['route:chat'] });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
     expect(args.providerOptions).toEqual({
-      gateway: { user: 'user_123', tags: ['route:chat'] },
+      gateway: { user: 'user_123', tags: ['route:chat'], models: [GATEWAY_MODEL_FAST], caching: 'auto' },
     });
   });
 
   it('ignores an empty tags array (does not emit an empty gateway.tags field)', () => {
     createSpawnforgeAgent({ ...gatewayBase, tags: [] });
-    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: unknown };
-    expect(args.providerOptions).toBeUndefined();
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: Record<string, unknown> } };
+    expect(args.providerOptions?.gateway).not.toHaveProperty('tags');
+  });
+
+  it.each([
+    [GATEWAY_MODEL_PREMIUM, [GATEWAY_MODEL_CHAT, GATEWAY_MODEL_FAST]],
+    [GATEWAY_MODEL_CHAT, [GATEWAY_MODEL_FAST]],
+  ])('emits the ordered fallback list for %s (#9631)', (model, models) => {
+    createSpawnforgeAgent({ ...gatewayBase, model });
+    const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
+    expect(args.providerOptions).toEqual({ gateway: { models, caching: 'auto' } });
+  });
+
+  it('emits no fallback list for the cheapest model or an unknown provider model', () => {
+    for (const model of [GATEWAY_MODEL_FAST, 'openai/gpt-4o-mini']) {
+      mockToolLoopAgent.mockClear();
+      createSpawnforgeAgent({ ...gatewayBase, model });
+      const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { gateway: unknown } };
+      expect(args.providerOptions).toEqual({ gateway: { caching: 'auto' } });
+    }
   });
 
   it('never emits providerOptions.gateway on the direct backend, even with userId/tags set', () => {
@@ -269,7 +365,7 @@ describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', (
     });
     const args = mockToolLoopAgent.mock.calls[0][0] as { providerOptions?: { anthropic?: unknown; gateway?: unknown } };
     expect(args.providerOptions).toEqual({
-      anthropic: { thinking: { type: 'enabled', budgetTokens: 10000 } },
+      anthropic: { thinking: { type: 'adaptive' } },
     });
   });
 });

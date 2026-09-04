@@ -144,11 +144,13 @@ export default async function PlayPage({ params }: PlayPageProps) {
           ]}
         />
       </div>
-      <GamePlayer
-        userId={userId}
-        slug={slug}
-        isAuthenticated={!!viewerClerkId}
-      />
+      <div data-testid="game-player-route-mount">
+        <GamePlayer
+          userId={userId}
+          slug={slug}
+          isAuthenticated={!!viewerClerkId}
+        />
+      </div>
     </>
   );
 }

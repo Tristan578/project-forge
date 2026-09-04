@@ -29,7 +29,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
  * Two separate bounds apply, because there are two separate costs:
  *   - `rateLimitPublicRoute()` — raw request volume, 30 per 5 minutes per IP,
  *     the same allowance every other public route gets.
- *   - `checkHealthFanoutBudget()` — the four outbound probes a cold report
+ *   - `checkHealthFanoutBudget()` — the five outbound probes a cold report
  *     costs, shared with `/api/health` and the `/health` page and charged only
  *     on a cache miss.
  *
@@ -44,8 +44,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   try {
   // Shared cache + in-flight dedup: this route is public and unauthenticated,
-  // so a distributed burst would otherwise fan out to four outbound probes
-  // (Neon, engine CDN, Clerk, Anthropic) per request. The cache alone is NOT a
+  // so a distributed burst would otherwise fan out to five outbound probes
+  // (Neon, engine CDN, Clerk, chat backend, Upstash) per request. The cache alone is NOT a
   // bound — its state is per-lambda-instance, so it bounds one instance rather
   // than the aggregate. The bound is the shared fan-out budget below, which is
   // charged only after a peek miss: a report we already hold costs nothing to
