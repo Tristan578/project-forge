@@ -330,9 +330,13 @@ describe('POST /api/community/games/[id]/report', () => {
     expect(calls[0].values).toContain(null);
   });
 
-  it('reports hidden:false and duplicate:true when the statement matched no row', async () => {
+  it('reports hidden:false and duplicate:true when the insert conflicted', async () => {
     vi.mocked(getDb).mockReturnValue(existingGame() as never);
-    const { sql } = makeSqlMock([]);
+    // `pre` matched the game, so a row comes back; the ON CONFLICT swallowed
+    // the insert, so the `upd` half of the LEFT JOIN is null.
+    const { sql } = makeSqlMock([
+      { status: null, report_count: null, hidden: null },
+    ]);
     vi.mocked(getNeonSql).mockReturnValue(sql as never);
 
     const { POST } = await import('./route');
@@ -343,6 +347,25 @@ describe('POST /api/community/games/[id]/report', () => {
 
     expect(res.status).toBe(200);
     expect(body).toEqual({ reported: true, hidden: false, duplicate: true });
+  });
+
+  it('404s rather than claiming a duplicate when the game vanished mid-request', async () => {
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
+    // Zero rows now means only one thing: `pre` matched nothing, i.e. the game
+    // was deleted between the existence check and the write. Reporting that as
+    // a duplicate told the user they had already reported a game that no
+    // longer exists, and hid the fact that no report was filed.
+    const { sql } = makeSqlMock([]);
+    vi.mocked(getNeonSql).mockReturnValue(sql as never);
+
+    const { POST } = await import('./route');
+    const res = await POST(makeRequest({ reason: 'spam' }), {
+      params: Promise.resolve({ id: GAME_ID }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(body).toEqual({ error: 'Game not found' });
   });
 
   it('reports hidden:false when the game was already flagged by someone else', async () => {

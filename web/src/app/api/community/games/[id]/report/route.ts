@@ -81,8 +81,10 @@ const reportSchema = z.object({
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface ReportResultRow {
-  status: string;
-  report_count: number | string;
+  // NULL when `upd` produced no row — the report conflicted with an existing
+  // one from the same reporter, so nothing was inserted and nothing counted.
+  status: string | null;
+  report_count: number | string | null;
   hidden: boolean | null;
 }
 
@@ -206,14 +208,26 @@ export async function POST(
         SELECT upd.new_status AS status,
                upd.new_report_count AS report_count,
                (pre.prev_status = 'published' AND upd.new_status = 'flagged') AS hidden
-        FROM upd CROSS JOIN pre
+        FROM pre LEFT JOIN upd ON true
       `
     )) as unknown as ReportResultRow[];
 
-    // Zero rows means the ON CONFLICT fired: this reporter had already reported
-    // this game, so nothing was inserted and nothing was counted.
+    // The final SELECT is driven by `pre`, not by `upd`, so the two ways this
+    // statement can decline to write are distinguishable. A CROSS JOIN made
+    // both collapse to zero rows and reported either as a duplicate — telling
+    // someone "you have already reported this game" about a game that had just
+    // been deleted, and swallowing the fact that no report was filed.
+    //
+    // No row at all: `pre` matched nothing, i.e. the game was deleted between
+    // the existence check above and this statement. Same answer as that check.
     const row = rows[0];
     if (!row) {
+      return NextResponse.json({ error: 'Game not found' }, { status: 404 });
+    }
+
+    // A row with no `upd` half: the ON CONFLICT fired, so this reporter had
+    // already reported this game and nothing was inserted or counted.
+    if (row.status === null || row.status === undefined) {
       return NextResponse.json({ reported: true, hidden: false, duplicate: true });
     }
 
