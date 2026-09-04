@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import { Globe, Users, Map, Clock, BookOpen, Scroll, Download, Sparkles, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { Globe, Users, Map, Clock, BookOpen, Scroll, Download, Sparkles, ChevronDown, ChevronRight, Loader2, AlertTriangle } from 'lucide-react';
 import {
   WORLD_PRESETS,
+  WORLD_DESC_MAX_LENGTH,
   generateWorld,
+  isWorldDescriptionTruncated,
   worldToMarkdown,
   type GameWorld,
   type Faction,
@@ -247,10 +249,13 @@ export function WorldBuilderPanel() {
   const [world, setWorld] = useState<GameWorld | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [truncationWarning, setTruncationWarning] = useState(false);
 
   const handleGenerate = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const willGenerate = !(selectedPreset && !description.trim());
+    setTruncationWarning(willGenerate && isWorldDescriptionTruncated(description));
     try {
       const result = await generateWorld(description, selectedPreset || undefined);
       setWorld(result);
@@ -352,6 +357,15 @@ export function WorldBuilderPanel() {
           {error && (
             <div className="rounded border border-red-800 bg-red-900/30 px-2 py-1 text-[11px] text-red-400">
               {error}
+            </div>
+          )}
+          {truncationWarning && (
+            <div className="flex items-start gap-1.5 rounded border border-yellow-800 bg-yellow-900/30 px-2 py-1 text-[11px] text-yellow-400">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>
+                Your description was over {WORLD_DESC_MAX_LENGTH.toLocaleString()} characters and was
+                shortened before generation — the result may not reflect your full description.
+              </span>
             </div>
           )}
         </div>

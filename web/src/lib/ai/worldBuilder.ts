@@ -568,6 +568,14 @@ export function parseWorldResponse(raw: string): GameWorld {
  * Generate a world using the AI chat endpoint.
  * Falls back to a preset if generation fails.
  */
+/** Max description length before generateWorld truncates it for the AI prompt. */
+export const WORLD_DESC_MAX_LENGTH = 1500;
+
+/** True when generateWorld will shorten this description before generation. */
+export function isWorldDescriptionTruncated(description: string): boolean {
+  return typeof description === 'string' && description.length > WORLD_DESC_MAX_LENGTH;
+}
+
 export async function generateWorld(description: string, preset?: string): Promise<GameWorld> {
   // If a preset is requested with no description, return it directly
   if (preset && !description.trim() && WORLD_PRESETS[preset]) {
@@ -579,9 +587,8 @@ export async function generateWorld(description: string, preset?: string): Promi
 
   // Truncate the user description (not the full prompt) to stay within
   // the 4000-char message limit without cutting through the JSON schema
-  const maxDescLength = 1500;
-  const safeDescription = description.length > maxDescLength
-    ? description.slice(0, maxDescLength) + '... (truncated)'
+  const safeDescription = isWorldDescriptionTruncated(description)
+    ? description.slice(0, WORLD_DESC_MAX_LENGTH) + '... (truncated)'
     : description;
   const prompt = buildWorldPrompt(safeDescription, preset);
 

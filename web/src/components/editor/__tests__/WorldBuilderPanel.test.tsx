@@ -61,6 +61,9 @@ const { mockWorld } = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/ai/worldBuilder', () => ({
+  WORLD_DESC_MAX_LENGTH: 1500,
+  isWorldDescriptionTruncated: (description: string) =>
+    typeof description === 'string' && description.length > 1500,
   WORLD_PRESETS: {
     medieval_fantasy: {
       name: 'Aethoria',
@@ -169,6 +172,54 @@ describe('WorldBuilderPanel', () => {
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
     await waitFor(() => screen.getByText('Aethoria'));
     expect(screen.getByText('Aethoria')).toBeInTheDocument();
+  });
+
+  it('warns when the submitted description is shortened before generation', async () => {
+    render(<WorldBuilderPanel />);
+    fireEvent.change(screen.getByLabelText('Describe your world concept'), {
+      target: { value: 'x'.repeat(1501) },
+    });
+    fireEvent.click(screen.getByLabelText('Generate world with AI'));
+
+    expect(await screen.findByText(/over 1,500 characters and was shortened before generation/i)).toBeInTheDocument();
+  });
+
+  it('does not warn for a description at the prompt limit', async () => {
+    render(<WorldBuilderPanel />);
+    fireEvent.change(screen.getByLabelText('Describe your world concept'), {
+      target: { value: 'x'.repeat(1500) },
+    });
+    fireEvent.click(screen.getByLabelText('Generate world with AI'));
+    await waitFor(() => expect(generateWorld).toHaveBeenCalledOnce());
+
+    expect(screen.queryByText(/shortened before generation/i)).toBeNull();
+  });
+
+  it('clears the warning on the next non-truncated generation', async () => {
+    render(<WorldBuilderPanel />);
+    const description = screen.getByLabelText('Describe your world concept');
+    fireEvent.change(description, { target: { value: 'x'.repeat(1501) } });
+    fireEvent.click(screen.getByLabelText('Generate world with AI'));
+    expect(await screen.findByText(/shortened before generation/i)).toBeInTheDocument();
+
+    fireEvent.change(description, { target: { value: 'A concise world' } });
+    fireEvent.click(screen.getByLabelText('Generate world with AI'));
+    await waitFor(() => expect(generateWorld).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/shortened before generation/i)).toBeNull();
+  });
+
+  it('does not warn when a preset bypasses generation for whitespace input', async () => {
+    render(<WorldBuilderPanel />);
+    fireEvent.change(screen.getByLabelText('Genre preset (optional)'), {
+      target: { value: 'medieval_fantasy' },
+    });
+    fireEvent.change(screen.getByLabelText('Describe your world concept'), {
+      target: { value: ' '.repeat(1501) },
+    });
+    fireEvent.click(screen.getByLabelText('Generate world with AI'));
+    await waitFor(() => expect(generateWorld).toHaveBeenCalledOnce());
+
+    expect(screen.queryByText(/shortened before generation/i)).toBeNull();
   });
 
   it('shows world genre and era after generation', async () => {

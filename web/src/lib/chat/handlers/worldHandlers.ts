@@ -12,6 +12,7 @@ import {
   validateWorldConsistency,
   healWorldConsistency,
   WORLD_PRESETS,
+  isWorldDescriptionTruncated,
   type GameWorld,
   type ConsistencyReport,
 } from '@/lib/ai/worldBuilder';
@@ -130,13 +131,27 @@ async function generateWithHealing(
 }
 
 /** Produce a human-readable summary of a GameWorld for the AI to return. */
-function worldSummary(world: GameWorld, report: ConsistencyReport, fallback: boolean): string {
+function worldSummary(
+  world: GameWorld,
+  report: ConsistencyReport,
+  fallback: boolean,
+  descriptionTruncated: boolean,
+): string {
   const factionList = world.factions.map((f) => `${f.name} (${f.alignment})`).join(', ');
   const regionList = world.regions.map((r) => r.name).join(', ');
   const warningCount = report.issues.filter((i) => i.severity === 'warning').length;
   const errorCount = report.issues.filter((i) => i.severity === 'error').length;
 
-  const lines: string[] = [
+  const lines: string[] = [];
+
+  if (descriptionTruncated) {
+    lines.push(
+      '*Your description was shortened before generation, so the result may not reflect the full premise.*',
+      ``,
+    );
+  }
+
+  lines.push(
     fallback
       ? `Generated world using preset fallback (genre: ${world.genre})`
       : `Generated world: **${world.name}**`,
@@ -147,7 +162,7 @@ function worldSummary(world: GameWorld, report: ConsistencyReport, fallback: boo
     `**Regions (${world.regions.length}):** ${regionList}`,
     `**Timeline events:** ${world.timeline.length}`,
     `**Lore entries:** ${world.lore.length}`,
-  ];
+  );
 
   if (errorCount > 0) {
     lines.push(``, `*${errorCount} consistency error(s) found — review the consistency report for details.*`);
@@ -172,6 +187,7 @@ export const worldHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const { premise, genre, factionCount, regionCount } = p.data;
+    const descriptionTruncated = isWorldDescriptionTruncated(premise);
 
     try {
       const { world, report, fallback } = await generateWithHealing(
@@ -183,7 +199,7 @@ export const worldHandlers: Record<string, ToolHandler> = {
 
       persistWorld(world);
 
-      const summary = worldSummary(world, report, fallback);
+      const summary = worldSummary(world, report, fallback, descriptionTruncated);
 
       return {
         success: true,
@@ -192,6 +208,7 @@ export const worldHandlers: Record<string, ToolHandler> = {
           world,
           consistencyReport: report,
           fallback,
+          descriptionTruncated,
         },
       };
     } catch (err) {

@@ -225,6 +225,24 @@ describe('build_world handler', () => {
     expect(result.message).toContain('3');
   });
 
+  it('reports when an oversized premise is truncated', async () => {
+    mockFetchWithWorld(VALID_WORLD);
+    const result = await worldHandlers.build_world({ premise: 'x'.repeat(1501) }, makeContext());
+    expect(result.success).toBe(true);
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(true);
+    expect(result.message).toMatch(/description.+shortened/i);
+  });
+
+  it('does not report truncation at the prompt limit', async () => {
+    mockFetchWithWorld(VALID_WORLD);
+    const result = await worldHandlers.build_world({ premise: 'x'.repeat(1500) }, makeContext());
+    expect(result.success).toBe(true);
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(false);
+    expect(result.message).not.toMatch(/description.+shortened/i);
+  });
+
   it('falls back to preset when AI returns unparseable JSON', async () => {
     const encoder = new TextEncoder();
     vi.mocked(fetch).mockResolvedValue({

@@ -4,6 +4,8 @@ import {
   buildWorldPrompt,
   parseWorldResponse,
   generateWorld,
+  isWorldDescriptionTruncated,
+  WORLD_DESC_MAX_LENGTH,
   worldToMarkdown,
   validateWorldConsistency,
   healWorldConsistency,
@@ -14,6 +16,15 @@ import {
   type LoreEntry,
   type WorldRule,
 } from '../worldBuilder';
+
+describe('world description truncation', () => {
+  it('reports only descriptions beyond the prompt limit', () => {
+    expect(isWorldDescriptionTruncated('x'.repeat(WORLD_DESC_MAX_LENGTH))).toBe(false);
+    expect(isWorldDescriptionTruncated('x'.repeat(WORLD_DESC_MAX_LENGTH + 1))).toBe(true);
+    expect(isWorldDescriptionTruncated('')).toBe(false);
+    expect(isWorldDescriptionTruncated(undefined as unknown as string)).toBe(false);
+  });
+});
 
 // ---- Type structure tests ----
 
