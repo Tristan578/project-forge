@@ -25,7 +25,7 @@
       "statements": 83,
       "branches": 75,
       "functions": 78,
-      "lines": 84
+      "lines": 85
     },
     "quickValidation": "cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run"
   },
