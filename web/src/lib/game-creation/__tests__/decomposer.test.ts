@@ -569,18 +569,22 @@ describe('decomposeIntoSystems', () => {
     // Iterating the exported const, so a verb added to the vocabulary that the
     // schema does not accept fails here rather than at generation time.
     for (const behavior of BEHAVIOR_VOCAB) {
-      fetchAI.mockClear();
-      fetchAI.mockResolvedValue(makeValidLLMJson({ scenes: [sceneWithBehavior(behavior)] }));
+      generateDecomposition.mockClear();
+      generateDecomposition.mockResolvedValue(
+        makeValidDecomposition({ scenes: [sceneWithBehavior(behavior)] }),
+      );
 
       const gdd = await decomposeIntoSystems('make a platformer', '2d');
 
-      expect(fetchAI).toHaveBeenCalledTimes(1);
+      expect(generateDecomposition).toHaveBeenCalledTimes(1);
       expect(gdd.scenes[0].entities[1].behavior).toBe(behavior);
     }
   });
 
   it('leaves the field off entirely when the model omits it', async () => {
-    fetchAI.mockResolvedValue(makeValidLLMJson({ scenes: [sceneWithBehavior(undefined)] }));
+    generateDecomposition.mockResolvedValue(
+      makeValidDecomposition({ scenes: [sceneWithBehavior(undefined)] }),
+    );
 
     const gdd = await decomposeIntoSystems('make a platformer', '2d');
 
@@ -591,20 +595,20 @@ describe('decomposeIntoSystems', () => {
     // The retry count is the assertion that matters. A schema that merely
     // dropped the unknown key would also "not throw", and the design would
     // silently lose the intent the model was asked for.
-    fetchAI.mockResolvedValue(
-      makeValidLLMJson({ scenes: [sceneWithBehavior('teleport-and-explode')] }),
+    generateDecomposition.mockResolvedValue(
+      makeValidDecomposition({ scenes: [sceneWithBehavior('teleport-and-explode')] }),
     );
 
     await expect(decomposeIntoSystems('make a platformer', '2d')).rejects.toThrow(
       /behavior/,
     );
     // One initial attempt plus MAX_RETRIES.
-    expect(fetchAI).toHaveBeenCalledTimes(3);
+    expect(generateDecomposition).toHaveBeenCalledTimes(3);
   });
 
   it('rejects the removed free-text ARRAY shape', async () => {
-    fetchAI.mockResolvedValue(
-      makeValidLLMJson({ scenes: [sceneWithBehavior(['chase', 'melee-attack'])] }),
+    generateDecomposition.mockResolvedValue(
+      makeValidDecomposition({ scenes: [sceneWithBehavior(['chase', 'melee-attack'])] }),
     );
 
     await expect(decomposeIntoSystems('make a platformer', '2d')).rejects.toThrow();
@@ -613,8 +617,8 @@ describe('decomposeIntoSystems', () => {
   it('states the whole vocabulary to the model, and still never says the plural', async () => {
     await decomposeIntoSystems('make a platformer', '2d');
 
-    const [userMessage, opts] = fetchAI.mock.calls[0] as [string, { systemOverride: string }];
-    const prompt = `${userMessage}\n${opts.systemOverride}`;
+    const [userMessage, systemPrompt] = generateDecomposition.mock.calls[0] as [string, string];
+    const prompt = `${userMessage}\n${systemPrompt}`;
 
     // A verb the schema accepts but the prompt never mentions is a verb the
     // model will not emit — the capability would exist and never be reached.
