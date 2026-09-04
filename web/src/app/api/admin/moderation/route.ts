@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getDb, getNeonSql, queryWithResilience } from '@/lib/db/client';
 import { gameComments, publishedGames, users } from '@/lib/db/schema';
-import { eq, desc, count } from 'drizzle-orm';
+import { eq, desc, count, sql } from 'drizzle-orm';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
@@ -201,10 +201,21 @@ export async function GET(req: NextRequest) {
  *             game_comments, game_ratings, game_likes and game_reports all hold
  *             NOT NULL foreign keys to published_games.id with no ON DELETE
  *             CASCADE, so a hard delete would raise an FK violation or require
- *             a multi-table cascade this route does not implement. flaggedAt is
- *             deliberately left in place as the takedown record — the hold is
- *             the enforcement, and approve (above) or a won appeal is what
- *             lifts it.
+ *             a multi-table cascade this route does not implement. The status
+ *             is NOT what makes the removal stick — POST /api/publish rewrites
+ *             status on any republish, and refuses only on `flagged_at`. So the
+ *             hold is STAMPED here when absent rather than merely left in
+ *             place: the queue is not the only way an operator reaches this
+ *             action, and a takedown driven by an out-of-band report (abuse
+ *             mail, a DMCA notice) targets a game that never crossed the
+ *             auto-hide threshold. With no hold on that row, re-POSTing the
+ *             same slug undid the takedown in one call. COALESCE, not a plain
+ *             now(), because on an already-held row the existing timestamp is
+ *             the record of when moderation began and must survive. approve
+ *             (above) or a won appeal is still what lifts it — both match on
+ *             `flagged_at IS NOT NULL`, so an operator can reverse their own
+ *             takedown, and approve's CASE leaves a row that was never
+ *             'flagged' 'unpublished' rather than silently republishing it.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -269,7 +280,11 @@ export async function POST(req: NextRequest) {
       const removed = await queryWithResilience(() =>
         getDb()
           .update(publishedGames)
-          .set({ status: 'unpublished', updatedAt: new Date() })
+          .set({
+            status: 'unpublished',
+            flaggedAt: sql`COALESCE(${publishedGames.flaggedAt}, now())`,
+            updatedAt: new Date(),
+          })
           .where(eq(publishedGames.id, id))
           .returning({ id: publishedGames.id })
       );
