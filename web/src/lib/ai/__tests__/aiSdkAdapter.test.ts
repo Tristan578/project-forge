@@ -542,12 +542,11 @@ describe('streamViaSdk — provider selection', () => {
     const callArgs = vi.mocked(streamText).mock.calls[0][0];
     expect(callArgs.experimental_telemetry).toEqual({
       isEnabled: true,
-      functionId: 'aiSdkAdapter.streamViaSdk',
-      metadata: { thinkingSent: 'none' },
+      functionId: 'aiSdkAdapter.streamViaSdk:thinking=none',
     });
   });
 
-  it('records the adaptive thinking literal in telemetry metadata for a direct route with thinking=true', async () => {
+  it('records the adaptive thinking literal in telemetry functionId for a direct route with thinking=true', async () => {
     await collectEvents(
       streamViaSdk(directRoute, simpleMessages, { thinking: true }),
     );
@@ -555,12 +554,11 @@ describe('streamViaSdk — provider selection', () => {
     const callArgs = vi.mocked(streamText).mock.calls[0][0];
     expect(callArgs.experimental_telemetry).toEqual({
       isEnabled: true,
-      functionId: 'aiSdkAdapter.streamViaSdk',
-      metadata: { thinkingSent: 'adaptive' },
+      functionId: 'aiSdkAdapter.streamViaSdk:thinking=adaptive',
     });
   });
 
-  it('records the budget thinking literal in telemetry metadata for a direct route on a model that rejects adaptive (Haiku 4.5)', async () => {
+  it('records the budget thinking literal in telemetry functionId for a direct route on a model that rejects adaptive (Haiku 4.5)', async () => {
     await collectEvents(
       streamViaSdk(directRoute, simpleMessages, { thinking: true, model: 'claude-haiku-4-5-20251001' }),
     );
@@ -568,19 +566,17 @@ describe('streamViaSdk — provider selection', () => {
     const callArgs = vi.mocked(streamText).mock.calls[0][0];
     expect(callArgs.experimental_telemetry).toEqual({
       isEnabled: true,
-      functionId: 'aiSdkAdapter.streamViaSdk',
-      metadata: { thinkingSent: 'enabled' },
+      functionId: 'aiSdkAdapter.streamViaSdk:thinking=enabled',
     });
   });
 
-  it('records "none" in telemetry metadata for a direct route with thinking left off', async () => {
+  it('records "none" in telemetry functionId for a direct route with thinking left off', async () => {
     await collectEvents(streamViaSdk(directRoute, simpleMessages, {}));
 
     const callArgs = vi.mocked(streamText).mock.calls[0][0];
     expect(callArgs.experimental_telemetry).toEqual({
       isEnabled: true,
-      functionId: 'aiSdkAdapter.streamViaSdk',
-      metadata: { thinkingSent: 'none' },
+      functionId: 'aiSdkAdapter.streamViaSdk:thinking=none',
     });
   });
 });

@@ -168,17 +168,22 @@ export async function* streamViaSdk(
       messages: convertMessages(messages),
       maxOutputTokens: maxTokens,
       tools,
-      // `metadata` attaches to the Sentry AI span as `ai.telemetry.metadata.*`
-      // (Phase 5 wiring above). Records which `thinking` literal actually went
-      // on the wire for this request -- 'adaptive' / 'enabled' (budget) /
-      // 'none' (backend isn't direct, thinking was off, or the model has no
-      // known shape) -- so a wrong shape for a given model/route combination
-      // is visible in the trace instead of only surfacing as an HTTP 400 from
-      // Anthropic (dx finding, PR #9672 review).
+      // The installed AI SDK's `TelemetryOptions` (ai@7, v7's rewritten
+      // diagnostics-channel telemetry) has no `metadata` field -- Sentry's
+      // subscriber (`vercel-ai-dc-subscriber.js`) reads only `functionId`
+      // off the event and maps it to the `gen_ai.function_id` span
+      // attribute. `functionId` is the only field that actually reaches the
+      // Sentry AI span, so it carries which `thinking` literal went on the
+      // wire for this request -- 'adaptive' / 'enabled' (budget) / 'none'
+      // (backend isn't direct, thinking was off, or the model has no known
+      // shape) -- so a wrong shape for a given model/route combination is
+      // visible in the trace instead of only surfacing as an HTTP 400 from
+      // Anthropic (dx finding, PR #9672 review). No dashboard in this repo
+      // groups on a fixed `aiSdkAdapter.streamViaSdk` literal (grepped
+      // src/lib/ai, src/lib/monitoring), so varying the suffix is safe.
       experimental_telemetry: {
         isEnabled: true,
-        functionId: 'aiSdkAdapter.streamViaSdk',
-        metadata: { thinkingSent: thinkingOption?.type ?? 'none' },
+        functionId: `aiSdkAdapter.streamViaSdk:thinking=${thinkingOption?.type ?? 'none'}`,
       },
       ...(thinkingOption
         ? { providerOptions: { anthropic: { thinking: thinkingOption } } }
