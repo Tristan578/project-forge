@@ -102,18 +102,20 @@ run_ratchet() {
 
 # ---------------------------------------------------------------------------
 # 1. Coverage exceeds thresholds → BOTH configs bumped to floored actuals
+#    MINUS the 1-point margin (PF: coverage ratchet margin), not flush
+#    against the measurement.
 # ---------------------------------------------------------------------------
 fresh_root 75 65 70 77  70 60 65 72
 write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "ratchet exits 0 on bump" 0 "$rc"
-check "main config bumped to floored actuals" "80/70/74/81" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "node config bumped in lockstep" "80/70/74/81" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check "main config bumped to floored actuals minus margin" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
+check "node config bumped in lockstep" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
 main_notice=0
-grep -q '::notice::.*vitest.config.ts.*statements=80' "$ROOT/ratchet.log" && main_notice=1
+grep -q '::notice::.*vitest.config.ts.*statements=79' "$ROOT/ratchet.log" && main_notice=1
 check "bump run emits a main-config notice" 1 "$main_notice"
 node_notice=0
-grep -q '::notice::.*vitest.config.node.ts.*statements=80' "$ROOT/ratchet.log" && node_notice=1
+grep -q '::notice::.*vitest.config.node.ts.*statements=79' "$ROOT/ratchet.log" && node_notice=1
 check "bump run emits a node-config notice" 1 "$node_notice"
 
 # ---------------------------------------------------------------------------
@@ -183,7 +185,7 @@ rm "$ROOT/web/vitest.config.node.ts"
 write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "missing node config exits 0" 0 "$rc"
-check "main config still bumped without node config" "80/70/74/81" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
+check "main config still bumped without node config" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
 skip_warned=0
 grep -q '::warning::.*vitest.config.node.ts.*node-config lockstep skipped' "$ROOT/ratchet.log" && skip_warned=1
 check "missing node config emits a lockstep-skipped warning" 1 "$skip_warned"
@@ -202,14 +204,59 @@ fresh_root 75 65 70 77  90 80 85 92
 write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "node-ahead run exits 0" 0 "$rc"
-check "main config bumped while node is ahead" "80/70/74/81" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
+check "main config bumped while node is ahead" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
 check "node config ahead of main is never decreased" "90/80/85/92" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
 ahead_sync=0
 grep -q '::notice::.*vitest.config.node.ts' "$ROOT/ratchet.log" && ahead_sync=1
 check "node-ahead run emits no node-sync notice" 0 "$ahead_sync"
 
 # ---------------------------------------------------------------------------
-# 9. Workflow contract: coverage-ratchet.yml must gate AND commit the node
+# 9. MARGIN REGRESSION (this fix): a measurement that used to ratchet up now
+#    does not, because it doesn't clear the 1-point margin. This is the exact
+#    shape of the live break: threshold 75, actual floors to one point above
+#    (76.4% -> 76). The old code adopted 76 flush against the measurement;
+#    the next run that dipped by half a point would then fail the gate. The
+#    margin rule computes 76 - 1 = 75, which is not > current (75), so the
+#    threshold is left alone instead of being set with zero headroom.
+# ---------------------------------------------------------------------------
+fresh_root 75 65 70 77  75 65 70 77
+write_summary "$ROOT/web/coverage" 76.4 66.4 71.4 78.4
+rc=0; run_ratchet "$ROOT" || rc=$?
+check "sub-margin run exits 0" 0 "$rc"
+check "sub-margin measurement does NOT bump main config" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
+check "sub-margin measurement does NOT bump node config" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+sub_margin_notice=0
+grep -q '::notice::.*bumped' "$ROOT/ratchet.log" && sub_margin_notice=1
+check "sub-margin run emits no bump notice" 0 "$sub_margin_notice"
+
+# ---------------------------------------------------------------------------
+# 10. Margin does not block a real improvement: a measurement that clears the
+#     threshold by more than the margin still ratchets up, to the
+#     margin-adjusted value (not to the raw floored actual).
+# ---------------------------------------------------------------------------
+fresh_root 75 65 70 77  75 65 70 77
+write_summary "$ROOT/web/coverage" 85.4 75.4 80.4 87.4
+rc=0; run_ratchet "$ROOT" || rc=$?
+check "clears-margin run exits 0" 0 "$rc"
+check "clears-margin measurement bumps main config to actual minus margin" "84/74/79/86" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
+check "clears-margin measurement bumps node config in lockstep" "84/74/79/86" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+
+# ---------------------------------------------------------------------------
+# 11. Never-ratchet-down still holds with the margin in play: a measurement
+#     below current thresholds must not be able to pull them down even after
+#     the margin subtraction (e.g. current 77, actual 77.4 -> floor 77,
+#     margin-adjusted 76, which is BELOW current and must be rejected, not
+#     adopted).
+# ---------------------------------------------------------------------------
+fresh_root 75 65 70 77  75 65 70 77
+write_summary "$ROOT/web/coverage" 75.4 65.4 70.4 77.4
+rc=0; run_ratchet "$ROOT" || rc=$?
+check "margin-adjusted-below-current run exits 0" 0 "$rc"
+check "margin never pulls main config below current" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
+check "margin never pulls node config below current" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+
+# ---------------------------------------------------------------------------
+# 12. Workflow contract: coverage-ratchet.yml must gate AND commit the node
 #    config alongside vitest.config.ts, and must never wire the test seam
 # ---------------------------------------------------------------------------
 diff_gates=$(grep -c 'git diff --quiet web/vitest.config.ts web/vitest.config.node.ts' "$WORKFLOW" || true)
