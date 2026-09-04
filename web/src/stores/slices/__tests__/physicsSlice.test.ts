@@ -378,6 +378,66 @@ describe('physicsSlice', () => {
     });
   });
 
+  /**
+   * The removal counterparts of `applyPhysics2dFromEngine` /
+   * `applyJoint2dFromEngine`, for `PHYSICS2D_REMOVED` and `JOINT2D_REMOVED`
+   * (#9290). The dispatching siblings would echo a `remove_*` command straight
+   * back at the engine that just reported the removal.
+   */
+  describe('applyPhysics2dRemovalFromEngine', () => {
+    it('should clear BOTH maps WITHOUT dispatching', () => {
+      store.getState().applyPhysics2dFromEngine('entity1', { friction: 0.25 }, true);
+      mockDispatch.mockClear();
+
+      store.getState().applyPhysics2dRemovalFromEngine('entity1');
+
+      expect(store.getState().physics2d.entity1).toBeUndefined();
+      // Leaving the enablement behind would show an enabled body with no data
+      // under it — a state no command can produce.
+      expect(store.getState().physics2dEnabled.entity1).toBeUndefined();
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should leave other entities alone', () => {
+      store.getState().applyPhysics2dFromEngine('entity1', { friction: 0.25 }, true);
+      store.getState().applyPhysics2dFromEngine('entity2', { friction: 0.75 }, false);
+
+      store.getState().applyPhysics2dRemovalFromEngine('entity1');
+
+      expect(store.getState().physics2d.entity2).toMatchObject({ friction: 0.75 });
+      expect(store.getState().physics2dEnabled.entity2).toBe(false);
+    });
+
+    it('should be a no-op for an entity the store has never seen', () => {
+      store.getState().applyPhysics2dRemovalFromEngine('ghost');
+
+      expect(store.getState().physics2d).toEqual({});
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('applyJoint2dRemovalFromEngine', () => {
+    it('should remove the joint WITHOUT dispatching', () => {
+      store.getState().applyJoint2dFromEngine('entity1', makeJoint2d());
+      mockDispatch.mockClear();
+
+      store.getState().applyJoint2dRemovalFromEngine('entity1');
+
+      expect(store.getState().joints2d.entity1).toBeUndefined();
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should leave other joints alone', () => {
+      const other = makeJoint2d({ jointType: 'rope', maxDistance: 4 });
+      store.getState().applyJoint2dFromEngine('entity1', makeJoint2d());
+      store.getState().applyJoint2dFromEngine('entity2', other);
+
+      store.getState().applyJoint2dRemovalFromEngine('entity1');
+
+      expect(store.getState().joints2d.entity2).toEqual(other);
+    });
+  });
+
   describe('removeJoint2d', () => {
     it('should remove from map and dispatch', () => {
       store.getState().setJoint2d('entity1', makeJoint2d());

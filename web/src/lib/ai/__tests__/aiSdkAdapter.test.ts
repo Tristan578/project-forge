@@ -28,16 +28,21 @@ vi.mock('@/lib/ai/toolAdapter', () => ({
   convertManifestToolsToSdkTools: vi.fn(() => ({})),
 }));
 
-vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
-  AI_MODELS: {
-    chat: 'claude-sonnet-4.5',
-    fast: 'claude-haiku-4-5',
-    deep: 'claude-opus-4-8',
-    gatewayChat: 'anthropic/claude-sonnet-4.6',
-    gatewayDeep: 'anthropic/claude-opus-4-8',
-  },
-}));
+vi.mock('@/lib/ai/models', async () => {
+  // Real thinkingModeFor (#9626); only the ids are stubbed.
+  const actual = await vi.importActual<typeof import('@/lib/ai/models')>('@/lib/ai/models');
+  return {
+    ...actual,
+    AI_MODEL_PRIMARY: 'claude-sonnet-4.5',
+    AI_MODELS: {
+      chat: 'claude-sonnet-4.5',
+      fast: 'claude-haiku-4-5',
+      deep: 'claude-opus-4-8',
+      gatewayChat: 'anthropic/claude-sonnet-4.6',
+      gatewayDeep: 'anthropic/claude-opus-4-8',
+    },
+  };
+});
 
 import { streamText } from 'ai';
 import { gateway } from '@ai-sdk/gateway';
@@ -478,15 +483,28 @@ describe('streamViaSdk — provider selection', () => {
     expect(anthropic).not.toHaveBeenCalled();
   });
 
-  it('passes thinking providerOptions for direct backend with thinking=true', async () => {
+  it('passes the budget thinking form for a direct-backend model that rejects adaptive (Haiku 4.5)', async () => {
     await collectEvents(
-      streamViaSdk(directRoute, simpleMessages, { thinking: true }),
+      streamViaSdk(directRoute, simpleMessages, { thinking: true, model: 'claude-haiku-4-5-20251001' }),
     );
 
     const callArgs = vi.mocked(streamText).mock.calls[0][0];
     expect(callArgs.providerOptions).toEqual({
       anthropic: {
         thinking: { type: 'enabled', budgetTokens: 10000 },
+      },
+    });
+  });
+
+  it('passes the adaptive thinking form for a direct-backend model that rejects the budget form (Opus 4.8) (#9626)', async () => {
+    await collectEvents(
+      streamViaSdk(directRoute, simpleMessages, { thinking: true, model: 'claude-opus-4-8' }),
+    );
+
+    const callArgs = vi.mocked(streamText).mock.calls[0][0];
+    expect(callArgs.providerOptions).toEqual({
+      anthropic: {
+        thinking: { type: 'adaptive' },
       },
     });
   });

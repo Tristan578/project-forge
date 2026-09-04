@@ -387,7 +387,7 @@ jobs:
       # whichever job builds packages/ui first warms the cache for the others.
       - name: Cache @spawnforge/ui build
         id: ui-cache-design
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/ui/dist
           key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
@@ -904,11 +904,13 @@ jobs:
             scripts/__tests__/ci-gate-path-filters.test.sh \
             scripts/resolve-ci-diff-range.sh scripts/__tests__/resolve-ci-diff-range.test.sh \
             scripts/check-vercel-deployment-drift.sh scripts/__tests__/check-vercel-deployment-drift.test.sh \
+            scripts/deploy-drift-dispatch.sh scripts/__tests__/deploy-drift-dispatch.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
-            scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
@@ -923,6 +925,9 @@ jobs:
 
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
+
+      - name: Run deploy-drift dispatcher test suite
+        run: bash scripts/__tests__/deploy-drift-dispatch.test.sh
 
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
@@ -1014,6 +1019,8 @@ jobs:
 
       - name: Run post-deploy health gate test suite
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
+      - name: Run CD rolling-release helper test suite
+        run: bash scripts/__tests__/cd-rolling-release.test.sh
       - name: Run CD tree-validation gate test suite
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run engine WASM cache-key test suite
@@ -1160,6 +1167,23 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      # Renders /dev and exposes the editor stores. Without it this job could
+      # only run specs that never open the editor -- 91 of 422 tests, all
+      # public pages and API routes -- while reading as an application gate
+      # (#9586). The same flag the journey gate already builds with.
+      #
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
+      # The integration probe is compiled in only for this CI build. Credentials
+      # belong to a CI-only Upstash database and must never be production values.
+      E2E_UPSTASH_TEST_ENABLED: 'true'
+      E2E_UPSTASH_TEST_REQUIRED: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+      UPSTASH_REDIS_REST_URL: ${{ secrets.CI_UPSTASH_REDIS_REST_URL }}
+      UPSTASH_REDIS_REST_TOKEN: ${{ secrets.CI_UPSTASH_REDIS_REST_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -1186,7 +1210,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Key on the REAL root lockfile. This is a single-root-lockfile
@@ -1209,15 +1233,33 @@ jobs:
         working-directory: web
         run: bash ../scripts/install-playwright-ci.sh deps
 
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
+
       - name: Build for E2E
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          # Renders /dev and exposes the editor stores. Without it this job could
-          # only run specs that never open the editor -- 91 of 422 tests, all
-          # public pages and API routes -- while reading as an application gate
-          # (#9586). The same flag the journey gate already builds with.
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run UI-only E2E tests (shard ${{ matrix.shard }})
@@ -1269,6 +1311,12 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    env:
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1289,7 +1337,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
@@ -1312,11 +1360,33 @@ jobs:
       # journey specs can drive a representative generated game without WASM/AI.
       # cd.yml never sets this flag, so prod/staging/preview deploys never expose
       # stores — this is a CI-only build.
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
+
       - name: Build for journey E2E (stores exposed)
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       - name: Run strict interactive-journey gate
@@ -1366,6 +1436,20 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+    env:
+      # The @engine-smoke fixture loads /dev, which renders the editor ONLY
+      # when e2eHooksEnabled() is true. NEXT_PUBLIC_E2E_HOOKS is build-time
+      # inlined (Next.js), so a production `next build` without it leaves the
+      # flag off: /dev then redirects to /sign-in, whose <SignIn> calls
+      # useSession with no <ClerkProvider> in this Clerk-less CI env, throws,
+      # and the engine never boots (__FORGE_ENGINE_READY times out). Mirror
+      # the strict @ui journey gate and build with the flag so /dev renders.
+      #
+      # Job-level, not step-level, because the Next.js build-cache key below
+      # reads it through the `env` context. A step-level value is visible only
+      # to that step, so an `env.` reference from the cache step would expand
+      # to the empty string and key on nothing at all (#9653 review).
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1417,7 +1501,7 @@ jobs:
 
       - name: Restore a prebuilt WebGL2 engine
         id: engine-wasm-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
@@ -1469,7 +1553,7 @@ jobs:
       # --- Playwright ---------------------------------------------------------
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
@@ -1487,18 +1571,33 @@ jobs:
         working-directory: web
         run: bash ../scripts/install-playwright-ci.sh deps
 
+      # Turbopack's filesystem build cache lives in .next/cache and is on by
+      # default, but it only helps CI when the directory is restored between
+      # runs (#9633). Keyed on the ROOT lockfile (web/package-lock.json does not
+      # exist in this single-root-lockfile monorepo — a hashFiles() on it is a
+      # constant key that never invalidates, #8589) plus the web source tree;
+      # the restore-keys prefix lets a source change start from the last cache
+      # for the same dependency set instead of cold.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          # NEXT_PUBLIC_E2E_HOOKS is inlined into the bundle at build time, so a
+          # cache written by a hooks-off build is not interchangeable with a
+          # hooks-on one. It is read from the JOB-level env rather than written
+          # as a literal so a future job that flips the flag re-keys itself
+          # instead of silently restoring the wrong build cache. It sits BEFORE
+          # the lockfile hash deliberately: the restore-keys prefix below would
+          # otherwise fall back across flag values and reintroduce exactly that
+          # cross-contamination.
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
+
       - name: Build for engine-smoke E2E
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-          # The @engine-smoke fixture loads /dev, which renders the editor ONLY
-          # when e2eHooksEnabled() is true. NEXT_PUBLIC_E2E_HOOKS is build-time
-          # inlined (Next.js), so a production `next build` without it leaves the
-          # flag off: /dev then redirects to /sign-in, whose <SignIn> calls
-          # useSession with no <ClerkProvider> in this Clerk-less CI env, throws,
-          # and the engine never boots (__FORGE_ENGINE_READY times out). Mirror
-          # the strict @ui journey gate and build with the flag so /dev renders.
-          NEXT_PUBLIC_E2E_HOOKS: 'true'
         run: npx next build
 
       # Runs the curated @engine-smoke set (two specs — see the job comment

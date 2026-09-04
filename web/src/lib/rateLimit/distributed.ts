@@ -1,12 +1,15 @@
 /**
- * Distributed rate limiting via Upstash Redis REST API.
+ * Distributed rate limiting via the Upstash Redis REST API.
  *
- * Uses a sliding window algorithm backed by Redis MULTI/EXEC transactions.
- * Falls back to in-memory limiting if Upstash is not configured.
+ * One atomic Lua EVAL per check (`SLIDING_WINDOW_SCRIPT`), sent in Upstash's
+ * body form. When Upstash is not configured, or the call fails, the check
+ * degrades to `rateLimit()` from `../rateLimit`: the `@upstash/ratelimit` SDK
+ * limiter when the same two env vars are set, per-instance memory otherwise.
  */
 
 import { rateLimit, type RateLimitResult } from '../rateLimit';
 import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
+import { isUpstashConfigured, postUpstashCommand } from '@/lib/upstash/restCommand';
 
 /**
  * Alias of the canonical RateLimitResult from rateLimit.ts.
@@ -14,15 +17,6 @@ import { sampledCaptureException } from '@/lib/monitoring/sampledCapture';
  * so callers can use either interchangeably (PF-39).
  */
 export type DistributedRateLimitResult = RateLimitResult;
-
-/**
- * Check whether the Upstash Redis environment is configured.
- */
-function isUpstashConfigured(): boolean {
-  return Boolean(
-    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN,
-  );
-}
 
 /**
  * Atomic sliding window rate limiter via a single Lua EVAL script (PF-744).
@@ -50,7 +44,10 @@ const REDIS_KEY_PREFIX = '@spawnforge/ratelimit';
  * ARGV[4] = member (unique value for ZADD)
  * ARGV[5] = windowSeconds (TTL for EXPIRE)
  *
- * Returns {allowed (0|1), count} as a two-element array.
+ * Returns {allowed (0|1), count, oldest} — `oldest` is the score of the
+ * earliest entry still in the window, present only on the deny branch. It is
+ * what turns "try again later" into a real wait: the window reopens when that
+ * entry expires, not a full window from now.
  *
  * Exported so `__tests__/slidingWindowScript.lua.test.ts` can execute this exact
  * source in a real Lua VM. Every other test in this directory mocks `fetch` and
@@ -67,7 +64,8 @@ if count < tonumber(ARGV[2]) then
   return {1, count + 1}
 else
   redis.call('EXPIRE', KEYS[1], tonumber(ARGV[5]))
-  return {0, count}
+  local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  return {0, count, tonumber(oldest[2]) or tonumber(ARGV[3])}
 end
 `;
 
@@ -76,34 +74,42 @@ async function upstashSlidingWindow(
   limit: number,
   windowSeconds: number,
 ): Promise<DistributedRateLimitResult> {
-  const url = process.env.UPSTASH_REDIS_REST_URL!;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
   const prefixedKey = `${REDIS_KEY_PREFIX}:${key}`;
   const now = Date.now();
   const windowMs = windowSeconds * 1000;
   const windowStart = now - windowMs;
-  const resetAt = now + windowMs;
   // Append random suffix to prevent ZADD member collisions when multiple
   // requests arrive in the same millisecond (each member must be unique).
   const member = `${now}:${Math.random().toString(36).slice(2, 8)}`;
 
-  const response = await fetch(`${url}/eval`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify([SLIDING_WINDOW_SCRIPT, 1, prefixedKey, windowStart, limit, now, member, windowSeconds]),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Upstash EVAL failed: ${response.status} ${response.statusText}`);
-  }
-
-  const result = await response.json() as { result: [number, number] };
-  const [allowed, count] = result.result;
+  // Body form via the shared transport: `["EVAL", script, numkeys, key,
+  // ...argv]` posted to the base URL (see `lib/upstash/restCommand.ts` for
+  // why the path form that shipped in #8369 was refused with 400 on every call
+  // until #9623, and why that was a silent degrade to the SDK limiter rather
+  // than a fail-open). Do not "tidy" this into a path — the unit test pins the
+  // shape.
+  const result = (await postUpstashCommand([
+    'EVAL',
+    SLIDING_WINDOW_SCRIPT,
+    1,
+    prefixedKey,
+    windowStart,
+    limit,
+    now,
+    member,
+    windowSeconds,
+  ])) as [number, number, number?];
+  const [allowed, count, oldest] = result;
 
   const remaining = Math.max(0, limit - count);
+  // On deny the window reopens when the OLDEST entry expires, which the script
+  // reports; a full window from now overstated the wait by up to the whole
+  // window in the sentence users see (#9623 review). On allow there is nothing
+  // to wait for, so the conventional "window from now" reset stands.
+  const resetAt =
+    allowed === 1 || typeof oldest !== 'number' || !Number.isFinite(oldest)
+      ? now + windowMs
+      : oldest + windowMs;
 
   return { allowed: allowed === 1, remaining, resetAt };
 }
@@ -116,13 +122,18 @@ async function upstashSlidingWindow(
  * @param key - Unique bucket key (e.g. `billing-checkout:user-123`)
  * @param limit - Maximum requests per window
  * @param windowSeconds - Window size in seconds
+ * @param options.fallbackOnError - Set false for health checks that must fail closed
  */
 export async function distributedRateLimit(
   key: string,
   limit: number,
   windowSeconds: number,
+  options: { fallbackOnError?: boolean } = {},
 ): Promise<DistributedRateLimitResult> {
   if (!isUpstashConfigured()) {
+    if (options.fallbackOnError === false) {
+      throw new Error('Upstash Redis is not configured');
+    }
     // Fall back to in-memory rate limiter
     const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;
@@ -131,6 +142,12 @@ export async function distributedRateLimit(
   try {
     return await upstashSlidingWindow(key, limit, windowSeconds);
   } catch (err) {
+    // Health/integration probes must expose the original distributed-store
+    // failure. They are not fail-open events and must not consume the sampled
+    // alert budget reserved for production fallback behavior.
+    if (options.fallbackOnError === false) {
+      throw err;
+    }
     // Report the Upstash failure so this silent fallback is visible (#8210), but
     // through the per-action throttle: during a sustained outage this path can
     // fire on every request, and an unconditional capture would become its own
@@ -141,7 +158,9 @@ export async function distributedRateLimit(
       limit,
       windowSeconds,
     });
-    // Fall back to in-memory to avoid blocking requests
+    // Degrade to rateLimit(): the @upstash/ratelimit SDK limiter when the same
+    // env vars are set (still distributed, approximate window), per-instance
+    // memory otherwise. Never reject the request over a limiter failure.
     const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;
   }
