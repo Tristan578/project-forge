@@ -1410,6 +1410,9 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          # The webhook rejects missing/invalid signatures only after confirming
+          # a signing secret exists. This inert test value enables that guard.
+          STRIPE_WEBHOOK_SECRET: 'whsec_ci_api_contract_only'
         run: npx playwright test --grep '@api' --project=chromium --config playwright.ci.config.ts
 
       - name: Upload blob report

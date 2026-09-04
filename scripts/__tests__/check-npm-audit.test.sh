@@ -2620,6 +2620,7 @@ STEPS_EOF
   lockfile-sync-tests:
   preview-deploy:
   test-e2e-ui:
+  test-e2e-api:
   test-e2e-journey:
   test-e2e-engine-smoke:
   test-e2e-crossbrowser:
