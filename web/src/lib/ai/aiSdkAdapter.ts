@@ -24,7 +24,7 @@ import type { ResolveChatStreamEvent, ChatMessage, ResolveChatOptions } from '@/
 import type { ResolvedRoute } from '@/lib/providers/types';
 import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
 import type { ManifestTool } from '@/lib/ai/toolAdapter';
-import { AI_MODEL_PRIMARY, AI_MODELS, thinkingModeFor } from '@/lib/ai/models';
+import { AI_MODEL_PRIMARY, AI_MODELS, anthropicThinkingOption } from '@/lib/ai/models';
 import { DEFAULT_MAX_TOKENS, THINKING_MAX_TOKENS } from '@/lib/constants';
 
 // ---------------------------------------------------------------------------
@@ -33,24 +33,29 @@ import { DEFAULT_MAX_TOKENS, THINKING_MAX_TOKENS } from '@/lib/constants';
 
 /**
  * Map a canonical SpawnForge model name to the gateway format string.
- * Gateway uses `provider/model` format (e.g. `anthropic/claude-sonnet-4-6`).
+ * Gateway uses `provider/model` format (e.g. `anthropic/claude-sonnet-5`).
  *
  * Derives the mapping from AI_MODELS (the single source of truth) rather
  * than maintaining a duplicate local map that can drift out of sync.
+ *
+ * Matching is EXACT. It used to fall through to `.includes('sonnet')` /
+ * `'opus'` / `'haiku'`, which turns a version bump into a silent model swap:
+ * once `AI_MODELS.deep` moved to Opus 5, an explicit `claude-opus-4-8` request
+ * matched the `opus` substring and came back as `anthropic/claude-opus-5` —
+ * a different model than the caller named, with no warning (PF-1216 / #9339).
+ * An unrecognised `claude-*` id now keeps its own name under the `anthropic/`
+ * prefix, so a wrong id fails loudly at the provider instead of quietly
+ * resolving to something else.
  */
 function toGatewayModelId(canonicalModel: string): string {
   // Already in gateway format
   if (canonicalModel.includes('/')) return canonicalModel;
   // Map known canonical model IDs to their gateway equivalents via AI_MODELS
-  if (canonicalModel === AI_MODELS.chat || canonicalModel.includes('sonnet')) {
-    return AI_MODELS.gatewayChat;
-  }
-  if (canonicalModel === AI_MODELS.fast || canonicalModel.includes('haiku')) {
-    return AI_MODELS.gatewayChat; // haiku routes to chat gateway by default
-  }
-  if (canonicalModel === AI_MODELS.deep || canonicalModel.includes('opus')) {
-    return AI_MODELS.gatewayDeep;
-  }
+  if (canonicalModel === AI_MODELS.chat) return AI_MODELS.gatewayChat;
+  // Deliberate, pre-existing behaviour: the fast tier has no separate gateway
+  // route here and rides the chat gateway model.
+  if (canonicalModel === AI_MODELS.fast) return AI_MODELS.gatewayChat;
+  if (canonicalModel === AI_MODELS.deep) return AI_MODELS.gatewayDeep;
   // Fallback: construct gateway ID from canonical name
   return `anthropic/${canonicalModel}`;
 }
@@ -65,6 +70,23 @@ function toAnthropicModelId(canonicalModel: string): string {
     return canonicalModel.split('/').slice(1).join('/');
   }
   return canonicalModel;
+}
+
+/**
+ * Build the AI SDK model instance for a resolved backend route.
+ *
+ * Direct routes get `anthropic()` (thinking mode + prompt caching); every
+ * other backend goes through `gateway()`. Exported so non-streaming callers —
+ * the decomposer's structured-output call, for one — pick the same provider
+ * for the same route instead of re-deriving the rule and drifting from it.
+ */
+export function resolveModelInstance(
+  route: ResolvedRoute,
+  canonicalModel: string,
+): ReturnType<typeof gateway> | ReturnType<typeof anthropic> {
+  return route.backendId === 'direct'
+    ? anthropic(toAnthropicModelId(canonicalModel))
+    : gateway(toGatewayModelId(canonicalModel));
 }
 
 // ---------------------------------------------------------------------------
@@ -125,16 +147,18 @@ export async function* streamViaSdk(
       ? convertManifestToolsToSdkTools(manifestTools)
       : undefined;
 
-  // Select model provider based on resolved backend
-  let modelInstance: ReturnType<typeof gateway> | ReturnType<typeof anthropic>;
+  // Select model provider based on resolved backend. Direct Anthropic
+  // preserves thinking mode and prompt caching; everything else (gateway,
+  // OpenRouter, GitHub Models) goes through the AI Gateway provider.
+  const modelInstance = resolveModelInstance(route, canonicalModel);
 
-  if (route.backendId === 'direct') {
-    // Direct Anthropic path: preserves thinking mode and prompt caching
-    modelInstance = anthropic(toAnthropicModelId(canonicalModel));
-  } else {
-    // Gateway / OpenRouter / GitHub Models: use AI Gateway provider
-    modelInstance = gateway(toGatewayModelId(canonicalModel));
-  }
+  // Model-gated thinking shape — see `models.ts`. `undefined` means this model
+  // has no known thinking shape, so the field is omitted rather than sent in a
+  // form the API rejects (PF-1216 / #9339).
+  const thinkingOption =
+    route.backendId === 'direct' && options.thinking
+      ? anthropicThinkingOption(canonicalModel)
+      : undefined;
 
   try {
     let toolIndex = 0;
@@ -144,21 +168,25 @@ export async function* streamViaSdk(
       messages: convertMessages(messages),
       maxOutputTokens: maxTokens,
       tools,
-      experimental_telemetry: { isEnabled: true },
-      // The thinking shape is a property of the model (#9626): adaptive for
-      // Opus 4.7+ / Sonnet 4.6+ / Claude 5, budget for Haiku 4.5 and earlier,
-      // nothing for a model that has no extended thinking.
-      ...(route.backendId === 'direct' && options.thinking && thinkingModeFor(canonicalModel) !== 'none'
-        ? {
-            providerOptions: {
-              anthropic: {
-                thinking:
-                  thinkingModeFor(canonicalModel) === 'adaptive'
-                    ? { type: 'adaptive' }
-                    : { type: 'enabled', budgetTokens: 10000 },
-              },
-            },
-          }
+      // The installed AI SDK's `TelemetryOptions` (ai@7, v7's rewritten
+      // diagnostics-channel telemetry) has no `metadata` field -- Sentry's
+      // subscriber (`vercel-ai-dc-subscriber.js`) reads only `functionId`
+      // off the event and maps it to the `gen_ai.function_id` span
+      // attribute. `functionId` is the only field that actually reaches the
+      // Sentry AI span, so it carries which `thinking` literal went on the
+      // wire for this request -- 'adaptive' / 'enabled' (budget) / 'none'
+      // (backend isn't direct, thinking was off, or the model has no known
+      // shape) -- so a wrong shape for a given model/route combination is
+      // visible in the trace instead of only surfacing as an HTTP 400 from
+      // Anthropic (dx finding, PR #9672 review). No dashboard in this repo
+      // groups on a fixed `aiSdkAdapter.streamViaSdk` literal (grepped
+      // src/lib/ai, src/lib/monitoring), so varying the suffix is safe.
+      experimental_telemetry: {
+        isEnabled: true,
+        functionId: `aiSdkAdapter.streamViaSdk:thinking=${thinkingOption?.type ?? 'none'}`,
+      },
+      ...(thinkingOption
+        ? { providerOptions: { anthropic: { thinking: thinkingOption } } }
         : {}),
     });
 

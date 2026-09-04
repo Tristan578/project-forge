@@ -72,20 +72,10 @@ vi.mock('@/lib/chat/docContext', () => ({
   buildDocContext: vi.fn(() => ''),
 }));
 
-vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_PRIMARY: 'claude-sonnet-4-6',
-  AI_MODEL_FAST: 'claude-haiku-4-5-20251001',
-  AI_MODEL_PREMIUM: 'claude-opus-4-8',
-  AI_MODEL_DEEP: 'claude-opus-4-8',
-  GATEWAY_MODEL_CHAT: 'anthropic/claude-sonnet-4-6',
-  GATEWAY_MODEL_FAST: 'anthropic/claude-haiku-4-5',
-  GATEWAY_MODEL_PREMIUM: 'anthropic/claude-opus-4-8',
-  isPremiumModel: vi.fn((model: string | undefined | null) => {
-    if (!model) return false;
-    const bare = model.includes('/') ? model.split('/').slice(1).join('/') : model;
-    return bare === 'claude-opus-4-8';
-  }),
-}));
+// `@/lib/ai/models` is deliberately NOT mocked. The fixture it used to carry
+// pinned a model set the product no longer ships AND reimplemented
+// `isPremiumModel` inline, so the premium gate here was exercised against a
+// copy of the helper rather than the helper (PF-1216 / #9339).
 
 // Deep-tier flag evaluation (PF-971). Mocked so the route test controls the
 // server-side derivation without touching the real flags cache; the evaluator
@@ -171,6 +161,7 @@ import { createSpawnforgeAgent } from '@/lib/ai/spawnforgeAgent';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { DEEP_GEN_SURFACES } from '@/lib/ai/surfaces';
+import { AI_MODEL_PRIMARY, AI_MODEL_PREMIUM, GATEWAY_MODEL_PREMIUM } from '@/lib/ai/models';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -994,7 +985,7 @@ describe('POST /api/chat', () => {
       } as never);
 
       const res = await POST(
-        makeRequest({ ...validBody(), model: 'claude-opus-4-8' }),
+        makeRequest({ ...validBody(), model: AI_MODEL_PREMIUM }),
       );
       expect(res.status).toBe(403);
       const body = await res.json();
@@ -1013,7 +1004,7 @@ describe('POST /api/chat', () => {
       } as never);
 
       const res = await POST(
-        makeRequest({ ...validBody(), model: 'anthropic/claude-opus-4-8' }),
+        makeRequest({ ...validBody(), model: GATEWAY_MODEL_PREMIUM }),
       );
       expect(res.status).toBe(403);
       expect(createSpawnforgeAgent).not.toHaveBeenCalled();
@@ -1027,11 +1018,11 @@ describe('POST /api/chat', () => {
       } as never);
 
       const res = await POST(
-        makeRequest({ ...validBody(), model: 'claude-opus-4-8' }),
+        makeRequest({ ...validBody(), model: AI_MODEL_PREMIUM }),
       );
       await res.text();
       expect(createSpawnforgeAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ model: 'claude-opus-4-8' }),
+        expect.objectContaining({ model: AI_MODEL_PREMIUM }),
       );
     });
 
@@ -1084,7 +1075,7 @@ describe('POST /api/chat', () => {
 
       expect(isDeepTierEnabledMock).toHaveBeenCalledWith({ tier: 'pro' });
       expect(createSpawnforgeAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ model: 'claude-opus-4-8' }),
+        expect.objectContaining({ model: AI_MODEL_PREMIUM }),
       );
     });
 
@@ -1093,13 +1084,13 @@ describe('POST /api/chat', () => {
 
       // Client claims the deep model, but the server derivation wins for surfaces.
       const res = await POST(
-        makeRequest({ ...validBody(), model: 'claude-opus-4-8', surface: 'world_builder' }),
+        makeRequest({ ...validBody(), model: AI_MODEL_PREMIUM, surface: 'world_builder' }),
       );
       await res.text();
 
       expect(res.status).toBe(200);
       expect(createSpawnforgeAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ model: 'claude-sonnet-4-6' }),
+        expect.objectContaining({ model: AI_MODEL_PRIMARY }),
       );
     });
 
@@ -1122,7 +1113,7 @@ describe('POST /api/chat', () => {
       expect(res.status).toBe(200);
       expect(isDeepTierEnabledMock).toHaveBeenCalledWith({ tier: 'creator' });
       expect(createSpawnforgeAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ model: 'claude-opus-4-8' }),
+        expect.objectContaining({ model: AI_MODEL_PREMIUM }),
       );
     });
 
@@ -1136,7 +1127,7 @@ describe('POST /api/chat', () => {
         rateLimit: { allowed: true, remaining: 9, resetAt: Date.now() + 60_000 },
       } as never);
 
-      const res = await POST(makeRequest({ ...validBody(), model: 'claude-opus-4-8' }));
+      const res = await POST(makeRequest({ ...validBody(), model: AI_MODEL_PREMIUM }));
       expect(res.status).toBe(403);
       expect(isDeepTierEnabledMock).not.toHaveBeenCalled();
       expect(createSpawnforgeAgent).not.toHaveBeenCalled();

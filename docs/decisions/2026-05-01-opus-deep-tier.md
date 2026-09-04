@@ -99,3 +99,60 @@ zero change to the rollout mechanics above. The same evaluator also backs a
 per-provider kill switch (`provider-kill-switch-<provider>`) consumed by
 `createGenerationHandler`, unrelated to the deep-tier decision but sharing the
 same fail-open infrastructure.
+
+## Addendum: Claude 5 migration (PF-1216 / #9339, 2026-09-02)
+
+**The model ids in this ADR are now historical.** `AI_MODEL_PRIMARY` is
+`claude-sonnet-5` and `AI_MODEL_DEEP` / `AI_MODEL_PREMIUM` are `claude-opus-5`.
+Nothing about the decision above changes: the deep tier is still one flagged
+alias of the premium model, still routed through `getDeepGenerationModel()`,
+still default off, still re-derived server-side in `/api/chat`. Only the two
+strings moved. The 4.x ids stay exported as `AI_MODEL_PRIMARY_4X` /
+`AI_MODEL_PREMIUM_4X` and stay in every backend `MODEL_MAP`, so reverting the
+tier to Opus 4.8 is a one-line edit in `models.ts`.
+
+`AI_MODEL_FAST` deliberately stays on Haiku 4.5. There is no Haiku 5 in the
+installed provider's model union, and Haiku 4.5 is the one chat model we route
+that still needs the legacy thinking shape (below).
+
+### The part that is not a rename
+
+A separate ticket, #9626 (shipped in #9650, just ahead of this migration),
+fixed a live HTTP 400 — this migration did not fix it, and does not re-claim
+it. `spawnforgeAgent.ts` and `aiSdkAdapter.ts` emitted
+`thinking: { type: 'enabled', budgetTokens: 10000 }` gated on the BACKEND
+(`isDirectBackend`) and never on the model, and
+`providerOptions.anthropic.effort` was forwarded from the request body for any
+creator/pro caller with no model check at all. There is no single literal that
+is valid across the models this app routes:
+
+| Model | `thinking` shape | `effort` |
+|---|---|---|
+| Claude 5 family, Opus 4.7/4.8, Sonnet 4.6 | `{ type: 'adaptive' }` | accepted |
+| Haiku 4.5 and earlier | `{ type: 'enabled', budgetTokens }` | **rejected (400)** |
+
+Claude 4.7+ rejects `type: 'enabled'`; Haiku 4.5 rejects `adaptive`. #9650 put
+both decisions in one table in `web/src/lib/ai/models.ts` (`thinkingModeFor()`,
+`supportsEffort()`), with an unmapped model resolving to "send no `thinking`
+field" — a silent no-op rather than a 400. `models.test.ts` fails if any model
+the product actually ships lands on that default, so the fail-safe cannot
+quietly become the answer.
+
+This migration (#9339) builds on that table rather than re-deriving it:
+`anthropicThinkingOption()` wraps `thinkingModeFor()` into the single
+`providerOptions.anthropic.thinking` literal each call site needs, so
+`spawnforgeAgent.ts` / `aiSdkAdapter.ts` stop duplicating the `adaptive` /
+`budget` / `none` switch themselves.
+
+**Deep-tier generations were never affected by the 400** — they pass
+`thinking: false`. The exposure was the Pro/creator extended-thinking toggle on
+the direct Anthropic backend (the primary route when no gateway key is set, and
+the circuit-breaker failover target otherwise).
+
+### Still open
+
+The GATEWAY path emits no Anthropic `providerOptions` at all, so the
+extended-thinking toggle remains a silent no-op there — the same state as
+before this migration, deliberately not changed in it. Wiring it needs a
+decision about whether the AI Gateway forwards `providerOptions.anthropic`
+through to the upstream provider, which is not answerable from this repo.

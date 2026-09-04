@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { GATEWAY_MODEL_CHAT } from '@/lib/ai/models';
 
 describe('vercelGatewayBackend', () => {
   beforeEach(() => {
@@ -105,8 +106,8 @@ describe('vercelGatewayBackend', () => {
       // modelMapCoverage.test.ts is what keeps every current canonical id off
       // this path.
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
-      expect(vercelGatewayBackend.resolveModelId('claude-opus-4')).toBe('anthropic/claude-sonnet-4-6');
-      expect(vercelGatewayBackend.resolveModelId('claude-haiku-3-5')).toBe('anthropic/claude-sonnet-4-6');
+      expect(vercelGatewayBackend.resolveModelId('claude-opus-4')).toBe(GATEWAY_MODEL_CHAT);
+      expect(vercelGatewayBackend.resolveModelId('claude-haiku-3-5')).toBe(GATEWAY_MODEL_CHAT);
     });
 
     it('maps premium and fast Anthropic models so they do not silently downgrade', async () => {
@@ -115,6 +116,8 @@ describe('vercelGatewayBackend', () => {
       // Pro users requesting the premium model — billed for Opus 4.8 but
       // routed to Sonnet 4.6.
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
+      expect(vercelGatewayBackend.resolveModelId('claude-sonnet-5')).toBe('anthropic/claude-sonnet-5');
+      expect(vercelGatewayBackend.resolveModelId('claude-opus-5')).toBe('anthropic/claude-opus-5');
       expect(vercelGatewayBackend.resolveModelId('claude-opus-4-8')).toBe('anthropic/claude-opus-4-8');
       expect(vercelGatewayBackend.resolveModelId('claude-haiku-4-5')).toBe('anthropic/claude-haiku-4-5');
       expect(vercelGatewayBackend.resolveModelId('claude-haiku-4-5-20251001')).toBe('anthropic/claude-haiku-4-5');
@@ -142,12 +145,12 @@ describe('vercelGatewayBackend', () => {
 
     it('falls back to default chat model for unknown non-namespaced models', async () => {
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
-      expect(vercelGatewayBackend.resolveModelId('unknown-model')).toBe('anthropic/claude-sonnet-4-6');
+      expect(vercelGatewayBackend.resolveModelId('unknown-model')).toBe(GATEWAY_MODEL_CHAT);
     });
 
     it('falls back to default chat model for empty string', async () => {
       const { vercelGatewayBackend } = await import('@/lib/providers/backends/vercelGateway');
-      expect(vercelGatewayBackend.resolveModelId('')).toBe('anthropic/claude-sonnet-4-6');
+      expect(vercelGatewayBackend.resolveModelId('')).toBe(GATEWAY_MODEL_CHAT);
     });
   });
 
@@ -192,7 +195,7 @@ describe('vercelGatewayDefaultModels', () => {
 
   it('exports default models for chat, embedding, and image', async () => {
     const { vercelGatewayDefaultModels } = await import('@/lib/providers/backends/vercelGateway');
-    expect(vercelGatewayDefaultModels.chat).toBe('anthropic/claude-sonnet-4-6');
+    expect(vercelGatewayDefaultModels.chat).toBe(GATEWAY_MODEL_CHAT);
     expect(vercelGatewayDefaultModels.embedding).toBe('google/gemini-embedding-2-preview');
     expect(vercelGatewayDefaultModels.image).toBe('openai/dall-e-3');
   });

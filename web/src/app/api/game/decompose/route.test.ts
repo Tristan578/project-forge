@@ -4,6 +4,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { decomposeIntoSystems } from '@/lib/game-creation/decomposer';
+import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { refundTokens } from '@/lib/tokens/service';
+import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { makeUser } from '@/test/utils/apiTestUtils';
 
 vi.mock('@/lib/api/middleware');
@@ -19,6 +22,32 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
+// `checkBotIdGate` and `isProviderKilled` are deliberately NOT mocked here,
+// mirroring chat/route.test.ts: both fail open with no config present in the
+// test environment (checkBotId() throws with no Vercel/BotID context and the
+// gate catches that; the PostHog flag evaluator is dormant with no API keys
+// set) — see their own header comments in botId.ts / posthogFlags.ts.
+vi.mock('@/lib/keys/resolver', () => {
+  class ApiKeyError extends Error {
+    code: string;
+    constructor(code: string, message: string) {
+      super(message);
+      this.code = code;
+      this.name = 'ApiKeyError';
+    }
+  }
+  return {
+    resolveApiKey: vi.fn(),
+    ApiKeyError,
+  };
+});
+vi.mock('@/lib/tokens/service', () => ({
+  refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
+}));
+vi.mock('@/lib/flags/posthogFlags', () => ({
+  isProviderKilled: vi.fn(() => false),
+}));
+
 function makeReq(body: unknown) {
   return new NextRequest('http://localhost:3000/api/game/decompose', {
     method: 'POST',
@@ -28,7 +57,11 @@ function makeReq(body: unknown) {
 }
 
 function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>) {
-  const user = makeUser(overrides);
+  // `makeUser`'s default tier is 'starter', which `assertTier` in the route
+  // rejects (['hobbyist', 'creator', 'pro']) with a 403 — override to a tier
+  // that actually has AI access so "success" fixtures don't accidentally
+  // exercise the tier-gate branch.
+  const user = makeUser({ tier: 'hobbyist', ...overrides });
   vi.mocked(withApiMiddleware).mockResolvedValue({
     error: undefined,
     userId: user.id,
@@ -64,6 +97,12 @@ const MOCK_GDD = {
 describe('POST /api/game/decompose', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(resolveApiKey).mockResolvedValue({
+      type: 'platform',
+      key: 'sk-ant-test',
+      metered: true,
+      usageId: 'usage-1',
+    } as never);
   });
 
   it('returns 200 with GDD on valid request', async () => {
@@ -180,5 +219,66 @@ describe('POST /api/game/decompose', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('validation_error');
+  });
+
+  // Security finding 2 (PR #9672 review) — this route hand-wires the same
+  // gates createGenerationHandler routes get for free, so each one needs its
+  // own coverage.
+  it('returns 403 for a tier with no AI access (starter)', async () => {
+    mockMiddlewareSuccess({ tier: 'starter' });
+
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ prompt: 'test', projectType: '3d' }));
+
+    expect(res.status).toBe(403);
+    expect(decomposeIntoSystems).not.toHaveBeenCalled();
+    expect(resolveApiKey).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 without deducting tokens when the provider kill switch is on', async () => {
+    mockMiddlewareSuccess();
+    vi.mocked(isProviderKilled).mockReturnValueOnce(true);
+
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ prompt: 'test', projectType: '3d' }));
+
+    expect(res.status).toBe(503);
+    expect(resolveApiKey).not.toHaveBeenCalled();
+    expect(decomposeIntoSystems).not.toHaveBeenCalled();
+  });
+
+  it('returns 402 and never calls decomposeIntoSystems when resolveApiKey rejects', async () => {
+    mockMiddlewareSuccess();
+    vi.mocked(resolveApiKey).mockRejectedValueOnce(
+      new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens'),
+    );
+
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ prompt: 'test', projectType: '3d' }));
+
+    expect(res.status).toBe(402);
+    const body = await res.json();
+    expect(body.code).toBe('INSUFFICIENT_TOKENS');
+    expect(decomposeIntoSystems).not.toHaveBeenCalled();
+  });
+
+  it('refunds tokens when decomposeIntoSystems throws', async () => {
+    mockMiddlewareSuccess();
+    vi.mocked(decomposeIntoSystems).mockRejectedValue(new Error('LLM call failed: timeout'));
+
+    const { POST } = await import('./route');
+    await POST(makeReq({ prompt: 'test game', projectType: '3d' }));
+
+    expect(refundTokens).toHaveBeenCalledWith('user-uuid-1', 'usage-1');
+  });
+
+  it('does not refund tokens on success', async () => {
+    mockMiddlewareSuccess();
+    vi.mocked(decomposeIntoSystems).mockResolvedValue(MOCK_GDD as never);
+
+    const { POST } = await import('./route');
+    await POST(makeReq({ prompt: 'make a platformer', projectType: '3d' }));
+
+    expect(refundTokens).not.toHaveBeenCalled();
   });
 });
