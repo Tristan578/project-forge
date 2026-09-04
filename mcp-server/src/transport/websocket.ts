@@ -83,8 +83,13 @@ export class EditorBridge {
           }
         });
 
-        ws.on('close', () => {
+        ws.on('close', (code, reason) => {
           this.connected = false;
+          if (!settled) {
+            settled = true;
+            const detail = reason.length > 0 ? `: ${reason.toString()}` : '';
+            reject(new Error(`MCP relay connection closed before opening (${code})${detail}`));
+          }
           for (const [id, pending] of this.pendingCommands) {
             clearTimeout(pending.timeout);
             pending.reject(new Error('Editor connection closed'));

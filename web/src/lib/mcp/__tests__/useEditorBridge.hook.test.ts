@@ -118,6 +118,20 @@ describe('useEditorBridge', () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
+  it('does not let a stale approve callback reconnect after detach', async () => {
+    const { result } = renderHook(() => useEditorBridge());
+    await waitFor(() => expect(result.current.status).toBe('awaiting-consent'));
+    const staleApprove = result.current.approve;
+
+    act(() => result.current.detach());
+    await waitFor(() => expect(result.current.status).toBe('detached'));
+    act(() => staleApprove());
+    await drainTimers();
+
+    expect(result.current.status).toBe('detached');
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
   // React StrictMode mounts the editor twice; the second mount races the
   // first's teardown and the relay answers 4409. Without a retry the tab
   // stayed silently unattached for the rest of its life.

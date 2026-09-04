@@ -174,6 +174,10 @@ export function useEditorBridge(): EditorBridgeControls {
   }, [requested, consented]);
 
   const approve = useCallback(() => {
+    // `detach` is terminal for this mount. Guard the public callback as well
+    // as the UI so a stale consumer cannot create a socket whose messages the
+    // synchronous detachedRef gate will intentionally ignore.
+    if (detachedRef.current) return;
     setSocketStatus('connecting');
     setDetail(null);
     setConsented(true);
