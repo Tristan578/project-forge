@@ -368,6 +368,67 @@ mod tests {
         );
     }
 
+    /// Deferred variants no system can answer in a `runtime` build, each with
+    /// the reason. The test above is cfg-blind — a claim inside an
+    /// editor-only function counted for both builds — and reported
+    /// `ListJoints`, `ListJoints2d`, `Joint2dState` and `Physics2dState` as
+    /// answered while every one of them sat in a queue nothing drained in an
+    /// exported game (#9550). Checked in both directions: an entry that gains
+    /// a runtime-reachable claimant fails, and an unanswered variant missing
+    /// from the list fails.
+    const RUNTIME_UNANSWERED: &[(&str, &str)] = &[
+        ("GameComponentState", "process_game_component_queries is editor-only; follow-up to #9550"),
+        ("GameCameraState", "process_game_camera_queries is editor-only; follow-up to #9550"),
+        ("Skeleton2dState", "handle_skeleton2d_query is editor-only; follow-up to #9550"),
+    ];
+
+    #[test]
+    fn runtime_build_claims_every_deferred_variant_or_waives_it() {
+        use super::super::runtime_drains::scan::{functions, gated_modules, runtime_reachable, DRAIN_SOURCES};
+
+        let deferred = deferred_variants();
+        let gated = gated_modules();
+        let mut runtime_claims = String::new();
+        let mut reachable_claimants = 0usize;
+        for (file, source) in DRAIN_SOURCES {
+            for f in functions(file, source) {
+                let predicates = take_queries_predicates(&f.body);
+                if predicates.is_empty() {
+                    continue;
+                }
+                if runtime_reachable(&f, &gated) {
+                    reachable_claimants += 1;
+                    runtime_claims.push_str(&predicates);
+                }
+            }
+        }
+        assert!(
+            reachable_claimants >= 8,
+            "only {reachable_claimants} runtime-reachable query systems found — the reachability model is probably broken"
+        );
+        let claimed = variant_names(&runtime_claims);
+        for v in ["ListJoints", "ListJoints2d", "Joint2dState", "Physics2dState"] {
+            assert!(claimed.contains(&v.to_string()), "`{v}` must be answerable in a runtime build (#9550 regression)");
+        }
+
+        let waived: Vec<&str> = RUNTIME_UNANSWERED.iter().map(|(v, _)| *v).collect();
+        let unanswered: Vec<&String> = deferred
+            .iter()
+            .filter(|v| !claimed.contains(v) && !waived.contains(&v.as_str()))
+            .collect();
+        assert!(
+            unanswered.is_empty(),
+            "QueryRequest variants a runtime build queues (process_query_requests defers them) but no \
+             runtime-reachable system takes — they accumulate in `query_requests` forever. Un-gate the \
+             system or add each to RUNTIME_UNANSWERED with a reason: {unanswered:?}"
+        );
+        let stale: Vec<&&str> = waived.iter().filter(|v| claimed.contains(&v.to_string()) || !deferred.contains(&v.to_string())).collect();
+        assert!(
+            stale.is_empty(),
+            "RUNTIME_UNANSWERED entries now answered in a runtime build (or no longer deferred) — remove them: {stale:?}"
+        );
+    }
+
     #[test]
     fn deferred_variants_are_real_enum_variants() {
         let enum_source = include_str!("query.rs");

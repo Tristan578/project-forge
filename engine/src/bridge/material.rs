@@ -82,6 +82,8 @@ pub(super) fn emit_light_on_selection(
 pub(super) fn apply_environment_updates(
     mut pending: ResMut<PendingCommands>,
     mut settings: ResMut<EnvironmentSettings>,
+    camera_query: Query<Entity, With<camera::EditorCamera>>,
+    mut skybox_query: Query<&mut bevy::core_pipeline::Skybox>,
 ) {
     for update in pending.environment_updates.drain(..) {
         if let Some(v) = update.skybox_brightness { settings.skybox_brightness = v; }
@@ -92,6 +94,18 @@ pub(super) fn apply_environment_updates(
         if let Some(v) = update.fog_color { settings.fog_color = v; }
         if let Some(v) = update.fog_start { settings.fog_start = v; }
         if let Some(v) = update.fog_end { settings.fog_end = v; }
+
+        // Brightness lives on the `Skybox` component, not in `EnvironmentSettings`.
+        // Writing only the resource updates the inspector and emits, while the
+        // render stays stale until the next `set_skybox` — the same silent split
+        // `apply_update_skybox_requests` closes for its own queue.
+        if update.skybox_brightness.is_some() {
+            if let Ok(camera_entity) = camera_query.single() {
+                if let Ok(mut skybox) = skybox_query.get_mut(camera_entity) {
+                    skybox.brightness = settings.skybox_brightness;
+                }
+            }
+        }
 
         // Emit event back to React with full state
         events::emit_environment_changed(&settings);

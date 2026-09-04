@@ -298,6 +298,15 @@ jobs:
         working-directory: engine
         run: cargo test --lib --features bevy/x11
 
+      # `runtime` compiles a DIFFERENT program (editor-only definitions vanish
+      # and `core/commands/performance.rs` takes its `feature = "runtime"`
+      # arms), and until #9550 no job ran a single test under it — the
+      # queue/no-drain asymmetry that ticket found was invisible to every gate.
+      # Dependencies are already built by the step above, so this is cheap.
+      - name: Run native engine unit tests (runtime)
+        working-directory: engine
+        run: cargo test --lib --features bevy/x11,runtime
+
       # `cargo test --lib` above runs the NATIVE target, and `engine/src/lib.rs`
       # declares `bridge` under `#[cfg(target_arch = "wasm32")]` — so every
       # `#[cfg(test)]` block under `engine/src/bridge/` is invisible to it. The
