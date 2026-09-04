@@ -637,7 +637,9 @@ jobs:
     # This job now mirrors ci.yml's test-e2e-ui (next build + next start via
     # playwright.ci.config.ts, @ui only, 3 shards, ~2.5 min each).
     if: ${{ !cancelled() && needs.check-validated.outputs.validated != 'true' && (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') }}
-    timeout-minutes: 20
+    # Keep this aligned with quality-gates.yml: the three fail-closed npm audit
+    # invocations may legitimately use their bounded retries before cargo-audit.
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:

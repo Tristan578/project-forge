@@ -13,10 +13,13 @@ interface ChatMessageProps {
 
 export function ChatMessage({ message }: ChatMessageProps) {
   const [thinkingOpen, setThinkingOpen] = useState(false);
+  /** toolCallId → the user's answer, held until every blocked call is answered. */
+  const [gatedDecisions, setGatedDecisions] = useState<Record<string, boolean>>({});
   const setMessageFeedback = useChatStore((s) => s.setMessageFeedback);
   const batchUndoMessage = useChatStore((s) => s.batchUndoMessage);
   const approveToolCalls = useChatStore((s) => s.approveToolCalls);
   const rejectToolCalls = useChatStore((s) => s.rejectToolCalls);
+  const resumeAfterApproval = useChatStore((s) => s.resumeAfterApproval);
 
   if (message.role === 'system') {
     return (
@@ -30,8 +33,29 @@ export function ChatMessage({ message }: ChatMessageProps) {
   const toolCalls = message.toolCalls ?? [];
   const hasPreviewTools = toolCalls.some((tc) => tc.status === 'preview');
   const successfulUndoable = toolCalls.filter((tc) => tc.status === 'success' && tc.undoable);
+  // One turn can block several calls. Decisions are collected here and the
+  // turn is resumed only once EVERY blocked call has been answered: resuming
+  // early would force the store's "an undecided gated call is denied" default
+  // onto calls the user simply had not clicked yet.
+  const gatedCalls = toolCalls.filter((tc) => tc.status === 'approval-required');
+  const recordGatedDecision = (id: string, approved: boolean) => {
+    const next = { ...gatedDecisions, [id]: approved };
+    setGatedDecisions(next);
+    if (gatedCalls.every((tc) => tc.id in next)) {
+      setGatedDecisions({});
+      void resumeAfterApproval(
+        message.id,
+        gatedCalls.map((tc) => ({ toolCallId: tc.id, approved: next[tc.id] })),
+      );
+    }
+  };
+
+  // 'approval-required' is deliberately NOT a done state — the turn is parked
+  // waiting on the user, so undo/feedback affordances must stay hidden.
+  // 'denied' IS done: the call is terminal and will never run.
   const allToolsDone = toolCalls.length > 0 && toolCalls.every(
-    (tc) => tc.status === 'success' || tc.status === 'error' || tc.status === 'rejected' || tc.status === 'undone'
+    (tc) => tc.status === 'success' || tc.status === 'error' || tc.status === 'rejected'
+      || tc.status === 'undone' || tc.status === 'denied'
   );
 
   return (
@@ -104,6 +128,9 @@ export function ChatMessage({ message }: ChatMessageProps) {
               toolCall={tc}
               onApprove={() => approveToolCalls(message.id)}
               onReject={() => rejectToolCalls(message.id)}
+              onApproveGated={(id) => recordGatedDecision(id, true)}
+              onDenyGated={(id) => recordGatedDecision(id, false)}
+              gatedDecision={gatedDecisions[tc.id]}
             />
           ))}
 
