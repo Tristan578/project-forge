@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Bound and retry Playwright's apt/browser installation in CI (#9303).
+#
+# Usage: install-playwright-ci.sh browsers|deps [browser ...]
+# The browser list defaults to chromium; the cross-browser job passes
+# `chromium firefox webkit` (#9610).
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,9 +53,13 @@ MAX_ATTEMPTS=5
 TOTAL_BUDGET_SECONDS="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-660}"
 BACKOFF_SECONDS=(15 30 60 90)
 
-case "${1:-}" in
-  browsers) playwright_args=(install --with-deps chromium) ;;
-  deps) playwright_args=(install-deps chromium) ;;
+mode="${1:-}"
+if [ $# -gt 0 ]; then shift; fi
+browsers=("$@")
+if [ ${#browsers[@]} -eq 0 ]; then browsers=(chromium); fi
+case "$mode" in
+  browsers) playwright_args=(install --with-deps "${browsers[@]}") ;;
+  deps) playwright_args=(install-deps "${browsers[@]}") ;;
   *)
     echo "install-playwright-ci: expected mode 'browsers' or 'deps'" >&2
     exit 2
@@ -67,7 +75,7 @@ cd "$REPO_ROOT/web" || {
 }
 started_at=$SECONDS
 for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
-  echo "Playwright ${1} install attempt ${attempt}/${MAX_ATTEMPTS}"
+  echo "Playwright ${mode} install attempt ${attempt}/${MAX_ATTEMPTS}"
   timeout --signal=TERM --kill-after=15s \
     "${ATTEMPT_TIMEOUT_SECONDS}s" npx playwright "${playwright_args[@]}"
   exit_code=$?
@@ -76,13 +84,13 @@ for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
     elapsed=$((SECONDS - started_at))
     backoff="${BACKOFF_SECONDS[attempt - 1]}"
     if [ "$((elapsed + backoff + ATTEMPT_TIMEOUT_SECONDS))" -ge "$TOTAL_BUDGET_SECONDS" ]; then
-      echo "::warning::Playwright ${1} install exhausted its ${TOTAL_BUDGET_SECONDS}s retry budget after ${elapsed}s; a further ${backoff}s backoff plus a ${ATTEMPT_TIMEOUT_SECONDS}s attempt would overrun it, so not retrying"
+      echo "::warning::Playwright ${mode} install exhausted its ${TOTAL_BUDGET_SECONDS}s retry budget after ${elapsed}s; a further ${backoff}s backoff plus a ${ATTEMPT_TIMEOUT_SECONDS}s attempt would overrun it, so not retrying"
       break
     fi
-    echo "::warning::Playwright ${1} install failed with exit ${exit_code}; retrying in ${backoff}s"
+    echo "::warning::Playwright ${mode} install failed with exit ${exit_code}; retrying in ${backoff}s"
     sleep "$backoff"
   fi
 done
 
-echo "::error::Playwright ${1} install failed after ${MAX_ATTEMPTS} attempts" >&2
+echo "::error::Playwright ${mode} install failed after ${MAX_ATTEMPTS} attempts" >&2
 exit "$exit_code"

@@ -299,7 +299,9 @@ describe('handleTransformEvent', () => {
 
   describe('TRANSFORM_CHANGED', () => {
     it('calls setPrimaryTransform with the transform data', () => {
+      actions.primaryId = 'entity-1';
       const transformData = {
+        entityId: 'entity-1',
         position: { x: 1, y: 2, z: 3 },
         rotation: { x: 0, y: 45, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
@@ -314,6 +316,77 @@ describe('handleTransformEvent', () => {
 
       expect(result).toBe(true);
       expect(actions.setPrimaryTransform).toHaveBeenCalledWith(transformData);
+    });
+
+    /**
+     * The resync drain emits TRANSFORM_CHANGED for whichever entity an undo
+     * moved, and for every entity a snapshot restore brings back. Writing one of
+     * those into `primaryTransform` is not a cosmetic error: the inspector edits
+     * with `updateTransform(primaryId, ...)` seeded from that buffer, so the next
+     * nudge would teleport the SELECTED entity onto the foreign position.
+     */
+    it('ignores a transform for an entity that is not the primary selection', async () => {
+      actions.primaryId = 'entity-1';
+
+      const result = handleTransformEvent(
+        'TRANSFORM_CHANGED',
+        {
+          entityId: 'some-other-entity',
+          position: { x: 9, y: 9, z: 9 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+        },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      // The gate re-checks on a microtask, so drain it before asserting the
+      // negative — otherwise this passes for the wrong reason.
+      await Promise.resolve();
+      expect(actions.setPrimaryTransform).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Selection resolves one microtask late (SELECTION_CHANGED is coalesced by
+     * `createSelectionBatcher`), so a payload arriving for the entity the user
+     * just picked must not be dropped outright.
+     */
+    it('applies a transform for an entity that becomes primary on the next microtask', async () => {
+      actions.primaryId = 'old-entity';
+
+      handleTransformEvent(
+        'TRANSFORM_CHANGED',
+        {
+          entityId: 'new-entity',
+          position: { x: 1, y: 1, z: 1 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+        },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.setPrimaryTransform).not.toHaveBeenCalled();
+      actions.primaryId = 'new-entity';
+      await Promise.resolve();
+      expect(actions.setPrimaryTransform).toHaveBeenCalledTimes(1);
+    });
+
+    /** No entity id means nothing can be gated on, so nothing is written. */
+    it('drops a payload with no entityId', async () => {
+      actions.primaryId = 'entity-1';
+
+      const result = handleTransformEvent(
+        'TRANSFORM_CHANGED',
+        { position: { x: 1, y: 2, z: 3 } },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      await Promise.resolve();
+      expect(actions.setPrimaryTransform).not.toHaveBeenCalled();
     });
   });
 

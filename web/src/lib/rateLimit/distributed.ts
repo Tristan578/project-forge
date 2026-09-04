@@ -122,13 +122,18 @@ async function upstashSlidingWindow(
  * @param key - Unique bucket key (e.g. `billing-checkout:user-123`)
  * @param limit - Maximum requests per window
  * @param windowSeconds - Window size in seconds
+ * @param options.fallbackOnError - Set false for health checks that must fail closed
  */
 export async function distributedRateLimit(
   key: string,
   limit: number,
   windowSeconds: number,
+  options: { fallbackOnError?: boolean } = {},
 ): Promise<DistributedRateLimitResult> {
   if (!isUpstashConfigured()) {
+    if (options.fallbackOnError === false) {
+      throw new Error('Upstash Redis is not configured');
+    }
     // Fall back to in-memory rate limiter
     const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;
@@ -137,6 +142,12 @@ export async function distributedRateLimit(
   try {
     return await upstashSlidingWindow(key, limit, windowSeconds);
   } catch (err) {
+    // Health/integration probes must expose the original distributed-store
+    // failure. They are not fail-open events and must not consume the sampled
+    // alert budget reserved for production fallback behavior.
+    if (options.fallbackOnError === false) {
+      throw err;
+    }
     // Report the Upstash failure so this silent fallback is visible (#8210), but
     // through the per-action throttle: during a sustained outage this path can
     // fire on every request, and an unconditional capture would become its own

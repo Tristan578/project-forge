@@ -42,7 +42,12 @@ engine/src/core/mesh_simplify.rs  # Rust unit tests (cargo test)
 
 ### Playwright Configuration
 - Config: `web/playwright.config.ts`
-- 4 CI shards, chromium only
+- 4 CI shards, chromium only on the blocking `test-e2e-ui` job
+- Cross-browser: `web/playwright.crossbrowser.config.ts` runs the SAME `@ui`
+  selection on firefox, webkit, mobile-iphone and mobile-pixel. One CI job per
+  project (`test-e2e-crossbrowser`, non-blocking for now), so a WebKit-only
+  regression produces a check that names WebKit. Locally:
+  `cd web && npm run e2e:crossbrowser` (add `--project=webkit` for one engine)
 - Page Object Model: `EditorPage` class in `web/e2e/fixtures/editor.fixture.ts` (import `test`, `expect`, `EditorPage` from `../fixtures/editor.fixture`)
 - Requires WASM build + dev server
 
@@ -282,7 +287,9 @@ cd web && npm run test:changed
 
 Playwright E2E tests require:
 1. WASM engine built — run `/build` first. Check `web/public/engine-pkg-webgl2/` exists.
-2. Playwright browsers installed — `npx playwright install chromium`
+2. Playwright browsers installed — `cd web && npm run e2e:install`
+   (chromium + firefox + webkit; the mobile projects are Chromium/WebKit
+   device emulations and need no extra download)
 3. Dev server starts automatically via Playwright's `webServer` config.
 
 ## Vitest 4.x API Reference
