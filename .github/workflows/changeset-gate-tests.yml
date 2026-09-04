@@ -14,6 +14,10 @@ on:
       - '.github/workflows/changeset-gate-tests.yml'
       - 'scripts/__tests__/changeset-skip-decision.test.sh'
 
+concurrency:
+  group: changeset-gate-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
