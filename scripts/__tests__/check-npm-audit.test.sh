@@ -3182,6 +3182,7 @@ OUTPUTS_EOF
             scripts/__tests__/lib/platform.sh scripts/__tests__/platform-contract.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
+            scripts/__tests__/pr-workflow-concurrency.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
@@ -3362,7 +3363,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=589
+readonly SELF_EXEC_EXPECTED_DROP=592
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3697,6 +3698,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/__tests__/lib/platform.sh scripts/__tests__/platform-contract.test.sh \
             scripts/changeset-version.sh scripts/__tests__/changeset-version.test.sh \
             scripts/__tests__/pr-workitem-check.test.sh \
+            scripts/__tests__/pr-workflow-concurrency.test.sh \
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
@@ -3759,6 +3761,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/changeset-version.test.sh
       - name: Run PR work-item check test suite
         run: bash scripts/__tests__/pr-workitem-check.test.sh
+      - name: Run PR workflow concurrency test suite
+        run: bash scripts/__tests__/pr-workflow-concurrency.test.sh
       - name: Run WASM variant integrity test suite
         run: bash scripts/__tests__/wasm-variant-integrity.test.sh
       - name: Run engine CDN alias test suite

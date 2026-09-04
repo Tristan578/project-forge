@@ -6,6 +6,10 @@ on:
       - 'infra/engine-cdn/**'
       - '.github/workflows/engine-cdn-test.yml'
 
+concurrency:
+  group: engine-cdn-test-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
