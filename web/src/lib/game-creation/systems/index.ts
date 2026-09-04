@@ -32,6 +32,19 @@ import './challenge';
 // is hoisted in source order, so re-exporting from './progression' above them
 // would evaluate that module first and reorder the whole registry.
 export { defaultWinConditionStep, DEFAULT_TARGET_SCORE } from './progression';
+// The chase tuning the challenge system would have used, for the per-entity
+// behaviour pass that now owns chasing for entities carrying a `behavior`
+// (PF-1114). Same placement reason as the line above: below the side-effect
+// imports, so re-exporting does not reorder registry initialization.
+// `spawnerEntityIdsFor` rides along for the same reason in the other
+// direction: the behaviour pass has to know which entities this system is
+// about to claim as spawners so it does not plan a second writer for them.
+export {
+  chaseTuningFor,
+  patrolTuningFor,
+  travelsVertically,
+  spawnerEntityIdsFor,
+} from './challenge';
 // NOTE: entity SPAWNING stays in planBuilder Phase 2, which iterates
 // gdd.scenes[].entities directly. The 'entities' and 'challenge' systems
 // registered above plan `game_component` steps ONLY — they never emit

@@ -45,6 +45,11 @@ export function mockSSEResponse(events: unknown[], status = 200): Response {
  * protocol drift between route and client fails a test instead of silently
  * blanking every reply (the #8746 regression).
  *
+ * The three chunk types the server-side approval gate adds —
+ * `tool-approval-request`, `tool-approval-response` and `tool-output-denied`
+ * (PF-8860) — live in `makeApprovalRequestSSEEvents` /
+ * `makeApprovalResumeSSEEvents` below, with their exact field shapes.
+ *
  * @param text - The assistant text content for this turn
  * @param toolCalls - Optional tool calls (each yields start → delta → available)
  * @param thinking - Optional reasoning text
@@ -114,6 +119,158 @@ export function makeChatSSEEvents(opts: {
     };
   }
   events.push(finishChunk);
+
+  return events;
+}
+
+/**
+ * One turn in which the SERVER gated a destructive tool call (PF-8860).
+ *
+ * Wire shape of the three chunk types the approval gate introduces, all
+ * verified against `ai@7.x`'s `UIMessageChunk` union
+ * (`node_modules/ai/dist/index.d.ts`):
+ *   - `{ type:'tool-approval-request', approvalId, toolCallId, reason?, isAutomatic?, signature? }`
+ *   - `{ type:'tool-approval-response', approvalId, approved, reason?, providerExecuted?, providerMetadata? }`
+ *   - `{ type:'tool-output-denied', toolCallId }`
+ *
+ * A gated call gets NO `tool-output-available` — the SDK blocks it before
+ * execution — so the client must resolve its card from the approval-request
+ * alone.
+ *
+ * @param approvalRequestFirst - emit `tool-approval-request` BEFORE
+ *   `tool-input-available` for the same toolCallId. The wire gives no ordering
+ *   guarantee between the two, so both orders must land on the same state.
+ */
+export function makeApprovalRequestSSEEvents(opts: {
+  toolCallId: string;
+  approvalId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  text?: string;
+  /** An additional, ungated call that must execute normally in the same turn. */
+  ungatedToolCall?: { id: string; name: string; input: Record<string, unknown> };
+  approvalRequestFirst?: boolean;
+  /** The HMAC the SDK stamps on the request when a signing secret is set. */
+  signature?: string;
+  /**
+   * Cut the stream immediately after `tool-input-available` — no
+   * `tool-approval-request`, no `finish`. This is the real window the SDK
+   * leaves open (it emits the input chunk first), and the shape the
+   * fail-closed drain in `chatStore` exists for.
+   */
+  severAfterInput?: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
+}): unknown[] {
+  const events: unknown[] = [];
+  events.push({ type: 'start' });
+  events.push({ type: 'start-step' });
+
+  if (opts.text) {
+    events.push({ type: 'text-start', id: 'text-0' });
+    events.push({ type: 'text-delta', id: 'text-0', delta: opts.text });
+    events.push({ type: 'text-end', id: 'text-0' });
+  }
+
+  if (opts.ungatedToolCall) {
+    const tc = opts.ungatedToolCall;
+    events.push({ type: 'tool-input-start', toolCallId: tc.id, toolName: tc.name });
+    events.push({
+      type: 'tool-input-delta',
+      toolCallId: tc.id,
+      inputTextDelta: JSON.stringify(tc.input),
+    });
+    events.push({
+      type: 'tool-input-available',
+      toolCallId: tc.id,
+      toolName: tc.name,
+      input: tc.input,
+    });
+  }
+
+  events.push({ type: 'tool-input-start', toolCallId: opts.toolCallId, toolName: opts.toolName });
+  events.push({
+    type: 'tool-input-delta',
+    toolCallId: opts.toolCallId,
+    inputTextDelta: JSON.stringify(opts.input),
+  });
+
+  const approvalRequest: Record<string, unknown> = {
+    type: 'tool-approval-request',
+    approvalId: opts.approvalId,
+    toolCallId: opts.toolCallId,
+    ...(opts.signature ? { signature: opts.signature } : {}),
+  };
+  const inputAvailable = {
+    type: 'tool-input-available',
+    toolCallId: opts.toolCallId,
+    toolName: opts.toolName,
+    input: opts.input,
+  };
+  if (opts.severAfterInput) {
+    events.push(inputAvailable);
+    return events;
+  }
+  if (opts.approvalRequestFirst) {
+    events.push(approvalRequest, inputAvailable);
+  } else {
+    events.push(inputAvailable, approvalRequest);
+  }
+
+  events.push({ type: 'finish-step' });
+
+  const finishChunk: Record<string, unknown> = { type: 'finish', finishReason: 'tool-calls' };
+  if (opts.inputTokens !== undefined || opts.outputTokens !== undefined) {
+    finishChunk.messageMetadata = {
+      usage: { inputTokens: opts.inputTokens ?? 0, outputTokens: opts.outputTokens ?? 0 },
+    };
+  }
+  events.push(finishChunk);
+
+  return events;
+}
+
+/**
+ * The turn that comes back after the client resumes with an approval decision.
+ *
+ * On APPROVE the client has already executed the call and sent its result, so
+ * the SDK re-emits nothing for it and the turn is just the model's follow-up
+ * text. On DENY the SDK synthesizes an `execution-denied` output and reports it
+ * with a `tool-output-denied` chunk — the chunk the ticket never mentions and
+ * the reason a denied card would otherwise sit at 'pending' forever.
+ */
+export function makeApprovalResumeSSEEvents(opts: {
+  approvalId: string;
+  toolCallId: string;
+  approved: boolean;
+  text?: string;
+  /** Echo the approval-response chunk the SDK sends back. */
+  echoResponse?: boolean;
+}): unknown[] {
+  const events: unknown[] = [];
+  events.push({ type: 'start' });
+  events.push({ type: 'start-step' });
+
+  if (opts.echoResponse) {
+    events.push({
+      type: 'tool-approval-response',
+      approvalId: opts.approvalId,
+      approved: opts.approved,
+    });
+  }
+
+  if (!opts.approved) {
+    events.push({ type: 'tool-output-denied', toolCallId: opts.toolCallId });
+  }
+
+  if (opts.text) {
+    events.push({ type: 'text-start', id: 'text-1' });
+    events.push({ type: 'text-delta', id: 'text-1', delta: opts.text });
+    events.push({ type: 'text-end', id: 'text-1' });
+  }
+
+  events.push({ type: 'finish-step' });
+  events.push({ type: 'finish', finishReason: 'stop' });
 
   return events;
 }

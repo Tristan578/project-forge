@@ -15,6 +15,17 @@
 # wrong in production, so they get direct coverage.
 set -u
 
+# CPython for Windows ships python.exe, not python3.exe; resolve once so the
+# suite runs under Git Bash on windows-latest as well as on Linux/macOS (#9611).
+PYTHON="${PYTHON:-}"
+if [ -z "$PYTHON" ]; then
+  PYTHON="$(command -v python3 || command -v python || true)"
+fi
+if [ -z "$PYTHON" ]; then
+  echo "FAIL no python3/python on PATH — this suite cannot run"
+  exit 1
+fi
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOKS_DIR="$(cd "$HERE/.." && pwd)"
 MODULE="$HOOKS_DIR/github_project_sync.py"
@@ -26,7 +37,7 @@ require() {
     exit 1
   fi
 }
-require python3
+require "$PYTHON"
 
 if [ ! -f "$MODULE" ]; then
   echo "FAIL - $MODULE not found" >&2
@@ -35,7 +46,7 @@ fi
 
 # Run a python snippet with the hooks dir importable. stdout is the verdict.
 run_py() {
-  HOOKS_DIR="$HOOKS_DIR" python3 -c "
+  HOOKS_DIR="$HOOKS_DIR" "$PYTHON" -c "
 import os, sys, importlib
 sys.path.insert(0, os.environ['HOOKS_DIR'])
 m = importlib.import_module('github_project_sync')

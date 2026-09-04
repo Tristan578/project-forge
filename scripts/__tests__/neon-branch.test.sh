@@ -51,15 +51,15 @@ FAILURES=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 SKIPS=0
-# skipped <reason> — a case the HOST cannot represent, never one we chose not
-# to run. Only reachable behind a capability PROBE (never an OS-name check), and
-# under CI it becomes a hard failure: coverage may thin out on a developer
-# laptop, never on the runner that gates merges.
-skipped() {
-  echo "  SKIP: $1"
-  SKIPS=$((SKIPS + 1))
-  if [ "${CI:-}" = "true" ]; then fail "skipped in CI: $1"; fi
-}
+# Shared platform contract (#9611). A case the HOST cannot represent — never one
+# we chose not to run — is only ever reachable behind a capability PROBE, never
+# an OS-name check, and under CI probe_skip turns it into a hard failure through
+# `fail` above: coverage may thin out on a developer laptop, never on the runner
+# that gates merges. probe_skip_absent_on names the one platform whose host
+# cannot close the gap at all, suppressing that upgrade there and nowhere else.
+# shellcheck source=scripts/__tests__/lib/platform.sh
+# shellcheck source=scripts/__tests__/lib/platform.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/platform.sh"
 
 # Can this filesystem represent POSIX mode 600 at all? PROBE it rather than
 # sniffing $OSTYPE: NTFS through Git-for-Windows accepts chmod and then still
@@ -238,7 +238,8 @@ if [ "$MODE_600_SUPPORTED" -eq 1 ]; then
     fail "the --uri-out file is $mode, expected -rw------- (a world-readable credential on a shared runner)"
   fi
 else
-  skipped "filesystem cannot represent mode 600 — the --uri-out file permission not verified"
+  SKIPS=$((SKIPS + 1))
+  probe_skip_absent_on windows "filesystem cannot represent mode 600 — the --uri-out file permission not verified"
 fi
 
 # --- 3. --endpoint response with no connection URI → fail loudly -------------
@@ -316,7 +317,8 @@ if [ "$MODE_600_SUPPORTED" -eq 1 ]; then
     fail "the composed-URI file is $mode, expected -rw-------"
   fi
 else
-  skipped "filesystem cannot represent mode 600 — the composed-URI file permission not verified"
+  SKIPS=$((SKIPS + 1))
+  probe_skip_absent_on windows "filesystem cannot represent mode 600 — the composed-URI file permission not verified"
 fi
 
 # --- 3b. A password with URI metacharacters must be percent-encoded ----------

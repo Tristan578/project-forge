@@ -113,6 +113,10 @@ skipped() {
   SKIP=$((SKIP + 1))
   if [ "${CI:-}" = "true" ]; then bad "skipped in CI: $1"; fi
 }
+# Shared platform contract (#9611): probe_skip_absent_on names a platform whose
+# HOST cannot close the gap, so the CI upgrade above is suppressed only there.
+# shellcheck source=scripts/__tests__/lib/platform.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/platform.sh"
 
 # Build a hermetic fixture root that mirrors the generator's expected layout:
 #   <root>/tools/agentic-sync/canonical.json   (source of truth)
@@ -406,7 +410,8 @@ ln -s "$PARENT/secret.md" "$SROOT/AGENTS.md" 2>/dev/null || true
 # symlink and this case would assert nothing while appearing to pass. Confirm
 # the planted file really is a link before trusting the result.
 if [ ! -h "$SROOT/AGENTS.md" ]; then
-  skipped "host cannot create symlinks (ln -s produced a regular file) - symlink-escape case not exercised"
+  SKIP=$((SKIP + 1))
+  probe_skip_absent_on windows "host cannot create symlinks (ln -s produced a regular file) - symlink-escape case not exercised"
 else
   before_sym="$(digest_of "$PARENT/secret.md")"
   if AGENTIC_SYNC_ROOT="$SROOT" node "$GEN" --write >/dev/null 2>&1; then

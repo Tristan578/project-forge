@@ -29,7 +29,10 @@ FAILURES=0
 
 pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; FAILURES=$((FAILURES + 1)); }
-skip() { echo "skip $1"; }
+# Shared platform contract (#9611): a probe skip is loud, and a failure in CI.
+# shellcheck source=scripts/__tests__/lib/platform.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/__tests__/lib/platform.sh"
+skip() { probe_skip "$1"; }
 
 command -v jq >/dev/null 2>&1 || { echo "FAIL jq is required to run this suite"; exit 1; }
 command -v awk >/dev/null 2>&1 || { echo "FAIL awk is required to run this suite"; exit 1; }

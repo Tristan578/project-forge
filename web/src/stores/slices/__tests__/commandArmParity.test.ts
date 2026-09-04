@@ -42,19 +42,9 @@ const WEB_SRC_DIR = join(REPO_ROOT, 'web', 'src');
  * becomes implemented or stops being dispatched, so this list cannot rot.
  */
 const ALLOWED_UNROUTED: Record<string, string> = {
-  // PF-1174: the whole clip-authoring surface is an engine placeholder.
-  // `create_animation_clip` matches a stub arm; the other six have no arm at all
-  // (the engine's stubs are spelled `add_keyframe`/`remove_keyframe`/`update_keyframe`).
-  // Live callers: AnimationClipInspector, TimelinePanel, ProceduralAnimPanel,
-  // and animationParticleHandlers. All of it writes Zustand and nothing else.
-  create_animation_clip: 'PF-1174 — engine arm is a `Not yet implemented` stub',
-  add_clip_keyframe: 'PF-1174 — engine-side clip authoring unimplemented',
-  remove_clip_keyframe: 'PF-1174 — engine-side clip authoring unimplemented',
-  update_clip_keyframe: 'PF-1174 — engine-side clip authoring unimplemented',
-  set_clip_property: 'PF-1174 — engine-side clip authoring unimplemented',
-  preview_clip: 'PF-1174 — engine-side clip authoring unimplemented',
-  remove_animation_clip: 'PF-1174 — engine-side clip authoring unimplemented',
-
+  // Empty since PF-1174 / #9278 landed the clip-authoring arms. That is the
+  // correct steady state: a store dispatch with no engine arm is a live UI
+  // control that does nothing.
 };
 
 /**
@@ -350,11 +340,19 @@ describe('store command names have engine dispatch arms', () => {
       'remove_tilemap_data',
       'set_animation_state_machine',
       'remove_animation_state_machine',
+      // Keyframe-clip authoring, implemented by PF-1174 / #9278.
+      'create_animation_clip',
+      'add_clip_keyframe',
+      'remove_clip_keyframe',
+      'update_clip_keyframe',
+      'set_clip_property',
+      'preview_clip',
+      'remove_animation_clip',
     ])('scores %s as implemented', (name) => {
       expect(arms.implemented.has(name)).toBe(true);
     });
 
-    it.each(['create_animation_clip', 'play_animation_clip', 'get_animation_clips'])(
+    it.each(['list_skeleton_animations', 'get_skeleton_animation'])(
       'scores the stub arm %s as NOT implemented',
       (name) => {
         expect(arms.stubbed.has(name)).toBe(true);
@@ -375,6 +373,14 @@ describe('store command names have engine dispatch arms', () => {
       'solve_ik2d',
       'set_skeleton_skin2d',
       'add_skeletal_keyframe2d',
+      // PF-1174 / #9278 deleted the six stub spellings the clip surface never
+      // dispatched (`add_keyframe` vs the real `add_clip_keyframe`, …).
+      'add_keyframe',
+      'remove_keyframe',
+      'update_keyframe',
+      'get_animation_clips',
+      'play_animation_clip',
+      'stop_animation_clip',
     ])('does not route the deleted name %s', (name) => {
       // PF-1181 deleted twenty names the router advertised with no arm behind
       // them. Their deletion left explanatory comments in `route_domain` that

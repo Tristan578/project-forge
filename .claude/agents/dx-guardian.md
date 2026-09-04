@@ -5,17 +5,7 @@ model: haiku
 effort: medium
 memory: project
 tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
-skills:
-  [
-    developer-experience,
-    kanban,
-    docs,
-    developer-tool-ux-patterns,
-    game-engine-ux-patterns,
-    dx-error-handling-patterns,
-    dx-api-design-patterns,
-    dx-mcp-command-patterns,
-  ]
+skills: [developer-experience, kanban, docs]
 hooks:
   Stop:
     - command: bash "$(git rev-parse --show-toplevel)/.claude/hooks/review-quality-gate.sh"
@@ -122,42 +112,33 @@ A ticket is done when:
 
 ## Domain Analysis
 
-Before any DX review, run the relevant audit scripts and read the reference material.
+Before any DX review, run the audits that exist and read the reference material.
 
-### Error Handling DX
+**Only cite a script you have confirmed is present.** If an audit you want does
+not exist, say so and review the domain by hand — do not invent a script path.
+This section previously listed ten audit scripts under four skill directories
+that were never created; a reviewer following it produced "no findings" from
+commands that had all failed to run.
 
-```bash
-bash .claude/skills/dx-error-handling-patterns/scripts/audit-error-messages.sh web/src
-bash .claude/skills/dx-error-handling-patterns/scripts/audit-error-boundaries.sh web/src
-```
-
-Read: `.claude/skills/dx-error-handling-patterns/references/competitor-analysis.md`
-
-### API Design DX
+### Standing audits
 
 ```bash
-bash .claude/skills/dx-api-design-patterns/scripts/audit-api-consistency.sh web/src
-bash .claude/skills/dx-api-design-patterns/scripts/audit-api-docs.sh web/src
+bash .claude/tools/dx-audit.sh          # cross-IDE drift, agent profiles, doc freshness
+bash .claude/tools/validate-all.sh      # every validator (rust, frontend, mcp, docs, tests)
 ```
 
-Read: `.claude/skills/dx-api-design-patterns/references/competitor-analysis.md`
+Read: `.claude/skills/developer-experience/references/dx-standards.md` — the DoQ/DoD
+table, cross-IDE config list, script-health requirements, and the "Anti-Patterns That
+Hurt DX" list this repo actually enforces.
 
-### MCP Command DX
+### Per-domain review (manual — no scripts exist for these)
 
-```bash
-bash .claude/skills/dx-mcp-command-patterns/scripts/audit-manifest-quality.sh
-bash .claude/skills/dx-mcp-command-patterns/scripts/audit-command-discoverability.sh
-bash .claude/skills/dx-mcp-command-patterns/scripts/audit-manifest-handler-sync.sh
-```
+| Domain | What to check | Where |
+| --- | --- | --- |
+| Error handling DX | No generic messages ("Something went wrong", "Error occurred"). Every failure names the cause and the next action. Error boundaries wrap async/suspense trees. | `web/src/app/api/**`, `web/src/components/**` |
+| API design DX | Route shapes, status codes, and error envelopes consistent across `/api/*`. Public behaviour matches `docs/api/openapi.json`. | `web/src/app/api/**` |
+| MCP command DX | Every command has a description and argument docs; manifest and handlers agree. `bash .claude/tools/validate-mcp.sh` covers the sync check. | `mcp-server/manifest/commands.json`, handlers |
+| Developer tool UX | Command palette coverage, panel layout, keyboard shortcuts. Shared with `ux-reviewer` — coordinate rather than duplicating. | `web/src/lib/workspace/`, `packages/ui/src/` |
 
-Read: `.claude/skills/dx-mcp-command-patterns/references/mcp-design-principles.md`
-
-### Developer Tool UX (shared with ux-reviewer)
-
-```bash
-bash .claude/skills/developer-tool-ux-patterns/scripts/audit-command-palette.sh web/src
-bash .claude/skills/developer-tool-ux-patterns/scripts/audit-panel-layout.sh web/src
-bash .claude/skills/developer-tool-ux-patterns/scripts/audit-keyboard-shortcuts.sh web/src
-```
-
-Run ALL relevant scripts for the domain under review. Read the competitor analysis references to calibrate your expectations against industry standards. Report findings as PASS/FAIL with specific file paths and line numbers.
+Report findings as PASS/FAIL with specific file paths and line numbers. A domain you
+could not audit is reported as "not audited", never as PASS.

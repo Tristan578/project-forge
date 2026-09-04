@@ -144,7 +144,13 @@ declare namespace forge {
      * 3D forge.physics.isGrounded of the same name returns a plain boolean.
      */
     function isGrounded(entityId: string, distance?: number): Promise<boolean>;
-    /** Set global gravity (default: [0, -9.81]) */
+    /**
+     * Set global gravity (default: [0, -9.81]).
+     *
+     * Applied in exported games as well as the editor: the runtime engine
+     * build drains this command since #9550 (before that it was queued and
+     * never applied, growing memory by one entry per call).
+     */
     function setGravity(x: number, y: number): void;
     /** Register a callback for when this entity collides with another (collision start) */
     function onCollisionEnter(callback: (event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void): () => void;

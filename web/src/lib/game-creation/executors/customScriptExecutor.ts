@@ -30,29 +30,56 @@ const inputSchema = z.object({
   projectType: z.enum(['2d', '3d']),
 });
 
-const SCRIPT_SYSTEM_PROMPT = `You are a game script generator for SpawnForge, a browser-based game engine.
+/**
+ * EVERY SIGNATURE BELOW IS COPIED FROM `web/src/lib/scripting/forgeTypes.ts`.
+ *
+ * It used to advertise a `forge.entity` namespace with six transform methods,
+ * `forge.input.isKeyDown`, `forge.input.isKeyJustPressed`, `forge.ui.setText`
+ * and `forge.ui.setVisible`. None of those exist — 10 of the 18 listed calls
+ * were imaginary — so every script this executor generated for the five
+ * unregistered system categories (input, narrative, audio, visual, physics)
+ * threw on its first frame inside a sandboxed worker, where nothing in the
+ * pipeline can see it. Transforms are TOP-LEVEL on `forge`, input is
+ * `isPressed`/`justPressed`, and UI text is `updateText` (PF-1114).
+ *
+ * `forgeApiConformance.test.ts` extracts every `forge.*` reference from this
+ * block and resolves each against `FORGE_TYPE_DEFINITIONS`, so an invented
+ * method fails a test instead of shipping. Exported for exactly that.
+ */
+export const SCRIPT_SYSTEM_PROMPT = `You are a game script generator for SpawnForge, a browser-based game engine.
 
 Generate a TypeScript game script that runs in a sandboxed Web Worker. The script has access to the forge API.
 
 ## Available APIs
-- forge.entity.getPosition(entityId) -> [x, y, z]
-- forge.entity.setPosition(entityId, x, y, z)
-- forge.entity.getRotation(entityId) -> [x, y, z]
-- forge.entity.setRotation(entityId, x, y, z)
-- forge.entity.getScale(entityId) -> [x, y, z]
-- forge.entity.setScale(entityId, x, y, z)
-- forge.input.isKeyDown(key) -> boolean
-- forge.input.isKeyJustPressed(key) -> boolean
-- forge.physics.applyForce(entityId, x, y, z)
-- forge.physics.applyImpulse(entityId, x, y, z)
-- forge.physics.setVelocity(entityId, x, y, z)
-- forge.physics.isGrounded(entityId) -> boolean (synchronous; true while a character controller touches the ground — gate jumps on it)
+Transforms are top-level on forge. There is no separate per-entity namespace: call them on forge itself and pass the entity id.
+- forge.getTransform(entityId) -> { position: [x, y, z], rotation: [x, y, z], scale: [x, y, z] } | null
+- forge.setPosition(entityId, x, y, z)
+- forge.setRotation(entityId, x, y, z)
+- forge.translate(entityId, dx, dy, dz)
+- forge.rotate(entityId, dx, dy, dz)
+- forge.spawn(type, options) -> entityId
+- forge.destroy(entityId)
+- forge.setColor(entityId, r, g, b, a)
+- forge.setVisibility(entityId, visible)
+- forge.log(message)
+- forge.input.isPressed(action) -> boolean
+- forge.input.justPressed(action) -> boolean
+- forge.input.getAxis(action) -> number
+- forge.physics.applyForce(entityId, fx, fy, fz)
+- forge.physics.applyImpulse(entityId, fx, fy, fz)
+- forge.physics.setVelocity(entityId, vx, vy, vz)
+- forge.physics.isGrounded(entityId) -> boolean (synchronous; true while a character controller touches the ground -- gate jumps on it)
+- forge.physics.distanceTo(entityIdA, entityIdB) -> number
+- forge.physics.onCollisionEnter(entityId, callback)
+- forge.scene.findByName(name) -> entityId[]
+- forge.scene.getEntityName(entityId) -> string | null
+- forge.scene.load(sceneName)
 - forge.audio.play(entityId)
 - forge.audio.stop(entityId)
-- forge.scene.load(sceneName)
 - forge.time.delta -> number (seconds)
-- forge.ui.setText(widgetId, text)
-- forge.ui.setVisible(widgetId, visible)
+- forge.ui.showText(id, text, x, y, options)
+- forge.ui.updateText(id, text)
+- forge.ui.removeText(id)
 
 ## Script Structure
 Variables declared at module scope persist across frames.
@@ -68,7 +95,8 @@ function onDestroy() { /* Called when the entity is removed */ }
 4. Use ONLY the forge.* API for engine interaction
 5. Keep scripts simple and focused on one behavior
 6. Use onUpdate(dt) for frame-by-frame logic, multiply movement by dt
-7. Return ONLY the script code. No markdown, no explanation, no code fences.`;
+7. MOVING AN ENEMY OR AN NPC: use forge.translate or forge.setPosition. Those entities are spawned as FIXED sensor bodies, so forge.physics.applyForce, applyImpulse and setVelocity do nothing to them and report no error. Physics forces are for the player and for projectiles.
+8. Return ONLY the script code. No markdown, no explanation, no code fences.`;
 
 // [B6] Output validation: check for sandbox escape attempts
 const FORBIDDEN_PATTERNS = [
@@ -113,8 +141,14 @@ function validateGeneratedScript(
 }
 
 // [FIX: NU1] Dynamic confidence scoring for custom scripts.
+//
+// `forge.entity` is NOT in this list and must not come back: no such namespace
+// is declared in `forgeTypes.ts`, so counting it rewarded a script for using an
+// API that does not exist — the more imaginary namespaces a script used, the
+// more "complex" it scored, while the real signal (does this run at all?) went
+// unmeasured (PF-1114).
 const FORGE_NAMESPACES = [
-  'forge.entity', 'forge.input', 'forge.physics', 'forge.audio',
+  'forge.input', 'forge.physics', 'forge.audio',
   'forge.scene', 'forge.time', 'forge.ui', 'forge.camera',
   'forge.physics2d', 'forge.sprite', 'forge.skeleton2d',
   'forge.dialogue', 'forge.tilemap',

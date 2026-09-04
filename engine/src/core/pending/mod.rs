@@ -35,6 +35,11 @@ pub mod scene;
 pub mod sprites;
 pub mod transform;
 
+/// Source-scan gate: every queue has a drain a runtime build can reach, or a
+/// reasoned waiver (#9550). Test-only.
+#[cfg(test)]
+mod runtime_drains;
+
 // Re-export all request types and bridge functions from domain modules
 pub use animation::*;
 pub use audio::*;

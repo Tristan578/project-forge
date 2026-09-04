@@ -16,6 +16,10 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 // [FIX: V4-4] Import zSystemCategory from types.ts (single source of truth)
 import { zSystemCategory, zEntityRole } from './types';
 import type { OrchestratorGDD, SystemCategory } from './types';
+// The closed per-entity behaviour vocabulary (PF-1114). The prompt below
+// enumerates it from the SAME constant the schema validates against, so the
+// model is never offered a verb the planner cannot build.
+import { BEHAVIOR_VOCAB, behaviorPromptLines, zBehavior } from './behaviorVocabulary';
 
 // ---------------------------------------------------------------------------
 // Zod schemas for LLM output validation
@@ -55,6 +59,13 @@ const zEntityBlueprint = z.object({
   // (`behaviors` used to live here too: prose the model spent tokens writing and
   // no stage of the pipeline ever read — PF-1111.)
   appearance: z.string().max(300),
+  // SINGULAR and CLOSED (PF-1114). `zBehavior` is a `z.enum` over
+  // `BEHAVIOR_VOCAB`, so a verb outside the vocabulary fails validation and the
+  // retry loop below asks the model again — rather than being sanitized into a
+  // string that reaches the plan builder and means nothing there. Optional
+  // because most entities are scenery, and because every GDD written before the
+  // field existed must still parse.
+  behavior: zBehavior.optional(),
 });
 
 const zSceneBlueprint = z.object({
@@ -132,13 +143,16 @@ ${SYSTEM_CATEGORIES.map(c => `- "${c}"`).join('\n')}
 7. Limit assetManifest to items the game genuinely needs. Fewer high-impact assets over many decorative ones.
 8. estimatedScope: "small" = 1-3 scenes, few entities; "medium" = 3-8 scenes, moderate entities; "large" = 8+ scenes, many entities.
 9. If you include a "movement" system, at least one entity in one scene MUST have role "player" -- a movement system with nothing to move is rejected.
+10. Entity "behavior" is OPTIONAL, and when present must be EXACTLY one of ${BEHAVIOR_VOCAB.map(b => `"${b}"`).join(', ')}. Any other value is rejected and the whole design is asked for again. What each one does:
+${behaviorPromptLines().join('\n')}
+10b. Set "behavior" on the things that act -- the enemy that hunts, the guard that walks a route, the creature that runs away, the turret that shoots. Leave it off scenery, lights, cameras and pickups: an object with no "behavior" simply stays where it is placed. Use "idle" only to say that an entity is deliberately still.
 
 ## Output Format
 Respond with ONLY valid JSON matching this exact structure (no markdown, no explanation):
 {
   "title": "string",
   "systems": [{ "category": "movement", "type": "walk+jump", "config": { "gravity": 20 }, "priority": "core", "dependsOn": ["physics"] }],
-  "scenes": [{ "name": "string", "purpose": "string", "systems": ["movement"], "entities": [{ "name": "string", "role": "player|enemy|npc|decoration|trigger|interactable|projectile", "systems": ["movement"], "appearance": "primitive:capsule" }], "transitions": [{ "to": "scene name", "trigger": "description" }] }],
+  "scenes": [{ "name": "string", "purpose": "string", "systems": ["movement"], "entities": [{ "name": "string", "role": "player|enemy|npc|decoration|trigger|interactable|projectile", "systems": ["movement"], "appearance": "primitive:capsule", "behavior": "chase" }], "transitions": [{ "to": "scene name", "trigger": "description" }] }],
   "assetManifest": [{ "type": "3d-model|texture|sound|music|voice|sprite", "description": "string", "entityRef": "optional entity name", "styleDirective": "string", "priority": "required|nice-to-have", "fallback": "primitive:cube" }],
   "estimatedScope": "small|medium|large",
   "styleDirective": "string",

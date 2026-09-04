@@ -126,9 +126,9 @@ fn route_domain(command: &str) -> u8 {
         | "stop_animation" | "seek_animation" | "set_animation_speed"
         | "set_animation_loop" | "set_animation_blend_weight"
         | "set_clip_speed" | "get_animation_state" | "list_animations"
-        | "get_animation_graph" | "create_animation_clip" | "add_keyframe"
-        | "remove_keyframe" | "update_keyframe" | "get_animation_clips"
-        | "play_animation_clip" | "stop_animation_clip"
+        | "get_animation_graph" | "create_animation_clip" | "add_clip_keyframe"
+        | "remove_clip_keyframe" | "update_clip_keyframe" | "set_clip_property"
+        | "preview_clip" | "remove_animation_clip"
         // NOTE: `set_animation_state_machine` / `remove_animation_state_machine`
         // are NOT here. They live in the sprites group below, because that is
         // where the working handlers are. Routing them to this domain sent them

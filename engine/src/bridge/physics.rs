@@ -13,19 +13,27 @@ use crate::core::{
     engine_mode::EngineMode,
 };
 
-// Editor-only imports. `DebugPhysicsEnabled` serves only
-// `apply_debug_physics_toggle`, `PhysicsJoint2d` only the 2D joint appliers, and
-// `Selection`/`SelectionChangedEvent` only the selection-emit systems — every
-// one of them `#[cfg(not(feature = "runtime"))]`. Split out of the groups above
-// rather than gating those whole: the names left behind stay live in a runtime
-// build.
-#[cfg(not(feature = "runtime"))]
+// `DebugPhysicsEnabled`, `PhysicsJoint2d` and `pending_commands` serve the
+// joint / gravity / debug-toggle drains, which run in BOTH builds since #9550:
+// `core::commands::physics::dispatch` queues those commands unconditionally,
+// so a runtime build with no drain grew the queues for the life of the process
+// (a script calling `forge.physics2d.setGravity` every frame leaked one entry
+// per frame in every exported game). The consuming layer — `Physics2dPlugin`'s
+// `sync_gravity2d` / `manage_joint2d_lifecycle`, `PhysicsPlugin`'s
+// `DebugPhysicsEnabled`, and `HistoryStack` — was always registered in both
+// builds; only the drains were missing.
 use crate::core::{
     pending_commands,
     physics::DebugPhysicsEnabled,
     physics_2d::PhysicsJoint2d,
-    selection::{Selection, SelectionChangedEvent},
 };
+
+// Editor-only imports: `Selection`/`SelectionChangedEvent` serve only the
+// selection-emit systems, which stay `#[cfg(not(feature = "runtime"))]`. Split
+// out of the group above rather than gating it whole: the names left behind
+// stay live in a runtime build.
+#[cfg(not(feature = "runtime"))]
+use crate::core::selection::{Selection, SelectionChangedEvent};
 
 use super::events;
 
@@ -156,7 +164,6 @@ pub(super) fn apply_physics_toggles(
 }
 
 /// System that applies pending debug physics toggle requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_debug_physics_toggle(
     mut pending: ResMut<PendingCommands>,
     mut debug_enabled: ResMut<DebugPhysicsEnabled>,
@@ -219,7 +226,6 @@ pub(super) fn apply_force_applications(
 }
 
 /// System that applies pending create joint requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_create_joint_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -248,7 +254,6 @@ pub(super) fn apply_create_joint_requests(
 }
 
 /// System that applies pending update joint requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_update_joint_requests(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut crate::core::physics::JointData)>,
@@ -298,7 +303,6 @@ pub(super) fn apply_update_joint_requests(
 }
 
 /// System that applies pending remove joint requests.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_remove_joint_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -492,8 +496,7 @@ pub(super) fn apply_physics2d_toggles(
     }
 }
 
-/// System that applies 2D joint creation requests (editor-only, metadata-only).
-#[cfg(not(feature = "runtime"))]
+/// System that applies 2D joint creation requests (both builds — see #9550).
 pub(super) fn apply_create_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -521,8 +524,7 @@ pub(super) fn apply_create_joint2d_requests(
     }
 }
 
-/// System that applies 2D joint update requests (editor-only, metadata-only).
-#[cfg(not(feature = "runtime"))]
+/// System that applies 2D joint update requests (both builds — see #9550).
 pub(super) fn apply_update_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut PhysicsJoint2d)>,
@@ -549,8 +551,7 @@ pub(super) fn apply_update_joint2d_requests(
     }
 }
 
-/// System that applies 2D joint removal requests (editor-only, metadata-only).
-#[cfg(not(feature = "runtime"))]
+/// System that applies 2D joint removal requests (both builds — see #9550).
 pub(super) fn apply_remove_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -683,7 +684,6 @@ pub(super) fn apply_raycast2d_requests(
 }
 
 /// System that applies 2D gravity updates to the Gravity2d resource.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_gravity2d_updates(
     mut pending: ResMut<PendingCommands>,
     mut gravity: ResMut<crate::core::physics_2d_sim::Gravity2d>,
@@ -700,7 +700,6 @@ pub(super) fn apply_gravity2d_updates(
 }
 
 /// System that applies 2D debug physics toggles.
-#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_debug_physics2d_toggle(
     mut pending: ResMut<PendingCommands>,
     mut debug_enabled: ResMut<crate::core::physics_2d_sim::DebugPhysics2dEnabled>,
@@ -711,8 +710,7 @@ pub(super) fn apply_debug_physics2d_toggle(
     }
 }
 
-/// System that handles 2D physics query requests (editor-only).
-#[cfg(not(feature = "runtime"))]
+/// System that handles 2D physics query requests (both builds — see #9550).
 pub(super) fn handle_physics2d_query(
     mut pending: ResMut<PendingCommands>,
     physics_query: Query<(&EntityId, &Physics2dData, Option<&Physics2dEnabled>)>,

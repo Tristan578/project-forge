@@ -3,7 +3,9 @@
 use bevy::prelude::*;
 use crate::core::{
     animation::{AnimationRegistry, HasAnimations, AnimationPlaybackState, AnimationClipInfo},
+    animation_clip::AnimationClipData,
     entity_id::EntityId,
+    history::{HistoryStack, UndoableAction},
     pending_commands::PendingCommands,
 };
 use bevy::animation::{AnimationPlayer, RepeatAnimation, AnimationClip};
@@ -374,6 +376,188 @@ pub(super) fn apply_animation_requests(
                     tracing::warn!("Unknown clip '{}' for entity: {}", clip_name, request.entity_id);
                 }
             }
+        }
+    }
+}
+
+// ============================================================================
+// Keyframe-clip authoring drains (PF-1174 / #9278)
+// ============================================================================
+//
+// One drain per queue, each: find the entity, apply the operation through the
+// natively-tested methods on `AnimationClipData`, push the before/after pair
+// onto the undo stack, and emit the resulting clip so the inspector mirrors
+// the engine rather than its own optimistic copy. A failed operation is logged
+// with the reason — the command was answered `Ok` when it was queued, which is
+// the general shape of this engine (see `rules/gotchas-engine.md`). All seven
+// run in BOTH builds: the queues are filled unconditionally by
+// `core::commands::animation`, and `core::pending::runtime_drains` pins that a
+// runtime build drains them (#9550).
+
+fn find_clip_entity<'a>(
+    query: &'a mut Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+    entity_id: &str,
+) -> Option<(Entity, Option<Mut<'a, AnimationClipData>>)> {
+    query
+        .iter_mut()
+        .find(|(_, eid, _)| eid.0 == entity_id)
+        .map(|(entity, _, clip)| (entity, clip))
+}
+
+fn push_clip_change(
+    history: &mut HistoryStack,
+    entity_id: &str,
+    old: Option<AnimationClipData>,
+    new: Option<AnimationClipData>,
+) {
+    history.push(UndoableAction::AnimationClipChange {
+        entity_id: entity_id.to_string(),
+        old_clip: old,
+        new_clip: new,
+    });
+}
+
+/// `create_animation_clip`: insert the clip (replacing any existing one).
+pub(super) fn apply_animation_clip_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for update in pending.animation_clip_updates.drain(..) {
+        let Some((entity, existing)) = find_clip_entity(&mut query, &update.entity_id) else {
+            tracing::warn!("create_animation_clip: no entity {}", update.entity_id);
+            continue;
+        };
+        let old = existing.map(|c| c.clone());
+        commands.entity(entity).insert(update.clip_data.clone());
+        push_clip_change(&mut history, &update.entity_id, old, Some(update.clip_data.clone()));
+        events::emit_animation_clip_changed(&update.entity_id, &update.clip_data);
+    }
+}
+
+/// Shared shape of the five in-place edits: mutate the existing clip, record
+/// the before/after pair, emit the result. `op` returns the reason on failure.
+fn edit_clip(
+    query: &mut Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+    history: &mut HistoryStack,
+    command: &str,
+    entity_id: &str,
+    op: impl FnOnce(&mut AnimationClipData) -> Result<(), String>,
+) {
+    let Some((_, Some(mut clip))) = find_clip_entity(query, entity_id) else {
+        tracing::warn!("{command}: entity {entity_id} has no animation clip");
+        return;
+    };
+    let old = clip.clone();
+    match op(&mut clip) {
+        Ok(()) => {
+            push_clip_change(history, entity_id, Some(old), Some(clip.clone()));
+            events::emit_animation_clip_changed(entity_id, &clip);
+        }
+        Err(reason) => tracing::warn!("{command} on {entity_id}: {reason}"),
+    }
+}
+
+pub(super) fn apply_animation_clip_add_keyframes(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for r in pending.animation_clip_add_keyframes.drain(..) {
+        edit_clip(&mut query, &mut history, "add_clip_keyframe", &r.entity_id, |clip| {
+            clip.add_keyframe(r.target.clone(), r.time, r.value, r.interpolation.clone())
+        });
+    }
+}
+
+pub(super) fn apply_animation_clip_remove_keyframes(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for r in pending.animation_clip_remove_keyframes.drain(..) {
+        edit_clip(&mut query, &mut history, "remove_clip_keyframe", &r.entity_id, |clip| {
+            clip.remove_keyframe(&r.target, r.time)
+        });
+    }
+}
+
+pub(super) fn apply_animation_clip_update_keyframes(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for r in pending.animation_clip_update_keyframes.drain(..) {
+        edit_clip(&mut query, &mut history, "update_clip_keyframe", &r.entity_id, |clip| {
+            clip.update_keyframe(&r.target, r.time, r.new_value, r.new_interpolation.clone(), r.new_time)
+        });
+    }
+}
+
+pub(super) fn apply_animation_clip_property_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for r in pending.animation_clip_property_updates.drain(..) {
+        edit_clip(&mut query, &mut history, "set_clip_property", &r.entity_id, |clip| {
+            clip.apply_properties(r.duration, r.play_mode.clone(), r.speed, r.autoplay)
+        });
+    }
+}
+
+/// `preview_clip` is transport, not authoring: it moves the playhead and is
+/// deliberately NOT recorded on the undo stack (an undo that rewinds a preview
+/// would evict the user's real edits).
+pub(super) fn apply_animation_clip_previews(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+) {
+    for r in pending.animation_clip_previews.drain(..) {
+        let Some((_, Some(mut clip))) = find_clip_entity(&mut query, &r.entity_id) else {
+            tracing::warn!("preview_clip: entity {} has no animation clip", r.entity_id);
+            continue;
+        };
+        match clip.preview(&r.action, r.seek_time) {
+            Ok(()) => events::emit_animation_clip_changed(&r.entity_id, &clip),
+            Err(reason) => tracing::warn!("preview_clip on {}: {reason}", r.entity_id),
+        }
+    }
+}
+
+pub(super) fn apply_animation_clip_removals(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &EntityId, Option<&mut AnimationClipData>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for r in pending.animation_clip_removals.drain(..) {
+        let Some((entity, Some(clip))) = find_clip_entity(&mut query, &r.entity_id) else {
+            tracing::warn!("remove_animation_clip: entity {} has no animation clip", r.entity_id);
+            continue;
+        };
+        let old = clip.clone();
+        commands.entity(entity).remove::<AnimationClipData>();
+        push_clip_change(&mut history, &r.entity_id, Some(old), None);
+        events::emit_animation_clip_removed(&r.entity_id);
+    }
+}
+
+/// Emit the keyframe clip of the newly selected entity, so the inspector's
+/// `primaryAnimationClip` reflects the engine and not the store's last write.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn emit_animation_clip_on_selection(
+    selection: Res<Selection>,
+    clip_query: Query<(&EntityId, Option<&AnimationClipData>)>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
+) {
+    for _event in selection_events.read() {
+        let Some(primary) = selection.primary else { continue };
+        if let Ok((entity_id, Some(clip))) = clip_query.get(primary) {
+            events::emit_animation_clip_changed(&entity_id.0, clip);
+        } else if let Ok((entity_id, None)) = clip_query.get(primary) {
+            events::emit_animation_clip_removed(&entity_id.0);
         }
     }
 }

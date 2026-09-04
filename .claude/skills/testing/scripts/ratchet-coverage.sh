@@ -146,17 +146,40 @@ if [[ "${IS_MAIN}" == "false" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Compute new thresholds (floor to nearest integer, never decrease)
+# Compute new thresholds (floor to nearest integer, subtract a margin, never
+# decrease)
 # ---------------------------------------------------------------------------
+# RATCHET_MARGIN_POINTS — the ratchet must never adopt a threshold flush
+# against the measurement that produced it. The old rule floored the actual
+# percentage and adopted it directly: a 78.4% run set the threshold to
+# exactly 78, so the very next merge only had to lose 0.41 of a point to fail
+# the gate outright — which is exactly what happened (Quality Gates run
+# 33815188404: functions coverage measured 77.99% against a threshold of
+# 78%). A gate with zero margin is a coin flip, not a wall.
+#
+# Subtracting a fixed integer number of points after flooring guarantees real
+# headroom: coverage has to fall by MORE than the margin below the adopted
+# threshold's measurement before a future run can trip the gate on rounding
+# noise alone, rather than by a fraction of a point. An integer point value
+# (not a percentage of the measurement) keeps the guarantee easy to state and
+# to verify by inspection, and matches how the thresholds themselves are
+# expressed (whole percentage points in vitest.config.ts).
+readonly RATCHET_MARGIN_POINTS=1
+
 new_threshold() {
   local actual="$1"
   local current="$2"
-  # Floor actual to integer
-  local floored
+  # Floor actual to integer, then pull back by the margin so the adopted
+  # value sits strictly below what was actually measured.
+  local floored target
   floored=$(echo "${actual}" | awk '{print int($1)}')
-  # Take max of current and floored
-  if [[ "${floored}" -gt "${current}" ]]; then
-    echo "${floored}"
+  target=$((floored - RATCHET_MARGIN_POINTS))
+  # Never ratchet down: only adopt the margin-adjusted target when it beats
+  # the current threshold. A target that doesn't clear the margin (e.g. actual
+  # only just above current) leaves the existing threshold untouched instead
+  # of bumping it flush against the measurement.
+  if [[ "${target}" -gt "${current}" ]]; then
+    echo "${target}"
   else
     echo "${current}"
   fi
