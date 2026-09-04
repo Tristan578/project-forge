@@ -15,7 +15,7 @@
  * Relay protocol: see mcp-server/src/relay/server.ts. Every inbound `command`
  * frame is answered with exactly one `command_result` carrying its requestId.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { mcpBridgeToken, mcpBridgeUrl, useMcpBridgeRequested } from './bridgeOptIn';
 
 export type BridgeStatus =
@@ -53,6 +53,13 @@ export function useEditorBridge(): EditorBridgeControls {
   const requested = useMcpBridgeRequested();
   const [consented, setConsented] = useState(false);
   const [detached, setDetached] = useState(false);
+  /**
+   * Set synchronously by `detach`. `detached` is state, so the effect cleanup
+   * that closes the socket does not run until React commits the re-render — a
+   * frame arriving in that window would otherwise still reach the store after
+   * the person at the keyboard had explicitly detached (#9293).
+   */
+  const detachedRef = useRef(false);
   const [socketStatus, setSocketStatus] = useState<BridgeStatus>('connecting');
   const [detail, setDetail] = useState<string | null>(null);
 
@@ -86,10 +93,40 @@ export function useEditorBridge(): EditorBridgeControls {
         send({ type: 'project_info', data: { attached: true } });
       };
       ws.onmessage = (event) => {
-        if (socket !== ws) return;
+        if (socket !== ws || detachedRef.current) return;
+        const raw = String(event.data);
         // Dynamic: this is what keeps the command manifest and the chat
         // executor out of the editor chunk for every tab that never attaches.
-        void import('./bridgeFrame').then((m) => m.handleBridgeFrame(String(event.data), send));
+        void import('./bridgeFrame')
+          .then((m) => m.handleBridgeFrame(raw, send))
+          .catch((err) => {
+            // A chunk that fails to load must not swallow the frame. This
+            // file's stated contract is that every `command` is answered
+            // exactly once; an unanswered one leaves the agent waiting on its
+            // own timeout with nothing said anywhere, and the relay holding a
+            // `pending` entry until one of the two sockets closes. The
+            // requestId is re-derived here rather than read through the module
+            // that just failed to load.
+            console.error('[mcp-bridge] could not load the frame handler', err);
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(raw);
+            } catch {
+              return; // malformed: there was no command to answer
+            }
+            if (
+              typeof parsed === 'object' &&
+              parsed !== null &&
+              (parsed as { type?: unknown }).type === 'command' &&
+              typeof (parsed as { requestId?: unknown }).requestId === 'string'
+            ) {
+              send({
+                type: 'command_result',
+                requestId: (parsed as { requestId: string }).requestId,
+                error: 'The editor could not load its bridge handler',
+              });
+            }
+          });
       };
       ws.onerror = () => {
         // A browser error event carries no detail; the close code that follows
@@ -142,6 +179,7 @@ export function useEditorBridge(): EditorBridgeControls {
     setConsented(true);
   }, []);
   const detach = useCallback(() => {
+    detachedRef.current = true;
     setDetached(true);
     setConsented(false);
   }, []);

@@ -165,6 +165,74 @@ describe('useEditorBridge', () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
+  // Both of these live in the window between an inbound frame arriving and the
+  // hook finishing with it. Neither is reachable through the module-scope
+  // import of the hook, so each mounts its own copy against a mocked
+  // `bridgeFrame`.
+  describe('inbound frames the happy path does not cover', () => {
+    afterEach(() => {
+      vi.doUnmock('../bridgeFrame');
+      vi.resetModules();
+    });
+
+    async function mountWith(factory: () => { handleBridgeFrame: typeof import('../bridgeFrame').handleBridgeFrame }) {
+      vi.resetModules();
+      vi.doMock('../bridgeFrame', factory);
+      const { useEditorBridge: hook } = await import('../useEditorBridge');
+      const { result } = renderHook(() => hook());
+      await waitFor(() => expect(result.current.status).toBe('awaiting-consent'));
+      act(() => result.current.approve());
+      await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+      act(() => FakeWebSocket.instances[0].open());
+      await waitFor(() => expect(result.current.status).toBe('attached'));
+      return result;
+    }
+
+    // The relay answers every `command` with exactly one `command_result`. A
+    // chunk that fails to load must not be the one path that answers none: the
+    // agent would wait out its own timeout with nothing said anywhere, and the
+    // relay would hold the `pending` entry until a socket closed.
+    it('answers the frame when the handler chunk fails to load', async () => {
+      await mountWith((): never => {
+        throw new Error('chunk load failed');
+      });
+      const socket = FakeWebSocket.instances[0];
+      act(() => {
+        socket.onmessage?.({
+          data: JSON.stringify({ type: 'command', requestId: 'req-1', name: 'spawn_entity' }),
+        });
+      });
+      await waitFor(() => expect(socket.sent).toHaveLength(2));
+      expect(JSON.parse(socket.sent[1])).toEqual({
+        type: 'command_result',
+        requestId: 'req-1',
+        error: 'The editor could not load its bridge handler',
+      });
+      expect(console.error).toHaveBeenCalled();
+    });
+
+    // `detached` is state, so the cleanup that closes the socket does not run
+    // until React commits. A frame delivered in that window used to reach the
+    // executor and mutate the scene after the user had detached.
+    it('runs no command that arrives between detach() and the socket closing', async () => {
+      const handleBridgeFrame = vi.fn(async () => {});
+      const result = await mountWith(() => ({ handleBridgeFrame }));
+      const socket = FakeWebSocket.instances[0];
+
+      // Deliberately un-acted: act() would flush the cleanup and close the
+      // window this test exists to cover.
+      result.current.detach();
+      socket.onmessage?.({
+        data: JSON.stringify({ type: 'command', requestId: 'req-2', name: 'spawn_entity' }),
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleBridgeFrame).not.toHaveBeenCalled();
+    });
+  });
+
   it('reports a socket error rather than failing silently', async () => {
     const { result } = renderHook(() => useEditorBridge());
     await waitFor(() => expect(result.current.status).toBe('awaiting-consent'));
