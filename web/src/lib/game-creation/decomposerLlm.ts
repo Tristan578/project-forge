@@ -17,16 +17,22 @@
  * (`resolveModelInstance`) so the two cannot drift.
  *
  * This module is deliberately separate from `decomposer.ts`: it is the only
- * part that touches the AI SDK, which keeps the AI provider packages out of
- * the module graph reachable from the `@/lib/game-creation` barrel, and gives
- * the decomposer's unit tests one seam to mock instead of a network stub.
+ * part that touches the AI SDK directly (`generateText`, `Output`,
+ * `resolveModelInstance`). The AI provider packages are still reachable from
+ * the `@/lib/game-creation` barrel — `index.ts` exports `decomposeIntoSystems`,
+ * which imports `decomposer.ts`, which imports this file — so the split is
+ * NOT a module-graph boundary. What it buys instead: `decomposer.test.ts`
+ * mocks this one function rather than the AI SDK's `generateText`/`Output`
+ * surface directly, and a provider-shape change (a new SDK major, a
+ * different `Output` API) touches one file instead of being interleaved
+ * with the retry/validation logic in `decomposer.ts`.
  */
 
 import { generateText, Output } from 'ai';
 import type { z } from 'zod';
 import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { resolveModelInstance } from '@/lib/ai/aiSdkAdapter';
-import { resolveChatRoute } from '@/lib/providers/resolveChat';
+import { resolveBackendWithCircuitBreaker } from '@/lib/providers/registry';
 import { DEFAULT_MAX_TOKENS } from '@/lib/constants';
 
 /**
@@ -46,7 +52,11 @@ export async function generateDecomposition<T>(
   systemPrompt: string,
   schema: z.ZodType<T>,
 ): Promise<T> {
-  const route = resolveChatRoute(AI_MODEL_PRIMARY);
+  // resolveBackendWithCircuitBreaker (not the plain resolveChatRoute) so a
+  // backend an in-flight breaker has tripped on is skipped the same way the
+  // streaming chat path skips it, instead of routing the decomposer straight
+  // into a backend already known to be failing.
+  const route = resolveBackendWithCircuitBreaker('chat', AI_MODEL_PRIMARY);
   if (!route) {
     throw new Error(
       'No chat backend is configured. Set AI_GATEWAY_API_KEY, OPENROUTER_API_KEY, GITHUB_MODELS_PAT, or ANTHROPIC_API_KEY.',

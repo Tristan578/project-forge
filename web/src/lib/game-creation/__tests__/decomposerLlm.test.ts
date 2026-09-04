@@ -22,8 +22,8 @@ vi.mock('ai', async () => {
   };
 });
 
-vi.mock('@/lib/providers/resolveChat', () => ({
-  resolveChatRoute: vi.fn(),
+vi.mock('@/lib/providers/registry', () => ({
+  resolveBackendWithCircuitBreaker: vi.fn(),
 }));
 
 vi.mock('@/lib/ai/aiSdkAdapter', () => ({
@@ -31,7 +31,7 @@ vi.mock('@/lib/ai/aiSdkAdapter', () => ({
 }));
 
 import { generateDecomposition } from '@/lib/game-creation/decomposerLlm';
-import { resolveChatRoute } from '@/lib/providers/resolveChat';
+import { resolveBackendWithCircuitBreaker } from '@/lib/providers/registry';
 import { resolveModelInstance } from '@/lib/ai/aiSdkAdapter';
 import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 
@@ -41,7 +41,7 @@ const directRoute = { backendId: 'direct' as const, apiKey: 'sk-ant-test', meter
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(resolveChatRoute).mockReturnValue(directRoute);
+  vi.mocked(resolveBackendWithCircuitBreaker).mockReturnValue(directRoute);
   vi.mocked(resolveModelInstance).mockReturnValue('MODEL_INSTANCE' as never);
   mockGenerateText.mockResolvedValue({ output: { title: 'Test Game' } });
 });
@@ -65,17 +65,17 @@ describe('generateDecomposition', () => {
     expect(args.prompt).toBe('user turn');
   });
 
-  it('resolves the model through the same route rule as the streaming path', async () => {
+  it('resolves the model through the same circuit-breaker-aware rule as the streaming path', async () => {
     await generateDecomposition('user turn', 'system prompt', schema);
 
-    expect(resolveChatRoute).toHaveBeenCalledWith(AI_MODEL_PRIMARY);
+    expect(resolveBackendWithCircuitBreaker).toHaveBeenCalledWith('chat', AI_MODEL_PRIMARY);
     expect(resolveModelInstance).toHaveBeenCalledWith(directRoute, AI_MODEL_PRIMARY);
     const args = mockGenerateText.mock.calls[0][0] as Record<string, unknown>;
     expect(args.model).toBe('MODEL_INSTANCE');
   });
 
   it('throws without calling the provider when no backend is configured', async () => {
-    vi.mocked(resolveChatRoute).mockReturnValue(null);
+    vi.mocked(resolveBackendWithCircuitBreaker).mockReturnValue(null);
 
     await expect(
       generateDecomposition('user turn', 'system prompt', schema),
