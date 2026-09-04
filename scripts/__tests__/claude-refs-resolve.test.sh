@@ -102,6 +102,39 @@ elif [ "$missing" -eq 0 ]; then
 fi
 
 echo ""
+echo "=== every .claude/skills/... path referenced by the harness exists ==="
+# This file's header claims EVERY harness path is checked; for its whole life it
+# checked only .claude/rules/*.md. The skills tree was the uncovered half, and it
+# was where the damage was: dx-guardian.md and ux-reviewer.md named eight skills
+# that were never created and told the reviewer to run ten audit scripts and read
+# five reference docs under them. A reviewer following those instructions reported
+# "no findings" from commands that had all failed to run — the #9605 failure mode
+# exactly, in the directory this rule did not look at.
+#
+# Directories count as resolved: an agent's `skills:` frontmatter names a skill by
+# directory, while prose cites files inside it. Placeholder forms in docs
+# (`.claude/skills/<name>/`, `.claude/skills/*/SKILL.md`, `.claude/skills/$s`) do
+# not match the extractor, which requires a literal path character after the
+# prefix — so they are neither checked nor falsely reported.
+missing=0
+checked=0
+while IFS= read -r ref; do
+  [ -n "$ref" ] || continue
+  checked=$((checked + 1))
+  if [ ! -e "$ROOT/$ref" ]; then
+    fail "referenced but missing: $ref"
+    missing=$((missing + 1))
+  fi
+done < <(grep -rhoE '\.claude/skills/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*' "$ROOT/.claude" 2>/dev/null \
+  | sed 's/[.,`)]*$//' | sort -u)
+
+if [ "$checked" -eq 0 ]; then
+  fail "no .claude/skills/* references found at all — the extractor is broken, and this rule would pass vacuously"
+elif [ "$missing" -eq 0 ]; then
+  pass "all ${checked} referenced skills path(s) exist"
+fi
+
+echo ""
 echo "  PASS=$PASS FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
   echo "SUITE PASSED"
