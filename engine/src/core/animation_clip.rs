@@ -6,7 +6,11 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::{engine_mode::EngineMode, lighting::LightData, material::MaterialData};
+use super::{
+    engine_mode::{EditorApplySet, EngineMode},
+    lighting::LightData,
+    material::MaterialData,
+};
 
 /// ECS component storing keyframe animation data for an entity.
 /// Each entity can have at most one AnimationClipData.
@@ -557,7 +561,9 @@ impl Plugin for AnimationClipPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (autoplay_clips_on_play, advance_animation_clips).chain(),
+            (autoplay_clips_on_play, advance_animation_clips)
+                .chain()
+                .after(EditorApplySet),
         );
     }
 }
