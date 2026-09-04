@@ -559,8 +559,15 @@ describe('POST /api/publish', () => {
   // -------------------------------------------------------------------------
   describe('republish (update existing slug)', () => {
     it('returns 200 when republishing an existing slug', async () => {
-      // flaggedAt is always selected by the route; null = no moderation hold.
-      const existingPublication = { id: 'pub-existing', version: 2, flaggedAt: null };
+      // `slug` is always selected by the route: the hold query can now return
+      // rows for OTHER slugs of the same project, so only rows whose slug
+      // matches drive the republish branch. flaggedAt null = no hold.
+      const existingPublication = {
+        id: 'pub-existing',
+        slug: 'my-awesome-game',
+        version: 2,
+        flaggedAt: null,
+      };
       const updatedPub = makePublication({ id: 'pub-existing', version: 3 });
 
       const mockUpdate = vi.fn().mockReturnValue({
@@ -621,6 +628,7 @@ describe('POST /api/publish', () => {
       // creator could undo any takedown in one call.
       const heldPublication = {
         id: 'pub-held',
+        slug: 'my-awesome-game',
         version: 2,
         flaggedAt: new Date('2026-05-01T00:00:00.000Z'),
       };
@@ -651,6 +659,64 @@ describe('POST /api/publish', () => {
       expect(body.code).toBe('MODERATION_HOLD');
       // The status flip must never run.
       expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a held row of the SAME PROJECT filed under a different slug (#8354)', async () => {
+      // The takedown bypass: the hold used to be looked up by slug alone, and
+      // `uq_published_games_slug` is on (user_id, slug) with nothing unique on
+      // project_id — so republishing the same project under a NEW slug created
+      // a fresh 'published' row with flaggedAt NULL and undid the takedown in
+      // one call. The row below is the held publication of this project under
+      // its OLD slug; it must 403, and must NOT be mistaken for the target
+      // publication and republished under the new slug.
+      //
+      // This covers the JS half only — `.where()` is a passthrough here, so the
+      // mock cannot prove the project-scoped `or(...)` predicate actually
+      // selects that row. The SQL half is proven against real Postgres in
+      // `src/app/api/publish/publish.db.test.ts`.
+      const heldUnderOtherSlug = {
+        id: 'pub-held',
+        slug: 'the-old-slug',
+        version: 2,
+        flaggedAt: new Date('2026-05-01T00:00:00.000Z'),
+      };
+
+      const mockUpdate = vi.fn();
+      const mockInsert = vi.fn();
+      const selectMock = vi
+        .fn()
+        .mockReturnValueOnce({
+          from: () => ({ where: () => Promise.resolve([]) }),
+        })
+        .mockReturnValueOnce({
+          from: () => ({
+            where: () => ({ limit: () => Promise.resolve([heldUnderOtherSlug]) }),
+          }),
+        });
+
+      vi.mocked(getDb).mockReturnValue({
+        select: selectMock,
+        update: mockUpdate,
+        insert: mockInsert,
+      } as never);
+
+      // A real uuid projectId — that is what arms the project-scoped half of
+      // the hold query.
+      const res = await POST(
+        makeRequest(
+          validBody({
+            projectId: '11111111-2222-4333-8444-555555555555',
+            slug: 'a-brand-new-slug',
+          })
+        )
+      );
+      const body = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(body.code).toBe('MODERATION_HOLD');
+      // Neither a republish of the held row nor a fresh publication.
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
     });
   });
 });
