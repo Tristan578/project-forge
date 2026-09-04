@@ -973,6 +973,7 @@ jobs:
             scripts/deploy-drift-dispatch.sh scripts/__tests__/deploy-drift-dispatch.test.sh \
             scripts/check-suite-wiring.sh scripts/__tests__/check-suite-wiring.test.sh \
             scripts/generate-wasm-manifests.sh scripts/__tests__/generate-wasm-manifests.test.sh \
+            scripts/assert-vercel-engine-manifest.sh scripts/__tests__/assert-vercel-engine-manifest.test.sh \
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
@@ -1073,6 +1074,9 @@ jobs:
 
       - name: Run WASM-manifest generator test suite
         run: bash scripts/__tests__/generate-wasm-manifests.test.sh
+
+      - name: Run Vercel engine-manifest assertion test suite
+        run: bash scripts/__tests__/assert-vercel-engine-manifest.test.sh
 
       - name: Run changeset-version wrapper test suite
         run: bash scripts/__tests__/changeset-version.test.sh
