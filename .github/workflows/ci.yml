@@ -1632,7 +1632,15 @@ jobs:
     needs: [test-e2e-ui]
     if: ${{ !cancelled() && needs.test-e2e-ui.result != 'skipped' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15, not 5: the only real work here is `npx playwright merge-reports`,
+    # but it needs `npm ci` first, and that is a full single-root monorepo
+    # install -- measured at 262s in the Lighthouse job on the same runner
+    # image. A 5-minute budget leaves under 40s of headroom, so this job
+    # died at exactly 5m04s on runs 33820965748 and 33820823628 with `npm ci`
+    # reported as `cancelled`. It is excluded from `ci-success` and so never
+    # blocked a merge, but it painted a red X on every PR and produced no
+    # report, which is worse than either passing or being absent.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
