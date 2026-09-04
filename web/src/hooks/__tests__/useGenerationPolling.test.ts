@@ -14,6 +14,17 @@ import { renderHook, act } from '@testing-library/react';
 
 const mockUpdateJob = vi.fn();
 const mockJobs: Record<string, Record<string, unknown>> = {};
+const {
+  mockFetchBalance,
+  mockShowSuccess,
+  mockEnqueueFailedRefund,
+  mockProcessFailedRefunds,
+} = vi.hoisted(() => ({
+  mockFetchBalance: vi.fn<() => Promise<void>>(),
+  mockShowSuccess: vi.fn(),
+  mockEnqueueFailedRefund: vi.fn(),
+  mockProcessFailedRefunds: vi.fn<() => Promise<void>>(),
+}));
 
 vi.mock('@/stores/generationStore', () => ({
   useGenerationStore: Object.assign(
@@ -47,6 +58,23 @@ vi.mock('@/stores/editorStore', () => ({
       setSpriteSheet: mockSetSpriteSheet,
     }),
   },
+}));
+
+vi.mock('@/stores/userStore', () => ({
+  useUserStore: {
+    getState: () => ({ fetchBalance: mockFetchBalance }),
+  },
+}));
+
+vi.mock('@/lib/toast', () => ({
+  showSuccess: mockShowSuccess,
+  showError: vi.fn(),
+  showInfo: vi.fn(),
+}));
+
+vi.mock('@/lib/utils/refundQueue', () => ({
+  enqueueFailedRefund: mockEnqueueFailedRefund,
+  processFailedRefunds: mockProcessFailedRefunds,
 }));
 
 vi.mock('@/lib/generate/postProcess', () => ({
@@ -131,6 +159,8 @@ describe('useGenerationPolling', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    mockFetchBalance.mockResolvedValue(undefined);
+    mockProcessFailedRefunds.mockResolvedValue(undefined);
     // Clear jobs
     Object.keys(mockJobs).forEach(k => delete mockJobs[k]);
   });
@@ -144,6 +174,31 @@ describe('useGenerationPolling', () => {
   // ---------------------------------------------------------------------------
   // Basic lifecycle
   // ---------------------------------------------------------------------------
+  it('reconciles the token balance after queued refunds are processed on mount', async () => {
+    renderHook(() => useGenerationPolling());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockProcessFailedRefunds).toHaveBeenCalledTimes(1);
+    expect(mockFetchBalance).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reconcile the token balance when queued-refund processing fails', async () => {
+    const error = new Error('queue unavailable');
+    mockProcessFailedRefunds.mockRejectedValueOnce(error);
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockFetchBalance).not.toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith('processFailedRefunds error:', error);
+  });
+
   it('does not poll when no active jobs exist', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     renderHook(() => useGenerationPolling());
@@ -421,6 +476,9 @@ describe('useGenerationPolling', () => {
         body: expect.stringContaining('usage-f1'),
       }),
     );
+    expect(mockFetchBalance).toHaveBeenCalledTimes(2); // mount reconciliation + refund
+    expect(mockShowSuccess).toHaveBeenCalledOnce();
+    expect(mockShowSuccess).toHaveBeenCalledWith('Tokens refunded for the failed generation.');
     fetchSpy.mockRestore();
   });
 
@@ -574,6 +632,8 @@ describe('useGenerationPolling', () => {
         body: expect.stringContaining('usage-rg1'),
       }),
     );
+    expect(mockFetchBalance).toHaveBeenCalledTimes(2); // mount reconciliation + refund
+    expect(mockShowSuccess).toHaveBeenCalledOnce();
     fetchSpy.mockRestore();
   });
 
@@ -594,7 +654,43 @@ describe('useGenerationPolling', () => {
       (c) => typeof c[0] === 'string' && (c[0] as string).includes('refund'),
     );
     expect(refundCalls).toHaveLength(0);
+    expect(mockShowSuccess).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it('queues an exhausted refund without showing a false success confirmation', async () => {
+    mockJobs['rf1'] = makeJob('rf1', { usageId: 'usage-rf1' });
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 500 });
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          jobId: 'job-rf1',
+          status: 'failed',
+          error: 'Provider error',
+          progress: 0,
+        }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+
+    expect(mockFetchBalance).toHaveBeenCalledTimes(1); // mount reconciliation only
+    expect(mockShowSuccess).not.toHaveBeenCalled();
+    expect(mockEnqueueFailedRefund).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueFailedRefund).toHaveBeenCalledWith(expect.objectContaining({
+      jobId: 'usage-rf1',
+    }));
+    expect(consoleSpy).toHaveBeenCalledWith(
+      'Token refund failed after retries — queuing for next session:',
+      expect.any(Error),
+    );
   });
 
   // ---------------------------------------------------------------------------
