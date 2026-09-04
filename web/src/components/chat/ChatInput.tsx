@@ -289,7 +289,12 @@ export function ChatInput() {
             <option
               key={opt.value}
               value={opt.value}
-              disabled={opt.requiresPro && profileLoaded && userTier !== 'pro'}
+              // Disable while the tier is unknown too, not only once it's
+              // known non-pro — `profileLoaded && userTier !== 'pro'` let a
+              // free-tier user select and submit a Pro-only model during the
+              // window before the profile loads, when userTier still read as
+              // its default (Boy Scout fix, PR #9672 review).
+              disabled={opt.requiresPro && (!profileLoaded || userTier !== 'pro')}
             >
               {opt.label}
             </option>
