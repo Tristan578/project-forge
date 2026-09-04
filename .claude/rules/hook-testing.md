@@ -138,3 +138,22 @@ silent:
    `expect_substr` MUST match the exact text of the FAIL line the child
    prints for that guard (the helper greps `FAIL <substr>`; a substring
    that only appears on an `ok` line will never match).
+
+## Platform contract (#9611)
+
+Suites run on Linux AND on Windows (Git Bash, `hook-tests-windows` in `ci.yml`).
+Source `scripts/__tests__/lib/platform.sh` rather than writing a private skip
+helper:
+
+- `unsupported_on <platform> <reason>` — the thing UNDER TEST cannot run here.
+  Prints `UNSUPPORTED on <platform>: …` and exits **3**. The Windows job counts
+  and warns on 3; anything else non-zero fails it. Never print a success line
+  after this.
+- `probe_skip <reason>` — a host-capability gap that is NOT the thing under test
+  (a probe fixture could not be planted). Prints `SKIP: …`; under `CI=true` it
+  calls the suite's own `fail`/`bad`, so coverage may thin out on a laptop and
+  never on the runner.
+- Shell sources are `eol=lf` in `.gitattributes` and `check-source-encoding.sh`
+  rejects a CR in `*.sh`/`*.bash`: a CRLF checkout dies at the shebang.
+- Call Python through a resolver (`command -v python3 || command -v python`):
+  CPython for Windows ships `python.exe`.

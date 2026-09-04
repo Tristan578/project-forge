@@ -108,6 +108,7 @@ mk() {
       "docs-internal-gate":   { result: "success" },
       "design-internal-gate": { result: $dig },
       "hook-tests":           { result: $ht },
+      "hook-tests-windows":   { result: "success" },
       "lockfile-sync":        { result: $ls },
       "lockfile-sync-tests":  { result: $lst },
       "agentic-sync":         { result: $as },
@@ -416,6 +417,19 @@ res="$(run_verify "$(mk true true success success success failure true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "hook-tests failure fails (exit 1)"; else fail "hook-tests failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "hook-tests"; then pass "the failing hook-tests gate is named"; else fail "failing hook-tests gate not named"; fi
+
+# --- 31b. TAMPER: hook-tests-windows skipped while needs-ci=true → exit 1 ------
+# The Windows leg (#9611) is gated on needs-hooks OR needs-ci, so a PR that
+# touches scripts/ (needs-ci=true) must run it; a skipped result there is the
+# same single-line unwiring vector. The fixture models it as success everywhere
+# else, so this case is the ONLY one exercising its anti-tamper arm.
+res="$(run_verify "$(mk true true success success | jq -c '."hook-tests-windows".result = "skipped"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "hook-tests-windows skipped while needs-ci=true fails (exit 1)"; else fail "tamper (hook-tests-windows) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "hook-tests-windows ("; then pass "the unwired hook-tests-windows gate is named"; else fail "unwired hook-tests-windows gate not named"; fi
+res="$(run_verify "$(mk false true success success | jq -c '."hook-tests-windows".result = "skipped"')")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "hook-tests-windows legit-skip (needs-ci=false, needs-hooks=false) passes (exit 0)"; else fail "hook-tests-windows legit skip should exit 0, got $rc"; fi
 
 # --- 32. TAMPER: test-e2e-journey skipped while needs-web=true → exit 1 ---------
 # The strict interactive-journey gate is self-defending: it is the only runtime
