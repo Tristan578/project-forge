@@ -1,11 +1,12 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 import { getDb, getNeonSql } from '@/lib/db/client';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { checkBotIdGate } from '@/lib/security/botId';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
@@ -15,9 +16,18 @@ vi.mock('@/lib/rateLimit', () => ({
 }));
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
+vi.mock('@/lib/security/botId', () => ({ checkBotIdGate: vi.fn() }));
+
+// NOTE: `@/lib/rateLimit/distributed` is deliberately NOT mocked. Both buckets
+// on this route (the per-reporter one inside withApiMiddleware, and the
+// per-game one in the route body) go through distributedRateLimit, which falls
+// back to the in-memory rateLimit() above when Upstash is unconfigured. Letting
+// that fallback run for real is what makes the two `rateLimit` assertions below
+// evidence about the shipped code path rather than about a mock.
 
 const GAME_ID = '11111111-2222-4333-8444-555555555555';
 const USER_ID = '99999999-8888-4777-8666-555555555555';
+const OWNER_ID = '77777777-6666-4555-8444-333333333333';
 
 /** Records every tagged-template call so tests can assert on bound values. */
 function makeSqlMock(rows: unknown[]) {
@@ -38,6 +48,11 @@ function selectingDb(rows: unknown[]) {
   return { select: vi.fn().mockReturnValue(selectChain) };
 }
 
+/** The game exists and belongs to someone other than the reporter. */
+function existingGame() {
+  return selectingDb([{ id: GAME_ID, userId: OWNER_ID }]);
+}
+
 function makeRequest(body: unknown, gameId = GAME_ID) {
   return new NextRequest(`http://localhost:3000/api/community/games/${gameId}/report`, {
     method: 'POST',
@@ -48,6 +63,7 @@ function makeRequest(body: unknown, gameId = GAME_ID) {
 describe('POST /api/community/games/[id]/report', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(checkBotIdGate).mockResolvedValue(null);
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
       ctx: {
@@ -60,6 +76,26 @@ describe('POST /api/community/games/[id]/report', () => {
       remaining: 4,
       resetAt: Date.now() + 60000,
     });
+  });
+
+  it('returns the BotID 403 before spending auth, either rate-limit bucket, or the database', async () => {
+    vi.mocked(checkBotIdGate).mockResolvedValue(
+      NextResponse.json({ error: 'nope', code: 'BOT_CHECK' }, { status: 403 })
+    );
+
+    const { POST } = await import('./route');
+    const res = await POST(makeRequest({ reason: 'spam' }), {
+      params: Promise.resolve({ id: GAME_ID }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.code).toBe('BOT_CHECK');
+    // A blocked bot must not consume a bucket it could then deny to the real
+    // user behind the same identifier, and must not reach any DB call.
+    expect(vi.mocked(rateLimit)).not.toHaveBeenCalled();
+    expect(vi.mocked(getDb)).not.toHaveBeenCalled();
+    expect(vi.mocked(getNeonSql)).not.toHaveBeenCalled();
   });
 
   it('returns 401 when unauthenticated, without touching the database', async () => {
@@ -99,7 +135,7 @@ describe('POST /api/community/games/[id]/report', () => {
   });
 
   it('rate-limits at 5 requests per 60s, keyed per user', async () => {
-    vi.mocked(getDb).mockReturnValue(selectingDb([{ id: GAME_ID }]) as never);
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
     vi.mocked(getNeonSql).mockReturnValue(makeSqlMock([]).sql as never);
 
     const { POST } = await import('./route');
@@ -108,6 +144,67 @@ describe('POST /api/community/games/[id]/report', () => {
     });
 
     expect(vi.mocked(rateLimit)).toHaveBeenCalledWith(`report:${USER_ID}`, 5, 60000);
+  });
+
+  it('also rate-limits per GAME, across all reporters', async () => {
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
+    vi.mocked(getNeonSql).mockReturnValue(makeSqlMock([]).sql as never);
+
+    const { POST } = await import('./route');
+    await POST(makeRequest({ reason: 'spam' }), {
+      params: Promise.resolve({ id: GAME_ID }),
+    });
+
+    // The per-reporter bucket is no defence against a brigade: N accounts each
+    // spending 1 of their 5 requests take a game down without any of them
+    // approaching their own limit. This bucket is keyed on the game instead.
+    expect(vi.mocked(rateLimit)).toHaveBeenCalledWith(
+      `report-game:${GAME_ID}`,
+      10,
+      3600000
+    );
+  });
+
+  it('returns 429 without writing when the per-game bucket is exhausted', async () => {
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
+    const { sql } = makeSqlMock([]);
+    vi.mocked(getNeonSql).mockReturnValue(sql as never);
+    // Only the per-game bucket is exhausted — this reporter's own bucket is
+    // untouched, which is exactly the brigade shape.
+    vi.mocked(rateLimit).mockImplementation(async (key: string) => ({
+      allowed: !key.startsWith('report-game:'),
+      remaining: 0,
+      resetAt: Date.now() + 3600000,
+    }));
+
+    const { POST } = await import('./route');
+    const res = await POST(makeRequest({ reason: 'spam' }), {
+      params: Promise.resolve({ id: GAME_ID }),
+    });
+
+    expect(res.status).toBe(429);
+    expect(sql).not.toHaveBeenCalled();
+  });
+
+  it('refuses a self-report with 403 and writes nothing', async () => {
+    // The reporter IS the owner of the game.
+    vi.mocked(getDb).mockReturnValue(
+      selectingDb([{ id: GAME_ID, userId: USER_ID }]) as never
+    );
+    const { sql } = makeSqlMock([]);
+    vi.mocked(getNeonSql).mockReturnValue(sql as never);
+
+    const { POST } = await import('./route');
+    const res = await POST(makeRequest({ reason: 'spam' }), {
+      params: Promise.resolve({ id: GAME_ID }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.code).toBe('SELF_REPORT');
+    // A creator's own report would otherwise count as a distinct reporter
+    // towards the auto-hide threshold — a free vote per takedown.
+    expect(sql).not.toHaveBeenCalled();
   });
 
   it('returns 422 for a reason outside the enum', async () => {
@@ -162,12 +259,19 @@ describe('POST /api/community/games/[id]/report', () => {
     expect(res.status).toBe(404);
     expect(body.error).toBe('Game not found');
     expect(sql).not.toHaveBeenCalled();
+    // The per-game bucket is only spent once the game is known to exist, so a
+    // 404 probe cannot exhaust a real game's budget.
+    expect(vi.mocked(rateLimit)).not.toHaveBeenCalledWith(
+      `report-game:${GAME_ID}`,
+      expect.anything(),
+      expect.anything()
+    );
   });
 
   it('reports the game and binds the caller-supplied reason and details', async () => {
-    vi.mocked(getDb).mockReturnValue(selectingDb([{ id: GAME_ID }]) as never);
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
     const { sql, calls } = makeSqlMock([
-      { status: 'flagged', report_count: 1, hidden: true },
+      { status: 'flagged', report_count: 3, hidden: true },
     ]);
     vi.mocked(getNeonSql).mockReturnValue(sql as never);
 
@@ -179,7 +283,7 @@ describe('POST /api/community/games/[id]/report', () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ reported: true, hidden: true, reportCount: 1 });
+    expect(body).toEqual({ reported: true, hidden: true });
 
     expect(calls).toHaveLength(1);
     // The bound values are what actually reach Postgres — assert the reason,
@@ -191,10 +295,30 @@ describe('POST /api/community/games/[id]/report', () => {
     expect(calls[0].values).toContain(GAME_ID);
   });
 
+  it('never discloses the report count to the reporter', async () => {
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
+    const { sql } = makeSqlMock([
+      { status: 'published', report_count: 2, hidden: false },
+    ]);
+    vi.mocked(getNeonSql).mockReturnValue(sql as never);
+
+    const { POST } = await import('./route');
+    const res = await POST(makeRequest({ reason: 'spam' }), {
+      params: Promise.resolve({ id: GAME_ID }),
+    });
+    const body = await res.json();
+
+    // `report_count` is moderation metadata about someone else's game. Leaking
+    // it lets one report per game per account enumerate the gallery for targets
+    // sitting one report below the auto-hide threshold.
+    expect(Object.keys(body)).toEqual(['reported', 'hidden']);
+    expect(JSON.stringify(body)).not.toContain('2');
+  });
+
   it('binds null when details is omitted', async () => {
-    vi.mocked(getDb).mockReturnValue(selectingDb([{ id: GAME_ID }]) as never);
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
     const { sql, calls } = makeSqlMock([
-      { status: 'flagged', report_count: 1, hidden: true },
+      { status: 'flagged', report_count: 3, hidden: true },
     ]);
     vi.mocked(getNeonSql).mockReturnValue(sql as never);
 
@@ -207,7 +331,7 @@ describe('POST /api/community/games/[id]/report', () => {
   });
 
   it('reports hidden:false and duplicate:true when the statement matched no row', async () => {
-    vi.mocked(getDb).mockReturnValue(selectingDb([{ id: GAME_ID }]) as never);
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
     const { sql } = makeSqlMock([]);
     vi.mocked(getNeonSql).mockReturnValue(sql as never);
 
@@ -222,9 +346,9 @@ describe('POST /api/community/games/[id]/report', () => {
   });
 
   it('reports hidden:false when the game was already flagged by someone else', async () => {
-    vi.mocked(getDb).mockReturnValue(selectingDb([{ id: GAME_ID }]) as never);
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
     const { sql } = makeSqlMock([
-      { status: 'flagged', report_count: 2, hidden: false },
+      { status: 'flagged', report_count: 4, hidden: false },
     ]);
     vi.mocked(getNeonSql).mockReturnValue(sql as never);
 
@@ -234,11 +358,11 @@ describe('POST /api/community/games/[id]/report', () => {
     });
     const body = await res.json();
 
-    expect(body).toEqual({ reported: true, hidden: false, reportCount: 2 });
+    expect(body).toEqual({ reported: true, hidden: false });
   });
 
   it('returns 500 and reports to Sentry when the write throws', async () => {
-    vi.mocked(getDb).mockReturnValue(selectingDb([{ id: GAME_ID }]) as never);
+    vi.mocked(getDb).mockReturnValue(existingGame() as never);
     vi.mocked(getNeonSql).mockReturnValue(
       vi.fn(() => Promise.reject(new Error('boom'))) as never
     );

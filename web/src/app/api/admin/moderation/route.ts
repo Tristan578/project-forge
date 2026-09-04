@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getDb, queryWithResilience } from '@/lib/db/client';
+import { getDb, getNeonSql, queryWithResilience } from '@/lib/db/client';
 import { gameComments, publishedGames, users } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, desc, count } from 'drizzle-orm';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
@@ -60,25 +60,40 @@ export async function GET(req: NextRequest) {
     }
 
     if (typeParam === 'game') {
-      const flaggedGames = await queryWithResilience(() =>
-        getDb()
-          .select({
-            id: publishedGames.id,
-            title: publishedGames.title,
-            slug: publishedGames.slug,
-            authorId: publishedGames.userId,
-            authorName: users.displayName,
-            authorEmail: users.email,
-            reportCount: publishedGames.reportCount,
-            flaggedAt: publishedGames.flaggedAt,
-          })
-          .from(publishedGames)
-          .leftJoin(users, eq(publishedGames.userId, users.id))
-          .where(eq(publishedGames.status, 'flagged'))
-          .orderBy(desc(publishedGames.flaggedAt))
-          .limit(limit)
-          .offset(offset)
-      );
+      // Two queries, not one: `total` is the QUEUE DEPTH, and a page's length
+      // can never report it. With the default limit of 50, `flaggedGames.length`
+      // reads 50 whether there are 50 or 5,000 games waiting — the number an
+      // operator would use to decide whether the backlog is under control is
+      // exactly the number that is wrong when it matters.
+      const [flaggedGames, totalRows] = await Promise.all([
+        queryWithResilience(() =>
+          getDb()
+            .select({
+              id: publishedGames.id,
+              title: publishedGames.title,
+              slug: publishedGames.slug,
+              authorId: publishedGames.userId,
+              authorName: users.displayName,
+              authorEmail: users.email,
+              reportCount: publishedGames.reportCount,
+              flaggedAt: publishedGames.flaggedAt,
+            })
+            .from(publishedGames)
+            .leftJoin(users, eq(publishedGames.userId, users.id))
+            .where(eq(publishedGames.status, 'flagged'))
+            .orderBy(desc(publishedGames.flaggedAt))
+            .limit(limit)
+            .offset(offset)
+        ),
+        queryWithResilience(() =>
+          getDb()
+            .select({ value: count() })
+            .from(publishedGames)
+            .where(eq(publishedGames.status, 'flagged'))
+        ),
+      ]);
+
+      const total = Number(totalRows[0]?.value ?? 0);
 
       return NextResponse.json({
         items: flaggedGames.map((g) => ({
@@ -95,31 +110,43 @@ export async function GET(req: NextRequest) {
           reportCount: g.reportCount,
           flaggedAt: g.flaggedAt ? g.flaggedAt.toISOString() : null,
         })),
-        total: flaggedGames.length,
+        total,
+        hasMore: offset + flaggedGames.length < total,
       });
     }
 
-    // Fetch flagged comments with author and game info
-    const flaggedComments = await queryWithResilience(() =>
-      getDb()
-        .select({
-          id: gameComments.id,
-          content: gameComments.content,
-          gameId: gameComments.gameId,
-          gameTitle: publishedGames.title,
-          authorId: gameComments.userId,
-          authorName: users.displayName,
-          authorEmail: users.email,
-          createdAt: gameComments.createdAt,
-        })
-        .from(gameComments)
-        .leftJoin(publishedGames, eq(gameComments.gameId, publishedGames.id))
-        .leftJoin(users, eq(gameComments.userId, users.id))
-        .where(eq(gameComments.flagged, 1))
-        .orderBy(desc(gameComments.createdAt))
-        .limit(limit)
-        .offset(offset)
-    );
+    // Fetch flagged comments with author and game info (same page-vs-depth
+    // split as the game branch above).
+    const [flaggedComments, totalCommentRows] = await Promise.all([
+      queryWithResilience(() =>
+        getDb()
+          .select({
+            id: gameComments.id,
+            content: gameComments.content,
+            gameId: gameComments.gameId,
+            gameTitle: publishedGames.title,
+            authorId: gameComments.userId,
+            authorName: users.displayName,
+            authorEmail: users.email,
+            createdAt: gameComments.createdAt,
+          })
+          .from(gameComments)
+          .leftJoin(publishedGames, eq(gameComments.gameId, publishedGames.id))
+          .leftJoin(users, eq(gameComments.userId, users.id))
+          .where(eq(gameComments.flagged, 1))
+          .orderBy(desc(gameComments.createdAt))
+          .limit(limit)
+          .offset(offset)
+      ),
+      queryWithResilience(() =>
+        getDb()
+          .select({ value: count() })
+          .from(gameComments)
+          .where(eq(gameComments.flagged, 1))
+      ),
+    ]);
+
+    const totalComments = Number(totalCommentRows[0]?.value ?? 0);
 
     return NextResponse.json({
       items: flaggedComments.map((c) => ({
@@ -133,7 +160,8 @@ export async function GET(req: NextRequest) {
         authorEmail: c.authorEmail,
         createdAt: c.createdAt.toISOString(),
       })),
-      total: flaggedComments.length,
+      total: totalComments,
+      hasMore: offset + flaggedComments.length < totalComments,
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation', method: 'GET' });
@@ -151,15 +179,29 @@ export async function GET(req: NextRequest) {
  * Body: { id, type?: 'comment' | 'game', action: 'approve' | 'delete' }
  *
  * For type='game' (#8354):
- *   approve — restore status to 'published' and clear flaggedAt. Scoped to rows
- *             that are currently 'flagged', so an approve on a stale queue entry
- *             can never republish a game the CREATOR has since unpublished.
+ *   approve — LIFT THE MODERATION HOLD. `flagged_at` is what POST /api/publish
+ *             refuses to republish over, so clearing it is the whole point of
+ *             this action; `status` is secondary. Hence the statement is scoped
+ *             on `flagged_at IS NOT NULL` rather than `status = 'flagged'`:
+ *             a creator who unpublishes their game while it sits in the queue
+ *             leaves a row that is 'unpublished' AND still held, and a
+ *             status-scoped approve matched nothing, 404'd, and stranded that
+ *             creator permanently unable to republish with no operator action
+ *             that could free them. The CASE keeps the other half of the old
+ *             scope intact: only a row that was actually 'flagged' goes back to
+ *             'published', so approving never republishes something the CREATOR
+ *             took down. `report_count` is reset to 0 because the threshold is
+ *             counted PER REVIEW CYCLE — see the docblock on
+ *             REPORT_AUTOHIDE_THRESHOLD; without the reset any threshold above
+ *             1 is decorative after a game's first review.
  *   delete  — soft-remove by setting status='unpublished'. NEVER a row delete:
  *             game_comments, game_ratings, game_likes and game_reports all hold
  *             NOT NULL foreign keys to published_games.id with no ON DELETE
  *             CASCADE, so a hard delete would raise an FK violation or require
  *             a multi-table cascade this route does not implement. flaggedAt is
- *             deliberately left in place as the takedown record.
+ *             deliberately left in place as the takedown record — the hold is
+ *             the enforcement, and approve (above) or a won appeal is what
+ *             lifts it.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -183,27 +225,42 @@ export async function POST(req: NextRequest) {
       }
 
       if (action === 'approve') {
-        const restored = await queryWithResilience(() =>
-          getDb()
-            .update(publishedGames)
-            .set({ status: 'published', flaggedAt: null, updatedAt: new Date() })
-            .where(
-              and(
-                eq(publishedGames.id, id),
-                eq(publishedGames.status, 'flagged')
-              )
-            )
-            .returning({ id: publishedGames.id })
-        );
+        // Raw SQL rather than Drizzle: the status update is conditional on the
+        // row's OWN current value (see the docblock), which `.set()` cannot
+        // express without an inline SQL fragment anyway, and one statement
+        // keeps hold-clearing and counter-reset in a single commit — neon-http
+        // has no transaction to fall back on.
+        const restored = (await queryWithResilience(
+          () => getNeonSql()`
+            UPDATE published_games
+            SET status = CASE
+                  WHEN status = 'flagged' THEN 'published'::publish_status
+                  ELSE status
+                END,
+                flagged_at = NULL,
+                report_count = 0,
+                updated_at = now()
+            WHERE id = ${id}::uuid
+              AND flagged_at IS NOT NULL
+            RETURNING id, status
+          `
+        )) as unknown as { id: string; status: string }[];
 
         if (restored.length === 0) {
           return NextResponse.json(
-            { error: 'No flagged game with that id' },
+            { error: 'No held game with that id' },
             { status: 404 }
           );
         }
 
-        return NextResponse.json({ success: true, action: 'approved', type: 'game' });
+        return NextResponse.json({
+          success: true,
+          action: 'approved',
+          type: 'game',
+          // The operator needs to see whether the game went back to public or
+          // only had its hold lifted (creator-unpublished rows stay down).
+          status: restored[0].status,
+        });
       }
 
       const removed = await queryWithResilience(() =>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getDb, queryWithResilience } from '@/lib/db/client';
-import { moderationAppeals, gameComments, publishedGames } from '@/lib/db/schema';
+import { getDb, getNeonSql, queryWithResilience } from '@/lib/db/client';
+import { moderationAppeals, gameComments } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -23,8 +23,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * Body: { decision: 'approve' | 'reject', note?: string }
  *
  * On approve: restore the original content — a comment is unflagged
- * (flagged=0), a game auto-hidden by viewer reports goes back to
- * status='published' with flaggedAt cleared (#8354).
+ * (flagged=0), a game auto-hidden by viewer reports has its moderation hold
+ * lifted (flaggedAt cleared, reportCount reset) and goes back to
+ * status='published' if it was still flagged (#8354). The response carries
+ * `gameRestored` for a game appeal so an approve that matched no row is
+ * visible rather than reported as a plain success.
  * On reject: mark appeal as rejected.
  *
  * `moderationAppeals.contentType` also admits 'asset'. There is no asset
@@ -110,9 +113,16 @@ export async function POST(
     // when the creator won the appeal (#8354).
     //
     // Scoped the same way as the comment branch (#8613): the appellant must
-    // still own the game, and the row must still be 'flagged' — an appeal can
-    // lift a moderation hold, never republish a game whose creator has since
-    // unpublished it themselves.
+    // still own the game. The row is matched on `flagged_at IS NOT NULL`, not
+    // on `status = 'flagged'`, for the reason spelled out in the admin queue
+    // route — `flagged_at` is the field POST /api/publish refuses to republish
+    // over, so a creator who unpublished their game while the appeal was open
+    // was left with a permanent hold that no won appeal could lift. The CASE
+    // preserves the other guarantee: winning an appeal restores 'published'
+    // only for a row that was actually flagged, never for one the creator took
+    // down themselves. `report_count` is reset for the same per-review-cycle
+    // reason as an admin approve (see REPORT_AUTOHIDE_THRESHOLD's docblock).
+    let gameRestored: boolean | undefined;
     if (
       decision === 'approve' &&
       appeal.contentType === 'game' &&
@@ -122,24 +132,42 @@ export async function POST(
       // uuid` and turn a bad row into a 500 for the whole review.
       UUID_RE.test(appeal.contentId)
     ) {
-      await queryWithResilience(() =>
-        getDb()
-          .update(publishedGames)
-          .set({ status: 'published', flaggedAt: null, updatedAt: new Date() })
-          .where(
-            and(
-              eq(publishedGames.id, appeal.contentId),
-              eq(publishedGames.userId, appeal.userId),
-              eq(publishedGames.status, 'flagged')
-            )
-          )
-      );
+      const restored = (await queryWithResilience(
+        () => getNeonSql()`
+          UPDATE published_games
+          SET status = CASE
+                WHEN status = 'flagged' THEN 'published'::publish_status
+                ELSE status
+              END,
+              flagged_at = NULL,
+              report_count = 0,
+              updated_at = now()
+          WHERE id = ${appeal.contentId}::uuid
+            AND user_id = ${appeal.userId}::uuid
+            AND flagged_at IS NOT NULL
+          RETURNING id
+        `
+      )) as unknown as { id: string }[];
+
+      // Surface the outcome instead of reporting a blanket success. An appeal
+      // marked "approved" whose restore matched nothing is the failure mode
+      // worth catching: the creator is told they won and their game is still
+      // held, and nothing in the response distinguishes that from a real
+      // restore.
+      gameRestored = restored.length > 0;
+      if (!gameRestored) {
+        console.warn(
+          '[appeals/review] approved game appeal restored no row',
+          { appealId: id, contentId: appeal.contentId }
+        );
+      }
     }
 
     return NextResponse.json({
       success: true,
       id,
       status: newStatus,
+      ...(gameRestored === undefined ? {} : { gameRestored }),
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation/appeals/[id]/review' });

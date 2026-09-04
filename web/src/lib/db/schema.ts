@@ -265,6 +265,16 @@ export const creditTransactions = pgTable(
 // 'flagged' = hidden pending moderation review after viewer reports crossed
 // REPORT_AUTOHIDE_THRESHOLD. Distinct from 'unpublished' (creator-initiated or
 // admin takedown) so an appeal can restore the game to 'published' (#8354).
+//
+// APPEND ONLY, AND 'flagged' MUST STAY LAST. Production DDL is applied by
+// `npx drizzle-kit push --verbose --force` from THIS FILE on merge to main
+// (.github/workflows/cd.yml), not by replaying web/drizzle/*.sql — those files
+// only build the PGlite test harness. See
+// docs/decisions/2026-08-29-drizzle-push-vs-migrate.md. Push diffs the enum and
+// emits `ALTER TYPE ... ADD VALUE`, which can only append; reordering or
+// inserting a value mid-list makes the diff unrepresentable and the deploy
+// either fails or (worse, with --force) drops and recreates the type, taking
+// published_games.status with it.
 export const publishStatusEnum = pgEnum('publish_status', ['published', 'unpublished', 'processing', 'flagged']);
 
 export const publishedGames = pgTable(
@@ -281,10 +291,17 @@ export const publishedGames = pgTable(
     cdnUrl: text('cdn_url'),
     thumbnail: text('thumbnail'),
     playCount: integer('play_count').notNull().default(0),
-    // Monotonic count of distinct reporters (one row per reporter in
-    // game_reports); never decremented by an admin approve (#8354).
+    // Distinct reporters SINCE THE LAST MODERATOR REVIEW (one row per reporter
+    // in game_reports, which keeps the full history). Reset to 0 by an admin
+    // approve and by a won appeal, so REPORT_AUTOHIDE_THRESHOLD means the same
+    // thing at every point in a game's life; a monotonic counter would leave a
+    // reviewed game parked one report below the threshold forever (#8354).
     reportCount: integer('report_count').notNull().default(0),
-    // Set when status first flipped to 'flagged'; cleared on admin approve.
+    // THE MODERATION HOLD. Set when status flips to 'flagged'; cleared ONLY by
+    // an admin approve or a won appeal. POST /api/publish refuses to republish
+    // any row of the creator's whose flagged_at is non-null, which is why it —
+    // not `status` — is the field every recovery path must clear: an admin
+    // takedown leaves the row 'unpublished' with the hold still on.
     flaggedAt: timestamp('flagged_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

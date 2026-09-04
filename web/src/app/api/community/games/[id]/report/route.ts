@@ -2,10 +2,34 @@
  * POST /api/community/games/[id]/report — viewer-initiated game report (#8354).
  *
  * Records one report per (game, reporter) and, once the number of DISTINCT
- * reporters reaches REPORT_AUTOHIDE_THRESHOLD, flips a `published` game to
- * `flagged` — which the play page and the community gallery already exclude via
- * their `status = 'published'` filters, so the game stops being publicly
- * playable with no read-path change.
+ * reporters since the last moderator review reaches REPORT_AUTOHIDE_THRESHOLD,
+ * flips a `published` game to `flagged` — which the play page and the community
+ * gallery already exclude via their `status = 'published'` filters, so the game
+ * stops being publicly playable with no read-path change.
+ *
+ * ABUSE CONTROLS (all four are load-bearing; the threshold alone is not enough)
+ * ---------------------------------------------------------------------------
+ * 1. Vercel BotID, the same gate /api/generate/* and /api/billing/checkout use.
+ *    Runs BEFORE the rate limiter so a blocked bot never spends a bucket.
+ * 2. Self-report rejection — a creator cannot report their own game, which
+ *    otherwise contributes a free reporter towards the threshold.
+ * 3. A PER-GAME rate limit on top of the per-reporter one. The per-reporter
+ *    bucket does nothing against a brigade of N accounts each spending one
+ *    request; this one bounds a coordinated takedown in wall-clock time.
+ * 4. REPORT_AUTOHIDE_THRESHOLD distinct reporters, counted since the last
+ *    moderator review (see the constant's docblock).
+ *
+ * KNOWN WINDOW — the CDN, not the database, decides what a viewer sees for the
+ * first few minutes after an auto-hide. GET /api/play/[userId]/[slug] is
+ * `dynamic = 'force-dynamic'` and sets `Cache-Control: public, s-maxage=30,
+ * stale-while-revalidate=120` by hand, and the gallery sets `s-maxage=60,
+ * stale-while-revalidate=300`. A `force-dynamic` route handler has no Next.js
+ * cache entry, so `revalidatePath()` here would purge nothing — it would be a
+ * check on an adjacent property, green while the content is still served. The
+ * hide is therefore authoritative in the database immediately and at the edge
+ * within at most 150s (play) / 360s (gallery). Closing that window means
+ * changing those two routes' cache headers, which is a deliberate latency
+ * trade-off on the hottest read path and is out of scope here.
  *
  * WHY ONE RAW SQL STATEMENT INSTEAD OF TWO DRIZZLE WRITES
  * -------------------------------------------------------
@@ -26,11 +50,16 @@ import { getDb, getNeonSql, queryWithResilience } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { checkBotIdGate } from '@/lib/security/botId';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import {
   GAME_REPORT_REASONS,
   REPORT_AUTOHIDE_THRESHOLD,
   REPORT_DETAILS_MAX_LENGTH,
+  REPORT_PER_GAME_RATE_LIMIT_MAX,
+  REPORT_PER_GAME_RATE_LIMIT_WINDOW_SECONDS,
   REPORT_RATE_LIMIT_MAX,
   REPORT_RATE_LIMIT_WINDOW_SECONDS,
 } from '@/lib/config/moderation';
@@ -60,6 +89,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Bot gate first: a blocked bot must not consume either rate-limit bucket.
+    const botIdResponse = await checkBotIdGate();
+    if (botIdResponse) return botIdResponse;
+
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
       rateLimit: true,
@@ -81,7 +114,7 @@ export async function POST(
 
     const [game] = await queryWithResilience(() =>
       getDb()
-        .select({ id: publishedGames.id })
+        .select({ id: publishedGames.id, userId: publishedGames.userId })
         .from(publishedGames)
         .where(eq(publishedGames.id, gameId))
         .limit(1)
@@ -89,6 +122,28 @@ export async function POST(
 
     if (!game) {
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
+    }
+
+    // A creator reporting their own game would count as a distinct reporter
+    // towards the auto-hide threshold — one free vote per takedown, and a way
+    // to self-hide that bypasses DELETE /api/publish/[id]'s bookkeeping.
+    if (game.userId === mid.userId) {
+      return NextResponse.json(
+        { error: 'You cannot report your own game', code: 'SELF_REPORT' },
+        { status: 403 }
+      );
+    }
+
+    // Per-GAME bucket, checked after the game is known to exist so a 404 probe
+    // cannot exhaust a real game's budget. Distinct key namespace from the
+    // per-reporter `report:` bucket above.
+    const perGame = await distributedRateLimit(
+      `report-game:${gameId}`,
+      REPORT_PER_GAME_RATE_LIMIT_MAX,
+      REPORT_PER_GAME_RATE_LIMIT_WINDOW_SECONDS
+    );
+    if (!perGame.allowed) {
+      return rateLimitResponse(perGame.remaining, perGame.resetAt);
     }
 
     const sql = getNeonSql();
@@ -102,6 +157,13 @@ export async function POST(
     // Selecting the INSERT's values FROM pre also means a game that vanished
     // between the 404 check above and this statement inserts nothing rather
     // than raising a foreign-key violation.
+    //
+    // report_count is bumped ONLY while the game is 'published'. Counting
+    // reports against an 'unpublished'/'processing'/'flagged' row let a group
+    // bank the counter against a game nobody could see and hide it on the first
+    // report after it went live, which defeats any threshold above 1. The
+    // report ROW is still recorded in either case — the moderator history is
+    // complete, only the auto-hide arithmetic is scoped.
     const rows = (await queryWithResilience(
       () => sql`
         WITH pre AS MATERIALIZED (
@@ -118,7 +180,10 @@ export async function POST(
         ),
         upd AS (
           UPDATE published_games pg
-          SET report_count = pg.report_count + 1,
+          SET report_count = CASE
+                WHEN pg.status = 'published' THEN pg.report_count + 1
+                ELSE pg.report_count
+              END,
               status = CASE
                 WHEN pg.status = 'published'
                  AND pg.report_count + 1 >= ${REPORT_AUTOHIDE_THRESHOLD}::int
@@ -150,10 +215,13 @@ export async function POST(
       return NextResponse.json({ reported: true, hidden: false, duplicate: true });
     }
 
+    // `reportCount` is deliberately NOT returned. It is moderation metadata
+    // about someone else's game, and one report per game per account is enough
+    // to enumerate the gallery for targets sitting one report below the
+    // threshold. The dialog only ever reads `hidden` and `duplicate`.
     return NextResponse.json({
       reported: true,
       hidden: row.hidden === true,
-      reportCount: Number(row.report_count),
     });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/report' });
