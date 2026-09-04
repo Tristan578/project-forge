@@ -22,6 +22,9 @@ JSON
 write_manifest "$TMP/complete.json"
 "$SCRIPT" "$TMP/complete.json"
 
+sed 's#web/public/#public/#g' "$TMP/complete.json" >"$TMP/root-relative.json"
+"$SCRIPT" "$TMP/root-relative.json"
+
 jq 'del(.files[] | select(.path | contains("engine-pkg-webgpu-runtime")))' \
   "$TMP/complete.json" >"$TMP/missing.json"
 if "$SCRIPT" "$TMP/missing.json"; then

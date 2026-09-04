@@ -990,6 +990,7 @@ jobs:
           bash scripts/generate-wasm-manifests.sh web/public
 
       - name: Verify staging upload contains the engine
+        if: steps.download-wasm-staging.outcome == 'success'
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
@@ -1449,6 +1450,7 @@ jobs:
           bash scripts/generate-wasm-manifests.sh web/public
 
       - name: Verify production upload contains the engine
+        if: steps.download-wasm-production.outcome == 'success'
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

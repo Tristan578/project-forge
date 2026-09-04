@@ -15,16 +15,17 @@ fi
 
 variants=(webgl2 webgpu webgl2-runtime webgpu-runtime)
 for variant in "${variants[@]}"; do
-  prefix="web/public/engine-pkg-${variant}/"
-  if ! jq -e --arg prefix "$prefix" \
-    '.files | any(.path | startswith($prefix))' "$manifest" >/dev/null; then
-    echo "Vercel upload is missing ${prefix}" >&2
+  repo_prefix="web/public/engine-pkg-${variant}/"
+  root_prefix="public/engine-pkg-${variant}/"
+  if ! jq -e --arg repo_prefix "$repo_prefix" --arg root_prefix "$root_prefix" \
+    '.files | any(.path | startswith($repo_prefix) or startswith($root_prefix))' "$manifest" >/dev/null; then
+    echo "Vercel upload is missing engine-pkg-${variant}" >&2
     exit 1
   fi
 
-  if ! jq -e --arg prefix "$prefix" \
-    '.files | any((.path | startswith($prefix)) and (.size > 0))' "$manifest" >/dev/null; then
-    echo "Vercel upload contains no non-empty file under ${prefix}" >&2
+  if ! jq -e --arg repo_prefix "$repo_prefix" --arg root_prefix "$root_prefix" \
+    '.files | any(((.path | startswith($repo_prefix)) or (.path | startswith($root_prefix))) and (.size > 0))' "$manifest" >/dev/null; then
+    echo "Vercel upload contains no non-empty file under engine-pkg-${variant}" >&2
     exit 1
   fi
 done
