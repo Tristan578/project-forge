@@ -635,6 +635,8 @@ fi
 echo ""
 echo "=== wiring ==="
 CD="$HERE/../../.github/workflows/cd.yml"
+# The single-quoted fragment intentionally matches the workflow's literal shell source.
+# shellcheck disable=SC2016
 WEB_FILTER="$(grep -F 'if echo "$CHANGED" | grep -qE' "$CD" | grep -F '^web/' | sed -E "s/.*grep -qE '([^']+)'.*/\1/")"
 if printf '%s\n' 'web/src/app/page.tsx' | grep -qE "$WEB_FILTER" \
   && printf '%s\n' 'package.json' | grep -qE "$WEB_FILTER" \
