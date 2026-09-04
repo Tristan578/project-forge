@@ -400,16 +400,67 @@ impl Plugin for SelectionPlugin {
         app
             .add_systems(Update, query::process_joint_queries)
             .add_systems(Update, query::process_joint2d_queries)
+            .add_systems(Update, physics::apply_debug_physics_toggle)
+            // `.chain()` for the same reason as the 2D joint tuple below:
+            // `apply_create_joint_requests` inserts `JointData` through
+            // deferred `Commands`, while `apply_update_joint_requests` reads
+            // `Query<(&EntityId, &mut JointData)>` immediately. Bevy inserts an
+            // `ApplyDeferred` at every EXPLICIT ordering edge and at none
+            // otherwise, so a bare tuple loses a same-frame `create_joint` +
+            // `set_joint` pair silently. Order is create -> update -> remove.
+            //
+            // `apply_debug_physics_toggle` is registered separately rather than
+            // chained in front of them: it shares only `ResMut<PendingCommands>`
+            // with the three and has no ordering requirement against them, so
+            // an edge there would be a claim this file cannot justify. It is
+            // NOT the deliberately-unchained case — that one is the 3D
+            // `apply_physics_updates` / `apply_physics_toggles` pair, whose
+            // registration order `executors/engineDispatch.ts` depends on.
             .add_systems(Update, (
-                physics::apply_debug_physics_toggle,
                 physics::apply_create_joint_requests,
                 physics::apply_update_joint_requests,
                 physics::apply_remove_joint_requests,
-            ))
+            ).chain())
+            // `.in_set(Physics2dWriteSet)` for the same reason the
+            // physics2d toggle/update pair carries it (PF-1172 / #9274): these
+            // three write `PhysicsJoint2d`, and `apply_mode_change_requests`
+            // inserts and removes that very component on a Play->Edit snapshot
+            // restore (`core_systems.rs`, the `joint2d_data` arm). All four
+            // take `ResMut<PendingCommands>`, so Bevy must order them, and
+            // before this edit NOTHING said which way — a Stop landing in the
+            // same frame as a `create_joint_2d` resolved by topological
+            // accident. `apply_update_joint2d_requests` makes the failure
+            // silent rather than loud: it reads `Query<&mut PhysicsJoint2d>`
+            // directly, so ordered before the restore's `ApplyDeferred` it
+            // matches nothing and `set_joint_2d` returns Ok having done
+            // nothing at all.
+            //
+            // The set's `.after(ModeRestoreSet)` edge also inserts an
+            // `ApplyDeferred`, so the restore's deferred inserts are flushed
+            // before these systems read. #9550 relocated these three out of
+            // the editor-only block, which moved them from after
+            // `apply_mode_change_requests` to before it; that tie-break was
+            // never pinned on either side of the move, so this is the pin.
+            //
+            // `.chain()` for the SAME reason, one level down: these three
+            // order against each other, not just against the restore.
+            // `apply_create_joint2d_requests` inserts `PhysicsJoint2d`
+            // through deferred `Commands`, while `apply_update_joint2d_requests`
+            // reads `Query<(&EntityId, &mut PhysicsJoint2d)>` immediately — so
+            // a `create_joint_2d` and a `set_joint_2d` dispatched in the same
+            // frame lose the update entirely unless an `ApplyDeferred` sits
+            // between them, and the update returns Ok having matched nothing.
+            // A bare tuple gives Bevy no edge at all, so which way it resolved
+            // was stable-but-unspecified and would flip when any unrelated
+            // system was added. Order is create -> update -> remove: the
+            // update must see what the create inserted, and the remove must
+            // act on the state the update left.
             .add_systems(Update, (
                 physics::apply_create_joint2d_requests,
                 physics::apply_update_joint2d_requests,
                 physics::apply_remove_joint2d_requests,
+            ).chain().in_set(Physics2dWriteSet))
+            .add_systems(Update, (
                 physics::apply_gravity2d_updates,
                 physics::apply_debug_physics2d_toggle,
                 physics::handle_physics2d_query,
@@ -680,13 +731,23 @@ impl Plugin for SelectionPlugin {
                     entity_factory::apply_material_updates,
                     entity_factory::apply_light_updates,
                     entity_factory::apply_ambient_light_updates,
-                    material::apply_environment_updates,
-                    material::apply_set_skybox_requests,
                 ).in_set(EditorApplySet))
+                // The skybox appliers MUST stay ONE chained group. The setters insert
+                // `Skybox` through deferred `Commands`; the updaters read it through an
+                // immediate `Query<&mut Skybox>`. Bevy inserts an `ApplyDeferred` only at
+                // an explicit ordering edge, and shared `EditorApplySet` membership is NOT
+                // one — so unchained, a same-frame `set_skybox` + `update_skybox` silently
+                // loses the brightness while `EnvironmentSettings` still updates and still
+                // emits, leaving the inspector ahead of the render until the next
+                // `set_skybox`. Order is create -> mutate -> remove.
                 .add_systems(Update, (
-                    material::apply_remove_skybox_requests,
-                    material::apply_update_skybox_requests,
+                    material::apply_set_skybox_requests,
                     material::apply_custom_skybox_requests,
+                    material::apply_update_skybox_requests,
+                    material::apply_environment_updates,
+                    material::apply_remove_skybox_requests,
+                ).chain().in_set(EditorApplySet))
+                .add_systems(Update, (
                     material::apply_post_processing_updates,
                     material::apply_shader_updates,
                     material::apply_shader_removals,

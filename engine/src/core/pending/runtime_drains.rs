@@ -37,9 +37,15 @@ pub(super) mod scan {
     /// Where drains are written: every bridge system file, plus the `core/`
     /// files that drain a queue themselves (their systems are registered by
     /// `bridge/mod.rs` or by a plugin in the same file).
+    ///
+    /// `include_str!` takes a literal path, so this list cannot be a glob and
+    /// is maintained by hand — which makes a NEWLY ADDED source invisible to
+    /// every assertion below, in both directions. `every_source_that_drains_a_queue_is_scanned`
+    /// walks `src/` and fails when a file that drains a queue is missing here.
     pub const DRAIN_SOURCES: &[(&str, &str)] = &[
         ("bridge/animation.rs", include_str!("../../bridge/animation.rs")),
         ("bridge/audio.rs", include_str!("../../bridge/audio.rs")),
+        ("bridge/component_resync.rs", include_str!("../../bridge/component_resync.rs")),
         ("bridge/core_systems.rs", include_str!("../../bridge/core_systems.rs")),
         ("bridge/edit_mode.rs", include_str!("../../bridge/edit_mode.rs")),
         ("bridge/game.rs", include_str!("../../bridge/game.rs")),
@@ -85,6 +91,10 @@ pub(super) mod scan {
         pub gated_def: bool,
         /// Text from the signature to the next function (approximate body).
         pub body: String,
+        /// The same span taken from `runtime_view`, so an inner block gated by
+        /// `EDITOR_ONLY` reads as blank. A drain inside such a block is NOT a
+        /// runtime drain, and `body` alone cannot tell the two apart.
+        pub runtime_body: String,
     }
 
     /// The source with everything from its first `#[cfg(test)]` on removed.
@@ -143,6 +153,12 @@ pub(super) mod scan {
     pub fn functions(file: &'static str, source: &str) -> Vec<Func> {
         let source = without_tests(source);
         let lines: Vec<&str> = source.lines().collect();
+        // `runtime_view` blanks bytes in place and never touches a newline, and
+        // `without_tests` is idempotent (it returns a prefix slice), so this
+        // view has exactly the same line indices as `lines` above.
+        let blanked = runtime_view(source);
+        let blanked_lines: Vec<&str> = blanked.lines().collect();
+        debug_assert_eq!(lines.len(), blanked_lines.len());
         let mut starts: Vec<(usize, String)> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
             if let Some(name) = fn_name(line) {
@@ -173,6 +189,7 @@ pub(super) mod scan {
                 name: name.clone(),
                 gated_def: gated,
                 body: lines[*i..end].join("\n"),
+                runtime_body: blanked_lines[*i..end].join("\n"),
             });
         }
         out
@@ -186,44 +203,60 @@ pub(super) mod scan {
         let mut ranges = Vec::new();
         for (idx, _) in source.match_indices(EDITOR_ONLY) {
             let mut pos = idx + EDITOR_ONLY.len();
-            // Skip to the first non-blank byte on a later line.
-            while pos < bytes.len() && (bytes[pos] as char).is_whitespace() {
-                pos += 1;
+            // Skip to the item this attribute gates: blank space, line/doc
+            // comments, and any FURTHER attributes stacked on the same item
+            // (`#[allow(dead_code)]` under an `EDITOR_ONLY` is routine). Without
+            // the last of those, the head below matches no item keyword, the
+            // statement branch hunts for a depth-0 `;` that a function body
+            // never has, and the scan panics on perfectly ordinary source.
+            loop {
+                while pos < bytes.len() && (bytes[pos] as char).is_whitespace() {
+                    pos += 1;
+                }
+                if pos >= bytes.len() {
+                    break;
+                }
+                let ahead = &source[pos..];
+                if ahead.starts_with("//") {
+                    pos += ahead.find('\n').map_or(ahead.len(), |n| n + 1);
+                    continue;
+                }
+                if ahead.starts_with("#[") || ahead.starts_with("#![") {
+                    pos = matching_bracket(bytes, pos + ahead.find('[').unwrap());
+                    continue;
+                }
+                break;
             }
             if pos >= bytes.len() {
                 break;
             }
-            let rest = &source[pos..];
-            let end = if rest.starts_with('{') {
-                matching_brace(bytes, pos)
-            } else {
-                let head: String = rest.chars().take(20).collect();
-                let item_with_body = ["pub", "fn", "impl", "struct", "enum", "mod "]
-                    .iter()
-                    .any(|k| head.starts_with(k))
-                    && !rest.starts_with("mod ")
-                    || head.starts_with("fn ");
-                if item_with_body && rest.find('{').is_some_and(|b| b < rest.find(';').unwrap_or(usize::MAX)) {
-                    let open = pos + rest.find('{').unwrap();
-                    matching_brace(bytes, open)
-                } else {
-                    // A statement: `mod x;`, `use ..;`, `app.add_systems(..);`
-                    let mut depth = 0i32;
-                    let mut end = None;
-                    for (off, b) in bytes[pos..].iter().enumerate() {
-                        match b {
-                            b'(' | b'{' | b'[' => depth += 1,
-                            b')' | b'}' | b']' => depth -= 1,
-                            b';' if depth == 0 => {
-                                end = Some(pos + off + 1);
-                                break;
-                            }
-                            _ => {}
-                        }
+            // Whichever comes first OUTSIDE any `(..)`/`[..]` decides the shape:
+            // a `{` opens a body (`fn`, `impl`, `mod x { .. }`, a bare block), a
+            // `;` ends a declaration or statement (`mod x;`, `use ..;`,
+            // `app.add_systems(..);`, `struct Foo;`). Deciding on the leading
+            // keyword instead is what broke here: a signature such as
+            // `fn f(v: &[[f32; 2]]) -> T {` carries a `;` before its `{`, so the
+            // keyword branch handed a whole function to the statement scanner,
+            // which then found no depth-0 `;` and panicked on valid source.
+            let mut depth = 0i32;
+            let mut end = None;
+            for (off, b) in bytes[pos..].iter().enumerate() {
+                match b {
+                    b'(' | b'[' => depth += 1,
+                    b')' | b']' => depth -= 1,
+                    b'{' if depth == 0 => {
+                        end = Some(matching_brace(bytes, pos + off));
+                        break;
                     }
-                    end.unwrap_or_else(|| panic!("unterminated statement after {EDITOR_ONLY} at byte {idx}"))
+                    b';' if depth == 0 => {
+                        end = Some(pos + off + 1);
+                        break;
+                    }
+                    _ => {}
                 }
-            };
+            }
+            let end = end
+                .unwrap_or_else(|| panic!("unterminated item after {EDITOR_ONLY} at byte {idx}"));
             ranges.push((idx, end));
         }
         ranges
@@ -244,6 +277,24 @@ pub(super) mod scan {
             }
         }
         panic!("unbalanced braces after byte {open}");
+    }
+
+    /// Byte just past the `]` closing the `[` at `open`.
+    fn matching_bracket(bytes: &[u8], open: usize) -> usize {
+        let mut depth = 0i32;
+        for (off, b) in bytes[open..].iter().enumerate() {
+            match b {
+                b'[' => depth += 1,
+                b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return open + off + 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unbalanced brackets after byte {open}");
     }
 
     /// `source` with every editor-only range blanked, so a text search over it
@@ -555,6 +606,47 @@ pub fn open(mut pending: ResMut<PendingCommands>) {
     }
 
     #[test]
+    fn the_gated_range_ends_at_the_item_not_at_the_first_semicolon() {
+        // A signature carrying a `;` inside brackets — `&[[f32; 2]]` is the real
+        // shape from bridge/skeleton2d.rs. Deciding the item's extent from the
+        // first `;` anywhere sends the scan hunting for a depth-0 terminator a
+        // function body never has, which panics instead of blanking the body.
+        let src = "\
+#[cfg(not(feature = \"runtime\"))]
+/// doc between the attribute and the item
+#[allow(dead_code)]
+fn gated(v: &[[f32; 2]]) -> Vec<u8> {
+    editor_only_call();
+}
+
+fn kept() {
+    runtime_call();
+}
+";
+        let view = runtime_view(src);
+        assert!(!mentions_ident(&view, "editor_only_call"), "gated body survived: {view}");
+        assert!(mentions_ident(&view, "runtime_call"), "runtime body was blanked: {view}");
+
+        // A declaration with no body still ends at its own `;`.
+        for decl in ["mod gone;", "use crate::gone;", "struct Gone;"] {
+            let src = format!("#[cfg(not(feature = \"runtime\"))]\n{decl}\nfn kept() {{ runtime_call(); }}\n");
+            let view = runtime_view(&src);
+            assert!(!mentions_ident(&view, "Gone") && !mentions_ident(&view, "gone"), "{decl}: {view}");
+            assert!(mentions_ident(&view, "runtime_call"), "{decl} swallowed the next item: {view}");
+        }
+
+        // A `{` inside a call is not a body: the statement ends at its `;`.
+        let src = "\
+#[cfg(not(feature = \"runtime\"))]
+app.add_systems(Update, (|w: &mut World| { editor_only_call(w); },));
+app.add_systems(Update, runtime_call);
+";
+        let view = runtime_view(src);
+        assert!(!mentions_ident(&view, "editor_only_call"), "closure body survived: {view}");
+        assert!(mentions_ident(&view, "runtime_call"), "the following statement was blanked: {view}");
+    }
+
+    #[test]
     fn extraction_floors() {
         let fields = pending_fields();
         assert!(fields.len() >= 120, "only {} PendingCommands fields parsed", fields.len());
@@ -569,6 +661,94 @@ pub fn open(mut pending: ResMut<PendingCommands>) {
         assert!(registered_in_runtime("process_query_requests"));
         assert!(!registered_in_runtime("emit_selection_events"));
         assert!(!registered_in_runtime("no_such_system_anywhere"));
+    }
+
+    /// Every `.rs` file under `src/` that drains a `PendingCommands` queue must
+    /// be listed in [`DRAIN_SOURCES`], and that list must describe the tree this
+    /// test is running against.
+    ///
+    /// The list is hand-maintained (no glob is possible — `include_str!` takes a
+    /// literal path), and a hand-maintained list of FILES is precisely what a
+    /// new file is invisible to. #9673 added `bridge/component_resync.rs` and
+    /// the `component_resyncs` queue it drains while this module was being
+    /// written on another branch; merging the two produced a correctly-drained
+    /// queue that every assertion below read as drained by NOTHING. The same
+    /// blindness runs the other way — a genuinely undrained queue in an
+    /// unlisted file would read as fine — so the list cannot be trusted to
+    /// check itself. This walks the tree instead.
+    #[test]
+    fn every_source_that_drains_a_queue_is_scanned() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        fn rust_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+            for entry in entries {
+                let path = entry.expect("directory entry").path();
+                if path.is_dir() {
+                    rust_sources(&path, out);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let mut files = Vec::new();
+        rust_sources(&src, &mut files);
+        // Floor: a walk that finds nothing must fail, not report nothing missing.
+        assert!(
+            files.len() >= 100,
+            "only {} .rs files walked under {} — the walk is broken",
+            files.len(),
+            src.display()
+        );
+
+        let key = |p: &std::path::Path| {
+            p.strip_prefix(&src)
+                .expect("walked path is under src/")
+                .to_string_lossy()
+                .replace('\\', "/")
+        };
+
+        // The walk must see the same bytes `include_str!` embedded, or the
+        // comparison below is between two different trees.
+        for (name, embedded) in DRAIN_SOURCES {
+            let (name, embedded) = (*name, *embedded);
+            let path = src.join(name);
+            let on_disk = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!("DRAIN_SOURCES names {name}, unreadable at {}: {e}", path.display())
+            });
+            assert_eq!(
+                on_disk.as_str(),
+                embedded,
+                "{name} on disk differs from the text include_str! embedded"
+            );
+            assert!(
+                files.iter().any(|f| key(f) == name),
+                "DRAIN_SOURCES names {name}, which the walk did not find — the path convention has drifted"
+            );
+        }
+
+        let mut draining: Vec<String> = Vec::new();
+        for path in &files {
+            let text = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            if !drained_fields(without_tests(&text)).is_empty() {
+                draining.push(key(path));
+            }
+        }
+        assert!(
+            draining.len() >= 20,
+            "only {} sources drain a queue — the detector is broken: {draining:?}",
+            draining.len()
+        );
+        let listed: Vec<&str> = DRAIN_SOURCES.iter().map(|(n, _)| *n).collect();
+        let unscanned: Vec<&String> = draining.iter().filter(|f| !listed.contains(&f.as_str())).collect();
+        assert!(
+            unscanned.is_empty(),
+            "sources drain a PendingCommands queue but are not in DRAIN_SOURCES, so every queue they drain \
+             reads as drained by nothing: {unscanned:?}"
+        );
     }
 
     #[test]
@@ -587,7 +767,12 @@ pub fn open(mut pending: ResMut<PendingCommands>) {
             let drainers: Vec<&Func> = fns.iter().filter(|f| drained_fields(&f.body).contains(&field)).collect();
             if drainers.is_empty() {
                 undrained_anywhere.push(field.clone());
-            } else if drainers.iter().any(|f| runtime_reachable(f, &gated_modules)) {
+            } else if drainers.iter().any(|f| {
+                // The drain must survive BOTH gates: the function's own
+                // definition must be reachable, and the statement that drains
+                // must not sit inside an `EDITOR_ONLY` block within it.
+                runtime_reachable(f, &gated_modules) && drained_fields(&f.runtime_body).contains(&field)
+            }) {
                 runtime_drained.push(field.clone());
             } else {
                 editor_drained.push(field.clone());
