@@ -216,6 +216,39 @@ else
   fail "the missing timeout diagnostic is absent"
 fi
 
+# The dpkg-lock wait is the reason a retry can succeed at all: apt-get exits
+# 100 the instant the lock is held, and a timed-out attempt leaves a root-owned
+# apt-get holding it (#9665). Both branches are driven, because a helper that
+# silently no-ops on a non-apt host would read as configured.
+APT_DIR="$TMP/apt.conf.d"
+mkdir -p "$APT_DIR"
+: > "$TMP/log"
+rm -f "$TMP/count"
+PLAYWRIGHT_TEST_LOG="$TMP/log" PLAYWRIGHT_TEST_COUNT="$TMP/count" \
+  PLAYWRIGHT_TIMEOUT_LOG="$TMP/timeout-log" PLAYWRIGHT_TEST_FAILS=0 \
+  APT_CONF_DIR="$APT_DIR" APT_LOCK_TIMEOUT_SECONDS=180 \
+  PATH="$STUB:$PATH" bash "$SCRIPT" deps >"$TMP/out" 2>"$TMP/err"
+assert_eq "apt is told to wait for the dpkg lock rather than exit 100" \
+  'DPkg::Lock::Timeout "180";' "$(cat "$APT_DIR/99-spawnforge-lock-timeout" 2>/dev/null)"
+if grep -q 'wait up to 180s for the dpkg lock' "$TMP/out"; then
+  pass "the lock-wait configuration is reported in the log"
+else
+  fail "the lock-wait configuration is silent"
+fi
+
+: > "$TMP/log"
+rm -f "$TMP/count"
+PLAYWRIGHT_TEST_LOG="$TMP/log" PLAYWRIGHT_TEST_COUNT="$TMP/count" \
+  PLAYWRIGHT_TIMEOUT_LOG="$TMP/timeout-log" PLAYWRIGHT_TEST_FAILS=0 \
+  APT_CONF_DIR="$TMP/definitely-not-here" \
+  PATH="$STUB:$PATH" bash "$SCRIPT" deps >"$TMP/out" 2>"$TMP/err"
+assert_eq "a non-apt host still installs" "0" "$?"
+if grep -q 'skipping apt lock-wait config' "$TMP/out"; then
+  pass "a non-apt host says the lock-wait config was skipped"
+else
+  fail "a non-apt host skips the lock-wait config silently"
+fi
+
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 CD_YML="$REPO_ROOT/.github/workflows/cd.yml"

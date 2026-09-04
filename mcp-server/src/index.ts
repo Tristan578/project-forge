@@ -30,7 +30,11 @@ function buildServer(bridge: EditorBridge): McpServer {
 }
 
 async function main() {
-  const editorUrl = process.env.FORGE_EDITOR_WS_URL ?? 'ws://localhost:3001/api/mcp/ws';
+  // The other end of this socket is the loopback relay (`npm run relay`), not
+  // the web app: Vercel cannot hold a WebSocket and the 351 handlers run in the
+  // browser tab that attaches to the same relay (#9293, ADR
+  // docs/decisions/2026-09-02-mcp-editor-bridge-relay.md).
+  const editorUrl = relayUrl(process.env);
   const bridge = new EditorBridge(editorUrl);
 
   const transportMode = (process.env.MCP_TRANSPORT ?? 'stdio').toLowerCase();
@@ -75,11 +79,26 @@ async function main() {
     await server.connect(transport);
   }
 
-  // Attempt to connect to editor (non-blocking — tools will error if bridge isn't connected)
+  // Attempt to connect to the relay (non-blocking — tools error until it is up).
+  // The bridge retries with backoff a bounded number of times, then stops:
+  // before #9293 it retried a URL that never existed every 5 s forever.
   bridge.connect().catch((err) => {
-    console.error(`[forge-mcp] Editor bridge connection failed: ${err.message}`);
-    console.error('[forge-mcp] Tools will work once the editor is running at', editorUrl);
+    console.error(`[forge-mcp] Relay connection failed: ${err.message}`);
+    console.error(`[forge-mcp] Start it with \`npm run relay\` (MCP_RELAY_TOKEN set) and open the editor with ?mcp=<token>; dialling ${redactToken(editorUrl)}`);
   });
+}
+
+/** ws://127.0.0.1:3001/api/mcp/ws?role=agent[&token=…] unless FORGE_EDITOR_WS_URL overrides the base. */
+export function relayUrl(env: NodeJS.ProcessEnv): string {
+  const base = env.FORGE_EDITOR_WS_URL ?? 'ws://127.0.0.1:3001/api/mcp/ws';
+  const url = new URL(base);
+  if (!url.searchParams.has('role')) url.searchParams.set('role', 'agent');
+  if (env.MCP_RELAY_TOKEN && !url.searchParams.has('token')) url.searchParams.set('token', env.MCP_RELAY_TOKEN);
+  return url.toString();
+}
+
+function redactToken(url: string): string {
+  return url.replace(/([?&]token=)[^&]*/, '$1<redacted>');
 }
 
 main().catch((err) => {

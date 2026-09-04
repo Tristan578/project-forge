@@ -1,12 +1,35 @@
 # SpawnForge MCP Server
 
-Exposes 350 SpawnForge editor commands as MCP tools over either **stdio** (local
+Exposes 351 SpawnForge editor commands as MCP tools over either **stdio** (local
 subprocess) or **Streamable HTTP** (remote / browser-based hosts).
 
-The server itself does not execute commands — it forwards JSON-RPC messages to
-the editor over a WebSocket bridge (`FORGE_EDITOR_WS_URL`, default
-`ws://localhost:3001/api/mcp/ws`). Tools will return errors until the editor is
-running.
+The server itself does not execute commands — every handler runs in the browser
+tab that has the editor open. The server dials a small **loopback relay**
+(`npm run relay`, `ws://127.0.0.1:3001/api/mcp/ws`) and the editor tab attaches
+to the same relay when opened with `?mcp=<token>`; commands go server → relay →
+tab and results come back the same way. Tools return a clear error until both
+sides are attached. Why a relay and not a route: Vercel cannot hold a
+WebSocket and the handlers cannot run outside the tab — see
+`docs/decisions/2026-09-02-mcp-editor-bridge-relay.md` (#9293).
+
+```bash
+# terminal 1 — the relay (both sides must present the same secret;
+# it must be at least 32 characters or the relay refuses to start)
+MCP_RELAY_TOKEN=$(openssl rand -hex 32) npm run relay
+# terminal 2 — the editor: open http://spawnforge.localhost:1355/dev?mcp=<that token>
+#              then approve the consent prompt in the tab
+# terminal 3 — the MCP server (or your MCP host's config), same token
+MCP_RELAY_TOKEN=<that token> node dist/index.js
+```
+
+The relay is loopback-only and checks the handshake before a socket exists: a
+loopback peer and `Host`, no `Origin` on the agent connection (a browser always
+sends one, so a web page cannot impersonate the agent), an allowlisted `Origin`
+on the editor connection, and a constant-time token comparison with a
+five-failure/60-second lockout. A rejected handshake is answered with HTTP 403.
+The editor side asks for consent in the tab, shows what ran, and permits only
+allowlisted commands — scripting is denied outright. Full rules:
+`docs/guides/mcp-server-setup.md`.
 
 ## Quick start
 
@@ -112,7 +135,10 @@ TCP remote address.
 | Variable                       | Default                              | Required when               |
 |--------------------------------|--------------------------------------|-----------------------------|
 | `MCP_TRANSPORT`                | `stdio`                              | always                      |
-| `FORGE_EDITOR_WS_URL`          | `ws://localhost:3001/api/mcp/ws`     | always                      |
+| `FORGE_EDITOR_WS_URL`          | `ws://127.0.0.1:3001/api/mcp/ws`     | optional (relay base URL)   |
+| `MCP_RELAY_TOKEN`              | (none — relay refuses to start)      | the relay, and the server   |
+| `MCP_RELAY_PORT`               | `3001`                               | `npm run relay`             |
+| `MCP_RELAY_EDITOR_ORIGINS`     | (localhost, 127.0.0.1, `*.spawnforge.localhost`) | optional (extra editor origins, comma-separated) |
 | `MCP_HTTP_TOKEN`               | (none — server refuses to start)     | `MCP_TRANSPORT=http`        |
 | `MCP_HTTP_PORT`                | `3030`                               | `MCP_TRANSPORT=http`        |
 | `MCP_HTTP_HOST`                | `0.0.0.0`                            | `MCP_TRANSPORT=http`        |
@@ -121,6 +147,12 @@ TCP remote address.
 | `MCP_HTTP_RATE_LIMIT_WINDOW_MS`| `300000` (five minutes)              | optional                    |
 | `UPSTASH_REDIS_REST_URL`       | (in-memory limiter)                  | optional                    |
 | `UPSTASH_REDIS_REST_TOKEN`     | (in-memory limiter)                  | optional                    |
+
+`MCP_RELAY_TOKEN` must be at least 32 characters — the relay exits with the
+required length rather than starting with a guessable secret. Each entry in
+`MCP_RELAY_EDITOR_ORIGINS` is a full origin (`https://host:port`), not a
+hostname; it extends the built-in local-editor origins rather than replacing
+them.
 
 Rate-limit overrides must be positive integers. Invalid values retain the safe
 defaults instead of disabling throttling. A loopback-only agentic development
