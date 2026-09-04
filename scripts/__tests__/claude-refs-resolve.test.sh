@@ -101,6 +101,12 @@ echo ""
 echo "=== every .claude/rules/*.md referenced by the harness exists ==="
 # Agents and skills cite rules files by name. A citation for a file that does not
 # exist sends the agent looking for guidance it will never find.
+#
+# TRACKED files only, for the same reason the retired-path sweep above uses
+# them: `.claude/*` is gitignored with a narrow whitelist, so a working-tree
+# grep also reads a developer's local scratch -- a `/skill-doctor` backup file
+# naming paths under `.claude/skills/` was enough to make this sweep report four
+# dangling references that do not exist in the repository.
 missing=0
 checked=0
 while IFS= read -r ref; do
@@ -110,7 +116,9 @@ while IFS= read -r ref; do
     fail "referenced but missing: $ref"
     missing=$((missing + 1))
   fi
-done < <(grep -rhoE '\.claude/rules/[a-z0-9-]+\.md' "$ROOT/.claude" 2>/dev/null | sort -u)
+done < <(git -C "$ROOT" ls-files -z .claude 2>/dev/null \
+  | (cd "$ROOT" && xargs -0 grep -hoE '\.claude/rules/[a-z0-9-]+\.md' 2>/dev/null) \
+  | sort -u)
 
 if [ "$checked" -eq 0 ]; then
   fail "no .claude/rules/*.md references found at all — the extractor is broken, and this rule would pass vacuously"
@@ -142,7 +150,8 @@ while IFS= read -r ref; do
     fail "referenced but missing: $ref"
     missing=$((missing + 1))
   fi
-done < <(grep -rhoE '\.claude/skills/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*' "$ROOT/.claude" 2>/dev/null \
+done < <(git -C "$ROOT" ls-files -z .claude 2>/dev/null \
+  | (cd "$ROOT" && xargs -0 grep -hoE '\.claude/skills/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*' 2>/dev/null) \
   | sed 's/[.,`)]*$//' | sort -u)
 
 if [ "$checked" -eq 0 ]; then
