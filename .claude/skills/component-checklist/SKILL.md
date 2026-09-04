@@ -15,14 +15,28 @@ When adding a **new ECS component**, update these domain-scoped files:
 
 ## Rust Engine (supporting, if needed)
 5. `engine/src/core/history.rs` — `UndoableAction` variant + `EntitySnapshot` field
-6. `engine/src/core/entity_factory.rs` — delete/duplicate/undo/redo + `spawn_from_snapshot`
+6. `engine/src/core/entity_factory.rs` — delete/duplicate/undo/redo + `spawn_from_snapshot`.
+   **Both the undo and the redo arm must queue a re-report** — `queue_resync(ComponentResync::<Kind> { .. }, ..)`,
+   with the variant added to `core/component_resync.rs` and routed to your emitter
+   in `bridge/component_resync.rs`. The selection emitters in #4 are gated on
+   `selection.primary` AND `Changed<T>`, so without this an undo touching a
+   non-selected entity leaves the browser's mirror stale and the next edit sends a
+   full-replace built from that stale value (#9290, #9291). `spawn_from_snapshot`
+   owes the same for anything the snapshot carries — add it to `resyncs_for_snapshot`.
+   The parity gate in `core/component_resync_tests.rs` fails the build until you do,
+   or until the arm is listed in `EXEMPT_ARMS` with a reason. See
+   `rules/entity-snapshot.md` -> "Every history arm owes the browser a re-report"
 7. `engine/src/core/engine_mode.rs` — `snapshot_scene` (separate query param)
 8. `engine/src/bridge/events.rs` — Emit function(s)
 9. `engine/src/bridge/query.rs` — Query handler (if component has query support)
 
 ## Web Layer (4 required files)
 10. `web/src/stores/slices/<domain>Slice.ts` — State + actions (+ re-export from `slices/index.ts`)
-11. `web/src/hooks/events/<domain>Events.ts` — Event handler(s)
+11. `web/src/hooks/events/<domain>Events.ts` — Event handler(s). Any handler that
+    writes a `primary*` store field must go through `applyWhenPrimary(entityId, ...)`
+    (`hooks/events/primaryGate.ts`) — the resync drain emits for non-selected
+    entities too, and the gate's microtask deferral is what keeps a same-tick
+    `SELECTION_CHANGED` from being read as the previous selection
 12. `web/src/lib/chat/handlers/<domain>Handlers.ts` — Tool call handler(s) (registered in `executor.ts` handler registry)
 13. `web/src/components/editor/<Inspector>.tsx` — Inspector panel
 

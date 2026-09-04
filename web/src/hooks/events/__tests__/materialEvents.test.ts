@@ -35,6 +35,7 @@ describe('handleMaterialEvent', () => {
   });
 
   it('MATERIAL_CHANGED: strips entityId and calls setPrimaryMaterial', () => {
+    actions.primaryId = 'entity-123';
     const payload = {
       entityId: 'entity-123',
       baseColor: { r: 1, g: 0, b: 0, a: 1 },
@@ -58,6 +59,7 @@ describe('handleMaterialEvent', () => {
   });
 
   it('LIGHT_CHANGED: strips entityId and calls setPrimaryLight', () => {
+    actions.primaryId = 'entity-456';
     const payload = {
       entityId: 'entity-456',
       lightType: 'point',
@@ -77,6 +79,45 @@ describe('handleMaterialEvent', () => {
       lightType: 'point',
       color: { r: 1, g: 1, b: 1 },
       intensity: 800,
+    });
+  });
+
+  /**
+   * The resync drain emits MATERIAL_CHANGED / LIGHT_CHANGED / SHADER_CHANGED for
+   * entities that are not selected: an undo on another entity, and every
+   * component of an entity restored from a snapshot. `setPrimary*` writes the
+   * inspector's editing buffer, which is then used as the base of the next
+   * full-replace edit, so a foreign payload landing there corrupts the SELECTED
+   * entity on the next slider move (#9290).
+   */
+  describe('primary-entity gate', () => {
+    it.each([
+      ['MATERIAL_CHANGED', { entityId: 'other', metallic: 0.1 }, 'setPrimaryMaterial'],
+      ['LIGHT_CHANGED', { entityId: 'other', intensity: 5 }, 'setPrimaryLight'],
+      ['SHADER_CHANGED', { entityId: 'other', data: null }, 'setPrimaryShaderEffect'],
+    ] as const)('%s for a non-primary entity is not written', async (type, payload, action) => {
+      actions.primaryId = 'selected';
+
+      expect(handleMaterialEvent(type, payload, mockSetGet.set, mockSetGet.get)).toBe(true);
+      // Drain the gate's microtask re-check before asserting the negative.
+      await Promise.resolve();
+      expect(actions[action]).not.toHaveBeenCalled();
+    });
+
+    it('applies once the entity becomes primary on the next microtask', async () => {
+      actions.primaryId = 'old';
+
+      handleMaterialEvent(
+        'MATERIAL_CHANGED',
+        { entityId: 'new', metallic: 0.25 },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(actions.setPrimaryMaterial).not.toHaveBeenCalled();
+      actions.primaryId = 'new';
+      await Promise.resolve();
+      expect(actions.setPrimaryMaterial).toHaveBeenCalledWith({ metallic: 0.25 });
     });
   });
 
@@ -148,11 +189,12 @@ describe('handleMaterialEvent', () => {
   });
 
   it('SHADER_CHANGED with non-null data: calls setPrimaryShaderEffect', () => {
+    actions.primaryId = 'entity-123';
     const shaderData = {
       shaderType: 'custom',
       uniforms: { time: 0 },
     };
-    const payload = { data: shaderData };
+    const payload = { entityId: 'entity-123', data: shaderData };
 
     const result = handleMaterialEvent(
       'SHADER_CHANGED',
@@ -166,7 +208,8 @@ describe('handleMaterialEvent', () => {
   });
 
   it('SHADER_CHANGED with null data: calls setPrimaryShaderEffect(null)', () => {
-    const payload = { data: null };
+    actions.primaryId = 'entity-123';
+    const payload = { entityId: 'entity-123', data: null };
 
     const result = handleMaterialEvent(
       'SHADER_CHANGED',

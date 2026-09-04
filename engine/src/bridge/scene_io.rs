@@ -434,7 +434,18 @@ pub(super) fn apply_scene_load(
     // Spawn all entities and build a mapping from entity_id string -> Bevy Entity
     let mut id_to_entity: std::collections::HashMap<String, Entity> = std::collections::HashMap::new();
     for snap in roots.iter().chain(children.iter()) {
-        let entity = entity_factory::spawn_from_snapshot(&mut commands, &mut meshes, &mut materials, snap);
+        // `ResyncReport::Silent`: this loop runs once per entity in the scene
+        // file, so per-entity re-reports would be O(N^2) main-thread work in a
+        // single frame — and duplicated work at that. `SCENE_LOADED` below
+        // clears the inspector buffers wholesale and the browser stages the
+        // per-entity state off the same JSON it just handed us.
+        let entity = entity_factory::spawn_from_snapshot(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            snap,
+            crate::core::component_resync::ResyncReport::Silent,
+        );
         id_to_entity.insert(snap.entity_id.clone(), entity);
     }
 
