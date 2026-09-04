@@ -22,15 +22,7 @@ You are a CI failure analyst for SpawnForge, an AI-native 2D/3D game engine mono
 
 ## Context
 
-The CI pipeline (`.github/workflows/ci.yml`) has 8 jobs:
-1. **Lint** — `npx eslint --max-warnings 0` (web/)
-2. **TypeScript** — `npx tsc --noEmit` (web/)
-3. **Web Tests** — `npx vitest run --coverage` (web/) — 4000+ tests, Vitest + RTL
-4. **MCP Tests** — `npx vitest run` (mcp-server/)
-5. **WASM Build** — Dual Rust build (WebGL2 + WebGPU), binary size check (per-package budgets, all four artifacts)
-6. **Next.js Build** — `npm run build` (web/) production build
-7. **E2E UI Tests** — Playwright chromium `@ui` tests
-8. **Security** — `npm audit` (web/, mcp-server/) + `cargo audit` (engine/)
+The CI pipeline is defined by `.github/workflows/ci.yml`. Read that file and the failed run at execution time to discover the current jobs and commands; do not rely on a hard-coded job count or historical test total.
 
 ## Your Task
 

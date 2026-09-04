@@ -596,7 +596,19 @@ pub fn restore_scene(
     // 5. Respawn entities that were deleted during play
     for snap in &snapshot.entities {
         if !existing_ids.contains(&snap.entity_id) {
-            super::entity_factory::spawn_from_snapshot(commands, meshes, materials, snap);
+            // `ResyncReport::Each`: these entities were despawned during Play
+            // and nothing else on the Stop path tells the browser they are
+            // back — `ENGINE_MODE_CHANGED` carries only the mode. The count is
+            // bounded by what the running game deleted, and the per-frame drain
+            // budget in `PendingCommands::take_component_resyncs` bounds the
+            // cost of a game that deleted a great many.
+            super::entity_factory::spawn_from_snapshot(
+                commands,
+                meshes,
+                materials,
+                snap,
+                crate::core::component_resync::ResyncReport::Each,
+            );
         }
     }
 }

@@ -261,35 +261,103 @@ describe('handlePhysicsEvent', () => {
   });
 
   describe('JOINT_CHANGED', () => {
-    it('calls setPrimaryJoint with joint data', () => {
-      const jointData = {
-        jointType: 'revolute',
-        targetEntity: 'entity-2',
-        anchor: [0, 1, 0],
-        axis: [0, 1, 0],
-      };
-
-      const result = handlePhysicsEvent(
-        'JOINT_CHANGED',
-        jointData,
-        mockSetGet.set,
-        mockSetGet.get
-      );
-
-      expect(result).toBe(true);
-      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(jointData);
+    /**
+     * The wire is a flattened `JointData` stamped with `entityId` — identical
+     * to a `QUERY_JOINTS_LIST` entry, which is why both go through
+     * `parseJointWire`. The previous fixtures here (`targetEntity`, `anchor`)
+     * were a shape the engine has never emitted; the handler cast rather than
+     * parsed, so they passed anyway (the PF-1141 class).
+     */
+    const wire = (entityId: string) => ({
+      entityId,
+      jointType: 'revolute',
+      connectedEntityId: 'entity-2',
+      anchorSelf: [0, 1, 0],
+      anchorOther: [0, 0, 0],
+      axis: [0, 1, 0],
     });
 
-    it('handles null joint data (joint removed)', () => {
+    const parsedData = {
+      jointType: 'revolute',
+      connectedEntityId: 'entity-2',
+      anchorSelf: [0, 1, 0],
+      anchorOther: [0, 0, 0],
+      axis: [0, 1, 0],
+      limits: null,
+      motor: null,
+    };
+
+    it('calls setPrimaryJoint when the event describes the selected entity', () => {
+      actions.primaryId = 'entity-1';
+
       const result = handlePhysicsEvent(
         'JOINT_CHANGED',
-        null as unknown as Record<string, unknown>,
+        wire('entity-1'),
         mockSetGet.set,
         mockSetGet.get
       );
 
       expect(result).toBe(true);
-      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(parsedData);
+    });
+
+    /**
+     * The bug this fixes (#9291): the undo/redo resync drain reports joints on
+     * NON-selected entities, and the old handler wrote every one of them into
+     * `primaryJoint`. The joint inspector then edits with the foreign body as
+     * its base, so the next change writes another entity's joint onto the
+     * selection.
+     */
+    it('does NOT write a foreign entity joint into the selected inspector', async () => {
+      actions.primaryId = 'entity-1';
+
+      const result = handlePhysicsEvent(
+        'JOINT_CHANGED',
+        wire('entity-9'),
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+    });
+
+    it('applies a late-resolving selection change (viewport pick)', async () => {
+      actions.primaryId = 'old-entity';
+
+      handlePhysicsEvent('JOINT_CHANGED', wire('new-entity'), mockSetGet.set, mockSetGet.get);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+
+      actions.primaryId = 'new-entity';
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(parsedData);
+    });
+
+    /**
+     * `JOINT_CHANGED` cannot express a removal — its payload IS the joint — so
+     * a malformed or null body is dropped rather than written through as
+     * "removed". `JOINT_REMOVED` is the removal channel.
+     */
+    it('drops a payload it cannot parse instead of clearing the inspector', () => {
+      actions.primaryId = 'entity-1';
+
+      for (const bad of [null, {}, { ...wire('entity-1'), entityId: '' }, { ...wire('entity-1'), jointType: 'nope' }]) {
+        const result = handlePhysicsEvent(
+          'JOINT_CHANGED',
+          bad as unknown as Record<string, unknown>,
+          mockSetGet.set,
+          mockSetGet.get
+        );
+        expect(result).toBe(true);
+      }
+
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
     });
   });
 
@@ -767,8 +835,8 @@ describe('handlePhysicsEvent', () => {
 
   describe('2D event names nothing emits', () => {
     /**
-     * These four are the phantom names this handler used to listen for. Pinning
-     * them as UNHANDLED is the point: `handlePhysicsEvent` returning `false` is
+     * These are phantom names this handler used to listen for. Pinning them as
+     * UNHANDLED is the point: `handlePhysicsEvent` returning `false` is
      * what `useEngineEvents` reports as an unhandled event, so a future rename
      * back onto one of these names fails here instead of silently going dead
      * again. `RAYCAST2D_HIT`/`RAYCAST2D_MISS` are real engine names that are
@@ -778,7 +846,6 @@ describe('handlePhysicsEvent', () => {
     it.each([
       'PHYSICS2D_UPDATED',
       'JOINT2D_UPDATED',
-      'PHYSICS2D_REMOVED',
       'RAYCAST2D_RESULT',
       'RAYCAST2D_HIT',
       'RAYCAST2D_MISS',
@@ -1023,7 +1090,100 @@ describe('handlePhysicsEvent', () => {
     });
   });
 
-  // `RAYCAST2D_RESULT` used to have three "returns true (placeholder handler)"
+    /**
+   * The removal half of the undo/redo re-report path (#9290, #9291).
+   *
+   * `PHYSICS2D_REMOVED` was on the phantom list above until the engine started
+   * emitting it: `PHYSICS2D_CHANGED` FLATTENS a `Physics2dData`, so it cannot
+   * describe a body that is gone, and the undo arm papered over that by sending
+   * `Physics2dData::default()` — which the store then merged, leaving a default
+   * 2D body behind on the entity whose body had just been undone away.
+   */
+  describe('component removal events', () => {
+    it('PHYSICS2D_REMOVED routes to the state-only removal action', () => {
+      const result = handlePhysicsEvent(
+        'PHYSICS2D_REMOVED',
+        { entityId: 'sprite-9' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.applyPhysics2dRemovalFromEngine).toHaveBeenCalledWith('sprite-9');
+      // The dispatching sibling would send `remove_physics_2d` straight back at
+      // the engine that just reported the removal.
+      expect(actions.removePhysics2d).not.toHaveBeenCalled();
+    });
+
+    it('JOINT2D_REMOVED routes to the state-only removal action', () => {
+      const result = handlePhysicsEvent(
+        'JOINT2D_REMOVED',
+        { entityId: 'sprite-9' },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.applyJoint2dRemovalFromEngine).toHaveBeenCalledWith('sprite-9');
+      expect(actions.removeJoint2d).not.toHaveBeenCalled();
+    });
+
+    it('JOINT_REMOVED clears the inspector only for the primary entity', () => {
+      actions.primaryId = 'entity-1';
+
+      expect(
+        handlePhysicsEvent('JOINT_REMOVED', { entityId: 'entity-1' }, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
+    });
+
+    it('JOINT_REMOVED for another entity leaves the inspector alone', async () => {
+      actions.primaryId = 'entity-1';
+
+      expect(
+        handlePhysicsEvent('JOINT_REMOVED', { entityId: 'other' }, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      // Drain the gate's microtask re-check before asserting the negative — the
+      // clear is deferred, so a synchronous assertion would pass even with no gate.
+      await Promise.resolve();
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `JOINT_REMOVED` used a synchronous `primaryId ===` read while its sibling
+     * handlers deferred. Selection resolves one microtask late — SELECTION_CHANGED
+     * is coalesced by `createSelectionBatcher` while this handler runs
+     * synchronously — so on a viewport pick the read saw the PREVIOUS primary and
+     * dropped the clear, leaving a joint the engine had already removed in the
+     * inspector for the next full-replace edit to write back (#9291).
+     */
+    it('JOINT_REMOVED clears once the entity becomes primary on the next microtask', async () => {
+      actions.primaryId = 'old';
+
+      expect(
+        handlePhysicsEvent('JOINT_REMOVED', { entityId: 'new' }, mockSetGet.set, mockSetGet.get)
+      ).toBe(true);
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+
+      actions.primaryId = 'new';
+      await Promise.resolve();
+      expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
+    });
+
+    it.each(['PHYSICS2D_REMOVED', 'JOINT2D_REMOVED', 'JOINT_REMOVED'])(
+      '%s with no entityId writes nothing',
+      (name) => {
+        actions.primaryId = 'entity-1';
+
+        expect(handlePhysicsEvent(name, {}, mockSetGet.set, mockSetGet.get)).toBe(true);
+        expect(actions.applyPhysics2dRemovalFromEngine).not.toHaveBeenCalled();
+        expect(actions.applyJoint2dRemovalFromEngine).not.toHaveBeenCalled();
+        expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+// `RAYCAST2D_RESULT` used to have three "returns true (placeholder handler)"
   // cases here. It is covered by the "2D event names nothing emits" block above,
   // which asserts the opposite — and the opposite is correct: the engine emits
   // `RAYCAST2D_HIT`/`RAYCAST2D_MISS`, so a placeholder returning `true` claimed an

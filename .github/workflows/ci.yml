@@ -1178,6 +1178,12 @@ jobs:
       # to that step, so an `env.` reference from the cache step would expand
       # to the empty string and key on nothing at all (#9653 review).
       NEXT_PUBLIC_E2E_HOOKS: 'true'
+      # The integration probe is compiled in only for this CI build. Credentials
+      # belong to a CI-only Upstash database and must never be production values.
+      E2E_UPSTASH_TEST_ENABLED: 'true'
+      E2E_UPSTASH_TEST_REQUIRED: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+      UPSTASH_REDIS_REST_URL: ${{ secrets.CI_UPSTASH_REDIS_REST_URL }}
+      UPSTASH_REDIS_REST_TOKEN: ${{ secrets.CI_UPSTASH_REDIS_REST_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
