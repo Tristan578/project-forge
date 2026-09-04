@@ -105,6 +105,10 @@ describe('chatStore deep tests', () => {
     });
 
     it('sets model to the primary model', () => {
+      // `beforeEach` already seeds activeModel as AI_MODEL_PRIMARY, so calling
+      // setModel(AI_MODEL_PRIMARY) directly would pass even if setModel were a
+      // no-op. Transition away first so the assertion can actually fail.
+      useChatStore.getState().setModel('claude-haiku-4-5-20251001');
       useChatStore.getState().setModel(AI_MODEL_PRIMARY);
       expect(useChatStore.getState().activeModel).toBe(AI_MODEL_PRIMARY);
     });
