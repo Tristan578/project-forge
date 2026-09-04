@@ -661,7 +661,7 @@ describe('useGenerationPolling', () => {
   it('queues an exhausted refund without showing a false success confirmation', async () => {
     mockJobs['rf1'] = makeJob('rf1', { usageId: 'usage-rf1' });
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       if (typeof url === 'string' && url.includes('refund')) {
         return new Response('{}', { status: 500 });
       }
@@ -678,7 +678,19 @@ describe('useGenerationPolling', () => {
 
     renderHook(() => useGenerationPolling());
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_500);
+      // Let the immediate status poll reach the first refund attempt before
+      // advancing the backoff clock; otherwise the async poll may not have
+      // scheduled its first timer yet when a busy full-suite runner advances.
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/generate/refund',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    await act(async () => {
+      // Jitter can stretch the 500 + 1,000 ms backoff to 1,875 ms. Stay below
+      // the 3-second polling interval while crossing the true worst case.
+      await vi.advanceTimersByTimeAsync(2_000);
     });
 
     expect(mockFetchBalance).toHaveBeenCalledTimes(1); // mount reconciliation only
