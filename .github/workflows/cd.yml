@@ -443,7 +443,7 @@ jobs:
             echo "No engine changes -- skipping WASM build"
           fi
 
-          if echo "$CHANGED" | grep -qE '^web/|^package\.json|^\.github/'; then
+          if echo "$CHANGED" | grep -qE '^web/|^package\.json'; then
             echo "web=true" >> "$GITHUB_OUTPUT"
             echo "Web files changed -- deploy required"
           else

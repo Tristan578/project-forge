@@ -635,6 +635,14 @@ fi
 echo ""
 echo "=== wiring ==="
 CD="$HERE/../../.github/workflows/cd.yml"
+WEB_FILTER="$(grep -F 'if echo "$CHANGED" | grep -qE' "$CD" | grep -F '^web/' | sed -E "s/.*grep -qE '([^']+)'.*/\1/")"
+if printf '%s\n' 'web/src/app/page.tsx' | grep -qE "$WEB_FILTER" \
+  && printf '%s\n' 'package.json' | grep -qE "$WEB_FILTER" \
+  && ! printf '%s\n' '.github/workflows/ci.yml' | grep -qE "$WEB_FILTER"; then
+  pass "web deploy filter includes app/package changes but excludes workflow-only changes"
+else
+  fail "web deploy filter must deploy web/package changes without deploying .github-only pushes (filter: $WEB_FILTER)"
+fi
 if grep -qF 'run: bash scripts/cd-rolling-release.sh lkg' "$CD"; then
   pass "cd.yml captures last-known-good through the script"
 else
