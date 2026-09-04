@@ -83,7 +83,7 @@ jobs:
           node-version-file: .node-version
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+        run: npm i -g vercel@55.0.0
 
       # Instant Rollback, not `vercel promote`: with Rolling Releases enabled a
       # promote of the old build starts a staged rollout of it when nothing is
@@ -954,7 +954,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+        run: npm i -g vercel@55.0.0
 
       # spawnforge-staging is a separate Vercel project, so its Production target
       # is the stable staging environment. A Preview target creates an ephemeral
@@ -988,6 +988,17 @@ jobs:
             fi
           done
           bash scripts/generate-wasm-manifests.sh web/public
+
+      - name: Verify staging upload contains the engine
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ENGINE_VERSION: ${{ github.sha }}
+        run: |
+          vercel deploy --dry --prod --yes --format=json --token="$VERCEL_TOKEN" \
+            --build-env NEXT_PUBLIC_ENGINE_VERSION="$ENGINE_VERSION" > vercel-upload.json
+          bash scripts/assert-vercel-engine-manifest.sh vercel-upload.json
 
       - name: Deploy to staging (remote build)
         id: deploy
@@ -1078,7 +1089,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+        run: npm i -g vercel@55.0.0
 
       # The rollback target. Read from the Vercel API, not `vercel ls`: the
       # previous grep for `READY` matched nothing (the CLI prints `● Ready`),
@@ -1437,6 +1448,17 @@ jobs:
           done
           bash scripts/generate-wasm-manifests.sh web/public
 
+      - name: Verify production upload contains the engine
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ENGINE_VERSION: ${{ github.sha }}
+        run: |
+          vercel deploy --dry --prod --yes --format=json --token="$VERCEL_TOKEN" \
+            --build-env NEXT_PUBLIC_ENGINE_VERSION="$ENGINE_VERSION" > vercel-upload.json
+          bash scripts/assert-vercel-engine-manifest.sh vercel-upload.json
+
       - name: Deploy to production (remote build)
         id: deploy
         env:
@@ -1754,7 +1776,7 @@ jobs:
         run: cd packages/ui && npm run build
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+        run: npm i -g vercel@55.0.0
 
       # Run from repo root — Vercel rootDirectory=apps/docs handles the subdirectory.
       # Same pattern as the main web deploy. Do NOT cd into apps/docs — that causes
@@ -1813,7 +1835,7 @@ jobs:
         run: cd packages/ui && npm run build
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+        run: npm i -g vercel@55.0.0
 
       # Run from repo root — Vercel rootDirectory=apps/design handles the subdirectory.
       # Same pattern as the main web deploy. Do NOT cd into apps/design — that causes
