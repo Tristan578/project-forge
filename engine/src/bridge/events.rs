@@ -198,35 +198,6 @@ pub fn emit_debug_physics_changed(enabled: bool) {
     emit_event("DEBUG_PHYSICS_CHANGED", &DebugPhysicsPayload { enabled });
 }
 
-/// Emit the full keyframe clip for an entity (PF-1174 / #9278). The payload is
-/// the clip's own camelCase serde shape plus `entityId`, which is exactly what
-/// `hooks/events/animationEvents.ts` has parsed for `ANIMATION_CLIP_CHANGED`
-/// since before the engine emitted it.
-pub fn emit_animation_clip_changed(entity_id: &str, clip: &crate::core::animation_clip::AnimationClipData) {
-    let mut payload = match serde_json::to_value(clip) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("could not serialize animation clip for {entity_id}: {e}");
-            return;
-        }
-    };
-    if let Some(map) = payload.as_object_mut() {
-        map.insert("entityId".to_string(), serde_json::Value::String(entity_id.to_string()));
-    }
-    emit_event("ANIMATION_CLIP_CHANGED", &payload);
-}
-
-/// A clip removal cannot ride `ANIMATION_CLIP_CHANGED` (that payload IS a
-/// clip), so it gets its own event — same split as `SKELETON2D_REMOVED`.
-pub fn emit_animation_clip_removed(entity_id: &str) {
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Payload<'a> {
-        entity_id: &'a str,
-    }
-    emit_event("ANIMATION_CLIP_REMOVED", &Payload { entity_id });
-}
-
 /// Emit a joint changed event for an entity.
 ///
 /// REMOVAL does not come through here: the payload IS the flattened
