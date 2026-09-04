@@ -663,6 +663,21 @@ describe('healthChecks', () => {
       });
     });
 
+    it('surfaces the configured primary model id so a stale/wrong id is visible in the report (PF-1216 / #9339)', async () => {
+      vi.resetModules();
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+
+      const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+      const { AI_MODEL_PRIMARY } = await import('@/lib/ai/models');
+      const result = await checkChatBackend();
+
+      // Configuration visibility, not verification — this check never confirms
+      // the Gateway actually serves the model, only what this deploy asks for.
+      expect(result.details?.configuredModel).toBe(AI_MODEL_PRIMARY);
+    });
+
     it('probes api.anthropic.com when the direct backend is the one resolved', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '');
