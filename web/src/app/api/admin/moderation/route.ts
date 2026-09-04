@@ -33,6 +33,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *                            i.e. published_games rows with status='flagged'.
  * Supports pagination via ?limit=N&offset=N.
  *
+ * Operator runbook (granting access, working the queue, appeals):
+ * `docs/guides/moderation-queue.md`.
+ *
  * NOTE: a game has no single reporter — several users can report the same game
  * — so the join surfaces the game's CREATOR, not a reporter. `reportCount` is
  * how many distinct users have reported it.

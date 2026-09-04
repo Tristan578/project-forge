@@ -7,6 +7,8 @@
  * gallery already exclude via their `status = 'published'` filters, so the game
  * stops being publicly playable with no read-path change.
  *
+ * Operator runbook: `docs/guides/moderation-queue.md`.
+ *
  * ABUSE CONTROLS (all four are load-bearing; the threshold alone is not enough)
  * ---------------------------------------------------------------------------
  * 1. Vercel BotID, the same gate /api/generate/* and /api/billing/checkout use.
