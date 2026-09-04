@@ -44,17 +44,6 @@ export function handleAnimationEvent(
       return true;
     }
 
-    // The engine cannot say "no clip" through `ANIMATION_CLIP_CHANGED` (that
-    // payload IS a clip), so removals — `remove_animation_clip`, and selecting
-    // an entity that has none — arrive on their own event (PF-1174 / #9278).
-    case 'ANIMATION_CLIP_REMOVED': {
-      const payload = castPayload<{ entityId: string }>(data);
-      if (useEditorStore.getState().primaryId === payload.entityId) {
-        useEditorStore.setState({ primaryAnimationClip: null });
-      }
-      return true;
-    }
-
     // `emit_skeleton2d_updated` sends `{ entityId, data, enabled }` — the rig is
     // under `data`, and it is the engine's `SkeletonData2d` wire shape, not the
     // store's. Reading the wrong key yielded `undefined`, which
