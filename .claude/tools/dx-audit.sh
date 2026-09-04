@@ -138,6 +138,7 @@ fi
 section "Agent Profiles"
 
 AGENTS_DIR="$PROJECT_ROOT/.claude/agents"
+SKILLS_ROOT="$PROJECT_ROOT/.claude/skills"
 # Accept the Agent SDK short aliases AND the canonical full IDs currently in
 # use. When a new model ships, add the full ID here so this audit catches
 # drift instead of giving every agent a green pass on any unknown string.
@@ -164,10 +165,42 @@ if [ -d "$AGENTS_DIR" ]; then
       warn "$name agent: no model specified"
     fi
 
-    # Check skills reference existing dirs
-    skills_line=$(grep "^skills:" "$agent" 2>/dev/null || echo "")
-    if [ -n "$skills_line" ]; then
-      pass "$name agent: has skills defined"
+    # Check skills reference existing dirs.
+    # This asserts the SKILL DIRECTORY RESOLVES — not merely that a `skills:`
+    # line is present. The weaker check passed dx-guardian and ux-reviewer for
+    # their whole life while 8 of their skills were dangling, and the agents
+    # were being told to run audit scripts that do not exist (#9605 family,
+    # lessons-learned #1). Handles both the one-line flow sequence and the
+    # multi-line `[ ... ]` form.
+    skills_raw=$(awk '/^skills:/{f=1} f{print; if (/\]/) exit}' "$agent" 2>/dev/null || echo "")
+    if [ -n "$skills_raw" ]; then
+      skills=$(printf '%s' "$skills_raw" | tr -d '\n' | sed 's/^skills:[[:space:]]*//; s/[][]//g; s/,/ /g')
+      # `read -ra` splits on IFS WITHOUT globbing; a bare `for s in $skills`
+      # would let a skill name containing a glob char expand against the cwd.
+      read -r -a skill_names <<< "$skills"
+      missing_skills=""
+      checked=0
+      # The `[@]+` guard is the house idiom for reading a possibly-empty array
+      # under `set -u`: bash 3.2 (macOS system bash) aborts on a plain
+      # "${ARR[@]}" expansion when the array is empty, which `skills: []`
+      # produces — and an abort here would kill the audit before the
+      # empty-list branch below could report it.
+      for s in ${skill_names[@]+"${skill_names[@]}"}; do
+        [ -z "$s" ] && continue
+        checked=$((checked + 1))
+        if [ ! -d "$SKILLS_ROOT/$s" ] && [ ! -d "$HOME/.claude/skills/$s" ]; then
+          missing_skills="$missing_skills $s"
+        fi
+      done
+      if [ "$checked" -eq 0 ]; then
+        # An empty list reads as "skills defined" to a human but resolves to
+        # nothing. A gate that inspects zero items passes vacuously.
+        fail "$name agent: skills: declared but empty"
+      elif [ -n "$missing_skills" ]; then
+        fail "$name agent: skills do not resolve:$missing_skills"
+      else
+        pass "$name agent: all $checked skills resolve"
+      fi
     else
       warn "$name agent: no skills referenced"
     fi
@@ -231,8 +264,13 @@ if [ -f "$MCP" ] && [ -f "$WEB" ]; then
   fi
 fi
 
-# Stale version references
-STALE_BEVY=$(grep -rn "Bevy 0\." README.md .claude/CLAUDE.md 2>/dev/null | grep -v "0\.18" | head -3)
+# Stale version references.
+# The trailing `|| true` is load-bearing: under `set -euo pipefail` the inner
+# `grep -v` exits 1 when every Bevy reference IS 0.18 — the healthy case — and
+# pipefail propagates that through the assignment, aborting the script. The
+# audit died here silently on any healthy repo, so sections 6-7 and the final
+# summary never ran and the exit code carried no verdict (lessons-learned #1).
+STALE_BEVY=$(grep -rn "Bevy 0\." README.md .claude/CLAUDE.md 2>/dev/null | grep -v "0\.18" | head -3 || true)
 if [ -n "$STALE_BEVY" ]; then
   warn "Stale Bevy version references found (not 0.18)"
 fi

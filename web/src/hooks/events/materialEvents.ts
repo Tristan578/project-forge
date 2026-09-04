@@ -4,6 +4,7 @@
 
 import { useEditorStore, type MaterialData, type EnvironmentData, type PostProcessingData } from '@/stores/editorStore';
 import { castPayload, type SetFn, type GetFn } from './types';
+import { applyWhenPrimary } from './primaryGate';
 
 export function handleMaterialEvent(
   type: string,
@@ -12,17 +13,27 @@ export function handleMaterialEvent(
   _get: GetFn
 ): boolean {
   switch (type) {
+    /**
+     * Gated on the entity: `setPrimaryMaterial` writes the inspector's editing
+     * buffer, and the resync drain now emits MATERIAL_CHANGED for entities that
+     * are not selected (an undo on another entity, or every component of an
+     * entity being restored from a snapshot). See `applyWhenPrimary`.
+     */
     case 'MATERIAL_CHANGED': {
       const payload = castPayload<MaterialData & { entityId: string }>(data);
-      const { entityId: _matId, ...matData } = payload;
-      useEditorStore.getState().setPrimaryMaterial(matData as MaterialData);
+      const { entityId: matId, ...matData } = payload;
+      applyWhenPrimary(matId, () => {
+        useEditorStore.getState().setPrimaryMaterial(matData as MaterialData);
+      });
       return true;
     }
 
     case 'LIGHT_CHANGED': {
       const payload = castPayload<import('@/stores/editorStore').LightData & { entityId: string }>(data);
-      const { entityId: _lightId, ...lightData } = payload;
-      useEditorStore.getState().setPrimaryLight(lightData as import('@/stores/editorStore').LightData);
+      const { entityId: lightId, ...lightData } = payload;
+      applyWhenPrimary(lightId, () => {
+        useEditorStore.getState().setPrimaryLight(lightData as import('@/stores/editorStore').LightData);
+      });
       return true;
     }
 
@@ -47,7 +58,9 @@ export function handleMaterialEvent(
 
     case 'SHADER_CHANGED': {
       const payload = castPayload<{ entityId: string; data: import('@/stores/editorStore').ShaderEffectData | null }>(data);
-      useEditorStore.getState().setPrimaryShaderEffect(payload.data ?? null);
+      applyWhenPrimary(payload.entityId, () => {
+        useEditorStore.getState().setPrimaryShaderEffect(payload.data ?? null);
+      });
       return true;
     }
 
