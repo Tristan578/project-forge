@@ -86,18 +86,41 @@ export function useEditorBridge(): void {
     if (typeof window === 'undefined' || !mcpBridgeEnabled()) return;
     const token = mcpBridgeToken(window.location.search);
     if (!token) return;
-    const ws = new WebSocket(mcpBridgeUrl(token));
-    const send = (frame: Record<string, unknown>) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
+    let stopped = false;
+    let retryDelayMs = 500;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let activeSocket: WebSocket | null = null;
+
+    const connect = () => {
+      if (stopped) return;
+      const ws = new WebSocket(mcpBridgeUrl(token));
+      activeSocket = ws;
+      const send = (frame: Record<string, unknown>) => {
+        if (activeSocket === ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(frame));
+        }
+      };
+      ws.onopen = () => {
+        retryDelayMs = 500;
+        send({ type: 'project_info', data: { attached: true } });
+      };
+      ws.onmessage = (event) => {
+        if (activeSocket === ws) void handleBridgeFrame(String(event.data), send);
+      };
+      ws.onclose = () => {
+        if (stopped || activeSocket !== ws) return;
+        activeSocket = null;
+        retryTimer = setTimeout(connect, retryDelayMs);
+        retryDelayMs = Math.min(retryDelayMs * 2, 10_000);
+      };
     };
-    ws.onopen = () => {
-      send({ type: 'project_info', data: { attached: true } });
-    };
-    ws.onmessage = (event) => {
-      void handleBridgeFrame(String(event.data), send);
-    };
+
+    connect();
     return () => {
-      ws.close();
+      stopped = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      activeSocket?.close();
+      activeSocket = null;
     };
   }, []);
 }

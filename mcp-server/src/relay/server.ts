@@ -130,7 +130,10 @@ export async function startRelay(options: RelayOptions): Promise<RunningRelay> {
         }
       });
       ws.on('close', () => {
-        if (editor === ws) editor = null;
+        // A replacement editor may attach while this socket is CLOSING. Only
+        // the socket that is still current owns the pending command set.
+        if (editor !== ws) return;
+        editor = null;
         log('editor detached');
         // Every in-flight command belongs to a tab that is gone.
         for (const [requestId, agent] of pending) {
