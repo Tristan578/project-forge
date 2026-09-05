@@ -3,7 +3,7 @@
 
 # Model & approval
 model = "gpt-5.3-codex"
-approval_policy = "unless-allow-listed"
+approval_policy = "never"
 
 # Sandbox: allow writes only within the project
 [sandbox_workspace_write]
