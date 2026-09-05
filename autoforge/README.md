@@ -6,7 +6,7 @@ Autoresearch-style nightly optimization loop for SpawnForge's compound AI action
 
 1. **Nightly (Mon–Sat 11 PM):** Claude Code reads `program.md`, forms a hypothesis, makes ONE change to the compound action handlers, evaluates the result with heuristics + vision scoring, keeps improvements, discards regressions. Repeat up to 20 times. Wake up to a PR.
 
-2. **Weekly (Sunday 2 AM):** Read-only validation run with real provider APIs (Meshy 3D, ElevenLabs audio, Suno music) to catch overfitting. Compares weekly scores against the nightly baseline and flags drift.
+2. **Weekly (Sunday 2 AM):** Read-only validation run with real provider APIs (Meshy 3D, ElevenLabs audio) to catch overfitting. Compares weekly scores against the nightly baseline and flags drift. Music is not validated: no autoforge path calls music generation, and the capability is declared unavailable platform-wide (Suno has no public API — see `docs/guides/platform-keys.md`, #9522).
 
 ---
 
@@ -136,8 +136,9 @@ Set any of these in your `.env` to enable real provider API calls during the wee
 ```bash
 MESHY_API_KEY=your-key    # Real 3D model generation
 ELEVENLABS_API_KEY=your-key  # Real audio/SFX generation
-SUNO_API_KEY=your-key     # Real music generation
 ```
+
+There is no music key to set: Suno has no public API, so no key can be minted, and the weekly run has no music path to validate (`music` is declared unavailable platform-wide until #9522 lands).
 
 Without these, the Sunday run still works — it just runs the same vision scoring as the nightly loop, which is still useful for tracking score stability.
 

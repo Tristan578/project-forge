@@ -137,6 +137,16 @@ describe('GET /api/capabilities', () => {
     expect(res.status).toBe(429);
   });
 
+  // Every editor page load costs one request to this route (generation
+  // dialogs, Asset panel, Audio inspector), and 30/min 429'd the E2E runner
+  // (#9725, 1942fe4b). Pinned so the ceiling cannot quietly regress.
+  it('rate-limits at 120 requests per minute per IP', async () => {
+    const { GET } = await import('./route');
+    const req = new NextRequest(BASE_URL);
+    await GET(req);
+    expect(rateLimitPublicRoute).toHaveBeenCalledWith(req, 'capabilities', 120, 60_000);
+  });
+
   it('marks chat available via AI Gateway on Vercel', async () => {
     process.env.VERCEL = '1';
     // No explicit AI_GATEWAY_API_KEY needed — OIDC auto-auth

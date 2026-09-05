@@ -1,6 +1,6 @@
 # AI Asset Generation
 
-Five generation dialogs that create 3D models, textures, sound effects, voice lines, and music directly inside the editor using text descriptions.
+Four generation dialogs that create 3D models, textures, sound effects, and voice lines directly inside the editor using text descriptions. A fifth, music, is not available yet — see [Music Track](#music-track) below for what it will do when it returns.
 
 ## Overview
 
@@ -11,7 +11,7 @@ AI Asset Generation lets you describe what you want in plain language and receiv
 All generation dialogs are available from the **Asset Panel**:
 
 1. Open the **Asset Panel** from the left sidebar.
-2. Click the generation button for the asset type you want (3D Model, Texture, Sound, Voice, or Music), or right-click in the panel to see all options.
+2. Click the generation button for the asset type you want (3D Model, Texture, Sound, or Voice), or right-click in the panel to see all options. The Music entry is shown disabled with the reason until music generation returns.
 3. Fill in the prompt and options, then click **Generate**.
 4. A progress indicator appears while the job runs. When complete, the asset appears in your Asset Panel.
 

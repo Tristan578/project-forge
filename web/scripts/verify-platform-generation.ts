@@ -298,6 +298,38 @@ export function formatTable(results: ProbeResult[]): string {
   return [line(header), line(widths.map((w) => '-'.repeat(w))), ...rowsOut.map(line)].join('\n');
 }
 
+export interface Summary {
+  /** Capabilities not declared unavailable (sprite's two rows count once). */
+  offered: number;
+  /** Offered capabilities whose EVERY row passed. */
+  verified: number;
+  /** Capabilities declared unavailable in code. */
+  unavailable: number;
+  /** Rows that failed or whose key is missing — any of these is a non-zero exit. */
+  failing: number;
+}
+
+/**
+ * Count CAPABILITIES, not rows: a capability with two keys (sprite) is one
+ * capability, verified only when every one of its rows passed, and `missing`
+ * counts as failing because an unset platform key is exactly what this
+ * script exists to catch. Pure, so the exit-code decision is testable.
+ */
+export function summarize(results: ProbeResult[]): Summary {
+  const byCapability = new Map<string, ProbeResult[]>();
+  for (const r of results) byCapability.set(r.capability, [...(byCapability.get(r.capability) ?? []), r]);
+  const groups = [...byCapability.values()];
+  const offered = groups.filter((rows) => rows.every((r) => r.status !== 'unavailable'));
+  const verified = offered.filter((rows) => rows.every((r) => r.status === 'pass'));
+  const failing = results.filter((r) => r.status === 'fail' || r.status === 'missing');
+  return {
+    offered: offered.length,
+    verified: verified.length,
+    unavailable: groups.length - offered.length,
+    failing: failing.length,
+  };
+}
+
 /** Windows-safe "am I the entry module" check (see provision-billing-meter.ts). */
 export function isMainModule(metaUrl: string, argv1: string | undefined): boolean {
   if (!argv1) return false;
@@ -308,16 +340,10 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const plan = buildPlan(process.env);
   const results = await runVerification(plan);
   console.log(formatTable(results));
-  const failing = results.filter((r) => r.status === 'fail' || r.status === 'missing');
-  // Count CAPABILITIES, not rows: a capability with two keys (sprite) is one
-  // capability, verified only when every one of its rows passed.
-  const byCapability = new Map<string, ProbeResult[]>();
-  for (const r of results) byCapability.set(r.capability, [...(byCapability.get(r.capability) ?? []), r]);
-  const offered = [...byCapability.values()].filter((rows) => rows.every((r) => r.status !== 'unavailable'));
-  const verified = offered.filter((rows) => rows.every((r) => r.status === 'pass'));
+  const summary = summarize(results);
   console.log(
-    `\n${verified.length}/${offered.length} offered capabilities verified; ` +
-      `${byCapability.size - offered.length} declared unavailable.`,
+    `\n${summary.verified}/${summary.offered} offered capabilities verified; ` +
+      `${summary.unavailable} declared unavailable.`,
   );
-  process.exit(failing.length > 0 ? 1 : 0);
+  process.exit(summary.failing > 0 ? 1 : 0);
 }

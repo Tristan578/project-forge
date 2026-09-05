@@ -168,6 +168,55 @@ describe('GET /api/capabilities availability', () => {
     expect(status(both.body, 'sprite').available).toBe(true);
   });
 
+  // `available` for sprite is decided from CAPABILITY_REQUIRED_PROVIDERS
+  // (Replicate AND OpenAI); the explanation beside it must come from the same
+  // list, naming only what is MISSING. Deriving it from the single-key map
+  // told a Replicate-only environment to "Configure Replicate" — the one key
+  // it already had — and never named OpenAI (lesson 1 family).
+  it('names only the missing provider for sprite in a Replicate-only environment', async () => {
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
+    const { body } = await call();
+    const sprite = status(body, 'sprite');
+    expect(sprite.available).toBe(false);
+    expect(sprite.requiredProviders).toEqual(['OpenAI']);
+    expect(sprite.hint).toContain('OpenAI');
+    expect(sprite.hint).not.toContain('Replicate');
+    expect(sprite.hint).toContain('Settings');
+  });
+
+  it('names every missing provider for sprite when neither key is present', async () => {
+    const { body } = await call();
+    const sprite = status(body, 'sprite');
+    expect(sprite.available).toBe(false);
+    expect(sprite.requiredProviders).toEqual(expect.arrayContaining(['Replicate', 'OpenAI']));
+    expect(sprite.requiredProviders).toHaveLength(2);
+    expect(sprite.hint).toContain('Replicate');
+    expect(sprite.hint).toContain('OpenAI');
+  });
+
+  // `resolveApiKey` resolves each provider independently, BYOK first — so a
+  // user holding their own OpenAI key on a Replicate-only deployment can run
+  // both sprite paths. Availability must OR the sources per provider, not
+  // demand that every key come from the same side.
+  it('lets a BYOK key supply the half of sprite the platform lacks', async () => {
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
+    signedInWithByok(['openai']);
+    const { body } = await call();
+    expect(status(body, 'sprite').available).toBe(true);
+    expect(status(body, 'sprite').requiredProviders).toBeUndefined();
+  });
+
+  it('requires every sprite provider from BYOK when the platform has none', async () => {
+    signedInWithByok(['replicate']);
+    const replicateOnly = await call();
+    expect(status(replicateOnly.body, 'sprite').available).toBe(false);
+    expect(status(replicateOnly.body, 'sprite').requiredProviders).toEqual(['OpenAI']);
+
+    signedInWithByok(['replicate', 'openai']);
+    const both = await call();
+    expect(status(both.body, 'sprite').available).toBe(true);
+  });
+
   it('falls back to platform-only availability when the BYOK lookup throws', async () => {
     signedInWithByok([]);
     mockByok.mockRejectedValue(new Error('db down'));
