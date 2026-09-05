@@ -1,5 +1,11 @@
 # @project-forge/mcp-server
 
+## 0.3.0
+
+### Minor Changes
+
+- [#9665](https://github.com/Tristan578/project-forge/pull/9665) [`5c8e36c`](https://github.com/Tristan578/project-forge/commit/5c8e36c956c23356d81a5670a6a75567d83918f8) Thanks [@Tristan578](https://github.com/Tristan578)! - The MCP server can finally reach the editor: a loopback relay (`npm run relay` in `mcp-server`) sits between the server and an editor tab opened with `?mcp=<token>`, so the 351 MCP tools execute against the live editor instead of failing with "Not connected". The bridge is opt-in per tab, off in production builds, refuses commands that spend tokens, export or publish, and the server stops retrying a dead URL forever.
+
 ## 0.2.3
 
 ### Patch Changes

@@ -1,5 +1,96 @@
 # web
 
+## 0.9.0
+
+### Minor Changes
+
+- [#9671](https://github.com/Tristan578/project-forge/pull/9671) [`4c7e96d`](https://github.com/Tristan578/project-forge/commit/4c7e96d6ac7a0bd32e9f2a7e6a3add65126619f8) Thanks [@Tristan578](https://github.com/Tristan578)! - Keyframe animation clips now run in the engine. The seven clip-authoring commands the Animation Clip inspector, Timeline and AI handlers have always dispatched (`create_animation_clip`, `add_clip_keyframe`, `remove_clip_keyframe`, `update_clip_keyframe`, `set_clip_property`, `preview_clip`, `remove_animation_clip`) were engine placeholders — they wrote editor state and animated nothing. They are now applied in the engine with undo/redo, the timeline's play/pause/seek drives the viewport, clips marked autoplay start on Play, and exported games play them too. Ships to the editor and to games exported after the next engine build.
+
+- [#9672](https://github.com/Tristan578/project-forge/pull/9672) [`82c3f5b`](https://github.com/Tristan578/project-forge/commit/82c3f5be91e57707dffcd00cde5b4fd72b80e5c8) Thanks [@Tristan578](https://github.com/Tristan578)! - Migrate product AI calls to the Claude 5 family.
+  
+  `AI_MODEL_PRIMARY` moves to `claude-sonnet-5` and `AI_MODEL_PREMIUM` / `AI_MODEL_DEEP` to `claude-opus-5`; the 4.x ids stay exported as `AI_MODEL_PRIMARY_4X` / `AI_MODEL_PREMIUM_4X` and stay in every backend `MODEL_MAP`, so a rollback is a one-line edit. The Vercel AI Gateway ids (`GATEWAY_MODEL_CHAT`, `GATEWAY_MODEL_PREMIUM`) are now derived from those same constants instead of being hand-written, so that rollback also takes effect on the gateway route. `isPremiumModel()` now also recognizes the 4.x Opus id as premium-tier, so a rollback (or a stale in-flight request) can't slip past the Pro-tier gate. The extended-thinking and `effort` provider-options shapes — chosen per model since [#9626](https://github.com/Tristan578/project-forge/issues/9626)/[#9650](https://github.com/Tristan578/project-forge/issues/9650), not by this PR — are now built through a single `anthropicThinkingOption()` helper that both `spawnforgeAgent.ts` and `aiSdkAdapter.ts` call, instead of each switching on `thinkingModeFor()` itself.
+  
+  The game-creation decomposer also stops asking the model for prose and parsing JSON out of it, using `Output.object` structured output against the existing Zod schema.
+
+- [#9667](https://github.com/Tristan578/project-forge/pull/9667) [`4935cdf`](https://github.com/Tristan578/project-forge/commit/4935cdfcf27f850d60518972ac0f4b2ca87bbe80) Thanks [@Tristan578](https://github.com/Tristan578)! - Generated games now translate per-entity design intent into real behavior. The
+  game design document carries a closed `behavior` vocabulary (chase, patrol,
+  flee, idle, projectile_fire), and the pipeline turns each verb into an
+  engine-native component or a hand-written script template, so a generated enemy
+  chases, a guard patrols and a creature flees instead of standing where it
+  spawned. Also fixes the script generator's API reference, which advertised ten
+  methods that did not exist.
+
+- [#9665](https://github.com/Tristan578/project-forge/pull/9665) [`5c8e36c`](https://github.com/Tristan578/project-forge/commit/5c8e36c956c23356d81a5670a6a75567d83918f8) Thanks [@Tristan578](https://github.com/Tristan578)! - The MCP server can finally reach the editor: a loopback relay (`npm run relay` in `mcp-server`) sits between the server and an editor tab opened with `?mcp=<token>`, so the 351 MCP tools execute against the live editor instead of failing with "Not connected". The bridge is opt-in per tab, off in production builds, refuses commands that spend tokens, export or publish, and the server stops retrying a dead URL forever.
+
+- [#9669](https://github.com/Tristan578/project-forge/pull/9669) [`aef4bde`](https://github.com/Tristan578/project-forge/commit/aef4bdec7619914f5eb1e9586a707423f7fc7c87) Thanks [@Tristan578](https://github.com/Tristan578)! - Destructive chat-agent tool calls now require your explicit approval before they run. When the AI proposes an action that deletes or replaces existing work — deleting entities, starting a new scene, loading over the current one, overwriting a script — the server blocks it and the chat shows an approval card with the exact arguments the call would run with. Nothing touches your scene until you press Approve, and denying the call sends that decision back to the model so it can carry on without it. Ordinary editing (spawning, transforming, materials, lighting) is unaffected.
+  
+  Also fixes a bug that broke every multi-turn tool call: the follow-up message the chat sent after running a tool used a format the AI SDK rejects, so the second step of any tool-using turn failed silently.
+
+- [#9666](https://github.com/Tristan578/project-forge/pull/9666) [`bc4a26a`](https://github.com/Tristan578/project-forge/commit/bc4a26aa500828ab655e7d77605903764ae9559a) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a UGC takedown workflow for published games: viewers can report a game from
+  the play page, a reported game is automatically hidden pending review, admins
+  can list and act on the queue via `GET/POST /api/admin/moderation?type=game`,
+  and a game whose appeal is approved is restored to published.
+
+### Patch Changes
+
+- [#9651](https://github.com/Tristan578/project-forge/pull/9651) [`ff11687`](https://github.com/Tristan578/project-forge/commit/ff116879fc39c95033a2aebe20ca166bcdfd041d) Thanks [@Tristan578](https://github.com/Tristan578)! - Clerk session tokens are now checked against the deployment's own origins (`authorizedParties`, the `azp` claim) in both the app and the docs middleware, so a token minted for another Clerk-hosted origin is rejected instead of accepted. Vercel preview and branch origins are included so previews keep signing in.
+
+- [#9703](https://github.com/Tristan578/project-forge/pull/9703) [`21a08c2`](https://github.com/Tristan578/project-forge/commit/21a08c2401208aadfe7440aeb9a5c24fac7ad7f9) Thanks [@Tristan578](https://github.com/Tristan578)! - Frame public product claims consistently as private pre-launch capabilities across marketing routes.
+
+- [#9683](https://github.com/Tristan578/project-forge/pull/9683) [`39f2b4a`](https://github.com/Tristan578/project-forge/commit/39f2b4a9f34e1dd32c4dcdf9c8c612073f09c342) Thanks [@Tristan578](https://github.com/Tristan578)! - Allow Clerk test keys in explicitly identified staging deployments while retaining the production guard.
+
+- [#9685](https://github.com/Tristan578/project-forge/pull/9685) [`fce5864`](https://github.com/Tristan578/project-forge/commit/fce586481bfff28c39615a81fa43d2faa6b74b2d) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a fail-closed Drizzle migration audit and explicit baseline command for established databases with missing migration journals.
+
+- [#9712](https://github.com/Tristan578/project-forge/pull/9712) [`976aca0`](https://github.com/Tristan578/project-forge/commit/976aca07c714ed504a706d1e81d0ab888ce0d7c4) Thanks [@Tristan578](https://github.com/Tristan578)! - Warn creators when a world description is shortened before AI generation, and expose the truncation status to chat tool callers.
+
+- [#9647](https://github.com/Tristan578/project-forge/pull/9647) [`978cd12`](https://github.com/Tristan578/project-forge/commit/978cd12625c3d33945dfa3448200437ff21fea07) Thanks [@Tristan578](https://github.com/Tristan578)! - Production deploys are now verified against the build that was just made. The post-deploy health check and smoke tests used to run against the public domain during a Rolling Release, where 95% of traffic still went to the previous build, and the health check against the protected deployment URL could never authenticate and exited 0 with a warning. Both now pin themselves to the rolling-release canary through Vercel's `vcrrForceCanary` cookie and assert that `/api/health` reports the commit this run deployed; a protected answer fails the check instead of passing it. The last-known-good deployment is read from the Rolling Release API so automatic rollback can actually fire, and rollback uses Instant Rollback rather than a promote that would start another staged rollout of the old build — and is skipped when a later deployment already owns production, which is a superseded run rather than an incident. Production deploys are now serialised rather than cancelled by the next push, so a run is never cancelled mid-verification with its unverified canary left ramping.
+
+- [#9660](https://github.com/Tristan578/project-forge/pull/9660) [`8bb5b78`](https://github.com/Tristan578/project-forge/commit/8bb5b787f6d79343a7a3083125b1d987e479a07c) Thanks [@Tristan578](https://github.com/Tristan578)! - The Clerk webhook handler now verifies deliveries with Clerk's own `verifyWebhook()` instead of a hand-rolled `svix` verification, passing the signing secret explicitly. The deprecated `svix` dependency is removed. Behaviour on valid, invalid and unsigned deliveries is unchanged.
+
+- [#9701](https://github.com/Tristan578/project-forge/pull/9701) [`e18ef68`](https://github.com/Tristan578/project-forge/commit/e18ef68320b3dcc37c3ee16d3ce2eec376cee6ea) Thanks [@Tristan578](https://github.com/Tristan578)! - Fail deployments before upload when Vercel's resolved manifest omits any same-origin engine bundle.
+
+- [#9681](https://github.com/Tristan578/project-forge/pull/9681) [`ead9404`](https://github.com/Tristan578/project-forge/commit/ead9404181bec6d90a864f93745d90fe65e653c0) Thanks [@dependabot](https://github.com/apps/dependabot)! - Bump the transitive `fflate` dependency from 0.4.8 to 0.4.9 (pulled in by `posthog-js`, so it ships in the client analytics bundle).
+
+- [#9654](https://github.com/Tristan578/project-forge/pull/9654) [`926d15c`](https://github.com/Tristan578/project-forge/commit/926d15c6a32b1e03ba5636073686715e4b763d57) Thanks [@Tristan578](https://github.com/Tristan578)! - Chat requests routed through the Vercel AI Gateway now carry an ordered model fallback list (premium → chat → fast) and `caching: 'auto'`, so a provider outage degrades to the next model instead of failing the request, and repeated prompt prefixes are cached where the provider supports it.
+
+- [#9682](https://github.com/Tristan578/project-forge/pull/9682) [`1cb5f45`](https://github.com/Tristan578/project-forge/commit/1cb5f451539f0d03376b010a0d5a6e475ccdd03e) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a fail-closed CI integration probe for the real Upstash rate limiter.
+
+- [#9648](https://github.com/Tristan578/project-forge/pull/9648) [`90e8b15`](https://github.com/Tristan578/project-forge/commit/90e8b1528c0cf851e8fcc36153c52b57fa08f7d3) Thanks [@Tristan578](https://github.com/Tristan578)! - Test-suite hardening: a `mock*Once` value queued on a shared mock and never consumed now fails the test that queued it, naming the file and line still armed. Such leftovers used to stay armed and were silently read by the next test ([#9501](https://github.com/Tristan578/project-forge/issues/9501)). The guard runs in every web test file and covers module-scoped `vi.fn` mocks, `vi.mock` factory mocks (including factories first triggered by a dynamic import inside a test) and bare automocks; it ignores mocks built inside the test and `vi.spyOn` spies. `MOCK_ONCE_GUARD=off` switches it off for a local run and is ignored under CI.
+
+- [#9645](https://github.com/Tristan578/project-forge/pull/9645) [`934b6a3`](https://github.com/Tristan578/project-forge/commit/934b6a33d4f903bdedded9e9ef51a9d6df137acc) Thanks [@Tristan578](https://github.com/Tristan578)! - Relock `fast-uri` to 3.1.7 (four HIGH SSRF / host-confusion advisories published 2026-09-02 against 3.1.5, reachable through `ajv`) and `qs` to 6.16.0 (two MODERATE advisories, reachable through the MCP server's `express`). Lockfile-only; no manifest ranges changed and no audit waiver added.
+
+- [#9655](https://github.com/Tristan578/project-forge/pull/9655) [`0a3a40c`](https://github.com/Tristan578/project-forge/commit/0a3a40c54e049306edc43f8aec763f49ba256287) Thanks [@Tristan578](https://github.com/Tristan578)! - Removed two dependencies nothing imported: `@anthropic-ai/sdk` (every Claude call goes through the AI SDK providers) together with the Sentry `anthropicAIIntegration` that could never emit a span, and `@google/generative-ai` with the unused semantic docs search it powered (live docs search is lexical). No production behaviour changes; the npm audit and changelog surface shrinks.
+
+- [#9670](https://github.com/Tristan578/project-forge/pull/9670) [`4a4b9ba`](https://github.com/Tristan578/project-forge/commit/4a4b9ba818cb8bca0ed6ac11320a092bdf61972b) Thanks [@Tristan578](https://github.com/Tristan578)! - Exported (runtime) games now apply `set_gravity2d`, the 2D/3D joint commands, the debug-physics toggles and the joint/physics2d reads. Before, the runtime engine build accepted and queued them but had no system to drain the queue, so `forge.physics2d.setGravity` silently did nothing and grew memory by one entry per call for the life of the game ([#9550](https://github.com/Tristan578/project-forge/issues/9550)). Ships to games exported after the next engine build.
+
+- [#9704](https://github.com/Tristan578/project-forge/pull/9704) [`ac0a18e`](https://github.com/Tristan578/project-forge/commit/ac0a18ea36540b0a0fed281dd95a86ed5c4d5637) Thanks [@Tristan578](https://github.com/Tristan578)! - Exported games now apply script-driven transform, visibility, material, camera, and 2D skeleton commands instead of silently leaving them queued.
+
+- [#9717](https://github.com/Tristan578/project-forge/pull/9717) [`e5beae6`](https://github.com/Tristan578/project-forge/commit/e5beae6538644336497bf442c85cf12ca0bef813) Thanks [@Tristan578](https://github.com/Tristan578)! - Docs: a malformed `NEXT_PUBLIC_DOCS_URL` no longer throws from `new URL()` while `proxy.ts` and the root layout load; it logs and falls back to the canonical origin. Web: removed the unreachable tool_use/tool_result pair-preservation branch from chat context truncation and replaced the test that could not fail.
+
+- [#9710](https://github.com/Tristan578/project-forge/pull/9710) [`324a6eb`](https://github.com/Tristan578/project-forge/commit/324a6ebf89647387b6a1c6da49e26fdf390771ea) Thanks [@Tristan578](https://github.com/Tristan578)! - Remove deprecated permissive schema calls from model-supplied material, light, and physics builders while preserving unknown-field stripping.
+
+- [#9650](https://github.com/Tristan578/project-forge/pull/9650) [`1c55570`](https://github.com/Tristan578/project-forge/commit/1c55570646cea0ec8a1f47ceb89e7ca84b4da6b8) Thanks [@Tristan578](https://github.com/Tristan578)! - Extended thinking and effort are now requested in the shape each Claude model accepts: Opus 4.7+, Sonnet 4.6+ and Claude 5 get the adaptive form, Haiku 4.5 and earlier get the token-budget form, and `effort` is dropped for models that reject it. Previously one shape was sent for every model, so a Pro user with the thinking toggle on and the premium model selected received HTTP 400 from the direct Anthropic backend.
+
+- [#9702](https://github.com/Tristan578/project-forge/pull/9702) [`dc9b181`](https://github.com/Tristan578/project-forge/commit/dc9b1813b6e577b488f4613ed591debbcade7b3b) Thanks [@Tristan578](https://github.com/Tristan578)! - Refresh the displayed token balance and confirm successful refunds after failed generations.
+
+- [#9673](https://github.com/Tristan578/project-forge/pull/9673) [`1628226`](https://github.com/Tristan578/project-forge/commit/16282268b8f871689cb879b9cba83b4ee00f4a44) Thanks [@Tristan578](https://github.com/Tristan578)! - Undo, redo and restoring a deleted entity now re-report every component they
+  touch to the editor, so inspectors stop showing a component as missing on an
+  entity that has it (or keeping one the engine dropped).
+  
+  The browser learned engine component state only through bridge emitters gated on
+  the primary selection AND a `Changed<T>` filter, which can see neither a write to
+  a non-selected entity nor a removal. The history arms and `spawn_from_snapshot`
+  now queue a `ComponentResync` carrying the state they wrote, drained by the
+  bridge into the existing change events plus four new removal events. Editing a
+  component after an undo no longer sends a full-replace command built from a
+  default.
+
+- [#9646](https://github.com/Tristan578/project-forge/pull/9646) [`6b6d7c2`](https://github.com/Tristan578/project-forge/commit/6b6d7c211926e61102e4e6a6704c982dc7b5b236) Thanks [@Tristan578](https://github.com/Tristan578)! - The distributed rate limiter now sends Upstash a request Upstash accepts. Its sliding-window Lua script was posted to `<base>/eval` with the arguments as the request body; Upstash's REST API reads a body on a path-form command as one trailing argument, so every call was refused with 400 (Sentry `SPAWNFORGE-AI-B`) and each check degraded to the `@upstash/ratelimit` SDK path — still distributed, but two round-trips per check, an approximate window instead of the exact one, and a sampled Sentry event per action per minute. Everything that calls `distributedRateLimit` was on that path: 37 of the 59 `withApiMiddleware` rate-limit configurations (the ones that leave `distributed` on, in 32 route files), all 12 `createGenerationHandler` routes (their per-route caps and the shared aggregate cap), and the two direct callers (feedback, voice batch) — 46 route files — plus the health-page fan-out budget.
+  
+  Every hand-rolled Upstash command (the limiter, its health probe, and both the read and the write of the generation response cache) now goes through one body-form transport with one 3-second timeout, so a stalled Upstash degrades the call instead of holding the route. Both `@upstash/ratelimit` instances (the per-route limiter and the global DB limiter) get the same timeout, and the SDK's resolve-as-allowed timeout outcome — which never threw, so it was never reported — is now reported as a fail-open. A refused command carries Upstash's error message in the reported exception. `/api/health` proves the rate limiter with a read-only EVAL instead of reporting "healthy" on the presence of two environment variables. A rate-limited response now tells the user how long to wait, computed from when the oldest request in the window actually expires rather than a full window from now.
+
+- [#9689](https://github.com/Tristan578/project-forge/pull/9689) [`24e232a`](https://github.com/Tristan578/project-forge/commit/24e232ac91ff830d124c33ad73f9df1ecfee2275) Thanks [@Tristan578](https://github.com/Tristan578)! - Size the `/api/vitals` rate limit against the beacons a page view actually sends. The endpoint allowed 10 requests per minute per IP while its own client emits one beacon per Core Web Vital per page view, so a visitor's third page view inside a minute was silently dropped and anyone behind a shared egress IP lost telemetry almost immediately.
+
 ## 0.8.1
 
 ### Patch Changes
