@@ -443,7 +443,7 @@ jobs:
             echo "No engine changes -- skipping WASM build"
           fi
 
-          if echo "$CHANGED" | grep -qE '^web/|^package\.json'; then
+          if echo "$CHANGED" | grep -qE '^web/|^packages/|^engine/|^[.]transform-gizmo-fork/|^scripts/|^(package(-lock)?\.json|turbo\.json|tsconfig\.json|[.]node-version|[.]nvmrc)$'; then
             echo "web=true" >> "$GITHUB_OUTPUT"
             echo "Web files changed -- deploy required"
           else
@@ -913,9 +913,9 @@ jobs:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # check-changes is intentionally NOT in needs -- path detection only gates
-    # build-wasm (slow). Every push to main that passes quality gates must deploy.
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, check-validated]
+    # Workflow-only pushes still validate the pipeline, but must not spend a web
+    # deployment. Manual production promotions bypass this staging job below.
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, check-validated, check-changes]
     # Each validation job must have SUCCEEDED, or have been skipped *because the
     # tree was proven already validated* (#9524). The second half is the point:
     # tolerating 'skipped' on its own would let a bug in check-validated deploy a
@@ -930,6 +930,7 @@ jobs:
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       github.event.inputs.promote_to_production != 'true' &&
+      needs.check-changes.outputs.web-changed == 'true' &&
       (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.test-web.result == 'success' || (needs.test-web.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
@@ -1061,7 +1062,7 @@ jobs:
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       (
-        (needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
+        (needs.check-changes.outputs.web-changed == 'true' && needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
         (github.event.inputs.promote_to_production == 'true' &&
          needs.lint.result == 'success' &&
          needs.typecheck.result == 'success' &&
