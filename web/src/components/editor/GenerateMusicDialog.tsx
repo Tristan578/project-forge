@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
+import posthog from 'posthog-js';
 
 interface GenerateMusicDialogProps {
   isOpen: boolean;
@@ -51,6 +52,14 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
       }
 
       // Job started successfully
+      if (posthog.__loaded) {
+        posthog.capture('music_generation_started', {
+          duration_seconds: duration,
+          instrumental,
+          attached_to_entity: attachToEntity && Boolean(entityId),
+          token_cost: tokenCost,
+        });
+      }
       onClose();
       setPrompt('');
     } catch (err) {

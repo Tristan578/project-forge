@@ -3,6 +3,7 @@
 import { useAuth } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import { Check, X } from 'lucide-react';
+import posthog from 'posthog-js';
 
 export function PricingPage() {
   const { isSignedIn } = useAuth();
@@ -23,6 +24,7 @@ export function PricingPage() {
 
       if (res.ok) {
         const { url } = await res.json();
+        if (posthog.__loaded) posthog.capture('checkout_started', { tier });
         window.location.href = url;
       }
     } catch (err) {

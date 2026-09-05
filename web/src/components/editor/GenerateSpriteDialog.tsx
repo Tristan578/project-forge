@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
+import posthog from 'posthog-js';
 
 interface GenerateSpriteDialogProps {
   isOpen: boolean;
@@ -95,6 +96,12 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
       });
 
       // Job started successfully
+      if (posthog.__loaded) {
+        posthog.capture('sprite_generation_started', {
+          generation_type: activeTab,
+          token_cost: tokenCost,
+        });
+      }
       onClose();
       setPrompt('');
     } catch (err) {

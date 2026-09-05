@@ -8,6 +8,7 @@ import { loadDocs, getDocsDir } from './loader.js';
 import { buildIndex, search } from './search.js';
 import type { DocIndex } from './loader.js';
 import type { TermIndex } from './search.js';
+import { posthog, SERVER_DISTINCT_ID } from '../posthog.js';
 
 let docIndex: DocIndex | null = null;
 let termIndex: TermIndex | null = null;
@@ -110,6 +111,16 @@ export function registerDocs(server: McpServer): void {
       const maxResults = args.maxResults ?? 10;
       const results = search(args.query, idx, tIdx, maxResults);
 
+      posthog?.capture({
+        distinctId: SERVER_DISTINCT_ID,
+        event: 'doc_searched',
+        properties: {
+          query: args.query,
+          result_count: results.length,
+          max_results: maxResults,
+        },
+      });
+
       if (results.length === 0) {
         return {
           content: [
@@ -164,6 +175,15 @@ export function registerDocs(server: McpServer): void {
           isError: true,
         };
       }
+
+      posthog?.capture({
+        distinctId: SERVER_DISTINCT_ID,
+        event: 'doc_retrieved',
+        properties: {
+          doc_path: args.path,
+          doc_title: doc.title,
+        },
+      });
 
       const meta = idx.meta.get(args.path);
       let header = '';

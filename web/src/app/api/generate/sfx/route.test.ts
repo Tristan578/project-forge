@@ -36,6 +36,7 @@ describe('POST /api/generate/sfx', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
@@ -44,7 +45,9 @@ describe('POST /api/generate/sfx', () => {
     vi.mocked(ElevenLabsClient).mockImplementation(function () {
       return {
         generateSfx: vi.fn().mockResolvedValue({ audioBase64: 'base64data', durationSeconds: 5 }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
   });
 
@@ -54,6 +57,7 @@ describe('POST /api/generate/sfx', () => {
       response: new NextResponse('Unauthorized', { status: 401 }),
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'explosion', durationSeconds: 5 }) as any);
     expect(res.status).toBe(401);
   });
@@ -61,6 +65,7 @@ describe('POST /api/generate/sfx', () => {
   it('returns 429 when rate limited', async () => {
     vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'explosion', durationSeconds: 5 }) as any);
     expect(res.status).toBe(429);
   });
@@ -71,6 +76,7 @@ describe('POST /api/generate/sfx', () => {
       body: 'not json',
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(req as any);
     expect(res.status).toBe(400);
     const data = await res.json();
@@ -78,6 +84,7 @@ describe('POST /api/generate/sfx', () => {
   });
 
   it('returns 422 for short prompt', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'ab', durationSeconds: 5 }) as any);
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -85,6 +92,7 @@ describe('POST /api/generate/sfx', () => {
   });
 
   it('returns 422 for invalid duration', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'explosion', durationSeconds: 30 }) as any);
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -96,6 +104,7 @@ describe('POST /api/generate/sfx', () => {
       new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
     );
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'explosion', durationSeconds: 5 }) as any);
     expect(res.status).toBe(402);
     const data = await res.json();
@@ -106,9 +115,12 @@ describe('POST /api/generate/sfx', () => {
     vi.mocked(ElevenLabsClient).mockImplementation(function () {
       return {
         generateSfx: vi.fn().mockRejectedValue(new Error('ElevenLabs API down')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'explosion', durationSeconds: 5 }) as any);
     expect(res.status).toBe(500);
     const data = await res.json();
@@ -116,6 +128,7 @@ describe('POST /api/generate/sfx', () => {
   });
 
   it('returns 200 on successful sfx generation', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'explosion', durationSeconds: 5 }) as any);
     expect(res.status).toBe(200);
     const data = await res.json();

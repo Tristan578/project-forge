@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
+import posthog from 'posthog-js';
 
 interface AssetUploadDialogProps {
   onClose: () => void;
@@ -58,6 +59,15 @@ export function AssetUploadDialog({ onClose, onSuccess }: AssetUploadDialogProps
         throw new Error(err.error);
       }
 
+      if (posthog.__loaded) {
+        posthog.capture('marketplace_listing_created', {
+          category,
+          price_tokens: priceTokens,
+          license,
+          tag_count: tags.split(',').map((tag) => tag.trim()).filter(Boolean).length,
+          ai_generated: aiGenerated,
+        });
+      }
       onSuccess();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to create listing');

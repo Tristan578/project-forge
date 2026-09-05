@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { posthog, SERVER_DISTINCT_ID } from '../posthog.js';
 
 interface PendingCommand {
   resolve: (result: unknown) => void;
@@ -33,6 +34,11 @@ export class EditorBridge {
 
         this.ws.on('open', () => {
           this.connected = true;
+          posthog?.capture({
+            distinctId: SERVER_DISTINCT_ID,
+            event: 'editor_connected',
+            properties: { editor_url: this.url },
+          });
           resolve();
         });
 
@@ -47,6 +53,11 @@ export class EditorBridge {
 
         this.ws.on('close', () => {
           this.connected = false;
+          posthog?.capture({
+            distinctId: SERVER_DISTINCT_ID,
+            event: 'editor_disconnected',
+            properties: { editor_url: this.url },
+          });
           // Reject all pending commands
           for (const [id, pending] of this.pendingCommands) {
             clearTimeout(pending.timeout);
@@ -102,6 +113,14 @@ export class EditorBridge {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingCommands.delete(requestId);
+        posthog?.capture({
+          distinctId: SERVER_DISTINCT_ID,
+          event: 'command_timeout',
+          properties: {
+            command_name: name,
+            timeout_ms: TIMEOUT_MS,
+          },
+        });
         reject(new Error(`Command '${name}' timed out after ${TIMEOUT_MS / 1000}s`));
       }, TIMEOUT_MS);
 

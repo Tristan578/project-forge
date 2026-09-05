@@ -36,6 +36,7 @@ describe('POST /api/generate/voice', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
@@ -44,7 +45,9 @@ describe('POST /api/generate/voice', () => {
     vi.mocked(ElevenLabsClient).mockImplementation(function () {
       return {
         generateVoice: vi.fn().mockResolvedValue({ audioBase64: 'base64voice', durationSeconds: 3 }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
   });
 
@@ -54,6 +57,7 @@ describe('POST /api/generate/voice', () => {
       response: new NextResponse('Unauthorized', { status: 401 }),
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
     expect(res.status).toBe(401);
   });
@@ -61,6 +65,7 @@ describe('POST /api/generate/voice', () => {
   it('returns 429 when rate limited', async () => {
     vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
     expect(res.status).toBe(429);
   });
@@ -71,6 +76,7 @@ describe('POST /api/generate/voice', () => {
       body: 'not json',
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(req as any);
     expect(res.status).toBe(400);
     const data = await res.json();
@@ -78,6 +84,7 @@ describe('POST /api/generate/voice', () => {
   });
 
   it('returns 422 for empty text', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ text: '' }) as any);
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -89,6 +96,7 @@ describe('POST /api/generate/voice', () => {
       new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
     );
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
     expect(res.status).toBe(402);
     const data = await res.json();
@@ -99,9 +107,12 @@ describe('POST /api/generate/voice', () => {
     vi.mocked(ElevenLabsClient).mockImplementation(function () {
       return {
         generateVoice: vi.fn().mockRejectedValue(new Error('ElevenLabs API down')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
     expect(res.status).toBe(500);
     const data = await res.json();
@@ -109,6 +120,7 @@ describe('POST /api/generate/voice', () => {
   });
 
   it('returns 200 on successful voice generation', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
     expect(res.status).toBe(200);
     const data = await res.json();

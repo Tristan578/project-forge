@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
+import posthog from 'posthog-js';
 
 interface GenerateTextureDialogProps {
   isOpen: boolean;
@@ -63,6 +64,15 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
       }
 
       // Job started successfully
+      if (posthog.__loaded) {
+        posthog.capture('texture_generation_started', {
+          resolution,
+          style,
+          seamless_tiling: tiling,
+          map_count: Object.values(maps).filter(Boolean).length,
+          token_cost: tokenCost,
+        });
+      }
       onClose();
       setPrompt('');
     } catch (err) {

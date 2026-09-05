@@ -20,6 +20,7 @@ function makeRequest(jobId?: string) {
   const url = jobId
     ? `http://test/api/generate/tileset-gen/status?jobId=${encodeURIComponent(jobId)}`
     : 'http://test/api/generate/tileset-gen/status';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new Request(url) as any;
 }
 
@@ -28,6 +29,7 @@ describe('GET /api/generate/tileset-gen/status', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
@@ -68,7 +70,9 @@ describe('GET /api/generate/tileset-gen/status', () => {
           status: 'succeeded',
           output: ['https://replicate.delivery/tileset.png'],
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('replicate-pred-123'));
@@ -87,7 +91,9 @@ describe('GET /api/generate/tileset-gen/status', () => {
           status: 'failed',
           output: null,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('replicate-pred-123'));
@@ -103,7 +109,9 @@ describe('GET /api/generate/tileset-gen/status', () => {
           status: 'processing',
           output: null,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('replicate-pred-123'));
@@ -119,7 +127,9 @@ describe('GET /api/generate/tileset-gen/status', () => {
           status: 'starting',
           output: null,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('replicate-pred-123'));
@@ -132,7 +142,9 @@ describe('GET /api/generate/tileset-gen/status', () => {
     vi.mocked(SpriteClient).mockImplementation(function () {
       return {
         getReplicateStatus: vi.fn().mockRejectedValue(new Error('Connection refused')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('replicate-pred-123'));

@@ -20,6 +20,7 @@ function makeRequest(jobId?: string) {
   const url = jobId
     ? `http://test/api/generate/texture/status?jobId=${jobId}`
     : 'http://test/api/generate/texture/status';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new Request(url) as any;
 }
 
@@ -28,6 +29,7 @@ describe('GET /api/generate/texture/status', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
@@ -74,7 +76,9 @@ describe('GET /api/generate/texture/status', () => {
           progress: 100,
           maps,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));
@@ -93,7 +97,9 @@ describe('GET /api/generate/texture/status', () => {
           status: 'FAILED',
           progress: 0,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));
@@ -109,7 +115,9 @@ describe('GET /api/generate/texture/status', () => {
           status: 'IN_PROGRESS',
           progress: 75,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));
@@ -125,7 +133,9 @@ describe('GET /api/generate/texture/status', () => {
           status: 'QUEUED',
           progress: 0,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));
@@ -137,7 +147,9 @@ describe('GET /api/generate/texture/status', () => {
     vi.mocked(MeshyClient).mockImplementation(function () {
       return {
         getTextureStatus: vi.fn().mockRejectedValue(new Error('API timeout')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));

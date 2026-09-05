@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import manifest from '../../manifest/commands.json' with { type: 'json' };
 import type { EditorBridge } from '../transport/websocket.js';
+import { posthog, SERVER_DISTINCT_ID } from '../posthog.js';
 
 /**
  * Convert JSON Schema property to a Zod schema.
@@ -80,6 +81,14 @@ export function registerTools(server: McpServer, bridge: EditorBridge): void {
       async (args) => {
         try {
           const result = await bridge.executeCommand(cmd.name, args as Record<string, unknown>);
+          posthog?.capture({
+            distinctId: SERVER_DISTINCT_ID,
+            event: 'tool_invoked',
+            properties: {
+              tool_name: cmd.name,
+              tool_category: cmd.category,
+            },
+          });
           return {
             content: [
               {
@@ -90,6 +99,19 @@ export function registerTools(server: McpServer, bridge: EditorBridge): void {
           };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          posthog?.capture({
+            distinctId: SERVER_DISTINCT_ID,
+            event: 'tool_error',
+            properties: {
+              tool_name: cmd.name,
+              tool_category: cmd.category,
+              error_message: message,
+            },
+          });
+          posthog?.captureException(error, SERVER_DISTINCT_ID, {
+            tool_name: cmd.name,
+            tool_category: cmd.category,
+          });
           return {
             content: [{ type: 'text' as const, text: `Error: ${message}` }],
             isError: true,

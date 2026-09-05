@@ -20,6 +20,7 @@ function makeRequest(jobId?: string) {
   const url = jobId
     ? `http://test/api/generate/model/status?jobId=${jobId}`
     : 'http://test/api/generate/model/status';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new Request(url) as any;
 }
 
@@ -28,6 +29,7 @@ describe('GET /api/generate/model/status', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
@@ -70,7 +72,9 @@ describe('GET /api/generate/model/status', () => {
           modelUrls: { glb: 'https://cdn.meshy.ai/model.glb' },
           thumbnailUrl: 'https://cdn.meshy.ai/thumb.png',
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));
@@ -90,7 +94,9 @@ describe('GET /api/generate/model/status', () => {
           status: 'FAILED',
           progress: 0,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));
@@ -107,7 +113,9 @@ describe('GET /api/generate/model/status', () => {
           status: 'IN_PROGRESS',
           progress: 50,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));
@@ -123,7 +131,9 @@ describe('GET /api/generate/model/status', () => {
           status: 'QUEUED',
           progress: 0,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));
@@ -135,7 +145,9 @@ describe('GET /api/generate/model/status', () => {
     vi.mocked(MeshyClient).mockImplementation(function () {
       return {
         getTaskStatus: vi.fn().mockRejectedValue(new Error('Meshy API timeout')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await GET(makeRequest('job-123'));

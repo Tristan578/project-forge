@@ -7,6 +7,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { EXPORT_PRESETS, getPreset, type ExportFormat } from '@/lib/export/presets';
 import { generateResponsiveEmbedSnippet, generateEmbedSnippet } from '@/lib/export/embedGenerator';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
+import posthog from 'posthog-js';
 
 function parseResolution(res: string): [number, number] {
   const parts = res.split('x');
@@ -121,6 +122,14 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       const extension = mode === 'single-html' ? 'html' : 'zip';
       const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.${extension}`;
       downloadBlob(blob, filename);
+      if (posthog.__loaded) {
+        posthog.capture('game_exported', {
+          export_format: mode,
+          resolution,
+          includes_debug_info: includeDebug,
+          used_preset: Boolean(selectedPreset),
+        });
+      }
 
       // Show embed snippet for embed mode
       if (mode === 'embed') {

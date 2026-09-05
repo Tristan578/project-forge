@@ -25,6 +25,7 @@ function makeRequest(body: unknown) {
   return new Request('http://test/api/generate/voice/batch', {
     method: 'POST',
     body: JSON.stringify(body),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }) as any;
 }
 
@@ -46,6 +47,7 @@ describe('POST /api/generate/voice/batch', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 4, resetAt: Date.now() + 300000 });
@@ -56,7 +58,9 @@ describe('POST /api/generate/voice/batch', () => {
           audioBase64: 'base64audio',
           durationSeconds: 2.5,
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
   });
 
@@ -83,6 +87,7 @@ describe('POST /api/generate/voice/batch', () => {
       body: 'not json',
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(req as any);
     expect(res.status).toBe(400);
     const data = await res.json();
@@ -171,7 +176,9 @@ describe('POST /api/generate/voice/batch', () => {
           }
           return Promise.resolve({ audioBase64: 'base64audio', durationSeconds: 1.0 });
         }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
     const res = await POST(makeRequest(validBody));

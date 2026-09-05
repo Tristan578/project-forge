@@ -36,6 +36,7 @@ describe('POST /api/generate/music', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
@@ -44,7 +45,9 @@ describe('POST /api/generate/music', () => {
     vi.mocked(SunoClient).mockImplementation(function () {
       return {
         createMusic: vi.fn().mockResolvedValue({ taskId: 'task-1' }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
   });
 
@@ -54,6 +57,7 @@ describe('POST /api/generate/music', () => {
       response: new NextResponse('Unauthorized', { status: 401 }),
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }) as any);
     expect(res.status).toBe(401);
   });
@@ -61,6 +65,7 @@ describe('POST /api/generate/music', () => {
   it('returns 429 when rate limited', async () => {
     vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }) as any);
     expect(res.status).toBe(429);
   });
@@ -71,6 +76,7 @@ describe('POST /api/generate/music', () => {
       body: 'not json',
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(req as any);
     expect(res.status).toBe(400);
     const data = await res.json();
@@ -78,6 +84,7 @@ describe('POST /api/generate/music', () => {
   });
 
   it('returns 422 for short prompt', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'ab', durationSeconds: 30 }) as any);
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -85,6 +92,7 @@ describe('POST /api/generate/music', () => {
   });
 
   it('returns 422 for invalid duration', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 5 }) as any);
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -96,6 +104,7 @@ describe('POST /api/generate/music', () => {
       new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
     );
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }) as any);
     expect(res.status).toBe(402);
     const data = await res.json();
@@ -106,9 +115,12 @@ describe('POST /api/generate/music', () => {
     vi.mocked(SunoClient).mockImplementation(function () {
       return {
         createMusic: vi.fn().mockRejectedValue(new Error('Suno API down')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }) as any);
     expect(res.status).toBe(500);
     const data = await res.json();
@@ -116,6 +128,7 @@ describe('POST /api/generate/music', () => {
   });
 
   it('returns 201 on successful music generation', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }) as any);
     expect(res.status).toBe(201);
     const data = await res.json();

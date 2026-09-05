@@ -27,6 +27,7 @@ describe('POST /api/generate/refund', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 2, resetAt: Date.now() + 60000 });
@@ -39,6 +40,7 @@ describe('POST /api/generate/refund', () => {
       response: new NextResponse('Unauthorized', { status: 401 }),
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
     expect(res.status).toBe(401);
   });
@@ -46,6 +48,7 @@ describe('POST /api/generate/refund', () => {
   it('returns 429 when rate limited', async () => {
     vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
     expect(res.status).toBe(429);
   });
@@ -56,6 +59,7 @@ describe('POST /api/generate/refund', () => {
       body: 'not json',
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(req as any);
     expect(res.status).toBe(400);
     const data = await res.json();
@@ -63,6 +67,7 @@ describe('POST /api/generate/refund', () => {
   });
 
   it('returns 400 when usageId is missing', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({}) as any);
     expect(res.status).toBe(400);
     const data = await res.json();
@@ -72,6 +77,7 @@ describe('POST /api/generate/refund', () => {
   it('returns 500 when refund fails', async () => {
     vi.mocked(refundTokens).mockRejectedValue(new Error('Refund failed'));
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
     expect(res.status).toBe(500);
     const data = await res.json();
@@ -79,6 +85,7 @@ describe('POST /api/generate/refund', () => {
   });
 
   it('returns 200 on successful refund', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
     expect(res.status).toBe(200);
     const data = await res.json();

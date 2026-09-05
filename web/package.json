@@ -39,6 +39,7 @@
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "posthog-js": "^1.426.2",
     "stripe": "^20.4.0",
     "svix": "^1.86.0",
     "zod": "^4.3.6",

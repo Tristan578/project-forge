@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
+import posthog from 'posthog-js';
 
 interface NewProjectDialogProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export function NewProjectDialog({ isOpen, onClose, onCreate }: NewProjectDialog
       if (err) {
         setError(err);
       } else {
+        if (posthog.__loaded) posthog.capture('project_created');
         setName('My Game');
         setError(null);
         onClose();

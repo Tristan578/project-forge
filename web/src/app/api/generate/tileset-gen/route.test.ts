@@ -34,6 +34,7 @@ describe('POST /api/generate/tileset-gen', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
@@ -41,7 +42,9 @@ describe('POST /api/generate/tileset-gen', () => {
     vi.mocked(SpriteClient).mockImplementation(function () {
       return {
         generateTileset: vi.fn().mockResolvedValue({ taskId: 'task-1', status: 'pending' }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
   });
 
@@ -51,6 +54,7 @@ describe('POST /api/generate/tileset-gen', () => {
       response: new NextResponse('Unauthorized', { status: 401 }),
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'grass tileset', tileSize: 32 }) as any);
     expect(res.status).toBe(401);
   });
@@ -58,6 +62,7 @@ describe('POST /api/generate/tileset-gen', () => {
   it('returns 429 when rate limited', async () => {
     vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'grass tileset', tileSize: 32 }) as any);
     expect(res.status).toBe(429);
   });
@@ -68,6 +73,7 @@ describe('POST /api/generate/tileset-gen', () => {
       body: 'not json',
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(req as any);
     expect(res.status).toBe(400);
     const data = await res.json();
@@ -75,6 +81,7 @@ describe('POST /api/generate/tileset-gen', () => {
   });
 
   it('returns 422 for short prompt', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'ab', tileSize: 32 }) as any);
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -86,6 +93,7 @@ describe('POST /api/generate/tileset-gen', () => {
       new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
     );
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'grass tileset', tileSize: 32 }) as any);
     expect(res.status).toBe(402);
     const data = await res.json();
@@ -96,9 +104,12 @@ describe('POST /api/generate/tileset-gen', () => {
     vi.mocked(SpriteClient).mockImplementation(function () {
       return {
         generateTileset: vi.fn().mockRejectedValue(new Error('Replicate down')),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'grass tileset', tileSize: 32 }) as any);
     expect(res.status).toBe(500);
     const data = await res.json();
@@ -106,6 +117,7 @@ describe('POST /api/generate/tileset-gen', () => {
   });
 
   it('returns 201 on successful tileset generation', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await POST(makeRequest({ prompt: 'grass tileset', tileSize: 32 }) as any);
     expect(res.status).toBe(201);
     const data = await res.json();

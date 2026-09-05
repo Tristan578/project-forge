@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { X, Globe, Loader2, Check, AlertCircle, Copy, Tag } from 'lucide-react';
 import { usePublishStore } from '@/stores/publishStore';
 import { useEditorStore } from '@/stores/editorStore';
+import posthog from 'posthog-js';
 
 interface PublishDialogProps {
   isOpen: boolean;
@@ -78,6 +79,11 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
     if (!projectId || !title || !slug) return;
     const result = await publishGame(projectId, title, slug, description, tags);
     if (result) {
+      if (posthog.__loaded) {
+        posthog.capture('game_published', {
+          tag_count: tags.length,
+        });
+      }
       setPublishedUrl(result.url);
     }
   }, [projectId, title, slug, description, tags, publishGame]);

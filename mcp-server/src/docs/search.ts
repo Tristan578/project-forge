@@ -18,7 +18,7 @@ export interface SearchResult {
   snippet: string;
 }
 
-interface TermIndex {
+export interface TermIndex {
   /** term → { docPath → frequency } */
   termFreqs: Map<string, Map<string, number>>;
   /** docPath → total term count */

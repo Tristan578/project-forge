@@ -5,11 +5,11 @@ const cspDirectives = [
   // 'unsafe-inline' is required for Clerk's sign-in/sign-up inline scripts in production.
   // Since 'unsafe-eval' is already allowed (for WASM), 'unsafe-inline' does not
   // meaningfully reduce CSP security. The /play/:path* route keeps a strict CSP.
-  `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com`,
+  `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com https://*.posthog.com https://us-assets.i.posthog.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://img.clerk.com",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.clerk.accounts.dev https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai",
+  "connect-src 'self' https://*.clerk.accounts.dev https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai https://us.i.posthog.com",
   "frame-src 'self' https://*.clerk.accounts.dev https://challenges.cloudflare.com",
   "worker-src 'self' blob:",
   "media-src 'self' blob:",
@@ -39,7 +39,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Content-Security-Policy",
-            value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'",
+            value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://*.posthog.com https://us-assets.i.posthog.com; connect-src 'self' https://us.i.posthog.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'",
           },
         ],
       },
