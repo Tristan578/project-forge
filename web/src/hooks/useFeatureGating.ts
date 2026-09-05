@@ -118,6 +118,11 @@ export function invalidateCapabilitiesCache(): void {
 function fetchCapabilities(): Promise<void> {
   if (fetchPromise) return fetchPromise;
 
+  // `no-store`: the route answers `Cache-Control: private, max-age=60`, and a
+  // default-mode fetch right after invalidateCapabilitiesCache() would be
+  // served the PRE-change body from the browser's HTTP cache — then held here
+  // for another CAPABILITIES_TTL_MS. This module is the only cache; the
+  // network request must always reach the route.
   const version = cacheVersion;
   fetchPromise = fetch('/api/capabilities', { cache: 'no-store' })
     .then((res) => {

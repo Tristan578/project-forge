@@ -8,6 +8,10 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 import { waitFor } from '@testing-library/react';
 import { ApiKeyManager } from '../ApiKeyManager';
 
+// A BYOK change must drop the per-user capabilities cache at once (#9725).
+vi.mock('@/hooks/useFeatureGating', () => ({ invalidateCapabilitiesCache: vi.fn() }));
+import { invalidateCapabilitiesCache } from '@/hooks/useFeatureGating';
+
 vi.mock('lucide-react', () => ({
   Key: (props: Record<string, unknown>) => <span data-testid="key-icon" {...props} />,
   Plus: (props: Record<string, unknown>) => <span data-testid="plus-icon" {...props} />,
@@ -152,6 +156,9 @@ describe('ApiKeyManager', () => {
 });
 
 describe('ApiKeyManager retired-provider keys (#9117 / #9522)', () => {
+  // The invalidateCapabilitiesCache mock is module-scoped; its call count
+  // must not leak from one test into the next.
+  beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanup());
 
   it('shows a remove-only row for a stored Suno key and issues DELETE on removal', async () => {
@@ -180,5 +187,70 @@ describe('ApiKeyManager retired-provider keys (#9117 / #9522)', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/keys/suno', { method: 'DELETE' });
       expect(screen.queryByText('(no longer offered)')).toBeNull();
     });
+    expect(vi.mocked(invalidateCapabilitiesCache)).toHaveBeenCalled();
+  });
+
+  // DELETE /api/keys/[provider] answers 403 (stale step-up), 429 or 500 with a
+  // resolved fetch. Removing the row on a non-ok response left the key in
+  // place server-side with nothing on screen, back on the next reload — and
+  // invalidated the capabilities cache as if the key were gone.
+  it('keeps the row, shows the error and leaves the cache alone when DELETE is refused', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/keys' && !init) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ providers: [{ provider: 'suno', configured: true, createdAt: '2026-01-01T00:00:00Z' }] }),
+        });
+      }
+      if (url === '/api/keys/api-key') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ keys: [] }) });
+      }
+      if (url === '/api/keys/suno' && init?.method === 'DELETE') {
+        return Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({ error: 'reverify' }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    global.fetch = fetchMock;
+    render(<ApiKeyManager />);
+    await waitFor(() => {
+      expect(screen.getByText('(no longer offered)')).toBeDefined();
+    });
+    fireEvent.click(screen.getByLabelText('Remove Suno API key'));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/keys/suno', { method: 'DELETE' });
+      expect(screen.getByRole('alert').textContent).toMatch(/Failed to remove suno key/);
+    });
+    expect(screen.getByText('(no longer offered)')).toBeDefined();
+    expect(vi.mocked(invalidateCapabilitiesCache)).not.toHaveBeenCalled();
+  });
+
+  // Same guard on the MCP key list: revoking is a DELETE that can be refused.
+  it('keeps an MCP key row and shows the error when its DELETE is refused', async () => {
+    global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ providers: [] }) });
+      }
+      if (url === '/api/keys/api-key' && !init) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            keys: [{ id: 'key-1', name: 'Key 1', prefix: 'sf_abc', scopes: ['read'], lastUsed: null, createdAt: '2024-01-01' }],
+          }),
+        });
+      }
+      if (url === '/api/keys/api-key/key-1' && init?.method === 'DELETE') {
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    render(<ApiKeyManager />);
+    await waitFor(() => {
+      expect(screen.getByText('Key 1')).toBeDefined();
+    });
+    fireEvent.click(screen.getByLabelText('Revoke key Key 1'));
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toMatch(/Failed to revoke key/);
+    });
+    expect(screen.getByText('Key 1')).toBeDefined();
   });
 });

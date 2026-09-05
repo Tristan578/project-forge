@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { ProviderCapability } from '@/lib/providers/types';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { safeAuth } from '@/lib/auth/safe-auth';
-import { getUserByClerkId } from '@/lib/auth/user-service';
-import { listConfiguredProviders } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import {
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
   CHAT_BACKEND_ENV_VARS,
+  CAPABILITY_REQUIRED_PROVIDERS,
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
   getCapabilityUnavailability,
@@ -43,7 +42,11 @@ const CAPABILITY_KEY_MAP: Record<ProviderCapability, string[]> = {
   sfx: [PLATFORM_KEY_ENV.elevenlabs],
   voice: [PLATFORM_KEY_ENV.elevenlabs],
   music: [PLATFORM_KEY_ENV.suno],
-  sprite: [PLATFORM_KEY_ENV.replicate],
+  // Derived from CAPABILITY_REQUIRED_PROVIDERS: sprite spends BOTH keys (the
+  // default path is DALL-E 3, pixel-art is Replicate SDXL), and this entry
+  // once listed Replicate alone — so a Replicate-only environment was told to
+  // configure the key it already had and never heard of OpenAI.
+  sprite: CAPABILITY_REQUIRED_PROVIDERS.sprite?.map((p) => PLATFORM_KEY_ENV[p]) ?? [PLATFORM_KEY_ENV.replicate],
   bg_removal: [PLATFORM_KEY_ENV.removebg],
 };
 
@@ -119,6 +122,13 @@ export interface CapabilitiesResponse {
 async function resolveByokProviders(clerkId: string | null): Promise<Set<string>> {
   if (!clerkId) return new Set();
   try {
+    // Imported lazily, and only for a signed-in caller: these modules pull in
+    // the DB client and key encryption, whose configuration an anonymous
+    // (E2E, preview, status-page) request has no business depending on.
+    const [{ getUserByClerkId }, { listConfiguredProviders }] = await Promise.all([
+      import('@/lib/auth/user-service'),
+      import('@/lib/keys/resolver'),
+    ]);
     const user = await getUserByClerkId(clerkId);
     if (!user) return new Set();
     const rows = await listConfiguredProviders(user.id);
@@ -126,6 +136,22 @@ async function resolveByokProviders(clerkId: string | null): Promise<Set<string>
   } catch (err) {
     captureException(err, { route: '/api/capabilities', action: 'byok_lookup' });
     return new Set();
+  }
+}
+
+/**
+ * The caller's Clerk id, or null. `safeAuth()` already returns null when Clerk
+ * is not configured; this additionally survives Clerk being configured but
+ * this route being reached outside `clerkMiddleware` (the E2E server), where
+ * `auth()` throws. Availability must never 500 on an auth hiccup — the body
+ * degrades to platform-only, which is what an anonymous caller gets anyway.
+ */
+async function resolveCallerId(): Promise<string | null> {
+  try {
+    return (await safeAuth()).userId;
+  } catch (err) {
+    captureException(err, { route: '/api/capabilities', action: 'auth' });
+    return null;
   }
 }
 
@@ -139,10 +165,15 @@ async function resolveByokProviders(clerkId: string | null): Promise<Set<string>
  * never available. Secrets are checked server-side and never exposed.
  */
 export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
-  const limited = await rateLimitPublicRoute(req, 'capabilities', 30, 60_000);
+  // 120/min per IP, up from 30 (#9725): since the generation dialogs and the
+  // Asset panel / Audio inspector entry points read this route, every editor
+  // page load costs one request, and the previous ceiling 429'd the E2E runner
+  // (and would 429 a shared-egress classroom). The body is cheap, cached
+  // client-side for CAPABILITIES_TTL_MS, and carries no secrets.
+  const limited = await rateLimitPublicRoute(req, 'capabilities', 120, 60_000);
   if (limited) return limited as NextResponse<CapabilitiesResponse>;
 
-  const { userId } = await safeAuth();
+  const userId = await resolveCallerId();
   const byokProviders = await resolveByokProviders(userId);
 
   const capabilities: CapabilityStatus[] = PROVIDER_CAPABILITIES.map((cap) => {
@@ -159,11 +190,30 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     }
 
     const envVars = CAPABILITY_KEY_MAP[cap];
-    // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
-    const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
-    const platformAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
-    const byokAvailable = byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
-    const isAvailable = platformAvailable || byokAvailable;
+    const required = CAPABILITY_REQUIRED_PROVIDERS[cap];
+    let isAvailable: boolean;
+    /** The env vars whose providers the user could still configure. */
+    let missingEnvVars: string[];
+    if (required) {
+      // A capability that spends more than one key is available only when
+      // EVERY one of them is present, otherwise its default request 500s.
+      // `resolveApiKey` resolves each provider on its own, BYOK first, so the
+      // sources OR per provider: a user's own OpenAI key on a Replicate-only
+      // deployment can run both sprite paths. Naming only what is missing
+      // is what keeps the hint from telling a Replicate-only environment to
+      // "Configure Replicate" (the key it already has).
+      const missing = required.filter(
+        (provider) => !process.env[PLATFORM_KEY_ENV[provider]] && !byokProviders.has(provider),
+      );
+      isAvailable = missing.length === 0;
+      missingEnvVars = missing.map((provider) => PLATFORM_KEY_ENV[provider]);
+    } else {
+      // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
+      const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
+      const platformAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
+      isAvailable = platformAvailable || byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
+      missingEnvVars = envVars;
+    }
 
     const status: CapabilityStatus = {
       capability: cap,
@@ -172,13 +222,17 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     };
 
     if (!isAvailable) {
-      // Tell the user which providers they could configure
-      const providerNames = envVars.map(
+      // Tell the user which providers they could configure. For a single-key
+      // capability every listed provider is an alternative (name the first);
+      // for a multi-key one every listed provider is still missing (name all).
+      const providerNames = missingEnvVars.map(
         (envVar) => ENV_VAR_PROVIDER_NAMES[envVar] || 'Unknown Provider'
       );
       const uniqueProviders = [...new Set(providerNames)];
       status.requiredProviders = uniqueProviders;
-      status.hint = `Configure ${uniqueProviders[0]} API key in Settings to enable ${FEATURE_LABELS[cap]}.`;
+      const named = required ? uniqueProviders.join(' and ') : uniqueProviders[0];
+      const plural = required && uniqueProviders.length > 1 ? 'keys' : 'key';
+      status.hint = `Configure ${named} API ${plural} in Settings to enable ${FEATURE_LABELS[cap]}.`;
     }
 
     return status;

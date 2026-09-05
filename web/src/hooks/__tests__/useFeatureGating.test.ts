@@ -407,4 +407,18 @@ describe('capabilities cache freshness (#9725)', () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(second.result.current.loading).toBe(false));
   });
+
+  // The route answers `Cache-Control: private, max-age=60`, so a default-mode
+  // fetch right after invalidateCapabilitiesCache() is satisfied by the
+  // browser's HTTP cache with the PRE-save body — which then sets fetchedAt
+  // and is held for another CAPABILITIES_TTL_MS. The module already memoizes
+  // for 60s; the network request itself must bypass the HTTP cache. jsdom
+  // mocks fetch, so the only observable here is the init the hook passes.
+  it('bypasses the browser HTTP cache so an invalidation is not served the stale body', async () => {
+    const fetchSpy = okFetch();
+    const hook = renderHook(() => useCapabilities());
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith('/api/capabilities', expect.objectContaining({ cache: 'no-store' }));
+  });
 });

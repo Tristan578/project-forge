@@ -20,10 +20,12 @@ import {
   buildPlan,
   runVerification,
   formatTable,
+  summarize,
   isMainModule,
   PROVIDER_PROBES,
   GATEWAY_PROBE,
   type PlanRow,
+  type ProbeResult,
 } from '../verify-platform-generation.ts';
 
 /** First row per capability (sprite has two - see the dedicated test). */
@@ -249,6 +251,50 @@ describe('runVerification', () => {
     const bg = results.find((r) => r.capability === 'bg_removal');
     expect(bg?.status).toBe('fail');
     expect(bg?.detail).toContain('ECONNRESET');
+  });
+});
+
+// The summary and the exit code used to live inside the `isMainModule` block,
+// where nothing could pin them. Three properties the report depends on:
+// sprite's two rows are ONE offered capability; one `missing` row keeps a
+// capability out of `verified`; and `missing` — not only `fail` — is a
+// non-zero exit, because an unset platform key is exactly what the script
+// exists to catch.
+describe('summarize', () => {
+  const row = (capability: ProbeResult['capability'], provider: string, status: ProbeResult['status']): ProbeResult => ({
+    capability,
+    provider,
+    route: status === 'unavailable' ? 'unavailable' : 'platform-key',
+    status,
+    detail: '',
+  });
+
+  it('counts a two-row capability (sprite) once, verified only when both rows pass', () => {
+    const summary = summarize([
+      row('sprite', 'replicate', 'pass'),
+      row('sprite', 'openai', 'pass'),
+      row('model3d', 'meshy', 'pass'),
+    ]);
+    expect(summary).toEqual({ offered: 2, verified: 2, unavailable: 0, failing: 0 });
+  });
+
+  it('does not count a capability with one missing row as verified, and fails the run', () => {
+    const summary = summarize([
+      row('sprite', 'replicate', 'pass'),
+      row('sprite', 'openai', 'missing'),
+      row('model3d', 'meshy', 'pass'),
+    ]);
+    expect(summary).toEqual({ offered: 2, verified: 1, unavailable: 0, failing: 1 });
+  });
+
+  it('keeps an unavailable capability out of offered, and counts fail and missing as failing', () => {
+    const summary = summarize([
+      row('music', 'suno', 'unavailable'),
+      row('sfx', 'elevenlabs', 'fail'),
+      row('voice', 'elevenlabs', 'missing'),
+      row('texture', 'meshy', 'pass'),
+    ]);
+    expect(summary).toEqual({ offered: 3, verified: 1, unavailable: 1, failing: 2 });
   });
 });
 

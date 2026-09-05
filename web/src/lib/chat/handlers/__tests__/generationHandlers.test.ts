@@ -668,9 +668,12 @@ describe('generationHandlers', () => {
       expect(mockAddJob).not.toHaveBeenCalled();
     });
 
-    it('still rejects malformed arguments ahead of the gate', async () => {
+    it('still rejects malformed arguments ahead of the gate, with the validation message', async () => {
       const { result } = await invoke('generate_music', { prompt: '' });
       expect(result.success).toBe(false);
+      // The VALIDATION error, not the gate's reason: proves parseArgs runs first.
+      expect(result.error).not.toMatch(/not available yet/i);
+      expect(result.error).toMatch(/prompt|argument|invalid/i);
       expect(mockFetch).not.toHaveBeenCalled();
     });
   });

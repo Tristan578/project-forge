@@ -46,6 +46,7 @@ import {
   PLATFORM_KEY_CONSOLE_URL,
   GATEWAY_KEY_ENV,
   GATEWAY_CAPABILITIES,
+  CAPABILITY_REQUIRED_PROVIDERS,
   getCapabilityUnavailability,
   type ProviderCapability,
   type PlatformKeyProvider,
@@ -146,18 +147,6 @@ export const GATEWAY_PROBE: Probe = {
 
 const GATEWAY_PROVIDER = 'vercel-gateway';
 
-/**
- * Capabilities whose platform path resolves MORE than the provider in
- * DIRECT_CAPABILITY_PROVIDER. `sprite`: `/api/generate/sprite` picks the
- * provider per request - `provider: 'auto'` (the dialog's and the chat tool's
- * default) resolves DALL-E 3 on OpenAI for every style except pixel-art, and
- * Replicate (SDXL) for pixel-art/sdxl - so a Replicate-only environment still
- * 500s on the default sprite path. Both keys are required for the capability
- * to be usable (#9725 review, lesson 1).
- */
-const ADDITIONAL_PLATFORM_PROVIDERS: Partial<Record<ProviderCapability, PlatformKeyProvider[]>> = {
-  sprite: ['openai'],
-};
 
 /**
  * Decide the route and configuration state of every capability from the
@@ -200,10 +189,10 @@ export function buildPlan(env: Readonly<Record<string, string | undefined>>): Pl
 
     // One row per provider the capability's platform path can resolve - a
     // capability that spends more than one key needs every one of them.
-    const providers: PlatformKeyProvider[] = [
-      provider as PlatformKeyProvider,
-      ...(ADDITIONAL_PLATFORM_PROVIDERS[capability] ?? []),
-    ];
+    // One row per key the capability's platform path can resolve — shared with
+    // /api/capabilities through CAPABILITY_REQUIRED_PROVIDERS so the two agree.
+    const providers: readonly PlatformKeyProvider[] =
+      CAPABILITY_REQUIRED_PROVIDERS[capability] ?? [provider as PlatformKeyProvider];
     return providers.map((platformProvider): PlanRow => {
       const envVar = PLATFORM_KEY_ENV[platformProvider];
       return {
@@ -309,6 +298,38 @@ export function formatTable(results: ProbeResult[]): string {
   return [line(header), line(widths.map((w) => '-'.repeat(w))), ...rowsOut.map(line)].join('\n');
 }
 
+export interface Summary {
+  /** Capabilities not declared unavailable (sprite's two rows count once). */
+  offered: number;
+  /** Offered capabilities whose EVERY row passed. */
+  verified: number;
+  /** Capabilities declared unavailable in code. */
+  unavailable: number;
+  /** Rows that failed or whose key is missing — any of these is a non-zero exit. */
+  failing: number;
+}
+
+/**
+ * Count CAPABILITIES, not rows: a capability with two keys (sprite) is one
+ * capability, verified only when every one of its rows passed, and `missing`
+ * counts as failing because an unset platform key is exactly what this
+ * script exists to catch. Pure, so the exit-code decision is testable.
+ */
+export function summarize(results: ProbeResult[]): Summary {
+  const byCapability = new Map<string, ProbeResult[]>();
+  for (const r of results) byCapability.set(r.capability, [...(byCapability.get(r.capability) ?? []), r]);
+  const groups = [...byCapability.values()];
+  const offered = groups.filter((rows) => rows.every((r) => r.status !== 'unavailable'));
+  const verified = offered.filter((rows) => rows.every((r) => r.status === 'pass'));
+  const failing = results.filter((r) => r.status === 'fail' || r.status === 'missing');
+  return {
+    offered: offered.length,
+    verified: verified.length,
+    unavailable: groups.length - offered.length,
+    failing: failing.length,
+  };
+}
+
 /** Windows-safe "am I the entry module" check (see provision-billing-meter.ts). */
 export function isMainModule(metaUrl: string, argv1: string | undefined): boolean {
   if (!argv1) return false;
@@ -319,11 +340,10 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const plan = buildPlan(process.env);
   const results = await runVerification(plan);
   console.log(formatTable(results));
-  const failing = results.filter((r) => r.status === 'fail' || r.status === 'missing');
-  const offered = results.filter((r) => r.status !== 'unavailable');
+  const summary = summarize(results);
   console.log(
-    `\n${offered.length - failing.length}/${offered.length} offered capabilities verified; ` +
-      `${results.length - offered.length} declared unavailable.`,
+    `\n${summary.verified}/${summary.offered} offered capabilities verified; ` +
+      `${summary.unavailable} declared unavailable.`,
   );
-  process.exit(failing.length > 0 ? 1 : 0);
+  process.exit(summary.failing > 0 ? 1 : 0);
 }

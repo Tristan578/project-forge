@@ -45,7 +45,7 @@ When adding a **new ECS component**, update these domain-scoped files:
 15. `web/src/components/chat/ToolCallCard.tsx` — Display labels
 16. `mcp-server/manifest/commands.json` — MCP commands. Set `visibility: 'public'` or `'internal'` (mandatory)
 17. `web/src/data/commands.json` — **COPY of #16** (keep in sync; `apps/docs/data/commands.json` is the third copy)
-17a. If the command spends a generation capability: add it to `COMMAND_CAPABILITY` in `web/src/lib/config/providers.ts` (withholds it from AI tool sets when the capability is declared unavailable — pinned by `web/src/lib/chat/__tests__/toolAvailability.test.ts`), set `capability:` on its `createGenerationHandler` route config, add its `forge.ai.*` method to `AI_METHODS` in `web/src/lib/scripting/channels/aiChannel.ts`, and add a row to the decision table in `docs/guides/platform-keys.md`
+17a. If the command spends a generation capability: add it to `COMMAND_CAPABILITY` in `web/src/lib/config/providers.ts` (withholds it from AI tool sets when the capability is declared unavailable — pinned by `web/src/lib/chat/__tests__/toolAvailability.test.ts`), set `capability:` on its `createGenerationHandler` route config AND add its `route:` string to `ROUTE_CAPABILITY` in the same `providers.ts` (pinned by `web/src/lib/config/__tests__/routeCapability.test.ts`, which fails on any generate route absent from that table), add its `forge.ai.*` method to `AI_METHODS` in `web/src/lib/scripting/channels/aiChannel.ts` (every `AI_METHODS` route must be a `ROUTE_CAPABILITY` key with the same capability — pinned by `aiChannel.test.ts`), and add a row to the decision table in `docs/guides/platform-keys.md`
 18. `TESTING.md` — Manual test cases
 
 ## Game Components (a much shorter list — do NOT run the 18 above)

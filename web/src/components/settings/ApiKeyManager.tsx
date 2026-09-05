@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { invalidateCapabilitiesCache } from '@/hooks/useFeatureGating';
 import { Key, Plus, Trash2, Copy, Check } from 'lucide-react';
+import { invalidateCapabilitiesCache } from '@/hooks/useFeatureGating';
 
 type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno';
 
@@ -70,7 +70,6 @@ export function ApiKeyManager() {
         body: JSON.stringify({ key }),
       });
       if (!res.ok) throw new Error('Failed to save key');
-      invalidateCapabilitiesCache();
 
       setProviderKeys((prev) => [
         ...prev.filter((p) => p.provider !== provider),
@@ -79,6 +78,9 @@ export function ApiKeyManager() {
       setKeyInputs((prev) => ({ ...prev, [provider]: '' }));
       setShowInputs((prev) => ({ ...prev, [provider]: false }));
       setError(null);
+      // The capabilities body is per-user (BYOK); a saved key must show up in
+      // the editor now, not after the client cache ages out (#9725).
+      invalidateCapabilitiesCache();
     } catch {
       setError(`Failed to save ${provider} key. Please try again.`);
     }
@@ -87,9 +89,14 @@ export function ApiKeyManager() {
   const removeKey = async (provider: Provider) => {
     try {
       const res = await fetch(`/api/keys/${provider}`, { method: 'DELETE' });
+      // DELETE answers 403 (stale step-up re-verification), 429 or 500 with a
+      // RESOLVED fetch: without this guard the row vanished, nothing was
+      // shown, the key was back on reload, and the capabilities cache was
+      // dropped as if the key were gone.
       if (!res.ok) throw new Error('Failed to remove key');
-      invalidateCapabilitiesCache();
       setProviderKeys((prev) => prev.filter((p) => p.provider !== provider));
+      setError(null);
+      invalidateCapabilitiesCache();
     } catch {
       setError(`Failed to remove ${provider} key.`);
     }
@@ -117,8 +124,11 @@ export function ApiKeyManager() {
 
   const revokeMcpKey = async (id: string) => {
     try {
-      await fetch(`/api/keys/api-key/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/keys/api-key/${id}`, { method: 'DELETE' });
+      // Same shape as removeKey: a refused DELETE must not drop the row.
+      if (!res.ok) throw new Error('Failed to revoke key');
       setMcpKeys((prev) => prev.filter((k) => k.id !== id));
+      setError(null);
     } catch {
       setError('Failed to revoke key.');
     }
