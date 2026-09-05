@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { ProviderCapability } from '@/lib/providers/types';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { safeAuth } from '@/lib/auth/safe-auth';
-import { getUserByClerkId } from '@/lib/auth/user-service';
-import { listConfiguredProviders } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import {
   PLATFORM_KEY_ENV,
@@ -119,6 +117,13 @@ export interface CapabilitiesResponse {
 async function resolveByokProviders(clerkId: string | null): Promise<Set<string>> {
   if (!clerkId) return new Set();
   try {
+    // Imported lazily, and only for a signed-in caller: these modules pull in
+    // the DB client and key encryption, whose configuration an anonymous
+    // (E2E, preview, status-page) request has no business depending on.
+    const [{ getUserByClerkId }, { listConfiguredProviders }] = await Promise.all([
+      import('@/lib/auth/user-service'),
+      import('@/lib/keys/resolver'),
+    ]);
     const user = await getUserByClerkId(clerkId);
     if (!user) return new Set();
     const rows = await listConfiguredProviders(user.id);
@@ -126,6 +131,22 @@ async function resolveByokProviders(clerkId: string | null): Promise<Set<string>
   } catch (err) {
     captureException(err, { route: '/api/capabilities', action: 'byok_lookup' });
     return new Set();
+  }
+}
+
+/**
+ * The caller's Clerk id, or null. `safeAuth()` already returns null when Clerk
+ * is not configured; this additionally survives Clerk being configured but
+ * this route being reached outside `clerkMiddleware` (the E2E server), where
+ * `auth()` throws. Availability must never 500 on an auth hiccup — the body
+ * degrades to platform-only, which is what an anonymous caller gets anyway.
+ */
+async function resolveCallerId(): Promise<string | null> {
+  try {
+    return (await safeAuth()).userId;
+  } catch (err) {
+    captureException(err, { route: '/api/capabilities', action: 'auth' });
+    return null;
   }
 }
 
@@ -142,7 +163,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
   const limited = await rateLimitPublicRoute(req, 'capabilities', 30, 60_000);
   if (limited) return limited as NextResponse<CapabilitiesResponse>;
 
-  const { userId } = await safeAuth();
+  const userId = await resolveCallerId();
   const byokProviders = await resolveByokProviders(userId);
 
   const capabilities: CapabilityStatus[] = PROVIDER_CAPABILITIES.map((cap) => {

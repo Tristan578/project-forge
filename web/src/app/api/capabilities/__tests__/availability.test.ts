@@ -123,6 +123,18 @@ describe('GET /api/capabilities availability', () => {
     expect(signedIn.res.headers.get('Cache-Control')).not.toMatch(/public|s-maxage/);
   });
 
+  // E2E servers reach this route with Clerk keys present but outside
+  // clerkMiddleware, where `auth()` throws; the shard that hit it saw a 500
+  // instead of the anonymous body (#9725 CI). Availability never 500s on auth.
+  it('degrades to the anonymous body when safeAuth itself throws', async () => {
+    mockAuth.mockRejectedValue(new Error('Clerk: auth() was called but clerkMiddleware() was not detected'));
+    vi.stubEnv('PLATFORM_MESHY_KEY', 'msy_fake');
+    const { body, res } = await call();
+    expect(res.status).toBe(200);
+    expect(status(body, 'model3d').available).toBe(true);
+    expect(mockByok).not.toHaveBeenCalled();
+  });
+
   it('falls back to platform-only availability when the BYOK lookup throws', async () => {
     signedInWithByok([]);
     mockByok.mockRejectedValue(new Error('db down'));
