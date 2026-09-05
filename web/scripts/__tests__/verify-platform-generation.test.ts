@@ -140,8 +140,13 @@ describe('runVerification', () => {
     // One probe per provider, not per capability.
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     const calls = fetchImpl.mock.calls as unknown as Array<[string, RequestInit]>;
-    const meshy = calls.find(([url]) => url.includes('api.meshy.ai'));
-    const eleven = calls.find(([url]) => url.includes('api.elevenlabs.io'));
+    // Exact-host match (not a substring): CodeQL's incomplete-URL-sanitization
+    // rule is right that `includes('api.meshy.ai')` would also accept
+    // `api.meshy.ai.evil.example`, and a probe test should be as strict as
+    // the contract it pins.
+    const hostOf = (url: string) => new URL(url).hostname;
+    const meshy = calls.find(([url]) => hostOf(url) === 'api.meshy.ai');
+    const eleven = calls.find(([url]) => hostOf(url) === 'api.elevenlabs.io');
     // Meshy: https://docs.meshy.ai/en/api/balance — Authorization: Bearer.
     expect(meshy?.[0]).toBe('https://api.meshy.ai/openapi/v1/balance');
     expect((meshy?.[1].headers as Record<string, string>).Authorization).toBe('Bearer msy_secret');

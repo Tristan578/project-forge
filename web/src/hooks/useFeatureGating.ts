@@ -9,7 +9,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ProviderCapability } from '@/lib/providers/types';
 import type { CapabilitiesResponse, CapabilityStatus } from '@/app/api/capabilities/route';
-import { ERROR_TTL_MS } from '@/lib/config/timeouts';
+import { ERROR_TTL_MS, CAPABILITIES_TTL_MS } from '@/lib/config/timeouts';
 
 /** High-level feature identifiers that map to one or more provider capabilities */
 export type FeatureId =
@@ -74,8 +74,10 @@ let fetchPromise: Promise<void> | null = null;
 let subscribers: Array<() => void> = [];
 
 /** TTL for error states — allows retry after 30 seconds (PF-508). Re-exported from @/lib/config/timeouts */
-export { ERROR_TTL_MS } from '@/lib/config/timeouts';
+export { ERROR_TTL_MS, CAPABILITIES_TTL_MS } from '@/lib/config/timeouts';
 let errorCachedAt: number | null = null;
+/** When the current successful body was fetched; it ages out after CAPABILITIES_TTL_MS (#9725). */
+let fetchedAt: number | null = null;
 
 function notifySubscribers(): void {
   for (const cb of subscribers) {
@@ -83,10 +85,31 @@ function notifySubscribers(): void {
   }
 }
 
-/** Check if the cached error state has expired and should be retried. */
-function isErrorExpired(): boolean {
-  if (!cachedState?.error || errorCachedAt === null) return false;
-  return Date.now() - errorCachedAt >= ERROR_TTL_MS;
+/**
+ * Whether the cached state should be refetched on the next mount: an error
+ * older than ERROR_TTL_MS (retry), or a successful body older than
+ * CAPABILITIES_TTL_MS (the body is per-user, so it must not outlive a
+ * sign-out/sign-in by more than the route's own max-age — #9725).
+ */
+function isCacheStale(): boolean {
+  if (!cachedState || cachedState.loading) return false;
+  if (cachedState.error) {
+    return errorCachedAt !== null && Date.now() - errorCachedAt >= ERROR_TTL_MS;
+  }
+  return fetchedAt !== null && Date.now() - fetchedAt >= CAPABILITIES_TTL_MS;
+}
+
+/**
+ * Drop the cached body so the next mount refetches. Call from whatever reacts
+ * to an auth change (sign-in, sign-out, BYOK key saved) so a per-user
+ * availability body never outlives the user it was fetched for.
+ */
+export function invalidateCapabilitiesCache(): void {
+  cachedState = null;
+  fetchPromise = null;
+  fetchedAt = null;
+  errorCachedAt = null;
+  notifySubscribers();
 }
 
 function fetchCapabilities(): Promise<void> {
@@ -105,6 +128,7 @@ function fetchCapabilities(): Promise<void> {
         error: null,
       };
       errorCachedAt = null;
+      fetchedAt = Date.now();
       notifySubscribers();
     })
     .catch((err: unknown) => {
@@ -132,6 +156,7 @@ export function _resetCapabilitiesCache(): void {
   fetchPromise = null;
   subscribers = [];
   errorCachedAt = null;
+  fetchedAt = null;
 }
 
 /**
@@ -158,7 +183,7 @@ export function useFeatureGating(featureId: FeatureId): FeatureGateResult {
     subscribers.push(cb);
 
     // Trigger fetch if not started, or retry if error TTL expired (PF-508)
-    if ((!cachedState && !fetchPromise) || isErrorExpired()) {
+    if ((!cachedState && !fetchPromise) || isCacheStale()) {
       cachedState = {
         capabilities: [],
         available: new Set(),
@@ -225,7 +250,7 @@ export function useCapabilities() {
     subscribers.push(cb);
 
     // Trigger fetch if not started, or retry if error TTL expired (PF-508)
-    if ((!cachedState && !fetchPromise) || isErrorExpired()) {
+    if ((!cachedState && !fetchPromise) || isCacheStale()) {
       cachedState = {
         capabilities: [],
         available: new Set(),
