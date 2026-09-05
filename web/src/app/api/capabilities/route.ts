@@ -161,7 +161,12 @@ async function resolveCallerId(): Promise<string | null> {
  * never available. Secrets are checked server-side and never exposed.
  */
 export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
-  const limited = await rateLimitPublicRoute(req, 'capabilities', 30, 60_000);
+  // 120/min per IP, up from 30 (#9725): since the generation dialogs and the
+  // Asset panel / Audio inspector entry points read this route, every editor
+  // page load costs one request, and the previous ceiling 429'd the E2E runner
+  // (and would 429 a shared-egress classroom). The body is cheap, cached
+  // client-side for CAPABILITIES_TTL_MS, and carries no secrets.
+  const limited = await rateLimitPublicRoute(req, 'capabilities', 120, 60_000);
   if (limited) return limited as NextResponse<CapabilitiesResponse>;
 
   const userId = await resolveCallerId();

@@ -122,6 +122,15 @@ test.describe('Misc Routes @ui', () => {
         (c: { available: boolean }) => !c.available,
       );
       for (const cap of unavailable) {
+        if (cap.unprovisionable) {
+          // Declared unavailable in code (#9117): no key can help, so the entry
+          // carries the user-facing reason and the tracking issue instead of a
+          // provider list.
+          expect(typeof cap.hint).toBe('string');
+          expect(typeof cap.issue).toBe('number');
+          expect(cap.requiredProviders).toBeUndefined();
+          continue;
+        }
         expect(Array.isArray(cap.requiredProviders)).toBe(true);
         expect(cap.requiredProviders.length).toBeGreaterThan(0);
         expect(typeof cap.hint).toBe('string');
