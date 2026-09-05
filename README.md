@@ -1,6 +1,6 @@
 # SpawnForge
 
-**SpawnForge is an open-source, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and 350 MCP commands, enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
+**SpawnForge is an open-source, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and a 351-command MCP manifest (measured 2026-09-05 — which of those commands work today through which entry point is recorded in the [capability matrix](docs/capability-matrix.md)), enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
 
 [![CI](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml)
 [![CD](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml)
@@ -12,7 +12,7 @@
 ## Why SpawnForge
 
 - **Browser-native** — No download, no IDE setup. Open a URL and start building 2D or 3D games.
-- **AI-first** — 25+ AI modules and 350 MCP commands let LLMs and agents drive the full editor. Describe a scene in plain text and watch it materialize.
+- **AI-first** — 25+ AI modules and 351 MCP commands let the in-app AI drive the editor; external MCP agents can attach in local builds (production access is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722)). Describe a scene in plain text and watch it materialize. Which capabilities are proven, unverified or unavailable per entry point: [capability matrix](docs/capability-matrix.md).
 - **Real engine** — Bevy ECS compiled to WebAssembly, WebGPU rendering (WebGL2 fallback), Rapier physics, spatial audio, GPU particles, skeletal animation. Not a toy.
 - **One command interface** — The visual editor, AI chat, and external MCP agents all call the same `handle_command()` JSON API. There is no separate "AI mode."
 - **Publish instantly** — One-click publish to a shareable URL. Export as a standalone ZIP with PWA support.
@@ -21,7 +21,7 @@
 
 | Metric | Value |
 |--------|-------|
-| MCP commands | 350 across 41 categories |
+| MCP commands | 351 across 41 categories (282 public), measured 2026-09-05 with `jq '.commands \| length' mcp-server/manifest/commands.json` — per-category status in the [capability matrix](docs/capability-matrix.md) |
 | Visual scripting nodes | 73 across 10 categories |
 | Material presets | 56 across 9 categories |
 | AI modules | 25+ (chat, generation, asset creation) |
@@ -30,7 +30,7 @@
 | Rendering | WebGPU primary, WebGL2 fallback |
 | Engine | Bevy 0.18, Rust/WASM |
 
-An open-source, AI-native 2D/3D game engine for the browser. Every capability — scene creation, materials, physics, scripting, audio, particles, tilemaps, animation, export — is exposed as a JSON command, making the entire editor fully controllable by LLMs and autonomous agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Build games by conversation, by code, or by hand.
+An open-source, AI-native 2D/3D game engine for the browser. Editor operations are JSON commands through `handle_command()`, and 351 of them (282 public) are published in the MCP manifest for the [Model Context Protocol](https://modelcontextprotocol.io/). Registration is not the same as a working feature: which capabilities are proven, implemented but unverified, partial or unavailable through the editor UI, the in-app AI, game scripts and external MCP is recorded per capability in [docs/capability-matrix.md](docs/capability-matrix.md). As of 2026-09-05, external MCP agents can attach only to local builds ([#9722](https://github.com/Tristan578/project-forge/issues/9722)) and platform-key asset generation is unavailable in production ([#9117](https://github.com/Tristan578/project-forge/issues/9117)). Build games by conversation, by code, or by hand — within those limits.
 
 Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a React-based visual editor.
 
@@ -50,7 +50,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
 - **AI Asset Generation** — Generate 3D models, textures, sound effects, voice lines, and music via 5 provider integrations (Meshy, ElevenLabs, Suno, DALL-E, Stable Diffusion)
-- **MCP Server** — 350 commands across 41 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required. See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
+- **MCP Server** — 351 commands across 41 categories (282 public). In a local build, any MCP-compatible agent can attach to the editor and create scenes, configure materials, set up physics, write game scripts, and export finished games without touching the UI; attaching to production is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722). Per-category status for MCP and the other entry points: [capability matrix](docs/capability-matrix.md). See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
@@ -112,7 +112,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Architecture
 
 ```
-MCP Server (350 commands, 41 categories)       AI agents + LLM tool use
+MCP Server (351 commands, 41 categories)       AI agents + LLM tool use
     |  JSON commands
 React Shell (Next.js 16, Zustand, Tailwind)    Visual editor UI
     |  JSON events via wasm-bindgen
@@ -223,7 +223,7 @@ project-forge/
 │   ├── public/              # Static assets + WASM binaries (generated)
 │   └── package.json
 ├── mcp-server/              # MCP command manifest + tools
-│   ├── manifest/commands.json  # 350 commands across 41 categories
+│   ├── manifest/commands.json  # 351 commands across 41 categories (see docs/capability-matrix.md)
 │   └── src/
 ├── docs/                    # User-facing documentation (human + AI readable)
 │   ├── getting-started/     # Installation, first scene, editor overview

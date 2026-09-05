@@ -2,7 +2,19 @@
 
 This document provides an honest accounting of features that are partially implemented or have genuine technical constraints. For unbuilt roadmap features, see the taskboard and the GitHub milestones. Note: Editor Collaboration (Phase 24) and Multiplayer Networking (Phase 25) stubs were removed in PF-141/PF-142 — these will be rebuilt from scratch when prioritized.
 
-> **Last updated:** 2026-03-30
+> **Last updated:** 2026-09-05
+
+## Launch-readiness gaps (verified 2026-09-05)
+
+The per-entry-point status of every capability — editor UI, in-app AI, game scripts, external MCP — lives in [capability-matrix.md](./capability-matrix.md) (rendered at docs.spawnforge.ai/capability-matrix and checked by `web/src/lib/config/__tests__/capabilityMatrix.test.ts`). The rows below are the gaps that matrix records which the rest of this file does not; each stays `unavailable` or `partial` there until its issue closes.
+
+| Gap | Effect today | Tracking |
+|-----|--------------|----------|
+| No `PLATFORM_*` generation keys in production | Platform-key generation — 3D models, textures, sound effects, voice, sprites, images, background removal — fails for platform users. Users who add their own Meshy, Hyper3D or ElevenLabs key under Settings → API Keys are unaffected; there is no BYOK path for OpenAI, Replicate or remove.bg, so images, sprites and background removal have no working path at all. | [#9117](https://github.com/Tristan578/project-forge/issues/9117) |
+| Music generation cannot be provisioned | `PLATFORM_SUNO_KEY` cannot be obtained and BYOK Suno keys cannot be either, so music is unavailable through every entry point. [PR #9725](https://github.com/Tristan578/project-forge/pull/9725) refuses `generate_music` before any token is deducted, withholds the tool from the model and hides the dialog entry points. | [#9522](https://github.com/Tristan578/project-forge/issues/9522) |
+| External MCP is local-only | `NEXT_PUBLIC_MCP_BRIDGE` is absent from the production build, so `mcpBridgeEnabled()` is false and no external MCP client can attach to the production editor. A local build, or a production build made with the flag, can attach after the in-tab consent prompt. | [#9722](https://github.com/Tristan578/project-forge/issues/9722) |
+| Phantom script commands | 16 names in `SCRIPT_ALLOWED_COMMANDS` have no engine arm: the velocity setters, `set_music_intensity` / `set_music_stems`, all four sprite-animation calls, the four `camera_*` names, `stop_skeletal_animation2d`, `set_ik_target2d` and `vibrate`. A script calling one gets no error and no effect. The adaptive-music intensity and stem control listed under Advanced Audio below is reachable from the mixer, not from `forge.audio.setMusicIntensity` / `setMusicStems`. | [#9284](https://github.com/Tristan578/project-forge/issues/9284) |
+| Public MCP reference is down | docs.spawnforge.ai/mcp returns 500 because the commands manifest is not traced into the serverless function. Fix in progress. | [#9718](https://github.com/Tristan578/project-forge/issues/9718) |
 
 ## 2D Subsystem
 
