@@ -1654,8 +1654,13 @@ const MAX_CONTEXT_TOKENS = 150000;
 
 /**
  * Build API messages with context window truncation.
- * Drops oldest messages (preserving tool_use/tool_result pairs) to fit within budget.
- * Inserts a "[Earlier conversation summarized]" marker when messages are dropped.
+ * Drops oldest messages to fit within budget and inserts a
+ * "[Earlier conversation summarized]" marker when messages are dropped.
+ *
+ * The input comes from buildApiMessages, which emits plain text (plus image
+ * blocks for user uploads). tool_use/tool_result turns exist only inside the
+ * per-turn agent loop (appendToolTurn) and never reach this function, so there
+ * are no block pairs to keep together here.
  */
 export function buildTruncatedApiMessages(
   messages: ChatMessage[],
@@ -1677,27 +1682,17 @@ export function buildTruncatedApiMessages(
   // If everything fits, return as-is
   if (totalTokens <= budget) return allApiMessages;
 
-  // Drop oldest messages, but preserve tool_use/tool_result pairs
-  // Always keep the last message (the current user message)
+  // Drop oldest messages from the front until we fit.
+  // Always keep the last message (the current user message).
   let droppedCount = 0;
   let droppedTokens = 0;
-
-  // Drop from the front until we fit (never drop the last message)
   let currentTokens = totalTokens;
   let i = 0;
   while (currentTokens > budget && i < allApiMessages.length - 1) {
-    // If this is a tool_use message, also drop its paired tool_result
-    if (isToolUseMessage(allApiMessages[i]) && i + 1 < allApiMessages.length && isToolResultMessage(allApiMessages[i + 1])) {
-      currentTokens -= tokenCounts[i] + tokenCounts[i + 1];
-      droppedTokens += tokenCounts[i] + tokenCounts[i + 1];
-      droppedCount += 2;
-      i += 2;
-    } else {
-      currentTokens -= tokenCounts[i];
-      droppedTokens += tokenCounts[i];
-      droppedCount += 1;
-      i += 1;
-    }
+    currentTokens -= tokenCounts[i];
+    droppedTokens += tokenCounts[i];
+    droppedCount += 1;
+    i += 1;
   }
 
   if (droppedCount === 0) return allApiMessages;
@@ -1734,16 +1729,4 @@ export function buildTruncatedApiMessages(
 
   // Fallback: just prepend the summary as a user message
   return [{ role: 'user' as const, content: summaryContent }, ...remaining];
-}
-
-function isToolUseMessage(msg: { role: string; content: unknown }): boolean {
-  if (msg.role !== 'assistant') return false;
-  if (!Array.isArray(msg.content)) return false;
-  return (msg.content as Array<{ type?: string }>).some((b) => b.type === 'tool_use');
-}
-
-function isToolResultMessage(msg: { role: string; content: unknown }): boolean {
-  if (msg.role !== 'user') return false;
-  if (!Array.isArray(msg.content)) return false;
-  return (msg.content as Array<{ type?: string }>).some((b) => b.type === 'tool_result');
 }

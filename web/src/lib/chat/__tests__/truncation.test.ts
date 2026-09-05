@@ -49,14 +49,18 @@ describe('buildTruncatedApiMessages', () => {
     expect(finalMsg).not.toBeUndefined();
   });
 
-  it('preserves tool_use/tool_result pairs (drops both together)', () => {
-    // Create enough messages to force truncation, including an assistant
-    // message with tool calls that will produce tool_use/tool_result API pairs
+  it('drops an assistant message that carried toolCalls like any other message', () => {
+    // buildApiMessages emits assistant turns as plain text — a ChatMessage's toolCalls
+    // metadata never becomes tool_use/tool_result content blocks — so truncation has no
+    // pairs to keep together and drops from the front one message at a time. The
+    // previous version of this test looked for orphaned tool_result blocks in output
+    // that can never contain any, so it could not fail.
     const longText = 'a'.repeat(8000); // ~2000 tokens each
+    const toolTurnText = 'b'.repeat(8000);
     const assistantWithTools: ChatMessage = {
       id: 'msg_tool_asst',
       role: 'assistant',
-      content: longText,
+      content: toolTurnText,
       toolCalls: [
         { id: 'tc_1', name: 'spawn_entity', input: { type: 'cube' }, status: 'success', undoable: true, result: 'ok' },
       ],
@@ -64,41 +68,24 @@ describe('buildTruncatedApiMessages', () => {
     };
 
     const messages: ChatMessage[] = [
-      makeMessage('user', longText),         // ~2000 tokens — should be dropped
-      assistantWithTools,                     // ~2000 tokens — should be dropped
-      makeMessage('user', longText),         // ~2000 tokens — should be dropped
-      makeMessage('assistant', longText),    // ~2000 tokens
-      makeMessage('user', 'final question'), // keep this
+      makeMessage('user', longText),
+      assistantWithTools,
+      makeMessage('user', longText),
+      makeMessage('assistant', longText),
+      makeMessage('user', 'final question'),
     ];
 
-    // Budget fits ~3000 tokens (after overhead), so the first messages must be dropped
+    // Budget fits ~4000 tokens, so at least the first two messages must go.
     const result = buildTruncatedApiMessages(messages, 5000, 1000);
 
-    // The final user message must always be present
-    const finalMsg = result.find(
-      (m) => typeof m.content === 'string' && (m.content === 'final question' || m.content.includes('final question'))
-    );
-    expect(finalMsg).not.toBeUndefined();
-
-    // Dropped messages should have produced a summary marker
-    const hasSummary = result.some(
-      (m) => typeof m.content === 'string' && m.content.includes('Earlier conversation summarized')
-    );
-    expect(hasSummary).toBe(true);
-
-    // Verify no orphaned tool_result without its preceding tool_use
-    for (let idx = 0; idx < result.length; idx++) {
-      const msg = result[idx];
-      if (Array.isArray(msg.content)) {
-        const hasToolResult = (msg.content as Array<{ type?: string }>).some(b => b.type === 'tool_result');
-        if (hasToolResult) {
-          // Must have a preceding assistant message with tool_use
-          const prev = result[idx - 1];
-          expect(prev).toBeDefined();
-          expect(prev.role).toBe('assistant');
-        }
-      }
-    }
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.every((m) => typeof m.content === 'string')).toBe(true);
+    expect(result.some((m) => m.content === toolTurnText)).toBe(false);
+    expect(
+      result.some((m) => typeof m.content === 'string' && m.content.includes('Earlier conversation summarized')),
+    ).toBe(true);
+    const last = result[result.length - 1];
+    expect(typeof last.content === 'string' && last.content.includes('final question')).toBe(true);
   });
 
   it('always keeps the last message', () => {
