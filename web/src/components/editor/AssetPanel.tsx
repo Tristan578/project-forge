@@ -86,7 +86,16 @@ export const AssetPanel = memo(function AssetPanel() {
   const dragCounterRef = useRef(0);
 
   const tier = useUserStore((s) => s.tier);
-  const musicGate = useGenerationGate('music-generation');
+  // #9117: every AI-menu item is gated by its own capability (a fixed set, so
+  // one hook call each), never just music — the next UNAVAILABLE_CAPABILITIES
+  // entry must disable its item here, not drop the user into a dead dialog.
+  const gates = {
+    'generate-model': useGenerationGate('model-generation'),
+    'generate-texture': useGenerationGate('texture-generation'),
+    'generate-sound': useGenerationGate('sfx-generation'),
+    'generate-music': useGenerationGate('music-generation'),
+    'generate-skybox': useGenerationGate('texture-generation'),
+  } as const;
 
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const importGltf = useEditorStore((s) => s.importGltf);
@@ -287,7 +296,8 @@ export const AssetPanel = memo(function AssetPanel() {
                   ] as const).map(({ id, label, open }) => {
                     // #9117: an unprovisionable capability is disabled at the
                     // entry point with its reason, like the tier lock below.
-                    const gated = id === 'generate-music' && musicGate.blocked;
+                    const gate = gates[id];
+                    const gated = gate.blocked;
                     const allowed = canAccessPanel(id, tier) && !gated;
                     const required = getRequiredTier(id);
                     return (
@@ -296,7 +306,7 @@ export const AssetPanel = memo(function AssetPanel() {
                         role="menuitem"
                         onClick={() => { if (allowed) { open(true); setShowAiDropdown(false); } }}
                         aria-disabled={!allowed || undefined}
-                        aria-label={gated ? `${label} — ${musicGate.reason ?? 'not available yet'}` : undefined}
+                        aria-label={gated ? `${label} — ${gate.reason ?? 'not available yet'}` : undefined}
                         className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
                           allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
                         }`}
@@ -304,7 +314,7 @@ export const AssetPanel = memo(function AssetPanel() {
                           allowed
                             ? label
                             : gated
-                              ? (musicGate.reason ?? 'Not available yet')
+                              ? (gate.reason ?? 'Not available yet')
                               : `Requires ${required ? TIER_LABELS[required] : ''} tier`
                         }
                       >

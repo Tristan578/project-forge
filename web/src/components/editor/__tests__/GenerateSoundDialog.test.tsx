@@ -55,6 +55,11 @@ describe('GenerateSoundDialog capability gate (#9117)', () => {
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sound-unavailable');
     expect(screen.getByText('Generate').closest('button')).toBeDisabled();
     expect(screen.getByPlaceholderText(/sword clashing/i)).toBeDisabled();
+    // The type selector is never locked by the gate: a user must always be
+    // able to switch back to a type that is still offered.
+    for (const radio of screen.getAllByRole('radio')) expect(radio).not.toBeDisabled();
+    fireEvent.click(screen.getAllByRole('radio')[1]);
+    expect(useGenerationGate).toHaveBeenLastCalledWith('voice-generation');
   });
 });
 

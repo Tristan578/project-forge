@@ -26,15 +26,20 @@ import {
   type PlanRow,
 } from '../verify-platform-generation.ts';
 
+/** First row per capability (sprite has two - see the dedicated test). */
 function rows(env: Record<string, string | undefined>): Record<string, PlanRow> {
-  return Object.fromEntries(buildPlan(env).map((r) => [r.capability, r]));
+  const out: Record<string, PlanRow> = {};
+  for (const r of buildPlan(env)) out[r.capability] ??= r;
+  return out;
 }
 
 describe('buildPlan', () => {
-  it('lists every capability exactly once', () => {
+  it('lists every capability, with one extra row for each additional key sprite needs', () => {
     const plan = buildPlan({});
     const caps = plan.map((r) => r.capability);
-    expect(new Set(caps).size).toBe(caps.length);
+    // sprite appears twice (Replicate + OpenAI); everything else once.
+    expect(caps.filter((c) => c === 'sprite')).toHaveLength(2);
+    expect(new Set(caps).size).toBe(caps.length - 1);
     expect(caps).toEqual(
       expect.arrayContaining(['chat', 'image', 'model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal', 'embedding']),
     );
@@ -65,6 +70,22 @@ describe('buildPlan', () => {
       expect(r[cap].route, cap).toBe('platform-key');
       expect(r[cap].configured, cap).toBe(false);
     }
+  });
+
+  it('reports a gateway-served capability as missing AI_GATEWAY_API_KEY rather than falling back to a direct key', () => {
+    const r = rows({ ANTHROPIC_API_KEY: 'sk-ant', PLATFORM_OPENAI_KEY: 'sk' });
+    for (const cap of ['chat', 'embedding', 'image']) {
+      expect(r[cap].route, cap).toBe('gateway');
+      expect(r[cap].configured, cap).toBe(false);
+      expect(r[cap].envVar, cap).toBe('AI_GATEWAY_API_KEY');
+    }
+  });
+
+  it('requires BOTH Replicate and OpenAI for sprite (the default sprite path is DALL-E 3)', () => {
+    const spriteRows = buildPlan({ PLATFORM_REPLICATE_KEY: 'r8' }).filter((r) => r.capability === 'sprite');
+    expect(spriteRows.map((r) => r.provider).sort()).toEqual(['openai', 'replicate']);
+    expect(spriteRows.find((r) => r.provider === 'replicate')?.configured).toBe(true);
+    expect(spriteRows.find((r) => r.provider === 'openai')?.configured).toBe(false);
   });
 
   it('marks a platform-key capability configured when its provider key is present', () => {
@@ -168,6 +189,16 @@ describe('runVerification', () => {
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://ai-gateway.vercel.sh/v1/credits');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer gw_secret');
+  });
+
+  it('reports the OpenAI half of sprite as missing in a Replicate-only environment', async () => {
+    const fetchImpl = okFetch();
+    const env = { PLATFORM_REPLICATE_KEY: 'r8' };
+    const results = await runVerification(buildPlan(env), { fetchImpl, env });
+    const sprite = results.filter((r) => r.capability === 'sprite');
+    expect(sprite.find((r) => r.provider === 'replicate')?.status).toBe('pass');
+    expect(sprite.find((r) => r.provider === 'openai')?.status).toBe('missing');
+    expect(sprite.find((r) => r.provider === 'openai')?.detail).toContain('PLATFORM_OPENAI_KEY');
   });
 
   it('reports fail with the HTTP status when the provider rejects the key', async () => {

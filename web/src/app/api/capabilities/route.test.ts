@@ -1,4 +1,11 @@
 vi.mock('server-only', () => ({}));
+// The route consults Clerk and the BYOK resolver since #9117; stub them to
+// "anonymous" so this suite asserts the env-var branch by construction, not
+// by whatever Clerk keys happen to be in the shell.
+vi.mock('@/lib/auth/safe-auth', () => ({ safeAuth: vi.fn(async () => ({ userId: null })) }));
+vi.mock('@/lib/auth/user-service', () => ({ getUserByClerkId: vi.fn(async () => null) }));
+vi.mock('@/lib/keys/resolver', () => ({ listConfiguredProviders: vi.fn(async () => []) }));
+vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';

@@ -84,15 +84,16 @@ function setupStore(overrides: {
 describe('AssetPanel music gate (#9117)', () => {
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false });
+    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false }));
   });
 
   it('disables only the Generate Music item, with an Unavailable badge and the reason in its accessible name', () => {
-    vi.mocked(useGenerationGate).mockReturnValue({
-      blocked: true,
-      reason: 'Music generation is not available yet.',
-      loading: false,
-    });
+    // Every menu item asks the gate for its own capability; only music is blocked here.
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'music-generation'
+        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false }
+        : { blocked: false, reason: undefined, loading: false },
+    );
     render(<AssetPanel />);
     fireEvent.click(screen.getByLabelText('AI Generate'));
     const music = screen.getByRole('menuitem', { name: /Generate Music — Music generation is not available yet\./ });
@@ -100,6 +101,22 @@ describe('AssetPanel music gate (#9117)', () => {
     expect(music).toHaveTextContent('Unavailable');
     expect(music).not.toHaveTextContent(/Hobbyist|Creator|Pro/);
     expect(screen.getByRole('menuitem', { name: 'Generate 3D Model' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('gates every item by its own capability — a texture gate disables Texture AND Skybox, nothing else', () => {
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'texture-generation'
+        ? { blocked: true, reason: 'Texture generation is not available yet.', loading: false }
+        : { blocked: false, reason: undefined, loading: false },
+    );
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+    expect(screen.getByRole('menuitem', { name: /Generate Texture — Texture generation is not available yet\./ })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('menuitem', { name: /Generate Skybox — Texture generation is not available yet\./ })).toHaveAttribute('aria-disabled', 'true');
+    for (const name of ['Generate 3D Model', 'Generate Sound', 'Generate Music']) {
+      expect(screen.getByRole('menuitem', { name })).not.toHaveAttribute('aria-disabled');
+    }
+    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false }));
   });
 });
 

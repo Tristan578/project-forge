@@ -8,12 +8,14 @@
  *      — the same tables `resolveApiKey` reads — so the script cannot disagree
  *      with the platform path about which key a capability needs. It verifies
  *      the PRIMARY route only: the Vercel AI Gateway for GATEWAY_CAPABILITIES,
- *      the direct provider's PLATFORM_* key for everything else. The alternate
- *      routers `/api/capabilities` also accepts for chat/embedding/image
- *      (OpenRouter, GitHub Models, Vercel OIDC) are deliberately NOT counted:
- *      this script answers "would production's intended path work", not
- *      "is there any path". A capability in `UNAVAILABLE_CAPABILITIES` is
- *      reported as such and never probed.
+ *      the direct provider's PLATFORM_* key(s) for everything else - one row
+ *      per key a capability can resolve, so `sprite` lists both Replicate and
+ *      OpenAI. The alternate routers `/api/capabilities` also accepts for
+ *      chat/embedding/image (OpenRouter, GitHub Models, Vercel OIDC) are
+ *      deliberately NOT counted, and a gateway row never falls back to a
+ *      direct key: this script answers "would production's intended path
+ *      work", not "is there any path". A capability in
+ *      `UNAVAILABLE_CAPABILITIES` is reported as such and never probed.
  *   2. For every configured provider it performs ONE cheap authenticated GET
  *      against that provider's documented account/balance endpoint. These
  *      calls cost no credits; they prove the key is accepted, which is the
@@ -145,15 +147,28 @@ export const GATEWAY_PROBE: Probe = {
 const GATEWAY_PROVIDER = 'vercel-gateway';
 
 /**
+ * Capabilities whose platform path resolves MORE than the provider in
+ * DIRECT_CAPABILITY_PROVIDER. `sprite`: `/api/generate/sprite` picks the
+ * provider per request - `provider: 'auto'` (the dialog's and the chat tool's
+ * default) resolves DALL-E 3 on OpenAI for every style except pixel-art, and
+ * Replicate (SDXL) for pixel-art/sdxl - so a Replicate-only environment still
+ * 500s on the default sprite path. Both keys are required for the capability
+ * to be usable (#9725 review, lesson 1).
+ */
+const ADDITIONAL_PLATFORM_PROVIDERS: Partial<Record<ProviderCapability, PlatformKeyProvider[]>> = {
+  sprite: ['openai'],
+};
+
+/**
  * Decide the route and configuration state of every capability from the
  * supplied environment. Pure: no I/O, so it is unit-testable against any env.
  */
 export function buildPlan(env: Readonly<Record<string, string | undefined>>): PlanRow[] {
-  return PROVIDER_CAPABILITIES.map((capability): PlanRow => {
+  return PROVIDER_CAPABILITIES.flatMap((capability): PlanRow[] => {
     const unavailability = getCapabilityUnavailability(capability);
     const provider = DIRECT_CAPABILITY_PROVIDER[capability];
     if (unavailability) {
-      return {
+      return [{
         capability,
         provider,
         route: 'unavailable',
@@ -161,38 +176,46 @@ export function buildPlan(env: Readonly<Record<string, string | undefined>>): Pl
         configured: false,
         consoleUrl: null,
         detail: `${unavailability.reason} (#${unavailability.issue})`,
-      };
+      }];
     }
 
     // The gateway serves exactly GATEWAY_CAPABILITIES (the same list the
     // vercel-gateway backend declares), so the gateway key is evidence for
     // those and nothing else — never for a Meshy/ElevenLabs/remove.bg asset.
-    if (
-      (GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability) &&
-      env[GATEWAY_KEY_ENV.vercelGateway]
-    ) {
-      return {
+    // Gateway-served capabilities are graded on the gateway key ONLY. With
+    // the key absent the row reads `missing AI_GATEWAY_API_KEY` - it never
+    // falls back to a direct provider key, because production's intended
+    // path is the gateway and a direct key would misreport that decision.
+    if ((GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability)) {
+      return [{
         capability,
         provider: GATEWAY_PROVIDER,
         route: 'gateway',
         envVar: GATEWAY_KEY_ENV.vercelGateway,
-        configured: true,
+        configured: Boolean(env[GATEWAY_KEY_ENV.vercelGateway]),
         consoleUrl: 'https://vercel.com/docs/ai-gateway',
         detail: `${capability} is served by the Vercel AI Gateway`,
-      };
+      }];
     }
 
-    const platformProvider = provider as PlatformKeyProvider;
-    const envVar = PLATFORM_KEY_ENV[platformProvider];
-    return {
-      capability,
-      provider,
-      route: 'platform-key',
-      envVar,
-      configured: Boolean(env[envVar]),
-      consoleUrl: PLATFORM_KEY_CONSOLE_URL[platformProvider] ?? null,
-      detail: '',
-    };
+    // One row per provider the capability's platform path can resolve - a
+    // capability that spends more than one key needs every one of them.
+    const providers: PlatformKeyProvider[] = [
+      provider as PlatformKeyProvider,
+      ...(ADDITIONAL_PLATFORM_PROVIDERS[capability] ?? []),
+    ];
+    return providers.map((platformProvider): PlanRow => {
+      const envVar = PLATFORM_KEY_ENV[platformProvider];
+      return {
+        capability,
+        provider: platformProvider,
+        route: 'platform-key',
+        envVar,
+        configured: Boolean(env[envVar]),
+        consoleUrl: PLATFORM_KEY_CONSOLE_URL[platformProvider] ?? null,
+        detail: '',
+      };
+    });
   });
 }
 
