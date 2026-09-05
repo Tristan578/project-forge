@@ -1150,10 +1150,13 @@ describe('compoundHandlers', () => {
       // Guard against regressing to the wrong key (the pre-fix contract).
       expect(texturePayload).not.toHaveProperty('targetEntityId');
 
-      expect(dispatchCommand).toHaveBeenCalledWith('generate_music', expect.any(Object));
+      // #9117: music is declared unavailable, so the compound action skips it
+      // (recorded in the operations list) instead of dispatching a job the
+      // route refuses.
+      expect(dispatchCommand).not.toHaveBeenCalledWith('generate_music', expect.any(Object));
 
       const data = result.result as Record<string, unknown>;
-      expect(data.generationJobs).toBe(3);
+      expect(data.generationJobs).toBe(2);
 
       // End-to-end: feed the EXACT dispatched payload into the REAL
       // generate_texture handler and assert the goal id survives the handler's

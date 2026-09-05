@@ -9,6 +9,11 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
+// Capability gate (#9117): default "available"; the music-gated case flips it.
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false })),
+}));
+
 vi.mock('@/stores/workspaceStore', () => ({
   useWorkspaceStore: vi.fn((selector: (s: unknown) => unknown) => selector({
     navigateDocs: vi.fn(),

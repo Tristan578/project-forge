@@ -5,6 +5,7 @@ import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sp
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
@@ -85,6 +86,7 @@ export const AssetPanel = memo(function AssetPanel() {
   const dragCounterRef = useRef(0);
 
   const tier = useUserStore((s) => s.tier);
+  const musicGate = useGenerationGate('music-generation');
 
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const importGltf = useEditorStore((s) => s.importGltf);
@@ -283,7 +285,10 @@ export const AssetPanel = memo(function AssetPanel() {
                     { id: 'generate-music', label: 'Generate Music', open: setGenerateMusicOpen },
                     { id: 'generate-skybox', label: 'Generate Skybox', open: setGenerateSkyboxOpen },
                   ] as const).map(({ id, label, open }) => {
-                    const allowed = canAccessPanel(id, tier);
+                    // #9117: an unprovisionable capability is disabled at the
+                    // entry point with its reason, like the tier lock below.
+                    const gated = id === 'generate-music' && musicGate.blocked;
+                    const allowed = canAccessPanel(id, tier) && !gated;
                     const required = getRequiredTier(id);
                     return (
                       <button
@@ -294,7 +299,13 @@ export const AssetPanel = memo(function AssetPanel() {
                         className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
                           allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
                         }`}
-                        title={allowed ? label : `Requires ${required ? TIER_LABELS[required] : ''} tier`}
+                        title={
+                          allowed
+                            ? label
+                            : gated
+                              ? (musicGate.reason ?? 'Not available yet')
+                              : `Requires ${required ? TIER_LABELS[required] : ''} tier`
+                        }
                       >
                         <span>{label}</span>
                         {!allowed && (

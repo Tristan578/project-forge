@@ -131,7 +131,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="generate-sprite-dialog-title"
+        aria-labelledby="generate-sprite-dialog-title" aria-describedby={gate.blocked ? 'generate-sprite-unavailable' : undefined}
         className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl"
       >
         {/* Header */}
@@ -184,7 +184,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sprite-unavailable" reason={gate.reason} />}
           {/* Prompt (all tabs) */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
@@ -193,7 +193,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               placeholder={
                 activeTab === 'single'
                   ? 'Pixel art wizard character, 64x64'
@@ -215,7 +215,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
               <select
                 value={style}
                 onChange={(e) => setStyle(e.target.value as SpriteStyle)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="pixel-art">Pixel Art</option>
@@ -233,7 +233,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
               <select
                 value={size}
                 onChange={(e) => setSize(e.target.value as SpriteSize)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="32x32">32x32</option>
@@ -258,7 +258,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
                 max="8"
                 value={frameCount}
                 onChange={(e) => setFrameCount(Number(e.target.value))}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full"
               />
             </div>
@@ -271,7 +271,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
               <select
                 value={tileSize}
                 onChange={(e) => setTileSize(Number(e.target.value) as 16 | 32 | 48 | 64)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="16">16x16</option>
@@ -289,7 +289,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
               <select
                 value={gridSize}
                 onChange={(e) => setGridSize(e.target.value as '4x4' | '8x8' | '16x16')}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="4x4">4x4 (16 tiles)</option>
@@ -322,7 +322,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit} aria-describedby={gate.blocked ? 'generate-sprite-unavailable' : undefined}
             aria-busy={isSubmitting}
             className="flex flex-1 items-center justify-center gap-2 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >

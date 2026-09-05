@@ -221,11 +221,28 @@ export const PLATFORM_KEY_CONSOLE_URL: Record<PlatformKeyProvider, string | null
 // ---------------------------------------------------------------------------
 
 export interface CapabilityUnavailability {
-  /** User-facing sentence. Must not name env vars or server internals. */
+  /**
+   * User-facing sentence shown verbatim in the editor, in chat tool results
+   * and in the 503 body. Plain product language only: no env-var names, no
+   * vendor names, no issue numbers, and it should offer the nearest thing the
+   * user CAN do instead.
+   */
   reason: string;
-  /** GitHub issue tracking the fix; surfaced as `#NNNN` in hints and errors. */
+  /**
+   * GitHub issue tracking the fix. Machine-readable: exposed as a separate
+   * `issue` field on `/api/capabilities` and in the 503 `details`, never
+   * interpolated into `reason`.
+   */
   issue: number;
 }
+
+/**
+ * Capabilities the Vercel AI Gateway can serve with `AI_GATEWAY_API_KEY` (or
+ * Vercel OIDC). Single source for `lib/providers/backends/vercelGateway.ts`
+ * and `web/scripts/verify-platform-generation.ts`, which disagreed about
+ * `image`/`embedding` until the #9725 review caught it.
+ */
+export const GATEWAY_CAPABILITIES = ['chat', 'embedding', 'image'] as const satisfies readonly ProviderCapability[];
 
 /**
  * Capabilities that must be refused everywhere — `/api/capabilities`, the
@@ -240,7 +257,7 @@ export interface CapabilityUnavailability {
 export const UNAVAILABLE_CAPABILITIES: Partial<Record<ProviderCapability, CapabilityUnavailability>> = {
   music: {
     reason:
-      'Music generation is unavailable: its current provider has no public API, so it is being moved to ElevenLabs.',
+      'Music generation is not available yet. Upload your own track from the Asset panel, or generate a sound effect instead.',
     issue: 9522,
   },
 };

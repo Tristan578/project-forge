@@ -25,7 +25,8 @@ const PROVIDERS: { id: Provider; label: string; placeholder: string }[] = [
   { id: 'meshy', label: 'Meshy', placeholder: 'msy_...' },
   { id: 'hyper3d', label: 'Hyper3D / Rodin', placeholder: 'hd_...' },
   { id: 'elevenlabs', label: 'ElevenLabs', placeholder: 'xi_...' },
-  { id: 'suno', label: 'Suno', placeholder: 'suno_...' },
+  // Suno deliberately absent: it has no public API, so no key exists to
+  // paste, and `music` is refused regardless (UNAVAILABLE_CAPABILITIES, #9522).
 ];
 
 export function ApiKeyManager() {

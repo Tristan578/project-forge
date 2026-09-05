@@ -14,11 +14,15 @@
 // @vitest-environment node
 
 import { describe, it, expect, vi } from 'vitest';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   buildPlan,
   runVerification,
   formatTable,
+  isMainModule,
   PROVIDER_PROBES,
+  GATEWAY_PROBE,
   type PlanRow,
 } from '../verify-platform-generation.ts';
 
@@ -50,9 +54,14 @@ describe('buildPlan', () => {
     expect(r.chat.envVar).toBe('AI_GATEWAY_API_KEY');
   });
 
-  it('does not treat the gateway key as evidence that asset generation works', () => {
+  it('routes exactly the gateway-declared capabilities through the gateway key', () => {
     const r = rows({ AI_GATEWAY_API_KEY: 'gw' });
-    for (const cap of ['model3d', 'texture', 'sfx', 'voice', 'sprite', 'bg_removal', 'image']) {
+    // Same list the vercel-gateway backend declares (GATEWAY_CAPABILITIES).
+    for (const cap of ['chat', 'embedding', 'image']) {
+      expect(r[cap].route, cap).toBe('gateway');
+      expect(r[cap].configured, cap).toBe(true);
+    }
+    for (const cap of ['model3d', 'texture', 'sfx', 'voice', 'sprite', 'bg_removal']) {
       expect(r[cap].route, cap).toBe('platform-key');
       expect(r[cap].configured, cap).toBe(false);
     }
@@ -76,6 +85,40 @@ describe('PROVIDER_PROBES', () => {
       expect(probe.docs, provider).toMatch(/^https:\/\//);
       expect(probe.method).toBe('GET');
     }
+  });
+
+  // Each vendor's documented auth header and account endpoint, pinned
+  // verbatim (lesson 14). The doc URL for each is in PROVIDER_PROBES.
+  it.each([
+    ['anthropic', 'https://api.anthropic.com/v1/models', { 'x-api-key': 'K', 'anthropic-version': '2023-06-01' }],
+    ['meshy', 'https://api.meshy.ai/openapi/v1/balance', { Authorization: 'Bearer K' }],
+    ['elevenlabs', 'https://api.elevenlabs.io/v1/user', { 'xi-api-key': 'K' }],
+    ['openai', 'https://api.openai.com/v1/models', { Authorization: 'Bearer K' }],
+    ['replicate', 'https://api.replicate.com/v1/account', { Authorization: 'Bearer K' }],
+    ['removebg', 'https://api.remove.bg/v1.0/account', { 'X-Api-Key': 'K' }],
+  ] as const)('%s probes %s with its documented auth header', (provider, url, headers) => {
+    const probe = PROVIDER_PROBES[provider];
+    expect(probe?.url).toBe(url);
+    expect(probe?.headers('K')).toEqual(headers);
+  });
+
+  it('has no probe for providers that can never be served by a platform key', () => {
+    expect(PROVIDER_PROBES.suno).toBeNull();
+    expect(PROVIDER_PROBES.hyper3d).toBeNull();
+  });
+
+  it('probes the gateway credits endpoint with Bearer auth', () => {
+    expect(GATEWAY_PROBE.url).toBe('https://ai-gateway.vercel.sh/v1/credits');
+    expect(GATEWAY_PROBE.headers('K')).toEqual({ Authorization: 'Bearer K' });
+  });
+});
+
+describe('isMainModule', () => {
+  it('is false without an argv[1] and true when argv[1] resolves to the module URL', () => {
+    expect(isMainModule('file:///x.ts', undefined)).toBe(false);
+    const here = path.resolve('scripts/verify-platform-generation.ts');
+    expect(isMainModule(pathToFileURL(here).href, here)).toBe(true);
+    expect(isMainModule(pathToFileURL(here).href, path.resolve('scripts/other.ts'))).toBe(false);
   });
 });
 
@@ -105,6 +148,21 @@ describe('runVerification', () => {
     // ElevenLabs: https://elevenlabs.io/docs/api-reference/user/get — xi-api-key.
     expect(eleven?.[0]).toBe('https://api.elevenlabs.io/v1/user');
     expect((eleven?.[1].headers as Record<string, string>)['xi-api-key']).toBe('xi_secret');
+  });
+
+  it('probes the gateway once for chat/embedding/image when only the gateway key is set', async () => {
+    const fetchImpl = okFetch();
+    const env = { AI_GATEWAY_API_KEY: 'gw_secret' };
+    const results = await runVerification(buildPlan(env), { fetchImpl, env });
+    const byCap = Object.fromEntries(results.map((r) => [r.capability, r]));
+    expect(byCap.chat.status).toBe('pass');
+    expect(byCap.embedding.status).toBe('pass');
+    expect(byCap.image.status).toBe('pass');
+    expect(byCap.model3d.status).toBe('missing');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://ai-gateway.vercel.sh/v1/credits');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer gw_secret');
   });
 
   it('reports fail with the HTTP status when the provider rejects the key', async () => {

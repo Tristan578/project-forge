@@ -55,7 +55,8 @@ describe('ApiKeyManager', () => {
       expect(screen.getByText('Anthropic (Claude)')).toBeDefined();
       expect(screen.getByText('Meshy')).toBeDefined();
       expect(screen.getByText('ElevenLabs')).toBeDefined();
-      expect(screen.getByText('Suno')).toBeDefined();
+      // Suno is deliberately absent: no public API, `music` refused regardless (#9522).
+      expect(screen.queryByText('Suno')).toBeNull();
     });
   });
 
@@ -63,7 +64,7 @@ describe('ApiKeyManager', () => {
     render(<ApiKeyManager />);
     await waitFor(() => {
       const addKeyButtons = screen.getAllByText('Add Key');
-      expect(addKeyButtons.length).toBeGreaterThanOrEqual(5);
+      expect(addKeyButtons.length).toBeGreaterThanOrEqual(4);
     });
   });
 

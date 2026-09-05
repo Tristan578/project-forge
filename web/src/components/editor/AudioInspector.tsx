@@ -9,6 +9,7 @@ import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
 import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
 
 interface SliderRowProps {
@@ -107,7 +108,10 @@ export function AudioInspector() {
 
   const tier = useUserStore((s) => s.tier);
   const canGenerateSound = canAccessPanel('generate-sound', tier);
-  const canGenerateMusic = canAccessPanel('generate-music', tier);
+  // #9117: an unprovisionable capability is disabled here, at the entry point,
+  // not two clicks later inside an empty dialog.
+  const musicGate = useGenerationGate('music-generation');
+  const canGenerateMusic = canAccessPanel('generate-music', tier) && !musicGate.blocked;
   // These stay focusable when locked (aria-disabled, not disabled): they are
   // upgrade prompts, and a control removed from the tab order can never tell
   // anyone what it wants. But `title` alone is not that telling — it is
@@ -118,7 +122,9 @@ export function AudioInspector() {
     : `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`;
   const musicButtonLabel = canGenerateMusic
     ? 'Generate music with AI'
-    : `Generate music with AI — requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`;
+    : musicGate.blocked
+      ? `Generate music with AI — ${musicGate.reason ?? 'not available yet'}`
+      : `Generate music with AI — requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`;
 
   const primaryId = useEditorStore((s) => s.primaryId);
   // Read the selected entity's audio out of the per-entity map. This used to be

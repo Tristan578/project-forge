@@ -133,7 +133,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="generate-music-dialog-title"
+        aria-labelledby="generate-music-dialog-title" aria-describedby={gate.blocked ? 'generate-music-unavailable' : undefined}
         className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl"
       >
         {/* Header */}
@@ -153,7 +153,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
         {/* Body */}
         <div className="space-y-4 p-4">
           {/* Unavailable state (#9117): the server refuses this capability before any charge. */}
-          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-music-unavailable" reason={gate.reason} />}
 
           {/* Prompt */}
           <div>
@@ -163,7 +163,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               placeholder="Upbeat chiptune adventure music"
               className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             />
@@ -184,7 +184,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
               step={5}
               value={duration}
               onChange={(e) => setDuration(parseInt(e.target.value))}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="h-1 w-full cursor-pointer appearance-none rounded bg-zinc-700
                 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
@@ -199,7 +199,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
               id="instrumental"
               checked={instrumental}
               onChange={(e) => setInstrumental(e.target.checked)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
             />
             <label htmlFor="instrumental" className="text-xs text-zinc-300">
@@ -215,7 +215,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
                 id="attach"
                 checked={attachToEntity}
                 onChange={(e) => setAttachToEntity(e.target.checked)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
               />
               <label htmlFor="attach" className="text-xs text-zinc-300">
@@ -247,7 +247,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit} aria-describedby={gate.blocked ? 'generate-music-unavailable' : undefined}
             aria-busy={isSubmitting}
             className="flex flex-1 items-center justify-center gap-2 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >

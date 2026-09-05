@@ -909,14 +909,30 @@ describe('createGenerationHandler', () => {
       execute: async () => ({ jobId: 'never' }),
     });
 
-    it('returns 503 SERVICE_UNAVAILABLE naming the tracking issue and never resolves a key', async () => {
+    it('returns 503 SERVICE_UNAVAILABLE with the user-facing reason, the issue in details, and spends nothing', async () => {
       const res = await musicHandler(makeRequest({ prompt: 'chiptune adventure' }));
       expect(res.status).toBe(503);
       const data = await res.json();
       expect(data.code).toBe('SERVICE_UNAVAILABLE');
-      expect(data.error).toContain('#9522');
+      expect(data.error).toMatch(/not available yet/i);
+      expect(data.error).not.toMatch(/#\d+|PLATFORM_/);
+      expect(data.details).toEqual({ capability: 'music', issue: 9522 });
+      // The gate runs right after auth: no rate-limit budget, no cache lookup,
+      // no key resolution, no deduction, nothing to refund.
+      expect(mockAggRateLimit).not.toHaveBeenCalled();
+      expect(mockRateLimit).not.toHaveBeenCalled();
+      expect(mockCachedGenerate).not.toHaveBeenCalled();
       expect(mockResolve).not.toHaveBeenCalled();
       expect(mockRefund).not.toHaveBeenCalled();
+    });
+
+    it('still requires authentication ahead of the gate', async () => {
+      mockAuth.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+      });
+      const res = await musicHandler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(401);
     });
 
     it('leaves an available capability untouched', async () => {

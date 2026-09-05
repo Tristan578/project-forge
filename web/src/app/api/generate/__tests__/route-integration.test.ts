@@ -229,7 +229,7 @@ describe('generate route integration (route → factory → provider)', () => {
     expect(res.status).toBe(503);
     const data = await res.json();
     expect(data.code).toBe('SERVICE_UNAVAILABLE');
-    expect(data.error).toContain('#9522');
+    expect(data.details).toEqual({ capability: 'music', issue: 9522 });
   });
 
   it('skybox: valid request → 201 with jobId', async () => {
@@ -849,8 +849,7 @@ describe('generate routes match the published OpenAPI response contract', () => 
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
     expect(res.status).toBe(503);
-    // `Error.details` is optional structured context; the gate has none to add.
-    expectContract('/api/generate/music', 503, await res.json(), ['missing $.details']);
+    expectContract('/api/generate/music', 503, await res.json());
   });
 
   it('POST /api/generate/skybox 201 matches GenerationJob', async () => {

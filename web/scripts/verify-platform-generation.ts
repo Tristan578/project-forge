@@ -16,13 +16,15 @@
  *      is non-empty). They do NOT prove a generation succeeds end to end —
  *      that is the owner's acceptance step in docs/guides/platform-keys.md.
  *
- * Usage (from the repo root, after `cd web && vercel env pull .env.local`):
+ * Usage (from the repo root; pull production vars into a SCRATCH file, never
+ * into web/.env.local, which is the local-dev environment):
  *
- *   node --env-file=web/.env.local web/scripts/verify-platform-generation.ts
+ *   node --env-file=<scratch env file> web/scripts/verify-platform-generation.ts
  *
  * Exit code 0 when every offered capability passes; 1 when any is missing a
- * key or its provider rejected the key. AI_GATEWAY_API_KEY only ever counts
- * for `chat` — it is not evidence that asset generation works.
+ * key or its provider rejected the key. AI_GATEWAY_API_KEY counts only for
+ * the capabilities the gateway backend declares (GATEWAY_CAPABILITIES) — it is
+ * never evidence that a Meshy, ElevenLabs or remove.bg capability works.
  *
  * Runs under plain `node` (Node 24+ type stripping): relative imports carry
  * explicit `.ts` extensions and no `@/` alias is used, same as
@@ -36,6 +38,7 @@ import {
   PLATFORM_KEY_ENV,
   PLATFORM_KEY_CONSOLE_URL,
   GATEWAY_KEY_ENV,
+  GATEWAY_CAPABILITIES,
   getCapabilityUnavailability,
   type ProviderCapability,
   type PlatformKeyProvider,
@@ -58,7 +61,7 @@ export interface PlanRow {
   detail: string;
 }
 
-export type ProbeStatus = 'pass' | 'fail' | 'missing' | 'unavailable' | 'unprobed';
+export type ProbeStatus = 'pass' | 'fail' | 'missing' | 'unavailable';
 
 export interface ProbeResult {
   capability: ProviderCapability;
@@ -156,10 +159,13 @@ export function buildPlan(env: Readonly<Record<string, string | undefined>>): Pl
       };
     }
 
-    // Only chat is served by the gateway in code today (lib/providers/registry).
-    // #9523 tracks routing image/embedding through it; until that lands the
-    // gateway key is NOT evidence for anything but chat.
-    if (capability === 'chat' && env[GATEWAY_KEY_ENV.vercelGateway]) {
+    // The gateway serves exactly GATEWAY_CAPABILITIES (the same list the
+    // vercel-gateway backend declares), so the gateway key is evidence for
+    // those and nothing else — never for a Meshy/ElevenLabs/remove.bg asset.
+    if (
+      (GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability) &&
+      env[GATEWAY_KEY_ENV.vercelGateway]
+    ) {
       return {
         capability,
         provider: GATEWAY_PROVIDER,
@@ -167,7 +173,7 @@ export function buildPlan(env: Readonly<Record<string, string | undefined>>): Pl
         envVar: GATEWAY_KEY_ENV.vercelGateway,
         configured: true,
         consoleUrl: 'https://vercel.com/docs/ai-gateway',
-        detail: 'chat is served by the Vercel AI Gateway',
+        detail: `${capability} is served by the Vercel AI Gateway`,
       };
     }
 
@@ -210,7 +216,9 @@ export async function runVerification(
         ? GATEWAY_PROBE
         : PROVIDER_PROBES[row.provider as PlatformKeyProvider] ?? null;
     if (!probe) {
-      return { status: 'unprobed', detail: `${row.provider} has no credit-free probe endpoint` };
+      // A configured provider this script cannot verify is a gap in the
+      // script, and a gap reads as a failure — never as a pass.
+      return { status: 'fail', detail: `${row.provider} has no credit-free probe defined in PROVIDER_PROBES` };
     }
     const key = row.envVar ? env[row.envVar] : undefined;
     if (!key) {

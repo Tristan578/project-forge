@@ -22,7 +22,9 @@ describe('UNAVAILABLE_CAPABILITIES', () => {
     const music = getCapabilityUnavailability('music');
     expect(music).not.toBeNull();
     expect(music?.issue).toBe(9522);
-    expect(music?.reason).toMatch(/unavailable/i);
+    expect(music?.reason).toMatch(/not available yet/i);
+    // Plain product copy: no vendor names, env vars or issue numbers.
+    expect(music?.reason).not.toMatch(/Suno|ElevenLabs|PLATFORM_|#\d+/);
   });
 
   it('returns null for a capability that is not declared unavailable', () => {

@@ -1,11 +1,12 @@
 /**
  * useGenerationGate — the dialog-facing gate over /api/capabilities (#9117).
  *
- * `blocked` is true only when the server has POSITIVELY reported the feature
- * unavailable. While the fetch is in flight, or when it failed, the dialog
- * must not block: the server refuses an unavailable capability before any
- * charge anyway, so failing open here costs nothing and failing closed would
- * turn a transient /api/capabilities error into "all generation is off".
+ * `blocked` is true ONLY when the server has reported the feature
+ * `unprovisionable` (declared unavailable in code). A plain `available:false`
+ * — "no platform key here" — never blocks: a BYOK key may override it and a
+ * stale cached body could misreport it, while the server refuses an
+ * unprovisionable capability before any charge anyway. Loading and failed
+ * fetches never block either.
  *
  * @vitest-environment jsdom
  */
@@ -21,19 +22,28 @@ function respond(body: CapabilitiesResponse) {
   );
 }
 
-const MUSIC_OFF: CapabilitiesResponse = {
+const FIXTURE: CapabilitiesResponse = {
   capabilities: [
     { capability: 'sfx', available: true, label: 'Sound Effect Generation' },
+    {
+      capability: 'model3d',
+      available: false,
+      label: '3D Model Generation',
+      requiredProviders: ['Meshy'],
+      hint: 'Configure Meshy API key in Settings to enable 3D Model Generation.',
+    },
     {
       capability: 'music',
       available: false,
       label: 'Music Generation',
       unprovisionable: true,
-      hint: 'Music generation is unavailable (#9522).',
+      issue: 9522,
+      hint: 'Music generation is not available yet. Generate a sound effect instead.',
     },
+    { capability: 'texture', available: false, label: 'Texture Generation', unprovisionable: true, issue: 1 },
   ],
   available: ['sfx'],
-  unavailable: ['music'],
+  unavailable: ['model3d', 'music', 'texture'],
 };
 
 describe('useGenerationGate', () => {
@@ -52,20 +62,35 @@ describe('useGenerationGate', () => {
     expect(result.current.blocked).toBe(false);
   });
 
-  it('blocks a feature the server reports unavailable and surfaces the hint', async () => {
-    respond(MUSIC_OFF);
+  it('blocks an unprovisionable feature and surfaces the server hint verbatim', async () => {
+    respond(FIXTURE);
     const { result } = renderHook(() => useGenerationGate('music-generation'));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.blocked).toBe(true);
-    expect(result.current.reason).toContain('#9522');
+    expect(result.current.reason).toBe('Music generation is not available yet. Generate a sound effect instead.');
   });
 
-  it('does not block a feature the server reports available', async () => {
-    respond(MUSIC_OFF);
-    const { result } = renderHook(() => useGenerationGate('sfx-generation'));
+  it('does NOT block a feature that is merely missing a platform key', async () => {
+    respond(FIXTURE);
+    const { result } = renderHook(() => useGenerationGate('model-generation'));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.blocked).toBe(false);
     expect(result.current.reason).toBeUndefined();
+  });
+
+  it('does not block a feature the server reports available', async () => {
+    respond(FIXTURE);
+    const { result } = renderHook(() => useGenerationGate('sfx-generation'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.blocked).toBe(false);
+  });
+
+  it('derives a reason from the label when the server sends no hint', async () => {
+    respond(FIXTURE);
+    const { result } = renderHook(() => useGenerationGate('texture-generation'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.blocked).toBe(true);
+    expect(result.current.reason).toBe('Texture Generation is not available yet.');
   });
 
   it('fails open when the capabilities fetch errors', async () => {

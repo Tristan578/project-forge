@@ -92,7 +92,8 @@ describe('GET /api/capabilities', () => {
     const music = body.capabilities.find((c: { capability: string }) => c.capability === 'music');
     expect(music.available).toBe(false);
     expect(music.unprovisionable).toBe(true);
-    expect(music.hint).toContain('#9522');
+    expect(music.issue).toBe(9522);
+    expect(music.hint).not.toContain('#9522');
     expect(music.requiredProviders).toBeUndefined();
   });
 

@@ -67,13 +67,24 @@ describe('createAiHandler', () => {
     expect(result).toEqual({ url: 'texture.png' });
   });
 
-  it('submits to correct routes for all five generation methods', async () => {
+  // #9117: `music` is declared unavailable in code, so forge.ai.generateMusic
+  // is refused inside the worker with the same reason the editor shows —
+  // before any request leaves, so no fetch, no job, no poll.
+  it('refuses generateMusic without submitting while music is declared unavailable', async () => {
+    const fetchJson = makeFetchJson([{ jobId: 'never' }]);
+    const handler = createAiHandler({ fetchJson });
+    await expect(handler('generateMusic', {}, reportProgress, makeSignal())).rejects.toThrow(
+      /not available yet/i,
+    );
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it('submits to correct routes for the four offered generation methods', async () => {
     const methods = [
       ['generateTexture', '/api/generate/texture'],
       ['generateModel', '/api/generate/model'],
       ['generateSound', '/api/generate/sound'],
       ['generateVoice', '/api/generate/voice'],
-      ['generateMusic', '/api/generate/music'],
     ] as const;
 
     for (const [method, expectedRoute] of methods) {
@@ -142,7 +153,7 @@ describe('createAiHandler', () => {
     ]);
     const handler = createAiHandler({ fetchJson });
 
-    const resultPromise = handler('generateMusic', {}, reportProgress, makeSignal());
+    const resultPromise = handler('generateTexture', {}, reportProgress, makeSignal());
     await vi.runAllTimersAsync();
     await resultPromise;
 

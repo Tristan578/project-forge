@@ -378,6 +378,25 @@ export function createGenerationHandler<TParams, TResult>(
     const tier = authResult.ctx.user.tier;
     mctx.tier = tier;
 
+    // 1a. Declared-unavailable capability (#9117). Static config, checked as
+    // soon as the caller is known and BEFORE BotID, both rate limits, body
+    // parsing and content safety: a capability with no provisionable provider
+    // can never succeed, so a refusal must not spend the user's aggregate
+    // generation budget, resolve a key, or deduct a token. The body carries the
+    // user-facing reason; the tracking issue rides in `details`, not the copy.
+    const unavailability = capability ? getCapabilityUnavailability(capability) : null;
+    if (unavailability) {
+      mctx.outcome = 'capability_unavailable';
+      return NextResponse.json(
+        {
+          error: unavailability.reason,
+          code: ErrorCode.SERVICE_UNAVAILABLE,
+          details: { capability, issue: unavailability.issue },
+        },
+        { status: 503 }
+      );
+    }
+
     // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
     // token deduction, so a blocked bot never spends either budget.
     const botIdResponse = await checkBotIdGate();
@@ -482,22 +501,6 @@ export function createGenerationHandler<TParams, TResult>(
     // (resolver.ts returns no usageId when the user supplies their own key).
     // Setting it here billed both to the metric, overstating consumption by the
     // entire cached-traffic volume and diverging from the Stripe billing meter.
-
-    // 6a. Declared-unavailable capability (#9117). A capability with no
-    // provisionable provider can never succeed, so it is refused here — before
-    // the cache, before the key resolves, before any deduction — with a
-    // message the caller can act on. Static config, so this never fails open.
-    const unavailability = capability ? getCapabilityUnavailability(capability) : null;
-    if (unavailability) {
-      mctx.outcome = 'provider_unavailable';
-      return NextResponse.json(
-        {
-          error: `${unavailability.reason} (#${unavailability.issue})`,
-          code: ErrorCode.SERVICE_UNAVAILABLE,
-        },
-        { status: 503 }
-      );
-    }
 
     // 6b. Provider kill switch (PF-971 / #8952). Checked immediately after the
     // provider resolves and BEFORE any cache lookup or token deduction, so a

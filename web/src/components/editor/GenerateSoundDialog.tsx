@@ -125,7 +125,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="generate-sound-dialog-title"
+        aria-labelledby="generate-sound-dialog-title" aria-describedby={gate.blocked ? 'generate-sound-unavailable' : undefined}
         className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl"
       >
         {/* Header */}
@@ -144,7 +144,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sound-unavailable" reason={gate.reason} />}
           {/* Type selection */}
           <div>
             <label className="mb-2 block text-xs font-medium text-zinc-300">Type</label>
@@ -154,7 +154,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                   type="radio"
                   checked={soundType === 'sfx'}
                   onChange={() => setSoundType('sfx')}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || gate.blocked}
                   className="text-blue-500"
                 />
                 <span className="text-sm text-zinc-300">Sound Effect</span>
@@ -164,7 +164,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                   type="radio"
                   checked={soundType === 'voice'}
                   onChange={() => setSoundType('voice')}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || gate.blocked}
                   className="text-blue-500"
                 />
                 <span className="text-sm text-zinc-300">Voice</span>
@@ -182,7 +182,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                 <textarea
                   value={sfxPrompt}
                   onChange={(e) => setSfxPrompt(e.target.value)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || gate.blocked}
                   placeholder="Sword clashing against metal shield"
                   className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
                 />
@@ -202,7 +202,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                   step={0.1}
                   value={duration}
                   onChange={(e) => setDuration(parseFloat(e.target.value))}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || gate.blocked}
                   className="h-1 w-full cursor-pointer appearance-none rounded bg-zinc-700
                     [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
                     [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
@@ -222,7 +222,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                 <textarea
                   value={voiceText}
                   onChange={(e) => setVoiceText(e.target.value)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || gate.blocked}
                   placeholder="Welcome, brave adventurer!"
                   className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
                 />
@@ -236,7 +236,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                 <select
                   value={voiceStyle}
                   onChange={(e) => setVoiceStyle(e.target.value as VoiceStyle)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || gate.blocked}
                   className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
                 >
                   <option value="neutral">Neutral</option>
@@ -257,7 +257,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                 id="attach"
                 checked={attachToEntity}
                 onChange={(e) => setAttachToEntity(e.target.checked)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
               />
               <label htmlFor="attach" className="text-xs text-zinc-300">
@@ -289,7 +289,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit} aria-describedby={gate.blocked ? 'generate-sound-unavailable' : undefined}
             aria-busy={isSubmitting}
             className="flex flex-1 items-center justify-center gap-2 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >

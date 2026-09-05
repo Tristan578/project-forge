@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { ProviderCapability } from '@/lib/providers/types';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { safeAuth } from '@/lib/auth/safe-auth';
+import { getUserByClerkId } from '@/lib/auth/user-service';
 import { listConfiguredProviders } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import {
@@ -86,9 +87,12 @@ export interface CapabilityStatus {
   /**
    * True when no key — platform or BYOK — can make this capability work
    * (`UNAVAILABLE_CAPABILITIES`, #9117). Clients should hide or explicitly
-   * disable the entry point rather than suggest configuring a key.
+   * disable the entry point rather than suggest configuring a key. `hint`
+   * then carries the user-facing reason and `issue` the tracking issue.
    */
   unprovisionable?: boolean;
+  /** GitHub issue tracking an unprovisionable capability (machine-readable). */
+  issue?: number;
 }
 
 export interface CapabilitiesResponse {
@@ -100,15 +104,24 @@ export interface CapabilitiesResponse {
 }
 
 /**
- * The signed-in user's BYOK providers, or an empty set when anonymous or when
- * the lookup fails. Fails open to platform-only availability: a DB hiccup
- * here must not turn the whole editor's generation UI off, and the generate
- * routes re-resolve the key authoritatively anyway.
+ * The signed-in user's BYOK providers, or an empty set when anonymous, when
+ * the Clerk identity has no local user row yet, or when the lookup fails.
+ *
+ * `safeAuth()` yields the CLERK id; `providerKeys.userId` is the INTERNAL
+ * `users.id` uuid (keys are stored under it by `/api/keys/[provider]`), so the
+ * Clerk id is resolved through `getUserByClerkId` first — passing it straight
+ * through would fail uuid parsing on every signed-in call (#9725 review).
+ *
+ * Fails open to platform-only availability: a DB hiccup here must not turn
+ * the editor's generation UI off, and the generate routes re-resolve the key
+ * authoritatively anyway.
  */
-async function resolveByokProviders(userId: string | null): Promise<Set<string>> {
-  if (!userId) return new Set();
+async function resolveByokProviders(clerkId: string | null): Promise<Set<string>> {
+  if (!clerkId) return new Set();
   try {
-    const rows = await listConfiguredProviders(userId);
+    const user = await getUserByClerkId(clerkId);
+    if (!user) return new Set();
+    const rows = await listConfiguredProviders(user.id);
     return new Set(rows.map((r) => r.provider));
   } catch (err) {
     captureException(err, { route: '/api/capabilities', action: 'byok_lookup' });
@@ -140,7 +153,8 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
         available: false,
         label: FEATURE_LABELS[cap],
         unprovisionable: true,
-        hint: `${unavailability.reason} (#${unavailability.issue})`,
+        hint: unavailability.reason,
+        issue: unavailability.issue,
       };
     }
 
@@ -178,11 +192,11 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     .map((c) => c.capability);
 
   const response = NextResponse.json({ capabilities, available, unavailable });
-  // A BYOK-aware body is per-user and must never be served from a shared cache.
-  response.headers.set(
-    'Cache-Control',
-    userId ? 'private, max-age=60' : 'public, max-age=60, s-maxage=300',
-  );
+  // The body can differ per session (BYOK), and a shared cache keys on the URL
+  // — not on the Clerk cookie — so a shared directive on the anonymous branch
+  // would hand the platform-only body to signed-in users for its whole TTL.
+  // Unconditionally private: the browser may keep it briefly, no CDN may.
+  response.headers.set('Cache-Control', 'private, max-age=60');
   return response;
 }
 

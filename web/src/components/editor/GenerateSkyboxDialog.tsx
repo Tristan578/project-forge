@@ -78,7 +78,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="generate-skybox-dialog-title"
+        aria-labelledby="generate-skybox-dialog-title" aria-describedby={gate.blocked ? 'generate-skybox-unavailable' : undefined}
         className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl"
       >
         {/* Header */}
@@ -97,7 +97,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-skybox-unavailable" reason={gate.reason} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
@@ -106,7 +106,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               placeholder="Alien planet with twin suns and purple sky"
               className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             />
@@ -121,7 +121,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
             <select
               value={style}
               onChange={(e) => setStyle(e.target.value as SkyboxStyle)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             >
               <option value="realistic">Realistic</option>
@@ -154,7 +154,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit} aria-describedby={gate.blocked ? 'generate-skybox-unavailable' : undefined}
             aria-busy={isSubmitting}
             className="flex flex-1 items-center justify-center gap-2 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >

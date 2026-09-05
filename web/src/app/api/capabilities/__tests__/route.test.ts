@@ -16,6 +16,9 @@ vi.mock('server-only', () => ({}));
 vi.mock('@/lib/auth/safe-auth', () => ({
   safeAuth: vi.fn(async () => ({ userId: null })),
 }));
+vi.mock('@/lib/auth/user-service', () => ({
+  getUserByClerkId: vi.fn(async () => null),
+}));
 vi.mock('@/lib/keys/resolver', () => ({
   listConfiguredProviders: vi.fn(async () => []),
 }));
@@ -91,8 +94,10 @@ describe('GET /api/capabilities', () => {
       for (const cap of body.capabilities) {
         expect(cap.hint).toBeDefined();
         if (cap.unprovisionable) {
-          // No key can help; the hint names the tracking issue instead (#9117).
-          expect(cap.hint).toMatch(/#\d+/);
+          // No key can help; the hint is the user-facing reason and the
+          // tracking issue rides in its own field (#9117).
+          expect(cap.issue).toBeGreaterThan(0);
+          expect(cap.hint).not.toMatch(/#\d+/);
           expect(cap.requiredProviders).toBeUndefined();
           continue;
         }
@@ -225,9 +230,11 @@ describe('GET /api/capabilities', () => {
       const sfx = body.capabilities.find((c) => c.capability === 'sfx');
       expect(sfx?.hint).toContain('ElevenLabs');
 
-      // Unprovisionable: the hint names the tracking issue, not a vendor (#9117).
+      // Unprovisionable: the hint is plain product copy; the tracking issue is
+      // a separate machine-readable field (#9117).
       const music = body.capabilities.find((c) => c.capability === 'music');
-      expect(music?.hint).toContain('#9522');
+      expect(music?.issue).toBe(9522);
+      expect(music?.hint).not.toMatch(/Suno|#9522/);
     });
 
     it('does not include hint for available capabilities', async () => {

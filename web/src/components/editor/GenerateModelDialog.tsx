@@ -96,7 +96,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="generate-model-dialog-title"
+        aria-labelledby="generate-model-dialog-title" aria-describedby={gate.blocked ? 'generate-model-unavailable' : undefined}
         className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl"
       >
         {/* Header */}
@@ -115,7 +115,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-model-unavailable" reason={gate.reason} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
@@ -124,7 +124,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               placeholder="A medieval wooden treasure chest with iron bands and ornate lock"
               className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             />
@@ -139,7 +139,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
             <select
               value={artStyle}
               onChange={(e) => setArtStyle(e.target.value as ArtStyle)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             >
               <option value="realistic">Realistic</option>
@@ -155,7 +155,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
             <select
               value={quality}
               onChange={(e) => setQuality(e.target.value as Quality)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             >
               <option value="standard">Standard (100 tokens)</option>
@@ -169,7 +169,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
             <select
               value={polyBudget}
               onChange={(e) => setPolyBudget(e.target.value as PolyBudget)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             >
               {(Object.entries(POLY_BUDGET_LABELS) as [PolyBudget, string][]).map(([value, label]) => (
@@ -187,7 +187,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
               type="text"
               value={negativePrompt}
               onChange={(e) => setNegativePrompt(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               placeholder="What to avoid"
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             />
@@ -223,7 +223,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit} aria-describedby={gate.blocked ? 'generate-model-unavailable' : undefined}
             className="flex-1 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >
             {isSubmitting ? 'Starting...' : 'Generate'}

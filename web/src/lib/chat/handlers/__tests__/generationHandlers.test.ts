@@ -543,91 +543,25 @@ describe('generationHandlers', () => {
   // generate_music
   // =========================================================================
   describe('generate_music', () => {
-    it('imports audio directly when sync response', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ audioBase64: 'base64music' }),
-      });
-      const { result, store } = await invoke('generate_music', {
+    // #9117: music is declared unavailable in code (UNAVAILABLE_CAPABILITIES),
+    // so the tool answers with the user-facing alternative and never calls the
+    // route. The sync/async import paths below the gate return with #9522.
+    it('returns the unavailable reason without calling the route while music is declared unavailable', async () => {
+      const { result } = await invoke('generate_music', {
         prompt: 'epic battle theme',
         entityId: 'ent-1',
       });
-      expect(result.success).toBe(true);
-      expect(store.importAudio).toHaveBeenCalledWith('base64music', expect.stringContaining('music-'));
-      expect(store.setAudio).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-        bus: 'music',
-        loopAudio: true,
-        autoplay: true,
-      }));
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not available yet/i);
+      expect(result.error).not.toMatch(/#\d+|PLATFORM_|Suno/);
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockAddJob).not.toHaveBeenCalled();
     });
 
-    it('tracks async job when no audioBase64', async () => {
-      mockFetchSuccess({ audioBase64: undefined });
-      const { result } = await invoke('generate_music', { prompt: 'calm ambient' });
-      expect(result.success).toBe(true);
-      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'music',
-      }));
-    });
-
-    it('uses default duration and instrumental', async () => {
-      mockFetchSuccess();
-      await invoke('generate_music', { prompt: 'battle' });
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.durationSeconds).toBe(30);
-      expect(body.instrumental).toBe(true);
-    });
-
-    it('passes autoPlace and targetEntityId to trackJob on async path', async () => {
-      mockFetchSuccess({ audioBase64: undefined });
-      await invoke('generate_music', {
-        prompt: 'boss theme',
-        targetEntityId: 'ent-2',
-        autoPlace: true,
-      });
-      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'music',
-        autoPlace: true,
-        targetEntityId: 'ent-2',
-      }));
-    });
-
-    it('autoPlace defaults to true when targetEntityId is set (async)', async () => {
-      mockFetchSuccess({ audioBase64: undefined });
-      await invoke('generate_music', { prompt: 'ambient', targetEntityId: 'ent-3' });
-      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
-        autoPlace: true,
-        targetEntityId: 'ent-3',
-      }));
-    });
-
-    it('autoPlace defaults to false when no entity (async)', async () => {
-      mockFetchSuccess({ audioBase64: undefined });
-      await invoke('generate_music', { prompt: 'ambient loop' });
-      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
-        autoPlace: false,
-      }));
-    });
-
-    it.each([
-      ['empty', ''],
-      ['not a string', { url: 'https://example.com/track.mp3' }],
-    ])('takes the async path when audioBase64 is %s', async (_label, audioBase64) => {
-      // Music is the one audio handler with two legitimate shapes, so a bad
-      // artifact is not an error here — it is the async path. The branch tests
-      // `typeof`, not truthiness: a truthy non-string would otherwise be cast
-      // to `string` and handed to `importAudio`.
-      mockFetchSuccess({ audioBase64 });
-
-      const { result, store } = await invoke('generate_music', {
-        prompt: 'calm ambient',
-        entityId: 'ent-1',
-      });
-
-      expect(result.success).toBe(true);
-      expect(store.importAudio).not.toHaveBeenCalled();
-      expect(store.setAudio).not.toHaveBeenCalled();
-      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({ type: 'music' }));
+    it('still rejects malformed arguments ahead of the gate', async () => {
+      const { result } = await invoke('generate_music', { prompt: '' });
+      expect(result.success).toBe(false);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 

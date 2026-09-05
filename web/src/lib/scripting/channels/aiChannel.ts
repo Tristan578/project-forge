@@ -1,6 +1,7 @@
 // AI channel handler — proxies generation requests to API routes with progress polling.
 
 import type { AsyncHandler } from '../asyncChannelRouter';
+import { getCapabilityUnavailability, type ProviderCapability } from '@/lib/config/providers';
 
 export interface AiChannelDeps {
   fetchJson: (url: string, init?: RequestInit) => Promise<unknown>;
@@ -17,6 +18,15 @@ const AI_ROUTE_MAP: Record<string, string> = {
   generateMusic: '/api/generate/music',
 };
 
+/** The capability each `forge.ai.*` method spends, for the #9117 gate. */
+const AI_METHOD_CAPABILITY: Record<string, ProviderCapability> = {
+  generateTexture: 'texture',
+  generateModel: 'model3d',
+  generateSound: 'sfx',
+  generateVoice: 'voice',
+  generateMusic: 'music',
+};
+
 export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
   return async (method: string, args: Record<string, unknown>, reportProgress, signal: AbortSignal) => {
     reportProgress(0, 'Submitting request...');
@@ -24,6 +34,13 @@ export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
     const route = AI_ROUTE_MAP[method];
     if (!route) {
       throw new Error(`Unknown AI method: ${method}`);
+    }
+
+    // #9117: a capability declared unavailable in code is refused before the
+    // request leaves the worker, with the same reason the editor shows.
+    const unavailable = getCapabilityUnavailability(AI_METHOD_CAPABILITY[method]);
+    if (unavailable) {
+      throw new Error(unavailable.reason);
     }
 
     // Submit generation request
