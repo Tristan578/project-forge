@@ -4,6 +4,7 @@ import {
   buildWorldPrompt,
   parseWorldResponse,
   generateWorld,
+  generateWorldWithStatus,
   isWorldDescriptionTruncated,
   WORLD_DESC_MAX_LENGTH,
   worldToMarkdown,
@@ -452,6 +453,63 @@ describe('generateWorld', () => {
 
     const result = await generateWorld('A world', 'post_apocalyptic');
     expect(result.name).toBe('The Scarred Earth');
+  });
+
+  it('generateWorldWithStatus reports fallback: true when the AI response cannot be parsed', async () => {
+    const encoder = new TextEncoder();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: {"type":"text_delta","text":"not valid json"}\ndata: {"type":"done"}\n'));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ) as unknown as Response,
+    );
+
+    const result = await generateWorldWithStatus('A world', 'post_apocalyptic');
+    expect(result.fallback).toBe(true);
+    expect(result.world.name).toBe('The Scarred Earth');
+  });
+
+  it('generateWorldWithStatus reports fallback: false for a parsed AI world', async () => {
+    const aiWorld: GameWorld = {
+      name: 'Status World',
+      description: 'Generated',
+      genre: 'custom',
+      era: 'Now',
+      factions: [{ name: 'F', description: 'D', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: {} }],
+      regions: [{ name: 'R', description: 'D', biome: 'b', dangerLevel: 3, resources: [], landmarks: [], connectedTo: [] }],
+      timeline: [],
+      lore: [],
+      rules: [],
+    };
+    const encoder = new TextEncoder();
+    const sseData = `data: {"type":"text_delta","text":"${JSON.stringify(aiWorld).replace(/"/g, '\\"')}"}\ndata: [DONE]\n`;
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(sseData));
+          controller.close();
+        },
+      }),
+    } as Response);
+
+    // Distinct description: fetchAI caches by prompt, and 'A unique world' is used above.
+    const result = await generateWorldWithStatus('A world for the status check');
+    expect(result.fallback).toBe(false);
+    expect(result.world.name).toBe('Status World');
+  });
+
+  it('generateWorldWithStatus reports fallback: true for a preset with no description', async () => {
+    const result = await generateWorldWithStatus('', 'medieval_fantasy');
+    expect(result.fallback).toBe(true);
+    expect(result.world.name).toBe('Eldoria');
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('passes surface: world_builder in POST body to /api/chat (PF-931)', async () => {

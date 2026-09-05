@@ -77,7 +77,7 @@ vi.mock('@/lib/ai/worldBuilder', () => ({
       rules: [],
     },
   },
-  generateWorld: vi.fn(() => Promise.resolve(mockWorld)),
+  generateWorldWithStatus: vi.fn(),
   worldToMarkdown: vi.fn(() => '# Aethoria\n\nA land of ancient magic.'),
 }));
 
@@ -86,12 +86,16 @@ vi.mock('lucide-react', async () => {
   return Object.fromEntries(Object.keys(actual).map((k) => [k, () => null]));
 });
 
-import { generateWorld, worldToMarkdown } from '@/lib/ai/worldBuilder';
+import { generateWorldWithStatus, worldToMarkdown } from '@/lib/ai/worldBuilder';
 
 describe('WorldBuilderPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(generateWorld).mockResolvedValue(mockWorld);
+    // Mirror the real function: a preset with a blank description short-circuits to the preset.
+    vi.mocked(generateWorldWithStatus).mockImplementation(async (description, preset) => ({
+      world: mockWorld,
+      fallback: Boolean(preset && !description.trim()),
+    }));
   });
   afterEach(() => cleanup());
 
@@ -155,13 +159,13 @@ describe('WorldBuilderPanel', () => {
     expect(screen.getByText(/Describe a world concept or select a genre preset/)).toBeInTheDocument();
   });
 
-  it('calls generateWorld when Generate button is clicked', async () => {
+  it('calls generateWorldWithStatus when Generate button is clicked', async () => {
     render(<WorldBuilderPanel />);
     fireEvent.change(screen.getByLabelText('Describe your world concept'), {
       target: { value: 'A cyberpunk megacity' },
     });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
-    expect(vi.mocked(generateWorld)).toHaveBeenCalledOnce();
+    expect(vi.mocked(generateWorldWithStatus)).toHaveBeenCalledOnce();
   });
 
   it('shows world name after successful generation', async () => {
@@ -190,7 +194,7 @@ describe('WorldBuilderPanel', () => {
       target: { value: 'x'.repeat(1500) },
     });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
-    await waitFor(() => expect(generateWorld).toHaveBeenCalledOnce());
+    await waitFor(() => expect(generateWorldWithStatus).toHaveBeenCalledOnce());
 
     expect(screen.queryByText(/shortened before generation/i)).toBeNull();
   });
@@ -204,7 +208,7 @@ describe('WorldBuilderPanel', () => {
 
     fireEvent.change(description, { target: { value: 'A concise world' } });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
-    await waitFor(() => expect(generateWorld).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(generateWorldWithStatus).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/shortened before generation/i)).toBeNull();
   });
 
@@ -217,13 +221,13 @@ describe('WorldBuilderPanel', () => {
       target: { value: ' '.repeat(1501) },
     });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
-    await waitFor(() => expect(generateWorld).toHaveBeenCalledOnce());
+    await waitFor(() => expect(generateWorldWithStatus).toHaveBeenCalledOnce());
 
     expect(screen.queryByText(/shortened before generation/i)).toBeNull();
   });
 
   it('clears the warning when generation fails', async () => {
-    vi.mocked(generateWorld).mockRejectedValue(new Error('World gen failed'));
+    vi.mocked(generateWorldWithStatus).mockRejectedValue(new Error('World gen failed'));
     render(<WorldBuilderPanel />);
     fireEvent.change(screen.getByLabelText('Describe your world concept'), {
       target: { value: 'x'.repeat(1501) },
@@ -231,6 +235,18 @@ describe('WorldBuilderPanel', () => {
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
 
     expect(await screen.findByText(/World gen failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/shortened before generation/i)).toBeNull();
+  });
+
+  it('does not warn when generation fell back to a preset', async () => {
+    vi.mocked(generateWorldWithStatus).mockResolvedValue({ world: mockWorld, fallback: true });
+    render(<WorldBuilderPanel />);
+    fireEvent.change(screen.getByLabelText('Describe your world concept'), {
+      target: { value: 'x'.repeat(1501) },
+    });
+    fireEvent.click(screen.getByLabelText('Generate world with AI'));
+    await waitFor(() => screen.getByText('Aethoria'));
+
     expect(screen.queryByText(/shortened before generation/i)).toBeNull();
   });
 
@@ -292,8 +308,8 @@ describe('WorldBuilderPanel', () => {
     expect(vi.mocked(worldToMarkdown)).toHaveBeenCalledWith(mockWorld);
   });
 
-  it('shows error message when generateWorld throws', async () => {
-    vi.mocked(generateWorld).mockRejectedValue(new Error('World gen failed'));
+  it('shows error message when generateWorldWithStatus throws', async () => {
+    vi.mocked(generateWorldWithStatus).mockRejectedValue(new Error('World gen failed'));
     render(<WorldBuilderPanel />);
     fireEvent.change(screen.getByLabelText('Describe your world concept'), {
       target: { value: 'A broken world' },

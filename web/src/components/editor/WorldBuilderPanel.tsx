@@ -5,7 +5,7 @@ import { Globe, Users, Map, Clock, BookOpen, Scroll, Download, Sparkles, Chevron
 import {
   WORLD_PRESETS,
   WORLD_DESC_MAX_LENGTH,
-  generateWorld,
+  generateWorldWithStatus,
   isWorldDescriptionTruncated,
   worldToMarkdown,
   type GameWorld,
@@ -254,14 +254,15 @@ export function WorldBuilderPanel() {
   const handleGenerate = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const willGenerate = !(selectedPreset && !description.trim());
-    setTruncationWarning(willGenerate && isWorldDescriptionTruncated(description));
+    setTruncationWarning(false);
     try {
-      const result = await generateWorld(description, selectedPreset || undefined);
+      const { world: result, fallback } = await generateWorldWithStatus(description, selectedPreset || undefined);
       setWorld(result);
+      // Warn only when the AI actually generated from the shortened description. A preset
+      // fallback (parse failure, or preset with no description) was not shaped by it, and a
+      // thrown error produced no result at all — in both cases the warning would be misleading.
+      setTruncationWarning(!fallback && isWorldDescriptionTruncated(description));
     } catch (err) {
-      // Nothing was generated, so a warning about "the result" would be misleading next to the error.
-      setTruncationWarning(false);
       setError(err instanceof Error ? err.message : 'Failed to generate world');
     } finally {
       setLoading(false);

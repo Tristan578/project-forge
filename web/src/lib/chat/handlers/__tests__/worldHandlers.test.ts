@@ -285,6 +285,29 @@ describe('build_world handler', () => {
     expect(result.success).toBe(true);
   });
 
+  it('does not report truncation when an oversized premise fell back to a preset', async () => {
+    const encoder = new TextEncoder();
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"text_delta","text":"not json"}\ndata: [DONE]\n'));
+          controller.close();
+        },
+      }),
+    } as Response);
+    const result = await worldHandlers.build_world(
+      { premise: 'x'.repeat(1501), genre: 'medieval_fantasy' },
+      makeContext(),
+    );
+    expect(result.success).toBe(true);
+    // The preset was not shaped by the premise, so it cannot have been truncated.
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(false);
+    expect(result.message).not.toMatch(/description.+shortened/i);
+  });
+
   it('surfaces auth errors immediately (does not fall back)', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(JSON.stringify({ error: 'insufficient credits' }), {

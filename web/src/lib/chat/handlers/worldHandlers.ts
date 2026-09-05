@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { parseArgs } from './types';
 import {
-  generateWorld,
+  generateWorldWithStatus,
   validateWorldConsistency,
   healWorldConsistency,
   WORLD_PRESETS,
@@ -55,7 +55,9 @@ export function clearPersistedWorld(): void {
  *
  * `descriptionTruncated` reports whether the prompt actually sent for the returned
  * world (premise + constraints + any retry notes) was shortened by generateWorld.
- * It is false for the preset fallback, which never used the premise.
+ * It is false whenever the returned world is a preset — the retry-exhausted fallback
+ * below or a parse-failure fallback from generateWorld — since a preset was never
+ * shaped by the premise.
  */
 async function generateWithHealing(
   premise: string,
@@ -94,12 +96,12 @@ async function generateWithHealing(
     }
 
     try {
-      const raw = await generateWorld(attemptPremise, genre);
+      const { world: raw, fallback: presetFallback } = await generateWorldWithStatus(attemptPremise, genre);
       const healed = healWorldConsistency(raw);
       const report = validateWorldConsistency(healed);
       lastWorld = healed;
       lastReport = report;
-      lastTruncated = isWorldDescriptionTruncated(attemptPremise);
+      lastTruncated = !presetFallback && isWorldDescriptionTruncated(attemptPremise);
 
       if (report.valid) {
         return { world: healed, report, fallback: false, descriptionTruncated: lastTruncated };
