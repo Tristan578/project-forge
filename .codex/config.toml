@@ -1,0 +1,9 @@
+approval_policy = "never"
+
+[mcp_servers.taskboard]
+command = "D:/repos/into-rust/taskboard/taskboard.exe"
+args = [
+    "mcp",
+    "--db",
+    "D:/repos/into-rust/project-forge/.claude/taskboard.db",
+]

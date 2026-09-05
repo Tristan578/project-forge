@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'D:\\repos\\into-rust\\project-forge\\.codex\\hooks\\post-edit-lint.sh'",
+            "timeout": 15000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'D:\\repos\\into-rust\\project-forge\\.codex\\hooks\\on-session-start.sh'",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'D:\\repos\\into-rust\\project-forge\\.codex\\hooks\\on-prompt-submit.sh'",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash 'D:\\repos\\into-rust\\project-forge\\.codex\\hooks\\on-stop.sh'",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
