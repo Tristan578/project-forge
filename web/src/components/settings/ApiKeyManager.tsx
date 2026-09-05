@@ -29,6 +29,11 @@ const PROVIDERS: { id: Provider; label: string; placeholder: string }[] = [
   // paste, and `music` is refused regardless (UNAVAILABLE_CAPABILITIES, #9522).
 ];
 
+/** Human labels for providers Settings no longer offers but a user may still hold a key for. */
+const RETIRED_PROVIDER_LABELS: Partial<Record<Provider, string>> = {
+  suno: 'Suno',
+};
+
 export function ApiKeyManager() {
   const [providerKeys, setProviderKeys] = useState<ProviderStatus[]>([]);
   const [mcpKeys, setMcpKeys] = useState<McpApiKey[]>([]);
@@ -210,14 +215,14 @@ export function ApiKeyManager() {
                 className="flex items-center gap-2 rounded-md bg-zinc-800 p-2"
               >
                 <span className="min-w-[140px] text-sm text-zinc-400">
-                  {k.provider} <span className="text-xs">(no longer offered)</span>
+                  {RETIRED_PROVIDER_LABELS[k.provider] ?? k.provider} <span className="text-xs">(no longer offered)</span>
                 </span>
                 <span className="flex-1 text-xs text-zinc-500">Stored key, unused</span>
                 <button
                   onClick={() => removeKey(k.provider)}
                   className="text-red-400 hover:text-red-300"
                   title="Remove key"
-                  aria-label={`Remove ${k.provider} API key`}
+                  aria-label={`Remove ${RETIRED_PROVIDER_LABELS[k.provider] ?? k.provider} API key`}
                 >
                   <Trash2 size={14} />
                 </button>

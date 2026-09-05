@@ -278,6 +278,8 @@ export function getCapabilityUnavailability(
  */
 export const COMMAND_CAPABILITY: Readonly<Record<string, ProviderCapability>> = {
   generate_3d_model: 'model3d',
+  generate_3d_from_image: 'model3d',
+  generate_character: 'sprite',
   generate_texture: 'texture',
   generate_pbr_maps: 'texture',
   generate_skybox: 'texture',

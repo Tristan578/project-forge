@@ -144,10 +144,9 @@ describe('POST /api/generate/music', () => {
       vi.mocked(distributedRateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
     });
     afterEach(() => {
-      vi.mocked(getCapabilityUnavailability).mockReset();
-      vi.mocked(getCapabilityUnavailability).mockImplementation(
-        (cap) => (cap === 'music' ? { reason: 'Music generation is not available yet.', issue: 9522 } : null),
-      );
+      // Back to the REAL table: vi.fn(impl).mockRestore() reinstates the wrapped
+      // implementation, so the gate describe asserts UNAVAILABLE_CAPABILITIES itself.
+      vi.mocked(getCapabilityUnavailability).mockRestore();
     });
 
     it('returns 400 for invalid JSON', async () => {

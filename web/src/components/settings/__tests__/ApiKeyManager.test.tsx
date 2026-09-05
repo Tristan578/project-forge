@@ -150,3 +150,35 @@ describe('ApiKeyManager', () => {
     });
   });
 });
+
+describe('ApiKeyManager retired-provider keys (#9117 / #9522)', () => {
+  afterEach(() => cleanup());
+
+  it('shows a remove-only row for a stored Suno key and issues DELETE on removal', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/keys' && !init) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ providers: [{ provider: 'suno', configured: true, createdAt: '2026-01-01T00:00:00Z' }] }),
+        });
+      }
+      if (url === '/api/keys/api-key') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ keys: [] }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    global.fetch = fetchMock;
+    render(<ApiKeyManager />);
+    await waitFor(() => {
+      expect(screen.getByText('(no longer offered)')).toBeDefined();
+    });
+    // Human label, not the raw id; no Add-Key affordance for it.
+    expect(screen.getByText(/^Suno/)).toBeDefined();
+    expect(screen.queryByLabelText('Suno API key')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Remove Suno API key'));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/keys/suno', { method: 'DELETE' });
+      expect(screen.queryByText('(no longer offered)')).toBeNull();
+    });
+  });
+});

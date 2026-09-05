@@ -41,6 +41,9 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
   const tokenCost = soundType === 'sfx' ? 20 : 40;
   const prompt = soundType === 'sfx' ? sfxPrompt : voiceText;
   // Capability gate (#9117): blocked only on a positive "unavailable" report.
+  // Keyed by the selected type, so the type radios below are deliberately NOT
+  // disabled by it: if one type is ever declared unavailable the user must
+  // still be able to switch back to the other.
   const gate = useGenerationGate(soundType === 'sfx' ? 'sfx-generation' : 'voice-generation');
   const canSubmit =
     !gate.blocked &&
@@ -154,7 +157,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                   type="radio"
                   checked={soundType === 'sfx'}
                   onChange={() => setSoundType('sfx')}
-                  disabled={isSubmitting || gate.blocked}
+                  disabled={isSubmitting}
                   className="text-blue-500"
                 />
                 <span className="text-sm text-zinc-300">Sound Effect</span>
@@ -164,7 +167,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                   type="radio"
                   checked={soundType === 'voice'}
                   onChange={() => setSoundType('voice')}
-                  disabled={isSubmitting || gate.blocked}
+                  disabled={isSubmitting}
                   className="text-blue-500"
                 />
                 <span className="text-sm text-zinc-300">Voice</span>

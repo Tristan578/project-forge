@@ -248,8 +248,11 @@ test.describe('Settings Panel @ui @dev', () => {
       await expect(providerLabel.first()).toBeVisible();
     }
     // Suno has no public API; music is declared unavailable (#9117 / #9522),
-    // so Settings must not invite a key that cannot exist.
-    await expect(dialog.getByText('Suno', { exact: false })).toHaveCount(0);
+    // so Settings must not invite a key that cannot exist. Scoped to the
+    // Add-Key affordance: an account that still holds a legacy Suno key sees a
+    // remove-only "Suno (no longer offered)" row, which is deliberate.
+    await expect(dialog.getByLabel('Suno API key')).toHaveCount(0);
+    await expect(dialog.getByText('Suno', { exact: true })).toHaveCount(0);
   });
 
   test('API keys tab shows MCP API Keys section with generate button', async ({ page }) => {

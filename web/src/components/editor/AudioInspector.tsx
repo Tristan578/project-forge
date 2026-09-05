@@ -239,7 +239,7 @@ export function AudioInspector() {
               <Sparkles size={10} />
             ) : musicGate.blocked ? (
               // Distinct from the tier lock: this is "not available yet".
-              <span className="rounded border border-amber-700/40 px-1 text-[9px] text-amber-400">Unavailable</span>
+              <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">Unavailable</span>
             ) : (
               <Lock size={10} />
             )}

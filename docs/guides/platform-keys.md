@@ -94,8 +94,7 @@ cd .. && node --env-file="$TMPDIR/spawnforge-prod.env" web/scripts/verify-platfo
 rm "$TMPDIR/spawnforge-prod.env"
 ```
 
-(On Windows use `%TEMP%\spawnforge-prod.env` in PowerShell or Git Bash's
-`$TEMP`.)
+(On Windows: `$env:TEMP\spawnforge-prod.env` in PowerShell, or `$TEMP/spawnforge-prod.env` in Git Bash.)
 
 The script prints one row per capability:
 

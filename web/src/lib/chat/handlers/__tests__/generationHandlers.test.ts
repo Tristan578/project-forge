@@ -559,10 +559,9 @@ describe('generationHandlers', () => {
       vi.mocked(getCapabilityUnavailability).mockReturnValue(null);
     });
     afterEach(() => {
-      vi.mocked(getCapabilityUnavailability).mockReset();
-      vi.mocked(getCapabilityUnavailability).mockImplementation(
-        (cap) => (cap === 'music' ? { reason: 'Music generation is not available yet.', issue: 9522 } : null),
-      );
+      // Back to the REAL table: vi.fn(impl).mockRestore() reinstates the wrapped
+      // implementation, so the gate describe asserts UNAVAILABLE_CAPABILITIES itself.
+      vi.mocked(getCapabilityUnavailability).mockRestore();
     });
 
     it('imports audio directly when sync response', async () => {
