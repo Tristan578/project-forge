@@ -6,49 +6,21 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import {
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
-  CHAT_BACKEND_ENV_VARS,
+  CAPABILITY_ENV_VARS,
   CAPABILITY_REQUIRED_PROVIDERS,
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
   getCapabilityUnavailability,
-  isVercelRuntime,
+  isCapabilityConfigured,
 } from '@/lib/config/providers';
 
 /**
- * Maps each provider capability to the environment variable(s) that must be set.
- * Mirrors the direct backend's CAPABILITY_PROVIDER_MAP but also includes the
- * gateway/router env vars that can serve certain capabilities.
- *
- * Every name comes from `lib/config/providers` — this table held its own
- * hardcoded copy until PF-1054, which is exactly the drift that put two
- * permanent false outages on the status page.
+ * Capability -> env vars lives in `lib/config/providers` (`CAPABILITY_ENV_VARS`)
+ * since #9719, shared with the AI Providers health probe so the two cannot
+ * disagree. This route held its own copy until then — the same drift class
+ * PF-1054 removed once already.
  */
-const CAPABILITY_KEY_MAP: Record<ProviderCapability, string[]> = {
-  // Any chat backend serves chat, so this is precisely the backend table.
-  chat: [...CHAT_BACKEND_ENV_VARS],
-  embedding: [
-    PLATFORM_KEY_ENV.openai,
-    GATEWAY_KEY_ENV.vercelGateway,
-    GATEWAY_KEY_ENV.openrouter,
-    GATEWAY_KEY_ENV.githubModels,
-  ],
-  image: [
-    PLATFORM_KEY_ENV.openai,
-    GATEWAY_KEY_ENV.vercelGateway,
-    GATEWAY_KEY_ENV.openrouter,
-  ],
-  model3d: [PLATFORM_KEY_ENV.meshy],
-  texture: [PLATFORM_KEY_ENV.meshy],
-  sfx: [PLATFORM_KEY_ENV.elevenlabs],
-  voice: [PLATFORM_KEY_ENV.elevenlabs],
-  music: [PLATFORM_KEY_ENV.suno],
-  // Derived from CAPABILITY_REQUIRED_PROVIDERS: sprite spends BOTH keys (the
-  // default path is DALL-E 3, pixel-art is Replicate SDXL), and this entry
-  // once listed Replicate alone — so a Replicate-only environment was told to
-  // configure the key it already had and never heard of OpenAI.
-  sprite: CAPABILITY_REQUIRED_PROVIDERS.sprite?.map((p) => PLATFORM_KEY_ENV[p]) ?? [PLATFORM_KEY_ENV.replicate],
-  bg_removal: [PLATFORM_KEY_ENV.removebg],
-};
+const CAPABILITY_KEY_MAP = CAPABILITY_ENV_VARS;
 
 /** Human-readable provider names for each env var */
 const ENV_VAR_PROVIDER_NAMES: Record<string, string> = {
@@ -244,11 +216,12 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
       isAvailable = missing.length === 0;
       missingEnvVars = missing.map((provider) => PLATFORM_KEY_ENV[provider]);
     } else {
-      // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
-      const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
-      const platformAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
-      isAvailable = platformAvailable || byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
-      missingEnvVars = envVars;
+      // Platform path: `isCapabilityConfigured` folds in Vercel OIDC for the
+      // gateway-served capabilities — the same predicate the AI Providers
+      // health probe grades (#9719), so the two can never disagree. BYOK: the
+      // signed-in user's own key for the capability's provider.
+      isAvailable = isCapabilityConfigured(cap) || byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
+      missingEnvVars = [...envVars];
     }
 
     const status: CapabilityStatus = {

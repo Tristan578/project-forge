@@ -445,6 +445,68 @@ export function resolveConfiguredChatBackend(): ChatBackendDescriptor | null {
 }
 
 // ---------------------------------------------------------------------------
+// Capability -> env vars that can serve it (#9719)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every environment variable that can serve each capability on the platform
+ * path. Read by `/api/capabilities` (feature gating) and by the AI Providers
+ * health probe, so "configured" means the same thing to both — the probe
+ * reported "up" with zero generation keys precisely because it graded a
+ * different property than the endpoint users depend on (#9719, lesson 1).
+ *
+ * Chat is any chat backend; embedding and image can also come from the
+ * multi-model routers. Everything else needs its direct provider's key.
+ */
+export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> = {
+  chat: CHAT_BACKEND_ENV_VARS,
+  embedding: [
+    PLATFORM_KEY_ENV.openai,
+    GATEWAY_KEY_ENV.vercelGateway,
+    GATEWAY_KEY_ENV.openrouter,
+    GATEWAY_KEY_ENV.githubModels,
+  ],
+  image: [
+    PLATFORM_KEY_ENV.openai,
+    GATEWAY_KEY_ENV.vercelGateway,
+    GATEWAY_KEY_ENV.openrouter,
+  ],
+  model3d: [PLATFORM_KEY_ENV.meshy],
+  texture: [PLATFORM_KEY_ENV.meshy],
+  sfx: [PLATFORM_KEY_ENV.elevenlabs],
+  voice: [PLATFORM_KEY_ENV.elevenlabs],
+  music: [PLATFORM_KEY_ENV.suno],
+  // Every key sprite spends (CAPABILITY_REQUIRED_PROVIDERS): the default path
+  // is DALL-E 3 on OpenAI, pixel-art is Replicate SDXL. Listing Replicate
+  // alone told a Replicate-only environment to configure the key it had.
+  sprite: CAPABILITY_REQUIRED_PROVIDERS.sprite!.map((p) => PLATFORM_KEY_ENV[p]),
+  bg_removal: [PLATFORM_KEY_ENV.removebg],
+};
+
+/**
+ * Whether the platform path can serve a capability in this environment: one
+ * of its env vars is set, or it is gateway-served and the process runs on
+ * Vercel (OIDC auto-auth needs no explicit key).
+ */
+export function isCapabilityConfigured(capability: ProviderCapability): boolean {
+  // A capability that spends more than one key is configured only when every
+  // one of them is present (CAPABILITY_REQUIRED_PROVIDERS - sprite's default
+  // path is DALL-E 3 on OpenAI, its pixel-art path is Replicate).
+  const required = CAPABILITY_REQUIRED_PROVIDERS[capability];
+  if (required) {
+    return required.every((provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]));
+  }
+  const envVars = CAPABILITY_ENV_VARS[capability];
+  const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
+  return vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
+}
+
+/** Capabilities the platform path cannot serve here, in declaration order. */
+export function listUnconfiguredCapabilities(): ProviderCapability[] {
+  return PROVIDER_CAPABILITIES.filter((cap) => !isCapabilityConfigured(cap));
+}
+
+// ---------------------------------------------------------------------------
 // Image generation constraints (per provider)
 // ---------------------------------------------------------------------------
 

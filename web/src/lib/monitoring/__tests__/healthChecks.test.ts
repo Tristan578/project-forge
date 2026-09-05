@@ -103,6 +103,28 @@ describe('healthChecks', () => {
       expect(sanitized[0].error).toBeUndefined();
       expect(sanitized[0].details).toBeUndefined();
     });
+
+    // #9719: `summary` is the one field a probe may use to say WHAT is wrong
+    // in public terms (capability names), so it must survive sanitization
+    // while `error` and `details` are still stripped.
+    it('preserves the public-safe summary while stripping error and details', async () => {
+      const { sanitizeForPublic } = await import('@/lib/monitoring/healthChecks');
+      const services = [
+        {
+          name: 'AI Providers',
+          status: 'degraded' as const,
+          latencyMs: 0,
+          lastChecked: '',
+          error: 'PLATFORM_MESHY_KEY unset',
+          summary: 'Unavailable: model3d, texture',
+          details: { generationProviders: { meshy: false } },
+        },
+      ];
+      const sanitized = sanitizeForPublic(services);
+      expect(sanitized[0].summary).toBe('Unavailable: model3d, texture');
+      expect(sanitized[0].error).toBe('AI Providers is degraded');
+      expect(sanitized[0].details).toBeUndefined();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -185,19 +207,74 @@ describe('healthChecks', () => {
       expect(result.error).toContain('STRIPE_SECRET_KEY not configured');
     });
 
-    it('returns healthy when STRIPE_SECRET_KEY is set', async () => {
+    // #9719: presence of STRIPE_SECRET_KEY is not evidence Stripe will accept
+    // it. The probe performs ONE authenticated, credit-free request — Retrieve
+    // balance, `GET https://api.stripe.com/v1/balance` with
+    // `Authorization: Bearer <secret key>` (https://docs.stripe.com/api/balance/balance_retrieve,
+    // https://docs.stripe.com/api/authentication) — and grades the answer.
+    // The request shape pinned here is Stripe's, not ours (lesson 14).
+    it('returns healthy with real latency when Stripe accepts the key on GET /v1/balance', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      const fetchMock = vi.fn(async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        return new Response('{"object":"balance","livemode":false}', { status: 200 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
       expect(result.status).toBe('healthy');
+      expect(result.latencyMs).toBeGreaterThanOrEqual(4);
       expect(result.details?.secretKeyConfigured).toBe(true);
+      expect(result.details?.probe).toBe('GET /v1/balance');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe('https://api.stripe.com/v1/balance');
+      expect(init.method).toBe('GET');
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk_test_abc');
+    });
+
+    it('returns degraded with an auth error when Stripe rejects the key (401)', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_revoked');
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        return new Response('{"error":{"type":"invalid_request_error"}}', { status: 401 });
+      }));
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe('degraded');
+      expect(result.latencyMs).toBeGreaterThanOrEqual(4);
+      expect(result.error).toMatch(/401/);
+      expect(result.error).toMatch(/rejected|auth/i);
+      expect(result.error).not.toContain('sk_test_revoked');
+    });
+
+    it('returns degraded (never throws) on a transient network failure', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET'); }));
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('ECONNRESET');
+    });
+
+    it('returns degraded on a Stripe 5xx', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe('degraded');
+      expect(result.error).toMatch(/503/);
     });
 
     it('reports webhook secret presence in details', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
       vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_xyz');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
       expect(result.details?.webhookSecretConfigured).toBe(true);
@@ -485,29 +562,61 @@ describe('healthChecks', () => {
       expect(result.error).toContain('No chat backend is configured');
     });
 
-    it('returns healthy on the gateway key alone, with zero generation keys set', async () => {
+    // #9719: the gateway key serves chat only. With no generation key set the
+    // paid offer is mostly unavailable, so the probe must say so — and say
+    // WHICH capabilities — in the public body, not only in stripped details.
+    it('returns degraded naming every unconfigured capability when only the gateway key is set', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '');
       vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
-      expect(result.status).toBe('healthy');
+      expect(result.status).toBe('degraded');
       expect(result.details?.chatBackend).toBe('vercel-gateway');
-      // Generation keys are an informational facet only — they never move status.
       expect(result.details?.generationConfiguredCount).toBe(0);
-      expect(result.error).toBeUndefined();
+      const missing = result.details?.unconfiguredCapabilities as string[];
+      expect(missing).toEqual(
+        expect.arrayContaining(['model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal']),
+      );
+      expect(missing).not.toContain('chat');
+      expect(result.error).toContain('model3d');
+      // Public-safe summary survives sanitizeForPublic; it carries capability
+      // names only, never env var names.
+      expect(result.summary).toContain('model3d');
+      expect(result.summary).not.toContain('PLATFORM_');
     });
 
-    it('returns healthy via Vercel OIDC with no explicit key at all', async () => {
+    it('returns healthy when a chat backend and every generation key are configured', async () => {
+      vi.resetModules();
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
+      vi.stubEnv('PLATFORM_MESHY_KEY', 'x');
+      vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'x');
+      vi.stubEnv('PLATFORM_SUNO_KEY', 'x');
+      vi.stubEnv('PLATFORM_OPENAI_KEY', 'x');
+      vi.stubEnv('PLATFORM_REPLICATE_KEY', 'x');
+      vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'x');
+      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAiProviders();
+      expect(result.status).toBe('healthy');
+      expect(result.details?.unconfiguredCapabilities).toEqual([]);
+      expect(result.error).toBeUndefined();
+      expect(result.summary).toBeUndefined();
+    });
+
+    it('resolves the gateway via Vercel OIDC with no explicit key at all (chat is not "down")', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '1');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
-      expect(result.status).toBe('healthy');
+      // Not 'down': chat resolves. Not 'healthy' either — no generation key
+      // is set, and #9719 makes that a degraded state, not a footnote.
+      expect(result.status).toBe('degraded');
       expect(result.details?.chatBackend).toBe('vercel-gateway');
+      expect(result.details?.unconfiguredCapabilities).not.toContain('chat');
     });
 
-    it('reports platform generation keys without changing status', async () => {
+    it('names only the capabilities that remain unconfigured once some keys are set', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '');
       vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
@@ -515,12 +624,17 @@ describe('healthChecks', () => {
       vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'el_abc');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
-      expect(result.status).toBe('healthy');
+      expect(result.status).toBe('degraded');
       expect(result.details?.generationConfiguredCount).toBe(2);
       const providers = result.details?.generationProviders as Record<string, boolean>;
       expect(providers.meshy).toBe(true);
       expect(providers.elevenlabs).toBe(true);
       expect(providers.suno).toBe(false);
+      const missing = result.details?.unconfiguredCapabilities as string[];
+      expect(missing).not.toContain('model3d');
+      expect(missing).not.toContain('sfx');
+      expect(missing).toContain('sprite');
+      expect(missing).toContain('music');
     });
 
     it('stays down when generation keys are set but no chat backend is', async () => {
@@ -539,7 +653,7 @@ describe('healthChecks', () => {
       vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-abc');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
-      expect(result.status).toBe('healthy');
+      expect(result.status).not.toBe('down');
       expect(result.details?.chatBackend).toBe('direct');
     });
   });
