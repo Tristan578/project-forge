@@ -164,17 +164,34 @@ describe('AudioInspector', () => {
 
 describe('AudioInspector music gate (#9117)', () => {
   afterEach(() => {
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false });
+    cleanup();
+    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false }));
+  });
+
+  it('gates the Sound button by its own capability too', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'creator' });
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'sfx-generation'
+        ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false }
+        : { blocked: false, reason: undefined, loading: false },
+    );
+    render(<AudioInspector />);
+    const sound = screen.getByRole('button', { name: 'Generate sound with AI — Sound effect generation is not available yet.' });
+    expect(sound).toHaveAttribute('aria-disabled', 'true');
+    expect(sound).toHaveTextContent('Unavailable');
+    expect(screen.getByRole('button', { name: 'Generate music with AI' })).not.toHaveAttribute('aria-disabled');
   });
 
   it('disables the Music button with the reason in its name and a distinct Unavailable badge, and never opens the dialog', () => {
     mockEditorStore();
     useUserStore.setState({ tier: 'creator' });
-    vi.mocked(useGenerationGate).mockReturnValue({
-      blocked: true,
-      reason: 'Music generation is not available yet.',
-      loading: false,
-    });
+    // Both buttons ask the gate for their own capability; only music is blocked here.
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'music-generation'
+        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false }
+        : { blocked: false, reason: undefined, loading: false },
+    );
     render(<AudioInspector />);
     const btn = screen.getByRole('button', { name: 'Generate music with AI — Music generation is not available yet.' });
     expect(btn).toHaveAttribute('aria-disabled', 'true');

@@ -871,6 +871,30 @@ describe('POST /api/chat', () => {
       expect(blocks[1]?.text).toContain('## Scene\nEmpty');
     });
 
+    it('restores the soundtrack instruction once music is no longer declared unavailable (#9117)', async () => {
+      // The available branch of the MUSIC_* prompt clauses: what the prompt
+      // reverts to when #9522 removes `music` from UNAVAILABLE_CAPABILITIES.
+      vi.doMock('@/lib/config/providers', async (importOriginal) => ({
+        ...(await importOriginal<typeof import('@/lib/config/providers')>()),
+        isCommandAvailable: () => true,
+      }));
+      vi.resetModules();
+      try {
+        const { POST: postWithMusic } = await import('../route');
+        const res = await postWithMusic(makeRequest(validBody()));
+        await res.text();
+        const call = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+        const blocks = (call?.instructions ?? []) as Array<{ text: string }>;
+        const basePrompt = blocks[0]?.text ?? '';
+        expect(basePrompt).toContain('generate_music (`targetEntityId`');
+        expect(basePrompt).toMatch(/Soundtrack\*\* - generate_music/);
+        expect(basePrompt).not.toMatch(/do not call generate_music/);
+      } finally {
+        vi.doUnmock('@/lib/config/providers');
+        vi.resetModules();
+      }
+    });
+
     it('steers the agent to orchestrate generate_* tools in the game-creation workflow (#8546)', async () => {
       // The base system prompt must teach the agent to drive the asset-generation
       // pipeline (idea → generated assets → spawn → script → win condition →

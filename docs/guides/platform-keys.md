@@ -47,14 +47,17 @@ table changes.
 | `model3d`, `texture` (also skybox) | Meshy | platform-key | `PLATFORM_MESHY_KEY` | **Platform key** (owner) | https://www.meshy.ai/settings/api — shown once, prefix `msy_` |
 | `sfx`, `voice` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key | https://elevenlabs.io/app/settings/api-keys |
 | `music` | (Suno → ElevenLabs) | unavailable | — | **Unavailable** until #9522 lands; then covered by `PLATFORM_ELEVENLABS_KEY` | n/a — Suno has no public API |
-| `sprite` (and pixel art) | Replicate | platform-key | `PLATFORM_REPLICATE_KEY` | **Platform key** (owner) until #9523 evaluates the gateway image pool | https://replicate.com/account/api-tokens |
+| `sprite` (and pixel art) | Replicate **and** OpenAI | platform-key x2 | `PLATFORM_REPLICATE_KEY` + `PLATFORM_OPENAI_KEY` | **Two platform keys** (owner): `/api/generate/sprite` resolves DALL-E 3 on OpenAI for every style except pixel-art (the dialog's and the chat tool's default) and Replicate SDXL for pixel-art. A Replicate-only environment still fails the default path. #9523 may later fold the OpenAI half into the gateway | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
 | `bg_removal` | remove.bg | platform-key | `PLATFORM_REMOVEBG_KEY` | **Platform key** (owner) | https://www.remove.bg/dashboard#api-key |
 
 Not in the table: `ANTHROPIC_API_KEY` is only a chat fallback when the gateway
-is bypassed (https://console.anthropic.com/settings/keys); `PLATFORM_OPENAI_KEY`
-is only needed if `image`/`embedding` must work with the gateway down
-(https://platform.openai.com/api-keys); `PLATFORM_HYPER3D_KEY` is BYOK-only and
-never read on the platform path.
+is bypassed (https://console.anthropic.com/settings/keys); `PLATFORM_HYPER3D_KEY`
+is BYOK-only and never read on the platform path.
+
+The gateway rows are graded on `AI_GATEWAY_API_KEY` alone: if that key were
+ever removed from production the script reports them `missing` and never
+substitutes a direct Anthropic/OpenAI key, because the decision above is the
+gateway and a silent fallback would hide its absence.
 
 `AI_GATEWAY_API_KEY` is evidence for the gateway-served capabilities only. It
 does not make any Meshy, ElevenLabs or remove.bg capability available, and

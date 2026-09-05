@@ -107,10 +107,12 @@ export function AudioInspector() {
   const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
 
   const tier = useUserStore((s) => s.tier);
-  const canGenerateSound = canAccessPanel('generate-sound', tier);
   // #9117: an unprovisionable capability is disabled here, at the entry point,
-  // not two clicks later inside an empty dialog.
+  // not two clicks later inside an empty dialog — for BOTH buttons, so the
+  // next declared-unavailable capability is handled the same way as music.
+  const soundGate = useGenerationGate('sfx-generation');
   const musicGate = useGenerationGate('music-generation');
+  const canGenerateSound = canAccessPanel('generate-sound', tier) && !soundGate.blocked;
   const canGenerateMusic = canAccessPanel('generate-music', tier) && !musicGate.blocked;
   // These stay focusable when locked (aria-disabled, not disabled): they are
   // upgrade prompts, and a control removed from the tab order can never tell
@@ -119,7 +121,9 @@ export function AudioInspector() {
   // goes in the accessible name too.
   const soundButtonLabel = canGenerateSound
     ? 'Generate sound with AI'
-    : `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`;
+    : soundGate.blocked
+      ? `Generate sound with AI — ${soundGate.reason ?? 'not available yet'}`
+      : `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`;
   const musicButtonLabel = canGenerateMusic
     ? 'Generate music with AI'
     : musicGate.blocked
@@ -221,7 +225,13 @@ export function AudioInspector() {
             }`}
             title={soundButtonLabel}
           >
-            {canGenerateSound ? <Sparkles size={10} /> : <Lock size={10} />}
+            {canGenerateSound ? (
+              <Sparkles size={10} />
+            ) : soundGate.blocked ? (
+              <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">Unavailable</span>
+            ) : (
+              <Lock size={10} />
+            )}
             Sound
           </button>
           <button

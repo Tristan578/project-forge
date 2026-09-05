@@ -66,11 +66,11 @@ Token cost: 40 tokens.
 
 ### Music Track
 
-> **Currently unavailable.** The original provider (Suno) has no public API,
-> so no key can be issued. Music is moving to ElevenLabs (#9522). Until that
-> lands the dialog shows an unavailable notice, and the route refuses every
-> request before any tokens are spent. The options below describe the intended
-> feature.
+> **Not available yet.** Music generation is temporarily switched off while
+> it moves to a new provider. Upload your own track from the Asset panel, or
+> generate a sound effect instead. Nothing is charged while it is off. The
+> options below describe the feature as it will return.
+<!-- maintainers: declared in UNAVAILABLE_CAPABILITIES; tracked in #9522; see docs/known-limitations.md and docs/guides/platform-keys.md -->
 
 Generates a background music loop from a description.
 

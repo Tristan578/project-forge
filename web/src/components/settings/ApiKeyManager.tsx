@@ -221,7 +221,7 @@ export function ApiKeyManager() {
                 <span className="min-w-[140px] text-sm text-zinc-400">
                   {RETIRED_PROVIDER_LABELS[k.provider] ?? k.provider} <span className="text-xs">(no longer offered)</span>
                 </span>
-                <span className="flex-1 text-xs text-zinc-500">Stored key, unused</span>
+                <span className="flex-1 text-xs text-zinc-400">Stored key, unused</span>
                 <button
                   onClick={() => removeKey(k.provider)}
                   className="text-red-400 hover:text-red-300"
