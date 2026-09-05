@@ -216,15 +216,15 @@ describe('healthChecks', () => {
     it('returns healthy with real latency when Stripe accepts the key on GET /v1/balance', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
-      const fetchMock = vi.fn(async () => {
-        await new Promise((r) => setTimeout(r, 5));
-        return new Response('{"object":"balance","livemode":false}', { status: 200 });
-      });
+      const fetchMock = vi.fn(async () => new Response('{"object":"balance","livemode":false}', { status: 200 }));
       vi.stubGlobal('fetch', fetchMock);
+      // Real latency = the clock read around the probe, not a constant 0:
+      // drive Date.now so the measured span is observable without sleeping.
+      vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(1_012);
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
       expect(result.status).toBe('healthy');
-      expect(result.latencyMs).toBeGreaterThanOrEqual(4);
+      expect(result.latencyMs).toBe(12);
       expect(result.details?.secretKeyConfigured).toBe(true);
       expect(result.details?.probe).toBe('GET /v1/balance');
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -237,14 +237,12 @@ describe('healthChecks', () => {
     it('returns degraded with an auth error when Stripe rejects the key (401)', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_revoked');
-      vi.stubGlobal('fetch', vi.fn(async () => {
-        await new Promise((r) => setTimeout(r, 5));
-        return new Response('{"error":{"type":"invalid_request_error"}}', { status: 401 });
-      }));
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{"type":"invalid_request_error"}}', { status: 401 })));
+      vi.spyOn(Date, 'now').mockReturnValueOnce(2_000).mockReturnValueOnce(2_007);
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
       expect(result.status).toBe('degraded');
-      expect(result.latencyMs).toBeGreaterThanOrEqual(4);
+      expect(result.latencyMs).toBe(7);
       expect(result.error).toMatch(/401/);
       expect(result.error).toMatch(/rejected|auth/i);
       expect(result.error).not.toContain('sk_test_revoked');
