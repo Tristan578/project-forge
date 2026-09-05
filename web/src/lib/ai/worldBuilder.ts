@@ -564,14 +564,37 @@ export function parseWorldResponse(raw: string): GameWorld {
   return parsed as GameWorld;
 }
 
+/** Max description length before generateWorld truncates it for the AI prompt. */
+export const WORLD_DESC_MAX_LENGTH = 1500;
+
+/** True when generateWorld will shorten this description before generation. */
+export function isWorldDescriptionTruncated(description: string): boolean {
+  return typeof description === 'string' && description.length > WORLD_DESC_MAX_LENGTH;
+}
+
+export interface GenerateWorldResult {
+  world: GameWorld;
+  /**
+   * True when `world` is a preset rather than the AI's output — either a preset was
+   * requested with no description, or the AI response could not be parsed. A fallback
+   * was not shaped by the description, so callers must not describe it as derived
+   * from (or truncated from) the user's text.
+   */
+  fallback: boolean;
+}
+
 /**
- * Generate a world using the AI chat endpoint.
- * Falls back to a preset if generation fails.
+ * Generate a world using the AI chat endpoint, reporting whether the result is a
+ * preset fallback. HTTP/auth errors propagate to the caller; a response that
+ * cannot be parsed falls back to the preset (or medieval_fantasy) with `fallback: true`.
  */
-export async function generateWorld(description: string, preset?: string): Promise<GameWorld> {
+export async function generateWorldWithStatus(
+  description: string,
+  preset?: string,
+): Promise<GenerateWorldResult> {
   // If a preset is requested with no description, return it directly
   if (preset && !description.trim() && WORLD_PRESETS[preset]) {
-    return structuredClone(WORLD_PRESETS[preset]);
+    return { world: structuredClone(WORLD_PRESETS[preset]), fallback: true };
   }
 
   const fallbackKey = preset ?? 'medieval_fantasy';
@@ -579,9 +602,8 @@ export async function generateWorld(description: string, preset?: string): Promi
 
   // Truncate the user description (not the full prompt) to stay within
   // the 4000-char message limit without cutting through the JSON schema
-  const maxDescLength = 1500;
-  const safeDescription = description.length > maxDescLength
-    ? description.slice(0, maxDescLength) + '... (truncated)'
+  const safeDescription = isWorldDescriptionTruncated(description)
+    ? description.slice(0, WORLD_DESC_MAX_LENGTH) + '... (truncated)'
     : description;
   const prompt = buildWorldPrompt(safeDescription, preset);
 
@@ -594,11 +616,21 @@ export async function generateWorld(description: string, preset?: string): Promi
   });
 
   try {
-    return parseWorldResponse(content);
+    return { world: parseWorldResponse(content), fallback: false };
   } catch {
     // Parse failed — fall back to preset
-    return structuredClone(fallback);
+    return { world: structuredClone(fallback), fallback: true };
   }
+}
+
+/**
+ * Generate a world using the AI chat endpoint.
+ * Falls back to a preset if the response cannot be parsed; use
+ * generateWorldWithStatus when the caller needs to know that happened.
+ */
+export async function generateWorld(description: string, preset?: string): Promise<GameWorld> {
+  const { world } = await generateWorldWithStatus(description, preset);
+  return world;
 }
 
 // ---- Consistency Validation ----
