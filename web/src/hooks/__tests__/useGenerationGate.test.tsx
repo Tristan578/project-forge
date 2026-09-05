@@ -1,12 +1,8 @@
 /**
  * useGenerationGate — the dialog-facing gate over /api/capabilities (#9117).
  *
- * `blocked` is true ONLY when the server has reported the feature
- * `unprovisionable` (declared unavailable in code). A plain `available:false`
- * — "no platform key here" — never blocks: a BYOK key may override it and a
- * stale cached body could misreport it, while the server refuses an
- * unprovisionable capability before any charge anyway. Loading and failed
- * fetches never block either.
+ * Successful per-user unavailable responses block; loading and failed fetches
+ * do not. BYOK availability is already resolved by the server.
  *
  * @vitest-environment jsdom
  */
@@ -70,12 +66,12 @@ describe('useGenerationGate', () => {
     expect(result.current.reason).toBe('Music generation is not available yet. Generate a sound effect instead.');
   });
 
-  it('does NOT block a feature that is merely missing a platform key', async () => {
+  it('blocks a feature the server reports unavailable for the current user', async () => {
     respond(FIXTURE);
     const { result } = renderHook(() => useGenerationGate('model-generation'));
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.blocked).toBe(false);
-    expect(result.current.reason).toBeUndefined();
+    expect(result.current.blocked).toBe(true);
+    expect(result.current.reason).toContain('Meshy');
   });
 
   it('does not block a feature the server reports available', async () => {

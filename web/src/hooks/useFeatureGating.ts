@@ -78,6 +78,7 @@ export { ERROR_TTL_MS, CAPABILITIES_TTL_MS } from '@/lib/config/timeouts';
 let errorCachedAt: number | null = null;
 /** When the current successful body was fetched; it ages out after CAPABILITIES_TTL_MS (#9725). */
 let fetchedAt: number | null = null;
+let cacheVersion = 0;
 
 function notifySubscribers(): void {
   for (const cb of subscribers) {
@@ -100,27 +101,31 @@ function isCacheStale(): boolean {
 }
 
 /**
- * Drop the cached body so the next mount refetches. Call from whatever reacts
+ * Drop the cached body and immediately refresh mounted consumers. Call from whatever reacts
  * to an auth change (sign-in, sign-out, BYOK key saved) so a per-user
  * availability body never outlives the user it was fetched for.
  */
 export function invalidateCapabilitiesCache(): void {
+  cacheVersion += 1;
   cachedState = null;
   fetchPromise = null;
   fetchedAt = null;
   errorCachedAt = null;
+  if (subscribers.length > 0) void fetchCapabilities();
   notifySubscribers();
 }
 
 function fetchCapabilities(): Promise<void> {
   if (fetchPromise) return fetchPromise;
 
-  fetchPromise = fetch('/api/capabilities')
+  const version = cacheVersion;
+  fetchPromise = fetch('/api/capabilities', { cache: 'no-store' })
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json() as Promise<CapabilitiesResponse>;
     })
     .then((data) => {
+      if (version !== cacheVersion) return;
       cachedState = {
         capabilities: data.capabilities,
         available: new Set(data.available),
@@ -132,6 +137,7 @@ function fetchCapabilities(): Promise<void> {
       notifySubscribers();
     })
     .catch((err: unknown) => {
+      if (version !== cacheVersion) return;
       const message = err instanceof Error ? err.message : 'Unknown error';
       cachedState = {
         capabilities: [],
@@ -152,6 +158,7 @@ function fetchCapabilities(): Promise<void> {
  * Reset internal cache — for testing only.
  */
 export function _resetCapabilitiesCache(): void {
+  cacheVersion += 1;
   cachedState = null;
   fetchPromise = null;
   subscribers = [];
@@ -274,18 +281,7 @@ export function useCapabilities() {
     error: null,
   };
 
-  const refresh = useCallback(() => {
-    fetchPromise = null;
-    cachedState = {
-      capabilities: [],
-      available: new Set(),
-      loading: true,
-      error: null,
-    };
-    errorCachedAt = null;
-    notifySubscribers();
-    void fetchCapabilities();
-  }, []);
+  const refresh = useCallback(() => invalidateCapabilitiesCache(), []);
 
   return {
     capabilities: state.capabilities,

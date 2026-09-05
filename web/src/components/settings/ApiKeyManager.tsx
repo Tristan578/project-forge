@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { invalidateCapabilitiesCache } from '@/hooks/useFeatureGating';
 import { Key, Plus, Trash2, Copy, Check } from 'lucide-react';
 
 type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno';
@@ -69,6 +70,7 @@ export function ApiKeyManager() {
         body: JSON.stringify({ key }),
       });
       if (!res.ok) throw new Error('Failed to save key');
+      invalidateCapabilitiesCache();
 
       setProviderKeys((prev) => [
         ...prev.filter((p) => p.provider !== provider),
@@ -84,7 +86,9 @@ export function ApiKeyManager() {
 
   const removeKey = async (provider: Provider) => {
     try {
-      await fetch(`/api/keys/${provider}`, { method: 'DELETE' });
+      const res = await fetch(`/api/keys/${provider}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to remove key');
+      invalidateCapabilitiesCache();
       setProviderKeys((prev) => prev.filter((p) => p.provider !== provider));
     } catch {
       setError(`Failed to remove ${provider} key.`);

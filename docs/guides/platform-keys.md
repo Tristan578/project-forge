@@ -26,7 +26,7 @@ three more layers keep it from reaching that point:
 |---|---|---|
 | Declared unavailable | `UNAVAILABLE_CAPABILITIES` in `web/src/lib/config/providers.ts` | The capability is refused everywhere regardless of keys. Today: `music` (#9522). |
 | `/api/capabilities` | `web/src/app/api/capabilities/route.ts` | Reports `available:false` per capability; `unprovisionable:true`, a user-facing `hint` and the tracking `issue` for declared ones. A signed-in user's BYOK key counts. Always `Cache-Control: private`. |
-| Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; the `generate_music` chat tool; `forge.ai.generateMusic` | Each shows the reason and refuses to submit. The dialog gate blocks **only** on `unprovisionable`, never on a missing platform key, so a BYOK user is never locked out by a stale report. |
+| Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; the `generate_music` chat tool; `forge.ai.generateMusic` | Each shows the reason and refuses to submit. The dialog gate blocks on a successful per-user `available:false` response; loading and failed fetches stay enabled. Auth changes and successful BYOK saves/removals immediately refresh mounted consumers, bypassing the browser cache and discarding older in-flight responses. |
 | Route gate | `capability:` option on `createGenerationHandler` (step 1a) | 503 `SERVICE_UNAVAILABLE` right after authentication — before rate limits, validation, key resolution or any deduction. |
 
 The health probe (`/api/health` → AI Providers) is the subject of #9719 and
