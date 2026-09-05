@@ -25,7 +25,7 @@ import {
 function getCapabilities(request: APIRequestContext) {
   const groups = randomBytes(12).toString('hex').match(/.{4}/g)!;
   return request.get('/api/capabilities', {
-    headers: { 'x-real-ip': '2001:db8:' + groups.join(':') },
+    headers: { 'x-forwarded-for': '2001:db8:' + groups.join(':') },
   });
 }
 
