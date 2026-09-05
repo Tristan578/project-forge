@@ -15,6 +15,7 @@ interface ServiceHealth {
   latencyMs: number;
   lastChecked: string;
   error?: string;
+  summary?: string;
   details?: Record<string, unknown>;
 }
 
@@ -70,6 +71,28 @@ describe('ServiceStatusCard', () => {
   });
 
   // ── Error message ──────────────────────────────────────────────────────
+
+  // #9719/#9727: `summary` is the one field that survives `sanitizeForPublic`,
+  // so on the public dashboard it is the ONLY thing that says WHAT is wrong.
+  // A card that renders `error` alone shows a bare "Degraded" there.
+  it('renders the public-safe summary when the service carries one', () => {
+    render(
+      <ServiceStatusCard
+        service={makeService({ status: 'degraded', summary: 'Unavailable: 3D Model Generation' })}
+      />,
+    );
+    expect(screen.getByText('Unavailable: 3D Model Generation')).toBeDefined();
+  });
+
+  it('renders summary and error as distinct lines when both are present', () => {
+    render(
+      <ServiceStatusCard
+        service={makeService({ status: 'down', summary: 'Stripe rejected the platform key', error: 'auth 401' })}
+      />,
+    );
+    expect(screen.getByText('Stripe rejected the platform key')).toBeDefined();
+    expect(screen.getByText('auth 401')).toBeDefined();
+  });
 
   it('shows error message when service has error', () => {
     render(

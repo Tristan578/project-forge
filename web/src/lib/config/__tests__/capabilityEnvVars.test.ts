@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   CAPABILITY_ENV_VARS,
+  CAPABILITY_LABELS,
   PROVIDER_CAPABILITIES,
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
@@ -80,12 +81,36 @@ describe('listUnconfiguredCapabilities', () => {
     const missing = listUnconfiguredCapabilities();
     expect(missing).not.toContain('chat');
     expect(missing).toEqual(
-      expect.arrayContaining(['model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal']),
+      expect.arrayContaining(['model3d', 'texture', 'sfx', 'voice', 'sprite', 'bg_removal']),
     );
+    // music is declared unavailable (#9522): no key could configure it.
+    expect(missing).not.toContain('music');
   });
 
   it('is empty when every capability has a key', () => {
     for (const v of Object.values(PLATFORM_KEY_ENV)) vi.stubEnv(v, 'x');
     expect(listUnconfiguredCapabilities()).toEqual([]);
+  });
+
+  // A capability declared in UNAVAILABLE_CAPABILITIES has no key that could
+  // configure it (music/Suno, #9522), so it must not be reported as
+  // "unconfigured" — that reads as "an operator forgot a key" and would keep
+  // the AI Providers probe permanently degraded (#9727 review).
+  it('excludes capabilities that are declared unavailable, key or no key', () => {
+    for (const [provider, v] of Object.entries(PLATFORM_KEY_ENV)) {
+      if (provider !== 'suno') vi.stubEnv(v, 'x');
+    }
+    expect(listUnconfiguredCapabilities()).toEqual([]);
+    vi.stubEnv(PLATFORM_KEY_ENV.suno, 'x');
+    expect(listUnconfiguredCapabilities()).toEqual([]);
+  });
+});
+
+describe('CAPABILITY_LABELS', () => {
+  it('names every capability with the user-facing feature label', () => {
+    expect(Object.keys(CAPABILITY_LABELS).sort()).toEqual([...PROVIDER_CAPABILITIES].sort());
+    expect(CAPABILITY_LABELS.model3d).toBe('3D Model Generation');
+    expect(CAPABILITY_LABELS.music).toBe('Music Generation');
+    expect(CAPABILITY_LABELS.bg_removal).toBe('Background Removal');
   });
 });

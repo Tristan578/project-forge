@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 vi.mock('server-only', () => ({}));
 
-// The route charges a shared fan-out budget before it will pay for the five
+// The route charges a shared fan-out budget before it will pay for the six
 // outbound probes a cold report costs. Default it to permissive so the mapping
 // tests below exercise the report path; the budget's own behaviour is asserted
 // in the two dedicated tests at the bottom of this file.
@@ -136,6 +136,44 @@ describe('GET /api/status', () => {
     expect(ids).toContain('asset_storage');
     expect(ids).toContain('engine_cdn');
     expect(ids).toContain('payments');
+  });
+
+  // #9719/#9727: a probe's public-safe `summary` (WHAT is degraded, in user
+  // vocabulary) is the one diagnostic the status page may show. Dropping it at
+  // this boundary leaves visitors with a bare "degraded" and nothing to act on.
+  it('carries a service summary into its entry and omits the key when absent', async () => {
+    vi.resetModules();
+
+    vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      peekCachedHealthReport: vi.fn(() => null),
+      getCachedHealthReport: vi.fn().mockResolvedValue({
+        overall: 'degraded',
+        timestamp: '2026-03-16T12:00:00.000Z',
+        services: [
+          { name: 'Database (Neon)', status: 'healthy', latencyMs: 5, lastChecked: '2026-03-16T12:00:00.000Z' },
+          {
+            name: 'AI Providers',
+            status: 'degraded',
+            latencyMs: 0,
+            lastChecked: '2026-03-16T12:00:00.000Z',
+            error: 'Generation unavailable on the platform path for model3d — no platform key',
+            summary: 'Unavailable: 3D Model Generation',
+          },
+        ],
+        environment: 'test',
+        version: 'abcd1234',
+      }),
+    }));
+
+    const { GET } = await import('./route');
+    const body = await (await GET(makeRequest())).json();
+
+    const ai = body.services.find((s: { id: string }) => s.id === 'ai');
+    const db = body.services.find((s: { id: string }) => s.id === 'database');
+    expect(ai?.summary).toBe('Unavailable: 3D Model Generation');
+    // The raw `error` may carry env-var names; it must never reach this body.
+    expect(ai).not.toHaveProperty('error');
+    expect(db).not.toHaveProperty('summary');
   });
 
   it('maps healthy → operational, degraded → degraded, down → outage', async () => {
@@ -422,7 +460,7 @@ describe('GET /api/status', () => {
     expect(res.status).toBe(429);
     expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
     expect(res.headers.get('Retry-After')).not.toBeNull();
-    // The five outbound probes are exactly what the budget exists to withhold.
+    // The six outbound probes are exactly what the budget exists to withhold.
     expect(getCachedHealthReport).not.toHaveBeenCalled();
   });
 });

@@ -77,6 +77,9 @@ export function ServiceStatusCard({ service }: ServiceStatusCardProps) {
           <span className="font-medium text-zinc-300">Last checked:</span>{' '}
           {formatTimestamp(service.lastChecked)}
         </p>
+        {service.summary && (
+          <p className="mt-2 text-zinc-200">{service.summary}</p>
+        )}
         {service.error && (
           <p className="mt-2 rounded bg-zinc-700 px-2 py-1 text-zinc-300">{service.error}</p>
         )}

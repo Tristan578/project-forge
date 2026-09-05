@@ -270,6 +270,26 @@ export function getCapabilityUnavailability(
 }
 
 /**
+ * User-facing feature name per capability — the vocabulary the Settings
+ * panel, `/api/capabilities` and the public status page all share. Anything
+ * that names a capability to a person reads from here so the three cannot
+ * drift (#9727 review: the health probe was emitting raw ids like `model3d`
+ * into the public body while Settings said "3D Model Generation").
+ */
+export const CAPABILITY_LABELS: Record<ProviderCapability, string> = {
+  chat: 'AI Chat',
+  embedding: 'Semantic Search',
+  image: 'Image Generation',
+  model3d: '3D Model Generation',
+  texture: 'Texture Generation',
+  sfx: 'Sound Effect Generation',
+  voice: 'Voice Generation',
+  music: 'Music Generation',
+  sprite: 'Sprite Generation',
+  bg_removal: 'Background Removal',
+};
+
+/**
  * The generation capability each MCP/chat command spends, for commands that
  * spend one. Used to withhold a command from the model's tool set (and from
  * the system prompt) while its capability is declared unavailable — a tool the
@@ -501,9 +521,18 @@ export function isCapabilityConfigured(capability: ProviderCapability): boolean 
   return vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
 }
 
-/** Capabilities the platform path cannot serve here, in declaration order. */
+/**
+ * Capabilities the platform path cannot serve here, in declaration order.
+ *
+ * A capability declared in `UNAVAILABLE_CAPABILITIES` is excluded: no key
+ * could configure it, so listing it would read as an operator omission and
+ * keep the AI Providers probe degraded for as long as the product decision
+ * stands (#9727 review).
+ */
 export function listUnconfiguredCapabilities(): ProviderCapability[] {
-  return PROVIDER_CAPABILITIES.filter((cap) => !isCapabilityConfigured(cap));
+  return PROVIDER_CAPABILITIES.filter(
+    (cap) => getCapabilityUnavailability(cap) === null && !isCapabilityConfigured(cap),
+  );
 }
 
 // ---------------------------------------------------------------------------

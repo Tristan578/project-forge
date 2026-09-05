@@ -182,5 +182,5 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 export const dynamic = 'force-dynamic';
-// Allow up to 30s for all 9 health checks to complete
+// Allow up to 30s for all 10 health checks (six of them outbound probes) to complete
 export const maxDuration = 30;

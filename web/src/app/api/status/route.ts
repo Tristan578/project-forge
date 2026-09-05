@@ -45,7 +45,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
   // Shared cache + in-flight dedup: this route is public and unauthenticated,
   // so a distributed burst would otherwise fan out to six outbound probes
-  // (Neon, engine CDN, Clerk, chat backend, Upstash) per request. The cache alone is NOT a
+  // (Neon, Stripe, engine CDN, Clerk, chat backend, Upstash) per request. The cache alone is NOT a
   // bound — its state is per-lambda-instance, so it bounds one instance rather
   // than the aggregate. The bound is the shared fan-out budget below, which is
   // charged only after a peek miss: a report we already hold costs nothing to
@@ -78,6 +78,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       lastCheckedAt: health.lastChecked,
       latencyMs: health.latencyMs,
       critical: config.critical,
+      ...(health.summary ? { summary: health.summary } : {}),
     };
     return [entry];
   });

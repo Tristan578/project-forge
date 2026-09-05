@@ -31,6 +31,7 @@ import 'server-only';
 import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
 import { dbCircuitBreaker } from '@/lib/db/circuitBreaker';
 import {
+  CAPABILITY_LABELS,
   DB_PROVIDER,
   PLATFORM_KEY_ENV,
   listUnconfiguredCapabilities,
@@ -203,10 +204,25 @@ const STRIPE_BALANCE_URL = 'https://api.stripe.com/v1/balance';
 /**
  * Payments probe (#9719). A present `STRIPE_SECRET_KEY` is not evidence that
  * Stripe will accept it — a revoked or wrong-mode key sat behind a green
- * probe with `latencyMs: 0`. One authenticated GET grades the key for real:
- * accepted → healthy; 401/403 → degraded with an auth error; anything else
- * (5xx, timeout, network) → degraded, never thrown, so a Stripe blip does not
- * page as a SpawnForge outage. `down` is reserved for "no key at all".
+ * probe with `latencyMs: 0`. One authenticated, credit-free GET grades the
+ * key for real, per Stripe's documented status meanings
+ * (https://docs.stripe.com/api/errors):
+ *
+ *  - 2xx  → healthy. A test-mode key running in production is `degraded`
+ *           instead: Stripe accepts it, but it charges nobody
+ *           (https://docs.stripe.com/keys#test-live-modes).
+ *  - 401  → down. "No valid API key provided" — every checkout will fail.
+ *  - 403  → healthy, probe-cannot-assess. "The API key doesn't have
+ *           permissions to perform the request": the key authenticated, it
+ *           is a restricted key without `balance:read`. Recorded in
+ *           `details.probeResult`; not an outage.
+ *  - 5xx, timeout, network → degraded, never thrown, so a Stripe blip does
+ *           not page as a SpawnForge outage.
+ *
+ * `down` without a request is reserved for "no key at all". The request is
+ * bounded by `AbortSignal.timeout` so a hung Stripe releases the socket at the
+ * deadline rather than only abandoning the promise, and latency is measured
+ * around the whole attempt — a timeout reports the seconds it cost, not 0.
  */
 export async function checkPayments(): Promise<ServiceHealth> {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -223,56 +239,83 @@ export async function checkPayments(): Promise<ServiceHealth> {
     };
   }
 
-  const details = {
+  const mode = key.startsWith('sk_live_') || key.startsWith('rk_live_') ? 'live' : 'test';
+  const details: Record<string, unknown> = {
     secretKeyConfigured: true,
     webhookSecretConfigured: !!webhookSecret,
     probe: 'GET /v1/balance',
-    mode: key.startsWith('sk_live_') || key.startsWith('rk_live_') ? 'live' : 'test',
+    mode,
   };
 
+  const start = Date.now();
+  let status: number;
   try {
-    const { result: status, latencyMs } = await timed(() =>
-      withTimeout(
-        fetch(STRIPE_BALANCE_URL, {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${key}` },
-        }).then((res) => res.status),
-        SERVICE_TIMEOUT_MS,
-      ),
-    );
-    const lastChecked = new Date().toISOString();
-    if (status >= 200 && status < 300) {
-      return { name, status: 'healthy', latencyMs, lastChecked, details };
-    }
-    if (status === 401 || status === 403) {
+    const res = await fetch(STRIPE_BALANCE_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(SERVICE_TIMEOUT_MS),
+    });
+    status = res.status;
+  } catch (err) {
+    const timedOut = (err as { name?: unknown } | null)?.name === 'TimeoutError';
+    return {
+      name,
+      status: 'degraded',
+      latencyMs: Date.now() - start,
+      lastChecked: new Date().toISOString(),
+      error: timedOut
+        ? `Stripe probe timed out after ${SERVICE_TIMEOUT_MS}ms`
+        : err instanceof Error
+          ? err.message
+          : String(err),
+      details,
+    };
+  }
+  const latencyMs = Date.now() - start;
+  const lastChecked = new Date().toISOString();
+
+  if (status >= 200 && status < 300) {
+    if (mode === 'test' && process.env.VERCEL_ENV === 'production') {
       return {
         name,
         status: 'degraded',
         latencyMs,
         lastChecked,
-        error: `Stripe rejected STRIPE_SECRET_KEY (auth ${status}) on GET /v1/balance`,
-        summary: 'Stripe rejected the platform key',
+        error: 'STRIPE_SECRET_KEY is a test-mode key in the production environment',
+        summary: 'Test-mode Stripe key in production',
         details,
       };
     }
+    return { name, status: 'healthy', latencyMs, lastChecked, details };
+  }
+  if (status === 401) {
     return {
       name,
-      status: 'degraded',
+      status: 'down',
       latencyMs,
       lastChecked,
-      error: `Stripe returned ${status} on GET /v1/balance`,
-      details,
-    };
-  } catch (err) {
-    return {
-      name,
-      status: 'degraded',
-      latencyMs: 0,
-      lastChecked: new Date().toISOString(),
-      error: err instanceof Error ? err.message : String(err),
+      error: 'Stripe rejected STRIPE_SECRET_KEY (auth 401) on GET /v1/balance',
+      summary: 'Stripe rejected the platform key',
       details,
     };
   }
+  if (status === 403) {
+    return {
+      name,
+      status: 'healthy',
+      latencyMs,
+      lastChecked,
+      details: { ...details, probeResult: 'key accepted; balance not readable by this key (403)' },
+    };
+  }
+  return {
+    name,
+    status: 'degraded',
+    latencyMs,
+    lastChecked,
+    error: `Stripe returned ${status} on GET /v1/balance`,
+    details,
+  };
 }
 
 export async function checkRateLimiting(): Promise<ServiceHealth> {
@@ -491,14 +534,17 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
   }
 
   if (unconfiguredCapabilities.length > 0) {
-    const list = unconfiguredCapabilities.join(', ');
+    const ids = unconfiguredCapabilities.join(', ');
+    // The summary reaches the public body: feature labels, the vocabulary a
+    // status-page visitor already sees in Settings, never ids or env vars.
+    const labels = unconfiguredCapabilities.map((cap) => CAPABILITY_LABELS[cap]).join(', ');
     return {
       name: 'AI Providers',
       status: 'degraded',
       latencyMs: 0,
       lastChecked,
-      error: `Generation unavailable on the platform path for ${list} — no platform key or gateway route configured`,
-      summary: `Unavailable: ${list}`,
+      error: `Generation unavailable on the platform path for ${ids} — no platform key or gateway route configured`,
+      summary: `Unavailable: ${labels}`,
       details,
     };
   }

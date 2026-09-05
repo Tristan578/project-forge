@@ -166,7 +166,7 @@ describe('GET /api/health — negative cases', () => {
 
       const res = await GET(makeReq());
 
-      // The budget bounds the five OUTBOUND probes, not the act of reading a
+      // The budget bounds the six OUTBOUND probes, not the act of reading a
       // report we already hold. Charging on a hit would let a warm cache burn
       // an allowance it never consumed.
       expect(res.status).toBe(200);

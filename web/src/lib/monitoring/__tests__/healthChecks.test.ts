@@ -11,6 +11,10 @@ describe('healthChecks', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    // `vi.spyOn(Date, 'now')` is not a stubbed global: unstubAllGlobals leaves
+    // it armed, and a leftover mockReturnValueOnce would shift the next test's
+    // clock.
+    vi.restoreAllMocks();
     vi.resetModules();
   });
 
@@ -234,28 +238,105 @@ describe('healthChecks', () => {
       expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk_test_abc');
     });
 
-    it('returns degraded with an auth error when Stripe rejects the key (401)', async () => {
+    // Stripe's documented meanings (https://docs.stripe.com/api/errors):
+    //   401 — "No valid API key provided."          → every charge will fail: DOWN
+    //   403 — "The API key doesn't have permissions   → the key authenticated;
+    //          to perform the request."                 a restricted key without
+    //                                                   `balance:read` cannot be
+    //                                                   graded by THIS probe
+    it('returns down with an auth error when Stripe rejects the key (401)', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_revoked');
       vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{"type":"invalid_request_error"}}', { status: 401 })));
       vi.spyOn(Date, 'now').mockReturnValueOnce(2_000).mockReturnValueOnce(2_007);
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
-      expect(result.status).toBe('degraded');
+      expect(result.status).toBe('down');
       expect(result.latencyMs).toBe(7);
       expect(result.error).toMatch(/401/);
       expect(result.error).toMatch(/rejected|auth/i);
       expect(result.error).not.toContain('sk_test_revoked');
+      expect(result.summary).toBe('Stripe rejected the platform key');
     });
 
-    it('returns degraded (never throws) on a transient network failure', async () => {
+    it('treats 403 as "key accepted, balance scope not granted" rather than an outage', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'rk_test_restricted');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{"type":"invalid_request_error"}}', { status: 403 })));
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe('healthy');
+      expect(result.summary).toBeUndefined();
+      expect(result.details?.probeResult).toBe('key accepted; balance not readable by this key (403)');
+    });
+
+    // The socket must actually be abandoned at the deadline, not just the
+    // promise dropped — a hung Stripe would otherwise keep the lambda alive
+    // past `maxDuration` while `withTimeout` had already "returned".
+    it('bounds the probe with AbortSignal.timeout and reports the timeout with real latency', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      const fetchMock = vi.fn(async () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(Date, 'now').mockReturnValueOnce(5_000).mockReturnValueOnce(8_004);
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(timeoutSpy).toHaveBeenCalledWith(3_000);
+      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      expect(result.status).toBe('degraded');
+      expect(result.error).toMatch(/timed out after 3000ms/);
+      expect(result.latencyMs).toBe(3_004);
+    });
+
+    it('returns degraded (never throws) on a transient network failure, with the latency it cost', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
       vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET'); }));
+      vi.spyOn(Date, 'now').mockReturnValueOnce(9_000).mockReturnValueOnce(9_250);
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
       expect(result.status).toBe('degraded');
       expect(result.error).toContain('ECONNRESET');
+      expect(result.latencyMs).toBe(250);
+    });
+
+    // A test-mode key in production accepts every request and charges nobody.
+    // Stripe accepts it (200), so only the key prefix can reveal the mismatch
+    // (https://docs.stripe.com/keys#test-live-modes).
+    it('returns degraded when a test-mode key is running in production', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      vi.stubEnv('VERCEL_ENV', 'production');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"object":"balance","livemode":false}', { status: 200 })));
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe('degraded');
+      expect(result.summary).toBe('Test-mode Stripe key in production');
+      expect(result.details?.mode).toBe('test');
+    });
+
+    it('returns healthy for a live key in production and a test key in preview', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"object":"balance"}', { status: 200 })));
+
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_live_abc');
+      vi.stubEnv('VERCEL_ENV', 'production');
+      let { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      let result = await checkPayments();
+      expect(result.status).toBe('healthy');
+      expect(result.details?.mode).toBe('live');
+
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      vi.stubEnv('VERCEL_ENV', 'preview');
+      ({ checkPayments } = await import('@/lib/monitoring/healthChecks'));
+      result = await checkPayments();
+      expect(result.status).toBe('healthy');
+      expect(result.details?.mode).toBe('test');
     });
 
     it('returns degraded on a Stripe 5xx', async () => {
@@ -574,23 +655,30 @@ describe('healthChecks', () => {
       expect(result.details?.generationConfiguredCount).toBe(0);
       const missing = result.details?.unconfiguredCapabilities as string[];
       expect(missing).toEqual(
-        expect.arrayContaining(['model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal']),
+        expect.arrayContaining(['model3d', 'texture', 'sfx', 'voice', 'sprite', 'bg_removal']),
       );
       expect(missing).not.toContain('chat');
       expect(result.error).toContain('model3d');
-      // Public-safe summary survives sanitizeForPublic; it carries capability
-      // names only, never env var names.
-      expect(result.summary).toContain('model3d');
+      // Public-safe summary survives sanitizeForPublic; it carries the
+      // user-facing feature labels (CAPABILITY_LABELS) — the vocabulary the
+      // status page's visitors already know — never ids or env var names.
+      expect(result.summary).toBe(
+        'Unavailable: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation, Sprite Generation, Background Removal',
+      );
       expect(result.summary).not.toContain('PLATFORM_');
+      // music is declared unavailable (#9522), not unconfigured.
+      expect(missing).not.toContain('music');
+      expect(result.summary).not.toContain('Music');
     });
 
-    it('returns healthy when a chat backend and every generation key are configured', async () => {
+    // No Suno key here on purpose: music is declared unavailable (#9522), so
+    // a fully provisioned platform has NO key for it and must still be green.
+    it('returns healthy when a chat backend and every provisionable generation key are configured', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '');
       vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
       vi.stubEnv('PLATFORM_MESHY_KEY', 'x');
       vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'x');
-      vi.stubEnv('PLATFORM_SUNO_KEY', 'x');
       vi.stubEnv('PLATFORM_OPENAI_KEY', 'x');
       vi.stubEnv('PLATFORM_REPLICATE_KEY', 'x');
       vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'x');
@@ -632,7 +720,8 @@ describe('healthChecks', () => {
       expect(missing).not.toContain('model3d');
       expect(missing).not.toContain('sfx');
       expect(missing).toContain('sprite');
-      expect(missing).toContain('music');
+      // Declared unavailable (#9522), so never reported as an omission.
+      expect(missing).not.toContain('music');
     });
 
     it('stays down when generation keys are set but no chat backend is', async () => {

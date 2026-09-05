@@ -276,8 +276,21 @@
                         "type": "object",
                         "properties": {
                           "name": { "type": "string" },
-                          "status": { "type": "string", "enum": ["healthy", "degraded", "down"] },
-                          "latencyMs": { "type": "number" }
+                          "status": {
+                            "type": "string",
+                            "enum": ["up", "degraded", "down"],
+                            "description": "Public vocabulary: the internal 'healthy' is emitted as 'up'."
+                          },
+                          "latencyMs": { "type": "number" },
+                          "lastChecked": { "type": "string", "format": "date-time" },
+                          "summary": {
+                            "type": "string",
+                            "description": "Public-safe one-liner saying what is wrong, present only when the probe knows (e.g. \"Unavailable: 3D Model Generation\"). The raw error is never exposed on this route."
+                          },
+                          "error": {
+                            "type": "string",
+                            "description": "Sanitized to \"<name> is <status>\" on this public route; present only when the probe recorded an error."
+                          }
                         }
                       }
                     }

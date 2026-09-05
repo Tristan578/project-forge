@@ -7,6 +7,7 @@ import {
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
   CAPABILITY_ENV_VARS,
+  CAPABILITY_LABELS,
   CAPABILITY_REQUIRED_PROVIDERS,
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
@@ -35,20 +36,6 @@ const ENV_VAR_PROVIDER_NAMES: Record<string, string> = {
   [GATEWAY_KEY_ENV.vercelGateway]: 'Vercel AI Gateway',
   [GATEWAY_KEY_ENV.openrouter]: 'OpenRouter',
   [GATEWAY_KEY_ENV.githubModels]: 'GitHub Models',
-};
-
-/** User-facing feature names mapped to capabilities */
-const FEATURE_LABELS: Record<ProviderCapability, string> = {
-  chat: 'AI Chat',
-  embedding: 'Semantic Search',
-  image: 'Image Generation',
-  model3d: '3D Model Generation',
-  texture: 'Texture Generation',
-  sfx: 'Sound Effect Generation',
-  voice: 'Voice Generation',
-  music: 'Music Generation',
-  sprite: 'Sprite Generation',
-  bg_removal: 'Background Removal',
 };
 
 export interface CapabilityStatus {
@@ -190,7 +177,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
       return {
         capability: cap,
         available: false,
-        label: FEATURE_LABELS[cap],
+        label: CAPABILITY_LABELS[cap],
         unprovisionable: true,
         hint: unavailability.reason,
         issue: unavailability.issue,
@@ -227,7 +214,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     const status: CapabilityStatus = {
       capability: cap,
       available: isAvailable,
-      label: FEATURE_LABELS[cap],
+      label: CAPABILITY_LABELS[cap],
     };
 
     if (!isAvailable) {
@@ -241,7 +228,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
       status.requiredProviders = uniqueProviders;
       const named = required ? uniqueProviders.join(' and ') : uniqueProviders[0];
       const plural = required && uniqueProviders.length > 1 ? 'keys' : 'key';
-      status.hint = `Configure ${named} API ${plural} in Settings to enable ${FEATURE_LABELS[cap]}.`;
+      status.hint = `Configure ${named} API ${plural} in Settings to enable ${CAPABILITY_LABELS[cap]}.`;
     }
 
     return status;

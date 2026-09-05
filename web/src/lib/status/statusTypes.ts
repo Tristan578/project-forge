@@ -43,6 +43,12 @@ export interface ServiceStatusEntry {
    * An outage on a non-critical service results in `partial_outage`.
    */
   critical: boolean;
+  /**
+   * Public-safe one-liner saying WHAT is wrong, when the probe knows
+   * (`ServiceHealth.summary`, #9719). Feature labels and counts only — the
+   * raw `error` never reaches this payload.
+   */
+  summary?: string;
 }
 
 /**
