@@ -6,6 +6,9 @@ export default function DocsHome() {
         <li>
           <a href="/mcp"><strong>MCP Commands</strong></a> — Control SpawnForge from AI tools. Browse the 350+ commands available to Claude and other MCP clients.
         </li>
+        <li>
+          <a href="/capability-matrix"><strong>Capability Matrix</strong></a> — Which capabilities are proven, implemented but unverified, partial or unavailable today through the editor, the in-app AI, game scripts and external MCP, with the issue tracking every gap.
+        </li>
         {/*
           Deliberately NOT a link. This pointed at `/api`, which has never had a
           route in this app (#9046). Three things say the page is not meant to
