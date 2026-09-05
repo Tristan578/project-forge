@@ -2,7 +2,7 @@
 /**
  * Tests for generationHandlers — AI asset generation commands.
  */
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import { generationHandlers } from '../generationHandlers';
 import { STATUS_ENDPOINTS } from '@/lib/generation/statusEndpoints';
@@ -10,6 +10,15 @@ import { STATUS_ENDPOINTS } from '@/lib/generation/statusEndpoints';
 // ---------------------------------------------------------------------------
 // Mock generationStore
 // ---------------------------------------------------------------------------
+// #9117: the providers module is real except `getCapabilityUnavailability`,
+// wrapped so a describe can bypass the static gate and keep the handler body
+// pinned while music is declared unavailable.
+vi.mock('@/lib/config/providers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/config/providers')>();
+  return { ...actual, getCapabilityUnavailability: vi.fn(actual.getCapabilityUnavailability) };
+});
+import { getCapabilityUnavailability } from '@/lib/config/providers';
+
 const mockAddJob = vi.fn();
 const mockUpdateJob = vi.fn();
 const mockGenJobs: Record<string, Record<string, unknown>> = {};
@@ -542,6 +551,108 @@ describe('generationHandlers', () => {
   // =========================================================================
   // generate_music
   // =========================================================================
+  // The handler body below the #9117 gate (sync import, async job tracking,
+  // defaults, autoPlace, the typeof-audioBase64 branch) is provider-independent
+  // and survives #9522, so it stays pinned with the gate bypassed.
+  describe('generate_music - handler body with the #9117 gate bypassed', () => {
+    beforeEach(() => {
+      vi.mocked(getCapabilityUnavailability).mockReturnValue(null);
+    });
+    afterEach(() => {
+      vi.mocked(getCapabilityUnavailability).mockReset();
+      vi.mocked(getCapabilityUnavailability).mockImplementation(
+        (cap) => (cap === 'music' ? { reason: 'Music generation is not available yet.', issue: 9522 } : null),
+      );
+    });
+
+    it('imports audio directly when sync response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64music' }),
+      });
+      const { result, store } = await invoke('generate_music', {
+        prompt: 'epic battle theme',
+        entityId: 'ent-1',
+      });
+      expect(result.success).toBe(true);
+      expect(store.importAudio).toHaveBeenCalledWith('base64music', expect.stringContaining('music-'));
+      expect(store.setAudio).toHaveBeenCalledWith('ent-1', expect.objectContaining({
+        bus: 'music',
+        loopAudio: true,
+        autoplay: true,
+      }));
+    });
+
+    it('tracks async job when no audioBase64', async () => {
+      mockFetchSuccess({ audioBase64: undefined });
+      const { result } = await invoke('generate_music', { prompt: 'calm ambient' });
+      expect(result.success).toBe(true);
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'music',
+      }));
+    });
+
+    it('uses default duration and instrumental', async () => {
+      mockFetchSuccess();
+      await invoke('generate_music', { prompt: 'battle' });
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.durationSeconds).toBe(30);
+      expect(body.instrumental).toBe(true);
+    });
+
+    it('passes autoPlace and targetEntityId to trackJob on async path', async () => {
+      mockFetchSuccess({ audioBase64: undefined });
+      await invoke('generate_music', {
+        prompt: 'boss theme',
+        targetEntityId: 'ent-2',
+        autoPlace: true,
+      });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'music',
+        autoPlace: true,
+        targetEntityId: 'ent-2',
+      }));
+    });
+
+    it('autoPlace defaults to true when targetEntityId is set (async)', async () => {
+      mockFetchSuccess({ audioBase64: undefined });
+      await invoke('generate_music', { prompt: 'ambient', targetEntityId: 'ent-3' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        autoPlace: true,
+        targetEntityId: 'ent-3',
+      }));
+    });
+
+    it('autoPlace defaults to false when no entity (async)', async () => {
+      mockFetchSuccess({ audioBase64: undefined });
+      await invoke('generate_music', { prompt: 'ambient loop' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        autoPlace: false,
+      }));
+    });
+
+    it.each([
+      ['empty', ''],
+      ['not a string', { url: 'https://example.com/track.mp3' }],
+    ])('takes the async path when audioBase64 is %s', async (_label, audioBase64) => {
+      // Music is the one audio handler with two legitimate shapes, so a bad
+      // artifact is not an error here — it is the async path. The branch tests
+      // `typeof`, not truthiness: a truthy non-string would otherwise be cast
+      // to `string` and handed to `importAudio`.
+      mockFetchSuccess({ audioBase64 });
+
+      const { result, store } = await invoke('generate_music', {
+        prompt: 'calm ambient',
+        entityId: 'ent-1',
+      });
+
+      expect(result.success).toBe(true);
+      expect(store.importAudio).not.toHaveBeenCalled();
+      expect(store.setAudio).not.toHaveBeenCalled();
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({ type: 'music' }));
+    });
+  });
+
   describe('generate_music', () => {
     // #9117: music is declared unavailable in code (UNAVAILABLE_CAPABILITIES),
     // so the tool answers with the user-facing alternative and never calls the

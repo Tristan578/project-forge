@@ -14,10 +14,11 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
-// Capability gate (#9117): default "available"; the music-gated case flips it.
+// Capability gate (#9117): default "available"; the gate describe below flips it.
 vi.mock('@/hooks/useGenerationGate', () => ({
   useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false })),
 }));
+import { useGenerationGate } from '@/hooks/useGenerationGate';
 
 vi.mock('@/stores/userStore', () => ({
   useUserStore: vi.fn((selector: (s: { tier: string }) => unknown) =>
@@ -79,6 +80,28 @@ function setupStore(overrides: {
     return selector(state);
   });
 }
+
+describe('AssetPanel music gate (#9117)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false });
+  });
+
+  it('disables only the Generate Music item, with an Unavailable badge and the reason in its accessible name', () => {
+    vi.mocked(useGenerationGate).mockReturnValue({
+      blocked: true,
+      reason: 'Music generation is not available yet.',
+      loading: false,
+    });
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+    const music = screen.getByRole('menuitem', { name: /Generate Music — Music generation is not available yet\./ });
+    expect(music).toHaveAttribute('aria-disabled', 'true');
+    expect(music).toHaveTextContent('Unavailable');
+    expect(music).not.toHaveTextContent(/Hobbyist|Creator|Pro/);
+    expect(screen.getByRole('menuitem', { name: 'Generate 3D Model' })).not.toHaveAttribute('aria-disabled');
+  });
+});
 
 describe('AssetPanel', () => {
   beforeEach(() => {

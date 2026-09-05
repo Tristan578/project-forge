@@ -24,7 +24,7 @@
 | AI (Anthropic) | Anthropic API | Chat, scene generation | HEAD `api.anthropic.com` | No |
 | AI (Meshy) | Meshy API | 3D model generation | Config check | No |
 | AI (ElevenLabs) | ElevenLabs API | SFX/voice generation | Config check | No |
-| AI (Suno) | Suno API | Music generation | Config check | No |
+| AI (music) | none — Suno has no public API; `music` is declared unavailable until #9522 moves it to ElevenLabs | Music generation | Declared unavailable in code | No |
 
 ### Critical vs Non-Critical
 
@@ -72,7 +72,7 @@ Vercel Edge (CDN, routing, headers)
   |       +---> Anthropic API          -- AI chat, scene generation
   |       |       (ANTHROPIC_API_KEY)
   |       |
-  |       +---> Meshy / ElevenLabs / Suno  -- AI asset generation
+  |       +---> Meshy / ElevenLabs         -- AI asset generation (music: unavailable, #9522)
   |       |
   |       +---> Cloudflare R2          -- asset upload/download (S3 API)
   |       |       (ASSET_R2_ACCESS_KEY_ID, ASSET_R2_SECRET_ACCESS_KEY, ASSET_BUCKET_NAME)
@@ -557,7 +557,7 @@ gh workflow run cd.yml
 # 1. Rotate the exposed key in the provider's dashboard:
 #    - Anthropic: console.anthropic.com > API Keys
 #    - Stripe: dashboard.stripe.com > Developers > API Keys
-#    - Meshy/ElevenLabs/Suno: respective dashboards
+#    - Meshy/ElevenLabs: respective dashboards (Suno has none; see docs/guides/platform-keys.md)
 
 # 2. Update in Vercel env vars
 

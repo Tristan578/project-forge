@@ -296,6 +296,7 @@ export const AssetPanel = memo(function AssetPanel() {
                         role="menuitem"
                         onClick={() => { if (allowed) { open(true); setShowAiDropdown(false); } }}
                         aria-disabled={!allowed || undefined}
+                        aria-label={gated ? `${label} — ${musicGate.reason ?? 'not available yet'}` : undefined}
                         className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
                           allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
                         }`}
@@ -308,7 +309,13 @@ export const AssetPanel = memo(function AssetPanel() {
                         }
                       >
                         <span>{label}</span>
-                        {!allowed && (
+                        {gated ? (
+                          // Not a tier lock: a distinct badge so "not available
+                          // yet" and "upgrade your plan" never read the same.
+                          <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">
+                            Unavailable
+                          </span>
+                        ) : !allowed && (
                           <span className="flex items-center gap-1 text-[10px] text-zinc-500">
                             <Lock size={10} />
                             {required ? TIER_LABELS[required] : ''}

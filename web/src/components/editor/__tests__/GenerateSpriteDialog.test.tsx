@@ -46,6 +46,8 @@ describe('GenerateSpriteDialog capability gate (#9117)', () => {
     expect(screen.getByRole('status')).toHaveAttribute('id', 'generate-sprite-unavailable');
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sprite-unavailable');
     expect(screen.getByText('Generate').closest('button')).toBeDisabled();
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    for (const select of screen.getAllByRole('combobox')) expect(select).toBeDisabled();
   });
 });
 

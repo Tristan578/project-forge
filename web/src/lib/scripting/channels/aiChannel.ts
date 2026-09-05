@@ -9,36 +9,33 @@ export interface AiChannelDeps {
 
 const POLL_INTERVAL_MS = 2000;
 
-// Hoisted to module scope to avoid reconstruction on every handler invocation
-const AI_ROUTE_MAP: Record<string, string> = {
-  generateTexture: '/api/generate/texture',
-  generateModel: '/api/generate/model',
-  generateSound: '/api/generate/sound',
-  generateVoice: '/api/generate/voice',
-  generateMusic: '/api/generate/music',
-};
-
-/** The capability each `forge.ai.*` method spends, for the #9117 gate. */
-const AI_METHOD_CAPABILITY: Record<string, ProviderCapability> = {
-  generateTexture: 'texture',
-  generateModel: 'model3d',
-  generateSound: 'sfx',
-  generateVoice: 'voice',
-  generateMusic: 'music',
+/**
+ * Every `forge.ai.*` method with the route it posts to AND the capability it
+ * spends, in one table: a method cannot gain a route without declaring its
+ * capability, so the #9117 gate below can never be bypassed by drift.
+ * Hoisted to module scope to avoid reconstruction on every invocation.
+ */
+export const AI_METHODS: Readonly<Record<string, { route: string; capability: ProviderCapability }>> = {
+  generateTexture: { route: '/api/generate/texture', capability: 'texture' },
+  generateModel: { route: '/api/generate/model', capability: 'model3d' },
+  generateSound: { route: '/api/generate/sound', capability: 'sfx' },
+  generateVoice: { route: '/api/generate/voice', capability: 'voice' },
+  generateMusic: { route: '/api/generate/music', capability: 'music' },
 };
 
 export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
   return async (method: string, args: Record<string, unknown>, reportProgress, signal: AbortSignal) => {
     reportProgress(0, 'Submitting request...');
 
-    const route = AI_ROUTE_MAP[method];
-    if (!route) {
+    const entry = AI_METHODS[method];
+    if (!entry) {
       throw new Error(`Unknown AI method: ${method}`);
     }
+    const { route, capability } = entry;
 
     // #9117: a capability declared unavailable in code is refused before the
     // request leaves the worker, with the same reason the editor shows.
-    const unavailable = getCapabilityUnavailability(AI_METHOD_CAPABILITY[method]);
+    const unavailable = getCapabilityUnavailability(capability);
     if (unavailable) {
       throw new Error(unavailable.reason);
     }

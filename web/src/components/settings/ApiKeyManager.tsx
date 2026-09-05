@@ -197,6 +197,32 @@ export function ApiKeyManager() {
               )}
             </div>
           ))}
+          {/*
+            A key stored for a provider Settings no longer offers (Suno, #9522)
+            must still be visible and revocable — an encrypted secret the user
+            can neither see nor remove is worse than the dead row it replaced.
+          */}
+          {providerKeys
+            .filter((k) => k.configured && !PROVIDERS.some((p) => p.id === k.provider))
+            .map((k) => (
+              <div
+                key={k.provider}
+                className="flex items-center gap-2 rounded-md bg-zinc-800 p-2"
+              >
+                <span className="min-w-[140px] text-sm text-zinc-400">
+                  {k.provider} <span className="text-xs">(no longer offered)</span>
+                </span>
+                <span className="flex-1 text-xs text-zinc-500">Stored key, unused</span>
+                <button
+                  onClick={() => removeKey(k.provider)}
+                  className="text-red-400 hover:text-red-300"
+                  title="Remove key"
+                  aria-label={`Remove ${k.provider} API key`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
         </div>
       </div>
 

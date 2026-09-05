@@ -5,10 +5,15 @@
  * platform-key (non-BYOK) generation request be accepted by its provider?"
  *
  *   1. The route for each capability is decided from `lib/config/providers.ts`
- *      — the same tables `resolveApiKey` and `/api/capabilities` read — so the
- *      script cannot disagree with the product about which key a capability
- *      needs. A capability in `UNAVAILABLE_CAPABILITIES` is reported as such
- *      and never probed.
+ *      — the same tables `resolveApiKey` reads — so the script cannot disagree
+ *      with the platform path about which key a capability needs. It verifies
+ *      the PRIMARY route only: the Vercel AI Gateway for GATEWAY_CAPABILITIES,
+ *      the direct provider's PLATFORM_* key for everything else. The alternate
+ *      routers `/api/capabilities` also accepts for chat/embedding/image
+ *      (OpenRouter, GitHub Models, Vercel OIDC) are deliberately NOT counted:
+ *      this script answers "would production's intended path work", not
+ *      "is there any path". A capability in `UNAVAILABLE_CAPABILITIES` is
+ *      reported as such and never probed.
  *   2. For every configured provider it performs ONE cheap authenticated GET
  *      against that provider's documented account/balance endpoint. These
  *      calls cost no credits; they prove the key is accepted, which is the
@@ -129,7 +134,7 @@ export const PROVIDER_PROBES: Record<PlatformKeyProvider, Probe | null> = {
   suno: null,
 };
 
-/** The gateway's authenticated, credit-free endpoint (serves `chat` only here). */
+/** The gateway's authenticated, credit-free endpoint (serves GATEWAY_CAPABILITIES). */
 export const GATEWAY_PROBE: Probe = {
   method: 'GET',
   url: 'https://ai-gateway.vercel.sh/v1/credits',

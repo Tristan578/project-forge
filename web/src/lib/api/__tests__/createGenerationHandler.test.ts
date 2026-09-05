@@ -11,6 +11,11 @@ vi.mock('next/server', async (importOriginal) => {
 });
 
 vi.mock('server-only', () => ({}));
+// Capture the business metric so a test can assert the `outcome` facet the
+// handler stamps (generationMetrics.ts emits through Sentry.metrics.*).
+vi.mock('@sentry/nextjs', () => ({
+  metrics: { count: vi.fn(), distribution: vi.fn() },
+}));
 
 // Mock all dependencies
 vi.mock('@/lib/auth/api-auth', () => ({
@@ -924,6 +929,13 @@ describe('createGenerationHandler', () => {
       expect(mockCachedGenerate).not.toHaveBeenCalled();
       expect(mockResolve).not.toHaveBeenCalled();
       expect(mockRefund).not.toHaveBeenCalled();
+      // Its own metrics bucket - never the `provider_unavailable` outage facet.
+      const { metrics } = await import('@sentry/nextjs');
+      expect(vi.mocked(metrics.count)).toHaveBeenCalledWith(
+        expect.any(String),
+        1,
+        expect.objectContaining({ attributes: expect.objectContaining({ outcome: 'capability_unavailable' }) }),
+      );
     });
 
     it('still requires authentication ahead of the gate', async () => {

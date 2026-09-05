@@ -185,6 +185,23 @@ describe('runVerification', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('reports fail, never pass, for a configured provider the script has no probe for', async () => {
+    const fetchImpl = okFetch();
+    const row: PlanRow = {
+      capability: 'model3d',
+      provider: 'hyper3d',
+      route: 'platform-key',
+      envVar: 'PLATFORM_HYPER3D_KEY',
+      configured: true,
+      consoleUrl: null,
+      detail: '',
+    };
+    const [result] = await runVerification([row], { fetchImpl, env: { PLATFORM_HYPER3D_KEY: 'k' } });
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('no credit-free probe');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('reports fail (not a crash) when the probe throws', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('ECONNRESET');

@@ -1157,6 +1157,9 @@ describe('compoundHandlers', () => {
 
       const data = result.result as Record<string, unknown>;
       expect(data.generationJobs).toBe(2);
+      expect(data.operations as Array<{ action: string; success: boolean }>).toContainEqual(
+        expect.objectContaining({ action: 'skip background music (not available yet)', success: true }),
+      );
 
       // End-to-end: feed the EXACT dispatched payload into the REAL
       // generate_texture handler and assert the goal id survives the handler's

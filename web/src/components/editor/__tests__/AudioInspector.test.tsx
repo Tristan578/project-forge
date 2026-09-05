@@ -2,14 +2,14 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, fireEvent } from '@/test/utils/componentTestUtils';
 import { AudioInspector } from '../AudioInspector';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
-// Capability gate (#9117): default "available"; the music-gated case flips it.
+// Capability gate (#9117): default "available"; the gate describe at the end flips it.
 vi.mock('@/hooks/useGenerationGate', () => ({
   useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false })),
 }));
@@ -26,13 +26,19 @@ vi.mock('lucide-react', async () => {
 });
 
 vi.mock('../GenerateSoundDialog', () => ({ GenerateSoundDialog: () => null }));
-vi.mock('../GenerateMusicDialog', () => ({ GenerateMusicDialog: () => null }));
+// Renders a marker only when opened, so a test can prove a gated click did NOT
+// open it (a `() => null` stub would make that assertion vacuous).
+vi.mock('../GenerateMusicDialog', () => ({
+  GenerateMusicDialog: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div role="dialog" aria-label="music-dialog-stub" /> : null,
+}));
 vi.mock('@/components/ui/InfoTooltip', () => ({
   InfoTooltip: () => null,
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -153,5 +159,30 @@ describe('AudioInspector', () => {
     expect(
       screen.getByRole('button', { name: 'Generate sound with AI' })
     ).not.toHaveAttribute('aria-disabled');
+  });
+});
+
+describe('AudioInspector music gate (#9117)', () => {
+  afterEach(() => {
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false });
+  });
+
+  it('disables the Music button with the reason in its name and a distinct Unavailable badge, and never opens the dialog', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'creator' });
+    vi.mocked(useGenerationGate).mockReturnValue({
+      blocked: true,
+      reason: 'Music generation is not available yet.',
+      loading: false,
+    });
+    render(<AudioInspector />);
+    const btn = screen.getByRole('button', { name: 'Generate music with AI — Music generation is not available yet.' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveTextContent('Unavailable');
+    expect(btn).not.toHaveTextContent(/tier/);
+    fireEvent.click(btn);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // The sibling Sound button is untouched by the music gate.
+    expect(screen.getByRole('button', { name: 'Generate sound with AI' })).not.toHaveAttribute('aria-disabled');
   });
 });

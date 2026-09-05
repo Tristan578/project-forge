@@ -437,9 +437,10 @@ export const generationHandlers: Record<string, ToolHandler> = {
     }), args);
     if (p.error) return p.error;
 
-    // #9117: music is declared unavailable in code. Say so here, in the
-    // assistant's own result, instead of letting it run a tool that the route
-    // will refuse 503 — the user gets the alternative, not a red error card.
+    // #9117: music is declared unavailable in code. The tool is withheld from
+    // the model (`isCommandAvailable` in the tool filters) so this is defence
+    // in depth for a replayed or hand-crafted call: answer with the user-facing
+    // reason and never touch the route.
     const unavailable = getCapabilityUnavailability('music');
     if (unavailable) {
       return { success: false, error: unavailable.reason };

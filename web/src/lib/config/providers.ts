@@ -270,6 +270,38 @@ export function getCapabilityUnavailability(
 }
 
 /**
+ * The generation capability each MCP/chat command spends, for commands that
+ * spend one. Used to withhold a command from the model's tool set (and from
+ * the system prompt) while its capability is declared unavailable — a tool the
+ * model is told to call and that can only fail is a guaranteed red card and
+ * wasted tokens on every orchestrated build (#9725 review).
+ */
+export const COMMAND_CAPABILITY: Readonly<Record<string, ProviderCapability>> = {
+  generate_3d_model: 'model3d',
+  generate_texture: 'texture',
+  generate_pbr_maps: 'texture',
+  generate_skybox: 'texture',
+  generate_sfx: 'sfx',
+  generate_voice: 'voice',
+  generate_music: 'music',
+  generate_sprite: 'sprite',
+  generate_sprite_sheet: 'sprite',
+  generate_tileset: 'sprite',
+  generate_pixel_art: 'sprite',
+  remove_background: 'bg_removal',
+};
+
+/**
+ * Whether a command may be offered to the model: true for every command that
+ * spends no capability, and for capability commands whose capability is not
+ * declared unavailable. Static, so safe in module-load tool tables.
+ */
+export function isCommandAvailable(commandName: string): boolean {
+  const capability = COMMAND_CAPABILITY[commandName];
+  return capability === undefined || getCapabilityUnavailability(capability) === null;
+}
+
+/**
  * Env-var names for the multi-model routers, which front several providers at
  * once rather than mapping 1:1 to one. Kept beside `PLATFORM_KEY_ENV` so every
  * consumer — the chat-backend table below, `/api/capabilities`, the health
