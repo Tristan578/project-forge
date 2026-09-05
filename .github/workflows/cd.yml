@@ -1805,10 +1805,15 @@ jobs:
       # alias (the deployment URL is SSO-protected and unobservable from here)
       # and fails on a non-200 OR on a 200 with no commands rendered — the
       # "0 commands" page is a 200, so status alone is the wrong property
-      # (lessons-learned #1). Pinned by scripts/__tests__/post-deploy-docs-check.test.sh.
+      # (lessons-learned #1). The commit assertion is what ties the probe to
+      # THIS deploy: the alias can still be serving the previous build (alias
+      # lag, or a deploy whose domain set missed docs.spawnforge.ai), and the
+      # page stamps VERCEL_GIT_COMMIT_SHA so the script can tell. Pinned by
+      # scripts/__tests__/post-deploy-docs-check.test.sh.
       - name: Post-deploy check (docs MCP reference)
         env:
           DOCS_URL: https://docs.spawnforge.ai
+          DOCS_CHECK_EXPECT_COMMIT: ${{ github.sha }}
         run: bash scripts/post-deploy-docs-check.sh "$DOCS_URL"
 
   # ---- Design Workbench Deploy ----

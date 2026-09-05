@@ -9,17 +9,17 @@
  * case. That shape is what let #9718 ship: the loader's real defect was WHERE
  * the manifest came from, and a mocked `fs` is blind to exactly that (lesson
  * 14). The loader now imports the manifest statically, so there is no `fs`
- * to mock and nothing here touches the shipped file — that is
- * `commandsManifestArtifact.test.ts`'s job, against the real
- * `data/commands.json`.
+ * to mock. This file is hermetic: every input is a fixture built here, and
+ * nothing in it depends on the contents of the shipped `data/commands.json`.
+ * The real file — and the page-facing `readCommandsManifest` /
+ * `readCommandsByCategory` wrappers, which can only be exercised over it —
+ * are `commandsManifestArtifact.test.ts`'s job.
  */
 import { describe, it, expect } from 'vitest';
 
 import {
   commandsInCategory,
   publicCommandsOf,
-  readCommandsByCategory,
-  readCommandsManifest,
   summarizeManifest,
   toParameterList,
   type CommandEntry,
@@ -207,29 +207,6 @@ describe('commandsInCategory', () => {
     for (const category of categories) {
       expect(commandsInCategory(source, category).length).toBeGreaterThan(0);
     }
-  });
-});
-
-/**
- * The page-facing readers are thin wrappers over the pure functions and the
- * shipped manifest. The real-file suite asserts their content; this only pins
- * that they agree with the pure functions on the same input, so the wrappers
- * cannot drift into filtering differently from what the logic tests cover.
- */
-describe('readCommandsManifest / readCommandsByCategory', () => {
-  it('readCommandsManifest reports the public count of every advertised category combined', async () => {
-    const summary = await readCommandsManifest();
-    let total = 0;
-    for (const category of summary.categories) {
-      total += (await readCommandsByCategory(category)).length;
-    }
-
-    expect(summary.categories.length).toBeGreaterThan(0);
-    expect(total).toBe(summary.publicCount);
-  });
-
-  it('readCommandsByCategory returns an empty array for an unknown category', async () => {
-    expect(await readCommandsByCategory('no-such-category')).toEqual([]);
   });
 });
 

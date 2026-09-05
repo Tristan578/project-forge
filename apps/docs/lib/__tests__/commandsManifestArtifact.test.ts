@@ -33,7 +33,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { readCommandsByCategory, readCommandsManifest } from '../commands';
+import shippedManifest from '../../data/commands.json';
+import {
+  commandsInCategory,
+  readCommandsByCategory,
+  readCommandsManifest,
+  summarizeManifest,
+  type CommandsManifest,
+} from '../commands';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOADER_SOURCE = path.resolve(HERE, '../commands.ts');
@@ -42,9 +49,15 @@ const MANIFEST_ON_DISK = path.resolve(HERE, '../../data/commands.json');
 // A command the public reference has carried since the manifest was first
 // published. If it is ever renamed, update this AND the default in
 // scripts/post-deploy-docs-check.sh (the deploy smoke test looks for the same
-// name on the live page) in the same PR.
+// name on the live page) in the same PR. `scripts/__tests__/post-deploy-docs-check.test.sh`
+// extracts both pairs and fails CI when they differ, so the drift cannot wait
+// for a red deploy to be noticed. Keep the two `const` lines in exactly this
+// shape — that suite parses them.
 const KNOWN_PUBLIC_COMMAND = 'spawn_entity';
 const KNOWN_CATEGORY = 'scene';
+
+// Same `unknown` hop as the loader, for the same reason (see commands.ts).
+const MANIFEST = shippedManifest as unknown as CommandsManifest;
 
 describe('the manifest loader against the real data/commands.json', () => {
   it('the in-root manifest exists where the loader imports it from', () => {
@@ -87,15 +100,49 @@ describe('the manifest loader against the real data/commands.json', () => {
   });
 });
 
+/**
+ * The page-facing readers are thin wrappers over the pure functions and the
+ * shipped manifest. `commands.test.ts` pins the pure functions on fixtures;
+ * this pins that the wrappers return exactly what those functions return for
+ * the real file, so they cannot drift into filtering differently from what
+ * the logic tests cover. Stated as equality against the same input — not as a
+ * property of the data (the sum of per-category counts, say), which the pure
+ * functions do not guarantee and a legitimate manifest change could break.
+ */
+describe('readCommandsManifest / readCommandsByCategory agree with the pure functions', () => {
+  it('readCommandsManifest() is summarizeManifest(<shipped manifest>)', async () => {
+    expect(await readCommandsManifest()).toEqual(summarizeManifest(MANIFEST));
+  });
+
+  it('readCommandsByCategory(c) is commandsInCategory(<shipped manifest>, c) for every advertised category', async () => {
+    const { categories } = summarizeManifest(MANIFEST);
+
+    // Assert the walk is non-empty (lesson 11).
+    expect(categories.length).toBeGreaterThan(0);
+    for (const category of categories) {
+      expect(await readCommandsByCategory(category), `category "${category}"`).toEqual(
+        commandsInCategory(MANIFEST, category),
+      );
+    }
+  });
+
+  it('readCommandsByCategory returns an empty array for an unknown category', async () => {
+    expect(await readCommandsByCategory('no-such-category')).toEqual([]);
+  });
+});
+
 describe('the loader depends on the manifest in a way output file tracing can see', () => {
   const source = fs.readFileSync(LOADER_SOURCE, 'utf-8');
-  // The negative assertions below are about CODE. The loader's own doc comment
-  // legitimately names the two loaders that preceded it (and what they called),
-  // so scan with comments stripped — a prose mention must not fail the pin, and
-  // a call hidden behind one must not pass it. The loader has no string
-  // literal containing `/*` or `//`, so a non-quote-aware strip is exact here;
-  // the positive assertion below is made on the FULL source and would still
-  // hold if that ever changed.
+  // Every assertion below — positive and negative — runs on CODE, with
+  // comments stripped. The loader's own doc comment legitimately names the two
+  // loaders that preceded it (and what they called), so a prose mention must
+  // not fail a negative pin, and a call hidden behind a comment must not pass
+  // one; a commented-out import must not satisfy the positive pin either.
+  // The strip is not quote-aware. That is exact today because the loader has
+  // no string literal containing `/*` or `//`; if one ever appears, the strip
+  // could eat real code, and the guard directly below (executable code
+  // survived) plus the positive import pin are what would turn that into a
+  // red test instead of a vacuous green one.
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 
   it('the comment strip left executable code behind (the checks below scan something)', () => {

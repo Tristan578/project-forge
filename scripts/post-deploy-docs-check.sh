@@ -2,11 +2,12 @@
 # post-deploy-docs-check.sh
 #
 # Post-deploy smoke check for the docs site's MCP command reference. Probes the
-# two routes that render `data/commands.json` and fails on anything short of a
-# populated page.
+# two routes that render `data/commands.json`, fails on anything short of a
+# populated page, and fails unless every accepted page carries the commit
+# stamp of the deploy this run made.
 #
 # Usage:
-#   bash scripts/post-deploy-docs-check.sh <base-url>
+#   DOCS_CHECK_EXPECT_COMMIT=<sha> bash scripts/post-deploy-docs-check.sh <base-url>
 #
 # Arguments:
 #   base-url   Origin to probe, no trailing slash (https://docs.spawnforge.ai).
@@ -14,21 +15,33 @@
 #              behind Deployment Protection and cannot be observed from here,
 #              and the alias is what readers load.
 #
-# Environment variables (all optional):
+# Environment variables:
+#   DOCS_CHECK_EXPECT_COMMIT REQUIRED. The commit this run deployed (cd.yml
+#                            passes github.sha; 8 to 40 hex chars). Every
+#                            accepted page must carry
+#                            <meta name="spawnforge-docs-commit" content="<sha>">
+#                            whose first 8 chars match. The layout renders it
+#                            from VERCEL_GIT_COMMIT_SHA (apps/docs/lib/commit.ts).
+#                            There is no optional mode: without the commit the
+#                            gate can only prove that SOME build is healthy.
 #   DOCS_CHECK_CATEGORY      Category page to probe (default: scene)
 #   DOCS_CHECK_COMMAND       Command name that must be rendered on that page
 #                            (default: spawn_entity). Keep in step with
 #                            apps/docs/lib/__tests__/commandsManifestArtifact.test.ts,
-#                            which pins the same pair against the manifest.
+#                            which pins the same pair against the manifest;
+#                            scripts/__tests__/post-deploy-docs-check.test.sh
+#                            fails CI when the two disagree.
 #   DOCS_CHECK_RETRIES       Attempts per route before failing (default: 3)
 #   DOCS_CHECK_INTERVAL_S    Seconds between attempts (default: 10)
 #   DOCS_CHECK_STABILIZE_S   Seconds to wait before the first probe (default: 30)
 #   DOCS_CHECK_TIMEOUT_S     curl max-time per request (default: 15)
 #
 # Exit codes:
-#   0  Both routes returned 200 with the expected content
-#   1  Any route was non-200, unobservable (Deployment Protection), or 200 with
-#      the content missing — the deploy is not verified.
+#   0  Both routes returned 200 with the expected content, stamped with the
+#      expected commit
+#   1  Any route was non-200, unobservable (protection on the alias), 200 with
+#      the content missing, or 200 from a different build — the deploy is not
+#      verified.
 #
 # WHY CONTENT, NOT JUST STATUS
 #
@@ -41,17 +54,39 @@
 # otherwise), and `/mcp/<category>` renders each command as a heading. A 200
 # that carries neither is the "0 commands" page and is a failure here — the
 # adjacent-property mistake of lessons-learned #1.
+#
+# WHY THE COMMIT, NOT JUST CONTENT
+#
+# The alias can keep serving the PREVIOUS healthy build — alias assignment
+# lag, or a --prod deploy whose domain set did not include docs.spawnforge.ai
+# — and a content-only probe goes green against the old artifact. A healthy
+# body proves that SOMETHING is healthy; only the commit stamp proves it is
+# the build this run published (post-deploy-health-check.sh learned the same
+# lesson with /api/health's commit field). A mismatch on one attempt is
+# retried, because alias lag resolves; a mismatch on every attempt fails.
 
 set -euo pipefail
+
+usage() {
+  echo "::error::Usage: DOCS_CHECK_EXPECT_COMMIT=<sha> $0 <base-url> — $1" >&2
+  exit 1
+}
 
 # ---------- arguments & defaults ------------------------------------------
 
 BASE_URL="${1:-}"
 if [[ -z "$BASE_URL" ]]; then
-  echo "::error::Usage: $0 <base-url>"
-  exit 1
+  usage "base-url is required"
 fi
 BASE_URL="${BASE_URL%/}"
+
+EXPECT_COMMIT="${DOCS_CHECK_EXPECT_COMMIT:-}"
+if [[ -z "$EXPECT_COMMIT" ]]; then
+  usage "DOCS_CHECK_EXPECT_COMMIT is unset; without it the probe cannot be tied to the deploy under test"
+fi
+if [[ ! "$EXPECT_COMMIT" =~ ^[0-9a-fA-F]{8,40}$ ]]; then
+  usage "DOCS_CHECK_EXPECT_COMMIT must be 8 to 40 hex chars, got '${EXPECT_COMMIT}'"
+fi
 
 CATEGORY="${DOCS_CHECK_CATEGORY:-scene}"
 COMMAND="${DOCS_CHECK_COMMAND:-spawn_entity}"
@@ -59,6 +94,10 @@ RETRIES="${DOCS_CHECK_RETRIES:-3}"
 INTERVAL="${DOCS_CHECK_INTERVAL_S:-10}"
 STABILIZE="${DOCS_CHECK_STABILIZE_S:-30}"
 TIMEOUT="${DOCS_CHECK_TIMEOUT_S:-15}"
+
+# The <meta name> the layout stamps the commit under. The bash suite extracts
+# this line and compares it with DOCS_COMMIT_META_NAME in apps/docs/lib/commit.ts.
+COMMIT_META_NAME='spawnforge-docs-commit'
 
 # TEST SEAM: the suite points this at a scratch file. Never set in CI (the
 # suite asserts no workflow wires it).
@@ -77,21 +116,37 @@ CATEGORY_MARKER=">${COMMAND}<"
 
 CURL_ARGS=(--silent --show-error --max-time "$TIMEOUT")
 
+# ---------- commit stamp ----------------------------------------------------
+#
+# commit_of_body <file>: prints the hex content of the commit <meta>, or
+# nothing when the tag is absent or its content is not hex (the layout stamps
+# 'unknown' for a build with no SHA — that must read as "no commit", never as
+# a value to compare).
+commit_of_body() {
+  local tag
+  tag="$(grep -oE "<meta[^>]*name=\"${COMMIT_META_NAME}\"[^>]*>" "$1" 2>/dev/null | head -1 || true)"
+  [ -n "$tag" ] || return 0
+  printf '%s' "$tag" | grep -oE 'content="[0-9a-fA-F]+"' | head -1 | sed -E 's/^content="//; s/"$//' || true
+}
+
 # ---------- one route, with retries ---------------------------------------
 #
 # probe <url> <marker> <what-the-marker-proves>
-# Returns 0 when some attempt returned 200 with the marker in the body.
-# Exits 1 immediately on a Deployment Protection answer: retrying cannot make
-# an unobservable deployment observable, and #9624 is the record of what a
+# Returns 0 when some attempt returned 200 with the marker in the body AND the
+# expected commit stamp. Exits 1 immediately on a 401/403: retrying cannot
+# make an unobservable page observable, and #9624 is the record of what a
 # "could not authenticate, skipping" branch does to a gate.
 probe() {
   local url="$1" marker="$2" proves="$3"
-  local attempt=0 http_code
+  local attempt=0 http_code reported last="no attempt was made"
 
   while [ "$attempt" -lt "$RETRIES" ]; do
     attempt=$(( attempt + 1 ))
     echo "Probe attempt ${attempt}/${RETRIES}: ${url}"
 
+    # Truncate first so a failed transfer can never leave the previous
+    # attempt's (or the previous route's) body in place to be judged.
+    : > "$RESPONSE_FILE"
     http_code=$(curl "${CURL_ARGS[@]}" \
       --output "$RESPONSE_FILE" \
       --write-out "%{http_code}" \
@@ -99,16 +154,29 @@ probe() {
     echo "  HTTP status: ${http_code}"
 
     if [ "$http_code" = "200" ]; then
-      if grep -qF -- "$marker" "$RESPONSE_FILE" 2>/dev/null; then
+      if ! grep -qF -- "$marker" "$RESPONSE_FILE" 2>/dev/null; then
+        last="HTTP 200 but the body does not contain ${marker} — ${proves} is missing, so this is the empty or zero-command page, not a healthy one"
+        echo "::warning::${last}"
+      else
         echo "  Content check passed: found ${marker} (${proves})"
-        return 0
+        reported="$(commit_of_body "$RESPONSE_FILE")"
+        if [ -z "$reported" ]; then
+          last="HTTP 200 with the content, but the page reported no commit (no hex <meta name=\"${COMMIT_META_NAME}\"> stamp), so it cannot be tied to the deploy under test — an older build, or one built without VERCEL_GIT_COMMIT_SHA"
+          echo "::warning::${last}"
+        elif [ "${reported:0:8}" != "${EXPECT_COMMIT:0:8}" ]; then
+          last="HTTP 200 with the content, but the page reports commit ${reported:0:8}, expected ${EXPECT_COMMIT:0:8} — the alias is serving a DIFFERENT build (alias assignment lag, or a deploy whose domain set did not include this alias), not the one this run published"
+          echo "::warning::${last}"
+        else
+          echo "  Commit check passed: page reports ${reported:0:8}"
+          return 0
+        fi
       fi
-      echo "::warning::HTTP 200 but the body does not contain ${marker} — ${proves} is missing, so this is the empty or zero-command page, not a healthy one"
     elif [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
-      echo "::error::Deployment Protection answered the probe for ${url} (HTTP ${http_code}). The deployment cannot be observed from here; probe the public alias, not the deployment URL." >&2
+      echo "::error::HTTP ${http_code} from ${url}: the production alias refused the probe, so the page cannot be observed from here. This is protection on the ALIAS itself, not the deployment-URL SSO (this gate never probes a deployment URL): Vercel Firewall / Attack Challenge Mode, a WAF rule, or 'Protect Production' Deployment Protection answering the CI runner. Allow the runner (a firewall allow rule, or turn Protect Production off for the docs project) and re-run; do not skip this gate." >&2
       exit 1
     else
-      echo "::warning::${url} returned HTTP ${http_code}"
+      last="${url} returned HTTP ${http_code}"
+      echo "::warning::${last}"
       head -c 512 "$RESPONSE_FILE" 2>/dev/null || true
       echo ""
     fi
@@ -119,13 +187,13 @@ probe() {
     fi
   done
 
-  echo "::error::${url} did not return 200 with ${marker} after ${RETRIES} attempt(s) — ${proves} could not be verified on the deployed docs site" >&2
+  echo "::error::${url} did not return 200 with ${marker} from commit ${EXPECT_COMMIT:0:8} after ${RETRIES} attempt(s) — ${proves} could not be verified on the deployed docs site. Last attempt: ${last}" >&2
   return 1
 }
 
 # ---------- run -------------------------------------------------------------
 
-echo "Waiting ${STABILIZE}s for the docs deployment to stabilize: ${BASE_URL}"
+echo "Waiting ${STABILIZE}s for the docs deployment to stabilize: ${BASE_URL} (expecting commit ${EXPECT_COMMIT:0:8})"
 sleep "$STABILIZE"
 
 if ! probe "$INDEX_URL" "$INDEX_MARKER" "a category tile, i.e. more than zero public commands"; then
@@ -135,5 +203,5 @@ if ! probe "$CATEGORY_URL" "$CATEGORY_MARKER" "the ${COMMAND} command rendered u
   exit 1
 fi
 
-echo "Docs MCP reference check passed: ${INDEX_URL} lists categories and ${CATEGORY_URL} renders ${COMMAND}"
+echo "Docs MCP reference check passed: ${INDEX_URL} lists categories and ${CATEGORY_URL} renders ${COMMAND}, both from commit ${EXPECT_COMMIT:0:8}"
 exit 0
