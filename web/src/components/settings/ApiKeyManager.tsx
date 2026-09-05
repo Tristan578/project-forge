@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Key, Plus, Trash2, Copy, Check } from 'lucide-react';
+import { invalidateCapabilitiesCache } from '@/hooks/useFeatureGating';
 
 type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno';
 
@@ -77,6 +78,9 @@ export function ApiKeyManager() {
       setKeyInputs((prev) => ({ ...prev, [provider]: '' }));
       setShowInputs((prev) => ({ ...prev, [provider]: false }));
       setError(null);
+      // The capabilities body is per-user (BYOK); a saved key must show up in
+      // the editor now, not after the client cache ages out (#9725).
+      invalidateCapabilitiesCache();
     } catch {
       setError(`Failed to save ${provider} key. Please try again.`);
     }
@@ -86,6 +90,7 @@ export function ApiKeyManager() {
     try {
       await fetch(`/api/keys/${provider}`, { method: 'DELETE' });
       setProviderKeys((prev) => prev.filter((p) => p.provider !== provider));
+      invalidateCapabilitiesCache();
     } catch {
       setError(`Failed to remove ${provider} key.`);
     }

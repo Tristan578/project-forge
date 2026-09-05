@@ -46,6 +46,7 @@ import {
   PLATFORM_KEY_CONSOLE_URL,
   GATEWAY_KEY_ENV,
   GATEWAY_CAPABILITIES,
+  CAPABILITY_REQUIRED_PROVIDERS,
   getCapabilityUnavailability,
   type ProviderCapability,
   type PlatformKeyProvider,
@@ -146,18 +147,6 @@ export const GATEWAY_PROBE: Probe = {
 
 const GATEWAY_PROVIDER = 'vercel-gateway';
 
-/**
- * Capabilities whose platform path resolves MORE than the provider in
- * DIRECT_CAPABILITY_PROVIDER. `sprite`: `/api/generate/sprite` picks the
- * provider per request - `provider: 'auto'` (the dialog's and the chat tool's
- * default) resolves DALL-E 3 on OpenAI for every style except pixel-art, and
- * Replicate (SDXL) for pixel-art/sdxl - so a Replicate-only environment still
- * 500s on the default sprite path. Both keys are required for the capability
- * to be usable (#9725 review, lesson 1).
- */
-const ADDITIONAL_PLATFORM_PROVIDERS: Partial<Record<ProviderCapability, PlatformKeyProvider[]>> = {
-  sprite: ['openai'],
-};
 
 /**
  * Decide the route and configuration state of every capability from the
@@ -200,10 +189,10 @@ export function buildPlan(env: Readonly<Record<string, string | undefined>>): Pl
 
     // One row per provider the capability's platform path can resolve - a
     // capability that spends more than one key needs every one of them.
-    const providers: PlatformKeyProvider[] = [
-      provider as PlatformKeyProvider,
-      ...(ADDITIONAL_PLATFORM_PROVIDERS[capability] ?? []),
-    ];
+    // One row per key the capability's platform path can resolve — shared with
+    // /api/capabilities through CAPABILITY_REQUIRED_PROVIDERS so the two agree.
+    const providers: readonly PlatformKeyProvider[] =
+      CAPABILITY_REQUIRED_PROVIDERS[capability] ?? [provider as PlatformKeyProvider];
     return providers.map((platformProvider): PlanRow => {
       const envVar = PLATFORM_KEY_ENV[platformProvider];
       return {
@@ -320,10 +309,15 @@ if (isMainModule(import.meta.url, process.argv[1])) {
   const results = await runVerification(plan);
   console.log(formatTable(results));
   const failing = results.filter((r) => r.status === 'fail' || r.status === 'missing');
-  const offered = results.filter((r) => r.status !== 'unavailable');
+  // Count CAPABILITIES, not rows: a capability with two keys (sprite) is one
+  // capability, verified only when every one of its rows passed.
+  const byCapability = new Map<string, ProbeResult[]>();
+  for (const r of results) byCapability.set(r.capability, [...(byCapability.get(r.capability) ?? []), r]);
+  const offered = [...byCapability.values()].filter((rows) => rows.every((r) => r.status !== 'unavailable'));
+  const verified = offered.filter((rows) => rows.every((r) => r.status === 'pass'));
   console.log(
-    `\n${offered.length - failing.length}/${offered.length} offered capabilities verified; ` +
-      `${results.length - offered.length} declared unavailable.`,
+    `\n${verified.length}/${offered.length} offered capabilities verified; ` +
+      `${byCapability.size - offered.length} declared unavailable.`,
   );
   process.exit(failing.length > 0 ? 1 : 0);
 }

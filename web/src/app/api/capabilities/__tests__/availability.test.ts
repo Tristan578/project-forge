@@ -33,6 +33,7 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 }));
 
 import { safeAuth } from '@/lib/auth/safe-auth';
+import { captureException } from '@/lib/monitoring/sentry-server';
 import { getUserByClerkId } from '@/lib/auth/user-service';
 import { listConfiguredProviders } from '@/lib/keys/resolver';
 
@@ -126,13 +127,45 @@ describe('GET /api/capabilities availability', () => {
   // E2E servers reach this route with Clerk keys present but outside
   // clerkMiddleware, where `auth()` throws; the shard that hit it saw a 500
   // instead of the anonymous body (#9725 CI). Availability never 500s on auth.
-  it('degrades to the anonymous body when safeAuth itself throws', async () => {
+  it('degrades to the anonymous body when safeAuth itself throws, and reports it', async () => {
     mockAuth.mockRejectedValue(new Error('Clerk: auth() was called but clerkMiddleware() was not detected'));
     vi.stubEnv('PLATFORM_MESHY_KEY', 'msy_fake');
     const { body, res } = await call();
     expect(res.status).toBe(200);
     expect(status(body, 'model3d').available).toBe(true);
     expect(mockByok).not.toHaveBeenCalled();
+    // Fail-open must never be silent (lesson 14).
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ route: '/api/capabilities', action: 'auth' }),
+    );
+  });
+
+  // The DB-backed modules must be reached only through the lazy `import()`
+  // inside resolveByokProviders: a static top-level import of either is what
+  // 500'd the E2E shard (899ce813), and a mocked runtime cannot observe module
+  // evaluation (vi.mock factories run once per file), so the source shape is
+  // pinned directly — the same technique CLAUDE.md prescribes for
+  // NEXT_PUBLIC_* member expressions.
+  it('reaches the DB-backed modules only through dynamic import()', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const src = readFileSync(path.resolve(__dirname, '../route.ts'), 'utf8');
+    for (const mod of ['@/lib/auth/user-service', '@/lib/keys/resolver']) {
+      expect(src, `${mod} must not be a static import`).not.toMatch(
+        new RegExp(String.raw`^\s*import\s+[^;]*from\s+'${mod}'`, 'm'),
+      );
+      expect(src, `${mod} must be imported lazily`).toContain(`import('${mod}')`);
+    }
+  });
+
+  it('treats a multi-key capability (sprite) as available only when every key is present', async () => {
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
+    const replicateOnly = await call();
+    expect(status(replicateOnly.body, 'sprite').available).toBe(false);
+    vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk');
+    const both = await call();
+    expect(status(both.body, 'sprite').available).toBe(true);
   });
 
   it('falls back to platform-only availability when the BYOK lookup throws', async () => {
@@ -143,5 +176,9 @@ describe('GET /api/capabilities availability', () => {
     expect(res.status).toBe(200);
     expect(status(body, 'model3d').available).toBe(true);
     expect(status(body, 'sfx').available).toBe(false);
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ route: '/api/capabilities', action: 'byok_lookup' }),
+    );
   });
 });

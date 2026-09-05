@@ -66,11 +66,7 @@ Token cost: 40 tokens.
 
 ### Music Track
 
-> **Not available yet.** Music generation is temporarily switched off while
-> it moves to a new provider. Upload your own track from the Asset panel, or
-> generate a sound effect instead. Nothing is charged while it is off. The
-> options below describe the feature as it will return.
-<!-- maintainers: declared in UNAVAILABLE_CAPABILITIES; tracked in #9522; see docs/known-limitations.md and docs/guides/platform-keys.md -->
+**Not available yet.** Music generation is temporarily switched off while it moves to a new provider. Upload your own track from the Asset panel, or generate a sound effect instead. Nothing is charged while it is off. The options below describe the feature as it will return; see Known Limitations for status.
 
 Generates a background music loop from a description.
 

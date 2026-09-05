@@ -294,6 +294,43 @@ export const COMMAND_CAPABILITY: Readonly<Record<string, ProviderCapability>> = 
 };
 
 /**
+ * The capability each generate route spends, keyed by the `route:` string its
+ * `createGenerationHandler` config declares. The handler's refuse-before-charge
+ * gate (step 1a) reads this table when a route does not declare `capability`
+ * itself, so a route cannot be left ungated by omission — a test walks every
+ * `web/src/app/api/generate/*\/route.ts` and fails on a route missing here.
+ * `localize` and `pacing` are LLM calls on the chat path.
+ */
+export const ROUTE_CAPABILITY: Readonly<Record<string, ProviderCapability>> = {
+  '/api/generate/localize': 'chat',
+  '/api/generate/model': 'model3d',
+  '/api/generate/music': 'music',
+  '/api/generate/pacing': 'chat',
+  '/api/generate/pixel-art': 'sprite',
+  '/api/generate/sfx': 'sfx',
+  '/api/generate/skybox': 'texture',
+  '/api/generate/sprite': 'sprite',
+  '/api/generate/sprite-sheet': 'sprite',
+  '/api/generate/texture': 'texture',
+  '/api/generate/tileset-gen': 'sprite',
+  '/api/generate/voice': 'voice',
+};
+
+/**
+ * Capabilities whose platform path resolves MORE than one provider key, all of
+ * which must be present for the capability to be usable. `sprite`:
+ * `/api/generate/sprite` picks the provider per request — `provider: 'auto'`
+ * (the dialog's and the chat tool's default) resolves DALL-E 3 on OpenAI for
+ * every style except pixel-art and Replicate SDXL for pixel-art — so a
+ * Replicate-only environment still fails the default sprite path. Read by
+ * `/api/capabilities` and `web/scripts/verify-platform-generation.ts` so the
+ * two cannot disagree (#9725 review, lesson 1).
+ */
+export const CAPABILITY_REQUIRED_PROVIDERS: Partial<Record<ProviderCapability, readonly PlatformKeyProvider[]>> = {
+  sprite: ['replicate', 'openai'],
+};
+
+/**
  * Whether a command may be offered to the model: true for every command that
  * spends no capability, and for capability commands whose capability is not
  * declared unavailable. Static, so safe in module-load tool tables.

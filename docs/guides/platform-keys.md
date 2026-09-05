@@ -34,12 +34,13 @@ is not evidence for anything in this document.
 
 ## Decision per capability
 
-Decided from `DIRECT_CAPABILITY_PROVIDER`, `PLATFORM_KEY_ENV` and
-`GATEWAY_CAPABILITIES` in `web/src/lib/config/providers.ts`. The
-"Route" and "Env var" columns are exactly what
-`web/scripts/verify-platform-generation.ts` prints; the "Decision" and
-"Where to mint" columns are this runbook's. Keep them in step when either
-table changes.
+Decided from `DIRECT_CAPABILITY_PROVIDER`, `PLATFORM_KEY_ENV`,
+`GATEWAY_CAPABILITIES` and `CAPABILITY_REQUIRED_PROVIDERS` in
+`web/src/lib/config/providers.ts` — the same tables
+`web/scripts/verify-platform-generation.ts` reads, so its `provider` and
+`route` columns match the "Provider" and "Route" columns here (the env var is
+named in its `detail` column on a `missing` row). The "Decision" and "Where
+to mint" columns are this runbook's; keep them in step when the tables change.
 
 | Capability | Provider | Route | Env var | Decision | Where to mint |
 |---|---|---|---|---|---|
@@ -99,7 +100,7 @@ rm "$TMPDIR/spawnforge-prod.env"
 
 (On Windows: `$env:TEMP\spawnforge-prod.env` in PowerShell, or `$TEMP/spawnforge-prod.env` in Git Bash.)
 
-The script prints one row per capability:
+The script prints one row per provider key a capability needs (`sprite` therefore prints two), with columns `capability  provider  route  status  detail`:
 
 | status | meaning |
 |---|---|
@@ -108,7 +109,7 @@ The script prints one row per capability:
 | `missing` | the env var is not set; `detail` names where to mint it |
 | `unavailable` | declared in `UNAVAILABLE_CAPABILITIES`; never probed |
 
-Exit code is 1 when any offered capability is `missing` or `fail`. The probes
+Exit code is 1 when any row is `missing` or `fail`; the summary line counts capabilities, and a multi-key capability is verified only when every one of its rows passed. The probes
 are `GET` calls to each vendor's account/balance endpoint (URLs and doc links
 in `PROVIDER_PROBES`); they cost nothing and prove authentication, not output.
 

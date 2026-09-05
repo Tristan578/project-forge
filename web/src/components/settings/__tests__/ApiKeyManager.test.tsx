@@ -8,6 +8,10 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 import { waitFor } from '@testing-library/react';
 import { ApiKeyManager } from '../ApiKeyManager';
 
+// A BYOK change must drop the per-user capabilities cache at once (#9725).
+vi.mock('@/hooks/useFeatureGating', () => ({ invalidateCapabilitiesCache: vi.fn() }));
+import { invalidateCapabilitiesCache } from '@/hooks/useFeatureGating';
+
 vi.mock('lucide-react', () => ({
   Key: (props: Record<string, unknown>) => <span data-testid="key-icon" {...props} />,
   Plus: (props: Record<string, unknown>) => <span data-testid="plus-icon" {...props} />,
@@ -180,5 +184,6 @@ describe('ApiKeyManager retired-provider keys (#9117 / #9522)', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/keys/suno', { method: 'DELETE' });
       expect(screen.queryByText('(no longer offered)')).toBeNull();
     });
+    expect(vi.mocked(invalidateCapabilitiesCache)).toHaveBeenCalled();
   });
 });

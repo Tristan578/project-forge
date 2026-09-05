@@ -938,6 +938,21 @@ describe('createGenerationHandler', () => {
       );
     });
 
+    it('gates a route through ROUTE_CAPABILITY when the config omits `capability`', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/music',
+        provider: 'suno',
+        operation: 'music_generation',
+        rateLimitKey: 'gen-music',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ jobId: 'never' }),
+      });
+      const res = await handler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(503);
+      expect((await res.json()).details).toEqual({ capability: 'music', issue: 9522 });
+      expect(mockResolve).not.toHaveBeenCalled();
+    });
+
     it('still requires authentication ahead of the gate', async () => {
       mockAuth.mockResolvedValue({
         ok: false,

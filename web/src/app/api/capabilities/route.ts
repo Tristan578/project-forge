@@ -7,6 +7,7 @@ import {
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
   CHAT_BACKEND_ENV_VARS,
+  CAPABILITY_REQUIRED_PROVIDERS,
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
   getCapabilityUnavailability,
@@ -183,8 +184,17 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
     const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
     const platformAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
-    const byokAvailable = byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
-    const isAvailable = platformAvailable || byokAvailable;
+    // A capability that spends more than one key (CAPABILITY_REQUIRED_PROVIDERS)
+    // is available only when EVERY one of them is present — on the platform
+    // path or via the user's own keys — otherwise its default request 500s.
+    const required = CAPABILITY_REQUIRED_PROVIDERS[cap];
+    const platformOk = required
+      ? required.every((provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]))
+      : platformAvailable;
+    const byokAvailable = required
+      ? required.every((provider) => byokProviders.has(provider))
+      : byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
+    const isAvailable = platformOk || byokAvailable;
 
     const status: CapabilityStatus = {
       capability: cap,
