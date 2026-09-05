@@ -1,7 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { DOCS_URL } from './lib/site';
+import { DOCS_URL, resolveDocsUrl } from './lib/site';
 
 /**
  * Every pattern is an exact path plus an explicit `/(.*)` subtree. Clerk's
@@ -40,7 +40,11 @@ const isPublicRoute = createRouteMatcher(PUBLIC_ROUTES);
  * as, so preview deployments keep signing in; localhost outside production.
  */
 export function buildAuthorizedParties(env: NodeJS.ProcessEnv = process.env): string[] {
-  const parties = new Set<string>([new URL(env.NEXT_PUBLIC_DOCS_URL ?? DOCS_URL).origin]);
+  // This runs at module scope (see `clerkHandler` below), so the parse must not
+  // throw: resolveDocsUrl swaps a malformed NEXT_PUBLIC_DOCS_URL for the canonical
+  // origin instead of taking the whole site down on load.
+  const docsUrl = env.NEXT_PUBLIC_DOCS_URL === undefined ? DOCS_URL : resolveDocsUrl(env.NEXT_PUBLIC_DOCS_URL);
+  const parties = new Set<string>([new URL(docsUrl).origin]);
   for (const host of [env.VERCEL_URL, env.VERCEL_BRANCH_URL, env.VERCEL_PROJECT_PRODUCTION_URL]) {
     if (host) parties.add(`https://${host.replace(/^https?:\/\//, '')}`);
   }

@@ -6,7 +6,7 @@
  * is public only by being listed — an omission is not a neutral default, it is a
  * 307 to sign-in for anyone (including a crawler) who asks for that URL.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createRouteMatcher } from '@clerk/nextjs/server';
 import { PUBLIC_ROUTES, buildAuthorizedParties, config } from '../../proxy';
 
@@ -89,5 +89,19 @@ describe('authorizedParties — the azp claim is enforced (#9630)', () => {
 
   it('is never empty in production with no optional env', () => {
     expect(buildAuthorizedParties({ NODE_ENV: 'production' } as NodeJS.ProcessEnv)).toEqual(['https://docs.spawnforge.ai']);
+  });
+
+  it('survives a malformed NEXT_PUBLIC_DOCS_URL at module load and keeps the canonical origin', () => {
+    // buildAuthorizedParties is evaluated while proxy.ts loads, so a throw here is
+    // not a bad request — it is the whole docs site failing to start.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const env = { NODE_ENV: 'production', NEXT_PUBLIC_DOCS_URL: 'docs.spawnforge.ai' } as NodeJS.ProcessEnv;
+      expect(() => buildAuthorizedParties(env)).not.toThrow();
+      expect(buildAuthorizedParties(env)).toEqual(['https://docs.spawnforge.ai']);
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
