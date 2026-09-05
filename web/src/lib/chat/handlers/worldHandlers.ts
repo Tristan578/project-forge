@@ -52,6 +52,10 @@ export function clearPersistedWorld(): void {
 /**
  * Attempt to generate a consistent world, retrying with issue context up to maxRetries.
  * Falls back to closest genre preset if all retries fail.
+ *
+ * `descriptionTruncated` reports whether the prompt actually sent for the returned
+ * world (premise + constraints + any retry notes) was shortened by generateWorld.
+ * It is false for the preset fallback, which never used the premise.
  */
 async function generateWithHealing(
   premise: string,
@@ -59,9 +63,15 @@ async function generateWithHealing(
   factionCount: number | undefined,
   regionCount: number | undefined,
   maxRetries = 2,
-): Promise<{ world: GameWorld; report: ConsistencyReport; fallback: boolean }> {
+): Promise<{
+  world: GameWorld;
+  report: ConsistencyReport;
+  fallback: boolean;
+  descriptionTruncated: boolean;
+}> {
   let lastWorld: GameWorld | null = null;
   let lastReport: ConsistencyReport | null = null;
+  let lastTruncated = false;
 
   // Build the full premise with constraints
   const constraintNote = [
@@ -89,9 +99,10 @@ async function generateWithHealing(
       const report = validateWorldConsistency(healed);
       lastWorld = healed;
       lastReport = report;
+      lastTruncated = isWorldDescriptionTruncated(attemptPremise);
 
       if (report.valid) {
-        return { world: healed, report, fallback: false };
+        return { world: healed, report, fallback: false, descriptionTruncated: lastTruncated };
       }
     } catch (err) {
       // Fail-fast on errors that retrying would amplify or that indicate
@@ -118,7 +129,7 @@ async function generateWithHealing(
   // All retries exhausted — if the last world exists but failed validation,
   // return it with fallback: true so callers know it may be inconsistent.
   if (lastWorld) {
-    return { world: lastWorld, report: lastReport!, fallback: true };
+    return { world: lastWorld, report: lastReport!, fallback: true, descriptionTruncated: lastTruncated };
   }
 
   const presetKey = genre && WORLD_PRESETS[genre] ? genre : 'medieval_fantasy';
@@ -127,6 +138,7 @@ async function generateWithHealing(
     world: fallbackWorld,
     report: validateWorldConsistency(fallbackWorld),
     fallback: true,
+    descriptionTruncated: false,
   };
 }
 
@@ -187,10 +199,9 @@ export const worldHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const { premise, genre, factionCount, regionCount } = p.data;
-    const descriptionTruncated = isWorldDescriptionTruncated(premise);
 
     try {
-      const { world, report, fallback } = await generateWithHealing(
+      const { world, report, fallback, descriptionTruncated } = await generateWithHealing(
         premise,
         genre,
         factionCount,

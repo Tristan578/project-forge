@@ -260,6 +260,8 @@ export function WorldBuilderPanel() {
       const result = await generateWorld(description, selectedPreset || undefined);
       setWorld(result);
     } catch (err) {
+      // Nothing was generated, so a warning about "the result" would be misleading next to the error.
+      setTruncationWarning(false);
       setError(err instanceof Error ? err.message : 'Failed to generate world');
     } finally {
       setLoading(false);

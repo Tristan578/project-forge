@@ -222,6 +222,18 @@ describe('WorldBuilderPanel', () => {
     expect(screen.queryByText(/shortened before generation/i)).toBeNull();
   });
 
+  it('clears the warning when generation fails', async () => {
+    vi.mocked(generateWorld).mockRejectedValue(new Error('World gen failed'));
+    render(<WorldBuilderPanel />);
+    fireEvent.change(screen.getByLabelText('Describe your world concept'), {
+      target: { value: 'x'.repeat(1501) },
+    });
+    fireEvent.click(screen.getByLabelText('Generate world with AI'));
+
+    expect(await screen.findByText(/World gen failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/shortened before generation/i)).toBeNull();
+  });
+
   it('shows world genre and era after generation', async () => {
     render(<WorldBuilderPanel />);
     fireEvent.change(screen.getByLabelText('Describe your world concept'), {

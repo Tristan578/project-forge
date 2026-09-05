@@ -243,6 +243,31 @@ describe('build_world handler', () => {
     expect(result.message).not.toMatch(/description.+shortened/i);
   });
 
+  it('reports truncation when constraints push the sent prompt over the limit', async () => {
+    mockFetchWithWorld(VALID_WORLD);
+    // 1490 chars is under the limit alone; the appended "[Constraints: ...]" note pushes it over.
+    const result = await worldHandlers.build_world(
+      { premise: 'x'.repeat(1490), factionCount: 3, regionCount: 2 },
+      makeContext(),
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(true);
+    expect(result.message).toMatch(/description.+shortened/i);
+  });
+
+  it('does not report truncation when premise plus constraints stay within the limit', async () => {
+    mockFetchWithWorld(VALID_WORLD);
+    const result = await worldHandlers.build_world(
+      { premise: 'x'.repeat(1400), factionCount: 3, regionCount: 2 },
+      makeContext(),
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { descriptionTruncated: boolean };
+    expect(data.descriptionTruncated).toBe(false);
+    expect(result.message).not.toMatch(/description.+shortened/i);
+  });
+
   it('falls back to preset when AI returns unparseable JSON', async () => {
     const encoder = new TextEncoder();
     vi.mocked(fetch).mockResolvedValue({
