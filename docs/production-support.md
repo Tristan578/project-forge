@@ -636,9 +636,9 @@ Source of truth: `web/src/lib/config/validateEnv.ts` (`OPTIONAL_VARS`). App degr
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Sentry | (empty, errors untracked) |
 | `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics | (empty) |
 | `ASSET_R2_ACCOUNT_ID` | R2 asset storage | (empty) |
-| `PLATFORM_MESHY_KEY` | Meshy 3D gen | (empty) |
-| `PLATFORM_ELEVENLABS_KEY` | ElevenLabs audio | (empty) |
-| `PLATFORM_SUNO_KEY` | Suno music | (empty) |
+| `PLATFORM_MESHY_KEY` | Meshy 3D gen | (empty — see `docs/guides/platform-keys.md`) |
+| `PLATFORM_ELEVENLABS_KEY` | ElevenLabs audio | (empty — see `docs/guides/platform-keys.md`) |
+| `PLATFORM_SUNO_KEY` | Suno music — unobtainable; `music` is declared unavailable (#9522) | (empty) |
 | `ASSET_R2_ACCESS_KEY_ID` | R2 auth | (empty) |
 | `ASSET_R2_SECRET_ACCESS_KEY` | R2 auth | (empty) |
 | `ASSET_BUCKET_NAME` | R2 bucket | (empty) |

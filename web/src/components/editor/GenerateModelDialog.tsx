@@ -7,6 +7,8 @@ import { useUserStore } from '@/stores/userStore';
 import { GenerationProgress } from '@/components/ui/GenerationProgress';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 
 interface GenerateModelDialogProps {
   isOpen: boolean;
@@ -38,7 +40,10 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
   const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = quality === 'standard' ? 100 : 200;
+  // Capability gate (#9117): blocked only on a positive "unavailable" report.
+  const gate = useGenerationGate('model-generation');
   const canSubmit =
+    !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
     !isSubmitting &&
@@ -110,6 +115,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
         {/* Body */}
         <div className="space-y-4 p-4">
+          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

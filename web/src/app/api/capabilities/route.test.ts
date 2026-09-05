@@ -70,18 +70,30 @@ describe('GET /api/capabilities', () => {
 
   it('marks capability as unavailable when no env vars set', async () => {
     // Ensure no relevant env vars are set
-    delete process.env.PLATFORM_SUNO_KEY;
+    delete process.env.PLATFORM_MESHY_KEY;
 
     const { GET } = await import('./route');
     const req = new NextRequest(BASE_URL);
     const res = await GET(req);
     const body = await res.json();
 
+    const model3d = body.capabilities.find((c: { capability: string }) => c.capability === 'model3d');
+    expect(model3d.available).toBe(false);
+    expect(model3d.requiredProviders).toBeDefined();
+    expect(model3d.hint).toContain('Meshy');
+    expect(body.unavailable).toContain('model3d');
+  });
+
+  it('marks an unprovisionable capability with the tracking issue instead of a key hint (#9117)', async () => {
+    const { GET } = await import('./route');
+    const res = await GET(new NextRequest(BASE_URL));
+    const body = await res.json();
+
     const music = body.capabilities.find((c: { capability: string }) => c.capability === 'music');
     expect(music.available).toBe(false);
-    expect(music.requiredProviders).toBeDefined();
-    expect(music.hint).toContain('Suno');
-    expect(body.unavailable).toContain('music');
+    expect(music.unprovisionable).toBe(true);
+    expect(music.hint).toContain('#9522');
+    expect(music.requiredProviders).toBeUndefined();
   });
 
   it('includes human-readable labels', async () => {

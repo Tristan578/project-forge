@@ -25,7 +25,7 @@ export type FeatureId =
   | 'semantic-search';
 
 /** Maps feature IDs to the provider capabilities they require */
-const FEATURE_CAPABILITY_MAP: Record<FeatureId, ProviderCapability[]> = {
+export const FEATURE_CAPABILITY_MAP: Record<FeatureId, ProviderCapability[]> = {
   'ai-chat': ['chat'],
   'image-generation': ['image'],
   'model-generation': ['model3d'],

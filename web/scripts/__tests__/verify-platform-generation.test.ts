@@ -1,0 +1,155 @@
+/**
+ * Tests for the platform-generation verification script (#9117).
+ *
+ * The script answers one question per capability: "with the keys in THIS
+ * environment, would a platform-key generation request be accepted by the
+ * provider?" It decides the route from `lib/config/providers.ts` and, for
+ * every configured provider, performs one cheap authenticated request that
+ * costs no credits. The request shapes below are pinned to each provider's
+ * documented account/auth endpoint (URLs in the script), per lesson 14: a
+ * mocked transport pins whatever contract we believed, so the contract must
+ * be the vendor's, cited.
+ */
+
+// @vitest-environment node
+
+import { describe, it, expect, vi } from 'vitest';
+import {
+  buildPlan,
+  runVerification,
+  formatTable,
+  PROVIDER_PROBES,
+  type PlanRow,
+} from '../verify-platform-generation.ts';
+
+function rows(env: Record<string, string | undefined>): Record<string, PlanRow> {
+  return Object.fromEntries(buildPlan(env).map((r) => [r.capability, r]));
+}
+
+describe('buildPlan', () => {
+  it('lists every capability exactly once', () => {
+    const plan = buildPlan({});
+    const caps = plan.map((r) => r.capability);
+    expect(new Set(caps).size).toBe(caps.length);
+    expect(caps).toEqual(
+      expect.arrayContaining(['chat', 'image', 'model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal', 'embedding']),
+    );
+  });
+
+  it('routes music as unavailable regardless of keys', () => {
+    const r = rows({ PLATFORM_SUNO_KEY: 'x' });
+    expect(r.music.route).toBe('unavailable');
+    expect(r.music.configured).toBe(false);
+    expect(r.music.detail).toContain('#9522');
+  });
+
+  it('routes chat through the gateway when AI_GATEWAY_API_KEY is set', () => {
+    const r = rows({ AI_GATEWAY_API_KEY: 'gw' });
+    expect(r.chat.route).toBe('gateway');
+    expect(r.chat.configured).toBe(true);
+    expect(r.chat.envVar).toBe('AI_GATEWAY_API_KEY');
+  });
+
+  it('does not treat the gateway key as evidence that asset generation works', () => {
+    const r = rows({ AI_GATEWAY_API_KEY: 'gw' });
+    for (const cap of ['model3d', 'texture', 'sfx', 'voice', 'sprite', 'bg_removal', 'image']) {
+      expect(r[cap].route, cap).toBe('platform-key');
+      expect(r[cap].configured, cap).toBe(false);
+    }
+  });
+
+  it('marks a platform-key capability configured when its provider key is present', () => {
+    const r = rows({ PLATFORM_MESHY_KEY: 'msy_x' });
+    expect(r.model3d.configured).toBe(true);
+    expect(r.model3d.envVar).toBe('PLATFORM_MESHY_KEY');
+    expect(r.texture.configured).toBe(true);
+    expect(r.sfx.configured).toBe(false);
+    expect(r.sfx.envVar).toBe('PLATFORM_ELEVENLABS_KEY');
+  });
+});
+
+describe('PROVIDER_PROBES', () => {
+  it('names a documented, credit-free endpoint for every probeable provider', () => {
+    for (const [provider, probe] of Object.entries(PROVIDER_PROBES)) {
+      if (probe === null) continue;
+      expect(probe.url, provider).toMatch(/^https:\/\//);
+      expect(probe.docs, provider).toMatch(/^https:\/\//);
+      expect(probe.method).toBe('GET');
+    }
+  });
+});
+
+describe('runVerification', () => {
+  const okFetch = () =>
+    vi.fn(async () => new Response('{}', { status: 200 }));
+
+  it('sends one authenticated request per configured provider using its documented header', async () => {
+    const fetchImpl = okFetch();
+    const results = await runVerification(
+      buildPlan({ PLATFORM_MESHY_KEY: 'msy_secret', PLATFORM_ELEVENLABS_KEY: 'xi_secret' }),
+      { fetchImpl, env: { PLATFORM_MESHY_KEY: 'msy_secret', PLATFORM_ELEVENLABS_KEY: 'xi_secret' } },
+    );
+    const byCap = Object.fromEntries(results.map((r) => [r.capability, r]));
+    expect(byCap.model3d.status).toBe('pass');
+    expect(byCap.texture.status).toBe('pass');
+    expect(byCap.sfx.status).toBe('pass');
+    expect(byCap.voice.status).toBe('pass');
+    // One probe per provider, not per capability.
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const calls = fetchImpl.mock.calls as unknown as Array<[string, RequestInit]>;
+    const meshy = calls.find(([url]) => url.includes('api.meshy.ai'));
+    const eleven = calls.find(([url]) => url.includes('api.elevenlabs.io'));
+    // Meshy: https://docs.meshy.ai/en/api/balance — Authorization: Bearer.
+    expect(meshy?.[0]).toBe('https://api.meshy.ai/openapi/v1/balance');
+    expect((meshy?.[1].headers as Record<string, string>).Authorization).toBe('Bearer msy_secret');
+    // ElevenLabs: https://elevenlabs.io/docs/api-reference/user/get — xi-api-key.
+    expect(eleven?.[0]).toBe('https://api.elevenlabs.io/v1/user');
+    expect((eleven?.[1].headers as Record<string, string>)['xi-api-key']).toBe('xi_secret');
+  });
+
+  it('reports fail with the HTTP status when the provider rejects the key', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{"error":"unauthorized"}', { status: 401 }));
+    const results = await runVerification(buildPlan({ PLATFORM_MESHY_KEY: 'bad' }), {
+      fetchImpl,
+      env: { PLATFORM_MESHY_KEY: 'bad' },
+    });
+    const model3d = results.find((r) => r.capability === 'model3d');
+    expect(model3d?.status).toBe('fail');
+    expect(model3d?.detail).toContain('401');
+  });
+
+  it('reports missing without a request when the key is absent, and unavailable for music', async () => {
+    const fetchImpl = okFetch();
+    const results = await runVerification(buildPlan({}), { fetchImpl, env: {} });
+    const byCap = Object.fromEntries(results.map((r) => [r.capability, r]));
+    expect(byCap.model3d.status).toBe('missing');
+    expect(byCap.music.status).toBe('unavailable');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('reports fail (not a crash) when the probe throws', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('ECONNRESET');
+    });
+    const results = await runVerification(buildPlan({ PLATFORM_REMOVEBG_KEY: 'k' }), {
+      fetchImpl,
+      env: { PLATFORM_REMOVEBG_KEY: 'k' },
+    });
+    const bg = results.find((r) => r.capability === 'bg_removal');
+    expect(bg?.status).toBe('fail');
+    expect(bg?.detail).toContain('ECONNRESET');
+  });
+});
+
+describe('formatTable', () => {
+  it('prints one line per capability with its status', () => {
+    const out = formatTable([
+      { capability: 'music', provider: 'suno', route: 'unavailable', status: 'unavailable', detail: '#9522' },
+      { capability: 'model3d', provider: 'meshy', route: 'platform-key', status: 'pass', detail: '200' },
+    ]);
+    expect(out).toContain('music');
+    expect(out).toContain('unavailable');
+    expect(out).toContain('model3d');
+    expect(out).toContain('pass');
+  });
+});

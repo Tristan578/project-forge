@@ -7,6 +7,8 @@ import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 
 interface GenerateTextureDialogProps {
   isOpen: boolean;
@@ -38,7 +40,10 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
   const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = 30;
+  // Capability gate (#9117): blocked only on a positive "unavailable" report.
+  const gate = useGenerationGate('texture-generation');
   const canSubmit =
+    !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
     !isSubmitting &&
@@ -109,6 +114,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
         {/* Body */}
         <div className="space-y-4 p-4">
+          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

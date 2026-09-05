@@ -28,6 +28,12 @@ vi.mock('lucide-react', () => ({
   Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
 
+// Capability gate (#9117): report "available" so these tests exercise the
+// submit path; the gate itself is covered by useGenerationGate.test.tsx.
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false })),
+}));
+
 describe('GenerateSoundDialog', () => {
   const mockOnClose = vi.fn();
   const importAudio = vi.fn();

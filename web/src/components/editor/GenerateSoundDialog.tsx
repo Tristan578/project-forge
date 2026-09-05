@@ -7,6 +7,8 @@ import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 
@@ -38,7 +40,10 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
 
   const tokenCost = soundType === 'sfx' ? 20 : 40;
   const prompt = soundType === 'sfx' ? sfxPrompt : voiceText;
+  // Capability gate (#9117): blocked only on a positive "unavailable" report.
+  const gate = useGenerationGate(soundType === 'sfx' ? 'sfx-generation' : 'voice-generation');
   const canSubmit =
+    !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
     !isSubmitting &&
@@ -139,6 +144,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
 
         {/* Body */}
         <div className="space-y-4 p-4">
+          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
           {/* Type selection */}
           <div>
             <label className="mb-2 block text-xs font-medium text-zinc-300">Type</label>

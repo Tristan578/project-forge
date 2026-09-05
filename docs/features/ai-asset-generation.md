@@ -65,7 +65,14 @@ Generates spoken dialogue in a chosen voice style. Powered by ElevenLabs.
 Token cost: 40 tokens.
 
 ### Music Track
-Generates a background music loop from a description. Powered by Suno.
+
+> **Currently unavailable.** The original provider (Suno) has no public API,
+> so no key can be issued. Music is moving to ElevenLabs (#9522). Until that
+> lands the dialog shows an unavailable notice, and the route refuses every
+> request before any tokens are spent. The options below describe the intended
+> feature.
+
+Generates a background music loop from a description.
 
 | Option | Description |
 |---|---|

@@ -195,6 +195,64 @@ export function getPlatformKeyEnvVar(provider: string): string | null {
 }
 
 /**
+ * Where a human mints each provider's platform key. `null` means the provider
+ * has NO self-serve console — its key cannot be obtained by anyone, so every
+ * capability it serves must be declared in `UNAVAILABLE_CAPABILITIES` (pinned
+ * by `capabilityAvailability.test.ts`, per #9522). Suno is the live case: no
+ * public API as of 2026-08, so `PLATFORM_SUNO_KEY` can never exist.
+ *
+ * URLs were confirmed against each vendor's current documentation for #9117;
+ * the OpenAI path is the standard console location (platform.openai.com
+ * refuses automated fetches, so it was not machine-verified).
+ */
+export const PLATFORM_KEY_CONSOLE_URL: Record<PlatformKeyProvider, string | null> = {
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  meshy: 'https://www.meshy.ai/settings/api',
+  hyper3d: 'https://developer.hyper3d.ai/',
+  elevenlabs: 'https://elevenlabs.io/app/settings/api-keys',
+  suno: null,
+  openai: 'https://platform.openai.com/api-keys',
+  replicate: 'https://replicate.com/account/api-tokens',
+  removebg: 'https://www.remove.bg/dashboard#api-key',
+};
+
+// ---------------------------------------------------------------------------
+// Capabilities the platform cannot offer (#9117)
+// ---------------------------------------------------------------------------
+
+export interface CapabilityUnavailability {
+  /** User-facing sentence. Must not name env vars or server internals. */
+  reason: string;
+  /** GitHub issue tracking the fix; surfaced as `#NNNN` in hints and errors. */
+  issue: number;
+}
+
+/**
+ * Capabilities that must be refused everywhere — `/api/capabilities`, the
+ * generation dialogs, and `createGenerationHandler` — regardless of which
+ * keys are set, because no key can make them work. Declared in code, not in
+ * an env var, so the product cannot drift back to offering something that
+ * 500s: a request for one of these is refused BEFORE any token is deducted.
+ *
+ * Remove an entry only when the capability has a provisionable provider and
+ * one real artifact has been generated through it (the #9117 done-when).
+ */
+export const UNAVAILABLE_CAPABILITIES: Partial<Record<ProviderCapability, CapabilityUnavailability>> = {
+  music: {
+    reason:
+      'Music generation is unavailable: its current provider has no public API, so it is being moved to ElevenLabs.',
+    issue: 9522,
+  },
+};
+
+/** The unavailability record for a capability, or null when it is offered. */
+export function getCapabilityUnavailability(
+  capability: ProviderCapability,
+): CapabilityUnavailability | null {
+  return UNAVAILABLE_CAPABILITIES[capability] ?? null;
+}
+
+/**
  * Env-var names for the multi-model routers, which front several providers at
  * once rather than mapping 1:1 to one. Kept beside `PLATFORM_KEY_ENV` so every
  * consumer — the chat-backend table below, `/api/capabilities`, the health

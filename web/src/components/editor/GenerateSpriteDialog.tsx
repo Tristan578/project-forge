@@ -7,6 +7,8 @@ import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 
 interface GenerateSpriteDialogProps {
   isOpen: boolean;
@@ -34,7 +36,10 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
   const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = activeTab === 'single' ? 15 : activeTab === 'sheet' ? frameCount * 15 : 50;
+  // Capability gate (#9117): blocked only on a positive "unavailable" report.
+  const gate = useGenerationGate('sprite-generation');
   const canSubmit =
+    !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
     !isSubmitting &&
@@ -179,6 +184,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
+          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
           {/* Prompt (all tabs) */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

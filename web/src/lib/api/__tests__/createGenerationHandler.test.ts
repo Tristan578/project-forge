@@ -892,4 +892,46 @@ describe('createGenerationHandler', () => {
     expect(mockSanitize).toHaveBeenCalledTimes(1);
     expect(mockSanitize).toHaveBeenCalledWith('test prompt');
   });
+
+  // #9117 / #9522: a capability declared unavailable in
+  // UNAVAILABLE_CAPABILITIES must be refused before the key resolves and before
+  // any token is deducted, with a message the caller can act on. Music is the
+  // live case — Suno has no API, so a request can never succeed and a charge
+  // would be an incorrect charge.
+  describe('unavailable capability gate (#9117)', () => {
+    const musicHandler = createGenerationHandler({
+      route: '/api/generate/music',
+      provider: 'suno',
+      capability: 'music',
+      operation: 'music_generation',
+      rateLimitKey: 'gen-music',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ jobId: 'never' }),
+    });
+
+    it('returns 503 SERVICE_UNAVAILABLE naming the tracking issue and never resolves a key', async () => {
+      const res = await musicHandler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.code).toBe('SERVICE_UNAVAILABLE');
+      expect(data.error).toContain('#9522');
+      expect(mockResolve).not.toHaveBeenCalled();
+      expect(mockRefund).not.toHaveBeenCalled();
+    });
+
+    it('leaves an available capability untouched', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/sfx',
+        provider: 'elevenlabs',
+        capability: 'sfx',
+        operation: 'sfx_generation',
+        rateLimitKey: 'gen-sfx',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'door creak' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledTimes(1);
+    });
+  });
 });

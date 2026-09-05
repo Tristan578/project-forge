@@ -7,6 +7,8 @@ import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { trackJob, makeJobId } from '@/lib/chat/handlers/generationHandlers';
@@ -33,7 +35,10 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
   const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = 80;
+  // Capability gate (#9117): blocked only on a positive "unavailable" report.
+  const gate = useGenerationGate('music-generation');
   const canSubmit =
+    !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
     !isSubmitting &&
@@ -147,10 +152,8 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {/* Coming soon notice */}
-          <div className="rounded border border-amber-700/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-300">
-            Music generation is in preview. The Suno API is invite-only and may not be available for all accounts. If generation fails, your tokens will be refunded.
-          </div>
+          {/* Unavailable state (#9117): the server refuses this capability before any charge. */}
+          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
 
           {/* Prompt */}
           <div>

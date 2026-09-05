@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 
 interface GenerateSkyboxDialogProps {
   isOpen: boolean;
@@ -25,7 +27,10 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
   const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = 50;
+  // Capability gate (#9117): skybox is served by the Meshy texture pipeline.
+  const gate = useGenerationGate('texture-generation');
   const canSubmit =
+    !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
     !isSubmitting &&
@@ -92,6 +97,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
+          {gate.blocked && <GenerationUnavailableNotice reason={gate.reason} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

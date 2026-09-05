@@ -38,6 +38,7 @@ import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
+import { getCapabilityUnavailability, type ProviderCapability } from '@/lib/config/providers';
 import { ErrorCode } from './errors';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
@@ -105,6 +106,15 @@ export interface GenerationHandlerConfig<TParams, TResult> {
 
   /** Provider name for API key resolution. Static or computed from validated params. */
   provider: Provider | ((params: TParams) => Provider);
+
+  /**
+   * The capability this route serves (#9117). When it appears in
+   * `UNAVAILABLE_CAPABILITIES`, every request is refused with 503
+   * `SERVICE_UNAVAILABLE` naming the tracking issue — before the key resolves
+   * and before any token is deducted. Optional and additive: a route that
+   * omits it is never gated here.
+   */
+  capability?: ProviderCapability;
 
   /** Token operation name for pricing lookup. Static or computed from validated params. */
   operation: string | ((params: TParams) => string);
@@ -245,6 +255,7 @@ export function createGenerationHandler<TParams, TResult>(
   const {
     route,
     provider,
+    capability,
     operation,
     rateLimitKey,
     rateLimitMax = 10,
@@ -471,6 +482,22 @@ export function createGenerationHandler<TParams, TResult>(
     // (resolver.ts returns no usageId when the user supplies their own key).
     // Setting it here billed both to the metric, overstating consumption by the
     // entire cached-traffic volume and diverging from the Stripe billing meter.
+
+    // 6a. Declared-unavailable capability (#9117). A capability with no
+    // provisionable provider can never succeed, so it is refused here — before
+    // the cache, before the key resolves, before any deduction — with a
+    // message the caller can act on. Static config, so this never fails open.
+    const unavailability = capability ? getCapabilityUnavailability(capability) : null;
+    if (unavailability) {
+      mctx.outcome = 'provider_unavailable';
+      return NextResponse.json(
+        {
+          error: `${unavailability.reason} (#${unavailability.issue})`,
+          code: ErrorCode.SERVICE_UNAVAILABLE,
+        },
+        { status: 503 }
+      );
+    }
 
     // 6b. Provider kill switch (PF-971 / #8952). Checked immediately after the
     // provider resolves and BEFORE any cache lookup or token deduction, so a

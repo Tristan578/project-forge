@@ -17,6 +17,12 @@ vi.mock('lucide-react', () => ({
   Sparkles: (props: Record<string, unknown>) => <span data-testid="sparkles-icon" {...props} />,
 }));
 
+// Capability gate (#9117): report "available" so these tests exercise the
+// submit path; the gate itself is covered by useGenerationGate.test.tsx.
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false })),
+}));
+
 describe('GenerateModelDialog', () => {
   const mockOnClose = vi.fn();
 

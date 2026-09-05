@@ -107,17 +107,6 @@ describe('POST /api/generate/music', () => {
     expect(data.error).toContain('Duration must be between 15 and 120');
   });
 
-  it('returns 402 when tokens insufficient', async () => {
-    vi.mocked(resolveApiKey).mockRejectedValue(
-      new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
-    );
-
-    const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }));
-    expect(res.status).toBe(402);
-    const data = await res.json();
-    expect(data.code).toBe('INSUFFICIENT_TOKENS');
-  });
-
   it('returns 422 when sanitizePrompt returns safe:false', async () => {
     const { sanitizePrompt } = await import('@/lib/ai/contentSafety');
     vi.mocked(sanitizePrompt).mockReturnValueOnce({ safe: false, filtered: '', reason: 'Injection detected' });
@@ -129,40 +118,29 @@ describe('POST /api/generate/music', () => {
     expect(data.error.length).toBeGreaterThan(0);
   });
 
-  it('returns 500 when provider fails', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        this.createMusic = vi.fn().mockRejectedValue(new Error('Suno API down'));
-      } as unknown as typeof SunoClient
-    );
-
+  // #9117 / #9522: music is declared unavailable (UNAVAILABLE_CAPABILITIES)
+  // because Suno has no public API. A valid, authenticated, safe request is
+  // refused 503 BEFORE the key resolves, before any deduction, and before the
+  // provider client is even constructed — so there is nothing to refund and
+  // no 402/500 path to reach. The 402/500/refund cases return with #9522.
+  it('refuses every valid request 503 SERVICE_UNAVAILABLE before resolving a key or charging', async () => {
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     const data = await res.json();
-    expect(data.error).toBe('Generation failed due to a server error. Please try again later.');
-    expect(data.error).not.toContain('Suno');
+    expect(data.code).toBe('SERVICE_UNAVAILABLE');
+    expect(data.error).toContain('#9522');
+    expect(data.error).not.toContain('PLATFORM_');
+    expect(vi.mocked(resolveApiKey)).not.toHaveBeenCalled();
+    expect(vi.mocked(refundTokens)).not.toHaveBeenCalled();
+    expect(vi.mocked(SunoClient)).not.toHaveBeenCalled();
   });
 
-  it('calls refundTokens when provider throws and usageId exists', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        this.createMusic = vi.fn().mockRejectedValue(new Error('Suno down'));
-      } as unknown as typeof SunoClient
+  it('still refuses 503 when the resolver would have thrown INSUFFICIENT_TOKENS (gate precedes billing)', async () => {
+    vi.mocked(resolveApiKey).mockRejectedValue(
+      new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
     );
-
-    await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }));
-
-    expect(vi.mocked(refundTokens)).toHaveBeenCalledWith('user_1', 'usage-1');
-  });
-
-  it('returns 201 on successful music generation', async () => {
     const res = await POST(makeRequest({ prompt: 'epic battle theme', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
-    const data = await res.json();
-    expect(data.jobId).toBe('task-1');
-    expect(data.provider).toBe('suno');
-    expect(data.status).toBe('pending');
-    expect(data.estimatedSeconds).toBe(60);
-    expect(data.usageId).toBeDefined();
+    expect(res.status).toBe(503);
+    expect(vi.mocked(resolveApiKey)).not.toHaveBeenCalled();
   });
 });
