@@ -2306,6 +2306,7 @@ STEPS_EOF
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       github.event.inputs.promote_to_production != 'true' &&
+      needs.check-changes.outputs.web-changed == 'true' &&
       (needs.lint.result == 'success' || (needs.lint.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.typecheck.result == 'success' || (needs.typecheck.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
       (needs.test-web.result == 'success' || (needs.test-web.result == 'skipped' && needs.check-validated.outputs.validated == 'true')) &&
@@ -2318,7 +2319,7 @@ STEPS_EOF
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       (
-        (needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
+        (needs.check-changes.outputs.web-changed == 'true' && needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
         (github.event.inputs.promote_to_production == 'true' &&
          needs.lint.result == 'success' &&
          needs.typecheck.result == 'success' &&

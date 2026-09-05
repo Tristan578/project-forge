@@ -46,7 +46,7 @@ bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 # --- fixture profiles --------------------------------------------------------
 # Safe profile — mirrors the committed HEAD: approval-gated, network/shell off.
 SAFE_TOML='model = "gpt-5.3-codex"
-approval_policy = "unless-allow-listed"
+approval_policy = "untrusted"
 
 [sandbox_workspace_write]
 allow = ["**/*"]
@@ -71,7 +71,7 @@ ONLY_NEVER='approval_policy = "never"
 
 [sandbox_workspace_write]
 network_access = false'
-ONLY_NETWORK='approval_policy = "unless-allow-listed"
+ONLY_NETWORK='approval_policy = "untrusted"
 
 [sandbox_workspace_write]
 network_access = true'
