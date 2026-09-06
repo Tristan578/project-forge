@@ -2613,6 +2613,7 @@ STEPS_EOF
   skills-lint:
   lockfile-sync:
   openapi-route-sync:
+  board-verdict-tests:
   agentic-sync:
   taskboard-onboarding-guard:
   codex-config-guard:
