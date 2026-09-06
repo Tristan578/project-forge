@@ -9,9 +9,13 @@
 # one machine's layout is assuming one contributor.
 #
 # Found by review on 2026-09-06: `.codex/config.toml` registered an MCP server
-# at `D:/repos/into-rust/taskboard/taskboard.exe`, and two skills told the
-# reader to `cd /Users/<name>/project-forge` before running a sync script. None
+# pinned to one contributor's Windows checkout, and two skills told the reader to
+# `cd` into one contributor's home directory before running a sync script. None
 # of it would work for anyone else, and none of it announced that.
+#
+# The forbidden shapes are spelled out ONCE, in PATTERN below, and nowhere else
+# in the tree: a file that quotes an example is a file this gate then fails on.
+# That is why the workflow step carries a pointer here rather than a copy.
 #
 # bash 3.2 compatible on purpose — macOS ships 3.2 as /bin/bash and the rest of
 # the CI self-defense scripts hold that floor (check-skills.sh,
@@ -30,7 +34,7 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # username, so a different contributor's path is caught too.
 PATTERN='([A-Za-z]:[\\/](Users|repos)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'
 
-# Paths where such a string is legitimate. Each entry states why.
+# Files where such a string is legitimate. Each entry states why.
 #   docs/audits, docs/reviews, docs/coverage — dated records of what a tool
 #     printed at the time; rewriting them would falsify the record.
 #   provision-billing-meter, mockOnceGuard, generate-wasm-manifests,
@@ -39,8 +43,15 @@ PATTERN='([A-Za-z]:[\\/](Users|repos)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z
 #     refused) rather than a path anyone is meant to follow.
 #   check-vitest-exit / db-migration-guard tests, sentry-to-test-stub — they
 #     quote real CI output verbatim as a fixture.
-#   this script and its test — they contain the pattern by definition.
-ALLOW_RE='^(docs/(audits|reviews|coverage)/|scripts/check-portable-paths\.sh$|scripts/__tests__/check-portable-paths\.test\.sh$|\.gitignore$)|provision-billing-meter|mockOnceGuard|generate-wasm-manifests|reaperBridge|check-vitest-exit|db-migration-guard|sentry-to-test-stub'
+#   this script and its test — they carry the pattern by definition.
+#
+# Matched against the FILE PATH ALONE, never the `path:line:content` string that
+# grep emits. Against the whole string every `$`-anchored entry here is
+# unreachable — `...\.sh$` cannot match when `:12:# ...` follows the name — so
+# this gate used to fail on its own header comment, while every UNanchored entry
+# leaked the other way and exempted any line whose CONTENT merely said
+# `mockOnceGuard`. Both directions are pinned by the suite.
+ALLOW_RE='^docs/(audits|reviews|coverage)/|^scripts/check-portable-paths\.sh$|^scripts/__tests__/check-portable-paths\.test\.sh$|^\.gitignore$|provision-billing-meter|mockOnceGuard|generate-wasm-manifests|reaperBridge|check-vitest-exit|db-migration-guard|sentry-to-test-stub'
 
 tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 
@@ -48,16 +59,35 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # is portable by construction. Workflows set cache dirs under it and several
 # suites quote CI output containing it. Filtered by LINE rather than removed
 # from PATTERN, so a genuine `/home/<someone>/` in the same file still fails.
-hits="$(git ls-files -z \
+raw="$(git ls-files -z \
   | xargs -0 grep -InE "$PATTERN" 2>/dev/null \
-  | grep -v '/home/runner/' \
-  | grep -vE "$ALLOW_RE" || true)"
+  | grep -v '/home/runner/' || true)"
+
+# The allowlist is applied per hit, to the path grep prefixed onto the line, so
+# an entry can be anchored to a whole path without also having to survive the
+# `:<lineno>:<content>` grep appends. Hits are few by construction, so the loop
+# costs nothing next to the single grep pass above. A here-string, not a pipe:
+# `grep -q` exits on first match and SIGPIPEs its writer, which under pipefail
+# inverts the verdict.
+hits=""
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  file="${line%%:*}"
+  grep -qE "$ALLOW_RE" <<<"$file" && continue
+  hits="${hits}${line}"$'\n'
+done <<<"$raw"
+hits="${hits%$'\n'}"
 
 # A gate that scans nothing passes vacuously and reads as coverage
 # (lessons-learned #9). This repo tracks thousands of files; if the walk ever
 # sees a handful, the walk broke rather than the repo shrinking.
-if [ "$tracked_count" -lt 500 ]; then
-  echo "::error::check-portable-paths saw only ${tracked_count} tracked files — the walk is broken, not the repo"
+#
+# PORTABLE_PATHS_MIN_FILES is a TEST-ONLY seam, so the suite can run the gate
+# against a small throwaway repo. It is never set in CI, and the suite asserts
+# no workflow sets it — wiring it would let a broken walk pass as a clean one.
+MIN_FILES="${PORTABLE_PATHS_MIN_FILES:-500}"
+if [ "$tracked_count" -lt "$MIN_FILES" ]; then
+  echo "::error::check-portable-paths saw only ${tracked_count} tracked file(s), floor ${MIN_FILES} — the walk is broken, not the repo"
   exit 2
 fi
 

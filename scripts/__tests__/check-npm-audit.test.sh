@@ -2614,6 +2614,7 @@ STEPS_EOF
   lockfile-sync:
   openapi-route-sync:
   board-verdict-tests:
+  portable-paths:
   agentic-sync:
   taskboard-onboarding-guard:
   codex-config-guard:
