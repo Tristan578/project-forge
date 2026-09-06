@@ -211,11 +211,16 @@ async function guardResponse(res: Response): Promise<Response> {
   // pays it once. Body and headers are redacted as separate roots so wrapping
   // them in a carrier object does not consume one of `redactSecrets`'s eight
   // depth levels.
-  const [cleanBody, cleanHeaderValues, cleanCookies] = redactSecretsAll([
-    bodyValue,
-    plan.entries.map(([, value]) => value),
-    plan.cookies,
-  ]) as [unknown, string[], string[]];
+  //
+  // `percentAware` is set because a redirect `Location` and a `Set-Cookie`
+  // value are URL-encoded by the time they are headers, and percent-encoding
+  // destroys the word boundary every credential shape is anchored on — the
+  // secret in `?e=invalid%20key%20sk-ant-AAA` was passing through verbatim
+  // until this was set. The same applies to an encoded URL inside a JSON body.
+  const [cleanBody, cleanHeaderValues, cleanCookies] = redactSecretsAll(
+    [bodyValue, plan.entries.map(([, value]) => value), plan.cookies],
+    { percentAware: true },
+  ) as [unknown, string[], string[]];
 
   const bodyRewritten = !nullBody && buffered;
   const headers = buildHeaders(plan, cleanHeaderValues, cleanCookies, bodyRewritten);

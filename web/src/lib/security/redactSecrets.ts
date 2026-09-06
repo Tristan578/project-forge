@@ -257,19 +257,153 @@ function secretEnvValues(): string[] {
 // Redaction
 // ---------------------------------------------------------------------------
 
-function redactString(input: string, envValues: readonly string[]): string {
+/**
+ * What one redaction pass carries: the environment values to remove, and
+ * whether to look through percent-encoding as well as at the literal text.
+ */
+interface RedactionContext {
+  envValues: readonly string[];
+  /**
+   * Also match against a percent-DECODED view of each string, splicing the
+   * placeholder back into the original at the mapped offsets.
+   *
+   * Off for ordinary structured data. ON for anything that has been through URL
+   * or cookie encoding, because every credential shape here is left-anchored
+   * with a word boundary and percent-encoding destroys it: in
+   * `...invalid%20key%20sk-ant-AAA...` the character before `sk-ant-` is the
+   * `0` of `%20`, which is a word character, so the boundary never matches and
+   * the key passes through verbatim. That is not hypothetical — it is how a
+   * redirect `Location` and a `Set-Cookie` value are actually written, and both
+   * emitted the secret unredacted until this existed.
+   */
+  percentAware: boolean;
+}
+
+const HEX_PAIR = /^[0-9a-fA-F]{2}$/;
+
+/**
+ * The shapes as ONE alternation, so a string is scanned once instead of
+ * thirteen times.
+ *
+ * This runs on every string leaf of every API response now that
+ * `withEgressGuard` sits on the response path, and thirteen separate passes
+ * over a 13 KB listing body measured at ~1.1 ms of added latency per request —
+ * most of it the repeated scanning, not the matching. Alternation preserves the
+ * array's precedence exactly: a JS regex tries alternatives left to right at
+ * each position, which is the same "longest-prefix-first where prefixes
+ * overlap" ordering the array documents (`sk-ant-` before `sk-`).
+ *
+ * Derived from `SECRET_SHAPES` rather than written out, so the cited,
+ * individually-reviewed patterns stay the source of truth and the
+ * bounded-quantifier test still scans the thing that is actually used.
+ */
+const ALL_SECRET_SHAPES = new RegExp(SECRET_SHAPES.map((s) => s.source).join('|'), 'g');
+
+function redactLiteral(input: string, envValues: readonly string[]): string {
   let out = input;
   for (const value of envValues) {
     // `split`/`join`, not a RegExp: the value is arbitrary and may contain
     // regex metacharacters. Compiling it as a pattern would both fail to match
     // the real secret and redact unrelated text that happened to match.
-    out = out.split(value).join(REDACTION_PLACEHOLDER);
+    //
+    // `includes` first: `split` allocates an array even when there is no match,
+    // and on the response path there is no match on the overwhelming majority
+    // of leaves.
+    if (out.includes(value)) out = out.split(value).join(REDACTION_PLACEHOLDER);
   }
-  for (const shape of SECRET_SHAPES) {
-    shape.lastIndex = 0;
-    out = out.replace(shape, REDACTION_PLACEHOLDER);
+  ALL_SECRET_SHAPES.lastIndex = 0;
+  return out.replace(ALL_SECRET_SHAPES, REDACTION_PLACEHOLDER);
+}
+
+/**
+ * A percent-decoded view of `raw`, plus an index map: `map[i]` is the offset in
+ * `raw` at which decoded character `i` begins, with a final entry of
+ * `raw.length`. That is what lets a match found in decoded space be cut out of
+ * the ORIGINAL string, leaving the surrounding encoding exactly as it was —
+ * re-encoding the whole value would rewrite bytes this module has no business
+ * touching (a `Set-Cookie`'s `; Path=/` is not URL-encoded, for one).
+ *
+ * Bytes >= 0x80 are deliberately left as their literal `%XX` text rather than
+ * assembled into a UTF-8 code point: every credential shape here is ASCII, and
+ * decoding multi-byte sequences would make the offset map lossy for no gain.
+ */
+function decodeWithMap(raw: string): { decoded: string; map: number[] } {
+  const chars: string[] = [];
+  const map: number[] = [];
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === '%' && i + 2 < raw.length && HEX_PAIR.test(raw.slice(i + 1, i + 3))) {
+      const byte = Number.parseInt(raw.slice(i + 1, i + 3), 16);
+      if (byte < 0x80) {
+        chars.push(String.fromCharCode(byte));
+        map.push(i);
+        i += 3;
+        continue;
+      }
+    }
+    chars.push(raw[i]);
+    map.push(i);
+    i += 1;
+  }
+  map.push(raw.length);
+  return { decoded: chars.join(''), map };
+}
+
+/** Half-open `[start, end)` ranges to remove, in DECODED-space indices. */
+function matchRanges(decoded: string, envValues: readonly string[]): [number, number][] {
+  const ranges: [number, number][] = [];
+  for (const value of envValues) {
+    let from = 0;
+    for (;;) {
+      const at = decoded.indexOf(value, from);
+      if (at === -1) break;
+      ranges.push([at, at + value.length]);
+      from = at + value.length;
+    }
+  }
+  ALL_SECRET_SHAPES.lastIndex = 0;
+  for (;;) {
+    const m = ALL_SECRET_SHAPES.exec(decoded);
+    if (m === null) break;
+    ranges.push([m.index, m.index + m[0].length]);
+    if (m[0].length === 0) ALL_SECRET_SHAPES.lastIndex += 1;
+  }
+  ALL_SECRET_SHAPES.lastIndex = 0;
+  return ranges;
+}
+
+/**
+ * Remove anything that only becomes visible once percent-escapes are resolved.
+ * Runs AFTER `redactLiteral`, so a secret written plainly is already gone and
+ * this pass only has to catch the encoded spelling of one.
+ */
+function redactPercentEncoded(raw: string, envValues: readonly string[]): string {
+  if (!raw.includes('%')) return raw;
+  const { decoded, map } = decodeWithMap(raw);
+  if (decoded === raw) return raw;
+  const ranges = matchRanges(decoded, envValues);
+  if (ranges.length === 0) return raw;
+
+  // Merge overlaps, then splice from the end so earlier offsets stay valid.
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const [start, end] of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+
+  let out = raw;
+  for (let i = merged.length - 1; i >= 0; i -= 1) {
+    const [start, end] = merged[i];
+    out = out.slice(0, map[start]) + REDACTION_PLACEHOLDER + out.slice(map[end]);
   }
   return out;
+}
+
+function redactString(input: string, ctx: RedactionContext): string {
+  const literal = redactLiteral(input, ctx.envValues);
+  return ctx.percentAware ? redactPercentEncoded(literal, ctx.envValues) : literal;
 }
 
 /**
@@ -288,7 +422,7 @@ function redactString(input: string, envValues: readonly string[]): string {
  */
 function redactExotic(
   input: object,
-  envValues: readonly string[],
+  ctx: RedactionContext,
   depth: number,
 ): unknown | undefined {
   if (input instanceof Date) return input;
@@ -298,41 +432,41 @@ function redactExotic(
     // record of its redacted strings — which is what a JSON body would have
     // shown anyway. `stack` is deliberately omitted: it is server detail.
     return {
-      name: redactString(input.name, envValues),
-      message: redactString(input.message, envValues),
+      name: redactString(input.name, ctx),
+      message: redactString(input.message, ctx),
     };
   }
   if (input instanceof Map) {
     return new Map(
-      [...input.entries()].map(([k, v]) => [k, redactWith(v, envValues, depth + 1)]),
+      [...input.entries()].map(([k, v]) => [k, redactWith(v, ctx, depth + 1)]),
     );
   }
   if (input instanceof Set) {
-    return new Set([...input].map((v) => redactWith(v, envValues, depth + 1)));
+    return new Set([...input].map((v) => redactWith(v, ctx, depth + 1)));
   }
   if (ArrayBuffer.isView(input) || input instanceof ArrayBuffer) return input;
   return undefined;
 }
 
-function redactWith<T>(input: T, envValues: readonly string[], depth: number): T {
+function redactWith<T>(input: T, ctx: RedactionContext, depth: number): T {
   if (input === null || input === undefined) return input;
-  if (typeof input === 'string') return redactString(input, envValues) as T;
+  if (typeof input === 'string') return redactString(input, ctx) as T;
   if (typeof input !== 'object') return input;
 
   // The depth bound REPLACES the sub-tree rather than passing it through.
   if (depth >= MAX_DEPTH) return DEPTH_LIMIT_PLACEHOLDER as T;
 
   if (Array.isArray(input)) {
-    return input.map((item) => redactWith(item, envValues, depth + 1)) as T;
+    return input.map((item) => redactWith(item, ctx, depth + 1)) as T;
   }
 
-  const exotic = redactExotic(input, envValues, depth);
+  const exotic = redactExotic(input, ctx, depth);
   if (exotic !== undefined) return exotic as T;
 
   const source = input as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(source)) {
-    result[key] = redactWith(source[key], envValues, depth + 1);
+    result[key] = redactWith(source[key], ctx, depth + 1);
   }
   return result as T;
 }
@@ -352,7 +486,7 @@ function redactWith<T>(input: T, envValues: readonly string[], depth: number): T
  */
 export function redactSecrets<T>(input: T): T {
   try {
-    return redactWith(input, secretEnvValues(), 0);
+    return redactWith(input, { envValues: secretEnvValues(), percentAware: false }, 0);
   } catch {
     // Only reachable for a structure that defeats the traversal — an exotic
     // proxy, or a throwing getter. Emitting the input unredacted would be worse
@@ -376,19 +510,30 @@ export function redactSecrets<T>(input: T): T {
  * legitimate response body nested eight deep would start being truncated by the
  * act of guarding it.
  *
+ * `percentAware` looks THROUGH percent-encoding as well as at the literal text
+ * (see `RedactionContext`). `withEgressGuard` sets it, because a redirect
+ * `Location` and a `Set-Cookie` value are URL-encoded by the time they are
+ * headers, and encoding destroys the word boundary every credential shape is
+ * anchored on. It is off by default so the Sentry path and the response
+ * constructors keep their existing behaviour exactly.
+ *
  * Never throws, for the same reason `redactSecrets` does not — and a failure on
  * one input does not affect the others.
  */
-export function redactSecretsAll(inputs: readonly unknown[]): unknown[] {
+export function redactSecretsAll(
+  inputs: readonly unknown[],
+  options?: { percentAware?: boolean },
+): unknown[] {
   let envValues: readonly string[];
   try {
     envValues = secretEnvValues();
   } catch {
     envValues = [];
   }
+  const ctx: RedactionContext = { envValues, percentAware: options?.percentAware ?? false };
   return inputs.map((input) => {
     try {
-      return redactWith(input, envValues, 0);
+      return redactWith(input, ctx, 0);
     } catch {
       return typeof input === 'string' ? REDACTION_PLACEHOLDER : undefined;
     }

@@ -27,6 +27,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   redactSecrets,
+  redactSecretsAll,
   resetSecretEnvCache,
   REDACTION_PLACEHOLDER,
   DEPTH_LIMIT_PLACEHOLDER,
@@ -381,5 +382,82 @@ describe('redactSecrets — source invariants', () => {
     expect(block.match(/[\])][+*]/g)).toBeNull();
     // `\s+` between a prefix and its token is unbounded too.
     expect(block.match(/\\s[+*]/g)).toBeNull();
+  });
+});
+
+describe('redactSecretsAll', () => {
+  const KEY = 'sk-ant-api03-0123456789abcdefghijKLMNOPQRSTUVWXYZ';
+
+  it('redacts each input as its own root, so nesting depth is not consumed by batching', () => {
+    // Eight levels is `MAX_DEPTH`. If the batch wrapped its inputs in one
+    // carrier object, this body would be truncated to the depth placeholder by
+    // the mere act of guarding it.
+    const deep = { a: { b: { c: { d: { e: { f: { g: `key ${KEY}` } } } } } } };
+    const [out] = redactSecretsAll([deep]) as [typeof deep];
+    expect(out.a.b.c.d.e.f.g).toBe(`key ${REDACTION_PLACEHOLDER}`);
+  });
+
+  it('derives the environment list ONCE for the whole batch', () => {
+    resetSecretEnvCache();
+    const spy = vi.spyOn(Object, 'keys');
+    const before = spy.mock.calls.filter((c) => c[0] === process.env).length;
+    redactSecretsAll(['a', 'b', 'c', 'd', 'e', 'f']);
+    const after = spy.mock.calls.filter((c) => c[0] === process.env).length;
+    spy.mockRestore();
+    // One derive, plus at most one fingerprint check.
+    expect(after - before).toBeLessThanOrEqual(2);
+  });
+
+  it('one hostile input does not stop the others being redacted', () => {
+    const hostile = { get boom(): string { throw new Error('nope'); } };
+    const out = redactSecretsAll([hostile, `key ${KEY}`]);
+    expect(out[0]).toBeUndefined();
+    expect(out[1]).toBe(`key ${REDACTION_PLACEHOLDER}`);
+  });
+
+  describe('percentAware', () => {
+    // Percent-encoding destroys the word boundary every credential shape is
+    // anchored on: in `...key%20sk-ant-AAA` the character before `sk-ant-` is
+    // the `0` of `%20`, which IS a word character. A redirect `Location` and a
+    // `Set-Cookie` value are percent-encoded by the time they are headers, so
+    // without this the two client-visible channels the egress guard exists to
+    // close were passing the key through verbatim.
+    const encoded = `https://x.test/fail?e=invalid%20key%20${KEY}%22%7D`;
+
+    it('is OFF by default, so the Sentry path and the response constructors are unchanged', () => {
+      const [out] = redactSecretsAll([encoded]) as [string];
+      expect(out).toBe(encoded);
+      expect(redactSecrets(encoded)).toBe(encoded);
+    });
+
+    it('removes a secret that is only visible once escapes are resolved', () => {
+      const [out] = redactSecretsAll([encoded], { percentAware: true }) as [string];
+      expect(out).not.toContain(KEY);
+      expect(out).toContain(REDACTION_PLACEHOLDER);
+      // The surrounding encoding is untouched — only the matched run is cut, so
+      // a Set-Cookie's unencoded attributes and a URL's structure survive.
+      expect(out).toBe(`https://x.test/fail?e=invalid%20key%20${REDACTION_PLACEHOLDER}%22%7D`);
+    });
+
+    it('removes an ENVIRONMENT value that has been percent-encoded', () => {
+      vi.stubEnv('PROVIDER_ACCESS_TOKEN', 'value with spaces and /slashes/');
+      resetSecretEnvCache();
+      const raw = 'detail=value%20with%20spaces%20and%20%2Fslashes%2F&ok=1';
+      const [out] = redactSecretsAll([raw], { percentAware: true }) as [string];
+      expect(out).toBe(`detail=${REDACTION_PLACEHOLDER}&ok=1`);
+    });
+
+    it('leaves a string with no escapes, and a string whose escapes hide nothing, exactly as it was', () => {
+      const plain = 'nothing to see here';
+      const harmless = 'a%20b%20c';
+      const out = redactSecretsAll([plain, harmless], { percentAware: true });
+      expect(out).toEqual([plain, harmless]);
+    });
+
+    it('does not corrupt a multi-byte UTF-8 escape sequence it cannot decode to ASCII', () => {
+      const emoji = 'note%20%F0%9F%94%92%20locked';
+      const [out] = redactSecretsAll([emoji], { percentAware: true }) as [string];
+      expect(out).toBe(emoji);
+    });
   });
 });
