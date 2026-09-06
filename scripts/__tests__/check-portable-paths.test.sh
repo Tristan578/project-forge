@@ -120,9 +120,14 @@ run_case "a real home path in a file that also has the runner's still fails" 1 "
 # Anchored entries. Both of these pass on a `path:line:content` match only by
 # accident of ordering; they FAIL on the pre-fix script, where the trailing `$`
 # could never match with `:<lineno>:` appended.
-d="$(make_repo allow_self)"
+# The gate script used to be allowlisted "so it can document the shapes it
+# forbids". It never exempted anything — PATTERN does not match its own text —
+# so the entry was pruned, and this asserts the pruning: if someone writes a
+# literal example into the gate, the gate fails on itself, immediately and
+# obviously, rather than carrying a standing exemption nobody re-reads.
+d="$(make_repo gate_not_exempt)"
 add_file "$d" "scripts/check-portable-paths.sh" "# documents $WIN_PATH as an example"
-run_case "the gate script may document the shapes it forbids" 0 "$d"
+run_case "the gate script gets no exemption for being the gate" 1 "$d"
 
 # `.gitignore` used to be allowlisted and had a case here. The entry exempted
 # nothing in the real tree — the file matches PATTERN not at all — so it was
@@ -270,10 +275,27 @@ fi
 #
 # The cases above run against fixtures. This one runs the real gate over the
 # real repo, so a suite that is green while `main` is dirty is not possible.
-if (cd "$ROOT" && bash "$SCRIPT") >/dev/null 2>&1; then
+real_out="$(cd "$ROOT" && bash "$SCRIPT" 2>&1)"
+real_status=$?
+if [ "$real_status" -eq 0 ]; then
   PASS=$((PASS + 1)); echo "  ok   the repository itself has no machine-local paths"
 else
   FAIL=$((FAIL + 1)); echo "  FAIL the repository has machine-local paths (run the gate for the list)"
+  printf '%s\n' "$real_out" | sed 's/^/         /' | head -6
+fi
+
+# THE ANTI-ROT NOTE NEEDS A CONSUMER, or it is a message into the void. It is a
+# `::notice::`, which never fails a job, and this case used to discard stdout —
+# so a rotted entry could be reported on every run, for months, with the suite
+# green and CI green. That is the same shape as a report nobody reads: lessons
+# #1 and #13 together. Asserting the REAL tree emits no such notice is what
+# makes the note mean something, and it is why the dead entry was pruned rather
+# than left with a warning attached.
+if grep -q 'exempts no file' <<<"$real_out"; then
+  FAIL=$((FAIL + 1)); echo "  FAIL an allowlist entry exempts nothing in the real tree — prune it:"
+  grep 'exempts no file' <<<"$real_out" | sed 's/^/         /'
+else
+  PASS=$((PASS + 1)); echo "  ok   every allowlist entry exempts something in the real tree"
 fi
 
 echo "PASS=$PASS FAIL=$FAIL"
