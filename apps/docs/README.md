@@ -35,14 +35,18 @@ All three must stay byte-identical; `scripts/check-manifest-sync.ts` asserts the
 
 ## Environment Variables
 
-No runtime secrets are required for local development. The docs site is statically generated.
+No runtime secrets are required for local development. The site is **not** statically
+generated: `app/layout.tsx` exports `dynamic = 'force-dynamic'`, so every route —
+`/mcp` and `/mcp/[category]` included — renders per request in the serverless
+function. That is why the commit stamp below reflects the deployment actually
+serving the page.
 
-For production deployments set:
+A production build reads the variables below. Only the first is one you set:
 
 | Variable | Purpose |
 |----------|---------|
-| `NEXT_PUBLIC_SITE_URL` | Canonical origin for sitemap and OG tags |
-| `VERCEL_GIT_COMMIT_SHA` | **Set by Vercel, not by you — but only if the project is configured to expose it.** `app/layout.tsx` stamps it into every page as `<meta name="spawnforge-docs-commit">` (`lib/commit.ts`), and `scripts/post-deploy-docs-check.sh` refuses any page that does not carry the commit the deploy just published. See the prerequisite below |
+| `NEXT_PUBLIC_SITE_URL` | **Set this** on the Vercel project. Canonical origin for sitemap and OG tags |
+| `VERCEL_GIT_COMMIT_SHA` | **Do NOT set this — Vercel supplies it per build, and only if the project is configured to expose it.** Adding it as a project env var hardcodes one SHA into every future build, so the deploy gate would report a "DIFFERENT build" forever. `app/layout.tsx` stamps it into every page as `<meta name="spawnforge-docs-commit">` (`lib/commit.ts`), and `scripts/post-deploy-docs-check.sh` refuses any page that does not carry the commit the deploy just published. See the prerequisite below |
 
 ### Required Vercel project setting: expose system environment variables
 
@@ -65,7 +69,7 @@ All commands must be run from within the `apps/docs/` directory:
 
 ```bash
 cd apps/docs
-npm test        # vitest run — runs scripts, lib, and component tests
+npm test        # vitest run — every *.test.ts(x) in the tree (see the directories below)
 ```
 
 When run locally with no `MANIFEST_PATH`, `scripts/generate-mcp-docs.ts` reads the canonical

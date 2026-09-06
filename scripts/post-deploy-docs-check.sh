@@ -17,12 +17,15 @@
 #
 # Environment variables:
 #   DOCS_CHECK_EXPECT_COMMIT REQUIRED. The commit this run deployed (cd.yml
-#                            passes github.sha; 8 to 40 hex chars, either
-#                            case). Every accepted page must carry
+#                            passes github.sha; hex, either case, at least
+#                            COMMIT_COMPARE_WIDTH chars and at most 40 — the
+#                            minimum is DERIVED from that constant below, not
+#                            restated, so raising it tightens the input in the
+#                            same edit). Every accepted page must carry
 #                            <meta name="spawnforge-docs-commit" content="<sha>">
-#                            whose first 8 chars match, compared case-
-#                            insensitively. The layout renders it from
-#                            VERCEL_GIT_COMMIT_SHA (apps/docs/lib/commit.ts).
+#                            whose leading COMMIT_COMPARE_WIDTH chars match,
+#                            compared case-insensitively. The layout renders it
+#                            from VERCEL_GIT_COMMIT_SHA (apps/docs/lib/commit.ts).
 #                            There is no optional mode: without the commit the
 #                            gate can only prove that SOME build is healthy.
 #
@@ -93,19 +96,18 @@ if [[ -z "$BASE_URL" ]]; then
 fi
 BASE_URL="${BASE_URL%/}"
 
-EXPECT_COMMIT="${DOCS_CHECK_EXPECT_COMMIT:-}"
-if [[ -z "$EXPECT_COMMIT" ]]; then
-  usage "DOCS_CHECK_EXPECT_COMMIT is unset; without it the probe cannot be tied to the deploy under test"
-fi
-if [[ ! "$EXPECT_COMMIT" =~ ^[0-9a-fA-F]{8,40}$ ]]; then
-  usage "DOCS_CHECK_EXPECT_COMMIT must be 8 to 40 hex chars, got '${EXPECT_COMMIT}'"
-fi
-
 # How many leading hex chars of the expected and reported commits are compared.
 # The expectation may be a full SHA and the stamp an abbreviation (or the other
 # way round), so only a common prefix can be compared.
 #
-# apps/docs/lib/commit.ts must never render a stamp SHORTER than this: a
+# This is the ONLY place the width is written. Everything else derives from it:
+# the caller-side validation below, and the header prose above, which names the
+# constant instead of a number. An expectation SHORTER than this width would be
+# compared against more reported chars than it has and fail on every attempt
+# with the "DIFFERENT build" diagnosis — the mirror image of the stamp-side
+# hazard, so both sides follow the same value.
+#
+# apps/docs/lib/commit.ts must never render a stamp SHORTER than this either: a
 # 7-char stamp of the very commit under test could not equal an 8-char
 # expectation, and the right build would be reported as a different one.
 # scripts/__tests__/post-deploy-docs-check.test.sh extracts this line and that
@@ -113,13 +115,35 @@ fi
 # keep the `COMMIT_COMPARE_WIDTH=<n>` line in exactly this shape.
 COMMIT_COMPARE_WIDTH=8
 
+# Built from the constant rather than spelled out, so the accepted input can
+# never be narrower than the comparison. The variable is unquoted on the right
+# of =~ deliberately: quoting it would match the pattern literally.
+EXPECT_COMMIT_RE="^[0-9a-fA-F]{${COMMIT_COMPARE_WIDTH},40}$"
+
+EXPECT_COMMIT="${DOCS_CHECK_EXPECT_COMMIT:-}"
+if [[ -z "$EXPECT_COMMIT" ]]; then
+  usage "DOCS_CHECK_EXPECT_COMMIT is unset; without it the probe cannot be tied to the deploy under test"
+fi
+if [[ ! "$EXPECT_COMMIT" =~ $EXPECT_COMMIT_RE ]]; then
+  usage "DOCS_CHECK_EXPECT_COMMIT must be ${COMMIT_COMPARE_WIDTH} to 40 hex chars, got '${EXPECT_COMMIT}'"
+fi
+
 # Both sides are case-folded before comparing. The validation above accepts
 # [0-9a-fA-F], so an upper-case expected SHA is legal input; comparing it
 # case-sensitively against the lower-case stamp git and Vercel produce would
 # fail every attempt with the "DIFFERENT build" diagnosis — the same commit
 # reported as a different one, sending the operator after alias lag that is
 # not there.
-EXPECT_COMMIT_SHORT="${EXPECT_COMMIT,,}"
+#
+# `tr`, not a `,,` parameter expansion: that expansion is bash 4.0+, macOS
+# ships bash 3.2 as /bin/bash, and this repo pins its CI self-defense scripts
+# to 3.2 (scripts/check-skills.sh, scripts/check-changeset-packages.sh,
+# scripts/check-npm-audit.sh, scripts/__tests__/db-migration-guard.test.sh).
+# On 3.2 the expansion is a PARSE error, so the script would abort with
+# `bad substitution` before the first probe and none of the diagnoses above
+# would ever be printed. shellcheck does not flag bash-4 syntax under a bash
+# shebang, so the suite pins it instead.
+EXPECT_COMMIT_SHORT="$(printf '%s' "$EXPECT_COMMIT" | tr '[:upper:]' '[:lower:]')"
 EXPECT_COMMIT_SHORT="${EXPECT_COMMIT_SHORT:0:$COMMIT_COMPARE_WIDTH}"
 
 CATEGORY="${DOCS_CHECK_CATEGORY:-scene}"
@@ -160,6 +184,13 @@ commit_of_body() {
   local tag
   tag="$(grep -oE "<meta[^>]*name=\"${COMMIT_META_NAME}\"[^>]*>" "$1" 2>/dev/null | head -1 || true)"
   [ -n "$tag" ] || return 0
+  # The hex filter is what classifies `content="unknown"` — the stamp a build
+  # with no VERCEL_GIT_COMMIT_SHA actually ships — as "no commit" rather than
+  # as some other build's SHA. Relaxing it to `content="[^"]+"` turns the
+  # toggle-off diagnosis into "the alias is serving a DIFFERENT build", which
+  # sends the operator after alias lag that is not there. Pinned by the
+  # `content="unknown"` / non-hex cases in
+  # scripts/__tests__/post-deploy-docs-check.test.sh.
   printf '%s' "$tag" | grep -oE 'content="[0-9a-fA-F]+"' | head -1 | sed -E 's/^content="//; s/"$//' || true
 }
 
@@ -194,7 +225,8 @@ probe() {
       else
         echo "  Content check passed: found ${marker} (${proves})"
         reported="$(commit_of_body "$RESPONSE_FILE")"
-        reported_short="${reported,,}"
+        # `tr`, not a `,,` expansion — see the note on EXPECT_COMMIT_SHORT.
+        reported_short="$(printf '%s' "$reported" | tr '[:upper:]' '[:lower:]')"
         reported_short="${reported_short:0:$COMMIT_COMPARE_WIDTH}"
         if [ -z "$reported" ]; then
           last="HTTP 200 with the content, but the page reported no commit (no hex <meta name=\"${COMMIT_META_NAME}\"> stamp), so it cannot be tied to the deploy under test — an older build, or one built without VERCEL_GIT_COMMIT_SHA. That variable reaches a Vercel build ONLY when the docs project has 'Automatically expose System Environment Variables' enabled (Vercel Dashboard > spawnforge-docs > Settings > Advanced; see docs/production-support.md section 13 and apps/docs/README.md). If this fails on every attempt of a fresh deploy, check that toggle before suspecting alias lag — retrying cannot turn it on"
