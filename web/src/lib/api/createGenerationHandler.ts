@@ -78,7 +78,13 @@ function emptyArtifactResponse(err: EmptyArtifactError, refunded: boolean): Next
   const message = refunded
     ? `${err.message}. Your tokens have been refunded — please try again.`
     : `${err.message}. Please try again.`;
-  return NextResponse.json(
+  // `redactedJson`, not `NextResponse.json`. This helper is called FROM two
+  // catch blocks, so it is the one place in this repo that exercises the
+  // documented limit of `spawnforge/no-raw-response-in-catch`: the rule sees
+  // the call site, not the construction inside the callee (#9736). The message
+  // is safe by construction as described above; running it through the
+  // redactor costs nothing and closes the limit here rather than only noting it.
+  return redactedJson(
     { error: message, code: ErrorCode.SERVICE_UNAVAILABLE },
     { status: 503 }
   );
