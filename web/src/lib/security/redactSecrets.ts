@@ -154,11 +154,20 @@ const MIN_REDACTABLE_LENGTH = 12;
  *    the caller FAILS CLOSED (`withEgressGuard` returns its fixed 500) instead
  *    of emitting a corrupted body as if it were the real one.
  *
- * The number: the largest realistic body on this surface is a published scene,
- * measured at ~190 KB / ~400 entities / ~34k nodes (`scripts/bench-egress-guard.mjs`).
- * 2,000,000 is two orders of magnitude above that and still bounds the walk at
- * well under a second, so it is a backstop against a hostile shape rather than
- * a ceiling any real payload approaches.
+ * The number: the largest realistic body on this surface is a published scene.
+ * The committed fixture for one (`__tests__/deepSceneBody.ts` at its default
+ * 400 entities, the body `web/scripts/bench-egress-guard.ts` measures) is
+ * 349,983 bytes and walks 38,412 nodes. An earlier version of this comment said
+ * "~190 KB / ~34k nodes (`scripts/bench-egress-guard.mjs`)" — a file that does
+ * not exist, and a size the harness in this same change measures at nearly
+ * double. Both numbers are now asserted rather than asserted-about:
+ * `redactSecrets.test.ts` drives that fixture through a pass and checks
+ * `lastNodeCount()` against this constant, so the headroom claim below fails
+ * when the body grows instead of quietly becoming false (lessons-learned #8).
+ *
+ * 2,000,000 is ~52x that node count and still bounds the walk at well under a
+ * second, so it is a backstop against a hostile shape rather than a ceiling any
+ * real payload approaches.
  */
 export const MAX_REDACTION_NODES = 2_000_000;
 
@@ -530,39 +539,150 @@ function redactString(input: string, ctx: RedactionContext): string {
   return ctx.percentAware ? redactPercentEncoded(literal, ctx) : literal;
 }
 
+/** The two-character JSON escapes, and what each stands for. */
+const SIMPLE_JSON_ESCAPES = new Map<string, string>([
+  ['"', '"'],
+  ['\\', '\\'],
+  ['/', '/'],
+  ['b', '\b'],
+  ['f', '\f'],
+  ['n', '\n'],
+  ['r', '\r'],
+  ['t', '\t'],
+]);
+
+const HEX_QUAD = /^[0-9a-fA-F]{4}$/;
+
 /**
- * Would this pass rewrite anything at all in `text`?
+ * A JSON-UNESCAPED view of `raw`, and the reason the fast path is sound at all.
  *
- * This is the whole reason the guard can hand back a body's ORIGINAL bytes. It
- * is one linear scan with no `JSON.parse`, no tree walk and no re-serialisation:
- * an `includes` per environment value plus one regex test, on the raw text.
+ * `hasCandidate` is handed a SERIALISED body; `redactValue` runs on the PARSED
+ * leaves. Those are different string spaces, and the difference is not cosmetic:
+ * on the wire a newline inside a leaf is backslash-then-`n`, and `n` is a word
+ * character, so the `\b` every credential shape is left-anchored on cannot
+ * match. A provider error folded into a message as
+ * `"Meshy status error (401): Unauthorized\nmsy_… is not valid"` therefore
+ * scanned CLEAN while `redactString` on the parsed leaf matched — the guard
+ * granted byte identity and shipped the credential, which is exactly the leak
+ * #9736 exists for. The environment half failed the same way: `includes` was
+ * run on escaped bytes, so any secret containing a quote, a backslash or a
+ * newline (any PEM `*_PRIVATE_KEY`, a `PGPASSWORD` with a quote — both selected
+ * by `SECRET_NAME_PATTERN`) was never found on the wire and always found after
+ * parse.
  *
- * It must be a strict OVER-approximation of what `redactString` would change —
- * it may say "maybe" and be wrong, but it must never say "no" where redaction
- * would have said "yes", or a secret ships. Every branch mirrors `redactString`
- * exactly, including the percent-decoded view, and both read the shape
- * alternation off the same context so they cannot drift apart.
+ * Decoding the whole text — not each leaf, which would require the parse the
+ * fast path exists to avoid — restores every leaf and every KEY verbatim
+ * somewhere inside the view, because `JSON.stringify` escapes exactly `"`, `\`,
+ * the five short control escapes and `\uXXXX`, all of which this reverses. The
+ * characters a leaf gains around it in the view (`"`, `,`, `{`, `[`) are
+ * non-word, so a `\b` that held inside the leaf still holds inside the view: the
+ * scan can gain matches, never lose them.
+ *
+ * Applied to text that is NOT JSON (a `text/plain` body, a header value) this
+ * may invent characters that were never there — `C:\new` reads as a newline.
+ * That is over-approximation in the safe direction, and the RAW scan runs first
+ * and independently, so nothing that matched before can stop matching.
+ *
+ * WHAT IT COSTS, measured rather than assumed (`scripts/bench-egress-guard.ts`,
+ * Node 24.5.0, win32 x64, Ryzen 7 3800X, 200 iterations after 30 warmup):
+ *
+ *   - a 350 KB scene with NO backslash anywhere: +2.361 ms vs +2.270 ms before.
+ *     Unchanged — the whole view costs one `indexOf` that finds nothing, which
+ *     is the overwhelming majority of bodies.
+ *   - the same scene with escapes in one script source: +4.528 ms vs +2.388 ms.
+ *     Roughly double, because the body is copied once and scanned a second
+ *     time.
+ *
+ * That second figure is a real cost on a real body and is stated rather than
+ * buried. It is inherent to scanning what the rewrite sees: a match hidden by
+ * an escape can only be found by looking at decoded text. It could be narrowed
+ * to windows around escape SITES (a match that the raw scan missed must contain
+ * a decoded character), which is a worthwhile optimisation and a new place for
+ * an off-by-one to become a leak — so it is named here, not taken, and the
+ * straightforward whole-view scan is what ships.
+ *
+ * Returns `raw` itself when there is nothing to decode.
  */
-function textHasCandidate(text: string, ctx: RedactionContext): boolean {
+function jsonUnescapeView(raw: string): string {
+  let at = raw.indexOf('\\');
+  if (at === -1) return raw;
+  let out = '';
+  let copied = 0;
+  while (at !== -1) {
+    const next = at + 1 < raw.length ? raw[at + 1] : '';
+    const simple = SIMPLE_JSON_ESCAPES.get(next);
+    let decoded: string | null = null;
+    let width = 0;
+    if (simple !== undefined) {
+      decoded = simple;
+      width = 2;
+    } else if (next === 'u' && at + 6 <= raw.length && HEX_QUAD.test(raw.slice(at + 2, at + 6))) {
+      decoded = String.fromCharCode(Number.parseInt(raw.slice(at + 2, at + 6), 16));
+      width = 6;
+    }
+    if (decoded === null) {
+      // Not a JSON escape. Leave both characters alone and keep looking.
+      at = raw.indexOf('\\', at + 1);
+      continue;
+    }
+    out += raw.slice(copied, at) + decoded;
+    copied = at + width;
+    at = raw.indexOf('\\', copied);
+  }
+  return copied === 0 ? raw : out + raw.slice(copied);
+}
+
+/** One view scanned: an `includes` per environment value plus one regex test. */
+function viewHasCandidate(text: string, ctx: RedactionContext): boolean {
   for (const value of ctx.envValues) {
     if (text.includes(value)) return true;
   }
   ctx.shapes.lastIndex = 0;
-  if (ctx.shapes.test(text)) {
-    ctx.shapes.lastIndex = 0;
-    return true;
-  }
+  const hit = ctx.shapes.test(text);
   ctx.shapes.lastIndex = 0;
+  return hit;
+}
+
+/** A view and, where the context asks for it, its percent-decoded spelling. */
+function viewAndEncodingHaveCandidate(text: string, ctx: RedactionContext): boolean {
+  if (viewHasCandidate(text, ctx)) return true;
   if (!ctx.percentAware || !text.includes('%')) return false;
   const { decoded } = decodeWithMap(text);
   if (decoded === text) return false;
-  for (const value of ctx.envValues) {
-    if (decoded.includes(value)) return true;
-  }
-  ctx.shapes.lastIndex = 0;
-  const hit = ctx.shapes.test(decoded);
-  ctx.shapes.lastIndex = 0;
-  return hit;
+  return viewHasCandidate(decoded, ctx);
+}
+
+/**
+ * Would this pass rewrite anything at all in `text`?
+ *
+ * This is the whole reason the guard can hand back a body's ORIGINAL bytes. It
+ * is a linear scan with no `JSON.parse`, no tree walk and no re-serialisation.
+ *
+ * THE INVARIANT, stated as the property a caller actually depends on rather
+ * than as a property of the configuration:
+ *
+ *     for any JSON-serialisable value V,
+ *       JSON.stringify(pass.redactValue(V)) !== JSON.stringify(V)
+ *         =>  pass.hasCandidate(JSON.stringify(V))
+ *
+ * i.e. IF THE PARSED LEAVES (or keys) WOULD BE REDACTED, THE SCAN SAYS
+ * CANDIDATE. The previous wording — "both read the same environment list and
+ * the same shape alternation off one context" — asserted identical
+ * CONFIGURATION, which is adjacent to the property and was true while the
+ * property was false (lessons-learned #1). `redactSecrets.test.ts` pins the
+ * composition above over a corpus of escaped forms, not one example.
+ *
+ * It is achieved by scanning both the raw text and its JSON-unescaped view (see
+ * `jsonUnescapeView`), each with its percent-decoded spelling. It remains a
+ * strict OVER-approximation: it may say "maybe" and be wrong, but it must never
+ * say "no" where redaction would have said "yes", or a secret ships.
+ */
+function textHasCandidate(text: string, ctx: RedactionContext): boolean {
+  if (viewAndEncodingHaveCandidate(text, ctx)) return true;
+  if (!text.includes('\\')) return false;
+  const unescaped = jsonUnescapeView(text);
+  if (unescaped === text) return false;
+  return viewAndEncodingHaveCandidate(unescaped, ctx);
 }
 
 /**
@@ -661,20 +781,79 @@ interface OpenedContainer {
   target: Container;
 }
 
-function openContainer(input: object): OpenedContainer {
+/**
+ * Two keys that redact to the same placeholder would collide, and
+ * `record[key] = value` / `map.set(key, value)` resolves a collision by SILENTLY
+ * DROPPING the earlier entry. Losing a key without a trace is the depth bound's
+ * mistake in miniature, so a repeat is suffixed instead: `[REDACTED]`,
+ * `[REDACTED] (2)`, `[REDACTED] (3)`, assigned in source key order so the same
+ * input always produces the same output.
+ *
+ * Only called when redaction actually changed a key, because `Object.keys` and
+ * `Map` keys are distinct by construction and cannot collide otherwise.
+ */
+function disambiguateKeys(keys: unknown[]): unknown[] {
+  const seen = new Set<unknown>();
+  return keys.map((key) => {
+    if (!seen.has(key)) {
+      seen.add(key);
+      return key;
+    }
+    if (typeof key !== 'string') return key;
+    let n = 2;
+    while (seen.has(`${key} (${n})`)) n += 1;
+    const renamed = `${key} (${n})`;
+    seen.add(renamed);
+    return renamed;
+  });
+}
+
+/**
+ * Redact the KEYS of a container.
+ *
+ * This used to be skipped entirely: `Object.keys(source)` went straight into
+ * `writeChild` and only values reached `redactString`. A body whose only
+ * occurrence of a credential was in key position — `{"msy_…":"invalid"}`, the
+ * literal shape of a provider echoing the key it rejected — made
+ * `hasCandidate` return true (the text IS there), took the slow path, paid the
+ * whole parse/walk/re-serialise round trip, and emitted the key unchanged. That
+ * is the worst available outcome: the body pays the lossy path AND still leaks,
+ * and it falsified the module's own claim that HOWEVER a response was assembled
+ * it is redacted here.
+ *
+ * Non-string keys (a `Map` keyed by an object or a number) are passed through:
+ * they carry no text, and walking INTO a key would change what the key IS,
+ * which is a different operation from redacting one.
+ */
+function redactKeys(keys: unknown[], ctx: RedactionContext): unknown[] {
+  let changed = false;
+  const out = keys.map((key) => {
+    if (typeof key !== 'string') return key;
+    const clean = redactString(key, ctx);
+    if (clean !== key) changed = true;
+    return clean;
+  });
+  return changed ? disambiguateKeys(out) : out;
+}
+
+function openContainer(input: object, ctx: RedactionContext): OpenedContainer {
   if (Array.isArray(input)) {
     return { values: input, keys: null, target: new Array<unknown>(input.length) };
   }
   if (input instanceof Map) {
     const entries = [...input.entries()];
-    return { values: entries.map((e) => e[1]), keys: entries.map((e) => e[0]), target: new Map() };
+    return {
+      values: entries.map((e) => e[1]),
+      keys: redactKeys(entries.map((e) => e[0]), ctx),
+      target: new Map(),
+    };
   }
   if (input instanceof Set) {
     return { values: [...input], keys: null, target: new Set() };
   }
   const source = input as Record<string, unknown>;
   const keys = Object.keys(source);
-  return { values: keys.map((k) => source[k]), keys, target: {} };
+  return { values: keys.map((k) => source[k]), keys: redactKeys(keys, ctx), target: {} };
 }
 
 /** One container being rebuilt, and the slot its finished form belongs in. */
@@ -731,7 +910,7 @@ function redactWith<T>(input: T, ctx: RedactionContext, state: TraversalState): 
       return;
     }
     state.path.add(obj);
-    stack.push({ ...openContainer(obj), obj, i: 0, outTarget, outKey });
+    stack.push({ ...openContainer(obj, ctx), obj, i: 0, outTarget, outKey });
   };
 
   emit(input, root, 0);
@@ -756,8 +935,11 @@ function newTraversalState(): TraversalState {
 
 /**
  * Remove credential material from a string, or from every string inside a
- * structure. Non-string leaves are returned unchanged; `Date`, `RegExp`, `Map`,
- * `Set` and typed arrays keep their identity rather than collapsing to `{}`.
+ * structure — VALUES and the string KEYS of plain objects and `Map`s alike.
+ * Keys used to be copied through untouched, so `{"msy_…":"invalid"}` survived
+ * the whole walk; see `redactKeys`. Non-string leaves are returned unchanged;
+ * `Date`, `RegExp`, `Map`, `Set` and typed arrays keep their identity rather
+ * than collapsing to `{}`.
  *
  * `null` and `undefined` are returned as they are at every depth, including the
  * top. An earlier version coerced them to `''` at depth 0, which turned
@@ -804,11 +986,12 @@ export interface RedactionPassOptions {
  * `Set-Cookie` and the `statusText` for every single response; a call each would
  * pay that enumeration a dozen times per request. A pass pays it once.
  *
- * It also keeps the SCAN and the REWRITE provably in step. `hasCandidate` is
- * what lets the guard return a body's original bytes untouched, and it is only
- * sound if it over-approximates `redactValue` exactly. Both read the same
- * `envValues` and the same shape alternation off one context, so they cannot be
- * configured differently by accident.
+ * It also keeps the SCAN and the REWRITE in step. `hasCandidate` is what lets
+ * the guard return a body's original bytes untouched, and it is only sound if
+ * it over-approximates `redactValue`. Sharing one context makes them
+ * identically CONFIGURED; what makes them agree on the SERIALISED-versus-PARSED
+ * difference is `jsonUnescapeView` — see the invariant on `textHasCandidate`,
+ * which is the property the tests pin.
  *
  * Each value handed to `redactValue` is redacted as its OWN root with its own
  * traversal budget, so one large body does not consume the budget the headers
@@ -822,14 +1005,27 @@ export interface RedactionPassOptions {
  */
 export interface RedactionPass {
   /**
-   * True if redacting `text` COULD change it. A strict over-approximation: it
-   * may say yes and be wrong, and must never say no where redaction would act.
+   * True if redacting `text`, OR the value `text` is the JSON serialisation of,
+   * COULD change it. A strict over-approximation: it may say yes and be wrong,
+   * and must never say no where redaction would act. See `textHasCandidate` for
+   * the invariant and why the serialised/parsed distinction matters.
    */
   hasCandidate(text: string): boolean;
   /** Redact one string. Never throws. */
   redactText(text: string): string;
-  /** Redact a value of any shape. Throws past the node budget — see above. */
+  /**
+   * Redact a value of any shape — string leaves AND the string keys of plain
+   * objects and `Map`s. Throws past the node budget; see above.
+   */
   redactValue<T>(input: T): T;
+  /**
+   * Nodes visited by the most recent `redactValue` call, or 0 if there has not
+   * been one. Diagnostic only — it exists so the headroom claim on
+   * `MAX_REDACTION_NODES` can be CHECKED against a real body rather than
+   * asserted in prose, which is what `redactSecrets.test.ts` does with the
+   * published-scene fixture.
+   */
+  lastNodeCount(): number;
 }
 
 export function createRedactionPass(options?: RedactionPassOptions): RedactionPass {
@@ -844,9 +1040,20 @@ export function createRedactionPass(options?: RedactionPassOptions): RedactionPa
     percentAware: options?.percentAware ?? false,
     shapes: shapesFor(options?.includeSelfIssuedShapes ?? true),
   };
+  let lastNodes = 0;
   return {
     hasCandidate: (text) => textHasCandidate(text, ctx),
     redactText: (text) => redactString(text, ctx),
-    redactValue: <T,>(input: T): T => redactWith(input, ctx, newTraversalState()),
+    redactValue: <T,>(input: T): T => {
+      const state = newTraversalState();
+      try {
+        return redactWith(input, ctx, state);
+      } finally {
+        // Recorded even when the walk threw, so a caller diagnosing a budget
+        // failure can see how far it got.
+        lastNodes = state.nodes;
+      }
+    },
+    lastNodeCount: () => lastNodes,
   };
 }

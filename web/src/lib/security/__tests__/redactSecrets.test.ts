@@ -34,6 +34,7 @@ import {
   REDACTION_PLACEHOLDER,
   CIRCULAR_PLACEHOLDER,
 } from '../redactSecrets';
+import { buildDeepSceneBody } from './deepSceneBody';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -257,6 +258,63 @@ describe('redactSecrets — DEPTH DOES NOT DESTROY DATA, and a secret at any dep
   });
 });
 
+describe('redactSecrets — KEYS are a channel too', () => {
+  /**
+   * Keys used to be copied straight through: `openContainer` captured
+   * `Object.keys(source)` and only VALUES reached `redactString`. A body whose
+   * only occurrence of a credential was in key position therefore made
+   * `hasCandidate` return true (the text is on the wire), took the slow path,
+   * paid the whole parse/walk/re-serialise round trip — and shipped the key
+   * unchanged. The worst available outcome: the lossy path AND the leak.
+   *
+   * `sceneData` is `z.record(z.string(), z.unknown())` carrying engine- and
+   * user-authored keys, so the channel is reachable, and a provider echoing the
+   * key it rejected as a JSON key is the literal `{"msy_…":"invalid"}` shape.
+   */
+  const MESHY = 'msy' + '_' + 'ab12cd34ef56gh78ij90';
+
+  it('removes a credential sitting in an object KEY', () => {
+    const out = JSON.stringify(redactSecrets({ [MESHY]: 'invalid' }));
+    expect(out).not.toContain(MESHY);
+    expect(out).toBe(`{"${REDACTION_PLACEHOLDER}":"invalid"}`);
+  });
+
+  it('removes an environment value sitting in an object KEY', () => {
+    vi.stubEnv('PLATFORM_SUNO_KEY', 'no-known-shape-but-a-secret');
+    resetSecretEnvCache();
+    const out = JSON.stringify(redactSecrets({ 'failed for no-known-shape-but-a-secret': true }));
+    expect(out).not.toContain('no-known-shape-but-a-secret');
+  });
+
+  it('removes a credential in a MAP key, which `target.set` would also have carried through', () => {
+    const out = redactSecrets(new Map<string, string>([[MESHY, 'invalid']]));
+    expect([...out.keys()]).toEqual([REDACTION_PLACEHOLDER]);
+  });
+
+  it('does NOT silently drop an entry when two keys redact to the same placeholder', () => {
+    // `record[key] = value` resolves a collision by overwriting, so redacting
+    // keys without handling this would lose an entry with no trace — the depth
+    // bound's mistake again. Deterministic, in source key order.
+    const other = 'msy' + '_' + 'zz98yy76xx54ww32vv10';
+    const out = redactSecrets({ [MESHY]: 'first', [other]: 'second', ok: 1 });
+    expect(out).toEqual({
+      [REDACTION_PLACEHOLDER]: 'first',
+      [`${REDACTION_PLACEHOLDER} (2)`]: 'second',
+      ok: 1,
+    });
+    // Same input, same output — a renaming scheme that depended on iteration
+    // luck would make the body nondeterministic.
+    expect(redactSecrets({ [MESHY]: 'first', [other]: 'second', ok: 1 })).toEqual(out);
+  });
+
+  it('leaves ordinary keys — and their order — exactly as they were', () => {
+    // Key redaction must not become a second way to corrupt a clean body.
+    const body = JSON.parse('{"10":"ten","2":"two","name":"Grass Tileset"}') as unknown;
+    expect(JSON.stringify(redactSecrets(body))).toBe(JSON.stringify(body));
+    expect(JSON.stringify(body)).toContain('"name":"Grass Tileset"');
+  });
+});
+
 describe('createRedactionPass — the node budget FAILS CLOSED', () => {
   it('throws past the budget rather than returning a truncated value', () => {
     // The bound exists so a pathological body cannot pin a request. It THROWS
@@ -275,6 +333,29 @@ describe('createRedactionPass — the node budget FAILS CLOSED', () => {
     const pass = createRedactionPass();
     const under = new Array<number>(1000).fill(0);
     expect(pass.redactValue(under)).toEqual(under);
+  });
+
+  it('has real headroom over the LARGEST REALISTIC body on this surface', () => {
+    // The assertion above cannot fail for any budget >= 1001, so it says
+    // nothing about whether the bound would fire in production. The docblock on
+    // MAX_REDACTION_NODES justifies 2,000,000 by claiming the biggest body this
+    // guard sees is a published scene — and the previous version of that claim
+    // cited a file that does not exist and a size the committed harness
+    // measures at nearly double (lessons-learned #8). So measure it.
+    const body = buildDeepSceneBody({ entities: 400 });
+    const pass = createRedactionPass({ percentAware: true, includeSelfIssuedShapes: false });
+    pass.redactValue(body);
+    const nodes = pass.lastNodeCount();
+
+    // Not vacuous: a fixture that walked a handful of nodes would satisfy any
+    // headroom claim while proving nothing.
+    expect(nodes).toBeGreaterThan(30_000);
+    // ...and the bound is two orders of magnitude away, which is the claim.
+    expect(nodes).toBeLessThan(MAX_REDACTION_NODES / 10);
+    // The exact figures the docblock quotes, so growth in the fixture is a
+    // failing test rather than a comment that quietly became false.
+    expect(nodes).toBe(38_412);
+    expect(JSON.stringify(body).length).toBe(349_983);
   });
 
   it('walks a 50,000-level structure without a stack overflow', () => {
@@ -524,8 +605,9 @@ describe('createRedactionPass', () => {
     });
 
     it('OVER-approximates: it never says no where redactText would change the string', () => {
-      // The soundness property the fast path rests on, checked by construction
-      // rather than by example. A `false` here with a changed string is a leak.
+      // The same-string half of the property. Necessary but NOT sufficient —
+      // see the composition sweep below, which is the pair the guard actually
+      // evaluates.
       vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'env-value-with-no-known-shape-at-all');
       resetSecretEnvCache();
       const pass = createRedactionPass({ percentAware: true });
@@ -545,6 +627,116 @@ describe('createRedactionPass', () => {
       }
       // ...and the sweep is not vacuous: at least some samples DID change.
       expect(samples.filter((s) => pass.redactText(s) !== s).length).toBeGreaterThan(3);
+    });
+
+    describe('THE INVARIANT: if the parsed leaves would be redacted, the scan says candidate', () => {
+      /**
+       * The property above compares `hasCandidate(s)` with `redactText(s)` on
+       * the SAME string, which is a pair the guard never evaluates and which is
+       * nearly trivially true — both run the same matchers on the same input.
+       * The guard calls `hasCandidate(serialisedBody)` and then
+       * `redactValue(JSON.parse(serialisedBody))` (`egressGuard.ts`), i.e. it
+       * scans the WIRE and rewrites the PARSED tree. That pair is what has to
+       * hold, and it did not: a JSON escape between the word boundary and a
+       * credential hid it from the scan, so the guard granted byte identity and
+       * shipped the secret verbatim (lessons-learned #1, #11).
+       *
+       * Stated as one line, and swept over a corpus of escaped forms rather
+       * than asserted on one example:
+       *
+       *     JSON.stringify(redactValue(V)) !== JSON.stringify(V)
+       *       =>  hasCandidate(JSON.stringify(V))
+       */
+      const check = (body: unknown): { changed: boolean; scanned: boolean; wire: string } => {
+        const pass = createRedactionPass({ percentAware: true });
+        const wire = JSON.stringify(body);
+        const parsed = JSON.parse(wire) as unknown;
+        const before = JSON.stringify(parsed);
+        const after = JSON.stringify(pass.redactValue(parsed));
+        return { changed: after !== before, scanned: pass.hasCandidate(wire), wire };
+      };
+
+      /**
+       * Every character `JSON.stringify` escapes with a two-character sequence,
+       * plus a control character it escapes as `\uXXXX`. Each one is placed
+       * IMMEDIATELY BEFORE the credential, which is the position that matters:
+       * on the wire the last character before the key becomes a word character
+       * (`n`, `t`, `u`), defeating the `\b` every shape is left-anchored on.
+       */
+      const ESCAPED_PREFIXES: Array<[string, string]> = [
+        ['newline', '\n'],
+        ['carriage return', '\r'],
+        ['tab', '\t'],
+        ['form feed', '\f'],
+        ['backspace', '\b'],
+        ['double quote', '"'],
+        ['backslash', '\\'],
+        // U+0001 has no short escape, so JSON.stringify writes it as a six
+        // character `\uXXXX` sequence ending in the word character `1`. Built
+        // with fromCharCode so the source file carries no raw control byte
+        // (`scripts/check-source-encoding.sh`).
+        ['a u-escaped control character', String.fromCharCode(1)],
+      ];
+
+      it.each(ESCAPED_PREFIXES)(
+        'holds for a shaped credential after %s',
+        (_label, prefix) => {
+          // #9736's literal shape: a provider auth failure folded into a
+          // message, with the credential starting a new line.
+          const body = {
+            error: `Meshy status error (401): Unauthorized${prefix}${KEY} is not valid`,
+          };
+          const { changed, scanned, wire } = check(body);
+          expect(changed, wire).toBe(true);
+          expect(scanned, wire).toBe(true);
+        },
+      );
+
+      it.each([
+        ['a double quote', 'has"quote-and-more-chars-here'],
+        ['a backslash', 'has\\backslash-and-more-chars'],
+        ['a newline (a PEM private key is the real case)', 'line-one-is-long\nline-two-here'],
+        ['a tab', 'has\ttab-and-more-chars-here'],
+      ])('holds for an environment secret containing %s', (_label, value) => {
+        // SECRET_NAME_PATTERN selects PASSWORD and PRIVATE, so both of these
+        // names are real classes: a PGPASSWORD with a quote, and any PEM
+        // `*_PRIVATE_KEY`, whose value is newline-separated by definition.
+        vi.stubEnv('PGPASSWORD', value);
+        resetSecretEnvCache();
+        const { changed, scanned, wire } = check({ error: `db said ${value}` });
+        expect(changed, wire).toBe(true);
+        expect(scanned, wire).toBe(true);
+      });
+
+      it('holds for a credential in KEY position', () => {
+        const { changed, scanned, wire } = check({ [`msy_${'ab12cd34ef56gh78ij90'}`]: 'invalid' });
+        expect(changed, wire).toBe(true);
+        expect(scanned, wire).toBe(true);
+      });
+
+      it('holds for a credential reached only through nesting and an escape', () => {
+        const body = {
+          jobs: [
+            { id: 'a', log: 'fine' },
+            { id: 'b', log: { upstream: { detail: `401:\t${KEY}` } } },
+          ],
+        };
+        const { changed, scanned, wire } = check(body);
+        expect(changed, wire).toBe(true);
+        expect(scanned, wire).toBe(true);
+      });
+
+      it('the sweep can fail: the same bodies without a credential are NOT candidates', () => {
+        // A gate that says "candidate" for everything would satisfy every
+        // assertion above while destroying the fast path. This is the other
+        // side of it, and it is what makes the sweep meaningful.
+        for (const [, prefix] of ESCAPED_PREFIXES) {
+          const body = { error: `Meshy status error (401): Unauthorized${prefix}retry later` };
+          const { changed, scanned, wire } = check(body);
+          expect(changed, wire).toBe(false);
+          expect(scanned, wire).toBe(false);
+        }
+      });
     });
   });
 

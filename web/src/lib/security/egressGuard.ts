@@ -61,10 +61,34 @@ import { createRedactionPass, type RedactionPass } from '@/lib/security/redactSe
  *     with a secret in it is being rewritten by definition; a JSON round-trip on
  *     THAT body is a cost worth paying, and it is the only body that pays it.
  *
- * The scan is a strict over-approximation of the rewrite (`hasCandidate` and
- * `redactValue` read the same environment list and the same shape alternation
- * off one context), so the fast path can be wrong only in the safe direction:
- * it may buffer and rewrite a body that turns out to need nothing.
+ * THE PROPERTY THE FAST PATH RESTS ON, stated as the composition this function
+ * actually performs — `hasCandidate(serialisedBody)` at step 2, and
+ * `redactValue(JSON.parse(serialisedBody))` at step 4:
+ *
+ *     JSON.stringify(pass.redactValue(V)) !== JSON.stringify(V)
+ *       =>  pass.hasCandidate(JSON.stringify(V))
+ *
+ * i.e. IF THE PARSED LEAVES (or keys) WOULD BE REDACTED, THE SCAN SAYS
+ * CANDIDATE. Only then can "no match" justify returning the handler's own
+ * bytes.
+ *
+ * The previous version of this paragraph said the scan and the rewrite "read
+ * the same environment list and the same shape alternation off one context",
+ * which asserts identical CONFIGURATION — a property adjacent to the one above,
+ * and one that stayed true while the real property was false. The scan reads
+ * the SERIALISED body and the rewrite reads the PARSED leaves, so a JSON escape
+ * between the word boundary and a credential hid it from the scan entirely:
+ * `{"error":"… Unauthorized\nmsy_… is not valid"}` scanned clean and shipped
+ * verbatim, and every env secret containing a quote, a backslash or a newline
+ * was invisible on the wire. That is lessons-learned #1, and it survived four
+ * review boards. `redactSecrets.ts`'s `textHasCandidate` now scans a
+ * JSON-unescaped view alongside the raw text so the two agree by construction,
+ * and `redactSecrets.test.ts` pins the composition above over a corpus of
+ * escaped forms rather than one example.
+ *
+ * It remains a strict OVER-approximation, so the fast path can be wrong only in
+ * the safe direction: it may buffer and rewrite a body that turns out to need
+ * nothing.
  *
  * WHAT IT DOES, in order:
  *  1. awaits the handler's `Response`;
@@ -171,15 +195,24 @@ const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
  *
  * `text/event-stream` is excluded explicitly because it starts with `text/`.
  * That exclusion is what keeps `/api/chat` streaming, and the value it tests
- * for is the provider's, not ours: `ai@7.0.84` writes
- * `"content-type": "text/event-stream"` at `node_modules/ai/dist/index.js:6545`
- * from `toUIMessageStreamResponse`. Cited here so an `ai` upgrade that changed
- * the header is a diff a reader can see, rather than streaming chat quietly
- * becoming one delayed response.
+ * for is the PROVIDER's, not ours: `ai` writes
+ * `"content-type": "text/event-stream"` from `UI_MESSAGE_STREAM_HEADERS`, which
+ * both `toUIMessageStreamResponse` (what the chat route calls) and
+ * `createUIMessageStreamResponse` use.
+ *
+ * A citation is not a gate, and `web/package.json` pins `"ai": "^7.0.11"` — a
+ * caret range, so a minor bump can change that header with no diff here, and
+ * every test that appeared to cover it set the value in a hand-written MOCK,
+ * which pins the belief rather than the contract (lessons-learned #14). If the
+ * header changed, this would return true, the guard would `await clone.text()`
+ * on an open SSE stream, and `/api/chat` would stall until the model finished —
+ * with nothing failing. So `egressGuard.test.ts` now calls the REAL
+ * `createUIMessageStreamResponse` and asserts its actual `content-type` against
+ * this function. Exported for exactly that.
  *
  * An ABSENT content type is NOT textual. See KNOWN GAPS.
  */
-function isTextualContentType(contentType: string): boolean {
+export function isTextualContentType(contentType: string): boolean {
   const ct = contentType.toLowerCase();
   if (ct === '') return false;
   if (ct.includes('event-stream')) return false;

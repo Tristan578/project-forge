@@ -21,7 +21,8 @@
  */
 import { NextResponse } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { withEgressGuard } from '@/lib/security/egressGuard';
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
+import { isTextualContentType, withEgressGuard } from '@/lib/security/egressGuard';
 import { REDACTION_PLACEHOLDER, resetSecretEnvCache } from '@/lib/security/redactSecrets';
 import { buildDeepSceneBody } from './deepSceneBody';
 
@@ -193,6 +194,117 @@ describe('withEgressGuard — the shapes that defeated the lint rule', () => {
   });
 });
 
+describe('withEgressGuard — a JSON ESCAPE must not hide a secret from the scan', () => {
+  /**
+   * The fast path grants byte identity on the strength of ONE scan of the
+   * serialised body, while the rewrite it claims to over-approximate runs on
+   * the PARSED leaves. Those are different string spaces. On the wire a newline
+   * inside a leaf is backslash-then-`n`, and `n` is a word character, so the
+   * `\b` every credential shape is left-anchored on could not match: the scan
+   * said clean, the guard returned the handler's own bytes, and the client's
+   * `JSON.parse` restored the credential intact.
+   *
+   * That is not a corner: `Meshy status error (401): Unauthorized\n<key> is not
+   * valid` is the literal shape of the provider auth failure #9736 was opened
+   * for. Four review boards passed over it because every existing test used a
+   * body with no escape in it (lessons-learned #11).
+   *
+   * These assert the SERIALISED response — the bytes a client receives — and
+   * additionally that `JSON.parse` of those bytes does not contain the secret,
+   * because parsing is what the client does and it is where the leak surfaced.
+   */
+  const ESCAPES: Array<[string, string]> = [
+    ['newline', '\n'],
+    ['carriage return', '\r'],
+    ['tab', '\t'],
+    ['form feed', '\f'],
+    ['backspace', '\b'],
+    ['double quote', '"'],
+    ['backslash', '\\'],
+    // U+0001 has no short escape; JSON.stringify writes six characters ending
+    // in the word character `1`. Built with fromCharCode so this file carries
+    // no raw control byte.
+    ['a u-escaped control character', String.fromCharCode(1)],
+  ];
+
+  it.each(ESCAPES)('redacts a credential that follows %s inside a leaf', async (_label, esc) => {
+    const leak = `Meshy status error (401): Unauthorized${esc}${SECRET} is not valid`;
+    const handler = withEgressGuard(async () => NextResponse.json({ error: leak }, { status: 500 }));
+
+    const out = await serialize(await handler());
+
+    expect(out.text).not.toContain(SECRET);
+    expect(JSON.stringify(JSON.parse(out.text))).not.toContain(SECRET);
+    expect(out.text).toContain(REDACTION_PLACEHOLDER);
+  });
+
+  it.each([
+    ['a double quote', 'has"quote-and-more-chars-here'],
+    ['a backslash', 'has\\backslash-and-more-chars'],
+    ['a newline (every PEM *_PRIVATE_KEY is this case)', 'line-one-is-long\nline-two-here'],
+  ])('redacts an environment secret containing %s', async (_label, value) => {
+    // `SECRET_NAME_PATTERN` selects PASSWORD and PRIVATE, so both names are
+    // real: a PGPASSWORD with a quote in it, and any PEM key, whose value is
+    // newline-separated by definition. `text.includes(value)` ran on ESCAPED
+    // bytes and could never find either.
+    vi.stubEnv('PGPASSWORD', value);
+    resetSecretEnvCache();
+    const handler = withEgressGuard(async () =>
+      NextResponse.json({ error: `db said ${value}` }, { status: 500 }));
+
+    const out = await serialize(await handler());
+
+    expect(out.text).not.toContain(value);
+    expect((JSON.parse(out.text) as { error: string }).error).toContain(REDACTION_PLACEHOLDER);
+  });
+
+  it('redacts a credential sitting in a JSON KEY, on the path the guard already decided to rewrite', async () => {
+    // The scan said MATCH (the text is on the wire), the guard bought the whole
+    // parse/walk/re-serialise round trip — and then re-emitted the key
+    // unchanged, because only VALUES ever reached the redactor. The worst
+    // available outcome: the lossy path AND the leak.
+    const key = 'msy' + '_' + 'ab12cd34ef56gh78ij90';
+    const handler = withEgressGuard(async () => NextResponse.json({ [key]: 'invalid' }, { status: 500 }));
+
+    const out = await serialize(await handler());
+
+    expect(out.text).not.toContain(key);
+    expect(out.text).toBe(`{"${REDACTION_PLACEHOLDER}":"invalid"}`);
+  });
+
+  it('STILL returns the handler\'s own Response for a large body full of escapes and no secret', async () => {
+    // The fix must not be "route everything through the slow path", which would
+    // close the leak by reintegrating every round-trip loss the fourth board
+    // found. Identity is the check that cannot be satisfied by a rewrite.
+    const body = buildDeepSceneBody({
+      entities: 400,
+      plantedDeepText: 'upstream said: "retry"\tlater, path C:\\tmp\\run\nno credential here',
+    });
+    const text = JSON.stringify(body);
+    const produced: Response[] = [];
+    const handler = withEgressGuard(async () => {
+      const made = new NextResponse(text, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+      produced.push(made);
+      return made;
+    });
+
+    const res = await handler();
+
+    expect(res).toBe(produced[0]);
+    expect(await res.text()).toBe(text);
+    // ...and the case is not vacuous: the body really is large AND really does
+    // carry the escapes the new scan has to walk.
+    expect(text.length).toBeGreaterThan(150_000);
+    expect(text).toContain('\\n');
+    expect(text).toContain('\\t');
+    expect(text).toContain('\\\\');
+    expect(text).toContain('\\"');
+  });
+});
+
 describe('withEgressGuard — a response with nothing to redact is returned UNTOUCHED', () => {
   /**
    * This block is the one that would have caught the blocker, and the reason it
@@ -225,7 +337,7 @@ describe('withEgressGuard — a response with nothing to redact is returned UNTO
   });
 
   it('keeps a REALISTIC published-game body byte-identical, tiles and keyframes included', async () => {
-    // ~190 KB, 400 entities, with `tiles`, `localPosition` and `keyframes` at
+    // 349,983 bytes, 400 entities, with `tiles`, `localPosition` and `keyframes` at
     // depth 8 and 9 — the exact values the old MAX_DEPTH=8 bound replaced with
     // the string '[REDACTED: nesting depth limit]', which made the player's
     // deserialisation of a published game fail outright.
@@ -533,6 +645,43 @@ describe('withEgressGuard — failure behaviour', () => {
 
     expect(res.headers.get('x-detail')).toContain(REDACTION_PLACEHOLDER);
     expect(await res.text()).toContain(SECRET); // the gap, asserted
+  });
+
+  it('reads the streaming carve-out off the REAL ai SDK, not off a mock of it', async () => {
+    // `isTextualContentType` excludes `event-stream`, and that one exclusion is
+    // the only thing keeping /api/chat streaming instead of buffering into one
+    // delayed response. Its docblock cited the `ai` SDK's header — but
+    // package.json pins `"ai": "^7.0.11"`, a caret range, and every test that
+    // looked like it covered this (`chat/__tests__/route.test.ts`,
+    // `negative-cases.test.ts`) sets `text/event-stream` in a hand-written mock.
+    // A mock cannot disagree with you (lessons-learned #14): it pins what the
+    // author believed the SDK writes, so a minor bump that changed the header
+    // would show up only as a lockfile diff, and chat would silently stop
+    // streaming with nothing red.
+    //
+    // `createUIMessageStreamResponse` and `toUIMessageStreamResponse` (what the
+    // chat route calls) both write `UI_MESSAGE_STREAM_HEADERS`, so this reads
+    // the value the product actually ships with.
+    const sdkResponse = createUIMessageStreamResponse({
+      stream: createUIMessageStream({ execute: () => {} }),
+    });
+    const contentType = sdkResponse.headers.get('content-type') ?? '';
+
+    // Non-vacuous: the SDK really did set one.
+    expect(contentType).not.toBe('');
+    expect(isTextualContentType(contentType)).toBe(false);
+
+    // ...and end to end: the guard hands the SDK's own Response straight back,
+    // which is what "not buffered" means here.
+    const produced: Response[] = [];
+    const handler = withEgressGuard(async () => {
+      const made = createUIMessageStreamResponse({
+        stream: createUIMessageStream({ execute: () => {} }),
+      });
+      produced.push(made);
+      return made;
+    });
+    expect(await handler()).toBe(produced[0]);
   });
 });
 

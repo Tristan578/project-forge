@@ -52,7 +52,11 @@ export interface DeepSceneOptions {
 }
 
 /**
- * Build the body. `entities: 400` produces roughly 190 KB of JSON.
+ * Build the body. At the default `entities: 400` it is 349,983 bytes of JSON
+ * and walks 38,412 redaction nodes — both asserted in `redactSecrets.test.ts`
+ * ("has real headroom over the LARGEST REALISTIC body"), because the earlier
+ * "roughly 190 KB" here was quoted in three places, contradicted by this
+ * change's own benchmark table, and checked by nothing (lessons-learned #8).
  */
 export function buildDeepSceneBody(options: DeepSceneOptions = {}): Record<string, unknown> {
   const entityCount = options.entities ?? 400;

@@ -57,6 +57,17 @@ function buildCases(): Case[] {
     entities: 400,
     plantedDeepText: `upstream said ${SECRET}`,
   });
+  // The fast path's WORST case after the JSON-escape fix. `hasCandidate` scans
+  // a JSON-unescaped view of the body in addition to the raw text, gated on the
+  // body containing a backslash at all — so a scene whose script source carries
+  // one (a quote, a tab, a Windows path) pays a second linear pass over 350 KB
+  // where the default fixture pays only an `indexOf`. Both are measured, because
+  // "the fix did not simply route everything down the slow path" is a claim, and
+  // the number is what makes it checkable.
+  const sceneWithEscapes = buildDeepSceneBody({
+    entities: 400,
+    plantedDeepText: 'log: "retry" at C:\\tmp\\run\tno credential here',
+  });
   const listing = {
     games: Array.from({ length: 60 }, (_, i) => ({
       id: `g-${i}`,
@@ -72,6 +83,7 @@ function buildCases(): Case[] {
     jsonCase('error envelope WITH a secret', { error: `upstream said ${SECRET}` }, 500),
     jsonCase('community listing', listing),
     jsonCase('published scene, 400 entities', scene),
+    jsonCase('same scene WITH JSON escapes, no secret', sceneWithEscapes),
     jsonCase('published scene WITH a secret planted at depth 8', sceneWithSecret),
   ];
 }
