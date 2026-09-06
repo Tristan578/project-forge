@@ -8,10 +8,13 @@
 # for entire sessions with nothing saying so. This repo is open source; assuming
 # one machine's layout is assuming one contributor.
 #
-# Found by review on 2026-09-06: `.codex/config.toml` registered an MCP server
-# pinned to one contributor's Windows checkout, and two skills told the reader to
-# `cd` into one contributor's home directory before running a sync script. None
-# of it would work for anyone else, and none of it announced that.
+# Found by review on 2026-09-06: two skills told the reader to `cd` into one
+# contributor's home directory before running a sync script. Neither would work
+# for anyone else, and neither announced that. An MCP server pinned to one
+# contributor's Windows checkout was found the same day in a working copy of
+# `.codex/config.toml` — that one was never committed, which is exactly why a
+# gate over TRACKED files is the thing worth having: it catches the moment such
+# a path becomes everybody's problem instead of one machine's.
 #
 # The forbidden shapes are spelled out ONCE, in PATTERN below, and nowhere else
 # in the tree: a file that quotes an example is a file this gate then fails on.
@@ -34,16 +37,14 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # username, so a different contributor's path is caught too.
 PATTERN='([A-Za-z]:[\\/](Users|repos)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'
 
-# Files where such a string is legitimate. Each entry states why.
-#   docs/audits, docs/reviews, docs/coverage — dated records of what a tool
-#     printed at the time; rewriting them would falsify the record.
-#   provision-billing-meter, mockOnceGuard, generate-wasm-manifests,
-#     reaperBridge — code and tests ABOUT path handling, where the literal is
-#     the subject under test (reaperBridge asserts a traversal attempt is
-#     refused) rather than a path anyone is meant to follow.
-#   check-vitest-exit / db-migration-guard tests, sentry-to-test-stub — they
-#     quote real CI output verbatim as a fixture.
-#   this script and its test — they carry the pattern by definition.
+# Files where such a string is legitimate. Each entry states why, and each entry
+# EXEMPTS SOMETHING TODAY — an allowlist entry that covers no file is not
+# harmless, it is unreviewed breadth waiting for a file to wander into it. Five
+# entries were pruned for exempting nothing: `docs/audits/`, `.gitignore`, and
+# the unanchored `check-vitest-exit`, `db-migration-guard` and
+# `sentry-to-test-stub`, whose only matches were `/home/runner/` lines the filter
+# below already strips. The anti-rot note at the end of this script reports any
+# entry that stops exempting something, so the list cannot rot again silently.
 #
 # Matched against the FILE PATH ALONE, never the `path:line:content` string that
 # grep emits. Against the whole string every `$`-anchored entry here is
@@ -51,7 +52,36 @@ PATTERN='([A-Za-z]:[\\/](Users|repos)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z
 # this gate used to fail on its own header comment, while every UNanchored entry
 # leaked the other way and exempted any line whose CONTENT merely said
 # `mockOnceGuard`. Both directions are pinned by the suite.
-ALLOW_RE='^docs/(audits|reviews|coverage)/|^scripts/check-portable-paths\.sh$|^scripts/__tests__/check-portable-paths\.test\.sh$|^\.gitignore$|provision-billing-meter|mockOnceGuard|generate-wasm-manifests|reaperBridge|check-vitest-exit|db-migration-guard|sentry-to-test-stub'
+#
+# bash 3.2 has no associative arrays, so the entries and their reasons are two
+# parallel indexed arrays. Keep them the same length; the script checks.
+ALLOW_ENTRIES=(
+  '^docs/(reviews|coverage)/'
+  '^scripts/check-portable-paths\.sh$'
+  '^scripts/__tests__/check-portable-paths\.test\.sh$'
+  'provision-billing-meter'
+  'mockOnceGuard'
+  'generate-wasm-manifests'
+  'reaperBridge'
+)
+ALLOW_REASONS=(
+  'dated records of what a tool printed; rewriting them would falsify the record'
+  'this gate, which must be able to document the shapes it forbids'
+  "this gate's own suite, which builds the shapes it tests"
+  'code ABOUT path handling — the literal is the subject, not a path to follow'
+  'test infrastructure ABOUT path handling'
+  'a generator whose test quotes real paths as fixtures'
+  'asserts a traversal attempt is REFUSED; the literal is the attack'
+)
+if [ "${#ALLOW_ENTRIES[@]}" -ne "${#ALLOW_REASONS[@]}" ]; then
+  echo "::error::check-portable-paths: ALLOW_ENTRIES and ALLOW_REASONS differ in length" >&2
+  exit 2
+fi
+
+ALLOW_RE=""
+for entry in "${ALLOW_ENTRIES[@]}"; do
+  if [ -z "$ALLOW_RE" ]; then ALLOW_RE="$entry"; else ALLOW_RE="${ALLOW_RE}|${entry}"; fi
+done
 
 tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 
@@ -59,8 +89,18 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # is portable by construction. Workflows set cache dirs under it and several
 # suites quote CI output containing it. Filtered by LINE rather than removed
 # from PATTERN, so a genuine `/home/<someone>/` in the same file still fails.
+#
+# `-H` IS LOAD-BEARING. Without it grep prints `path:line:content` only when it
+# is handed more than one file, and `line:content` when handed exactly one.
+# `xargs` splits by ARG_MAX — seven batches on a 3,484-file checkout here — so a
+# batch boundary leaving a remainder of one silently drops the path from those
+# hits. `${line%%:*}` then reads a LINE NUMBER, no allowlist entry can ever
+# match it, and the file is reported as `::error file=<lineno>::`. It fails in
+# the closed direction, but it turns an exempt file into a red build with a
+# nonsense name, and no fixture can reach it: the suite's repos are small enough
+# to be one batch.
 raw="$(git ls-files -z \
-  | xargs -0 grep -InE "$PATTERN" 2>/dev/null \
+  | xargs -0 grep -HInE "$PATTERN" 2>/dev/null \
   | grep -v '/home/runner/' || true)"
 
 # The allowlist is applied per hit, to the path grep prefixed onto the line, so
@@ -70,10 +110,25 @@ raw="$(git ls-files -z \
 # `grep -q` exits on first match and SIGPIPEs its writer, which under pipefail
 # inverts the verdict.
 hits=""
+# One flag per entry, so the anti-rot note below can name an entry that stopped
+# exempting anything. Parallel to ALLOW_ENTRIES by index (bash 3.2, no maps).
+allow_used=""
+for _ in "${ALLOW_ENTRIES[@]}"; do allow_used="${allow_used}0"; done
+
 while IFS= read -r line; do
   [ -n "$line" ] || continue
   file="${line%%:*}"
-  grep -qE "$ALLOW_RE" <<<"$file" && continue
+  exempt=0
+  index=0
+  for entry in "${ALLOW_ENTRIES[@]}"; do
+    if grep -qE "$entry" <<<"$file"; then
+      exempt=1
+      allow_used="${allow_used:0:index}1${allow_used:$((index + 1))}"
+      break
+    fi
+    index=$((index + 1))
+  done
+  [ "$exempt" -eq 1 ] && continue
   hits="${hits}${line}"$'\n'
 done <<<"$raw"
 hits="${hits%$'\n'}"
@@ -101,8 +156,22 @@ if [ -n "$hits" ]; then
   echo "::error::${count} machine-local absolute path(s) in tracked files."
   echo "Use a repo-relative path, \$(git rev-parse --show-toplevel), or an environment"
   echo "variable. A tool that genuinely needs a machine-local path belongs in a personal"
-  echo "config that is not checked in — see .codex/config.toml for the convention."
+  echo "config that is not checked in, not in a tracked one — see CONTRIBUTING.md."
   exit 1
 fi
+
+# ANTI-ROT. An allowlist entry that exempts nothing is unreviewed breadth: the
+# file it was written for is gone, and the entry now waits for an unrelated one
+# to wander into it. Five had already rotted that way before anything reported
+# it. This follows check-npm-audit.sh's precedent and NOTES rather than fails —
+# the pruning decision needs a human, and a gate that reddens a PR for a stale
+# comment gets deleted rather than fixed.
+index=0
+for entry in "${ALLOW_ENTRIES[@]}"; do
+  if [ "${allow_used:$index:1}" = "0" ]; then
+    echo "::notice::check-portable-paths: allowlist entry '${entry}' (${ALLOW_REASONS[$index]}) exempts no file — safe to prune"
+  fi
+  index=$((index + 1))
+done
 
 echo "check-portable-paths: ${tracked_count} tracked file(s), no machine-local absolute paths"

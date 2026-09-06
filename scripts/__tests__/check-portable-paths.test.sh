@@ -124,9 +124,13 @@ d="$(make_repo allow_self)"
 add_file "$d" "scripts/check-portable-paths.sh" "# documents $WIN_PATH as an example"
 run_case "the gate script may document the shapes it forbids" 0 "$d"
 
-d="$(make_repo allow_gitignore)"
+# `.gitignore` used to be allowlisted and had a case here. The entry exempted
+# nothing in the real tree — the file matches PATTERN not at all — so it was
+# pruned, and this asserts the pruning instead: an ordinary file gets no
+# exemption for its name alone.
+d="$(make_repo gitignore_not_exempt)"
 add_file "$d" ".gitignore" "$MAC_PATH/"
-run_case ".gitignore may name an absolute path" 0 "$d"
+run_case ".gitignore is not exempt just for being .gitignore" 1 "$d"
 
 d="$(make_repo allow_suite)"
 add_file "$d" "scripts/__tests__/check-portable-paths.test.sh" "# fixture $WIN_PATH"
@@ -138,8 +142,8 @@ add_file "$d" "web/src/lib/__tests__/mockOnceGuard.test.ts" "const p = '$MAC_PAT
 run_case "a path-handling test file is exempt by its name" 0 "$d"
 
 d="$(make_repo allow_docs)"
-add_file "$d" "docs/audits/2026-01-01-run.md" "log line: $LINUX_PATH/out"
-run_case "a dated audit record is exempt by its directory" 0 "$d"
+add_file "$d" "docs/reviews/2026-01-01-run.md" "log line: $LINUX_PATH/out"
+run_case "a dated review record is exempt by its directory" 0 "$d"
 
 # The leak the other way: an ordinary file whose CONTENT mentions an allowlist
 # token must NOT be exempted. This fails on the pre-fix script.
@@ -163,6 +167,21 @@ if (cd "$d" && PORTABLE_PATHS_MIN_FILES=3 bash "$SCRIPT") >/dev/null 2>&1; then
 else
   FAIL=$((FAIL + 1)); echo "  FAIL an untracked file should be out of scope"
 fi
+
+# THE SINGLE-FILE BATCH. `grep` prints `path:line:content` only when handed more
+# than one file; with exactly one it prints `line:content`. `xargs` splits by
+# ARG_MAX, so a batch boundary leaving a remainder of one used to strip the path
+# from those hits — `${line%%:*}` then read a line NUMBER, no allowlist entry
+# could match it, and an exempt file was reported red under a nonsense name.
+# A one-file repo is the only way to reach that from a fixture; the other cases
+# here all fit in one multi-file batch and cannot see it.
+d="$(make_repo one_file 0)"
+add_file "$d" ".gitkeep" "x"
+rm -f "$d/.gitkeep"
+add_file "$d" "docs/coverage/dashboard.md" "measured at $MAC_PATH"
+run_case "an allowlisted file survives a single-file grep batch" 0 "$d" 1
+
+# --- scope and fail-closed posture ---
 
 # A gate that scans almost nothing passes vacuously and reads as coverage
 # (lessons-learned #9). Below the floor it must fail CLOSED, not clean.
@@ -194,6 +213,38 @@ if grep -q '1 machine-local absolute path' <<<"$report"; then
   PASS=$((PASS + 1)); echo "  ok   the report counts the hits"
 else
   FAIL=$((FAIL + 1)); echo "  FAIL the report did not count the hits"
+fi
+
+# --- the allowlist reports its own rot ---
+#
+# An entry that exempts nothing is unreviewed breadth waiting for an unrelated
+# file to wander into it; five had rotted that way before anything said so. The
+# note is a note and not a failure on purpose (check-npm-audit.sh's precedent):
+# pruning needs a human, and a gate that reddens a PR over a stale comment gets
+# deleted rather than fixed. So the assertion is that it SPEAKS.
+d="$(make_repo rot_note)"
+add_file "$d" "docs/coverage/dashboard.md" "measured at $MAC_PATH"
+(cd "$d" && git add -A) >/dev/null 2>&1
+note="$(cd "$d" && PORTABLE_PATHS_MIN_FILES=3 bash "$SCRIPT" 2>&1)"
+if grep -q "exempts no file" <<<"$note"; then
+  PASS=$((PASS + 1)); echo "  ok   an allowlist entry that exempts nothing is reported"
+else
+  FAIL=$((FAIL + 1)); echo "  FAIL no anti-rot note for an unused allowlist entry"
+fi
+# ...and the entry that DID exempt something is not named as unused.
+if grep -q "'\^docs/(reviews|coverage)/'" <<<"$note"; then
+  FAIL=$((FAIL + 1)); echo "  FAIL an entry that exempted a file was reported as unused"
+else
+  PASS=$((PASS + 1)); echo "  ok   an entry that exempted a file is not reported as unused"
+fi
+
+# The two parallel arrays are a bash 3.2 stand-in for a map. A reason added
+# without an entry (or the reverse) shifts every later reason onto the wrong
+# entry, so the mismatch is a fail-closed tooling error, not a silent misreport.
+if grep -q 'ALLOW_ENTRIES\[@\]}" -ne "${#ALLOW_REASONS\[@\]}' "$SCRIPT"; then
+  PASS=$((PASS + 1)); echo "  ok   the entry/reason arrays are length-checked"
+else
+  FAIL=$((FAIL + 1)); echo "  FAIL nothing checks ALLOW_ENTRIES against ALLOW_REASONS"
 fi
 
 # --- the seam must never be wired into CI ---
