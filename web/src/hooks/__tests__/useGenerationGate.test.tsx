@@ -40,6 +40,7 @@ const FIXTURE: CapabilitiesResponse = {
   ],
   available: ['sfx'],
   unavailable: ['model3d', 'music', 'texture'],
+  degraded: false,
 };
 
 describe('useGenerationGate', () => {
@@ -87,6 +88,47 @@ describe('useGenerationGate', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.blocked).toBe(true);
     expect(result.current.reason).toBe('Texture Generation is not available yet.');
+  });
+
+  // The server fails OPEN when it cannot read the caller's BYOK keys, answering
+  // 200 with platform-only availability. Blocking on that turned a server
+  // fail-open into a client fail-closed: production runs zero PLATFORM_* keys,
+  // so one DB blip told every BYOK user to configure the key they already hold
+  // and disabled Generate everywhere for the cache TTL (#9725 p7).
+  it('does not block a provisionable capability when the body is degraded', async () => {
+    respond({ ...FIXTURE, degraded: true });
+    const { result } = renderHook(() => useGenerationGate('model-generation'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.blocked).toBe(false);
+    expect(result.current.reason).toBeUndefined();
+  });
+
+  // `unprovisionable` is decided from a code constant, not from any lookup, so
+  // it survives a degraded body: music stays refused.
+  it('still blocks an unprovisionable capability when the body is degraded', async () => {
+    respond({ ...FIXTURE, degraded: true });
+    const { result } = renderHook(() => useGenerationGate('music-generation'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.blocked).toBe(true);
+    expect(result.current.unprovisionable).toBe(true);
+  });
+
+  // Entry points (Asset panel menu, Audio inspector buttons) hard-disable only
+  // on `unprovisionable`; a merely unconfigured capability stays clickable so
+  // the in-dialog notice and its Settings link remain reachable (#9725 p7).
+  it('reports unprovisionable separately from blocked', async () => {
+    respond(FIXTURE);
+    const music = renderHook(() => useGenerationGate('music-generation'));
+    await waitFor(() => expect(music.result.current.loading).toBe(false));
+    expect(music.result.current.unprovisionable).toBe(true);
+
+    const model = renderHook(() => useGenerationGate('model-generation'));
+    expect(model.result.current.blocked).toBe(true);
+    expect(model.result.current.unprovisionable).toBe(false);
+
+    const sfx = renderHook(() => useGenerationGate('sfx-generation'));
+    expect(sfx.result.current.blocked).toBe(false);
+    expect(sfx.result.current.unprovisionable).toBe(false);
   });
 
   it('fails open when the capabilities fetch errors', async () => {

@@ -7,6 +7,7 @@ const response = (available: boolean) => new Response(JSON.stringify({
   capabilities: [{ capability: 'model3d', available, label: '3D Model Generation' }],
   available: available ? ['model3d'] : [],
   unavailable: available ? [] : ['model3d'],
+  degraded: false,
 }), { status: 200 });
 
 describe('capabilities cache lifecycle (#9725)', () => {
@@ -21,6 +22,40 @@ describe('capabilities cache lifecycle (#9725)', () => {
     act(() => invalidateCapabilitiesCache());
     await waitFor(() => expect(result.current.available.has('model3d')).toBe(true));
     expect(fetchSpy).toHaveBeenLastCalledWith('/api/capabilities', { cache: 'no-store' });
+  });
+
+  // Nulling the cached body flipped every mounted consumer to loading:true for
+  // the whole round trip, so useGenerationGate returned blocked:false, the
+  // notice unmounted, disabled inputs re-enabled and the pills vanished — on
+  // every sign-in/out and every BYOK save. Serve the previous body while
+  // revalidating instead (#9725 p7).
+  it('keeps serving the previous body while revalidating', async () => {
+    let releaseSecond!: (value: Response) => void;
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(false))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { releaseSecond = resolve; }));
+    const { result } = renderHook(() => useCapabilities());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.capabilities).toHaveLength(1);
+
+    act(() => invalidateCapabilitiesCache());
+    // Mid-flight: still the old answer, never an empty loading state.
+    expect(result.current.loading).toBe(false);
+    expect(result.current.capabilities).toHaveLength(1);
+    expect(result.current.available.has('model3d')).toBe(false);
+
+    await act(async () => { releaseSecond(response(true)); await Promise.resolve(); });
+    await waitFor(() => expect(result.current.available.has('model3d')).toBe(true));
+  });
+
+  it('exposes the route\'s degraded flag to consumers', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      capabilities: [{ capability: 'model3d', available: false, label: '3D Model Generation' }],
+      available: [], unavailable: ['model3d'], degraded: true,
+    }), { status: 200 }));
+    const { result } = renderHook(() => useCapabilities());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.degraded).toBe(true);
   });
 
   it.each(['success', 'failure'])('ignores an old request ending in %s after invalidation', async (outcome) => {

@@ -11,7 +11,10 @@ AI Asset Generation lets you describe what you want in plain language and receiv
 All generation dialogs are available from the **Asset Panel**:
 
 1. Open the **Asset Panel** from the left sidebar.
-2. Click the generation button for the asset type you want (3D Model, Texture, Sound, or Voice), or right-click in the panel to see all options. The Music entry is shown disabled with the reason until music generation returns.
+2. Click the generation button for the asset type you want (3D Model, Texture, Sound, or Voice), or right-click in the panel to see all options.
+   - **Music** is shown disabled, with an "Unavailable" badge and the reason, until music generation returns — no key can enable it.
+   - Any other type whose provider key is missing (neither configured on the platform nor added as your own key in **Settings**) stays clickable: opening it shows a notice naming the provider you need and a link to Settings. Generate is disabled until the key is there.
+   - If the app cannot read your saved keys for a moment (a database blip), nothing is disabled — the request is allowed through and the route decides.
 3. Fill in the prompt and options, then click **Generate**.
 4. A progress indicator appears while the job runs. When complete, the asset appears in your Asset Panel.
 

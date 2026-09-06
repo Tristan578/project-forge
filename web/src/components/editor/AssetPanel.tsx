@@ -294,10 +294,17 @@ export const AssetPanel = memo(function AssetPanel() {
                     { id: 'generate-music', label: 'Generate Music', open: setGenerateMusicOpen },
                     { id: 'generate-skybox', label: 'Generate Skybox', open: setGenerateSkyboxOpen },
                   ] as const).map(({ id, label, open }) => {
-                    // #9117: an unprovisionable capability is disabled at the
-                    // entry point with its reason, like the tier lock below.
+                    // #9117: a capability NO key can enable (`unprovisionable`,
+                    // e.g. music pending #9522) is disabled here at the entry
+                    // point, like the tier lock below. A capability that is
+                    // merely unconfigured stays clickable on purpose: its
+                    // reason is actionable, and the dialog's notice — which
+                    // names the provider and links to Settings — is the only
+                    // place that reason is readable by a touch user at all
+                    // (#9725 p7). Disabling both made "not offered" and "add
+                    // your own key" read identically.
                     const gate = gates[id];
-                    const gated = gate.blocked;
+                    const gated = gate.unprovisionable;
                     const allowed = canAccessPanel(id, tier) && !gated;
                     const required = getRequiredTier(id);
                     return (

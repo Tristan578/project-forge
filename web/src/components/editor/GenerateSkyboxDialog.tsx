@@ -97,7 +97,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-skybox-unavailable" reason={gate.reason} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-skybox-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

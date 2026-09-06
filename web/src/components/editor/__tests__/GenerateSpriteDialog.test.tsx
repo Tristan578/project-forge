@@ -26,13 +26,13 @@ vi.mock('lucide-react', () => ({
 // submit path; the gate itself is covered by useGenerationGate.test.tsx.
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 vi.mock('@/hooks/useGenerationGate', () => ({
-  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false })),
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
 }));
 
 describe('GenerateSpriteDialog capability gate (#9117)', () => {
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
   });
 
   it('asks the gate for sprite-generation', () => {
@@ -41,7 +41,7 @@ describe('GenerateSpriteDialog capability gate (#9117)', () => {
   });
 
   it('shows the notice and disables Generate when blocked', () => {
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false });
     render(<GenerateSpriteDialog isOpen={true} onClose={vi.fn()} />);
     expect(screen.getByRole('status')).toHaveAttribute('id', 'generate-sprite-unavailable');
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sprite-unavailable');

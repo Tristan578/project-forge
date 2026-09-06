@@ -35,6 +35,7 @@ function mockCapabilitiesResponse(
     ],
     available: ['chat', 'embedding'],
     unavailable: ['image', 'model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal'],
+    degraded: false,
     ...overrides,
   };
 }

@@ -138,8 +138,15 @@ describe('GET /api/capabilities', () => {
   });
 
   // Every editor page load costs one request to this route (generation
-  // dialogs, Asset panel, Audio inspector), and 30/min 429'd the E2E runner
-  // (#9725, 1942fe4b). Pinned so the ceiling cannot quietly regress.
+  // dialogs, Asset panel, Audio inspector), so 30/min was too low for a
+  // shared-egress classroom. Pinned so the ceiling cannot quietly regress.
+  //
+  // It is NOT what fixed the E2E 429s, and the earlier note here saying so was
+  // wrong: run 33987394245 at head 1942fe4b already ran with 120 and failed
+  // misc-routes.spec.ts the same way. Under `next start` nothing sets a
+  // forwarded-for header, so every worker, shard and concurrent CI job keys
+  // one `public:capabilities:unknown` bucket. That is fixed by client
+  // isolation — `playwright.ci.config.ts` and `e2e/helpers/capabilities.ts`.
   it('rate-limits at 120 requests per minute per IP', async () => {
     const { GET } = await import('./route');
     const req = new NextRequest(BASE_URL);

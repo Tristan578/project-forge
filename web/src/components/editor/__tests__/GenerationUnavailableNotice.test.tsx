@@ -19,4 +19,32 @@ describe('GenerationUnavailableNotice', () => {
     render(<GenerationUnavailableNotice id="x" reason={undefined} />);
     expect(screen.getByRole('status')).toHaveTextContent('This generation feature is not available yet.');
   });
+
+  // The server's reason for a merely unconfigured capability is actionable
+  // ("Configure Meshy API key in Settings..."), so the notice carries the user
+  // there. This is the payoff for keeping such entry points clickable: the
+  // dialog is where the fix lives (#9725 p7).
+  it('offers a Settings link when the capability is merely unconfigured', () => {
+    render(
+      <GenerationUnavailableNotice
+        id="x"
+        reason="Configure Meshy API key in Settings to enable 3D Model Generation."
+        unprovisionable={false}
+      />,
+    );
+    expect(screen.getByRole('link', { name: /settings/i })).toHaveAttribute('href', '/settings');
+  });
+
+  // Nothing the user can do in Settings enables an unprovisionable capability,
+  // so sending them there would be a dead end of its own.
+  it('omits the Settings link when no key can enable the capability', () => {
+    render(
+      <GenerationUnavailableNotice
+        id="x"
+        reason="Music generation is not available yet."
+        unprovisionable={true}
+      />,
+    );
+    expect(screen.queryByRole('link')).toBeNull();
+  });
 });

@@ -66,6 +66,17 @@ interface CapabilitiesState {
   available: Set<ProviderCapability>;
   loading: boolean;
   error: string | null;
+  /**
+   * The route could not read the caller's own (BYOK) keys, so `available:
+   * false` in this body is not a claim about this user (#9725 p7). Consumers
+   * that DISABLE something must not act on it.
+   */
+  degraded: boolean;
+}
+
+/** The empty body served before the first fetch settles. */
+function loadingState(): CapabilitiesState {
+  return { capabilities: [], available: new Set(), loading: true, error: null, degraded: false };
 }
 
 /** Module-level cache so multiple hook instances share one fetch */
@@ -79,6 +90,12 @@ let errorCachedAt: number | null = null;
 /** When the current successful body was fetched; it ages out after CAPABILITIES_TTL_MS (#9725). */
 let fetchedAt: number | null = null;
 let cacheVersion = 0;
+/**
+ * An invalidation happened while nothing was mounted, so the body currently
+ * held is known-stale even though its TTL has not expired. Cleared the moment
+ * a replacement request is issued.
+ */
+let revalidationPending = false;
 
 function notifySubscribers(): void {
   for (const cb of subscribers) {
@@ -94,10 +111,33 @@ function notifySubscribers(): void {
  */
 function isCacheStale(): boolean {
   if (!cachedState || cachedState.loading) return false;
+  // `fetchPromise` is nulled when a request settles, so a non-null one means a
+  // revalidation is already in flight: never start a second.
+  if (fetchPromise) return false;
+  if (revalidationPending) return true;
   if (cachedState.error) {
     return errorCachedAt !== null && Date.now() - errorCachedAt >= ERROR_TTL_MS;
   }
   return fetchedAt !== null && Date.now() - fetchedAt >= CAPABILITIES_TTL_MS;
+}
+
+/**
+ * Start a fetch if one is needed, WITHOUT discarding a usable body first
+ * (stale-while-revalidate). Resetting to the loading fallback flipped every
+ * mounted consumer to `loading: true` for the whole round trip, which
+ * un-blocked `useGenerationGate`: the unavailable notice unmounted, disabled
+ * inputs and the Generate button re-enabled, the pills vanished, and a user
+ * mid-flow could submit into the gap — on every sign-in/out and every BYOK
+ * save (#9725 p7). Only an errored body is worth throwing away.
+ */
+function ensureCapabilities(): void {
+  const uninitialized = !cachedState && !fetchPromise;
+  if (!uninitialized && !isCacheStale()) return;
+  if (!cachedState || cachedState.error) {
+    cachedState = loadingState();
+    errorCachedAt = null;
+  }
+  void fetchCapabilities();
 }
 
 /**
@@ -107,10 +147,14 @@ function isCacheStale(): boolean {
  */
 export function invalidateCapabilitiesCache(): void {
   cacheVersion += 1;
-  cachedState = null;
   fetchPromise = null;
   fetchedAt = null;
   errorCachedAt = null;
+  revalidationPending = true;
+  // The previous body is kept and keeps being served until the replacement
+  // lands (see `ensureCapabilities`); only an errored one is dropped, since
+  // serving a stale error would suppress nothing but the retry's own result.
+  if (cachedState?.error) cachedState = null;
   if (subscribers.length > 0) void fetchCapabilities();
   notifySubscribers();
 }
@@ -124,6 +168,7 @@ function fetchCapabilities(): Promise<void> {
   // for another CAPABILITIES_TTL_MS. This module is the only cache; the
   // network request must always reach the route.
   const version = cacheVersion;
+  revalidationPending = false;
   fetchPromise = fetch('/api/capabilities', { cache: 'no-store' })
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -136,9 +181,11 @@ function fetchCapabilities(): Promise<void> {
         available: new Set(data.available),
         loading: false,
         error: null,
+        degraded: data.degraded === true,
       };
       errorCachedAt = null;
       fetchedAt = Date.now();
+      fetchPromise = null;
       notifySubscribers();
     })
     .catch((err: unknown) => {
@@ -149,6 +196,7 @@ function fetchCapabilities(): Promise<void> {
         available: new Set(),
         loading: false,
         error: message,
+        degraded: false,
       };
       // Allow retry on next mount or after TTL expires
       fetchPromise = null;
@@ -169,6 +217,7 @@ export function _resetCapabilitiesCache(): void {
   subscribers = [];
   errorCachedAt = null;
   fetchedAt = null;
+  revalidationPending = false;
 }
 
 /**
@@ -194,30 +243,14 @@ export function useFeatureGating(featureId: FeatureId): FeatureGateResult {
     const cb = () => forceUpdate((n) => n + 1);
     subscribers.push(cb);
 
-    // Trigger fetch if not started, or retry if error TTL expired (PF-508)
-    if ((!cachedState && !fetchPromise) || isCacheStale()) {
-      cachedState = {
-        capabilities: [],
-        available: new Set(),
-        loading: true,
-        error: null,
-      };
-      errorCachedAt = null;
-      fetchPromise = null;
-      void fetchCapabilities();
-    }
+    ensureCapabilities();
 
     return () => {
       subscribers = subscribers.filter((s) => s !== cb);
     };
   }, []);
 
-  const state = cachedState ?? {
-    capabilities: [],
-    available: new Set<ProviderCapability>(),
-    loading: true,
-    error: null,
-  };
+  const state = cachedState ?? loadingState();
 
   return useMemo(() => {
     if (state.loading) {
@@ -261,30 +294,14 @@ export function useCapabilities() {
     const cb = () => forceUpdate((n) => n + 1);
     subscribers.push(cb);
 
-    // Trigger fetch if not started, or retry if error TTL expired (PF-508)
-    if ((!cachedState && !fetchPromise) || isCacheStale()) {
-      cachedState = {
-        capabilities: [],
-        available: new Set(),
-        loading: true,
-        error: null,
-      };
-      errorCachedAt = null;
-      fetchPromise = null;
-      void fetchCapabilities();
-    }
+    ensureCapabilities();
 
     return () => {
       subscribers = subscribers.filter((s) => s !== cb);
     };
   }, []);
 
-  const state = cachedState ?? {
-    capabilities: [],
-    available: new Set<ProviderCapability>(),
-    loading: true,
-    error: null,
-  };
+  const state = cachedState ?? loadingState();
 
   const refresh = useCallback(() => invalidateCapabilitiesCache(), []);
 
@@ -293,6 +310,7 @@ export function useCapabilities() {
     available: state.available,
     loading: state.loading,
     error: state.error,
+    degraded: state.degraded,
     refresh,
   };
 }

@@ -104,6 +104,22 @@ export interface CapabilitiesResponse {
   available: ProviderCapability[];
   /** Quick lookup: which capabilities are unavailable */
   unavailable: ProviderCapability[];
+  /**
+   * True when the per-user half of the answer could not be read (auth threw,
+   * the user row was unreachable, or the BYOK lookup failed). The route still
+   * answers 200 with platform-only availability, but an `available: false` is
+   * then NOT a claim about this caller's own keys, and a client must not
+   * disable anything on the strength of it (#9725 p7). `unprovisionable` is
+   * unaffected -- it depends on no lookup at all.
+   */
+  degraded: boolean;
+}
+
+/** A BYOK lookup result: the providers found, and whether the lookup failed. */
+interface ByokLookup {
+  providers: Set<string>;
+  /** True when the lookup could not run — see `CapabilitiesResponse.degraded`. */
+  degraded: boolean;
 }
 
 /**
@@ -117,10 +133,15 @@ export interface CapabilitiesResponse {
  *
  * Fails open to platform-only availability: a DB hiccup here must not turn
  * the editor's generation UI off, and the generate routes re-resolve the key
- * authoritatively anyway.
+ * authoritatively anyway. Failing open on the SERVER is only half of it — the
+ * body carries `degraded: true` so the client does not read the resulting
+ * `available: false` as "this user holds no key" and disable the UI anyway
+ * (#9725 p7). Production runs zero PLATFORM_* keys today, so BYOK is the only
+ * working generation path, and one `CircuitBreakerOpenError` would otherwise
+ * lock every paying generation user out for the client cache's whole TTL.
  */
-async function resolveByokProviders(clerkId: string | null): Promise<Set<string>> {
-  if (!clerkId) return new Set();
+async function resolveByokProviders(clerkId: string | null): Promise<ByokLookup> {
+  if (!clerkId) return { providers: new Set(), degraded: false };
   try {
     // Imported lazily, and only for a signed-in caller: these modules pull in
     // the DB client and key encryption, whose configuration an anonymous
@@ -130,12 +151,13 @@ async function resolveByokProviders(clerkId: string | null): Promise<Set<string>
       import('@/lib/keys/resolver'),
     ]);
     const user = await getUserByClerkId(clerkId);
-    if (!user) return new Set();
+    // No local row is a real answer, not a failure: the user holds no keys.
+    if (!user) return { providers: new Set(), degraded: false };
     const rows = await listConfiguredProviders(user.id);
-    return new Set(rows.map((r) => r.provider));
+    return { providers: new Set(rows.map((r) => r.provider)), degraded: false };
   } catch (err) {
     captureException(err, { route: '/api/capabilities', action: 'byok_lookup' });
-    return new Set();
+    return { providers: new Set(), degraded: true };
   }
 }
 
@@ -146,12 +168,14 @@ async function resolveByokProviders(clerkId: string | null): Promise<Set<string>
  * `auth()` throws. Availability must never 500 on an auth hiccup — the body
  * degrades to platform-only, which is what an anonymous caller gets anyway.
  */
-async function resolveCallerId(): Promise<string | null> {
+async function resolveCallerId(): Promise<{ userId: string | null; degraded: boolean }> {
   try {
-    return (await safeAuth()).userId;
+    return { userId: (await safeAuth()).userId, degraded: false };
   } catch (err) {
     captureException(err, { route: '/api/capabilities', action: 'auth' });
-    return null;
+    // A signed-in caller whose identity we could not read is not an anonymous
+    // caller: the per-user half of the body is missing, so say so.
+    return { userId: null, degraded: true };
   }
 }
 
@@ -165,16 +189,28 @@ async function resolveCallerId(): Promise<string | null> {
  * never available. Secrets are checked server-side and never exposed.
  */
 export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
-  // 120/min per IP, up from 30 (#9725): since the generation dialogs and the
-  // Asset panel / Audio inspector entry points read this route, every editor
-  // page load costs one request, and the previous ceiling 429'd the E2E runner
-  // (and would 429 a shared-egress classroom). The body is cheap, cached
-  // client-side for CAPABILITIES_TTL_MS, and carries no secrets.
+  // 120/min per IP, up from 30 (#9725): the generation dialogs and the Asset
+  // panel / Audio inspector entry points read this route, so every editor page
+  // load costs one request and a shared-egress classroom would 429 on the old
+  // ceiling. The body is cheap, cached client-side for CAPABILITIES_TTL_MS,
+  // and carries no secrets.
+  //
+  // This raise did NOT fix the E2E 429s, and the comment that claimed it did
+  // was a wrong diagnosis: run 33987394245 at head 1942fe4b already had the
+  // ceiling at 120 and still failed misc-routes.spec.ts with 429. `next start`
+  // on localhost sets no forwarded-for header, so every browser page load from
+  // 3 shards x 4 workers, plus every other concurrent CI job, keys the SAME
+  // `public:capabilities:unknown` bucket in the shared CI Upstash DB. The fix
+  // is client isolation, not a bigger number — see the per-process
+  // `x-forwarded-for` in `playwright.ci.config.ts` and the shared probe helper
+  // in `e2e/helpers/capabilities.ts`.
   const limited = await rateLimitPublicRoute(req, 'capabilities', 120, 60_000);
   if (limited) return limited as NextResponse<CapabilitiesResponse>;
 
-  const userId = await resolveCallerId();
-  const byokProviders = await resolveByokProviders(userId);
+  const caller = await resolveCallerId();
+  const byok = await resolveByokProviders(caller.userId);
+  const byokProviders = byok.providers;
+  const degraded = caller.degraded || byok.degraded;
 
   const capabilities: CapabilityStatus[] = PROVIDER_CAPABILITIES.map((cap) => {
     const unavailability = getCapabilityUnavailability(cap);
@@ -245,7 +281,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     .filter((c) => !c.available)
     .map((c) => c.capability);
 
-  const response = NextResponse.json({ capabilities, available, unavailable });
+  const response = NextResponse.json({ capabilities, available, unavailable, degraded });
   // The body can differ per session (BYOK), and a shared cache keys on the URL
   // — not on the Clerk cookie — so a shared directive on the anonymous branch
   // would hand the platform-only body to signed-in users for its whole TTL.

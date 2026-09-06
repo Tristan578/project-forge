@@ -1,5 +1,5 @@
-import { randomBytes } from 'node:crypto';
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { getCapabilities } from '../helpers/capabilities';
 import {
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_NAV_MS,
@@ -20,15 +20,6 @@ import {
  * Routes requiring auth (feedback, bridges, tokens, etc.) are verified to
  * correctly reject unauthenticated requests.
  */
-// Each API probe represents its own client, isolated from the editor pages'
-// shared rate-limit bucket. This still exercises the real endpoint and limiter.
-function getCapabilities(request: APIRequestContext) {
-  const groups = randomBytes(12).toString('hex').match(/.{4}/g)!;
-  return request.get('/api/capabilities', {
-    headers: { 'x-forwarded-for': '2001:db8:' + groups.join(':') },
-  });
-}
-
 test.describe('Misc Routes @ui', () => {
   // ---------------------------------------------------------------------------
   // /api/status — public status-page endpoint
@@ -145,7 +136,6 @@ test.describe('Misc Routes @ui', () => {
 
     test('music is declared unavailable and session responses stay private', async ({ request }) => {
       const response = await getCapabilities(request);
-      expect(response.status()).toBe(200);
       expect(response.headers()['cache-control']).toContain('private');
       const body = await response.json();
       expect(body.capabilities.find((c: { capability: string }) => c.capability === 'music'))

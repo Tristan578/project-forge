@@ -217,6 +217,41 @@ describe('GET /api/capabilities availability', () => {
     expect(status(both.body, 'sprite').available).toBe(true);
   });
 
+  // Fail-open on the SERVER became fail-closed on the CLIENT: the route
+  // returned 200 with available:false and "Configure Meshy API key in
+  // Settings", and useGenerationGate disabled every entry point for a BYOK
+  // user who already holds that key. The body must say the per-user half of
+  // the answer is missing so the client can refuse to act on it (#9725 p7).
+  it('marks the body degraded when the BYOK lookup throws', async () => {
+    signedInWithByok([]);
+    mockByok.mockRejectedValue(new Error('db down'));
+    const { body } = await call();
+    expect(body.degraded).toBe(true);
+  });
+
+  it('marks the body degraded when safeAuth throws', async () => {
+    mockAuth.mockRejectedValue(new Error('clerkMiddleware not detected'));
+    const { body } = await call();
+    expect(body.degraded).toBe(true);
+  });
+
+  it('marks the body degraded when the user-row lookup throws', async () => {
+    mockAuth.mockResolvedValue({ userId: CLERK_ID });
+    mockUser.mockRejectedValue(new Error('circuit breaker open'));
+    const { body } = await call();
+    expect(body.degraded).toBe(true);
+  });
+
+  it.each([
+    ['anonymous', () => {}],
+    ['signed in with a healthy lookup', () => signedInWithByok(['meshy'])],
+    ['signed in with no local user row', () => { mockAuth.mockResolvedValue({ userId: CLERK_ID }); mockUser.mockResolvedValue(null); }],
+  ])('does not mark the body degraded when %s', async (_label, arrange) => {
+    arrange();
+    const { body } = await call();
+    expect(body.degraded).toBe(false);
+  });
+
   it('falls back to platform-only availability when the BYOK lookup throws', async () => {
     signedInWithByok([]);
     mockByok.mockRejectedValue(new Error('db down'));

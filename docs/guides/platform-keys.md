@@ -92,13 +92,31 @@ Pull the production variables into a **scratch file**, never into
 `npm run db:push` read, and pointing it at production would run both against
 production.
 
+The script reads eight variables and calls six vendors, so give it only those:
+`vercel env pull` writes the WHOLE production environment — `DATABASE_URL`,
+`CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `ENCRYPTION_KEY`, the MCP relay token
+— and handing all of it to a script that needs none of it is how a scratch file
+turns into an incident. Filter first, and remove both files from a `trap` so a
+failure or a `Ctrl-C` cannot leave them behind. Note `${TMPDIR:-/tmp}`: `TMPDIR`
+is unset on most Linux shells, and a bare `$TMPDIR/...` would write to `/`.
+
 ```bash
-cd web && vercel env pull "$TMPDIR/spawnforge-prod.env" --environment production --scope tnolan
-cd .. && node --env-file="$TMPDIR/spawnforge-prod.env" web/scripts/verify-platform-generation.ts
-rm "$TMPDIR/spawnforge-prod.env"
+cd web
+tmp="${TMPDIR:-/tmp}"
+raw="$(mktemp "$tmp/spawnforge-prod-raw.XXXXXX")"
+env_file="$(mktemp "$tmp/spawnforge-prod.XXXXXX")"
+trap 'rm -f "$raw" "$env_file"' EXIT INT TERM
+vercel env pull "$raw" --environment production --scope tnolan
+grep -E '^(PLATFORM_[A-Z0-9_]+|AI_GATEWAY_API_KEY)=' "$raw" > "$env_file"
+cd .. && node --env-file="$env_file" web/scripts/verify-platform-generation.ts
 ```
 
-(On Windows: `$env:TEMP\spawnforge-prod.env` in PowerShell, or `$TEMP/spawnforge-prod.env` in Git Bash.)
+The `trap` removes both files when the shell block exits, however it exits.
+Verify with `ls "${TMPDIR:-/tmp}"/spawnforge-prod*` — it must match nothing.
+
+(On Windows PowerShell there is no `trap` equivalent here; use
+`try { ... } finally { Remove-Item -Force $env:TEMP\spawnforge-prod*.env }`, or
+run the block above in Git Bash, where `${TMPDIR:-/tmp}` resolves the same way.)
 
 The script prints one row per provider key a capability needs (`sprite` therefore prints two), with columns `capability  provider  route  status  detail`:
 

@@ -11,7 +11,7 @@ vi.mock('@/stores/editorStore', () => ({
 
 // Capability gate (#9117): default "available"; the gate describe at the end flips it.
 vi.mock('@/hooks/useGenerationGate', () => ({
-  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false })),
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({
@@ -25,7 +25,10 @@ vi.mock('lucide-react', async () => {
   return Object.fromEntries(Object.keys(actual).map(k => [k, () => null]));
 });
 
-vi.mock('../GenerateSoundDialog', () => ({ GenerateSoundDialog: () => null }));
+vi.mock('../GenerateSoundDialog', () => ({
+  GenerateSoundDialog: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div role="dialog" aria-label="sound-dialog-stub" /> : null,
+}));
 // Renders a marker only when opened, so a test can prove a gated click did NOT
 // open it (a `() => null` stub would make that assertion vacuous).
 vi.mock('../GenerateMusicDialog', () => ({
@@ -165,7 +168,7 @@ describe('AudioInspector', () => {
 describe('AudioInspector music gate (#9117)', () => {
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false }));
+    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false }));
   });
 
   it('gates the Sound button by its own capability too', () => {
@@ -173,8 +176,8 @@ describe('AudioInspector music gate (#9117)', () => {
     useUserStore.setState({ tier: 'creator' });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'sfx-generation'
-        ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false }
-        : { blocked: false, reason: undefined, loading: false },
+        ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true }
+        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
     );
     render(<AudioInspector />);
     const sound = screen.getByRole('button', { name: 'Generate sound with AI — Sound effect generation is not available yet.' });
@@ -189,8 +192,8 @@ describe('AudioInspector music gate (#9117)', () => {
     // Both buttons ask the gate for their own capability; only music is blocked here.
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'music-generation'
-        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false }
-        : { blocked: false, reason: undefined, loading: false },
+        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false, unprovisionable: true }
+        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
     );
     render(<AudioInspector />);
     const btn = screen.getByRole('button', { name: 'Generate music with AI — Music generation is not available yet.' });
@@ -201,5 +204,28 @@ describe('AudioInspector music gate (#9117)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     // The sibling Sound button is untouched by the music gate.
     expect(screen.getByRole('button', { name: 'Generate sound with AI' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  // Same reasoning as the Asset panel: a missing key is fixable, so the button
+  // opens the dialog whose notice names the provider and links to Settings.
+  it('keeps a merely unconfigured capability clickable and opens its dialog', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'creator' });
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'sfx-generation'
+        ? {
+            blocked: true,
+            reason: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.',
+            loading: false,
+            unprovisionable: false,
+          }
+        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+    );
+    render(<AudioInspector />);
+    const sound = screen.getByRole('button', { name: 'Generate sound with AI' });
+    expect(sound).not.toHaveAttribute('aria-disabled');
+    expect(sound).not.toHaveTextContent('Unavailable');
+    fireEvent.click(sound);
+    expect(screen.getByRole('dialog', { name: 'sound-dialog-stub' })).toBeInTheDocument();
   });
 });
