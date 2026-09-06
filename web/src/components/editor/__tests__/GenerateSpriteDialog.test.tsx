@@ -25,14 +25,15 @@ vi.mock('lucide-react', () => ({
 // Capability gate (#9117): report "available" so these tests exercise the
 // submit path; the gate itself is covered by useGenerationGate.test.tsx.
 import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { spriteTokenCost } from '@/lib/config/providers';
 vi.mock('@/hooks/useGenerationGate', () => ({
-  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false })),
 }));
 
 describe('GenerateSpriteDialog capability gate (#9117)', () => {
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false });
   });
 
   it('asks the gate for sprite-generation', () => {
@@ -41,7 +42,7 @@ describe('GenerateSpriteDialog capability gate (#9117)', () => {
   });
 
   it('shows the notice and disables Generate when blocked', () => {
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false, byokConfigurable: false });
     render(<GenerateSpriteDialog isOpen={true} onClose={vi.fn()} />);
     expect(screen.getByRole('status')).toHaveAttribute('id', 'generate-sprite-unavailable');
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sprite-unavailable');
@@ -103,9 +104,25 @@ describe('GenerateSpriteDialog', () => {
     expect(screen.getByText('Vector')).toBeInTheDocument();
   });
 
-  it('renders token cost of 15 for single sprite', () => {
+  // This asserted 15, which is the number that shipped and is neither
+  // provider's price (#9741). The dialog defaults to the pixel-art style, which
+  // the route resolves to SDXL and charges 10 for; a DALL-E style costs 20. The
+  // old assertion could only pass while the quote disagreed with the charge.
+  it('quotes the price of the provider the default style resolves to', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('15')).toBeInTheDocument();
+    expect(screen.getByText(String(spriteTokenCost('pixel-art')))).toBeInTheDocument();
+    expect(screen.queryByText('15')).not.toBeInTheDocument();
+  });
+
+  it('re-quotes when the style changes provider', () => {
+    render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
+    expect(screen.getByText(String(spriteTokenCost('pixel-art')))).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Style'), { target: { value: 'realistic' } });
+
+    // 20, not 10 — and the point of the test is that the number MOVED.
+    expect(screen.getByText(String(spriteTokenCost('realistic')))).toBeInTheDocument();
+    expect(spriteTokenCost('realistic')).not.toBe(spriteTokenCost('pixel-art'));
   });
 
   it('disables Generate when prompt is empty', () => {

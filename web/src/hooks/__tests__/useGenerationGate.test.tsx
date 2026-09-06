@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useGenerationGate } from '../useGenerationGate';
+import { useGenerationGate, combineGenerationGates, type GenerationGateResult } from '../useGenerationGate';
 import { _resetCapabilitiesCache } from '../useFeatureGating';
 import type { CapabilitiesResponse } from '@/app/api/capabilities/route';
 
@@ -26,7 +26,16 @@ const FIXTURE: CapabilitiesResponse = {
       available: false,
       label: '3D Model Generation',
       requiredProviders: ['Meshy'],
+      byokConfigurable: true,
       hint: 'Configure Meshy API key in Settings to enable 3D Model Generation.',
+    },
+    {
+      capability: 'sprite',
+      available: false,
+      label: 'Sprite Generation',
+      requiredProviders: ['Replicate', 'OpenAI'],
+      byokConfigurable: false,
+      hint: 'Sprite Generation needs Replicate and OpenAI API keys, which only this deployment can configure.',
     },
     {
       capability: 'music',
@@ -39,7 +48,7 @@ const FIXTURE: CapabilitiesResponse = {
     { capability: 'texture', available: false, label: 'Texture Generation', unprovisionable: true, issue: 1 },
   ],
   available: ['sfx'],
-  unavailable: ['model3d', 'music', 'texture'],
+  unavailable: ['model3d', 'sprite', 'music', 'texture'],
   degraded: false,
 };
 
@@ -136,5 +145,64 @@ describe('useGenerationGate', () => {
     const { result } = renderHook(() => useGenerationGate('music-generation'));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.blocked).toBe(false);
+  });
+
+  // The notice's "Open Settings" affordance renders from this and nothing
+  // else: Settings can only store a BYOK_PROVIDERS key, so sprite (Replicate +
+  // OpenAI) must never offer it (#9725 p8).
+  it('carries the route’s byokConfigurable through, defaulting to false', async () => {
+    respond(FIXTURE);
+    const model = renderHook(() => useGenerationGate('model-generation'));
+    await waitFor(() => expect(model.result.current.loading).toBe(false));
+    expect(model.result.current.byokConfigurable).toBe(true);
+
+    const sprite = renderHook(() => useGenerationGate('sprite-generation'));
+    expect(sprite.result.current.blocked).toBe(true);
+    expect(sprite.result.current.byokConfigurable).toBe(false);
+
+    // Unprovisionable: no key of any kind helps, so never configurable.
+    const music = renderHook(() => useGenerationGate('music-generation'));
+    expect(music.result.current.byokConfigurable).toBe(false);
+  });
+});
+
+// The Sound dialog covers sfx AND voice and keeps its type radios enabled so
+// the user can switch to whichever still works. Its entry points therefore
+// close only when EVERY capability behind them is closed (#9725 p8).
+describe('combineGenerationGates', () => {
+  const open = (o: Partial<GenerationGateResult> = {}): GenerationGateResult => ({
+    blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false, ...o,
+  });
+  const shut = (o: Partial<GenerationGateResult> = {}): GenerationGateResult =>
+    open({ blocked: true, reason: 'nope', unprovisionable: true, ...o });
+
+  it('stays open while any one capability can still run', () => {
+    const combined = combineGenerationGates([shut(), open()]);
+    expect(combined.blocked).toBe(false);
+    expect(combined.unprovisionable).toBe(false);
+  });
+
+  it('closes only when every capability is blocked', () => {
+    const combined = combineGenerationGates([shut({ reason: 'first' }), shut({ reason: 'second' })]);
+    expect(combined.blocked).toBe(true);
+    expect(combined.reason).toBe('first');
+    expect(combined.unprovisionable).toBe(true);
+  });
+
+  it('reports unprovisionable only when it is true of all of them', () => {
+    const combined = combineGenerationGates([
+      shut({ unprovisionable: true }),
+      shut({ unprovisionable: false, byokConfigurable: true }),
+    ]);
+    expect(combined.blocked).toBe(true);
+    expect(combined.unprovisionable).toBe(false);
+    // One half cannot be fixed in Settings, so the pair cannot be either.
+    expect(combined.byokConfigurable).toBe(false);
+  });
+
+  it('is loading, and never blocked, while any capability is still loading', () => {
+    const combined = combineGenerationGates([shut(), open({ loading: true })]);
+    expect(combined.loading).toBe(true);
+    expect(combined.blocked).toBe(false);
   });
 });

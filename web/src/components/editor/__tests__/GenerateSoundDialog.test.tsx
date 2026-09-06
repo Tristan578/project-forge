@@ -32,13 +32,13 @@ vi.mock('lucide-react', () => ({
 // submit path; the gate itself is covered by useGenerationGate.test.tsx.
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 vi.mock('@/hooks/useGenerationGate', () => ({
-  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false })),
 }));
 
 describe('GenerateSoundDialog capability gate (#9117)', () => {
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false });
   });
 
   it('asks the gate for sfx-generation by default and voice-generation once Voice is selected', () => {
@@ -49,7 +49,7 @@ describe('GenerateSoundDialog capability gate (#9117)', () => {
   });
 
   it('shows the notice, disables inputs and Generate when blocked', () => {
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false, byokConfigurable: false });
     render(<GenerateSoundDialog isOpen={true} onClose={vi.fn()} />);
     expect(screen.getByRole('status')).toHaveAttribute('id', 'generate-sound-unavailable');
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sound-unavailable');

@@ -21,13 +21,13 @@ vi.mock('lucide-react', () => ({
 // submit path; the gate itself is covered by useGenerationGate.test.tsx.
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 vi.mock('@/hooks/useGenerationGate', () => ({
-  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false })),
 }));
 
 describe('GenerateModelDialog capability gate (#9117)', () => {
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false });
   });
 
   it('asks the gate for model-generation', () => {
@@ -36,7 +36,7 @@ describe('GenerateModelDialog capability gate (#9117)', () => {
   });
 
   it('shows the notice, disables inputs and Generate, and links them by aria-describedby when blocked', () => {
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false, byokConfigurable: false });
     render(<GenerateModelDialog isOpen={true} onClose={vi.fn()} />);
     const notice = screen.getByRole('status');
     expect(notice).toHaveTextContent('Not available yet.');

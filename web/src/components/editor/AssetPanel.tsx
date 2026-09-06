@@ -5,7 +5,7 @@ import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sp
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
-import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
@@ -92,7 +92,14 @@ export const AssetPanel = memo(function AssetPanel() {
   const gates = {
     'generate-model': useGenerationGate('model-generation'),
     'generate-texture': useGenerationGate('texture-generation'),
-    'generate-sound': useGenerationGate('sfx-generation'),
+    // The Sound dialog runs sfx OR voice and keeps its type radios enabled so
+    // the user can switch: gating this item on sfx alone would make voice
+    // generation unreachable from the UI the moment sfx were declared
+    // unavailable, and the dialog's own escape hatch unexercisable (#9725 p8).
+    'generate-sound': combineGenerationGates([
+      useGenerationGate('sfx-generation'),
+      useGenerationGate('voice-generation'),
+    ]),
     'generate-music': useGenerationGate('music-generation'),
     'generate-skybox': useGenerationGate('texture-generation'),
   } as const;
@@ -305,7 +312,11 @@ export const AssetPanel = memo(function AssetPanel() {
                     // your own key" read identically.
                     const gate = gates[id];
                     const gated = gate.unprovisionable;
-                    const allowed = canAccessPanel(id, tier) && !gated;
+                    // Until the first /api/capabilities body lands nothing is
+                    // known, so the item must not paint as ready and then flip
+                    // to a disabled amber badge when the answer arrives
+                    // (#9725 p8).
+                    const allowed = canAccessPanel(id, tier) && !gated && !gate.loading;
                     const required = getRequiredTier(id);
                     return (
                       <button
@@ -313,7 +324,14 @@ export const AssetPanel = memo(function AssetPanel() {
                         role="menuitem"
                         onClick={() => { if (allowed) { open(true); setShowAiDropdown(false); } }}
                         aria-disabled={!allowed || undefined}
-                        aria-label={gated ? `${label} — ${gate.reason ?? 'not available yet'}` : undefined}
+                        aria-busy={gate.loading || undefined}
+                        aria-label={
+                          gated
+                            ? `${label} — ${gate.reason ?? 'not available yet'}`
+                            : gate.loading
+                              ? `${label} — checking availability`
+                              : undefined
+                        }
                         className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
                           allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
                         }`}
@@ -322,7 +340,9 @@ export const AssetPanel = memo(function AssetPanel() {
                             ? label
                             : gated
                               ? (gate.reason ?? 'Not available yet')
-                              : `Requires ${required ? TIER_LABELS[required] : ''} tier`
+                              : gate.loading
+                                ? 'Checking availability'
+                                : `Requires ${required ? TIER_LABELS[required] : ''} tier`
                         }
                       >
                         <span>{label}</span>

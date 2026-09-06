@@ -101,7 +101,15 @@ describe('GET /api/capabilities', () => {
           expect(cap.requiredProviders).toBeUndefined();
           continue;
         }
-        expect(cap.hint).toContain('Settings');
+        // Only a capability whose missing key `/api/keys/[provider]` would
+        // accept may be sent to Settings; the rest say who must configure it
+        // instead of pointing at a form that has no field for it (#9725 p8).
+        if (cap.byokConfigurable) {
+          expect(cap.hint).toContain('Settings');
+        } else {
+          expect(cap.hint).not.toContain('Settings');
+          expect(cap.hint).toContain('only this deployment can configure');
+        }
         expect(cap.requiredProviders).toBeDefined();
         expect(cap.requiredProviders!.length).toBeGreaterThan(0);
       }

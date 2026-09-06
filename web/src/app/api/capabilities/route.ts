@@ -11,6 +11,7 @@ import {
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
   getCapabilityUnavailability,
+  isByokProvider,
   isVercelRuntime,
 } from '@/lib/config/providers';
 
@@ -94,6 +95,16 @@ export interface CapabilityStatus {
    * then carries the user-facing reason and `issue` the tracking issue.
    */
   unprovisionable?: boolean;
+  /**
+   * True when the caller could turn this capability on themselves: every
+   * provider it still needs is in `BYOK_PROVIDERS`, so `/api/keys/[provider]`
+   * accepts it and Settings renders a field for it. False for `sprite`
+   * (Replicate + OpenAI), `image` and `bg_removal` (OpenAI, remove.bg) — the
+   * key those need can only be set on the deployment, so the client must not
+   * send the user to Settings for them (#9725 p8). Never set on an available
+   * or unprovisionable capability.
+   */
+  byokConfigurable?: boolean;
   /** GitHub issue tracking an unprovisionable capability (machine-readable). */
   issue?: number;
 }
@@ -230,6 +241,13 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     let isAvailable: boolean;
     /** The env vars whose providers the user could still configure. */
     let missingEnvVars: string[];
+    /**
+     * Whether a key the user could add in Settings would actually flip this
+     * capability on. For a multi-key capability that means EVERY still-missing
+     * provider is a BYOK one; for a single-key one it is the provider the BYOK
+     * branch of `isAvailable` below actually consults.
+     */
+    let byokConfigurable: boolean;
     if (required) {
       // A capability that spends more than one key is available only when
       // EVERY one of them is present, otherwise its default request 500s.
@@ -243,12 +261,14 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
       );
       isAvailable = missing.length === 0;
       missingEnvVars = missing.map((provider) => PLATFORM_KEY_ENV[provider]);
+      byokConfigurable = missing.every((provider) => isByokProvider(provider));
     } else {
       // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
       const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
       const platformAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
       isAvailable = platformAvailable || byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
       missingEnvVars = envVars;
+      byokConfigurable = isByokProvider(DIRECT_CAPABILITY_PROVIDER[cap]);
     }
 
     const status: CapabilityStatus = {
@@ -266,9 +286,17 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
       );
       const uniqueProviders = [...new Set(providerNames)];
       status.requiredProviders = uniqueProviders;
+      status.byokConfigurable = byokConfigurable;
       const named = required ? uniqueProviders.join(' and ') : uniqueProviders[0];
       const plural = required && uniqueProviders.length > 1 ? 'keys' : 'key';
-      status.hint = `Configure ${named} API ${plural} in Settings to enable ${FEATURE_LABELS[cap]}.`;
+      // Only say "in Settings" when Settings can actually take the key. It
+      // cannot for Replicate, OpenAI or remove.bg — `/api/keys/[provider]`
+      // rejects them and ApiKeyManager renders no field — so the old sentence
+      // sent sprite/image/bg_removal users to a page where the named key does
+      // not exist, the dead end this notice was added to remove (#9725 p8).
+      status.hint = byokConfigurable
+        ? `Configure ${named} API ${plural} in Settings to enable ${FEATURE_LABELS[cap]}.`
+        : `${FEATURE_LABELS[cap]} needs ${named} API ${plural}, which only this deployment can configure.`;
     }
 
     return status;

@@ -9,7 +9,7 @@ import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
-import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
 
 interface SliderRowProps {
@@ -113,25 +113,50 @@ export function AudioInspector() {
   // way as music. A merely unconfigured capability stays clickable: the dialog
   // notice names the provider and links to Settings, and that is the only
   // place a touch user can read it (#9725 p7).
-  const soundGate = useGenerationGate('sfx-generation');
+  // The Sound dialog runs sfx OR voice and keeps its own type radios enabled
+  // so the user can switch between them, so this entry point closes only when
+  // NEITHER can run — gating it on sfx alone would make voice generation
+  // unreachable from the UI the moment sfx were declared unavailable (#9725 p8).
+  const soundGate = combineGenerationGates([
+    useGenerationGate('sfx-generation'),
+    useGenerationGate('voice-generation'),
+  ]);
   const musicGate = useGenerationGate('music-generation');
-  const canGenerateSound = canAccessPanel('generate-sound', tier) && !soundGate.unprovisionable;
-  const canGenerateMusic = canAccessPanel('generate-music', tier) && !musicGate.unprovisionable;
+  const soundTierOk = canAccessPanel('generate-sound', tier);
+  const musicTierOk = canAccessPanel('generate-music', tier);
+  // While the first /api/capabilities body is in flight nothing is known yet,
+  // so the button must not paint as ready and then contradict itself when the
+  // answer lands. Held closed for that window rather than opening a dialog
+  // whose own gate is about to change under the user (#9725 p8).
+  const canGenerateSound = soundTierOk && !soundGate.unprovisionable && !soundGate.loading;
+  const canGenerateMusic = musicTierOk && !musicGate.unprovisionable && !musicGate.loading;
   // These stay focusable when locked (aria-disabled, not disabled): they are
   // upgrade prompts, and a control removed from the tab order can never tell
   // anyone what it wants. But `title` alone is not that telling — it is
   // unreachable by keyboard and inconsistently announced — so the requirement
   // goes in the accessible name too.
+  //
+  // Name and badge below read the SAME key, `unprovisionable`. They used to
+  // disagree — badge on `blocked`, name on `unprovisionable` — so a tier-locked
+  // user missing only a key (the default free-tier state in production) got an
+  // amber "Unavailable" beside a name reading "requires Starter tier": two
+  // contradictory reasons for one disabled control, no upgrade affordance, and
+  // visible text absent from the accessible name (WCAG 2.5.3). AssetPanel
+  // already derived all three from `unprovisionable`; this now matches.
   const soundButtonLabel = canGenerateSound
     ? 'Generate sound with AI'
     : soundGate.unprovisionable
       ? `Generate sound with AI — ${soundGate.reason ?? 'not available yet'}`
-      : `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`;
+      : !soundTierOk
+        ? `Generate sound with AI — requires ${TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']} tier`
+        : 'Generate sound with AI — checking availability';
   const musicButtonLabel = canGenerateMusic
     ? 'Generate music with AI'
     : musicGate.unprovisionable
       ? `Generate music with AI — ${musicGate.reason ?? 'not available yet'}`
-      : `Generate music with AI — requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`;
+      : !musicTierOk
+        ? `Generate music with AI — requires ${TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']} tier`
+        : 'Generate music with AI — checking availability';
 
   const primaryId = useEditorStore((s) => s.primaryId);
   // Read the selected entity's audio out of the per-entity map. This used to be
@@ -220,6 +245,7 @@ export function AudioInspector() {
           <button
             onClick={() => canGenerateSound && setGenerateSoundOpen(true)}
             aria-disabled={!canGenerateSound || undefined}
+            aria-busy={soundGate.loading || undefined}
             aria-label={soundButtonLabel}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateSound
@@ -228,18 +254,24 @@ export function AudioInspector() {
             }`}
             title={soundButtonLabel}
           >
-            {canGenerateSound ? (
-              <Sparkles size={10} />
-            ) : soundGate.blocked ? (
+            {soundGate.unprovisionable ? (
+              // "Not offered", never "upgrade your plan" — keyed on the same
+              // field as the accessible name so the two cannot disagree.
               <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">Unavailable</span>
+            ) : !soundTierOk ? (
+              <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                <Lock size={10} />
+                {TIER_LABELS[getRequiredTier('generate-sound') ?? 'hobbyist']}
+              </span>
             ) : (
-              <Lock size={10} />
+              <Sparkles size={10} />
             )}
             Sound
           </button>
           <button
             onClick={() => canGenerateMusic && setGenerateMusicOpen(true)}
             aria-disabled={!canGenerateMusic || undefined}
+            aria-busy={musicGate.loading || undefined}
             aria-label={musicButtonLabel}
             className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] ${
               canGenerateMusic
@@ -248,13 +280,16 @@ export function AudioInspector() {
             }`}
             title={musicButtonLabel}
           >
-            {canGenerateMusic ? (
-              <Sparkles size={10} />
-            ) : musicGate.blocked ? (
+            {musicGate.unprovisionable ? (
               // Distinct from the tier lock: this is "not available yet".
               <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">Unavailable</span>
+            ) : !musicTierOk ? (
+              <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                <Lock size={10} />
+                {TIER_LABELS[getRequiredTier('generate-music') ?? 'hobbyist']}
+              </span>
             ) : (
-              <Lock size={10} />
+              <Sparkles size={10} />
             )}
             Music
           </button>

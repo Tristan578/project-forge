@@ -51,6 +51,17 @@ export const BYOK_PROVIDERS = [
 
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
 
+/**
+ * Whether a user could add this provider's key themselves — the single
+ * predicate behind "is /api/keys/[provider] going to accept it" and "does
+ * ApiKeyManager render a field for it". `/api/capabilities` uses it to decide
+ * whether a missing key is fixable in Settings before telling anyone to go
+ * there; Replicate, OpenAI and remove.bg are not (#9725 p8).
+ */
+export function isByokProvider(provider: string): provider is ByokProvider {
+  return (BYOK_PROVIDERS as readonly string[]).includes(provider);
+}
+
 // ---------------------------------------------------------------------------
 // Backend identifiers
 // ---------------------------------------------------------------------------
@@ -480,11 +491,46 @@ export type SpriteProvider = (typeof SPRITE_PROVIDERS)[number];
 export const SPRITE_SIZES = ['32x32', '64x64', '128x128', '256x256', '512x512', '1024x1024'] as const;
 export type SpriteSize = (typeof SPRITE_SIZES)[number];
 
+/** The sprite styles the dialog offers; `auto` routing keys off this. */
+export const SPRITE_STYLES = ['pixel-art', 'hand-drawn', 'vector', 'realistic'] as const;
+export type SpriteStyle = (typeof SPRITE_STYLES)[number];
+
+/**
+ * Which provider a sprite request will actually be served by.
+ *
+ * ONE definition, because the price depends on it and two copies drifted:
+ * `/api/generate/sprite` resolved `auto` by style and charged
+ * `SPRITE_TOKEN_COST` accordingly, while `GenerateSpriteDialog` hard-coded 15
+ * for its quote AND its balance check. 15 is neither provider's price, so the
+ * single-sprite tab was wrong for every generation — a 10-14 balance was
+ * refused on a pixel-art request the server would have charged 10 for, and a
+ * 15-19 balance submitted a request the server then rejected for 20 (#9741,
+ * reported by Devin on #9727).
+ *
+ * The route and the dialog now both call this, so a future routing change
+ * cannot move the charge without moving the quote.
+ */
+export function resolveSpriteProvider(
+  style: SpriteStyle | undefined,
+  provider: SpriteProvider = 'auto',
+): Exclude<SpriteProvider, 'auto'> {
+  if (provider !== 'auto') return provider;
+  return style === 'pixel-art' ? 'sdxl' : 'dalle3';
+}
+
 /** Token costs per sprite generation provider */
 export const SPRITE_TOKEN_COST: Record<Exclude<SpriteProvider, 'auto'>, number> = {
   dalle3: 20,
   sdxl: 10,
 };
+
+/** What a single sprite costs, for the provider the request will resolve to. */
+export function spriteTokenCost(
+  style: SpriteStyle | undefined,
+  provider: SpriteProvider = 'auto',
+): number {
+  return SPRITE_TOKEN_COST[resolveSpriteProvider(style, provider)];
+}
 
 /** Estimated generation time per provider (seconds) */
 export const SPRITE_ESTIMATED_SECONDS: Record<Exclude<SpriteProvider, 'auto'>, number> = {
