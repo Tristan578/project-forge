@@ -249,13 +249,13 @@ Every PR must link to a GitHub issue (`Closes #NNNN`). Tickets only become GitHu
 
 ```bash
 # Incremental push (syncs todo + in_progress + recently-done)
-cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py push
+cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py push
 
 # Full push (all tickets including historical done)
-cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py push-all
+cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py push-all
 
 # Check sync status
-cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py status
+cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py status
 ```
 
 Then find the GitHub issue number for your ticket:
@@ -270,7 +270,7 @@ Include `Closes #NNNN` (GitHub issue number, NOT `PF-XXX`) in every PR body. CI 
 
 ```bash
 # Pull changes from GitHub
-cd /Users/tristannolan/project-forge && python3 .claude/hooks/github_project_sync.py pull
+cd "$(git rev-parse --show-toplevel)" && python3 .claude/hooks/github_project_sync.py pull
 ```
 
 This runs automatically via SessionStart hook. Pull manually when:
