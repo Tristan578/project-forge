@@ -71,7 +71,7 @@ the app.
 
 | Variable | Provider | What degrades when unset |
 |----------|----------|--------------------------|
-| `ANTHROPIC_API_KEY` | Anthropic | AI chat and every text-generation route for non-BYOK users. This is the one the status page's "AI Assistant" check reads. |
+| `ANTHROPIC_API_KEY` | Anthropic | AI chat and every text-generation route for non-BYOK users — but only as the LAST chat backend tried. `resolveConfiguredChatBackend()` prefers the Vercel AI Gateway (`AI_GATEWAY_API_KEY`, or Vercel OIDC with no key at all), then OpenRouter, then GitHub Models, then this. So the status page's **"AI Providers"** check (renamed from "AI Assistant" in #9727) reports `down` only when NONE of those resolves; an unset `ANTHROPIC_API_KEY` alone does not degrade it. |
 | `PLATFORM_OPENAI_KEY` | OpenAI | Image and texture generation for non-BYOK users. |
 | `PLATFORM_MESHY_KEY` | Meshy | 3D model and texture generation (`model3d`, `texture` capabilities). |
 | `PLATFORM_HYPER3D_KEY` | Hyper3D | Alternative 3D model generation backend. |

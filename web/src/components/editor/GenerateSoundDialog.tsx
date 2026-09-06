@@ -147,7 +147,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-sound-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sound-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
           {/* Type selection */}
           <div>
             <label className="mb-2 block text-xs font-medium text-zinc-300">Type</label>

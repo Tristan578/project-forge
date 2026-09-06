@@ -114,7 +114,7 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-texture-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-texture-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

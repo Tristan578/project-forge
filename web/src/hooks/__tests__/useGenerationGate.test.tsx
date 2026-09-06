@@ -131,6 +131,16 @@ describe('useGenerationGate', () => {
     expect(sfx.result.current.unprovisionable).toBe(false);
   });
 
+  it('gates the selected sprite provider while allowing a supported style', async () => {
+    respond({ ...FIXTURE, capabilities: [{ capability: 'sprite', available: true, label: 'Sprite Generation', providerAvailability: { openai: true, replicate: false } }] });
+    const { result, rerender } = renderHook(({ provider }) => useGenerationGate('sprite-generation', provider), { initialProps: { provider: 'replicate' as 'replicate' | 'openai' } });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.blocked).toBe(true);
+    expect(result.current.reason).toContain('Replicate');
+    rerender({ provider: 'openai' });
+    expect(result.current.blocked).toBe(false);
+  });
+
   it('fails open when the capabilities fetch errors', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network'));
     const { result } = renderHook(() => useGenerationGate('music-generation'));

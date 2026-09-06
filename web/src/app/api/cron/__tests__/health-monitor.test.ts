@@ -70,7 +70,23 @@ vi.mock('@/lib/logging/logger', () => ({
 
 type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
-function makeService(name: string, status: ServiceStatus, error?: string) {
+/**
+ * Mirrors `ServiceHealth` (healthChecks.ts) rather than importing it — this
+ * suite mocks that whole module. `configurationOnly` is the #9727 marker the
+ * Sentry capture below must honour.
+ */
+interface ServiceEntry {
+  name: string;
+  status: ServiceStatus;
+  latencyMs: number;
+  lastChecked: string;
+  error?: string;
+  summary?: string;
+  configurationOnly?: boolean;
+  details?: Record<string, unknown>;
+}
+
+function makeService(name: string, status: ServiceStatus, error?: string): ServiceEntry {
   return { name, status, latencyMs: status === 'healthy' ? 5 : 0, lastChecked: new Date().toISOString(), error };
 }
 
@@ -121,6 +137,31 @@ describe('GET /api/cron/health-monitor', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
+  });
+
+  it('pages when an expected provider key disappears after provisioning', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/monitoring/healthChecks')>('@/lib/monitoring/healthChecks');
+    const { PLATFORM_KEY_ENV } = await import('@/lib/config/providers');
+    for (const key of Object.values(PLATFORM_KEY_ENV)) vi.stubEnv(key, '');
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw');
+    vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', 'sfx,voice,sprite,bg_removal');
+    vi.stubEnv('PLATFORM_MESHY_KEY', 'provisioned');
+    const { GET } = await import('@/app/api/cron/health-monitor/route');
+    const setReport = async () => {
+      const ai = await actual.checkAiProviders();
+      const report = allHealthyReport();
+      report.services = report.services.map((s) => s.name === 'AI Providers' ? ai : s);
+      report.overall = actual.computeOverallStatus(report.services);
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      return report;
+    };
+    expect((await setReport()).overall).toBe('healthy');
+    await GET(makeRequest());
+    expect(mockCaptureException).not.toHaveBeenCalled();
+    vi.stubEnv('PLATFORM_MESHY_KEY', '');
+    expect((await setReport()).overall).toBe('degraded');
+    await GET(makeRequest());
+    expect(mockCaptureException).toHaveBeenCalledTimes(1);
   });
 
   // -------------------------------------------------------------------------
@@ -271,6 +312,102 @@ describe('GET /api/cron/health-monitor', () => {
       const body = await res.json() as { failureCount: number; criticalFailureCount: number };
       expect(body.failureCount).toBe(1);
       expect(body.criticalFailureCount).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // configurationOnly degradation — #9727 review
+  // -------------------------------------------------------------------------
+  //
+  // AI Providers reports `degraded` whenever a generation capability has no
+  // platform key, and production has none by deliberate deferral
+  // (docs/guides/platform-keys.md). This cron runs every 15 minutes, so
+  // capturing that as an exception is ~96 synthetic-monitor pages a day for a
+  // state the owner chose — and the run where AI Providers genuinely breaks
+  // then arrives inside a stream everyone has learned to ignore (lesson 13).
+  // It is still LOGGED at warn, matching the #7075 noise-reduction precedent
+  // this file already carries for non-critical degradations.
+  describe('AI Providers degraded by unprovisioned platform keys', () => {
+    beforeEach(() => {
+      const report = allHealthyReport();
+      report.services[4] = {
+        ...makeService(
+          'AI Providers',
+          'degraded',
+          'Generation unavailable on the platform path for model3d, texture, sfx, voice, sprite, bg_removal — no platform key or gateway route configured',
+        ),
+        summary:
+          'Available only with your own API key: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation, Sprite Generation, Background Removal',
+        configurationOnly: true,
+        details: {
+          unconfiguredCapabilities: ['model3d', 'texture', 'sfx', 'voice', 'sprite', 'bg_removal'],
+        },
+      };
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      mockComputeCriticalStatus.mockReturnValue('healthy');
+    });
+
+    it('does not call captureException for it', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockCaptureException).not.toHaveBeenCalled();
+    });
+
+    it('still logs it at warn so the operator signal survives', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockLoggerWarn).toHaveBeenCalled();
+      const warned = mockLoggerWarn.mock.calls.map(([msg]) => String(msg)).join(' | ');
+      expect(warned).toContain('configuration');
+      expect(mockLoggerError).not.toHaveBeenCalled();
+    });
+
+    it('still reports it in the response body as a failure', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      const body = await res.json() as {
+        failureCount: number;
+        failures: { name: string; status: string }[];
+      };
+      expect(body.failureCount).toBe(1);
+      expect(body.failures[0]?.name).toBe('AI Providers');
+      expect(body.failures[0]?.status).toBe('degraded');
+    });
+
+    // The exemption is per-service, not a blanket mute: a real failure in the
+    // same run must still page.
+    it('still captures a genuinely failing service in the same run', async () => {
+      const report = allHealthyReport();
+      report.services[4] = {
+        ...makeService('AI Providers', 'degraded', 'no platform key'),
+        configurationOnly: true,
+      };
+      report.services[0] = makeService('Database (Neon)', 'down', 'timeout');
+      report.overall = 'down';
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      mockComputeCriticalStatus.mockReturnValue('down');
+
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockCaptureException).toHaveBeenCalledOnce();
+      const [err] = mockCaptureException.mock.calls[0] as [Error];
+      expect(err.message).toContain('Database (Neon)');
+    });
+
+    // A `down` service is an incident whatever set the flag.
+    it('captures a down service even when it carries the marker', async () => {
+      const report = allHealthyReport();
+      report.services[4] = {
+        ...makeService('AI Providers', 'down', 'No chat backend is configured'),
+        configurationOnly: true,
+      };
+      report.overall = 'down';
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      mockComputeCriticalStatus.mockReturnValue('healthy');
+
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockCaptureException).toHaveBeenCalledOnce();
     });
   });
 

@@ -423,3 +423,18 @@ describe('capabilities cache freshness (#9725)', () => {
     expect(fetchSpy).toHaveBeenCalledWith('/api/capabilities', expect.objectContaining({ cache: 'no-store' }));
   });
 });
+
+// #9727 review: `CAPABILITY_LABELS` in lib/config/providers claims to be the one
+// vocabulary Settings, /api/capabilities and the status page share. A second
+// byte-identical table in this hook is exactly the drift that claim denies.
+describe('feature labels', () => {
+  it('derives every label from the shared CAPABILITY_LABELS table', async () => {
+    const { FEATURE_CAPABILITY_MAP, FEATURE_LABELS } = await import('@/hooks/useFeatureGating');
+    const { CAPABILITY_LABELS } = await import('@/lib/config/providers');
+    for (const [featureId, caps] of Object.entries(FEATURE_CAPABILITY_MAP)) {
+      expect(FEATURE_LABELS[featureId as keyof typeof FEATURE_LABELS], featureId).toBe(
+        caps.map((cap) => CAPABILITY_LABELS[cap]).join(' + '),
+      );
+    }
+  });
+});

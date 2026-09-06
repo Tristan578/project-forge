@@ -37,7 +37,7 @@ describe('GenerateSpriteDialog capability gate (#9117)', () => {
 
   it('asks the gate for sprite-generation', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={vi.fn()} />);
-    expect(useGenerationGate).toHaveBeenCalledWith('sprite-generation');
+    expect(useGenerationGate).toHaveBeenCalledWith('sprite-generation', 'replicate');
   });
 
   it('shows the notice and disables Generate when blocked', () => {
@@ -47,7 +47,8 @@ describe('GenerateSpriteDialog capability gate (#9117)', () => {
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sprite-unavailable');
     expect(screen.getByText('Generate').closest('button')).toBeDisabled();
     expect(screen.getByRole('textbox')).toBeDisabled();
-    for (const select of screen.getAllByRole('combobox')) expect(select).toBeDisabled();
+    expect(screen.getAllByRole('combobox')[0]).toBeEnabled(); // Allow switching to a supported provider.
+    expect(screen.getAllByRole('combobox')[1]).toBeDisabled();
   });
 });
 
@@ -79,6 +80,19 @@ describe('GenerateSpriteDialog', () => {
     cleanup();
   });
 
+  it.each([
+    ['pixel-art', 9, false, '10'], ['pixel-art', 10, true, '10'],
+    ['pixel-art', 14, true, '10'], ['hand-drawn', 15, false, '20'],
+    ['hand-drawn', 19, false, '20'], ['hand-drawn', 20, true, '20'],
+  ])('quotes and gates %s at balance %s', (style, balance, enabled, quote) => {
+    setupStore(balance as number);
+    render(<GenerateSpriteDialog isOpen onClose={mockOnClose} />);
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: style } });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A wizard' } });
+    expect(screen.getByText('Token cost:').nextElementSibling).toHaveTextContent(String(quote));
+    expect(screen.getByText('Generate').closest('button')?.disabled).toBe(!enabled);
+  });
+
   it('returns null when isOpen is false', () => {
     const { container } = render(<GenerateSpriteDialog isOpen={false} onClose={mockOnClose} />);
     expect(container.firstChild).toBeNull();
@@ -103,9 +117,9 @@ describe('GenerateSpriteDialog', () => {
     expect(screen.getByText('Vector')).toBeInTheDocument();
   });
 
-  it('renders token cost of 15 for single sprite', () => {
+  it('renders token cost of 10 for pixel-art sprite', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('15')).toBeInTheDocument();
+    expect(screen.getByText('10')).toBeInTheDocument();
   });
 
   it('disables Generate when prompt is empty', () => {

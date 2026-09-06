@@ -29,7 +29,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
  * Two separate bounds apply, because there are two separate costs:
  *   - `rateLimitPublicRoute()` — raw request volume, 30 per 5 minutes per IP,
  *     the same allowance every other public route gets.
- *   - `checkHealthFanoutBudget()` — the five outbound probes a cold report
+ *   - `checkHealthFanoutBudget()` — the six outbound probes a cold report
  *     costs, shared with `/api/health` and the `/health` page and charged only
  *     on a cache miss.
  *
@@ -44,8 +44,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   try {
   // Shared cache + in-flight dedup: this route is public and unauthenticated,
-  // so a distributed burst would otherwise fan out to five outbound probes
-  // (Neon, engine CDN, Clerk, chat backend, Upstash) per request. The cache alone is NOT a
+  // so a distributed burst would otherwise fan out to six outbound probes
+  // (Neon, Stripe, engine CDN, Clerk, chat backend, Upstash) per request. The cache alone is NOT a
   // bound — its state is per-lambda-instance, so it bounds one instance rather
   // than the aggregate. The bound is the shared fan-out budget below, which is
   // charged only after a peek miss: a report we already hold costs nothing to
@@ -78,6 +78,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       lastCheckedAt: health.lastChecked,
       latencyMs: health.latencyMs,
       critical: config.critical,
+      ...(health.summary ? { summary: health.summary } : {}),
+      // Carried, not just consumed: `deriveOverallStatus` needs it below, and
+      // a consumer of this payload can then tell "degraded because an operator
+      // deliberately has not provisioned a key" from "degraded because
+      // something broke" (#9727).
+      ...(health.configurationOnly ? { configurationOnly: true } : {}),
     };
     return [entry];
   });

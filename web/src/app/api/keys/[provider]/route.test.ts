@@ -59,6 +59,14 @@ describe('PUT /api/keys/[provider]', () => {
     expect(res.status).toBe(429);
   });
 
+  it.each(['openai', 'replicate'])('rejects unsupported sprite key setup for %s', async (provider) => {
+    const { PUT } = await import('./route');
+    const req = new NextRequest('http://localhost/api/keys/' + provider, { method: 'PUT', body: JSON.stringify({ key: 'test-key-1234567890' }) });
+    const response = await PUT(req, { params: Promise.resolve({ provider }) });
+    expect(response.status).toBe(400);
+    expect(storeProviderKey).not.toHaveBeenCalled();
+  });
+
   it('should return 400 for invalid provider', async () => {
     const { PUT } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/keys/invalid', {

@@ -70,6 +70,26 @@ async function pruneExpiredWebhookClaims(): Promise<void> {
   }
 }
 
+/**
+ * Whether a non-healthy service should page, rather than only be logged.
+ *
+ * A `degraded` service carrying `configurationOnly` is degraded BY DECISION:
+ * production runs with no `PLATFORM_*` key and `docs/guides/platform-keys.md`
+ * records that provisioning is deliberately deferred, so `AI Providers` is
+ * degraded on every single run of this 15-minute cron. Capturing that is ~96
+ * synthetic-monitor exceptions a day, indefinitely — and the run where AI
+ * Providers GENUINELY breaks then arrives inside a stream everyone has learned
+ * to ignore (lesson 13). It is still logged at warn: the same noise-reduction
+ * trade #7075 made in this file for non-critical degradations, which stopped at
+ * the logger and left this Sentry capture unconditional (#9727 review).
+ *
+ * `down` always pages, marker or not — nothing serving at all is an incident
+ * whatever configured it. So does every degradation without the marker.
+ */
+function shouldPage(service: ServiceHealth): boolean {
+  return !(service.status === 'degraded' && service.configurationOnly === true);
+}
+
 function reportFailuresToSentry(
   failedServices: ServiceHealth[],
   overallStatus: string,
@@ -112,8 +132,11 @@ async function runHealthMonitor(): Promise<NextResponse> {
       (s.name === 'Database (Neon)' || s.name === 'Clerk') && s.status !== 'healthy',
   );
 
+  // Degraded by a deliberate configuration state (#9727): logged, never paged.
+  const configurationOnly = failedServices.filter((s) => !shouldPage(s));
+
   if (failedServices.length > 0) {
-    reportFailuresToSentry(failedServices, report.overall);
+    reportFailuresToSentry(failedServices.filter(shouldPage), report.overall);
 
     // Critical failures (Database, Clerk) or any 'down' status → error
     // Non-critical degraded services → warn to reduce alert noise (#7075)
@@ -121,8 +144,20 @@ async function runHealthMonitor(): Promise<NextResponse> {
       (s) => criticalFailures.some((c) => c.name === s.name) || s.status === 'down',
     );
     const nonCriticalDegraded = failedServices.filter(
-      (s) => !criticalOrDown.includes(s),
+      (s) => !criticalOrDown.includes(s) && !configurationOnly.includes(s),
     );
+
+    if (configurationOnly.length > 0) {
+      logger.warn('Synthetic health monitor detected configuration-only degradation (not paged)', {
+        endpoint: 'GET /api/cron/health-monitor',
+        failureCount: configurationOnly.length,
+        failures: configurationOnly.map((s) => ({
+          name: s.name,
+          status: s.status,
+          error: s.error,
+        })),
+      });
+    }
 
     if (criticalOrDown.length > 0) {
       logger.error('Synthetic health monitor detected critical failures', {
@@ -182,5 +217,5 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 export const dynamic = 'force-dynamic';
-// Allow up to 30s for all 9 health checks to complete
+// Allow up to 30s for all 10 health checks (six of them outbound probes) to complete
 export const maxDuration = 30;

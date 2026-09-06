@@ -153,7 +153,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
         {/* Body */}
         <div className="space-y-4 p-4">
           {/* Unavailable state (#9117): the server refuses this capability before any charge. */}
-          {gate.blocked && <GenerationUnavailableNotice id="generate-music-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-music-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
 
           {/* Prompt */}
           <div>

@@ -101,7 +101,8 @@ describe('GET /api/capabilities', () => {
           expect(cap.requiredProviders).toBeUndefined();
           continue;
         }
-        expect(cap.hint).toContain('Settings');
+        if (cap.byokConfigurable) expect(cap.hint).toContain('Settings');
+        else expect(cap.hint).not.toContain('Settings');
         expect(cap.requiredProviders).toBeDefined();
         expect(cap.requiredProviders!.length).toBeGreaterThan(0);
       }

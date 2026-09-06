@@ -21,14 +21,23 @@ export interface GenerationGateResult {
    * links to Settings, is still reachable (#9725 p7).
    */
   unprovisionable: boolean;
+  /** False when Settings cannot supply the missing provider. */
+  byokConfigurable?: boolean;
 }
 
-export function useGenerationGate(featureId: FeatureId): GenerationGateResult {
+export function useGenerationGate(featureId: FeatureId, provider?: 'openai' | 'replicate'): GenerationGateResult {
   const { capabilities, loading, error, degraded } = useCapabilities();
 
   return useMemo(() => {
-    const open = { blocked: false, reason: undefined, loading, unprovisionable: false };
+    const open = { blocked: false, reason: undefined, loading, unprovisionable: false, byokConfigurable: false };
     if (loading || error) return open;
+
+    const operation = capabilities.find((c) => c.capability === 'sprite');
+    if (featureId === 'sprite-generation' && provider && !degraded &&
+        operation?.unprovisionable !== true && operation?.providerAvailability?.[provider] === false) {
+      return { ...open, loading: false, blocked: true,
+        reason: `This sprite operation needs ${provider === 'openai' ? 'OpenAI' : 'Replicate'}, which only this deployment can configure.` };
+    }
 
     const required = FEATURE_CAPABILITY_MAP[featureId] ?? [];
     const status = capabilities.find(
@@ -48,6 +57,7 @@ export function useGenerationGate(featureId: FeatureId): GenerationGateResult {
       reason: status.hint ?? `${status.label} is not available yet.`,
       loading: false,
       unprovisionable: status.unprovisionable === true,
+      byokConfigurable: status.byokConfigurable === true,
     };
-  }, [featureId, capabilities, loading, error, degraded]);
+  }, [featureId, provider, capabilities, loading, error, degraded]);
 }
