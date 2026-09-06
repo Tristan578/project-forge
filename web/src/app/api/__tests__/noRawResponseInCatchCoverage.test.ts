@@ -99,7 +99,8 @@ describe('no-raw-response-in-catch coverage', () => {
     for (const file of responseBuilders) {
       const relative = rel(file);
       if (EXCUSED.has(relative)) continue;
-      // eslint-disable-next-line no-await-in-loop -- config resolution is cached by ESLint; parallelising it buys nothing and obscures which file failed
+      // Sequential on purpose: ESLint caches config resolution, so
+      // parallelising buys nothing and obscures which file failed.
       const config = await eslint.calculateConfigForFile(file) as { rules?: Record<string, unknown> };
       if (!config.rules?.[RULE_ID]) uncovered.push(relative);
     }
