@@ -272,3 +272,47 @@ of a `*.failOpen` Sentry action as a contract break to diagnose, not noise, and
 carry the provider's error body into the captured exception so the next break
 is readable.
 **Ticket:** #9623
+
+### 15. A gate with no producer has unreachable states, and reads as one constant signal
+**Applies:** gate|status|verdict|marker|check-|board-verdict|producer|callers
+**What happens:** A check ships, runs on every PR, and can only ever report one
+value. `board-verdict.sh` turned a review-board marker in a PR comment into a
+`review-board` commit status — and nothing in the repository emitted that
+marker. The board workflow computed PASS/FAIL and returned it into a
+conversation. So `success` and `failure` were states no code path could produce,
+and every PR read `pending` forever. That is lesson #13's tell (the same result
+on unrelated commits) arriving through a different door, and it is worse than
+inert: a status that never changes trains everyone to ignore it, which is the
+habit the check was written to break.
+**Why:** Writing the consumer feels like writing the feature. The producer is a
+one-line call somewhere else, so it reads as wiring rather than as the other
+half of the mechanism. `agent-operations.md` §7 already says it — "grep for the
+call sites that SHOULD use it; the module is not done until callers are wired" —
+and the grep was not run.
+**Prevention:** Before claiming a gate exists, name the code path that produces
+EVERY state it can report, and run it once. If a state is only reachable by a
+human remembering a command, say so at the definition. For a marker-based
+check, assert the round trip in the suite: what the producer writes must be what
+the consumer recognises, in one test, or the two regexes drift apart silently.
+**Ticket:** #9743
+
+### 16. A source pin written as a containment check passes on the commented-out line
+**Applies:** toContain|grep -q|source pin|regression|sentry-regressions|nodeVersionConsistency|literal member
+**What happens:** A test asserts a source file contains a call that must happen,
+the call is commented out, and the test stays green — the name is still
+byte-present. Measured three ways in one session: `expect(content).toContain(
+'setSentryDeepRedactor')` passed with `// setSentryDeepRedactor(...)`; a suite
+asserted a workflow "invokes the gate" with a containment grep that survives a
+second `run:` key appended under it; and an allowlist entry anchored with `$`
+was matched against `path:line:content`, where the anchor can never hold.
+**Why:** A source pin exists precisely for properties no runtime test can see —
+a bundle edge, a build-time substitution, a wiring call whose absence changes
+nothing observable. That is exactly the situation where the pin is the only
+guard, so its strength is the whole guarantee, and "the string appears
+somewhere" is much weaker than it reads.
+**Prevention:** Assert an EXECUTABLE occurrence: anchor to line start, exclude a
+leading comment marker, or count occurrences rather than testing membership.
+Then MUTATE — comment the line out, append a duplicate key, delete the call —
+and confirm the pin goes red. A source pin you have not mutated is a source pin
+you have not tested, and it is guarding the one thing nothing else can.
+**Ticket:** #9743, #9739
