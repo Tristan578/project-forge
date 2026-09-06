@@ -146,6 +146,25 @@ assert_output "engine file does NOT fire docs" "engine/src/lib.rs" docs false
 assert_output "near-miss path does NOT fire docs" "web/src/data/commands.jsonx" docs false
 assert_output "commands.json elsewhere does NOT fire docs" "web/src/other/commands.json" docs false
 
+# ---- #9720: the capability matrix must fire the web AND docs gates ----------
+#
+# docs/capability-matrix.md is prose whose only content gate is a web unit test
+# (web/src/lib/config/__tests__/capabilityMatrix.test.ts); its docs-site copy
+# (apps/docs/data/capability-matrix.json) is verified by the docs gate's
+# check-manifest-sync.ts. `^docs/` alone maps only to the onboarding tripwire,
+# so a matrix-only PR used to run neither check.
+echo "--- capability matrix (#9720) ---"
+assert_output "capability matrix alone fires web" "docs/capability-matrix.md" web true
+assert_output "capability matrix alone fires docs" "docs/capability-matrix.md" docs true
+assert_output "capability matrix reaches any-code" "docs/capability-matrix.md" any-code true
+assert_output "the docs-site matrix copy fires docs" "apps/docs/data/capability-matrix.json" docs true
+# Controls: the alternative is anchored and dot-escaped, so a sibling doc or a
+# near-miss name must not fire web.
+assert_output "another docs file does NOT fire web" "docs/known-limitations.md" web false
+assert_output "another docs file does NOT fire docs" "docs/known-limitations.md" docs false
+assert_output "near-miss matrix path does NOT fire web" "docs/capability-matrix.mdx" web false
+assert_output "matrix name elsewhere does NOT fire web" "specs/capability-matrix.md" web false
+
 # ---- The other thirteen outputs ---------------------------------------------
 echo "--- other filters ---"
 assert_output "engine source fires engine" "engine/src/lib.rs" engine true

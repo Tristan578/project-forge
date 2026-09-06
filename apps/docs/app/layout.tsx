@@ -13,8 +13,12 @@ export const metadata: Metadata = {
     default: 'SpawnForge Documentation',
     template: '%s | SpawnForge Docs',
   },
+  // Count-free on purpose: the previous "350 commands across 41 categories"
+  // was a hard-coded number nothing compared against the manifest, and it
+  // rotted. The measured count lives in the pages that read the manifest and
+  // in docs/capability-matrix.md, which a test pins (#9720).
   description:
-    'API reference, MCP command documentation, and getting started guides for SpawnForge — the AI-powered game creation platform. 350 commands across 41 categories.',
+    'API reference, MCP command documentation, a per-entry-point capability matrix, and getting started guides for SpawnForge — the AI-powered game creation platform.',
   openGraph: {
     title: 'SpawnForge Documentation',
     description:

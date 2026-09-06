@@ -4,7 +4,10 @@ export default function DocsHome() {
       <h1>SpawnForge Documentation</h1>
       <ul>
         <li>
-          <a href="/mcp"><strong>MCP Commands</strong></a> — Control SpawnForge from AI tools. Browse the 350+ commands available to Claude and other MCP clients.
+          <a href="/mcp"><strong>MCP Commands</strong></a> — Control SpawnForge from AI tools. Browse every public command available to Claude and other MCP clients; the reference counts them from the shipped manifest.
+        </li>
+        <li>
+          <a href="/capability-matrix"><strong>Capability Matrix</strong></a> — Which capabilities are proven, implemented but unverified, partial or unavailable today through the editor, the in-app AI, game scripts and external MCP, with the issue tracking every gap.
         </li>
         {/*
           Deliberately NOT a link. This pointed at `/api`, which has never had a

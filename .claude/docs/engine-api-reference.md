@@ -1,7 +1,11 @@
 # SpawnForge Engine API Reference
 
-> Generated from `web/src/data/commands.json`. 350 commands across 41 categories.
-> Last updated: 2026-03-30
+> Hand-written against `web/src/data/commands.json` — no generator emits this
+> file, so the "Generated from" claim it used to carry was itself a rotted
+> number's cover story. The manifest holds 351 commands across 41 categories,
+> measured 2026-09-05 and pinned by
+> `web/src/lib/config/__tests__/capabilityMatrix.test.ts`.
+> Last updated: 2026-09-05
 
 ## System Boundaries
 

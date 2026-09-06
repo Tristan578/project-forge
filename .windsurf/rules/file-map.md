@@ -45,8 +45,17 @@
 - `db/` — Drizzle + Neon client
 
 ### MCP Server (`mcp-server/`)
-- `manifest/commands.json` — 322 commands across 37 categories
+- `manifest/commands.json` — 351 commands across 41 categories (measured: `bash .claude/tools/validate-mcp.sh sync`; pinned by `web/src/lib/config/__tests__/capabilityMatrix.test.ts`)
 - `src/docs/` — Doc loader, BM25 search
+
+### Docs Site (`apps/docs/`)
+
+Deploys with `rootDirectory: apps/docs`, so nothing above `apps/docs/` exists on Vercel. Every repo-root artifact the site needs has an in-root copy under `apps/docs/data/`, loaded by **static import** — a runtime `readFileSync` from a `__dirname`-derived path is invisible to Next.js output file tracing and is what 500'd `/mcp` in production (#9718).
+
+- `data/commands.json` — copy of `mcp-server/manifest/commands.json` (guarded by `scripts/check-manifest-sync.ts`)
+- `data/capability-matrix.json` — `{ source, lines[] }` generated from `docs/capability-matrix.md` by `scripts/sync-capability-matrix.ts` (`npm run sync:capability-matrix` at the repo root). Never hand-edit; the docs gate and the web gate both fail on a stale copy
+- `lib/capabilityMatrix.ts` — parser for the markdown subset the matrix is written in, plus `readCapabilityMatrix()` over the statically imported JSON
+- `components/CapabilityMatrixDocument.tsx` — server-renderable renderer for `/capability-matrix`: `#` is the page h1 and `##` the h2 (no skipped level), the row-key column is `<th scope="row">`, every header cell `<th scope="col">`, each scrolling table wrapper is a focusable `role="region"`
 
 ## Communication Pattern
 

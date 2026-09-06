@@ -133,4 +133,23 @@ describe('sitemap', () => {
     expect(apiEntry?.priority).toBe(0.6);
     expect(mcpEntry?.priority).toBe(0.7);
   });
+
+  it('advertises /capability-matrix, which the MDX walk cannot discover', async () => {
+    // The page renders from data/capability-matrix.json, not content/, so it
+    // is a hand-listed entry. Same fs mock as above with NO mdx files: the
+    // entry must be present regardless of what content/ holds.
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      return { ...actual, readdirSync: vi.fn(() => []), statSync: vi.fn() };
+    });
+
+    const { default: sitemap } = await import('../sitemap');
+    const { DOCS_URL } = await import('../../lib/site');
+    const result = sitemap();
+
+    const matrixEntry = result.find((e) => e.url === `${DOCS_URL}/capability-matrix`);
+    expect(matrixEntry).toBeDefined();
+    expect(matrixEntry?.priority).toBe(0.8);
+    expect(matrixEntry?.changeFrequency).toBe('weekly');
+  });
 });
