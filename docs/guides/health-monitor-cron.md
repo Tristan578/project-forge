@@ -89,8 +89,17 @@ Two consequences that this runbook exists to prevent:
    rather than as "production was never rebuilt" — lesson 1 with lesson 4's
    skipped-reads-as-success on top. That arm also requires lint, typecheck, the
    web and MCP tests and security to pass, and it deliberately bypasses
-   staging. **Confirm the `Deploy to Production` job actually ran** (`gh run
-   view <id>`), not merely that the workflow is green.
+   staging.
+
+   The job is **additionally** gated on the repository variable
+   `vars.VERCEL_DEPLOY_ENABLED == 'true'`. With that unset it skips however you
+   dispatch it, and the run is green then too — so it produces the identical
+   symptom from a cause your inputs cannot fix. Check it before assuming you got
+   the dispatch wrong.
+
+   **Confirm the `Deploy to Production` job actually ran** (`gh run view <id>`),
+   not merely that the workflow is green. That single check covers both causes
+   and any future gate added to the same job.
 
    A bare `vercel deploy --prod` from your machine is the wrong mechanism here
    and is hard to undo. CD's production deploy is not a plain deploy: it pulls
@@ -178,9 +187,19 @@ section proves less than it looks like it proves.
    vercel env ls preview <branch> --scope tnolan   # confirm the scope took
    ```
 
-   Capture the project-wide preview value of `UPSTASH_REDIS_REST_URL` first
-   (`vercel env pull`, or your password manager) so a mistake here is
-   recoverable.
+   Capture the project-wide preview value of `UPSTASH_REDIS_REST_URL` first, so
+   a mistake here is recoverable:
+
+   ```bash
+   vercel env pull --environment preview --scope tnolan .env.preview.bak
+   ```
+
+   `--environment preview` is not optional. A bare `vercel env pull` writes the
+   **Development** values ("Pull all Development Environment Variables from the
+   cloud and write to a file", CLI 58.4.4), so it would capture the wrong
+   variable entirely and leave you believing you had a backup. This is the only
+   safety net for a step whose stated hazard is that `vercel env rm` destroys
+   the value with nothing to restore from.
 
 2. **Redeploy that preview.** Environment variables are injected at build time
    (same reason as activation step 3), so a preview built before step 1 still
@@ -229,14 +248,28 @@ section proves less than it looks like it proves.
 **What this rehearsal proves:** the route detects a degraded service and raises
 a Sentry issue for it.
 
-**What it does not prove:** that the production alert rule *delivers*. Preview
-issues are tagged `environment: preview`, and `docs/sentry-alert-rules.md`
-requires Environment = `production` on all P1/P2 rules, so a preview issue is
-filtered out by construction and silence here is expected rather than a fault.
-Do not "fix" the production rule to accommodate it. To prove delivery, either
-add `preview` to that rule's environment filter for the duration of the
-rehearsal and remove it afterwards, or accept the first production fire as the
-proof. Note too that `captureException` reads **`SENTRY_DSN` alone** and
+**A preview issue is NOT filtered out — it is tagged `production`, and this
+rehearsal can page on-call.** All three Sentry inits set
+`environment: process.env.NODE_ENV ?? 'development'`
+(`web/sentry.server.config.ts`, `web/sentry.edge.config.ts`,
+`web/instrumentation-client.ts`). None reads `VERCEL_ENV`, and there is no
+`SENTRY_ENVIRONMENT` anywhere in `web/`. A preview deployment is a production
+Next.js build, so `NODE_ENV` is `production` there and its issues carry
+`environment: production` like any other. `docs/sentry-alert-rules.md` requires
+Environment = `production` on all P1/P2 rules, so a synthetic failure raised
+here can match them.
+
+Tell someone before you run this, or pick a window where a spurious P1 is
+acceptable. And read silence here as a fault worth investigating — it is not the
+environment filter doing its job.
+
+Two things follow. Adding `preview` to a rule's environment filter is a
+**no-op**: no issue this codebase emits ever carries that tag, so the filter
+matches nothing and you will conclude the alert path is broken when it is not.
+And genuinely separating preview from production in Sentry is a code change —
+set `environment` from `VERCEL_ENV` — not a rule edit.
+
+Note too that `captureException` reads **`SENTRY_DSN` alone** and
 no-ops without it (`web/src/lib/monitoring/sentry-server.ts`) - unlike
 `withCronMonitor`, which also accepts `NEXT_PUBLIC_SENTRY_DSN`. A preview
 carrying only the public variable satisfies a loose "has a DSN" check and still
