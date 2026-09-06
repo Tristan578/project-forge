@@ -274,7 +274,7 @@ is readable.
 **Ticket:** #9623
 
 ### 15. Upstream error text is not yours to forward
-**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard
+**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
 **What happens:** A route answers a failure with the upstream provider's own
 words. It reads like good diagnostics and it is an egress channel: on the
 platform path the credential in play is the PLATFORM's, so a provider that
@@ -396,4 +396,59 @@ Three more things this cost, each worth carrying forward:
   key through verbatim until the guard matched against a DECODED view and
   spliced the placeholder back at mapped offsets. Test a redactor on the
   encoding its output actually travels in.
+**A FOURTH board found the runtime guard shipping a blocker of its own, and the
+shape of it is the most transferable thing in this entry.** Redacting every
+response meant parsing, walking and re-serialising every response — which
+carried `redactSecrets`' `MAX_DEPTH = 8` onto the SUCCESS path. Past the bound
+the sub-tree was replaced with the literal string
+`[REDACTED: nesting depth limit]`. On the error path that was right: truncating
+a diagnostic costs nothing, and the version before it emitted a deeply-nested
+secret verbatim. On a 200 it was catastrophic. At
+`{game:{sceneData:{entities:[{...}]}}}` an entity sits at depth 4, so a tilemap
+layer's `tiles`, a skeleton bone's `localPosition` and an animation track's
+`keyframes` all land at or past eight. Published games came back
+undeserialisable, the editor wrote the truncated scene back on the next save,
+and the GDPR export had holes in it. Silently — no status change, no log.
+
+That is lesson #1 in a new costume: **a control that asserts the right property
+on its old path and the wrong one on its new one.** When you move a control to a
+different path, re-derive every bound it carries against the new input class.
+"It was fail-closed where it came from" is not an argument that it is
+fail-closed here; on the error path a truncated diagnostic is free, and on the
+success path it is data loss served as if it were the data.
+
+Three more, each of which cost a review pass:
+
+- **The guard's own byte-identity test could not observe any of it.** The
+  fixture was `{ ok, items:[1,2,3], nested:{ a, b } }` — two levels, small
+  integers, nothing a JSON round-trip or a depth bound could damage — so the
+  assertion passed for any implementation that round-trips JSON at all. That is
+  #11, written by the same author who had just cited #11, in the file that cites
+  it. When you assert "unchanged", pick a fixture where each way it could
+  CHANGE is present and reachable, and prove the fixture is capable of failing.
+- **The fix for the blocker was also the fix for the lossiness and the
+  latency.** Scanning the raw text first and returning the ORIGINAL response
+  when nothing matches means a body with no secret is never parsed, never
+  walked, never re-serialised — so pretty-printing, integer-like key order,
+  integers past 2^53, `1e400` and `-0` all survive without anyone enumerating
+  them, and the cost falls to one linear pass. Reach for "do nothing when there
+  is nothing to do" before reaching for "do it more carefully".
+- **A redactor that runs on live output can BREAK the product it protects.**
+  Two here, both real: `ASSET_R2_ACCESS_KEY_ID` matches a secret-name pattern on
+  the word KEY and its value is embedded in every SigV4 presigned URL, so
+  redacting it made R2 answer 403 and every paid asset download failed silently;
+  and correcting the `forge_` shape (which could never match, because the route
+  mints 64 hex characters and the pattern said `{32}`) would have redacted the
+  key out of the 200 body whose entire purpose is to show it once. Before
+  widening a redactor, ask which legitimate output carries the thing you are
+  about to remove. A pattern with no match is useless; a pattern that fires on
+  the product working is worse than useless.
+
+And two enforcement notes: a gate that walks `route.ts` does not walk the files
+Next.js routes (`route.js`, `.jsx`, `.mjs`, `.tsx` all count, and a floor of
+"> 90 files" is satisfied by the ones you can see however many you cannot). A
+gate that accepts a wrapper by IDENTIFIER TEXT is defeated by
+`const withEgressGuard = (h) => h;` — the same aliasing that beat the three
+static passes, reappearing inside the enforcement half of the design that
+replaced them. Resolve the binding.
 **Ticket:** #9736
