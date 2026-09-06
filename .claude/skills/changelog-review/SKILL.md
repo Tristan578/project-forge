@@ -80,7 +80,7 @@ Read the actual installed versions:
 ```bash
 # JavaScript dependencies
 node -e "
-const pkg = require('/Users/tristannolan/project-forge/web/package.json');
+const pkg = require('./web/package.json');  // run from the repo root
 const deps = {...pkg.dependencies, ...pkg.devDependencies};
 const tracked = ['next','@clerk/nextjs','stripe','@sentry/nextjs','posthog-js',
   '@upstash/redis','@neondatabase/serverless','drizzle-orm','ai','@ai-sdk/react',
@@ -89,7 +89,7 @@ tracked.forEach(d => deps[d] && console.log(d + ': ' + deps[d]));
 "
 
 # Rust dependencies
-grep -E '^(bevy|bevy_rapier|wasm-bindgen)\s' /Users/tristannolan/project-forge/engine/Cargo.toml
+grep -E '^(bevy|bevy_rapier|wasm-bindgen)\s' engine/Cargo.toml
 ```
 
 ### Step 3: Generate Report

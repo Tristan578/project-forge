@@ -151,3 +151,83 @@ apps/docs/content/mcp/*.mdx
 .vercel
 .claude/.env-health-last-check
 .worktrees/
+
+# --- Machine artefacts that must never be committed (#9736 follow-up) ---
+# A literal `%SystemDrive%` directory appeared at the repo root: a Windows
+# environment variable written into a path by a tool running under a POSIX
+# shell, which does not expand it. It contained copies of Windows cache
+# databases. Ignored so a recurrence cannot be swept in by `git add -A`, and
+# named here so the next person to see one knows what it is.
+%SystemDrive%/
+%USERPROFILE%/
+%LOCALAPPDATA%/
+
+# Codex hook runtime state, mirroring the .claude/hooks rules above.
+.codex/hooks/__pycache__/
+.codex/hooks/.sync-push.lock
+.codex/hooks/.sync-lock-wanted
+.codex/hooks/.sync.log
+*.bak
+
+# --- Half-finished cross-tool port: untracked on purpose (see #PORTISSUE) ---
+# `.codex/agents`, `.codex/hooks`, `.codex/hooks.json` and the project-specific
+# skills copied into `.agents/skills/` are a port of the `.claude/` tree that is
+# not finished, and committing it would ship instructions that do not work:
+#
+#   * 143 references to `.Codex/tools`, `.Codex/rules` and `.Codex/skills` —
+#     directories that do not exist. Zero TRACKED files contain such a
+#     reference; all 19 that do are in this untracked set, so this is damage
+#     from a find-and-replace, not an existing convention.
+#   * `.codex/hooks.json` wires 26 hooks where `.claude/settings.json` wires 39.
+#     Missing are `block-main-commits.sh`, `check-pr-metadata.sh`,
+#     `pre-push-quality-gate.sh` and `block-deferred-fixes.sh` — and the Codex
+#     profile runs with `approval_policy = "never"`, so those controls would
+#     simply be absent rather than merely weaker.
+#   * The skills duplicate `.claude/skills/` by hand and have ALREADY drifted
+#     (arch-validator and kanban differ from their originals). This repo's
+#     answer to that problem is a generator plus a drift gate
+#     (`tools/agentic-sync/`, `scripts/check-agentic-sync.sh`), which is how the
+#     port should be done rather than by copying.
+#
+# Ignored rather than left merely untracked so a `git add -A` cannot sweep the
+# broken state into the repository while the port is finished.
+.codex/agents/
+.codex/hooks/
+.codex/hooks.json
+
+# The 35 project-specific skills copied from `.claude/skills/`; see the note above.
+.agents/skills/api-middleware-migrate/
+.agents/skills/arch-validator/
+.agents/skills/architect-flow/
+.agents/skills/autonomous-sprint/
+.agents/skills/babysit-prs/
+.agents/skills/build/
+.agents/skills/builder/
+.agents/skills/capability-review/
+.agents/skills/changelog-review/
+.agents/skills/claude-platform-reference/
+.agents/skills/component-checklist/
+.agents/skills/cycle/
+.agents/skills/db-migrate/
+.agents/skills/deploy-engine/
+.agents/skills/design/
+.agents/skills/developer-experience/
+.agents/skills/dispatch-builder/
+.agents/skills/docs/
+.agents/skills/env-health-check/
+.agents/skills/frontend/
+.agents/skills/generate-route/
+.agents/skills/infra-services/
+.agents/skills/mcp-commands/
+.agents/skills/multiplayer-readiness/
+.agents/skills/planner/
+.agents/skills/pr-code-review/
+.agents/skills/pr-green-machine/
+.agents/skills/resolve-all-pr-comments/
+.agents/skills/resolve-pr-comments/
+.agents/skills/review-protocol/
+.agents/skills/rust-engine/
+.agents/skills/stripe-webhooks/
+.agents/skills/testing/
+.agents/skills/troubleshoot/
+.agents/skills/viewport/
