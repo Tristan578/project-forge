@@ -22,6 +22,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { checkMatrixCopyOnDisk } from './sync-capability-matrix.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
@@ -112,9 +113,22 @@ if (isMainModule) {
     }
   }
 
+  /**
+   * The capability matrix has the same two-copies shape (#9720): the
+   * canonical `docs/capability-matrix.md` and the JSON module the docs site
+   * imports, `apps/docs/data/capability-matrix.json`. The web unit gate pins
+   * the pair too, but this gate is the one `ci.yml` runs for an `apps/docs/`
+   * or `docs/capability-matrix.md` edit, so a stale copy is red here as well.
+   */
+  const matrix = checkMatrixCopyOnDisk();
+  if (!matrix.passed) {
+    console.error(matrix.error);
+    failed = true;
+  }
+
   if (failed) {
     process.exit(1);
   }
 
-  console.log(`Manifest sync check passed (${copies.length} copies).`);
+  console.log(`Manifest sync check passed (${copies.length} copies; capability matrix copy in sync).`);
 }

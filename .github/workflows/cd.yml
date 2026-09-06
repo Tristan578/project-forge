@@ -1799,6 +1799,23 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel deploy --prod --archive=tgz --token="$VERCEL_TOKEN"
 
+      # Verify the deployed ARTIFACT renders /capability-matrix, not just that
+      # the route answers (#9720). The page imports its data statically because
+      # a runtime file read is invisible to output file tracing — the shape
+      # that 500'd /mcp for weeks with every local test green (#9718) — and no
+      # test short of the deployed function can observe tracing. The probe
+      # requires a rendered table with the marker row; the page's own "no
+      # rows" notice is a 200 and must fail. The public docs domain is
+      # unprotected and the docs project has no rolling release, so the
+      # production domain is the artifact this run just made.
+      - name: Post-deploy capability matrix check (docs)
+        env:
+          DEPLOY_URL: https://docs.spawnforge.ai
+          MATRIX_CHECK_STABILIZE_S: '10'
+          MATRIX_CHECK_RETRIES: '3'
+          MATRIX_CHECK_INTERVAL_S: '10'
+        run: bash scripts/post-deploy-capability-matrix-check.sh "$DEPLOY_URL"
+
   # ---- Design Workbench Deploy ----
   # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
   deploy-design:

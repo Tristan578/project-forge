@@ -1,21 +1,20 @@
 /**
  * @vitest-environment node
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { describe, it, expect } from 'vitest';
 import {
-  CAPABILITY_MATRIX_PATH,
   ISSUE_BASE_URL,
   MATRIX_STATUSES,
+  hasMatrixRows,
   parseBlocks,
   parseCapabilityMatrix,
   parseInline,
-  readCapabilityMatrix,
   statusOf,
 } from '../capabilityMatrix';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+// The shipped artifact (the real data/capability-matrix.json and the way the
+// loader depends on it) is covered by capabilityMatrixArtifact.test.ts. This
+// file pins the parser against synthetic input only.
 
 describe('parseInline', () => {
   it('returns one text node for plain text', () => {
@@ -161,40 +160,12 @@ describe('parseCapabilityMatrix', () => {
   });
 });
 
-describe('readCapabilityMatrix', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('resolves the in-root copy under data/ by default', () => {
-    expect(CAPABILITY_MATRIX_PATH).toBe(path.resolve(HERE, '../../data/capability-matrix.md'));
-  });
-
-  it('reads the shipped copy and finds both matrix tables (not a vacuous walk)', () => {
-    const doc = readCapabilityMatrix();
-    expect(doc).not.toBeNull();
-    expect(doc!.title).toBe('Capability Matrix');
-
-    const tables = doc!.blocks.filter((b) => b.type === 'table');
-    const matrixRows = tables.flatMap((t) => (t.type === 'table' ? t.rows : []));
-    const generationRows = matrixRows.filter((r) => r[0]?.startsWith('`generation:'));
-    const commandRows = matrixRows.filter((r) => r[0]?.startsWith('`commands:'));
-
-    // The web gate pins the exact row set against providers.ts and the manifest;
-    // this only asserts the copy this app ships is the real document.
-    expect(generationRows.length).toBeGreaterThanOrEqual(10);
-    expect(commandRows.length).toBeGreaterThanOrEqual(41);
-    for (const row of [...generationRows, ...commandRows]) {
-      for (const cell of row.slice(1, 5)) {
-        expect(statusOf(cell), `${row[0]}: "${cell}"`).not.toBeNull();
-      }
-    }
-  });
-
-  it('returns null and logs when the file cannot be read', () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(readCapabilityMatrix(path.join(HERE, 'does-not-exist.md'))).toBeNull();
-    expect(error).toHaveBeenCalledTimes(1);
-    expect(String(error.mock.calls[0][0])).toContain('cannot read capability matrix');
+describe('hasMatrixRows', () => {
+  it('is true only when a table carries a generation: or commands: row', () => {
+    const withRow = parseCapabilityMatrix('| A | B |\n|---|---|\n| `commands:scene` | proven |');
+    const legendOnly = parseCapabilityMatrix('| Status | Meaning |\n|---|---|\n| `proven` | verified |');
+    expect(hasMatrixRows(withRow)).toBe(true);
+    expect(hasMatrixRows(legendOnly)).toBe(false);
+    expect(hasMatrixRows(parseCapabilityMatrix(''))).toBe(false);
   });
 });

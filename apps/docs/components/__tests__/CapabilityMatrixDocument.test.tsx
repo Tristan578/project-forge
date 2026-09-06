@@ -38,10 +38,28 @@ describe('Inline', () => {
 });
 
 describe('CapabilityMatrixDocument', () => {
-  it('renders the title as the page h1 and section headings one level down', () => {
+  it('renders the title as the page h1 and a ## section as the h2 directly beneath it', () => {
+    // No skipped level: the document's `#` is the h1 and `##` is the h2 (axe
+    // heading-order). The previous mapping rendered `##` as h3 with no h2
+    // anywhere on the page, and the test pinned the defect.
     render(<CapabilityMatrixDocument doc={parseCapabilityMatrix(SAMPLE)} />);
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sample Matrix');
-    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('Legend');
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Legend');
+    expect(screen.queryByRole('heading', { level: 3 })).toBeNull();
+  });
+
+  it('never mints a second h1 from a stray # in the body', () => {
+    render(<CapabilityMatrixDocument doc={parseCapabilityMatrix('# Title\n\n# Stray\n\n### Deep')} />);
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Stray');
+    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent('Deep');
+  });
+
+  it('marks every header cell as a column header for the six-column data table', () => {
+    const { container } = render(<CapabilityMatrixDocument doc={parseCapabilityMatrix(SAMPLE)} />);
+    const ths = [...container.querySelectorAll('th')];
+    expect(ths.length).toBe(6);
+    for (const th of ths) expect(th).toHaveAttribute('scope', 'col');
   });
 
   it('renders the quote, paragraph and list blocks', () => {

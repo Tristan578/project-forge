@@ -103,7 +103,15 @@ jobs:
 
           web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
 
-          echo "$CHANGED" | grep -q '^web/' && web=true
+          # docs/capability-matrix.md is prose, but its ONLY gate is a web unit
+          # test (web/src/lib/config/__tests__/capabilityMatrix.test.ts): the
+          # status vocabulary, the row set against providers.ts and the
+          # manifest, the bridge-allowlist pins. `^docs/` alone maps to the
+          # onboarding tripwire, so a PR that edited just the matrix — flipping
+          # a cell to `proven`, typing a sixth status — never ran the check
+          # that exists to catch exactly that (#9720, lesson #1). The copy the
+          # docs site ships is guarded by the docs gate below.
+          echo "$CHANGED" | grep -qE '^web/|^docs/capability-matrix\.md$' && web=true
           # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
           # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
           # so it compiles into every shipped WASM binary. It is a local patch we
@@ -124,7 +132,10 @@ jobs:
           # while web/src/lib/chat/tools.ts imports that very copy to build the
           # tool definitions served to the chat API (#8620). command-parity does
           # not cover it: it reads only the canonical manifest.
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
+          # docs/capability-matrix.md has the same two-copies shape: the docs
+          # gate's check-manifest-sync.ts also verifies apps/docs/data/
+          # capability-matrix.json against it (#9720).
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$|^docs/capability-matrix\.md$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           # Claude Code hook scripts + their self-contained bash test suites,
           # plus .claude/settings.json (the committed permissions posture, which
@@ -977,6 +988,7 @@ jobs:
             scripts/__tests__/wasm-variant-integrity.test.sh \
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
+            scripts/post-deploy-capability-matrix-check.sh scripts/__tests__/post-deploy-capability-matrix-check.test.sh \
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
@@ -1095,6 +1107,8 @@ jobs:
 
       - name: Run post-deploy health gate test suite
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
+      - name: Run post-deploy capability matrix probe test suite
+        run: bash scripts/__tests__/post-deploy-capability-matrix-check.test.sh
       - name: Run CD rolling-release helper test suite
         run: bash scripts/__tests__/cd-rolling-release.test.sh
       - name: Run CD tree-validation gate test suite

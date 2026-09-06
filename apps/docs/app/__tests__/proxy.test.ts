@@ -43,6 +43,10 @@ describe('docs proxy public routes', () => {
     expect(isPublic('/')).toBe(true);
     expect(isPublic('/mcp')).toBe(true);
     expect(isPublic('/mcp/commands')).toBe(true);
+    // The capability matrix (#9720) is the launch-readiness page README,
+    // robots.ts and sitemap.ts send anonymous readers to; the proxy's default
+    // is to PROTECT, so dropping it from PUBLIC_ROUTES would 307 them to sign-in.
+    expect(isPublic('/capability-matrix')).toBe(true);
     expect(isPublic('/sign-in')).toBe(true);
     expect(isPublic('/sign-in/sso-callback')).toBe(true);
     expect(isPublic('/sign-up')).toBe(true);

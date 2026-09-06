@@ -12,7 +12,7 @@
 ## Why SpawnForge
 
 - **Browser-native** — No download, no IDE setup. Open a URL and start building 2D or 3D games.
-- **AI-first** — 25+ AI modules and 351 MCP commands let the in-app AI drive the editor; external MCP agents can attach in local builds (production access is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722)). Describe a scene in plain text and watch it materialize. Which capabilities are proven, unverified or unavailable per entry point: [capability matrix](docs/capability-matrix.md).
+- **AI-first** — 25+ AI modules; the in-app AI is offered 275 of the 351 manifest commands (every `:write`-scoped command plus the `query` category) to drive the editor. External MCP agents can attach only in local builds, through an allowlist of 293 commands, and that path is not yet verified end to end (production access is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722)). Describe a scene in plain text and watch it materialize. Which capabilities are proven, unverified or unavailable per entry point: [capability matrix](docs/capability-matrix.md).
 - **Real engine** — Bevy ECS compiled to WebAssembly, WebGPU rendering (WebGL2 fallback), Rapier physics, spatial audio, GPU particles, skeletal animation. Not a toy.
 - **One command interface** — The visual editor, AI chat, and external MCP agents all call the same `handle_command()` JSON API. There is no separate "AI mode."
 - **Publish instantly** — One-click publish to a shareable URL. Export as a standalone ZIP with PWA support.
@@ -49,8 +49,8 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Compound AI Actions** — 8 high-level tools (`create_scene_from_description`, `setup_character`, `arrange_entities`, etc.) that batch dozens of operations into single AI calls
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
-- **AI Asset Generation** — Generate 3D models, textures, sound effects, voice lines, and music via 5 provider integrations (Meshy, ElevenLabs, Suno, DALL-E, Stable Diffusion)
-- **MCP Server** — 351 commands across 41 categories (282 public). In a local build, any MCP-compatible agent can attach to the editor and create scenes, configure materials, set up physics, write game scripts, and export finished games without touching the UI; attaching to production is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722). Per-category status for MCP and the other entry points: [capability matrix](docs/capability-matrix.md). See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
+- **AI Asset Generation** — Generate 3D models, textures, sound effects, and voice lines via provider integrations (Meshy, ElevenLabs, DALL-E, Stable Diffusion). Music generation is not available yet — its move to ElevenLabs is tracked in [#9522](https://github.com/Tristan578/project-forge/issues/9522); platform provisioning status per capability is in [docs/guides/platform-keys.md](docs/guides/platform-keys.md)
+- **MCP Server** — 351 commands across 41 categories (282 public). In a local build, an MCP-compatible agent can attach to the editor (after the in-tab consent prompt) and drive 293 of those commands — scene authoring, materials, physics, animation, inspection; script authoring, export, publishing, generation, security and economy commands are withheld over the bridge by design (`web/src/lib/mcp/bridgeAllowlist.ts`). That local path is not yet verified end to end, and attaching to production is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722). Per-category status for MCP and the other entry points: [capability matrix](docs/capability-matrix.md). See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
@@ -83,7 +83,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Tilemap System** — Multi-layer tilemaps, paint/erase/fill/rectangle tools, tile palette, hash-based change detection
 - **2D Physics** — Rapier2D integration with 6 collider shapes, 4 joint types, one-way platforms, surface velocity
 - **Skeletal 2D Animation** — Bone hierarchy, skins, IK constraints, blend trees, vertex skinning, keyframe animation
-- **AI Sprite Generation** — Generate pixel art characters, tilesets, and sprite sheets via DALL-E 3 and SDXL
+- **AI Sprite Generation** — Pixel art characters, tilesets, and sprite sheets via Replicate SDXL (pixel-art style) or DALL-E 3 (other styles). Not usable in production until the platform keys are provisioned ([#9117](https://github.com/Tristan578/project-forge/issues/9117)) — neither provider accepts a user-supplied key; see `generation:sprite` in the [capability matrix](docs/capability-matrix.md)
 
 ### Editor
 - **Dockable Workspace** — Movable, resizable panels with preset layouts and persistent user customization

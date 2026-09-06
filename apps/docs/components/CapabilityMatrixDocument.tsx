@@ -128,7 +128,11 @@ function Table({ header, rows }: { header: string[]; rows: string[][] }) {
         <thead>
           <tr>
             {header.map((cell, i) => (
-              <th key={i} style={{ ...cellStyle, color: FOREGROUND, fontWeight: 600, background: SURFACE }}>
+              <th
+                key={i}
+                scope="col"
+                style={{ ...cellStyle, color: FOREGROUND, fontWeight: 600, background: SURFACE }}
+              >
                 <Inline text={cell} />
               </th>
             ))}
@@ -153,7 +157,11 @@ function Table({ header, rows }: { header: string[]; rows: string[][] }) {
 function renderBlock(block: Block, key: number): ReactNode {
   switch (block.type) {
     case 'heading': {
-      const Tag = `h${Math.min(6, block.level + 1)}` as 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
+      // The document's `#` title is lifted out and rendered as the page h1 by
+      // the component below, so a `##` section IS the h2 — mapping it one level
+      // down skipped h2 entirely (axe `heading-order`, WCAG 1.3.1). Level as-is,
+      // clamped so a stray `#` in the body cannot mint a second h1.
+      const Tag = `h${Math.min(6, Math.max(2, block.level))}` as 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
       return (
         <Tag
           key={key}

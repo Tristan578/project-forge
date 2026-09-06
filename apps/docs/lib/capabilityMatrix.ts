@@ -1,21 +1,31 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import matrixCopy from '../data/capability-matrix.json';
 
 /**
- * The matrix MUST resolve inside the deploy root — the same rule `commands.ts`
- * documents for the manifest. The canonical file is `docs/capability-matrix.md`
- * at the repo root, which sits above `apps/docs/` and is therefore absent on
- * Vercel (`rootDirectory: apps/docs`). `data/capability-matrix.md` is the
- * in-root copy; `web/src/lib/config/__tests__/capabilityMatrix.test.ts` fails
- * whenever the two are not byte-identical, so this page can never render a
- * stale matrix without the web unit gate going red first (#9720).
+ * The matrix is a STATIC IMPORT, deliberately — the same rule `commands.ts`
+ * follows for the manifest after #9718.
+ *
+ * The canonical file is `docs/capability-matrix.md` at the repo root, which
+ * sits above `apps/docs/` and is therefore absent on Vercel (`rootDirectory:
+ * apps/docs`). The first in-root copy was a `.md` read with `fs.readFileSync`
+ * from a `__dirname`-derived path at request time, under a root layout that is
+ * `force-dynamic`. Next.js output file tracing bundles only the files it can
+ * see as module edges, and a path assembled from `__dirname` or an env var is
+ * not one — the `.md` never reached `/var/task`, the read threw, and the page
+ * would have rendered its "could not be read" notice on the very deployment
+ * README, robots.ts and sitemap.ts advertise. Every local test passed because
+ * the file was right there (lessons-learned #1 and #14).
+ *
+ * `data/capability-matrix.json` is generated from the canonical file by
+ * `scripts/sync-capability-matrix.ts` (`npm run sync:capability-matrix` at the
+ * repo root) and carries the markdown as `lines`, one per source line. A JSON
+ * import is an edge the bundler owns: the file is traced into the server
+ * function and a missing file is a build failure instead of a runtime
+ * fallback. `lib/__tests__/capabilityMatrixArtifact.test.ts` pins this shape;
+ * `web/src/lib/config/__tests__/capabilityMatrix.test.ts` (web gate) and
+ * `scripts/check-manifest-sync.ts` (docs gate) both fail when the copy is
+ * stale; `scripts/post-deploy-capability-matrix-check.sh` verifies the
+ * deployed page in `cd.yml`.
  */
-export const CAPABILITY_MATRIX_PATH = process.env.CAPABILITY_MATRIX_PATH
-  ? path.resolve(process.env.CAPABILITY_MATRIX_PATH)
-  : path.resolve(__dirname, '../data/capability-matrix.md');
 
 /** Where a bare `#1234` in the matrix points. GitHub redirects PR numbers. */
 export const ISSUE_BASE_URL = 'https://github.com/Tristan578/project-forge/issues/';
@@ -174,17 +184,27 @@ export function parseCapabilityMatrix(markdown: string): CapabilityMatrixDocumen
 }
 
 /**
- * Null when the copy cannot be read. The page renders an explicit notice for
- * that case rather than an empty table, because an empty table would look
- * like "nothing is limited" — the opposite of what the file says.
+ * The markdown the site ships — `lines` joined back into the file the sync
+ * script split. Exported so the artifact test can compare it with the
+ * canonical file without going through the parser.
  */
-export function readCapabilityMatrix(
-  matrixPath: string = CAPABILITY_MATRIX_PATH,
-): CapabilityMatrixDocument | null {
-  try {
-    return parseCapabilityMatrix(fs.readFileSync(matrixPath, 'utf-8'));
-  } catch (err) {
-    console.error(`[docs] cannot read capability matrix at ${matrixPath}:`, err);
-    return null;
-  }
+export function shippedCapabilityMatrixMarkdown(): string {
+  return (matrixCopy as { lines: string[] }).lines.join('\n');
+}
+
+/** True when the document carries at least one table with a matrix row. */
+export function hasMatrixRows(doc: CapabilityMatrixDocument): boolean {
+  return doc.blocks.some(
+    (b) => b.type === 'table' && b.rows.some((row) => /^`(generation|commands):/.test(row[0] ?? '')),
+  );
+}
+
+/**
+ * The shipped matrix, parsed. It cannot be missing — the import is a module
+ * edge and a missing file fails the build — but the PAGE still refuses to
+ * render a document with no matrix rows, because an empty table would read as
+ * "nothing is limited", the opposite of what the file says; see `hasMatrixRows`.
+ */
+export function readCapabilityMatrix(): CapabilityMatrixDocument {
+  return parseCapabilityMatrix(shippedCapabilityMatrixMarkdown());
 }

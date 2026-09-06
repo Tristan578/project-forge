@@ -15,9 +15,21 @@
  *   - every status cell is exactly one of the five statuses, and every
  *     non-proven, non-excluded cell names the issue that tracks the gap;
  *   - every row with an `excluded` cell says why in its Notes column;
- *   - the copy the docs site ships (`apps/docs/data/capability-matrix.md`) is
- *     byte-identical to the canonical file, the same rule the manifest copies
- *     live under (`apps/docs/scripts/check-manifest-sync.ts`).
+ *   - the Legend TABLE (not just the prose) defines all five statuses;
+ *   - the manifest counts the prose quotes (351 / 41 / 282 / 69) and the
+ *     per-category `public/internal` count that opens every `commands:` row's
+ *     Notes agree with `mcp-server/manifest/commands.json` — the README's "350"
+ *     rotted precisely because nothing compared it against the manifest;
+ *   - the External MCP column follows `bridgeAllowlist.ts`: `excluded` for a
+ *     category `BRIDGE_DENIED_CATEGORIES` names (a design decision), and
+ *     `unavailable (#9722)` for every category the bridge allows (production
+ *     has no bridge);
+ *   - the copy the docs site ships (`apps/docs/data/capability-matrix.json`)
+ *     reproduces the canonical file line for line, the same rule the manifest
+ *     copies live under (`apps/docs/scripts/check-manifest-sync.ts`);
+ *   - and, in the last describe, README.md's command counts are derived from
+ *     the manifest, `getChatTools()` and `bridgeAllowedCommands()` rather than
+ *     transcribed — the "350" that rotted was a README number too.
  *
  * Fails closed: an unreadable file, an empty walk, or a header that does not
  * carry the four entry-point columns is a failure, never a vacuous pass
@@ -28,11 +40,14 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PROVIDER_CAPABILITIES } from '../providers';
+import { BRIDGE_DENIED_CATEGORIES, bridgeAllowedCommands } from '@/lib/mcp/bridgeAllowlist';
+import { getChatTools } from '@/lib/chat/tools';
 
 // __dirname is web/src/lib/config/__tests__ — five levels below the repo root.
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..', '..');
 const MATRIX_PATH = join(REPO_ROOT, 'docs', 'capability-matrix.md');
-const DOCS_SITE_COPY_PATH = join(REPO_ROOT, 'apps', 'docs', 'data', 'capability-matrix.md');
+const README_PATH = join(REPO_ROOT, 'README.md');
+const DOCS_SITE_COPY_PATH = join(REPO_ROOT, 'apps', 'docs', 'data', 'capability-matrix.json');
 const MANIFEST_PATH = join(REPO_ROOT, 'mcp-server', 'manifest', 'commands.json');
 
 export const MATRIX_STATUSES = [
@@ -226,11 +241,63 @@ export function formatProblems(problems: readonly MatrixProblem[]): string {
     .join('\n');
 }
 
-function readManifestCategories(): string[] {
+interface ManifestFacts {
+  categories: string[];
+  total: number;
+  publicCount: number;
+  internalCount: number;
+  /** `category -> [public, internal]`, the pair each `commands:` row's Notes opens with. */
+  perCategory: Map<string, [number, number]>;
+}
+
+function readManifestFacts(): ManifestFacts {
   const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as {
-    commands: Array<{ category: string }>;
+    commands: Array<{ category: string; visibility: string }>;
   };
-  return [...new Set(manifest.commands.map((c) => c.category))].sort();
+  const perCategory = new Map<string, [number, number]>();
+  let publicCount = 0;
+  for (const cmd of manifest.commands) {
+    const pair = perCategory.get(cmd.category) ?? [0, 0];
+    if (cmd.visibility === 'public') {
+      pair[0] += 1;
+      publicCount += 1;
+    } else {
+      pair[1] += 1;
+    }
+    perCategory.set(cmd.category, pair);
+  }
+  return {
+    categories: [...perCategory.keys()].sort(),
+    total: manifest.commands.length,
+    publicCount,
+    internalCount: manifest.commands.length - publicCount,
+    perCategory,
+  };
+}
+
+/**
+ * The rows of the first pipe table under a given `## Heading`, split into
+ * cells, with the separator row dropped. Empty when the heading is missing or
+ * no table follows it — callers assert non-emptiness (lesson 11).
+ */
+export function tableUnderHeading(markdown: string, heading: string): string[][] {
+  const lines = markdown.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim() === heading);
+  if (start < 0) return [];
+  const rows: string[][] = [];
+  let inTable = false;
+  for (const raw of lines.slice(start + 1)) {
+    const line = raw.trim();
+    if (/^#{1,6}\s/.test(line)) break;
+    if (!line.startsWith('|')) {
+      if (inTable) break;
+      continue;
+    }
+    inTable = true;
+    const cells = splitTableRow(line);
+    if (!isSeparatorRow(cells)) rows.push(cells);
+  }
+  return rows;
 }
 
 describe('docs/capability-matrix.md', () => {
@@ -238,7 +305,8 @@ describe('docs/capability-matrix.md', () => {
   const exists = existsSync(MATRIX_PATH);
   const markdown = exists ? readFileSync(MATRIX_PATH, 'utf8') : '';
   const rows = exists ? parseMatrix(markdown) : [];
-  const categories = readManifestCategories();
+  const facts = readManifestFacts();
+  const { categories } = facts;
   const report = checkMatrix(rows, { capabilities: PROVIDER_CAPABILITIES, categories });
 
   it('exists', () => {
@@ -274,9 +342,19 @@ describe('docs/capability-matrix.md', () => {
     expect(report.problems, `\n${formatProblems(report.problems)}\n`).toEqual([]);
   });
 
-  it('defines every status in its legend', () => {
+  it('defines every status in the table under the Legend heading', () => {
+    // The statuses are backticked in the Facts prose and in "How this file is
+    // checked" too, so a whole-document `toContain` would stay green with the
+    // Legend table deleted. Read the table itself.
+    const [header, ...legend] = tableUnderHeading(markdown, '## Legend');
+    expect(header?.[0], 'no table follows the ## Legend heading').toBe('Status');
+    const keys = legend.map((cells) => cells[0]);
+    expect(legend.length, 'the legend table must define exactly the five statuses').toBe(MATRIX_STATUSES.length);
     for (const status of MATRIX_STATUSES) {
-      expect(markdown, `legend does not define \`${status}\``).toContain(`\`${status}\``);
+      expect(keys, `legend table does not define \`${status}\``).toContain(`\`${status}\``);
+    }
+    for (const cells of legend) {
+      expect(cells[1]?.trim() ?? '', `legend row ${cells[0]} has no definition`).not.toBe('');
     }
   });
 
@@ -284,35 +362,167 @@ describe('docs/capability-matrix.md', () => {
     expect(markdown).toContain('capabilityMatrix.test.ts');
   });
 
-  // Facts verified on 2026-09-05 (#9720). Both are pinned so the matrix cannot
-  // quietly claim otherwise before the tracking issue closes: flipping either
-  // means editing this test in the same change, with the evidence.
-  it('marks music unavailable through every entry point until #9522 closes', () => {
-    const music = rows.find((r) => r.kind === 'generation' && r.key === 'music');
-    expect(music).toBeDefined();
-    for (const column of ENTRY_POINT_COLUMNS) {
-      expect(music!.cells[column], `music / ${column}`).toMatch(/^unavailable \(.*#9522.*\)$/);
-    }
+  it('quotes the manifest counts the manifest actually has', () => {
+    // These are prose, so nothing else compares them; the README's "350" rotted
+    // this way. Derived from the manifest, never hard-coded here.
+    expect(facts.total).toBeGreaterThan(0);
+    expect(markdown).toContain(
+      `holds **${facts.total}** commands across **${facts.categories.length}** categories, ` +
+        `${facts.publicCount} public and ${facts.internalCount} internal`,
+    );
   });
 
-  it('marks external MCP unavailable on every row until the #9722 decision', () => {
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) {
-      expect(row.cells['External MCP'], `${row.kind}:${row.key} / External MCP`).toMatch(
-        /^unavailable \(.*#9722.*\)$/,
+  it('opens every commands row Notes with the public/internal count from the manifest', () => {
+    const commandRows = rows.filter((r) => r.kind === 'commands');
+    expect(commandRows.length).toBe(facts.categories.length);
+    for (const row of commandRows) {
+      const [publicCount, internalCount] = facts.perCategory.get(row.key) ?? [NaN, NaN];
+      expect(row.notes, `commands:${row.key} (line ${row.line}) Notes must start with "${publicCount}/${internalCount}."`).toMatch(
+        new RegExp(`^${publicCount}/${internalCount}\\. `),
       );
     }
   });
 
-  it('is mirrored byte-for-byte into the docs site deploy root', () => {
+  // Facts verified on 2026-09-05 (#9720). Pinned so the matrix cannot quietly
+  // claim otherwise before the tracking issue closes: flipping one means
+  // editing this test in the same change, with the evidence.
+  it('marks music unavailable through every non-bridge entry point until #9522 closes', () => {
+    const music = rows.find((r) => r.kind === 'generation' && r.key === 'music');
+    expect(music).toBeDefined();
+    for (const column of ENTRY_POINT_COLUMNS) {
+      if (column === 'External MCP') continue; // governed by the bridge allowlist below
+      expect(music!.cells[column], `music / ${column}`).toMatch(/^unavailable \(.*#9522.*\)$/);
+    }
+  });
+
+  it('follows the bridge allowlist in the External MCP column', () => {
+    // `excluded` is a design decision (BRIDGE_DENIED_CATEGORIES says why);
+    // `unavailable (#9722)` is the production gate for everything the bridge
+    // WOULD execute. Generation capabilities are all `generation`-category or
+    // `ai:generate`-scoped commands, which the bridge denies, so they are
+    // `excluded` too — a `partial`/`unavailable` there would claim a path the
+    // allowlist closes on purpose.
+    expect(rows.length).toBeGreaterThan(0);
+    expect(BRIDGE_DENIED_CATEGORIES.size).toBeGreaterThan(0);
+    for (const row of rows) {
+      const cell = row.cells['External MCP'];
+      const label = `${row.kind}:${row.key} / External MCP`;
+      if (row.kind === 'generation' || BRIDGE_DENIED_CATEGORIES.has(row.key)) {
+        expect(cell, `${label} — the bridge allowlist denies this by design`).toBe('excluded');
+      } else {
+        expect(cell, `${label} — the bridge cannot attach to production`).toBe('unavailable (#9722)');
+      }
+    }
+  });
+
+  it('is mirrored line for line into the docs site deploy root', () => {
     // apps/docs deploys with rootDirectory apps/docs, so the page it renders
-    // cannot read docs/ — it reads this copy. Same rule as commands.json.
+    // cannot read docs/ — it imports this copy. A JSON module is a bundler-
+    // owned edge (a runtime `readFileSync` of the .md is what 500'd /mcp in
+    // #9718), and `lines` keeps the diff one line per markdown line.
     expect(existsSync(DOCS_SITE_COPY_PATH), `${DOCS_SITE_COPY_PATH} is missing`).toBe(true);
-    const copy = readFileSync(DOCS_SITE_COPY_PATH, 'utf8');
+    const copy = JSON.parse(readFileSync(DOCS_SITE_COPY_PATH, 'utf8')) as { lines?: unknown };
+    expect(Array.isArray(copy.lines), 'apps/docs/data/capability-matrix.json must carry a `lines` array').toBe(true);
     expect(
-      copy === markdown,
-      'apps/docs/data/capability-matrix.md differs from docs/capability-matrix.md — copy the canonical file over it',
+      (copy.lines as string[]).join('\n') === markdown,
+      'apps/docs/data/capability-matrix.json is stale — run `npm run sync:capability-matrix` from the repo root',
     ).toBe(true);
+  });
+});
+
+/**
+ * The README's command counts, derived rather than transcribed.
+ *
+ * The README said "350 commands" for months while the manifest held 351,
+ * because the number was prose and nothing compared it against the artifact
+ * (#9720). Fixing the digit without pinning it just resets the clock. Every
+ * count the README quotes about the manifest is computed here from the same
+ * sources the sentences cite: the manifest itself for the total / category /
+ * public counts, `getChatTools()` for what the in-app AI is offered, and
+ * `bridgeAllowedCommands()` for what the MCP bridge will execute.
+ *
+ * Two halves, and both are needed. The positive assertions catch the counts
+ * going stale; the sweep catches a NEW sentence quoting a stale count, which
+ * the positive list alone would not see (lesson #11 — assert on content, and
+ * assert the walk was non-empty).
+ */
+describe('README.md manifest counts', () => {
+  const readme = existsSync(README_PATH) ? readFileSync(README_PATH, 'utf8') : '';
+  const facts = readManifestFacts();
+  const chatToolCount = getChatTools().length;
+  const bridgeCount = bridgeAllowedCommands().length;
+
+  it('is readable and non-empty (never a vacuous pass)', () => {
+    expect(existsSync(README_PATH), `${README_PATH} is missing`).toBe(true);
+    expect(readme.length).toBeGreaterThan(0);
+    expect(facts.total).toBeGreaterThan(0);
+    expect(chatToolCount).toBeGreaterThan(0);
+    expect(bridgeCount).toBeGreaterThan(0);
+  });
+
+  it('quotes the manifest total, category and public counts the manifest has', () => {
+    const claims = [
+      // Line 3 — the opening sentence.
+      `${facts.total}-command MCP manifest`,
+      // The stats table, and the repo-map comment near the bottom.
+      `${facts.total} across ${facts.categories.length} categories (${facts.publicCount} public)`,
+      `${facts.total} commands across ${facts.categories.length} categories`,
+      // The "What is SpawnForge" paragraph.
+      `${facts.total} of them (${facts.publicCount} public)`,
+    ];
+    for (const claim of claims) {
+      expect(readme, `README no longer says "${claim}"`).toContain(claim);
+    }
+  });
+
+  it('quotes the in-app AI and MCP bridge counts those code paths produce', () => {
+    // getChatTools(): every `:write`-scoped command plus the `query` category.
+    expect(readme, `README no longer says the in-app AI is offered ${chatToolCount}`).toContain(
+      `offered ${chatToolCount} of the ${facts.total} manifest commands`,
+    );
+    // bridgeAllowedCommands(): the allowlist minus the denied scopes.
+    expect(readme, `README no longer says the bridge allowlist is ${bridgeCount}`).toContain(
+      `an allowlist of ${bridgeCount} commands`,
+    );
+    expect(readme).toContain(`drive ${bridgeCount} of those commands`);
+  });
+
+  it('quotes no OTHER command count anywhere in the file', () => {
+    // Every three-digit number on a line that mentions commands must be one of
+    // the four derived counts. `#`-prefixed and dotted numbers are skipped so
+    // issue references and version strings are not swept up.
+    const allowed = new Set([facts.total, facts.publicCount, chatToolCount, bridgeCount]);
+    const offenders: string[] = [];
+    let inspected = 0;
+    readme.split(/\r?\n/).forEach((line, i) => {
+      if (!/command/i.test(line)) return;
+      for (const match of line.matchAll(/(?<![#\w.])\d{3}(?![\w.])/g)) {
+        inspected += 1;
+        if (!allowed.has(Number(match[0]))) {
+          offenders.push(`README.md:${i + 1}: ${match[0]}`);
+        }
+      }
+    });
+    // A zero-item walk reads as zero problems found; it means the regex or the
+    // README changed shape, not that the counts are clean.
+    expect(inspected, 'the README sweep inspected no numbers at all').toBeGreaterThanOrEqual(4);
+    expect(
+      offenders,
+      `\nREADME command counts that match none of ${[...allowed].join('/')}:\n${offenders.join('\n')}\n`,
+    ).toEqual([]);
+  });
+});
+
+describe('tableUnderHeading on synthetic input', () => {
+  it('returns the first table after the heading and stops at the next heading', () => {
+    const md = ['## A', '', 'intro', '', '| K | V |', '|---|---|', '| `x` | one |', '', '## B', '| K | V |', '|---|---|', '| `y` | two |'].join('\n');
+    expect(tableUnderHeading(md, '## A')).toEqual([['K', 'V'], ['`x`', 'one']]);
+    expect(tableUnderHeading(md, '## B')).toEqual([['K', 'V'], ['`y`', 'two']]);
+  });
+
+  it('returns nothing for a missing heading or a heading with no table', () => {
+    expect(tableUnderHeading('## A\n\nprose only\n\n## B', '## A')).toEqual([]);
+    expect(tableUnderHeading('## A\n| K |\n|---|\n| 1 |', '## Missing')).toEqual([]);
   });
 });
 

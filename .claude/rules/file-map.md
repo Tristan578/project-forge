@@ -185,12 +185,19 @@ Fumadocs-based docs site for the SpawnForge platform API and MCP command referen
 
 ### `apps/docs/components/` — Docs-site React components
 - `CommandFilter.tsx` — Accessible faceted filter for the MCP command index. Accepts `categories`, `scopes`, `totalCommands`, optional `visibleCount` + `onFilterChange`. Uses `role="group"`, native checkboxes, and `aria-live="polite"` status region.
+- `CapabilityMatrixDocument.tsx` — Server-renderable renderer for the capability matrix (#9720): the document's `#` is the page h1, `##` sections are h2 (no skipped level), status cells become `data-status` badges, `<th scope="col">` on every data table. Styled inline like `app/mcp/[category]/page.tsx`; no markdown dependency.
 
 ### `apps/docs/lib/` — Shared docs-site utilities
 - `commands.ts` — `readCommandsManifest()`: reads `apps/docs/data/commands.json` (override with `MANIFEST_PATH`), returns `{ categories, scopes, publicCount }` for public commands only. Scope prefixes extracted via `/^([a-z_]+)_/` regex. **The path must stay inside the deploy root** — `rootDirectory: apps/docs`, so anything above `apps/docs/` resolves locally and is absent on Vercel (PF-1019). An unreadable manifest THROWS; it must never degrade to a zero-command build.
+- `capabilityMatrix.ts` — Parser for the markdown subset `docs/capability-matrix.md` is written in (headings, quotes, lists, pipe tables; inline code/bold/links/`#1234`) plus `readCapabilityMatrix()`, which parses the **statically imported** `data/capability-matrix.json`. A static import is the ONLY loader shape that survives Next.js output file tracing under the `force-dynamic` layout — a runtime `readFileSync` of an in-root file is what 500'd `/mcp` (#9718). `lib/__tests__/capabilityMatrixArtifact.test.ts` pins the import shape and exercises the real copy.
+
+### `apps/docs/data/` — In-root copies of repo-root artifacts (the deploy root cannot see above `apps/docs/`)
+- `commands.json` — copy of `mcp-server/manifest/commands.json` (guarded by `check-manifest-sync.ts`)
+- `capability-matrix.json` — `{ source, lines[] }` generated from `docs/capability-matrix.md` by `scripts/sync-capability-matrix.ts` (`npm run sync:capability-matrix` at the repo root). Never hand-edit; the web gate (`web/src/lib/config/__tests__/capabilityMatrix.test.ts`) and the docs gate both fail on a stale copy.
 
 ### `apps/docs/scripts/` — Build-time Node scripts
-- `check-manifest-sync.ts` — Asserts the canonical `mcp-server/manifest/commands.json` matches BOTH copies: `web/src/data/commands.json` and `apps/docs/data/commands.json`. THREE copies exist; adding a fourth without registering it here is how the docs copy silently drifted (PF-1019)
+- `check-manifest-sync.ts` — Asserts the canonical `mcp-server/manifest/commands.json` matches BOTH copies: `web/src/data/commands.json` and `apps/docs/data/commands.json`. THREE manifest copies exist; adding a fourth without registering it here is how the docs copy silently drifted (PF-1019). Its CLI also runs `checkMatrixCopyOnDisk()` so a stale `data/capability-matrix.json` is red in the docs gate.
+- `sync-capability-matrix.ts` — Writes (or with `--check`, verifies) `data/capability-matrix.json` from `docs/capability-matrix.md`; pure `toMatrixCopy` / `checkMatrixCopy` are what the gate and the test share
 - `ci-gate-check.ts` — CI gate: fails if public command count drops below threshold
 - `generate-mcp-docs.ts` — Generates MDX pages from the MCP command manifest
 - `__tests__/` — Vitest unit tests for each script (environment: node)
