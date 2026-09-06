@@ -5125,7 +5125,7 @@ Scope: `generation:write` | Token cost: 70
 
 ### `generate_music`
 
-Generate background music from text description
+Generate background music from text description. Not available yet: the music provider is being replaced (#9522), so this command is withheld from AI tool sets and refused by the route until then.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

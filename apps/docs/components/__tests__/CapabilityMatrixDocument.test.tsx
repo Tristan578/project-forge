@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { axe, toHaveNoViolations } from 'jest-axe';
+import { axe } from 'jest-axe';
 import '@testing-library/jest-dom';
 import { CapabilityMatrixDocument, Inline } from '../CapabilityMatrixDocument';
 import {
@@ -16,7 +16,6 @@ import {
   readCapabilityMatrix,
 } from '../../lib/capabilityMatrix';
 
-expect.extend(toHaveNoViolations);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PROBE_SCRIPT = path.resolve(HERE, '../../../../scripts/post-deploy-capability-matrix-check.sh');
@@ -238,7 +237,11 @@ describe('axe on the rendered document', () => {
   // validity, duplicate ids, list nesting.
   it('reports no violations for the sample document', async () => {
     const { container } = render(<CapabilityMatrixDocument doc={parseCapabilityMatrix(SAMPLE)} />);
-    expect(await axe(container)).toHaveNoViolations();
+    const results = await axe(container);
+    // On `violations` rather than through the `toHaveNoViolations` matcher:
+    // the matcher needs a vitest type augmentation this deploy root cannot
+    // carry (see jest-axe.d.ts), and a failure here names the rules.
+    expect(results.violations.map((v) => v.id)).toEqual([]);
   });
 });
 

@@ -354,6 +354,17 @@ jobs:
       - name: Install docs dependencies
         run: cd apps/docs && npm install
 
+      # A TYPE ERROR IN apps/docs USED TO REACH THE PRODUCTION DEPLOY. Both
+      # typecheck jobs are scoped to `web/` (cd.yml, quality-gates.yml) and this
+      # gate ran vitest only — but `next build` type-checks unconditionally
+      # unless `typescript.ignoreBuildErrors` is set, and apps/docs does not set
+      # it. So the first thing that could notice a broken type in this deploy
+      # root was the `vercel deploy --prod` in cd.yml's deploy-docs job. Found
+      # live: a test importing `jest-axe` with no declaration file passed vitest,
+      # which does not type-check, and failed `tsc --noEmit` with TS7016.
+      - name: Typecheck the docs app
+        run: cd apps/docs && npx tsc --noEmit
+
       - name: Run docs vitest suite
         run: cd apps/docs && npx vitest run
 
