@@ -461,6 +461,10 @@ gh workflow run cd.yml
 - Each deploy uploads 4 variants to R2 CDN
 
 ### Monitoring Recommendations
+- **Synthetic health monitor** (`/api/cron/health-monitor`, every 15 min) — the only automated
+  outage detector between deploys. It is inert until `CRON_SECRET` is set in production, and it
+  inherits whatever `runAllHealthChecks()` reports. Activation, the evidence to attach, and the
+  alert-path rehearsal: `docs/guides/health-monitor-cron.md` (#9118).
 - Track R2 storage via Cloudflare Analytics
 - Track Neon storage via Neon Dashboard metrics
 - Track Vercel function invocations in Vercel Analytics
