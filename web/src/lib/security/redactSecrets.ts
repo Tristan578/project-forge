@@ -13,15 +13,23 @@
  * secret to any signed-in user. Relying on a third party's redaction policy is
  * the wrong dependency: it can change without notice and we would not know.
  *
- * WHERE THIS ACTUALLY RUNS, stated precisely because the first version of this
- * comment overstated it. Redaction is on the catch path because
- * `spawnforge/no-raw-response-in-catch` (see `web/eslint-rules/`) forbids
- * building a response inside a catch with anything except the constructors in
- * `lib/api/errors.ts`, all of which call this module. Before that rule existed
- * the claim was false: 89 of 101 route files built error bodies with a raw
- * `NextResponse.json`, so this "net" sat under about 1% of the API surface —
- * including none of the routes that had the defect. The lint rule is what makes
- * the sentence true; without it this file is decoration.
+ * WHERE THIS ACTUALLY RUNS, stated precisely because two earlier versions of
+ * this comment overstated it.
+ *
+ * It runs on EVERY API response, because `withEgressGuard`
+ * (`src/lib/security/egressGuard.ts`) wraps every App Router handler and calls
+ * this module on the body, on every header value, on every `Set-Cookie` and on
+ * the `Location` before the response is returned. That is what makes the
+ * sentence "redaction is on the response path" true, and it is true whatever
+ * the route did — no static analysis has to predict the shape.
+ *
+ * The first version of this comment claimed the catch path was covered because
+ * routes used the constructors in `lib/api/errors.ts`; 89 of 101 route files
+ * used a raw `NextResponse.json` instead, so the net sat under about 1% of the
+ * API surface, including none of the routes that had the defect. The second
+ * credited the lint rule `spawnforge/no-raw-response-in-catch`, which three
+ * review passes then walked around one alias at a time. The rule is kept as
+ * early feedback; the guard is what carries the property.
  *
  * It also runs inside the Sentry scrubbers, because provider text reaches a
  * third party too.
@@ -46,9 +54,12 @@
  *    appears behind `Bearer `**. That is a real gap, and naming it is better
  *    than a guessed pattern that would read as coverage.
  *
- * Redaction is a net, not a licence. Callers must still keep upstream text out
- * of user-facing strings — the lint rule above is what enforces that, and this
- * module is what catches what a static rule cannot see.
+ * Redaction is a net, not a licence, and the net has a specific hole: it
+ * removes environment values and the credential shapes listed below, and it
+ * cannot recognise an internal hostname, a SQL fragment, or another tenant's
+ * identifier. Routes must still return fixed strings on the error path. The
+ * guard is what catches what nobody predicted; it is not permission to stop
+ * trying.
  */
 
 /** What a removed value is replaced with. Stable so tests and greps can pin it. */

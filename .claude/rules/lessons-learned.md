@@ -274,7 +274,7 @@ is readable.
 **Ticket:** #9623
 
 ### 15. Upstream error text is not yours to forward
-**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch
+**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard
 **What happens:** A route answers a failure with the upstream provider's own
 words. It reads like good diagnostics and it is an egress channel: on the
 platform path the credential in play is the PLATFORM's, so a provider that
@@ -320,16 +320,52 @@ rooted in a call (`getDb().update(x).set({ e: err.message })`), a stream's
 unbounded as the set of ways to build a string.** Enumerating either one is the
 same mistake wearing a different hat.
 
-What holds is an ALLOWLIST at the BOUNDARY. `spawnforge/no-raw-response-in-catch`
-(`web/eslint-rules/`) tracks the caught binding and every value derived from it
-through the catch scope, and reports wherever that value CROSSES OUT —
-returned, written into anything not declared inside the catch, passed to a
-response constructor, or passed to a call that is not on the sink allowlist
-(`errorSinks`/`loggerObjects`, set in `web/eslint.config.mjs` so they are
-auditable there). Crossing out IS closed, unlike the sinks: a value that never
-leaves the scope cannot reach a client. Derivations stay quiet, which is what
-keeps the rule usable. Use `createErrorResponse`, `apiError` or `redactedJson`
-from `@/lib/api/errors` — all of which run `redactSecrets`.
+The third attempt inverted the model: instead of enumerating sinks, track the
+caught binding and every value derived from it, and report wherever it CROSSES
+OUT of the catch scope. The claim was that crossing out is a CLOSED set even
+though sinks are not. A third board disproved that too, and the bypasses were
+one-liners:
+
+    const sink = cache; sink.set('last', err.message);   // alias an outer Map
+    const R = NextResponse; return R.json({ detail });    // alias the ctor
+    function detail() { return String(err); }             // hoisted declaration
+    sql`UPDATE jobs SET error = ${err.message}`           // tagged template
+    yield String(err);                                    // a fifth exit
+
+The escape check compared NAME scope against REACHABILITY — "declared inside
+the catch" was treated as "cannot outlive the request" — so one `const` that
+aliased an outer object silenced every escape the previous two boards had
+pinned. And the rule's own message ("keep the error inside the catch") is what
+pushes an author toward writing exactly that alias.
+
+**THE ACTUAL LESSON, after three passes: a hand-written static analysis cannot
+carry a security property over an open-ended language. Put the control at
+RUNTIME, on the one path every byte takes.** `withEgressGuard`
+(`web/src/lib/security/egressGuard.ts`) wraps every App Router handler and
+redacts the body, every header value, every `Set-Cookie` and the `Location`
+before the response is returned. However the body was assembled — helper,
+alias, hoisted function, tagged template, stream, a shape nobody has thought of
+— it passes through one function. That property does not depend on anyone
+having predicted the attack, which is the exact thing each of the three static
+designs depended on.
+
+Enforcement then stops being a dataflow question and becomes a SHAPE question,
+which a parser can answer with certainty: `egressGuardCoverage.test.ts` walks
+every `src/app/**/route.ts` and names any exported HTTP method that is not a
+`withEgressGuard(...)` call. A route that forgets the wrapper is named; nothing
+has to be inferred.
+
+The lint rule is KEPT, and demoted to what it is: early feedback in the editor
+for the common shapes, not the guarantee. That is a real thing to want — it
+tells an author they are writing the defect before CI does — as long as nobody
+reads its green as proof. Use `createErrorResponse`, `apiError` or
+`redactedJson` from `@/lib/api/errors`; all of them run `redactSecrets`, and
+the guard runs it again on the way out.
+
+A generalisation worth carrying: when a control has a mandatory single path at
+runtime, put the control THERE and use static analysis for the coverage
+question ("is every handler wrapped?"), never for the semantic one ("can this
+value reach a client?"). The first is decidable. The second is not.
 
 Three more things this cost, each worth carrying forward:
 
@@ -351,4 +387,13 @@ Three more things this cost, each worth carrying forward:
   it green (lessons-learned #11, inside the file that cites #11). Write each
   case so the line under test is the only thing that can report, then DELETE
   that line and confirm the case fails.
+- **Percent-encoding defeats a `\b`-anchored pattern.** Every credential shape
+  in `redactSecrets` is left-anchored on a word boundary, and in
+  `?e=invalid%20key%20sk-ant-AAA` the character before `sk-ant-` is the `0` of
+  `%20` — a word character — so the boundary never matches. A redirect
+  `Location` and a `Set-Cookie` value are percent-encoded by the time they are
+  headers, so the two channels the guard closes structurally were passing the
+  key through verbatim until the guard matched against a DECODED view and
+  spliced the placeholder back at mapped offsets. Test a redactor on the
+  encoding its output actually travels in.
 **Ticket:** #9736

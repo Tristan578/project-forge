@@ -1,88 +1,104 @@
 /**
- * spawnforge/no-raw-response-in-catch — the caught error must not leave a catch
- * scope, and API error responses built on the catch path must go through a
- * redacting constructor (#9736).
+ * spawnforge/no-raw-response-in-catch — EARLY FEEDBACK, at author time, that a
+ * caught error is heading for a client response (#9736).
  *
- * WHY THIS IS AN ALLOWLIST AND NOT A LIST OF FORBIDDEN SINKS.
+ * THIS RULE IS NOT THE GUARANTEE. Read that sentence before trusting anything
+ * below it.
  *
- * Two earlier designs were defeated by a review board, each in one sitting.
+ * The guarantee is `withEgressGuard` in `src/lib/security/egressGuard.ts`: a
+ * runtime wrapper on every App Router handler that redacts the body, every
+ * header value, every `Set-Cookie` and the `Location` of every response before
+ * it is returned. However the body was assembled — helper, alias, hoisted
+ * function, tagged template, stream, a shape nobody has thought of — it passes
+ * through one function. `src/app/api/__tests__/egressGuardCoverage.test.ts`
+ * names any route that is not wrapped.
  *
- * The first was a regex detector that looked for a caught binding flowing into
- * a response body. Eleven ordinary shapes walked through it — `err.toString()`,
- * `err.response.data`, `const { message } = err`, `NextResponse.json(build(err))`,
- * a header set after construction, an assignment to an outer `let`,
- * `parts.push(err.message)` then `join`, a promise `.catch((e) => ...)`, and so
- * on. A detector that enumerates how a body was ASSEMBLED can always be written
- * around, because the space of ways to build a string is unbounded.
+ * WHY THE GUARANTEE MOVED. Three adversarial review passes were run against
+ * successive versions of this rule. Each pass closed the shapes the previous
+ * one found, and each next pass found more. By the third they were one-liners:
  *
- * The second — the AST rule this replaces — fixed assembly by forbidding the
- * SITE, then enumerated the sites: `.json`, an assignment to an outer binding,
- * an argument to a sanctioned constructor. The board found three more sinks in
- * an afternoon, all lint-clean: the RETURN VALUE of the catch scope
- * (`.catch((e) => e.message)` and a body built at the call site), a response
- * HEADER set on a sanctioned constructor's result, and a `redirect` whose URL
- * carries the text. The sink space is open-ended too, so enumerating it has the
- * same shape of failure as enumerating assembly (lessons-learned #1: a gate
- * that checks a property adjacent to the one that matters).
+ *     const sink = cache; sink.set('last', err.message);   // alias an outer Map
+ *     const R = NextResponse; return R.json({ detail });    // alias the ctor
+ *     function detail() { return String(err); }             // hoisted decl
+ *     sql`UPDATE jobs SET error = ${err.message}`           // tagged template
+ *     import * as srv from 'next/server';                   // namespace import
  *
- * So the model is inverted. Inside a catch scope, the caught binding and every
- * value DERIVED from it are tracked, and the rule reports wherever that value
- * CROSSES OUT of the scope. Crossing out is a closed set, unlike the set of
- * sinks:
+ * The escape check compared NAME scope against reachability, so one `const`
+ * defeated it — and the rule's own message ("keep the error inside the catch")
+ * is what pushes an author toward writing exactly that line. Every shape listed
+ * above is now closed and pinned by a named RuleTester case, and that is
+ * precisely the point: three rounds of closing enumerated shapes produced three
+ * rounds of new ones. A static analysis over an open-ended language is the
+ * wrong primitive for a property that has to hold. It is a very good primitive
+ * for telling an author, in their editor, that they are writing the defect.
  *
- *   - it is RETURNED (a `return`, or a callback's expression body);
+ * DO NOT restate the earlier claim that "crossing out is a closed set". Pass 3
+ * disproved it: `yield`, a tagged template and a hoisted declaration were all
+ * outside the enumeration, and the enumeration is what the claim rested on.
+ *
+ * HOW IT WORKS, so a report is readable. Inside a catch scope the caught
+ * binding and every value DERIVED from it are tracked, and the rule reports
+ * where that value crosses out of the scope:
+ *
+ *   - it is RETURNED (a `return`, a `yield`, or a callback's expression body);
  *   - it is WRITTEN into something not declared inside the catch — an
- *     assignment, a destructuring assignment, or a mutating call on an outer or
- *     freshly-constructed receiver (`outer.push`, `db.update(x).set(...)`,
- *     `controller.enqueue(...)`, `Object.assign(outerBody, ...)`);
+ *     assignment, a destructuring assignment, or a mutating call (including a
+ *     tagged template) on a receiver that RESOLVES to an outer binding.
+ *     Resolution, not naming: `const h = res.headers` resolves to `res`, so a
+ *     write to `h` taints `res`; `const s = cache` resolves to a module
+ *     binding, so the write is an escape naming `cache`;
  *   - it is passed to a SANCTIONED response constructor (redaction is a net,
  *     not a licence: upstream text carries internal hostnames, SQL and other
  *     tenants' identifiers that no shape list will match);
  *   - it is passed to any call that is not on the sink allowlist below.
  *
- * Every sink named in the board's three passes is one of those four, and so is
- * every sink nobody has thought of yet: a value that never leaves the scope
- * cannot reach a client. Derivations themselves — a member read, a template
- * literal, an object or array, `await`, a string method, a local accumulator —
- * are inert, so they are tracked but never reported. That is what keeps the
- * rule quiet enough to leave enabled.
+ * Derivations themselves — a member read, a template literal, an object or
+ * array, `await`, a string method, a local accumulator — are inert, so they are
+ * tracked but never reported. That is what keeps the rule quiet enough to leave
+ * enabled.
  *
  * The allowlist of terminal sinks is an OPTION (`errorSinks`, `loggerObjects`,
  * `pureDerivations`), set explicitly in `web/eslint.config.mjs` so a reviewer
  * can audit what is permitted without reading this file.
  *
- * Rule 1 (the site ban) is kept alongside the taint model rather than folded
- * into it, and it earns its place: it catches a response built inside a catch
- * whose body carries upstream text the taint tracker cannot see — the classic
- * `NextResponse.json(await upstream.text())` inside a catch, where nothing
- * references the caught binding at all. It now bans EVERY member of
- * NextResponse/Response (`json`, `redirect`, `rewrite`, `next`, `error`),
- * computed or not, because a redirect URL is a client-visible egress channel
- * exactly like a body.
+ * Rule 1 (the site ban) sits alongside the taint model and earns its place: it
+ * catches a response built inside a catch whose body carries upstream text the
+ * tracker cannot see — `NextResponse.json(await upstream.text())`, where
+ * nothing references the caught binding at all. It bans every member of
+ * NextResponse/Response, computed or not, through an import rename, a namespace
+ * import or a local alias, and it is UNCONDITIONAL: the narrowing exemption
+ * cannot suppress it, because a single `typeof err` inside the arguments used
+ * to be enough to turn it off.
  *
  * ESCAPE HATCH. An ordinary `// eslint-disable-next-line` with a stated reason.
  * The repo bans blanket disables, so a reviewer sees every one of them.
  *
- * KNOWN LIMITS, stated rather than implied. Each was reproduced against this
- * rule; none is a claim that the shape is safe.
+ * KNOWN LIMITS. Each was reproduced against this rule. None is a claim that the
+ * shape is safe — `withEgressGuard` is what covers them at runtime, and that is
+ * the whole reason this list is allowed to be non-empty.
  *  - `Promise.allSettled` hands a rejection reason back with no catch clause
  *    anywhere: `rs.filter((r) => r.status === 'rejected').map((r) => r.reason.message)`
  *    has no caught binding to track and is NOT analysed.
+ *  - Taint is not propagated into CALLBACK PARAMETERS, so higher-order
+ *    iteration launders it: `String(err).split('\n').forEach((line) => outer.push(line))`
+ *    reports nothing, while the `for...of` spelling of the same code does.
+ *  - A call whose RECEIVER carries the taint but whose arguments do not is not
+ *    classified: `err.response.body.pipeTo(writable)`.
  *  - The NON-THROWING path is out of scope by construction. `const r = await
  *    fetch(u); if (!r.ok) return apiError(502, await r.text());` puts the
- *    upstream body in a client response with no catch clause; this rule cannot
- *    see it. `redactSecrets` inside the sanctioned constructor is the only
- *    control there.
+ *    upstream body in a client response with no catch clause.
  *  - A response constructed inside a helper function that the catch merely
- *    calls is not seen as a construction. It is, however, an unknown-sink call
- *    if the caught value reaches it, and a `catchValueReturned` if its result is
- *    returned — so the laundering path is closed even though the site is not.
- *  - Scope tracking is lexical name tracking, not full scope resolution: a
- *    catch that shadows an outer name is treated as declaring it. Import
- *    RENAMES are resolved (`NextResponse as NR`), shadowing is not.
- *  - A `return` inside a function nested in the catch is not itself reported;
- *    the nested function's binding is tainted instead, so the value is caught
- *    when the function's RESULT crosses out.
+ *    calls is not seen as a construction. It is an unknown-sink call if the
+ *    caught value reaches it, and a `catchValueReturned` if its result is
+ *    returned.
+ *  - Scope tracking is lexical NAME tracking, not scope resolution.
+ *    `declaredWithin` walks the whole catch subtree including nested function
+ *    bodies, so a local declared in a nested arrow puts its name in the
+ *    declared set and disarms the outer-write check for an unrelated outer
+ *    binding of the same name.
+ *  - The taint fixpoint is capped at 12 passes rather than iterated to
+ *    stability, so a reverse-ordered derivation chain longer than that loses
+ *    the taint.
  */
 
 /**
@@ -477,10 +493,16 @@ const rule = {
      */
     const rawResponseNames = new Set(RAW_RESPONSE_OBJECTS);
     const helperNames = new Set(responseHelpers);
+    /** `import * as srv from 'next/server'` — `srv.NextResponse.json` is a site. */
+    const responseNamespaces = new Set();
     for (const statement of context.sourceCode.ast.body) {
       if (statement.type !== 'ImportDeclaration') continue;
       const source = typeof statement.source.value === 'string' ? statement.source.value : '';
       for (const specifier of statement.specifiers) {
+        if (specifier.type === 'ImportNamespaceSpecifier' && RESPONSE_MODULES.has(source)) {
+          responseNamespaces.add(specifier.local.name);
+          continue;
+        }
         if (specifier.type !== 'ImportSpecifier' || specifier.imported.type !== 'Identifier') continue;
         const imported = specifier.imported.name;
         if (RAW_RESPONSE_OBJECTS.has(imported) && RESPONSE_MODULES.has(source)) {
@@ -488,6 +510,22 @@ const rule = {
         }
         if (responseHelpers.has(imported)) helperNames.add(specifier.local.name);
       }
+    }
+
+    // A LOCAL alias of a constructor is neither an import rename nor a
+    // cross-file call, so it was the cheapest evasion of the one rule meant to
+    // be independent of taint tracking: `const R = NextResponse;` then
+    // `R.json({ detail })`. Resolved to a fixpoint so a chain of aliases does
+    // not reopen it.
+    for (let pass = 0; pass < 4; pass += 1) {
+      const before = rawResponseNames.size + helperNames.size;
+      walk(context.sourceCode.ast, (n) => {
+        if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier') return;
+        if (!n.init || n.init.type !== 'Identifier') return;
+        if (rawResponseNames.has(n.init.name)) rawResponseNames.add(n.id.name);
+        if (helperNames.has(n.init.name)) helperNames.add(n.id.name);
+      });
+      if (rawResponseNames.size + helperNames.size === before) break;
     }
 
     // A catch nested inside a catch is analysed by both, so dedupe reports; and
@@ -528,6 +566,42 @@ const rule = {
       return declared;
     }
 
+    /**
+     * Catch-declared bindings that merely ALIAS something built outside the
+     * catch, mapped to the outer root they reach.
+     *
+     * `declared` is a set of NAMES, and the escape check treated "named here"
+     * as "cannot outlive this scope". One `const` falsifies that:
+     * `const sink = cache; sink.set('last', err.message)` writes into a
+     * module-scoped Map read by a later request, and every escape the board had
+     * pinned went quiet the moment an alias line was added — including the
+     * rule's own named test cases. Worse, the rule's message ("keep the error
+     * inside the catch") is what pushes an author toward writing that line.
+     *
+     * So a receiver counts as local only when the binding its initializer
+     * chains back to was declared here — a fresh object, `new`, or call result.
+     * `const h = res.headers` resolves to `res`, which is local, so writing to
+     * `h` taints `res` and the eventual `return res` reports; `const s = cache`
+     * resolves to a module binding, so the write is an escape naming `cache`.
+     */
+    function aliasRootsWithin(root) {
+      const roots = new Map();
+      const chainRoot = (init) => {
+        let current = init;
+        while (current && (current.type === 'MemberExpression' || current.type === 'TSNonNullExpression')) {
+          current = current.object ?? current.expression;
+        }
+        return current && current.type === 'Identifier' ? current.name : null;
+      };
+      walk(root, (n) => {
+        if (n.type !== 'VariableDeclarator' || !n.init) return;
+        const from = chainRoot(n.init);
+        if (!from) return;
+        for (const name of patternNames(n.id)) if (name !== from) roots.set(name, from);
+      });
+      return roots;
+    }
+
     /** True when a member chain reaches a plain identifier without a call. */
     function staticReceiverRoot(node) {
       let current = node;
@@ -546,7 +620,7 @@ const rule = {
      * `parts.push(err.message)` on a local array, and `res.headers.set(k, err.message)`
      * on a locally-built response all land here.
      */
-    function taintedWithin(root, bindings, declared) {
+    function taintedWithin(root, bindings, declared, isLocal, resolveRoot) {
       const tainted = new Set(bindings);
       if (tainted.size === 0) return tainted;
       for (let pass = 0; pass < 12; pass += 1) {
@@ -574,6 +648,19 @@ const rule = {
             patternNames(n.left, tainted);
             return;
           }
+          if (
+            (n.type === 'FunctionDeclaration' || n.type === 'ClassDeclaration')
+            && n.id
+            && referencesAny(n.body, tainted)
+          ) {
+            // The compensating half of "a return inside a nested function is not
+            // reported" only ever worked for function EXPRESSIONS bound by a
+            // declarator. A hoisted `function detail() { return String(err); }`
+            // had no tainted binding at all, so `apiError(500, detail())`
+            // reproduced the original defect lint-clean.
+            tainted.add(n.id.name);
+            return;
+          }
           if (n.type !== 'CallExpression' || !n.arguments.some((a) => referencesAny(a, tainted))) return;
           // A mutating call on a LOCAL binding accumulates into it rather than
           // escaping: the binding becomes tainted and is caught when it crosses
@@ -584,12 +671,21 @@ const rule = {
           if (path && TARGET_IS_FIRST_ARG.has(path)) {
             const target = n.arguments[0];
             const targetRoot = target ? staticReceiverRoot(target) : null;
-            if (targetRoot && declared.has(targetRoot)) tainted.add(targetRoot);
+            if (targetRoot && isLocal(targetRoot)) {
+              tainted.add(targetRoot);
+              tainted.add(resolveRoot(targetRoot));
+            }
             return;
           }
           if (n.callee.type !== 'MemberExpression') return;
           const receiverRoot = staticReceiverRoot(n.callee.object);
-          if (receiverRoot && declared.has(receiverRoot)) tainted.add(receiverRoot);
+          if (receiverRoot && isLocal(receiverRoot)) {
+            // Taint what the receiver RESOLVES to as well: `const h = res.headers;
+            // h.set('X-Detail', err.message); return res;` is the header channel,
+            // and it is closed only if the write reaches `res`.
+            tainted.add(receiverRoot);
+            tainted.add(resolveRoot(receiverRoot));
+          }
         });
         if (tainted.size === before) break;
       }
@@ -602,7 +698,22 @@ const rule = {
       if (!root) return;
       const declared = declaredWithin(root);
       for (const name of bindings) declared.add(name);
-      const tainted = taintedWithin(root, bindings, declared);
+      const aliasRoots = aliasRootsWithin(root);
+      /** Follow an alias chain to the binding it actually reaches. */
+      const resolveRoot = (name) => {
+        let current = name;
+        for (let hop = 0; hop < 8 && aliasRoots.has(current); hop += 1) {
+          const next = aliasRoots.get(current);
+          if (next === current) break;
+          current = next;
+        }
+        return current;
+      };
+      /** A receiver is local only when what it RESOLVES to was declared here. */
+      const isLocal = (name) => declared.has(resolveRoot(name));
+      /** Report the binding an alias actually reaches, not the alias. */
+      const outerNameFor = (name) => resolveRoot(name);
+      const tainted = taintedWithin(root, bindings, declared, isLocal, resolveRoot);
 
       /**
        * `ancestors` is the chain ABOVE `node`, exclusive of it.
@@ -645,6 +756,19 @@ const rule = {
 
       /** A raw response construction site, whatever member is used. */
       function rawResponseSite(node) {
+        // `srv.NextResponse.json(...)` after `import * as srv from 'next/server'`.
+        if (
+          node.type === 'CallExpression'
+          && node.callee.type === 'MemberExpression'
+          && node.callee.object.type === 'MemberExpression'
+          && node.callee.object.object.type === 'Identifier'
+          && responseNamespaces.has(node.callee.object.object.name)
+          && node.callee.object.property.type === 'Identifier'
+          && RAW_RESPONSE_OBJECTS.has(node.callee.object.property.name)
+        ) {
+          const property = node.callee.property.type === 'Identifier' ? node.callee.property.name : '…';
+          return `${node.callee.object.property.name}.${property}`;
+        }
         if (
           node.type === 'CallExpression'
           && node.callee.type === 'MemberExpression'
@@ -710,23 +834,23 @@ const rule = {
         if (path && TARGET_IS_FIRST_ARG.has(path)) {
           const target = node.arguments[0];
           const targetRoot = target ? staticReceiverRoot(target) : null;
-          if (targetRoot && declared.has(targetRoot)) return null;
+          if (targetRoot && isLocal(targetRoot)) return null;
           return {
             messageId: 'catchValueEscapes',
-            data: { name: targetRoot ?? context.sourceCode.getText(node.callee) },
+            data: { name: targetRoot ? outerNameFor(targetRoot) : context.sourceCode.getText(node.callee) },
           };
         }
 
         if (node.callee.type === 'MemberExpression') {
           const root = staticReceiverRoot(node.callee.object);
-          if (root && declared.has(root)) return null; // local accumulation
+          if (root && isLocal(root)) return null; // local accumulation
           return {
             messageId: 'catchValueEscapes',
             // A receiver rooted in a CALL (`db.update(x).set(...)`,
             // `new TextEncoder().encode(...)`) has no root identifier at all,
             // which is why the previous rule was silently inert for the repo's
             // universal DB-write idiom.
-            data: { name: root ?? context.sourceCode.getText(node.callee).slice(0, 60) },
+            data: { name: root ? outerNameFor(root) : context.sourceCode.getText(node.callee).slice(0, 60) },
           };
         }
 
@@ -752,6 +876,29 @@ const rule = {
       walk(root, (node, ancestors) => {
         if (node.type === 'CallExpression' || node.type === 'NewExpression') {
           const verdict = classifyCall(node, ancestors);
+          if (!verdict || verdict === 'sink') return;
+          // The SITE ban is unconditional. `isExempt` asks whether every tainted
+          // READ in the expression is a narrowing test, and a single `typeof err`
+          // anywhere in a raw response's arguments made that true — suppressing
+          // the one verdict that is supposed to hold whether or not the tracker
+          // can see what the body carries.
+          if (verdict.messageId === 'rawResponseInCatch' || !isExempt(node, ancestors)) {
+            report(node, verdict.messageId, verdict.data);
+          }
+          return;
+        }
+
+        // A tagged template is a call the walk never classified, so
+        // `neonSql`UPDATE jobs SET error = ${err.message}`` — this repo's
+        // documented DB-write idiom — was a silent store-and-forward channel.
+        if (node.type === 'TaggedTemplateExpression') {
+          const asCall = {
+            type: 'CallExpression',
+            callee: node.tag,
+            arguments: node.quasi.expressions,
+            range: node.range,
+          };
+          const verdict = classifyCall(asCall, ancestors);
           if (verdict && verdict !== 'sink' && !isExempt(node, ancestors)) {
             report(node, verdict.messageId, verdict.data);
           }
@@ -761,11 +908,19 @@ const rule = {
         if (node.type === 'AssignmentExpression' && referencesAny(node.right, tainted)) {
           if (isExempt(node, ancestors)) return;
           for (const target of patternNames(node.left)) {
-            if (!declared.has(target)) {
-              report(node, 'catchValueEscapes', { name: target });
+            if (!isLocal(target)) {
+              report(node, 'catchValueEscapes', { name: outerNameFor(target) });
               return;
             }
           }
+          return;
+        }
+
+        // `yield` is a fifth way out, and a Next.js streaming route body is
+        // idiomatically an async generator.
+        if (node.type === 'YieldExpression') {
+          const nested = ancestors.some((a) => FUNCTION_TYPES.has(a.type));
+          if (!nested) reportReturnLike(node, node.argument, ancestors);
           return;
         }
 

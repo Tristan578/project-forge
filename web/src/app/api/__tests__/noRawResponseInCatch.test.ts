@@ -883,5 +883,162 @@ ruleTester.run('no-raw-response-in-catch', rule, {
       options: OPTIONS,
       errors: [{ messageId: 'rawResponseInCatch' }],
     },
+
+    // -----------------------------------------------------------------------
+    // PASS 3. Every one of these was reproduced LINT-CLEAN against the shipped
+    // rule by the review board, and every one is a one-line edit away from a
+    // shape the suite already pinned. They are the evidence that a hand-written
+    // dataflow rule cannot make this property certain — which is why the
+    // guarantee now lives in `withEgressGuard`, and this rule is early feedback.
+    // -----------------------------------------------------------------------
+    {
+      name: 'pass 3 — aliasing an outer Map into a catch-local const (const sink = cache)',
+      code: `
+        const cache = new Map<string, string>();
+        export async function GET() {
+          try {
+            await load();
+          } catch (err) {
+            const sink = cache;
+            sink.set('last', err.message);
+          }
+          return createErrorResponse(500, 'Please try again.');
+        }
+      `,
+      options: OPTIONS,
+      // Named for the binding it REACHES, not the alias: `cache` is what
+      // outlives the request.
+      errors: [{ messageId: 'catchValueEscapes', data: { name: 'cache' } }],
+    },
+    {
+      name: 'pass 3 — aliasing the header bag of a locally-built response, then returning it',
+      code: `
+        export async function GET() {
+          try {
+            return await load();
+          } catch (err) {
+            const res = createErrorResponse(502, 'Upstream failed');
+            const headers = res.headers;
+            headers.set('X-Upstream-Detail', err.message);
+            return res;
+          }
+        }
+      `,
+      options: OPTIONS,
+      // The write taints what the alias resolves to, so the `return res`
+      // reports. Nothing else on these lines can.
+      errors: [{ messageId: 'catchValueReturned' }],
+    },
+    {
+      name: 'pass 3 — aliasing the cookie jar of a locally-built response',
+      code: `
+        export async function GET() {
+          try {
+            return await load();
+          } catch (err) {
+            const res = createErrorResponse(502, 'Upstream failed');
+            const jar = res.cookies;
+            jar.set('lastError', err.message);
+            return res;
+          }
+        }
+      `,
+      options: OPTIONS,
+      errors: [{ messageId: 'catchValueReturned' }],
+    },
+    {
+      name: 'pass 3 — a LOCAL alias of the raw constructor (const R = NextResponse)',
+      code: `
+        export async function GET() {
+          const raw = await readUpstream();
+          try {
+            return await load();
+          } catch {
+            const R = NextResponse;
+            return R.json({ error: 'failed', detail: raw }, { status: 502 });
+          }
+        }
+      `,
+      options: OPTIONS,
+      errors: [{ messageId: 'rawResponseInCatch' }],
+    },
+    {
+      name: 'pass 3 — a namespace import of the raw constructor (srv.NextResponse.json)',
+      code: `
+        import * as srv from 'next/server';
+        export async function GET() {
+          const raw = await readUpstream();
+          try {
+            return await load();
+          } catch {
+            return srv.NextResponse.json({ raw }, { status: 502 });
+          }
+        }
+      `,
+      options: OPTIONS,
+      errors: [{ messageId: 'rawResponseInCatch' }],
+    },
+    {
+      name: 'pass 3 — a `typeof err` read no longer suppresses the SITE ban',
+      code: `
+        export async function GET() {
+          const raw = await readUpstream();
+          try {
+            return await load();
+          } catch (err) {
+            return NextResponse.json({ kind: typeof err, detail: raw }, { status: 502 });
+          }
+        }
+      `,
+      options: OPTIONS,
+      errors: [{ messageId: 'rawResponseInCatch' }],
+    },
+    {
+      name: 'pass 3 — a tagged template, this repo\'s documented DB-write idiom',
+      code: `
+        export async function GET() {
+          try {
+            return await load();
+          } catch (err) {
+            const sql = getNeonSql();
+            await sql\`UPDATE jobs SET error = \${err.message}\`;
+            return createErrorResponse(500, 'Please try again.');
+          }
+        }
+      `,
+      options: OPTIONS,
+      errors: [{ messageId: 'catchValueToUnknownSink' }],
+    },
+    {
+      name: 'pass 3 — a HOISTED function declaration launders the caught error',
+      code: `
+        export async function GET() {
+          try {
+            return await load();
+          } catch (err) {
+            function detail() {
+              return err instanceof Error ? err.message : String(err);
+            }
+            return createErrorResponse(500, detail());
+          }
+        }
+      `,
+      options: OPTIONS,
+      errors: [{ messageId: 'catchValueInResponseHelper' }],
+    },
+    {
+      name: 'pass 3 — `yield` is a fifth way out of the scope',
+      code: `
+        export async function* stream() {
+          try {
+            yield await load();
+          } catch (err) {
+            yield String(err);
+          }
+        }
+      `,
+      options: OPTIONS,
+      errors: [{ messageId: 'catchValueReturned' }],
+    },
   ],
 });
