@@ -285,7 +285,11 @@
                           "lastChecked": { "type": "string", "format": "date-time" },
                           "summary": {
                             "type": "string",
-                            "description": "Public-safe one-liner saying what is wrong, present only when the probe knows (e.g. \"Unavailable: 3D Model Generation\"). The raw error is never exposed on this route."
+                            "description": "Public-safe one-liner saying what is wrong, present only when the probe knows. Emitted values: \"Available only with your own API key: <feature labels>\" (platform generation keys unset — the features still work for callers using their own key), \"AI Chat is unavailable without your own API key\", and \"Payments are unavailable\". Never names a credential or an environment variable, and the raw error is never exposed on this route."
+                          },
+                          "configurationOnly": {
+                            "type": "boolean",
+                            "description": "Present and true when this service is degraded by a deliberate configuration state (e.g. a generation capability with no platform key) rather than by a fault. Such a service does not raise the top-level `overall`, and does not page the synthetic monitor."
                           },
                           "error": {
                             "type": "string",

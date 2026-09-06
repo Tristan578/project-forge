@@ -79,6 +79,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       latencyMs: health.latencyMs,
       critical: config.critical,
       ...(health.summary ? { summary: health.summary } : {}),
+      // Carried, not just consumed: `deriveOverallStatus` needs it below, and
+      // a consumer of this payload can then tell "degraded because an operator
+      // deliberately has not provisioned a key" from "degraded because
+      // something broke" (#9727).
+      ...(health.configurationOnly ? { configurationOnly: true } : {}),
     };
     return [entry];
   });

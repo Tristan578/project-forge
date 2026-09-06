@@ -157,7 +157,11 @@ describe('GET /api/status', () => {
             latencyMs: 0,
             lastChecked: '2026-03-16T12:00:00.000Z',
             error: 'Generation unavailable on the platform path for model3d — no platform key',
-            summary: 'Unavailable: 3D Model Generation',
+            // The vocabulary the probe actually emits (healthChecks.ts): the
+            // BYOK caveat in feature labels, never "Unavailable: <feature>",
+            // which pass 3 removed because it told BYOK users a feature they
+            // can use is down.
+            summary: 'Available only with your own API key: 3D Model Generation',
           },
         ],
         environment: 'test',
@@ -170,10 +174,73 @@ describe('GET /api/status', () => {
 
     const ai = body.services.find((s: { id: string }) => s.id === 'ai');
     const db = body.services.find((s: { id: string }) => s.id === 'database');
-    expect(ai?.summary).toBe('Unavailable: 3D Model Generation');
+    expect(ai?.summary).toBe('Available only with your own API key: 3D Model Generation');
     // The raw `error` may carry env-var names; it must never reach this body.
     expect(ai).not.toHaveProperty('error');
     expect(db).not.toHaveProperty('summary');
+  });
+
+  // #9727 review: production has no PLATFORM_* key by deliberate deferral, so
+  // AI Providers is `degraded` on every run. Letting that drive `overall`
+  // publishes `partial_outage` forever and the field stops carrying
+  // information (lesson 13). The service entry still says `degraded`.
+  it('keeps overall operational when the only degradation is configuration-only', async () => {
+    vi.resetModules();
+
+    vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      peekCachedHealthReport: vi.fn(() => null),
+      getCachedHealthReport: vi.fn().mockResolvedValue({
+        overall: 'healthy',
+        timestamp: '2026-03-16T12:00:00.000Z',
+        services: [
+          { name: 'Database (Neon)', status: 'healthy', latencyMs: 5, lastChecked: '2026-03-16T12:00:00.000Z' },
+          {
+            name: 'AI Providers',
+            status: 'degraded',
+            latencyMs: 0,
+            lastChecked: '2026-03-16T12:00:00.000Z',
+            summary: 'Available only with your own API key: 3D Model Generation',
+            configurationOnly: true,
+          },
+        ],
+        environment: 'test',
+        version: 'abcd1234',
+      }),
+    }));
+
+    const { GET } = await import('./route');
+    const body = await (await GET(makeRequest())).json();
+
+    const ai = body.services.find((s: { id: string }) => s.id === 'ai');
+    expect(ai?.status).toBe('degraded');
+    expect(ai?.summary).toBe('Available only with your own API key: 3D Model Generation');
+    expect(ai?.configurationOnly).toBe(true);
+    expect(body.overall).toBe('operational');
+  });
+
+  it('a degradation with no marker still raises overall to partial_outage', async () => {
+    vi.resetModules();
+
+    vi.doMock('@/lib/monitoring/healthChecks', () => ({
+      peekCachedHealthReport: vi.fn(() => null),
+      getCachedHealthReport: vi.fn().mockResolvedValue({
+        overall: 'degraded',
+        timestamp: '2026-03-16T12:00:00.000Z',
+        services: [
+          { name: 'Database (Neon)', status: 'healthy', latencyMs: 5, lastChecked: '2026-03-16T12:00:00.000Z' },
+          { name: 'Payments (Stripe)', status: 'degraded', latencyMs: 40, lastChecked: '2026-03-16T12:00:00.000Z' },
+        ],
+        environment: 'test',
+        version: 'abcd1234',
+      }),
+    }));
+
+    const { GET } = await import('./route');
+    const body = await (await GET(makeRequest())).json();
+
+    const payments = body.services.find((s: { id: string }) => s.id === 'payments');
+    expect(payments).not.toHaveProperty('configurationOnly');
+    expect(body.overall).toBe('partial_outage');
   });
 
   it('maps healthy → operational, degraded → degraded, down → outage', async () => {

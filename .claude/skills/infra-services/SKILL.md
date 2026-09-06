@@ -172,10 +172,25 @@ Only **Database and Clerk** failures return HTTP 503; everything else degrades t
 a per-service `degraded`/`down` entry. So a green status code is not a green stack — read
 `services[]`.
 
-The `AI Providers` check is the one that reports "outage" when a `PLATFORM_*` key is unset
-rather than wrong (PF-1054). Those names are read through an indirection table
-(`PLATFORM_KEY_ENV` in `web/src/lib/config/providers.ts`), so grepping for them finds nothing —
-see `web/.env.example` before concluding a provider is actually down.
+The `AI Providers` check grades per capability (#9719), not per key:
+
+| Verdict | When |
+|---------|------|
+| `down` | no chat backend resolves at all — nothing AI-shaped can be served |
+| `degraded` | a chat backend resolves but some generation capability has neither a platform key nor a gateway route. The unconfigured capabilities are named in `error`, in `details.unconfiguredCapabilities`, and in the public-safe `summary` |
+| `healthy` | chat resolves and every offered capability is configured |
+
+An unset `PLATFORM_*` key therefore yields **`degraded`, never "outage"** — and that is
+production's expected steady state today (`docs/guides/platform-keys.md`: no `PLATFORM_*` key
+is set, deliberately). Because it is expected, that entry carries `configurationOnly: true`,
+which keeps it out of the top-level `overall` and out of the 15-minute synthetic monitor's
+Sentry pages (#9727) — the entry itself still reads `degraded` on the status page. So: an
+amber AI Providers card with no `/health` banner and no Sentry page is the documented
+baseline; the same card WITH a page is a real regression.
+
+Those key names are read through an indirection table (`PLATFORM_KEY_ENV` in
+`web/src/lib/config/providers.ts`), so grepping for them finds nothing — see
+`web/.env.example` before concluding a provider is actually down.
 
 ## Scripts
 

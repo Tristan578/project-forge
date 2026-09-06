@@ -77,11 +77,21 @@ export function ServiceStatusCard({ service }: ServiceStatusCardProps) {
           <span className="font-medium text-zinc-300">Last checked:</span>{' '}
           {formatTimestamp(service.lastChecked)}
         </p>
-        {service.summary && (
-          <p className="mt-2 text-zinc-200">{service.summary}</p>
-        )}
-        {service.error && (
-          <p className="mt-2 rounded bg-zinc-700 px-2 py-1 text-zinc-300">{service.error}</p>
+        {/*
+          One emphasised message, and it is the one that says something.
+          `summary` is the probe's public-safe "what is wrong"; `error` on this
+          dashboard has been through `sanitizeForPublic`, so it reads
+          "<name> is <status>" — a verbatim repeat of the badge above. Showing
+          both put the emphasis on the empty one and styled the substantive one
+          as a footnote (#9727 review). With no summary, the error keeps
+          today's rendering: it is then the only line there is.
+        */}
+        {service.summary ? (
+          <p className="mt-2 rounded bg-zinc-700 px-2 py-1 text-zinc-200">{service.summary}</p>
+        ) : (
+          service.error && (
+            <p className="mt-2 rounded bg-zinc-700 px-2 py-1 text-zinc-300">{service.error}</p>
+          )
         )}
       </div>
     </div>

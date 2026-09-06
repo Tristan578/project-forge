@@ -58,6 +58,25 @@ export interface ServiceHealth {
    * put only vocabulary a user already sees in it (capability names, counts).
    */
   summary?: string;
+  /**
+   * "Degraded by a deliberate configuration state, not by a fault" (#9727
+   * review). The per-service entry still reports `degraded` with its summary —
+   * that is #9719's acceptance criterion and it stands — but the marker keeps a
+   * permanent, chosen state out of the two consumers that read any non-healthy
+   * status as an incident:
+   *
+   *   - `computeOverallStatus` / `deriveOverallStatus` skip it, so the public
+   *     banner and `/api/status`'s `overall` are not pinned amber forever, and
+   *   - `/api/cron/health-monitor` logs it at warn instead of paging Sentry
+   *     every 15 minutes (~96 synthetic-monitor exceptions a day) for a state
+   *     the owner deliberately chose.
+   *
+   * Lesson 13: a signal that reports the same value on every run is read as
+   * noise, and the genuine outage then looks identical to the baseline. Set it
+   * only where the cause is a documented, deliberate configuration decision —
+   * never for an unreachable dependency, a rejected credential, or any `down`.
+   */
+  configurationOnly?: boolean;
   details?: Record<string, unknown>;
 }
 
@@ -208,12 +227,15 @@ const STRIPE_BALANCE_URL = 'https://api.stripe.com/v1/balance';
  * key for real, per Stripe's documented status meanings
  * (https://docs.stripe.com/api/errors):
  *
- *  - 2xx or 403 → the key was ACCEPTED, so both take the same mode rule: a
- *           test-mode key running in production is `degraded` (Stripe accepts
- *           it and it charges nobody — https://docs.stripe.com/keys#test-live-modes),
- *           otherwise `healthy`. 403 is "The API key doesn't have permissions
- *           to perform the request": a restricted key without `balance:read`,
- *           recorded in `details.probeResult`, never an outage.
+ *  - 2xx or 403 → the key was ACCEPTED, so both take the same MODE rule first:
+ *           a test-mode key running in production is `degraded` (Stripe accepts
+ *           it and it charges nobody — https://docs.stripe.com/keys#test-live-modes).
+ *           Past that rule they part ways. 2xx is `healthy`. 403 is "The API
+ *           key doesn't have permissions to perform the request" — a restricted
+ *           key without `balance:read`, so the probe COULD NOT RUN: `degraded`,
+ *           with the missing scope in `error` and `details.probeResult`, never
+ *           `healthy` (a check that could not run must not report success —
+ *           lesson 9) and never an outage.
  *  - 401  → down. "No valid API key provided" — every checkout will fail.
  *  - 5xx, timeout, network → degraded, never thrown, so a Stripe blip does
  *           not page as a SpawnForge outage.
@@ -255,6 +277,13 @@ export async function checkPayments(): Promise<ServiceHealth> {
       signal: AbortSignal.timeout(SERVICE_TIMEOUT_MS),
     });
     status = res.status;
+    // `GET /v1/balance` always answers with a JSON body and nothing here reads
+    // it. Under undici an unconsumed body holds the socket out of the
+    // connection pool until GC, and this probe is driven by unauthenticated
+    // /health, /api/health and /api/status plus a 15-minute cron — the
+    // highest-volume body-discarding fetch in the tree (#9727 review).
+    // Best-effort: a body that refuses to cancel must not change the verdict.
+    await res.body?.cancel().catch(() => undefined);
   } catch (err) {
     const timedOut = (err as { name?: unknown } | null)?.name === 'TimeoutError';
     return {
@@ -274,8 +303,9 @@ export async function checkPayments(): Promise<ServiceHealth> {
   const lastChecked = new Date().toISOString();
 
   // 403 says the key authenticated and merely lacks `balance:read`, so it is an
-  // ACCEPTED response like a 2xx and must be graded by the same rules. Grading
-  // it healthy on its own let a restricted test-mode key pass in production.
+  // ACCEPTED response like a 2xx for the MODE rule — grading it healthy on its
+  // own let a restricted test-mode key pass in production. It is NOT accepted
+  // as evidence for the health verdict: see the 403 branch below.
   const accepted = (status >= 200 && status < 300) || status === 403;
   if (accepted) {
     const acceptedDetails =
@@ -292,6 +322,24 @@ export async function checkPayments(): Promise<ServiceHealth> {
         latencyMs,
         lastChecked,
         error: 'STRIPE_SECRET_KEY is a test-mode key in the production environment',
+        details: acceptedDetails,
+      };
+    }
+    if (status === 403) {
+      // The key authenticated and this probe could not run — that is not
+      // "payments work". A restricted `rk_live_` key provisioned with
+      // `checkout_sessions:write` only answers 403 forever, so grading it
+      // healthy would keep reporting green after that checkout scope was
+      // revoked: authentication would be the only property ever graded
+      // (lesson 9, lesson 1). No `summary` — a visitor cannot act on a key's
+      // scopes and this is not a payment outage; the fix is operator-side.
+      return {
+        name,
+        status: 'degraded',
+        latencyMs,
+        lastChecked,
+        error:
+          'Stripe returned 403 on GET /v1/balance — STRIPE_SECRET_KEY lacks the `balance:read` scope, so payments cannot be graded. Grant it to this restricted key, or use a key that has it.',
         details: acceptedDetails,
       };
     }
@@ -485,7 +533,10 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
  *               capability has neither a platform key nor a gateway route; the
  *               unconfigured capabilities are named in `error`, in
  *               `details.unconfiguredCapabilities`, and — because the public
- *               body strips both of those — in `summary`
+ *               body strips both of those — in `summary`. Marked
+ *               `configurationOnly` (#9727): production runs this way by
+ *               decision, so the verdict stands but does not drive the
+ *               top-level `overall` or the 15-minute Sentry page
  *   healthy   — chat resolves and every capability in CAPABILITY_ENV_VARS is
  *               configured
  *
@@ -550,6 +601,12 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
       lastChecked,
       error: `Generation unavailable on the platform path for ${ids} — no platform key or gateway route configured`,
       summary: `Available only with your own API key: ${labels}`,
+      // Production's documented steady state: `docs/guides/platform-keys.md`
+      // records that no PLATFORM_* key is set and that provisioning is
+      // deliberately deferred. The verdict stays `degraded` (#9719's acceptance
+      // criterion), but this marker stops it driving the public banner and the
+      // 15-minute Sentry page — see `ServiceHealth.configurationOnly`.
+      configurationOnly: true,
       details,
     };
   }
@@ -804,7 +861,12 @@ const CRITICAL_SERVICES = new Set(['Database (Neon)', 'Clerk']);
  */
 export function computeOverallStatus(services: ServiceHealth[]): ServiceStatus {
   if (services.some((s) => s.status === 'down')) return 'down';
-  if (services.some((s) => s.status === 'degraded')) return 'degraded';
+  // A `configurationOnly` degradation is a deliberate, documented state (no
+  // PLATFORM_* key — see `ServiceHealth.configurationOnly`), so it must not pin
+  // the top-level signal amber forever; the service's own entry still says
+  // `degraded`. The exemption covers degradation ONLY — a `down` service is an
+  // incident whatever set the flag, which is why the check above runs first.
+  if (services.some((s) => s.status === 'degraded' && !s.configurationOnly)) return 'degraded';
   return 'healthy';
 }
 

@@ -49,6 +49,14 @@ export interface ServiceStatusEntry {
    * raw `error` never reaches this payload.
    */
   summary?: string;
+  /**
+   * True when this service's `degraded` status is a deliberate configuration
+   * state rather than a fault (`ServiceHealth.configurationOnly`, #9727).
+   * `deriveOverallStatus` skips such entries, so the platform-wide `overall`
+   * is not pinned at `partial_outage` by a state the operator chose — the
+   * entry itself still reports `degraded` with its summary.
+   */
+  configurationOnly?: boolean;
 }
 
 /**
@@ -154,7 +162,14 @@ export function deriveOverallStatus(
         }
         break;
       case 'degraded':
-        hasDegraded = true;
+        // A `configurationOnly` degradation is a deliberate, documented
+        // configuration state (#9727) — production runs with no PLATFORM_* key
+        // by decision, so counting it here would publish `partial_outage`
+        // forever and the field would stop carrying information (lesson 13).
+        // The entry keeps its own `degraded` status and summary; only this
+        // top-level derivation skips it. Outages are never skipped: the case
+        // above runs regardless of the marker.
+        if (!s.configurationOnly) hasDegraded = true;
         break;
       case 'maintenance':
         hasMaintenance = true;

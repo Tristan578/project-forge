@@ -58,6 +58,57 @@ describe('healthChecks', () => {
       ];
       expect(computeOverallStatus(services)).toBe('down');
     });
+
+    // #9727 review: a degradation caused by a deliberate configuration state
+    // (no PLATFORM_* key — production's documented steady state) must not pin
+    // the public banner amber forever. A signal that never changes is read as
+    // noise, and the real AI-provider outage then looks identical to the
+    // baseline (lesson 13). The per-service entry still says `degraded`.
+    it('ignores a configurationOnly degradation when deriving the overall status', async () => {
+      const { computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
+      const services = [
+        { name: 'A', status: 'healthy' as const, latencyMs: 1, lastChecked: '' },
+        {
+          name: 'AI Providers',
+          status: 'degraded' as const,
+          latencyMs: 0,
+          lastChecked: '',
+          configurationOnly: true,
+        },
+      ];
+      expect(computeOverallStatus(services)).toBe('healthy');
+    });
+
+    it('still reports degraded when an ordinary degradation sits beside a configurationOnly one', async () => {
+      const { computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
+      const services = [
+        {
+          name: 'AI Providers',
+          status: 'degraded' as const,
+          latencyMs: 0,
+          lastChecked: '',
+          configurationOnly: true,
+        },
+        { name: 'Rate Limiting (Upstash)', status: 'degraded' as const, latencyMs: 2, lastChecked: '' },
+      ];
+      expect(computeOverallStatus(services)).toBe('degraded');
+    });
+
+    // The marker exempts a degradation, never an outage: `down` means nothing
+    // AI-shaped can be served, which is an incident whatever set the flag.
+    it('never lets configurationOnly suppress a down service', async () => {
+      const { computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
+      const services = [
+        {
+          name: 'AI Providers',
+          status: 'down' as const,
+          latencyMs: 0,
+          lastChecked: '',
+          configurationOnly: true,
+        },
+      ];
+      expect(computeOverallStatus(services)).toBe('down');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -263,15 +314,62 @@ describe('healthChecks', () => {
       expect(result.summary).not.toMatch(/key|Stripe|401/i);
     });
 
-    it('treats 403 as "key accepted, balance scope not granted" rather than an outage', async () => {
+    // 403 is an ACCEPTED response for the mode rule (the key authenticated),
+    // but it is NOT evidence that payments work: the probe could not run. A
+    // restricted `rk_live_` key with `checkout_sessions:write` only answers 403
+    // forever, and grading that `healthy` would keep reporting green after the
+    // checkout scope was revoked — the exact green-while-broken state #9719
+    // exists to remove (lesson 9: a check that could not run must not report
+    // success; #9727 review).
+    it('degrades on 403 — the key authenticated but the probe could not grade payments', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'rk_test_restricted');
       vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{"type":"invalid_request_error"}}', { status: 403 })));
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
-      expect(result.status).toBe('healthy');
+      expect(result.status).toBe('degraded');
+      // Operator detail only: the missing scope and what to do about it. No
+      // public summary — a visitor cannot act on a Stripe key's scopes, and
+      // this is not a payment outage.
+      expect(result.error).toContain('balance:read');
+      expect(result.error).toMatch(/403/);
       expect(result.summary).toBeUndefined();
       expect(result.details?.probeResult).toBe('key accepted; balance not readable by this key (403)');
+    });
+
+    // Under undici an unconsumed body holds the socket out of the connection
+    // pool until GC. This probe is driven by unauthenticated /health,
+    // /api/health and /api/status plus a 15-minute cron, so it is the
+    // highest-volume body-discarding fetch in the tree (#9727 review).
+    it('releases the Stripe response body after reading the status', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      const cancel = vi.fn(async () => undefined);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ status: 200, body: { cancel } }) as unknown as Response),
+      );
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe('healthy');
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
+
+    // Releasing the socket is best-effort: a body that refuses to cancel must
+    // not turn an accepted key into a degraded verdict.
+    it('still grades the key when cancelling the response body rejects', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          status: 200,
+          body: { cancel: async () => { throw new TypeError('already locked'); } },
+        }) as unknown as Response),
+      );
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe('healthy');
     });
 
     // The socket must actually be abandoned at the deadline, not just the
@@ -666,6 +764,9 @@ describe('healthChecks', () => {
       // the BYOK caveat, not "chat backend".
       expect(result.summary).toBe('AI Chat is unavailable without your own API key');
       expect(result.summary).not.toMatch(/backend|PLATFORM_|API_KEY/);
+      // No chat backend at all is a real outage, not a deferred provisioning
+      // decision: it must keep driving the banner and the Sentry page (#9727).
+      expect(result.configurationOnly).toBeUndefined();
     });
 
     // #9719: the gateway key serves chat only. With no generation key set the
@@ -699,6 +800,12 @@ describe('healthChecks', () => {
       // music is declared unavailable (#9522), not unconfigured.
       expect(missing).not.toContain('music');
       expect(result.summary).not.toContain('Music');
+      // #9727 review: this verdict is production's documented steady state
+      // (docs/guides/platform-keys.md — provisioning is deliberately
+      // deferred), so it is marked as a configuration state. The service entry
+      // still reads `degraded`; the marker is what keeps it out of the public
+      // `overall` and out of the 15-minute synthetic-monitor page.
+      expect(result.configurationOnly).toBe(true);
     });
 
     // No Suno key here on purpose: music is declared unavailable (#9522), so
@@ -718,6 +825,7 @@ describe('healthChecks', () => {
       expect(result.details?.unconfiguredCapabilities).toEqual([]);
       expect(result.error).toBeUndefined();
       expect(result.summary).toBeUndefined();
+      expect(result.configurationOnly).toBeUndefined();
     });
 
     it('resolves the gateway via Vercel OIDC with no explicit key at all (chat is not "down")', async () => {
@@ -1116,6 +1224,70 @@ describe('healthChecks', () => {
       expect(report.version).toBe('abcdef12');
       expect(report.timestamp).toBeDefined();
       expect(['healthy', 'degraded', 'down']).toContain(report.overall);
+    });
+
+    // The "six outbound probes" fact is the cost model the shared fan-out
+    // budget is sized against, and it is hand-restated in ten places:
+    // healthChecks.ts (getCachedHealthReport's header), api/health/route.ts
+    // (x2), api/status/route.ts (x2), api/status/route.test.ts,
+    // healthFanoutBudget.ts, app/health/page.tsx, app/__tests__/health-page.test.tsx
+    // and api/cron/health-monitor/route.ts's `maxDuration` comment. A comment
+    // is not a check (lesson 9), so this counts the real fan-out: the seventh
+    // probe someone adds fails here instead of silently making all ten wrong.
+    it('a full fan-out costs exactly six outbound probes', async () => {
+      vi.resetModules();
+      // Fully configured, so every check takes its network path rather than
+      // short-circuiting on a missing env var — a probe skipped for want of a
+      // key would undercount and the assertion would pass vacuously.
+      vi.stubEnv('DATABASE_URL', 'postgres://user:pw@db.neon.tech/spawnforge');
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
+      vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.upstash.io');
+      vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'tok');
+      vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://cdn.example.com');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_x');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_clerk');
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw_abc');
+      vi.stubEnv('VERCEL', '');
+
+      // Neon speaks over its own transport, so it is counted through the
+      // driver rather than through `fetch`.
+      const neonQuery = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
+      vi.doMock('@neondatabase/serverless', () => ({
+        neon: () => neonQuery,
+      }));
+
+      const fetchMock = vi.fn(async (input: unknown) => {
+        const url = typeof input === 'string' ? input : String((input as { url?: string })?.url);
+        // The CDN probe reads Content-Type; everything else reads the status.
+        return new Response('{}', {
+          status: 200,
+          headers: url.endsWith('.wasm')
+            ? { 'content-type': 'application/wasm' }
+            : { 'content-type': 'text/javascript' },
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
+      await runAllHealthChecks();
+
+      // One probe per outbound destination. The engine CDN fetches two assets
+      // (forge_engine.js and forge_engine_bg.wasm) in one probe, so hosts —
+      // not raw fetch calls — are what the budget is sized in.
+      const hosts = new Set(
+        fetchMock.mock.calls.map(([input]) => new URL(String(input)).host),
+      );
+      expect(hosts).toEqual(
+        new Set([
+          'cdn.example.com',
+          'api.clerk.com',
+          'ai-gateway.vercel.sh',
+          'redis.upstash.io',
+          'api.stripe.com',
+        ]),
+      );
+      expect(neonQuery).toHaveBeenCalledTimes(1);
+      expect(hosts.size + 1).toBe(6);
     });
 
     it('overall is down when DB is unavailable and no keys configured', async () => {

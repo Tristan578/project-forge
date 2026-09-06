@@ -10,11 +10,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   CAPABILITY_ENV_VARS,
   CAPABILITY_LABELS,
+  CAPABILITY_REQUIRED_PROVIDERS,
+  GATEWAY_CAPABILITIES,
   PROVIDER_CAPABILITIES,
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
   isCapabilityConfigured,
   listUnconfiguredCapabilities,
+  type ProviderCapability,
 } from '../providers';
 
 describe('CAPABILITY_ENV_VARS', () => {
@@ -30,6 +33,53 @@ describe('CAPABILITY_ENV_VARS', () => {
     for (const [cap, vars] of Object.entries(CAPABILITY_ENV_VARS)) {
       expect(vars.length, cap).toBeGreaterThan(0);
       for (const v of vars) expect(known.has(v), `${cap}: ${v}`).toBe(true);
+    }
+  });
+
+  // #9727 review: gateway coverage is encoded TWICE — declaratively in
+  // GATEWAY_CAPABILITIES (which `web/scripts/verify-platform-generation.ts`
+  // reads algorithmically, and which docs/guides/platform-keys.md states
+  // verbatim) and by hand in each CAPABILITY_ENV_VARS row. The check above
+  // walks every row and can never fail on that property (lesson 11): it only
+  // asks whether a row names SOME known env var. These two are the drift
+  // alarm for #9523 ("route more capabilities through the gateway"), which
+  // edits GATEWAY_CAPABILITIES and would otherwise leave this table behind —
+  // the probe reporting `degraded` for a capability the gateway already
+  // serves, while /api/capabilities tells users to configure a key.
+  it('every gateway-served capability accepts the gateway key', () => {
+    for (const cap of GATEWAY_CAPABILITIES) {
+      expect(CAPABILITY_ENV_VARS[cap], cap).toContain(GATEWAY_KEY_ENV.vercelGateway);
+    }
+  });
+
+  it('no capability outside GATEWAY_CAPABILITIES accepts the gateway key', () => {
+    const gatewayServed = new Set<string>(GATEWAY_CAPABILITIES);
+    const direct = PROVIDER_CAPABILITIES.filter((cap) => !gatewayServed.has(cap));
+    // Fail rather than pass vacuously if every capability becomes
+    // gateway-served: an empty sweep is zero items inspected, not zero
+    // problems found.
+    expect(direct.length).toBeGreaterThan(0);
+    for (const cap of direct) {
+      expect(CAPABILITY_ENV_VARS[cap], cap).not.toContain(GATEWAY_KEY_ENV.vercelGateway);
+    }
+  });
+
+  // `isCapabilityConfigured` short-circuits on CAPABILITY_REQUIRED_PROVIDERS
+  // and never reads CAPABILITY_ENV_VARS for such a capability, while
+  // /api/capabilities builds its user-facing `missingEnvVars`/`hint` from the
+  // row. They agree today only because sprite's row is written as a `.map()`
+  // over the required providers; written out by hand they could diverge, and a
+  // user would be told to set a key the predicate does not grade (#9727).
+  it('a multi-key capability row is exactly the key set the predicate grades', () => {
+    const entries = Object.entries(CAPABILITY_REQUIRED_PROVIDERS) as [
+      ProviderCapability,
+      readonly (keyof typeof PLATFORM_KEY_ENV)[],
+    ][];
+    expect(entries.length).toBeGreaterThan(0);
+    for (const [cap, required] of entries) {
+      expect(CAPABILITY_ENV_VARS[cap], cap).toEqual(
+        required.map((provider) => PLATFORM_KEY_ENV[provider]),
+      );
     }
   });
 });

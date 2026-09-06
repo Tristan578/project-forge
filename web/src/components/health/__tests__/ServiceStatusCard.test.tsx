@@ -78,20 +78,46 @@ describe('ServiceStatusCard', () => {
   it('renders the public-safe summary when the service carries one', () => {
     render(
       <ServiceStatusCard
-        service={makeService({ status: 'degraded', summary: 'Unavailable: 3D Model Generation' })}
+        service={makeService({
+          status: 'degraded',
+          summary: 'Available only with your own API key: 3D Model Generation',
+        })}
       />,
     );
-    expect(screen.getByText('Unavailable: 3D Model Generation')).toBeDefined();
+    expect(
+      screen.getByText('Available only with your own API key: 3D Model Generation'),
+    ).toBeDefined();
   });
 
-  it('renders summary and error as distinct lines when both are present', () => {
-    render(
+  // #9727 review: on the public dashboard `error` has already been through
+  // `sanitizeForPublic`, so it always reads "<name> is <status>" — a verbatim
+  // repeat of the badge. Rendering that in the emphasised box above the
+  // substantive line put the emphasis on the one element carrying no
+  // information. The summary takes the box; the sanitized echo is dropped.
+  it('gives the summary the emphasis and suppresses the sanitized error echo', () => {
+    const { container } = render(
       <ServiceStatusCard
-        service={makeService({ status: 'down', summary: 'Stripe rejected the platform key', error: 'auth 401' })}
+        service={makeService({
+          name: 'AI Providers',
+          status: 'degraded',
+          summary: 'Available only with your own API key: 3D Model Generation',
+          error: 'AI Providers is degraded',
+        })}
       />,
     );
-    expect(screen.getByText('Stripe rejected the platform key')).toBeDefined();
-    expect(screen.getByText('auth 401')).toBeDefined();
+    const box = container.querySelector('.bg-zinc-700');
+    expect(box).not.toBeNull();
+    expect(box?.textContent).toBe('Available only with your own API key: 3D Model Generation');
+    expect(screen.queryByText('AI Providers is degraded')).toBeNull();
+  });
+
+  it('still shows the error when the service carries no summary', () => {
+    const { container } = render(
+      <ServiceStatusCard
+        service={makeService({ status: 'down', error: 'Payments (Stripe) is down' })}
+      />,
+    );
+    expect(container.querySelector('.bg-zinc-700')?.textContent).toBe('Payments (Stripe) is down');
   });
 
   it('shows error message when service has error', () => {
