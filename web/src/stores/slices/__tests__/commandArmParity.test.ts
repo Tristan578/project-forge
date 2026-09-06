@@ -29,12 +29,13 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  readEngineArms,
+  productionSources,
+  WEB_SRC_DIR,
+} from '@/lib/engine/__tests__/engineCommandArms';
 
-// __dirname is web/src/stores/slices/__tests__ — five levels below the repo root.
-const REPO_ROOT = join(__dirname, '..', '..', '..', '..', '..');
-const ENGINE_COMMANDS_DIR = join(REPO_ROOT, 'engine', 'src', 'core', 'commands');
 const SLICES_DIR = join(__dirname, '..');
-const WEB_SRC_DIR = join(REPO_ROOT, 'web', 'src');
 
 /**
  * Names the store dispatches that no implemented engine arm handles. Each entry
@@ -86,143 +87,6 @@ const ALLOWED_UNDISPATCHED: Record<string, string> = Object.fromEntries(
   ]),
 );
 
-/** Text of a brace-balanced block starting at `openIndex` (which must be a `{`). */
-function blockAt(source: string, openIndex: number): string {
-  let depth = 0;
-  for (let i = openIndex; i < source.length; i++) {
-    if (source[i] === '{') depth++;
-    else if (source[i] === '}' && --depth === 0) return source.slice(openIndex, i);
-  }
-  // Unbalanced braces mean the parse is unreliable — say so rather than
-  // silently returning a truncated body that would under-report arms.
-  throw new Error(`unbalanced braces starting at offset ${openIndex}`);
-}
-
-/** `[name, body]` for every `fn <namePattern>(...) { ... }` in `source`. */
-function fnBodies(source: string, namePattern: string): Array<[string, string]> {
-  const bodies: Array<[string, string]> = [];
-  const sig = new RegExp(`fn (${namePattern})\\s*\\(`, 'g');
-  let m: RegExpExecArray | null;
-  while ((m = sig.exec(source)) !== null) {
-    const open = source.indexOf('{', sig.lastIndex);
-    if (open !== -1) bodies.push([m[1], blockAt(source, open)]);
-  }
-  return bodies;
-}
-
-const NOT_IMPLEMENTED = /is not implemented|Not yet implemented/;
-
-interface EngineArms {
-  implemented: Set<string>;
-  stubbed: Set<string>;
-  /** Names `route_domain` sends to a domain module. Anything else is unreachable. */
-  routed: Set<string>;
-  /** Arms that exist and are not stubs, but that `route_domain` never names. */
-  armedButUnrouted: Set<string>;
-  fileCount: number;
-  dispatchBodyCount: number;
-}
-
-/**
- * Body of a TOP-LEVEL `fn <name>(...)`, i.e. one whose `fn` starts at column 0.
- *
- * `fnBodies` matches the signature anywhere in the file, which is right for
- * scanning handlers but wrong for a named singleton: `mod.rs` mentions
- * `fn route_domain(` twice more inside indented string literals in its own
- * `route_domain_parity` tests, and a whole-file match counts those as real
- * definitions. Anchoring on the newline is exactly what the Rust-side scanner
- * does, and it fails closed — a definition this cannot find reports as absent,
- * never as empty-but-present.
- */
-function topLevelFnBody(source: string, name: string): string | undefined {
-  const at = source.indexOf(`\nfn ${name}(`);
-  if (at === -1) return undefined;
-  const open = source.indexOf('{', at);
-  return open === -1 ? undefined : blockAt(source, open);
-}
-
-/** Every command name listed in `fn route_domain`, whatever domain it maps to. */
-function readRoutedNames(): Set<string> {
-  const source = readFileSync(join(ENGINE_COMMANDS_DIR, 'mod.rs'), 'utf8');
-  // `route_domain` is private, so match on `fn` alone rather than `pub fn`. An
-  // anchor written `pub fn route_domain` matches nothing and reads exactly like
-  // "the router names no commands" — a scanner failure that looks like a pass.
-  const body = topLevelFnBody(source, 'route_domain');
-  if (body === undefined) {
-    throw new Error('mod.rs has no top-level `fn route_domain(` — the scanner is broken');
-  }
-  // Comments are stripped first: PF-1181 left explanatory comments in
-  // `route_domain` naming the twenty command names it deleted, and a raw scan
-  // would read those back as still routed.
-  const arms = body
-    .split('\n')
-    .map((line) => {
-      const at = line.indexOf('//');
-      return at === -1 ? line : line.slice(0, at);
-    })
-    .join('\n');
-  // What is left is nothing but match arms, so every quoted lower-snake token
-  // in it is a command name.
-  return new Set([...arms.matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]));
-}
-
-function readEngineArms(): EngineArms {
-  const files = readdirSync(ENGINE_COMMANDS_DIR).filter((f) => f.endsWith('.rs'));
-  const sources = files.map((f) => readFileSync(join(ENGINE_COMMANDS_DIR, f), 'utf8'));
-
-  // Handlers whose whole body is a not-implemented error. An arm delegating to
-  // one of these is stubbed even though the arm itself looks ordinary.
-  const stubHandlers = new Set<string>();
-  for (const source of sources) {
-    for (const [name, body] of fnBodies(source, '\\w+')) {
-      if (NOT_IMPLEMENTED.test(body)) stubHandlers.add(name);
-    }
-  }
-
-  const implemented = new Set<string>();
-  const stubbed = new Set<string>();
-  let dispatchBodyCount = 0;
-
-  for (const source of sources) {
-    // Scoped to `dispatch` bodies: a whole-file scan matches quoted payload
-    // VALUES ("mask", "high", "toggle") as if they were command names.
-    for (const [, body] of fnBodies(source, 'dispatch')) {
-      dispatchBodyCount++;
-      for (const arm of body.matchAll(/"([a-z0-9_]+)"\s*(?:=>|\|)/g)) {
-        const window = body.slice(arm.index ?? 0, (arm.index ?? 0) + 200);
-        // Two stub shapes: delegated to a stub handler, or written inline in the
-        // arm itself (`=> Some(Err("Not yet implemented: x".to_string()))`).
-        const handler = window.match(/\bhandle_\w+/)?.[0];
-        const inlineStub = NOT_IMPLEMENTED.test(window.split('\n')[0]);
-        if (inlineStub || (handler !== undefined && stubHandlers.has(handler))) {
-          stubbed.add(arm[1]);
-        } else {
-          implemented.add(arm[1]);
-        }
-      }
-    }
-  }
-  // An `a | b => handler` group where the handler is a stub marks every name in
-  // the group; a name reached both ways is not implemented.
-  for (const name of stubbed) implemented.delete(name);
-
-  // An arm the router never names cannot run, so it does not count as
-  // implemented. Tracked separately so the checks below can prove this
-  // subtraction is really happening rather than being vacuous.
-  const routed = readRoutedNames();
-  const armedButUnrouted = new Set([...implemented].filter((name) => !routed.has(name)));
-  for (const name of armedButUnrouted) implemented.delete(name);
-
-  return {
-    implemented,
-    stubbed,
-    routed,
-    armedButUnrouted,
-    fileCount: files.length,
-    dispatchBodyCount,
-  };
-}
-
 interface StoreDispatches {
   /** Command name -> the slice file that dispatches it. */
   names: Map<string, string>;
@@ -251,19 +115,6 @@ function readStoreDispatches(): StoreDispatches {
     }
   }
   return { names, unreadable, fileCount: files.length };
-}
-
-function productionSources(dir: string): string[] {
-  const sources: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name !== '__tests__') sources.push(...productionSources(full));
-    } else if (/\.(?:ts|tsx)$/.test(entry.name) && !/\.(?:test|spec)\./.test(entry.name)) {
-      sources.push(readFileSync(full, 'utf8'));
-    }
-  }
-  return sources;
 }
 
 /** Commands passed at a literal browser dispatch call site outside tests. */

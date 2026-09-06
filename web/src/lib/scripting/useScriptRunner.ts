@@ -17,6 +17,7 @@ import { DeltaSerializer, type SceneSnapshot } from '@/lib/engine/deltaSerialize
 import { checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
 import { getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
 import { isScriptAllowedCommand } from '@/lib/scripting/scriptAllowlist';
+import { handleLocalScriptCommand } from '@/lib/scripting/localScriptCommands';
 
 const WATCHDOG_TIMEOUT_MS = 5000;
 const OCCLUSION_RAYCAST_INTERVAL_MS = 250; // Check occlusion 4x per second
@@ -49,79 +50,6 @@ interface ScriptRunnerOptions {
   } | null;
 }
 
-/**
- * Handle audio layering/transition commands JS-side (no WASM dispatch needed).
- * Returns true if the command was handled.
- */
-function handleAudioCommand(cmdName: string, payload: Record<string, unknown>): boolean {
-  switch (cmdName) {
-    case 'audio_add_layer':
-      audioManager.addLayer(
-        payload.entityId as string,
-        payload.slotName as string,
-        payload.assetId as string,
-        {
-          volume: payload.volume as number | undefined,
-          pitch: payload.pitch as number | undefined,
-          loop: payload.loop as boolean | undefined,
-          spatial: payload.spatial as boolean | undefined,
-          bus: payload.bus as string | undefined,
-        }
-      );
-      return true;
-    case 'audio_remove_layer':
-      audioManager.removeLayer(payload.entityId as string, payload.slotName as string);
-      return true;
-    case 'audio_remove_all_layers':
-      audioManager.removeAllLayers(payload.entityId as string);
-      return true;
-    case 'audio_crossfade':
-      audioManager.crossfade(
-        payload.fromEntityId as string,
-        payload.toEntityId as string,
-        payload.durationMs as number
-      );
-      return true;
-    case 'audio_play_one_shot':
-      audioManager.playOneShot(payload.assetId as string, {
-        position: payload.position as [number, number, number] | undefined,
-        bus: payload.bus as string | undefined,
-        volume: payload.volume as number | undefined,
-        pitch: payload.pitch as number | undefined,
-      });
-      return true;
-    case 'audio_fade_in':
-      audioManager.fadeIn(payload.entityId as string, payload.durationMs as number);
-      return true;
-    case 'audio_fade_out':
-      audioManager.fadeOut(payload.entityId as string, payload.durationMs as number);
-      return true;
-    case 'audio_save_snapshot':
-      audioManager.saveSnapshot(
-        payload.name as string,
-        payload.crossfadeDurationMs as number | undefined
-      );
-      return true;
-    case 'audio_load_snapshot':
-      audioManager.loadSnapshot(
-        payload.name as string,
-        payload.durationMs as number | undefined
-      );
-      return true;
-    case 'audio_detect_loop_points':
-      audioManager.detectLoopPoints(
-        payload.assetId as string,
-        {
-          maxResults: payload.maxResults as number | undefined,
-          minLoopDuration: payload.minLoopDuration as number | undefined,
-        }
-      );
-      return true;
-    default:
-      return false;
-  }
-}
-
 export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const engineMode = useEditorStore((s) => s.engineMode);
   const workerRef = useRef<Worker | null>(null);
@@ -135,6 +63,39 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const routerRef = useRef<AsyncChannelRouter | null>(null);
   const entityDeltaRef = useRef<DeltaSerializer | null>(null);
   const entityInfoDeltaRef = useRef<DeltaSerializer | null>(null);
+  // Command names already reported as refused this play session. `dispatchCommand`
+  // runs inside the per-frame command drain, so a bad call in `onUpdate` would
+  // otherwise log at 60Hz and bury every other line in the script console.
+  const reportedFailuresRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Surface an engine refusal instead of swallowing it.
+   *
+   * `handle_command` answers `{ success: false, error }` for a name
+   * `route_domain` does not know, and for four years nothing read that: a script
+   * calling a command the engine never had produced no error, no exception and
+   * no log, so PF-1180's sixteen phantom names went unnoticed until someone
+   * diffed the two lists by hand. Reporting is deliberately NON-THROWING — one
+   * bad call must not end the play session — and deduped by command NAME, so a
+   * per-frame mistake logs once.
+   */
+  const reportDispatchFailure = useCallback((command: string, result: unknown) => {
+    if (result === null || typeof result !== 'object') return;
+    const response = result as { success?: unknown; error?: unknown };
+    if (response.success !== false) return;
+    if (reportedFailuresRef.current.has(command)) return;
+    reportedFailuresRef.current.add(command);
+
+    const reason = typeof response.error === 'string' ? response.error : 'unknown error';
+    const message = `Engine refused command '${command}': ${reason}`;
+    console.error(`[ScriptRunner] ${message}`);
+    addScriptLog({
+      entityId: 'engine',
+      level: 'error',
+      message,
+      timestamp: Date.now(),
+    });
+  }, [addScriptLog]);
 
   const dispatchCommand = useCallback(
     (command: string, payload: unknown): unknown => {
@@ -151,19 +112,24 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       }
       if (wasmModule?.handle_command) {
         try {
-          return wasmModule.handle_command(command, payload);
+          const result = wasmModule.handle_command(command, payload);
+          reportDispatchFailure(command, result);
+          return result;
         } catch (error) {
           console.error(`[ScriptRunner] Command error '${command}':`, error);
         }
       }
       return undefined;
     },
-    [wasmModule]
+    [wasmModule, reportDispatchFailure]
   );
 
   // Start worker when entering Play mode
   useEffect(() => {
     if (engineMode === 'play' && !workerRef.current && wasmModule) {
+      // Fresh session, fresh dedupe: a name refused during the last run must be
+      // reported again if the author hits Play without having fixed it.
+      reportedFailuresRef.current.clear();
       const worker = new Worker(
         new URL('./scriptWorker.ts', import.meta.url),
         { type: 'module' }
@@ -216,7 +182,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           case 'commands':
             for (const cmd of msg.commands) {
               const { cmd: cmdName, ...payload } = cmd;
-              if (handleAudioCommand(cmdName, payload)) {
+              if (handleLocalScriptCommand(cmdName, payload, () => useEditorStore.getState())) {
                 continue;
               }
               if (!isScriptAllowedCommand(cmdName)) {
