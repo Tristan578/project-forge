@@ -36,18 +36,20 @@ cannot disagree about what "configured" means. It grades the PLATFORM path
 only — a user's own key never makes it green, and its public `summary` says
 so.
 
-Because the state above is deliberate and open-ended, that `degraded` entry
-carries `configurationOnly: true` (#9727). The service card and the
-`/api/status` entry still read `degraded` and still name the unavailable
-capabilities, but the marker keeps it out of the platform-wide `overall` (so
-`/health`'s banner does not read "Partial Service Disruption" until a key is
-provisioned) and out of the 15-minute synthetic monitor's Sentry captures —
-which would otherwise be ~96 identical pages a day for a state the owner
-chose, until the genuine AI-provider outage arrived looking exactly like them
-(lesson 13). A `down` AI Providers, and any degradation without that marker,
-pages exactly as before. Nothing needs unsetting on provisioning day: the
-probe returns `healthy` and the marker disappears with the verdict that
-carried it.
+Deliberately unprovisioned capabilities can be listed explicitly in the server-only
+`HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES` deployment setting (comma-separated
+capability IDs). With no setting, missing keys are incident signals. Invalid IDs
+also disable suppression. Only when every missing capability appears in this
+list does the degraded entry carry `configurationOnly: true`, keeping that
+expected state out of overall health and synthetic-monitor paging.
+
+For the currently deferred asset providers, an operator may declare
+`model3d,texture,sfx,voice,sprite,bg_removal`. This repository does not set the
+deployment value automatically. When provisioning a capability, remove its ID
+from the declaration in the same deployment. For example, provisioning Meshy
+requires removing both `model3d` and `texture`. A later missing Meshy key then
+changes overall health and pages instead of being silently treated as intentional.
+An actual `down` verdict is never suppressed.
 
 ## Decision per capability
 

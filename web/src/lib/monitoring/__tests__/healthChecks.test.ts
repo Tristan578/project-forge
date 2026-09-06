@@ -805,7 +805,29 @@ describe('healthChecks', () => {
       // deferred), so it is marked as a configuration state. The service entry
       // still reads `degraded`; the marker is what keeps it out of the public
       // `overall` and out of the 15-minute synthetic-monitor page.
-      expect(result.configurationOnly).toBe(true);
+      expect(result.configurationOnly).toBeUndefined();
+    });
+
+    it('suppresses only explicitly declared missing capabilities and detects later key loss', async () => {
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw');
+      vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', 'sfx,voice,sprite,bg_removal');
+      vi.stubEnv('PLATFORM_MESHY_KEY', 'provisioned');
+      const { checkAiProviders, computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
+      const baseline = await checkAiProviders();
+      expect(baseline.configurationOnly).toBe(true);
+      expect(computeOverallStatus([baseline])).toBe('healthy');
+      vi.stubEnv('PLATFORM_MESHY_KEY', '');
+      const regression = await checkAiProviders();
+      expect(regression.configurationOnly).toBeUndefined();
+      expect(regression.details?.unconfiguredCapabilities).toContain('model3d');
+      expect(computeOverallStatus([regression])).toBe('degraded');
+    });
+
+    it.each(['', '*', 'model3d,texture,sfx,voice,sprite,bg_removal,typo'])('does not suppress missing keys for an absent or invalid declaration (%s)', async (declaration) => {
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'gw');
+      vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', declaration);
+      const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
+      expect((await checkAiProviders()).configurationOnly).toBeUndefined();
     });
 
     // No Suno key here on purpose: music is declared unavailable (#9522), so

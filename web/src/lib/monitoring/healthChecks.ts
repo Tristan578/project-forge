@@ -549,6 +549,16 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
  * probe cannot disagree with the feature-gating endpoint. BYOK users are
  * unaffected by any of this and are not what a platform health probe grades.
  */
+function isExpectedConfigurationGap(missing: readonly string[]): boolean {
+  // No declaration means missing keys are faults. Invalid entries fail closed
+  // instead of silently suppressing an outage after an operator typo.
+  const expected = (process.env.HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES ?? '')
+    .split(',').map((cap) => cap.trim()).filter(Boolean);
+  return expected.length > 0 &&
+    expected.every((cap) => Object.prototype.hasOwnProperty.call(CAPABILITY_LABELS, cap)) &&
+    missing.every((cap) => expected.includes(cap));
+}
+
 export async function checkAiProviders(): Promise<ServiceHealth> {
   const backend = resolveConfiguredChatBackend();
 
@@ -601,12 +611,9 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
       lastChecked,
       error: `Generation unavailable on the platform path for ${ids} — no platform key or gateway route configured`,
       summary: `Available only with your own API key: ${labels}`,
-      // Production's documented steady state: `docs/guides/platform-keys.md`
-      // records that no PLATFORM_* key is set and that provisioning is
-      // deliberately deferred. The verdict stays `degraded` (#9719's acceptance
-      // criterion), but this marker stops it driving the public banner and the
-      // 15-minute Sentry page — see `ServiceHealth.configurationOnly`.
-      configurationOnly: true,
+      // Suppress only an explicit deployment baseline, never infer intent
+      // from the absence of a key. Remove entries when provisioning them.
+      ...(isExpectedConfigurationGap(unconfiguredCapabilities) ? { configurationOnly: true } : {}),
       details,
     };
   }
