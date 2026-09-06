@@ -316,3 +316,30 @@ Then MUTATE — comment the line out, append a duplicate key, delete the call �
 and confirm the pin goes red. A source pin you have not mutated is a source pin
 you have not tested, and it is guarding the one thing nothing else can.
 **Ticket:** #9743, #9739
+
+### 17. Do not assert facts about the OPERATING environment you did not check
+**Applies:** runbook|docs/guides|on-call|alert|escalat|rotation|notify|SLA|incident|postmortem|process
+**What happens:** A document states, as fact, something about how this project
+is run that nobody verified, and it reads with the same authority as the parts
+that were measured. Written into `health-monitor-cron.md`: a rehearsal step
+warned that a synthetic failure "can page on-call" and told the reader to "tell
+someone before you run this". **There is no on-call — this is a
+single-developer project.** The phrasing came from a review agent's report and
+was repeated as fact.
+**Why:** Environment facts feel like background rather than claims, so they skip
+the check that any code claim would get. They are also the easiest thing to
+import from a generic template, from another project's habits, or from an
+agent's summary — and an agent's report is a SOURCE, not a verification. Worse,
+`docs/sentry-alert-rules.md` looks like evidence that alert rules exist; its own
+first paragraph says the opposite ("recommended … actual rules must be created
+in the Sentry dashboard"). A document describing a system is not proof the
+system is configured.
+**Prevention:** Write the property you can point at in the repository, and stop
+there. "The Sentry `environment` tag comes from `NODE_ENV`, so preview issues
+are tagged `production`" is checkable and useful; "so this will page someone" is
+neither. When the next step depends on infrastructure outside the repo — an
+alert rule, a rotation, a dashboard setting, a notification channel — say what
+you could not verify and name where to look, rather than predicting the outcome.
+Never carry a subagent's framing into a claim of your own without checking the
+thing it was framing.
+**Ticket:** #9718
