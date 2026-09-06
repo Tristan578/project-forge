@@ -78,8 +78,19 @@ Two consequences that this runbook exists to prevent:
    it up. **Re-run the CD workflow; do not deploy from a local checkout:**
 
    ```bash
-   gh workflow run cd.yml --ref main
+   gh workflow run cd.yml --ref main -f promote_to_production=true
    ```
+
+   `-f promote_to_production=true` is not optional. `cd.yml`'s
+   `deploy-production` job runs only when
+   `github.event_name == 'push'` **or** that input is `true`; a bare
+   `workflow_dispatch` satisfies neither, so the job is **skipped** and the run
+   still reports green. You would then read the continuing 401s as a bad secret
+   rather than as "production was never rebuilt" — lesson 1 with lesson 4's
+   skipped-reads-as-success on top. That arm also requires lint, typecheck, the
+   web and MCP tests and security to pass, and it deliberately bypasses
+   staging. **Confirm the `Deploy to Production` job actually ran** (`gh run
+   view <id>`), not merely that the workflow is green.
 
    A bare `vercel deploy --prod` from your machine is the wrong mechanism here
    and is hard to undo. CD's production deploy is not a plain deploy: it pulls
@@ -152,11 +163,24 @@ section proves less than it looks like it proves.
    branch, and `vercel env rm` destroys the value with nothing to restore
    from. Add a branch-scoped override instead, which is additive and reversible:
 
+   The git branch is a **positional** argument, not a flag: CLI 58.4.4's
+   signatures are `vercel env add name [environment] [git-branch]` and
+   `vercel env rm <name> <environment> <gitbranch>`. Writing `--git-branch
+   <branch>` does not scope anything — and this CLI does not reject unknown
+   flags, so it fails silently and writes the override **project-wide across
+   every preview deployment**, which is the blast radius this section exists to
+   avoid.
+
    ```bash
-   vercel env add UPSTASH_REDIS_REST_URL preview --git-branch <branch> --scope tnolan
+   vercel env add UPSTASH_REDIS_REST_URL preview <branch> --scope tnolan
    # paste an unreachable value, e.g. https://invalid.invalid
-   vercel env add CRON_SECRET preview --git-branch <branch> --scope tnolan
+   vercel env add CRON_SECRET preview <branch> --scope tnolan
+   vercel env ls preview <branch> --scope tnolan   # confirm the scope took
    ```
+
+   Capture the project-wide preview value of `UPSTASH_REDIS_REST_URL` first
+   (`vercel env pull`, or your password manager) so a mistake here is
+   recoverable.
 
 2. **Redeploy that preview.** Environment variables are injected at build time
    (same reason as activation step 3), so a preview built before step 1 still
@@ -166,17 +190,28 @@ section proves less than it looks like it proves.
 3. Invoke the route. Preview deployments sit behind Vercel Deployment
    Protection, which answers **401 — the same status `isAuthorizedCron`
    returns** — so send the project's automation bypass header or you cannot
-   tell the two apart. Keep the secret out of `argv` and shell history:
+   tell the two apart.
+
+   Both values must stay out of `argv`. `read -rs` only suppresses the echo and
+   the history entry: the shell expands `-H "Authorization: Bearer $VAR"`
+   **before** exec, so the secret lands in curl's command line and is readable
+   by any local process through `ps` for the life of the request. Feed the
+   headers to curl as a config file on stdin instead — `printf` is a shell
+   builtin, so it forks nothing and the values never reach a process table:
 
    ```bash
    read -rs CRON_SECRET_PREVIEW      # paste; nothing echoes
    read -rs VERCEL_AUTOMATION_BYPASS
-   curl -s \
-     -H "Authorization: Bearer ${CRON_SECRET_PREVIEW}" \
-     -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS}" \
-     "https://<preview-url>/api/cron/health-monitor" | jq .
+   printf 'url = "%s"\nheader = "Authorization: Bearer %s"\nheader = "x-vercel-protection-bypass: %s"\n' \
+     "https://<preview-url>/api/cron/health-monitor" \
+     "$CRON_SECRET_PREVIEW" "$VERCEL_AUTOMATION_BYPASS" \
+     | curl -s -K - | jq .
    unset CRON_SECRET_PREVIEW VERCEL_AUTOMATION_BYPASS
    ```
+
+   (`curl -K -` reads its configuration from stdin; verified against curl
+   8.21.0. Do not write the config to a file — that trades the process table
+   for the disk.)
 
    Assert on the JSON body — the degraded service must appear in it — not on
    the status code alone.
@@ -186,8 +221,9 @@ section proves less than it looks like it proves.
 5. Remove the branch-scoped overrides:
 
    ```bash
-   vercel env rm UPSTASH_REDIS_REST_URL preview --git-branch <branch> --scope tnolan
-   vercel env rm CRON_SECRET preview --git-branch <branch> --scope tnolan
+   vercel env rm UPSTASH_REDIS_REST_URL preview <branch> --scope tnolan
+   vercel env rm CRON_SECRET preview <branch> --scope tnolan
+   vercel env ls preview <branch> --scope tnolan   # confirm both are gone
    ```
 
 **What this rehearsal proves:** the route detects a degraded service and raises
@@ -200,9 +236,12 @@ filtered out by construction and silence here is expected rather than a fault.
 Do not "fix" the production rule to accommodate it. To prove delivery, either
 add `preview` to that rule's environment filter for the duration of the
 rehearsal and remove it afterwards, or accept the first production fire as the
-proof. Note too that `captureException` no-ops without a DSN
-(`web/src/lib/monitoring/sentry-server.ts`), so confirm the preview has one
-before reading silence as a broken alert rule.
+proof. Note too that `captureException` reads **`SENTRY_DSN` alone** and
+no-ops without it (`web/src/lib/monitoring/sentry-server.ts`) - unlike
+`withCronMonitor`, which also accepts `NEXT_PUBLIC_SENTRY_DSN`. A preview
+carrying only the public variable satisfies a loose "has a DSN" check and still
+raises no issue, which reads exactly like a broken alert rule. Confirm
+`SENTRY_DSN` specifically before drawing that conclusion.
 
 ## Rotation
 
