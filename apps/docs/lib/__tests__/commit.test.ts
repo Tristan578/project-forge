@@ -16,8 +16,19 @@ describe('commitStampOf', () => {
     expect(commitStampOf({ VERCEL_GIT_COMMIT_SHA: sha })).toBe(sha);
   });
 
-  it('accepts an abbreviated SHA (7+ hex chars)', () => {
-    expect(commitStampOf({ VERCEL_GIT_COMMIT_SHA: 'abcdef1' })).toBe('abcdef1');
+  it('accepts an abbreviated SHA of at least the width the deploy gate compares (8+ hex chars)', () => {
+    expect(commitStampOf({ VERCEL_GIT_COMMIT_SHA: 'abcdef12' })).toBe('abcdef12');
+  });
+
+  it('renders a 7-char abbreviation as unknown — shorter than the gate compares', () => {
+    // `scripts/post-deploy-docs-check.sh` compares the leading 8 chars
+    // (COMMIT_COMPARE_WIDTH). A 7-char stamp of the very commit under test
+    // could never equal that expectation, so the gate would report the right
+    // build as a DIFFERENT one and fail the deploy on a mismatch that does not
+    // exist. UNKNOWN_COMMIT says "this build has no usable SHA" instead, which
+    // the gate diagnoses as exactly that. `scripts/__tests__/post-deploy-docs-check.test.sh`
+    // cross-pins the two widths so they cannot drift apart again.
+    expect(commitStampOf({ VERCEL_GIT_COMMIT_SHA: 'abcdef1' })).toBe(UNKNOWN_COMMIT);
   });
 
   it.each([

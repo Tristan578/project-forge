@@ -17,13 +17,26 @@
 #
 # Environment variables:
 #   DOCS_CHECK_EXPECT_COMMIT REQUIRED. The commit this run deployed (cd.yml
-#                            passes github.sha; 8 to 40 hex chars). Every
-#                            accepted page must carry
+#                            passes github.sha; 8 to 40 hex chars, either
+#                            case). Every accepted page must carry
 #                            <meta name="spawnforge-docs-commit" content="<sha>">
-#                            whose first 8 chars match. The layout renders it
-#                            from VERCEL_GIT_COMMIT_SHA (apps/docs/lib/commit.ts).
+#                            whose first 8 chars match, compared case-
+#                            insensitively. The layout renders it from
+#                            VERCEL_GIT_COMMIT_SHA (apps/docs/lib/commit.ts).
 #                            There is no optional mode: without the commit the
 #                            gate can only prove that SOME build is healthy.
+#
+#                            RUNTIME PREREQUISITE: VERCEL_GIT_COMMIT_SHA only
+#                            reaches the docs build when the spawnforge-docs
+#                            Vercel project has "Automatically expose System
+#                            Environment Variables" enabled (Settings ->
+#                            Advanced; docs/production-support.md section 13
+#                            documents the same toggle for the spawnforge
+#                            project, and apps/docs/README.md lists it under
+#                            Environment Variables). With it off, every page
+#                            stamps 'unknown' and this gate fails closed on
+#                            every attempt. Nothing in this repo can set it —
+#                            it is a per-project dashboard setting.
 #   DOCS_CHECK_CATEGORY      Category page to probe (default: scene)
 #   DOCS_CHECK_COMMAND       Command name that must be rendered on that page
 #                            (default: spawn_entity). Keep in step with
@@ -88,6 +101,27 @@ if [[ ! "$EXPECT_COMMIT" =~ ^[0-9a-fA-F]{8,40}$ ]]; then
   usage "DOCS_CHECK_EXPECT_COMMIT must be 8 to 40 hex chars, got '${EXPECT_COMMIT}'"
 fi
 
+# How many leading hex chars of the expected and reported commits are compared.
+# The expectation may be a full SHA and the stamp an abbreviation (or the other
+# way round), so only a common prefix can be compared.
+#
+# apps/docs/lib/commit.ts must never render a stamp SHORTER than this: a
+# 7-char stamp of the very commit under test could not equal an 8-char
+# expectation, and the right build would be reported as a different one.
+# scripts/__tests__/post-deploy-docs-check.test.sh extracts this line and that
+# module's GIT_SHA minimum and fails when the minimum drops below this width;
+# keep the `COMMIT_COMPARE_WIDTH=<n>` line in exactly this shape.
+COMMIT_COMPARE_WIDTH=8
+
+# Both sides are case-folded before comparing. The validation above accepts
+# [0-9a-fA-F], so an upper-case expected SHA is legal input; comparing it
+# case-sensitively against the lower-case stamp git and Vercel produce would
+# fail every attempt with the "DIFFERENT build" diagnosis — the same commit
+# reported as a different one, sending the operator after alias lag that is
+# not there.
+EXPECT_COMMIT_SHORT="${EXPECT_COMMIT,,}"
+EXPECT_COMMIT_SHORT="${EXPECT_COMMIT_SHORT:0:$COMMIT_COMPARE_WIDTH}"
+
 CATEGORY="${DOCS_CHECK_CATEGORY:-scene}"
 COMMAND="${DOCS_CHECK_COMMAND:-spawn_entity}"
 RETRIES="${DOCS_CHECK_RETRIES:-3}"
@@ -138,7 +172,7 @@ commit_of_body() {
 # "could not authenticate, skipping" branch does to a gate.
 probe() {
   local url="$1" marker="$2" proves="$3"
-  local attempt=0 http_code reported last="no attempt was made"
+  local attempt=0 http_code reported reported_short last="no attempt was made"
 
   while [ "$attempt" -lt "$RETRIES" ]; do
     attempt=$(( attempt + 1 ))
@@ -160,14 +194,16 @@ probe() {
       else
         echo "  Content check passed: found ${marker} (${proves})"
         reported="$(commit_of_body "$RESPONSE_FILE")"
+        reported_short="${reported,,}"
+        reported_short="${reported_short:0:$COMMIT_COMPARE_WIDTH}"
         if [ -z "$reported" ]; then
-          last="HTTP 200 with the content, but the page reported no commit (no hex <meta name=\"${COMMIT_META_NAME}\"> stamp), so it cannot be tied to the deploy under test — an older build, or one built without VERCEL_GIT_COMMIT_SHA"
+          last="HTTP 200 with the content, but the page reported no commit (no hex <meta name=\"${COMMIT_META_NAME}\"> stamp), so it cannot be tied to the deploy under test — an older build, or one built without VERCEL_GIT_COMMIT_SHA. That variable reaches a Vercel build ONLY when the docs project has 'Automatically expose System Environment Variables' enabled (Vercel Dashboard > spawnforge-docs > Settings > Advanced; see docs/production-support.md section 13 and apps/docs/README.md). If this fails on every attempt of a fresh deploy, check that toggle before suspecting alias lag — retrying cannot turn it on"
           echo "::warning::${last}"
-        elif [ "${reported:0:8}" != "${EXPECT_COMMIT:0:8}" ]; then
-          last="HTTP 200 with the content, but the page reports commit ${reported:0:8}, expected ${EXPECT_COMMIT:0:8} — the alias is serving a DIFFERENT build (alias assignment lag, or a deploy whose domain set did not include this alias), not the one this run published"
+        elif [ "$reported_short" != "$EXPECT_COMMIT_SHORT" ]; then
+          last="HTTP 200 with the content, but the page reports commit ${reported_short}, expected ${EXPECT_COMMIT_SHORT} — the alias is serving a DIFFERENT build (alias assignment lag, or a deploy whose domain set did not include this alias), not the one this run published"
           echo "::warning::${last}"
         else
-          echo "  Commit check passed: page reports ${reported:0:8}"
+          echo "  Commit check passed: page reports ${reported_short}"
           return 0
         fi
       fi
@@ -187,13 +223,13 @@ probe() {
     fi
   done
 
-  echo "::error::${url} did not return 200 with ${marker} from commit ${EXPECT_COMMIT:0:8} after ${RETRIES} attempt(s) — ${proves} could not be verified on the deployed docs site. Last attempt: ${last}" >&2
+  echo "::error::${url} did not return 200 with ${marker} from commit ${EXPECT_COMMIT_SHORT} after ${RETRIES} attempt(s) — ${proves} could not be verified on the deployed docs site. Last attempt: ${last}" >&2
   return 1
 }
 
 # ---------- run -------------------------------------------------------------
 
-echo "Waiting ${STABILIZE}s for the docs deployment to stabilize: ${BASE_URL} (expecting commit ${EXPECT_COMMIT:0:8})"
+echo "Waiting ${STABILIZE}s for the docs deployment to stabilize: ${BASE_URL} (expecting commit ${EXPECT_COMMIT_SHORT})"
 sleep "$STABILIZE"
 
 if ! probe "$INDEX_URL" "$INDEX_MARKER" "a category tile, i.e. more than zero public commands"; then
@@ -203,5 +239,5 @@ if ! probe "$CATEGORY_URL" "$CATEGORY_MARKER" "the ${COMMAND} command rendered u
   exit 1
 fi
 
-echo "Docs MCP reference check passed: ${INDEX_URL} lists categories and ${CATEGORY_URL} renders ${COMMAND}, both from commit ${EXPECT_COMMIT:0:8}"
+echo "Docs MCP reference check passed: ${INDEX_URL} lists categories and ${CATEGORY_URL} renders ${COMMAND}, both from commit ${EXPECT_COMMIT_SHORT}"
 exit 0

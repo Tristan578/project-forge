@@ -804,6 +804,39 @@ Vercel then auto-injects two env vars on every build:
 
 Next.js uses these to attach `?dpl=<id>` to framework-managed requests (static assets, RSC fetches, prefetches), routing them to the same deployment that served the initial HTML.
 
+### The same toggle is a hard prerequisite for the docs deploy gate
+
+Step 2 above (**Automatically expose System Environment Variables**) is a
+**per-project** setting, and it must be enabled on **`spawnforge-docs`** as well
+as `spawnforge`. Nothing in the repository can set it.
+
+It is what makes `VERCEL_GIT_COMMIT_SHA` available to the build. `apps/docs`
+stamps that value into every page (`app/layout.tsx` → `lib/commit.ts` →
+`<meta name="spawnforge-docs-commit">`), and `cd.yml`'s `Deploy Docs` job ends
+with `scripts/post-deploy-docs-check.sh`, which **requires** the deployed page
+to carry the commit the run just published — a healthy body proves only that
+*something* is healthy, so the stamp is what proves the alias is serving *this*
+build (lessons-learned #1; `/api/health`'s `commit` field is the web app's
+equivalent).
+
+With the toggle **off** on `spawnforge-docs`, the page stamps `unknown`, and
+every docs deploy fails closed on:
+
+```
+the page reported no commit (no hex <meta name="spawnforge-docs-commit"> stamp)
+... an older build, or one built without VERCEL_GIT_COMMIT_SHA
+```
+
+That is a correct refusal, not a false alarm — but retrying cannot fix it. Turn
+the toggle on and redeploy. To confirm without a deploy:
+
+```bash
+# The stamp must be hex, not 'unknown'
+curl -s https://docs.spawnforge.ai/mcp | grep -o '<meta name="spawnforge-docs-commit"[^>]*>'
+```
+
+See also `apps/docs/README.md` → Environment Variables.
+
 ### What it protects
 
 | Request type | Protected automatically |

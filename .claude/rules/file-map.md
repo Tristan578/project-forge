@@ -196,7 +196,10 @@ Fumadocs-based docs site for the SpawnForge platform API and MCP command referen
 - `generate-mcp-docs.ts` — Generates MDX pages from the MCP command manifest, read by PATH (`MANIFEST_PATH`, set to `./data/commands.json` in `apps/docs/vercel.json`'s `buildCommand`). A script, not traced code, so a path read is correct HERE and wrong in `lib/commands.ts`. An unreadable manifest is `fatal` and exits 1 so the build cannot go green with zero pages
 - `__tests__/` — Vitest unit tests for each script (environment: node)
 
-**vitest config:** `apps/docs/vitest.config.ts` — includes `scripts/__tests__/**/*.test.ts` and `components/__tests__/**/*.test.tsx` and `lib/__tests__/**/*.test.ts` (environment: node for scripts, jsdom for components).
+### `apps/docs/app/__tests__/` — Root-layout tests
+- `layout-commit-stamp.test.ts` — Pins that `app/layout.tsx` renders `VERCEL_GIT_COMMIT_SHA` under `DOCS_COMMIT_META_NAME` (and `'unknown'` when it is absent), by re-importing the layout under a stubbed env. The deploy gate greps that tag on the live site, so a layout that stopped reading the variable would fail only at CD.
+
+**vitest config:** `apps/docs/vitest.config.ts` — ONE broad include glob, `**/*.{test,spec}.{ts,tsx}` (excluding `.next/` and Playwright's `e2e/`), not a per-directory enumeration: a directory-scoped list silently never collects a test at a path it does not name, and the author gets a green run for a test that never executed (PF-9453). `lib/__tests__/testCollection.test.ts` fails if the glob stops matching every test file in the tree. Default `environment: 'node'`; `environmentMatchGlobs` was removed in vitest 4, so DOM tests declare `// @vitest-environment jsdom` inline. `coverage.enabled: true` is set in the config because ci.yml's Docs Internal Gate runs a bare `npx vitest run` — a threshold only checked behind a `--coverage` flag nobody passes is not a gate.
 
 ## Design Workbench (`apps/design/`)
 

@@ -201,6 +201,40 @@ else
   fail "an 8-char expected commit was rejected against a matching full stamp: $OUT"
 fi
 
+# Git SHAs are conventionally lower-case, but nothing forces a caller to pass
+# one that way: `DOCS_CHECK_EXPECT_COMMIT` is validated as [0-9a-fA-F]{8,40},
+# so an upper-case SHA is ACCEPTED at validation and then, under a
+# case-sensitive comparison, fails every attempt against a lower-case stamp
+# with the "DIFFERENT build" diagnosis — the same commit reported as a
+# different one, and the operator sent chasing alias lag that is not there.
+UPPER_SHA="$(printf '%s' "$DEPLOYED_SHA" | tr 'a-f' 'A-F')"
+OUT="$(EXPECT_COMMIT="$UPPER_SHA" e2e 200 "$INDEX_OK" 200 "$CATEGORY_OK")"; RC=$?
+if [ "$RC" = 0 ]; then
+  pass "an UPPER-case expected commit matches a lower-case stamp of the same SHA (the comparison is case-insensitive)"
+else
+  fail "an upper-case expected commit was rejected against a stamp of the same SHA (rc=$RC): $OUT"
+fi
+
+# The other direction: an upper-case stamp against the lower-case SHA cd.yml
+# passes. Both sides must be folded, not just the one the caller controls.
+INDEX_UPPER_STAMP="<html>$(stamp "$UPPER_SHA")<body>${INDEX_TILES}</body></html>"
+CATEGORY_UPPER_STAMP="<html>$(stamp "$UPPER_SHA")<body>${CATEGORY_LIST}</body></html>"
+OUT="$(e2e 200 "$INDEX_UPPER_STAMP" 200 "$CATEGORY_UPPER_STAMP")"; RC=$?
+if [ "$RC" = 0 ]; then
+  pass "an UPPER-case stamp matches the lower-case expected commit (both sides are folded, not just the caller's)"
+else
+  fail "an upper-case stamp was rejected against the same SHA lower-cased (rc=$RC): $OUT"
+fi
+
+# Case folding must not become "compare nothing": a genuinely different build
+# still fails when the cases differ.
+OUT="$(EXPECT_COMMIT="$UPPER_SHA" e2e 200 "$INDEX_OTHER_BUILD" 200 "$CATEGORY_OK")"; RC=$?
+if [ "$RC" != 0 ] && grep -qi 'different build' <<<"$OUT"; then
+  pass "case folding did not weaken the check — a genuinely different commit still fails against an upper-case expectation"
+else
+  fail "an upper-case expectation accepted a page from another build (rc=$RC): $OUT"
+fi
+
 # --- refusals ---
 # The exact shape of #9718: the index route 500s.
 OUT="$(e2e 500 "$SERVER_ERROR" 200 "$CATEGORY_OK")"; RC=$?
@@ -259,11 +293,20 @@ else
   fail "a healthy page from another build was accepted or not explained (rc=$RC): $OUT"
 fi
 
+# An unstamped page has one likely cause that no amount of retrying fixes:
+# `VERCEL_GIT_COMMIT_SHA` only reaches the build when the Vercel project has
+# "Automatically expose System Environment Variables" enabled, and that is a
+# per-project dashboard toggle nothing in this repo can set. If the message
+# does not name it, every docs deploy after this gate lands fails closed on a
+# diagnosis that reads like alias lag, and the one action that fixes it is
+# nowhere in the log.
 OUT="$(e2e 200 "$INDEX_UNSTAMPED" 200 "$CATEGORY_OK")"; RC=$?
-if [ "$RC" != 0 ] && grep -q 'reported no commit' <<<"$OUT"; then
-  pass "a healthy 200 with no commit stamp fails (an unstamped page cannot be tied to the deploy under test)"
+if [ "$RC" != 0 ] && grep -q 'reported no commit' <<<"$OUT" \
+  && grep -q 'VERCEL_GIT_COMMIT_SHA' <<<"$OUT" \
+  && grep -qi 'Automatically expose System Environment Variables' <<<"$OUT"; then
+  pass "a healthy 200 with no commit stamp fails and names the toggle that produces it (Automatically expose System Environment Variables)"
 else
-  fail "an unstamped page passed the commit assertion (rc=$RC): $OUT"
+  fail "an unstamped page passed the commit assertion, or failed without naming the toggle (rc=$RC): $OUT"
 fi
 
 OUT="$(e2e 200 "$INDEX_OK" 200 "$CATEGORY_OTHER_BUILD")"; RC=$?
@@ -390,6 +433,27 @@ else
     pass "the fixtures above stamp the name the script actually looks for"
   else
     fail "the suite's stamp() fixture uses 'spawnforge-docs-commit' but the script looks for '$SCRIPT_META' — the passing cases above are not exercising the real name"
+  fi
+
+  # The second thing the two files must agree on, and the one no runtime case
+  # can reach: the script compares the leading COMMIT_COMPARE_WIDTH chars, so a
+  # stamp SHORTER than that can never equal the commit it names. A build whose
+  # VERCEL_GIT_COMMIT_SHA is a 7-char abbreviation of the very commit under
+  # test would be reported as a DIFFERENT build and the deploy would fail
+  # closed on a mismatch that does not exist. The module's accepted minimum
+  # must therefore be at least the script's comparison width. Both extractions
+  # must be non-empty — comparing two empty strings passes vacuously.
+  SCRIPT_WIDTH="$(sed -nE 's/^COMMIT_COMPARE_WIDTH=([0-9]+)$/\1/p' "$SCRIPT" | head -1)"
+  MODULE_SHA_MIN="$(sed -nE 's/^const GIT_SHA = \/\^\[0-9a-fA-F\]\{([0-9]+),[0-9]+\}\$\/;$/\1/p' "$COMMIT_MODULE" | head -1)"
+  if [ -n "$SCRIPT_WIDTH" ] && [ -n "$MODULE_SHA_MIN" ]; then
+    pass "extracted both minimums (script compares $SCRIPT_WIDTH chars; lib/commit.ts renders a stamp of $MODULE_SHA_MIN+ hex chars)"
+    if [ "$MODULE_SHA_MIN" -ge "$SCRIPT_WIDTH" ]; then
+      pass "lib/commit.ts's GIT_SHA minimum ($MODULE_SHA_MIN) is at least the width the gate compares ($SCRIPT_WIDTH)"
+    else
+      fail "stamp-width drift: lib/commit.ts renders stamps as short as $MODULE_SHA_MIN chars but the gate compares $SCRIPT_WIDTH — a short stamp of the deployed commit reads as a DIFFERENT build. Raise the {min,40} in apps/docs/lib/commit.ts to $SCRIPT_WIDTH."
+    fi
+  else
+    fail "could not extract the minimums (script COMMIT_COMPARE_WIDTH: '$SCRIPT_WIDTH', lib/commit.ts GIT_SHA: '$MODULE_SHA_MIN') — a shape change made this pin vacuous"
   fi
 fi
 

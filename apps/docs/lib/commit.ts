@@ -32,8 +32,20 @@ export const DOCS_COMMIT_META_NAME = 'spawnforge-docs-commit';
  */
 export const UNKNOWN_COMMIT = 'unknown';
 
-/** A git SHA-1, full or abbreviated. Anything else is not rendered into the page. */
-const GIT_SHA = /^[0-9a-fA-F]{7,40}$/;
+/**
+ * A git SHA-1, full or abbreviated. Anything else is not rendered into the page.
+ *
+ * The minimum is 8, not git's own 7, because that is the width
+ * `scripts/post-deploy-docs-check.sh` compares (`COMMIT_COMPARE_WIDTH`): a
+ * 7-char stamp of the very commit under test could never equal the gate's
+ * expectation, so the right build would be reported as a DIFFERENT one and the
+ * deploy would fail closed on a mismatch that does not exist. Rendering
+ * `UNKNOWN_COMMIT` instead states the true problem — this build has no usable
+ * SHA. `scripts/__tests__/post-deploy-docs-check.test.sh` extracts this
+ * minimum and fails if it drops below the script's comparison width; keep the
+ * `const GIT_SHA = /^[0-9a-fA-F]{<min>,<max>}$/;` line in exactly this shape.
+ */
+const GIT_SHA = /^[0-9a-fA-F]{8,40}$/;
 
 /**
  * The stamp value for an environment: the SHA verbatim when it is one,
