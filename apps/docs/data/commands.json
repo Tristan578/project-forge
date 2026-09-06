@@ -6084,7 +6084,7 @@
     },
     {
       "name": "generate_music",
-      "description": "Generate background music from text description",
+      "description": "Generate background music from text description. Not available yet: the music provider is being replaced (#9522), so this command is withheld from AI tool sets and refused by the route until then.",
       "category": "generation",
       "parameters": {
         "type": "object",

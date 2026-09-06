@@ -1,4 +1,11 @@
 vi.mock('server-only', () => ({}));
+// The route consults Clerk and the BYOK resolver since #9117; stub them to
+// "anonymous" so this suite asserts the env-var branch by construction, not
+// by whatever Clerk keys happen to be in the shell.
+vi.mock('@/lib/auth/safe-auth', () => ({ safeAuth: vi.fn(async () => ({ userId: null })) }));
+vi.mock('@/lib/auth/user-service', () => ({ getUserByClerkId: vi.fn(async () => null) }));
+vi.mock('@/lib/keys/resolver', () => ({ listConfiguredProviders: vi.fn(async () => []) }));
+vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -70,18 +77,31 @@ describe('GET /api/capabilities', () => {
 
   it('marks capability as unavailable when no env vars set', async () => {
     // Ensure no relevant env vars are set
-    delete process.env.PLATFORM_SUNO_KEY;
+    delete process.env.PLATFORM_MESHY_KEY;
 
     const { GET } = await import('./route');
     const req = new NextRequest(BASE_URL);
     const res = await GET(req);
     const body = await res.json();
 
+    const model3d = body.capabilities.find((c: { capability: string }) => c.capability === 'model3d');
+    expect(model3d.available).toBe(false);
+    expect(model3d.requiredProviders).toBeDefined();
+    expect(model3d.hint).toContain('Meshy');
+    expect(body.unavailable).toContain('model3d');
+  });
+
+  it('marks an unprovisionable capability with the tracking issue instead of a key hint (#9117)', async () => {
+    const { GET } = await import('./route');
+    const res = await GET(new NextRequest(BASE_URL));
+    const body = await res.json();
+
     const music = body.capabilities.find((c: { capability: string }) => c.capability === 'music');
     expect(music.available).toBe(false);
-    expect(music.requiredProviders).toBeDefined();
-    expect(music.hint).toContain('Suno');
-    expect(body.unavailable).toContain('music');
+    expect(music.unprovisionable).toBe(true);
+    expect(music.issue).toBe(9522);
+    expect(music.hint).not.toContain('#9522');
+    expect(music.requiredProviders).toBeUndefined();
   });
 
   it('includes human-readable labels', async () => {
@@ -115,6 +135,23 @@ describe('GET /api/capabilities', () => {
     const res = await GET(req);
 
     expect(res.status).toBe(429);
+  });
+
+  // Every editor page load costs one request to this route (generation
+  // dialogs, Asset panel, Audio inspector), so 30/min was too low for a
+  // shared-egress classroom. Pinned so the ceiling cannot quietly regress.
+  //
+  // It is NOT what fixed the E2E 429s, and the earlier note here saying so was
+  // wrong: run 33987394245 at head 1942fe4b already ran with 120 and failed
+  // misc-routes.spec.ts the same way. Under `next start` nothing sets a
+  // forwarded-for header, so every worker, shard and concurrent CI job keys
+  // one `public:capabilities:unknown` bucket. That is fixed by client
+  // isolation — `playwright.ci.config.ts` and `e2e/helpers/capabilities.ts`.
+  it('rate-limits at 120 requests per minute per IP', async () => {
+    const { GET } = await import('./route');
+    const req = new NextRequest(BASE_URL);
+    await GET(req);
+    expect(rateLimitPublicRoute).toHaveBeenCalledWith(req, 'capabilities', 120, 60_000);
   });
 
   it('marks chat available via AI Gateway on Vercel', async () => {

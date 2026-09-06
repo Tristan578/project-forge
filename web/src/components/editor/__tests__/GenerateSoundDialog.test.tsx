@@ -28,6 +28,41 @@ vi.mock('lucide-react', () => ({
   Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
 
+// Capability gate (#9117): report "available" so these tests exercise the
+// submit path; the gate itself is covered by useGenerationGate.test.tsx.
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+}));
+
+describe('GenerateSoundDialog capability gate (#9117)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
+  });
+
+  it('asks the gate for sfx-generation by default and voice-generation once Voice is selected', () => {
+    render(<GenerateSoundDialog isOpen={true} onClose={vi.fn()} />);
+    expect(useGenerationGate).toHaveBeenLastCalledWith('sfx-generation');
+    fireEvent.click(screen.getAllByRole('radio')[1]);
+    expect(useGenerationGate).toHaveBeenLastCalledWith('voice-generation');
+  });
+
+  it('shows the notice, disables inputs and Generate when blocked', () => {
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false });
+    render(<GenerateSoundDialog isOpen={true} onClose={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveAttribute('id', 'generate-sound-unavailable');
+    expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sound-unavailable');
+    expect(screen.getByText('Generate').closest('button')).toBeDisabled();
+    expect(screen.getByPlaceholderText(/sword clashing/i)).toBeDisabled();
+    // The type selector is never locked by the gate: a user must always be
+    // able to switch back to a type that is still offered.
+    for (const radio of screen.getAllByRole('radio')) expect(radio).not.toBeDisabled();
+    fireEvent.click(screen.getAllByRole('radio')[1]);
+    expect(useGenerationGate).toHaveBeenLastCalledWith('voice-generation');
+  });
+});
+
 describe('GenerateSoundDialog', () => {
   const mockOnClose = vi.fn();
   const importAudio = vi.fn();

@@ -38,6 +38,7 @@ import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
+import { getCapabilityUnavailability, ROUTE_CAPABILITY, type ProviderCapability } from '@/lib/config/providers';
 import { ErrorCode, redactedJson } from './errors';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
@@ -117,6 +118,16 @@ export interface GenerationHandlerConfig<TParams, TResult> {
 
   /** Provider name for API key resolution. Static or computed from validated params. */
   provider: Provider | ((params: TParams) => Provider);
+
+  /**
+   * The capability this route serves (#9117). When it appears in
+   * `UNAVAILABLE_CAPABILITIES`, every request is refused with 503
+   * `SERVICE_UNAVAILABLE` — right after auth, before any token is deducted.
+   * Optional override: when omitted the handler reads `ROUTE_CAPABILITY[route]`
+   * from `lib/config/providers`, so a generate route cannot be left ungated by
+   * forgetting this field (a test pins every route into that table).
+   */
+  capability?: ProviderCapability;
 
   /** Token operation name for pricing lookup. Static or computed from validated params. */
   operation: string | ((params: TParams) => string);
@@ -257,6 +268,7 @@ export function createGenerationHandler<TParams, TResult>(
   const {
     route,
     provider,
+    capability,
     operation,
     rateLimitKey,
     rateLimitMax = 10,
@@ -378,6 +390,26 @@ export function createGenerationHandler<TParams, TResult>(
     const userId = authResult.ctx.user.id;
     const tier = authResult.ctx.user.tier;
     mctx.tier = tier;
+
+    // 1a. Declared-unavailable capability (#9117). Static config, checked as
+    // soon as the caller is known and BEFORE BotID, both rate limits, body
+    // parsing and content safety: a capability with no provisionable provider
+    // can never succeed, so a refusal must not spend the user's aggregate
+    // generation budget, resolve a key, or deduct a token. The body carries the
+    // user-facing reason; the tracking issue rides in `details`, not the copy.
+    const effectiveCapability = capability ?? ROUTE_CAPABILITY[route] ?? null;
+    const unavailability = effectiveCapability ? getCapabilityUnavailability(effectiveCapability) : null;
+    if (unavailability) {
+      mctx.outcome = 'capability_unavailable';
+      return NextResponse.json(
+        {
+          error: unavailability.reason,
+          code: ErrorCode.SERVICE_UNAVAILABLE,
+          details: { capability: effectiveCapability, issue: unavailability.issue },
+        },
+        { status: 503 }
+      );
+    }
 
     // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
     // token deduction, so a blocked bot never spends either budget.

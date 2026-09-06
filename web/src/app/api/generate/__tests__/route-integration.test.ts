@@ -126,7 +126,11 @@ vi.mock('@/lib/generate/palettes', () => ({
   validateCustomPalette: vi.fn().mockReturnValue({ valid: true }),
 }));
 
-vi.mock('@/lib/config/providers', () => ({
+vi.mock('@/lib/config/providers', async (importOriginal) => ({
+  // Real module underneath so the factory's capability gate (#9117) reads
+  // the real UNAVAILABLE_CAPABILITIES table; the literals below are the
+  // pre-existing pins this suite asserts against.
+  ...(await importOriginal<typeof import('@/lib/config/providers')>()),
   DB_PROVIDER: {
     chat: 'anthropic', sfx: 'elevenlabs', voice: 'elevenlabs', music: 'suno',
     model3d: 'meshy', texture: 'meshy', sprite: 'replicate', image: 'openai',
@@ -217,13 +221,15 @@ describe('generate route integration (route → factory → provider)', () => {
     expect(data.audioBase64).toBe('base64==');
   });
 
-  it('music: valid request → 201 with jobId', async () => {
+  // #9117 / #9522: music is declared unavailable until it moves to ElevenLabs.
+  // The route refuses 503 before the key resolves, so no jobId is ever minted.
+  it('music: valid request → 503 SERVICE_UNAVAILABLE (declared unavailable, #9522)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(503);
     const data = await res.json();
-    expect(data.jobId).toBe('suno-1');
-    expect(data.usageId).toBe('usage-int');
+    expect(data.code).toBe('SERVICE_UNAVAILABLE');
+    expect(data.details).toEqual({ capability: 'music', issue: 9522 });
   });
 
   it('skybox: valid request → 201 with jobId', async () => {
@@ -472,13 +478,12 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     expect(data.provider).toBe('elevenlabs');
   });
 
-  it('music: 201 with jobId AND usageId preserved through the agent', async () => {
+  it('music: the unavailable gate precedes the agent — 503, no usageId minted (#9117)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(503);
     const data = await res.json();
-    expect(data.jobId).toBe('suno-1');
-    expect(data.usageId).toBe('usage-int');
+    expect(data.usageId).toBeUndefined();
   });
 
   it('model: 201 with jobId AND usageId preserved through the agent', async () => {
@@ -605,14 +610,12 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     expect(instance.createTextToTexture.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('test 17 — music route: SunoClient.createMusic receives ctx.abortSignal', async () => {
+  it('test 17 — music route: SunoClient is never constructed while music is declared unavailable (#9117)', async () => {
     const { SunoClient } = await import('@/lib/generate/sunoClient');
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const instance = vi.mocked(SunoClient).mock.instances.at(-1) as any;
-    expect(instance.createMusic.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+    expect(res.status).toBe(503);
+    expect(vi.mocked(SunoClient)).not.toHaveBeenCalled();
   });
 
   it('test 17 — sfx route: ElevenLabsClient.generateSfx receives ctx.abortSignal', async () => {
@@ -842,11 +845,11 @@ describe('generate routes match the published OpenAPI response contract', () => 
     ).toEqual(expectedDivergences);
   }
 
-  it('POST /api/generate/music 201 matches GenerationJob', async () => {
+  it('POST /api/generate/music 503 matches Error (declared unavailable, #9117)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(201);
-    expectContract('/api/generate/music', 201, await res.json());
+    expect(res.status).toBe(503);
+    expectContract('/api/generate/music', 503, await res.json());
   });
 
   it('POST /api/generate/skybox 201 matches GenerationJob', async () => {

@@ -10,7 +10,9 @@ import {
   useFeatureGating,
   useCapabilities,
   _resetCapabilitiesCache,
+  invalidateCapabilitiesCache,
   ERROR_TTL_MS,
+  CAPABILITIES_TTL_MS,
 } from '../useFeatureGating';
 import type { CapabilitiesResponse } from '@/app/api/capabilities/route';
 
@@ -33,6 +35,7 @@ function mockCapabilitiesResponse(
     ],
     available: ['chat', 'embedding'],
     unavailable: ['image', 'model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal'],
+    degraded: false,
     ...overrides,
   };
 }
@@ -347,5 +350,76 @@ describe('useCapabilities', () => {
     });
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+// #9725 review (Sentry): the module-level cache never expired on success, so a
+// sign-out/sign-in within one SPA session kept serving the previous user's
+// BYOK-aware body. The cache now ages out on the same 60s the route's
+// `Cache-Control: private, max-age=60` allows, and can be invalidated
+// explicitly by whatever reacts to an auth change.
+describe('capabilities cache freshness (#9725)', () => {
+  beforeEach(() => {
+    _resetCapabilitiesCache();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    _resetCapabilitiesCache();
+  });
+
+  function okFetch() {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify(mockCapabilitiesResponse()), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  }
+
+  it('refetches once a successful response is older than CAPABILITIES_TTL_MS', async () => {
+    const fetchSpy = okFetch();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const first = renderHook(() => useCapabilities());
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    // Inside the TTL: a new mount is served from cache.
+    now.mockReturnValue(1_000_000 + CAPABILITIES_TTL_MS - 1);
+    const second = renderHook(() => useCapabilities());
+    expect(second.result.current.loading).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    second.unmount();
+
+    // Past the TTL: a new mount refetches.
+    now.mockReturnValue(1_000_000 + CAPABILITIES_TTL_MS + 1);
+    const third = renderHook(() => useCapabilities());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(third.result.current.loading).toBe(false));
+  });
+
+  it('invalidateCapabilitiesCache() forces the next mount to refetch', async () => {
+    const fetchSpy = okFetch();
+    const first = renderHook(() => useCapabilities());
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    first.unmount();
+    invalidateCapabilitiesCache();
+    const second = renderHook(() => useCapabilities());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(second.result.current.loading).toBe(false));
+  });
+
+  // The route answers `Cache-Control: private, max-age=60`, so a default-mode
+  // fetch right after invalidateCapabilitiesCache() is satisfied by the
+  // browser's HTTP cache with the PRE-save body — which then sets fetchedAt
+  // and is held for another CAPABILITIES_TTL_MS. The module already memoizes
+  // for 60s; the network request itself must bypass the HTTP cache. jsdom
+  // mocks fetch, so the only observable here is the init the hook passes.
+  it('bypasses the browser HTTP cache so an invalidation is not served the stale body', async () => {
+    const fetchSpy = okFetch();
+    const hook = renderHook(() => useCapabilities());
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith('/api/capabilities', expect.objectContaining({ cache: 'no-store' }));
   });
 });

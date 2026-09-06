@@ -46,7 +46,7 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S (use 180 for h
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { withEgressGuard } from '@/lib/security/egressGuard';
-// Import the provider client (e.g. ElevenLabsClient, MeshyClient, SunoClient)
+// Import the provider client (e.g. ElevenLabsClient, MeshyClient)
 
 const POST_impl = createGenerationHandler<
   { prompt: string; /* route-specific params */ },
@@ -54,6 +54,11 @@ const POST_impl = createGenerationHandler<
 >({
   route: '/api/generate/<name>',
   provider: DB_PROVIDER.<provider>,
+  // The capability this route spends (#9117). ALSO add the route to
+  // ROUTE_CAPABILITY in web/src/lib/config/providers.ts — a test walks every
+  // generate route and fails on one missing there. When the capability is in
+  // UNAVAILABLE_CAPABILITIES the handler refuses 503 before any charge.
+  capability: '<capability>',
   operation: '<operation>',
   rateLimitKey: 'gen-<name>',
 

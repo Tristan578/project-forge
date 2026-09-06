@@ -23,6 +23,40 @@ vi.mock('lucide-react', () => ({
   Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
 
+// Capability gate (#9117): report "available" so these tests exercise the
+// submit path; the gate itself is covered by useGenerationGate.test.tsx.
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+}));
+
+describe('GenerateTextureDialog capability gate (#9117)', () => {
+  beforeEach(() => {
+    vi.mocked(useUserStore).mockImplementation(((selector: (s: unknown) => unknown) =>
+      selector({ tokenBalance: { total: 1000, monthlyRemaining: 1000, addon: 0 } })) as never);
+    vi.mocked(useEditorStore).mockImplementation(((selector: (s: unknown) => unknown) =>
+      selector({ primaryName: '' })) as never);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
+  });
+
+  it('asks the gate for texture-generation', () => {
+    render(<GenerateTextureDialog isOpen={true} onClose={vi.fn()} entityId="e1" />);
+    expect(useGenerationGate).toHaveBeenCalledWith('texture-generation');
+  });
+
+  it('shows the notice, disables inputs and Generate when blocked', () => {
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false });
+    render(<GenerateTextureDialog isOpen={true} onClose={vi.fn()} entityId="e1" />);
+    expect(screen.getByRole('status')).toHaveAttribute('id', 'generate-texture-unavailable');
+    expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-texture-unavailable');
+    expect(screen.getByText('Generate').closest('button')).toBeDisabled();
+    expect(screen.getByPlaceholderText(/brick wall/i)).toBeDisabled();
+  });
+});
+
 describe('GenerateTextureDialog', () => {
   const mockOnClose = vi.fn();
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Key, Plus, Trash2, Copy, Check } from 'lucide-react';
+import { invalidateCapabilitiesCache } from '@/hooks/useFeatureGating';
 
 type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno';
 
@@ -25,8 +26,14 @@ const PROVIDERS: { id: Provider; label: string; placeholder: string }[] = [
   { id: 'meshy', label: 'Meshy', placeholder: 'msy_...' },
   { id: 'hyper3d', label: 'Hyper3D / Rodin', placeholder: 'hd_...' },
   { id: 'elevenlabs', label: 'ElevenLabs', placeholder: 'xi_...' },
-  { id: 'suno', label: 'Suno', placeholder: 'suno_...' },
+  // Suno deliberately absent: it has no public API, so no key exists to
+  // paste, and `music` is refused regardless (UNAVAILABLE_CAPABILITIES, #9522).
 ];
+
+/** Human labels for providers Settings no longer offers but a user may still hold a key for. */
+const RETIRED_PROVIDER_LABELS: Partial<Record<Provider, string>> = {
+  suno: 'Suno',
+};
 
 export function ApiKeyManager() {
   const [providerKeys, setProviderKeys] = useState<ProviderStatus[]>([]);
@@ -71,6 +78,9 @@ export function ApiKeyManager() {
       setKeyInputs((prev) => ({ ...prev, [provider]: '' }));
       setShowInputs((prev) => ({ ...prev, [provider]: false }));
       setError(null);
+      // The capabilities body is per-user (BYOK); a saved key must show up in
+      // the editor now, not after the client cache ages out (#9725).
+      invalidateCapabilitiesCache();
     } catch {
       setError(`Failed to save ${provider} key. Please try again.`);
     }
@@ -78,8 +88,15 @@ export function ApiKeyManager() {
 
   const removeKey = async (provider: Provider) => {
     try {
-      await fetch(`/api/keys/${provider}`, { method: 'DELETE' });
+      const res = await fetch(`/api/keys/${provider}`, { method: 'DELETE' });
+      // DELETE answers 403 (stale step-up re-verification), 429 or 500 with a
+      // RESOLVED fetch: without this guard the row vanished, nothing was
+      // shown, the key was back on reload, and the capabilities cache was
+      // dropped as if the key were gone.
+      if (!res.ok) throw new Error('Failed to remove key');
       setProviderKeys((prev) => prev.filter((p) => p.provider !== provider));
+      setError(null);
+      invalidateCapabilitiesCache();
     } catch {
       setError(`Failed to remove ${provider} key.`);
     }
@@ -107,8 +124,11 @@ export function ApiKeyManager() {
 
   const revokeMcpKey = async (id: string) => {
     try {
-      await fetch(`/api/keys/api-key/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/keys/api-key/${id}`, { method: 'DELETE' });
+      // Same shape as removeKey: a refused DELETE must not drop the row.
+      if (!res.ok) throw new Error('Failed to revoke key');
       setMcpKeys((prev) => prev.filter((k) => k.id !== id));
+      setError(null);
     } catch {
       setError('Failed to revoke key.');
     }
@@ -196,6 +216,32 @@ export function ApiKeyManager() {
               )}
             </div>
           ))}
+          {/*
+            A key stored for a provider Settings no longer offers (Suno, #9522)
+            must still be visible and revocable — an encrypted secret the user
+            can neither see nor remove is worse than the dead row it replaced.
+          */}
+          {providerKeys
+            .filter((k) => k.configured && !PROVIDERS.some((p) => p.id === k.provider))
+            .map((k) => (
+              <div
+                key={k.provider}
+                className="flex items-center gap-2 rounded-md bg-zinc-800 p-2"
+              >
+                <span className="min-w-[140px] text-sm text-zinc-400">
+                  {RETIRED_PROVIDER_LABELS[k.provider] ?? k.provider} <span className="text-xs">(no longer offered)</span>
+                </span>
+                <span className="flex-1 text-xs text-zinc-400">Stored key, unused</span>
+                <button
+                  onClick={() => removeKey(k.provider)}
+                  className="text-red-400 hover:text-red-300"
+                  title="Remove key"
+                  aria-label={`Remove ${RETIRED_PROVIDER_LABELS[k.provider] ?? k.provider} API key`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
         </div>
       </div>
 

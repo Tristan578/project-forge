@@ -17,6 +17,38 @@ vi.mock('lucide-react', () => ({
   Sparkles: (props: Record<string, unknown>) => <span data-testid="sparkles-icon" {...props} />,
 }));
 
+// Capability gate (#9117): report "available" so these tests exercise the
+// submit path; the gate itself is covered by useGenerationGate.test.tsx.
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+}));
+
+describe('GenerateModelDialog capability gate (#9117)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
+  });
+
+  it('asks the gate for model-generation', () => {
+    render(<GenerateModelDialog isOpen={true} onClose={vi.fn()} />);
+    expect(useGenerationGate).toHaveBeenCalledWith('model-generation');
+  });
+
+  it('shows the notice, disables inputs and Generate, and links them by aria-describedby when blocked', () => {
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: true, reason: 'Not available yet.', loading: false, unprovisionable: false });
+    render(<GenerateModelDialog isOpen={true} onClose={vi.fn()} />);
+    const notice = screen.getByRole('status');
+    expect(notice).toHaveTextContent('Not available yet.');
+    expect(notice).toHaveAttribute('id', 'generate-model-unavailable');
+    expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-model-unavailable');
+    const btn = screen.getByText('Generate').closest('button');
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('aria-describedby', 'generate-model-unavailable');
+    expect(screen.getByPlaceholderText(/treasure chest/i)).toBeDisabled();
+  });
+});
+
 describe('GenerateModelDialog', () => {
   const mockOnClose = vi.fn();
 
