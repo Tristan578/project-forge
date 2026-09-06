@@ -6,6 +6,7 @@ import nextTs from "eslint-config-next/typescript";
 // are exercised through ESLint's RuleTester from a vitest suite. The inline
 // rules below predate that split; new ones belong in a file.
 import noRawResponseInCatch from "./eslint-rules/no-raw-response-in-catch.mjs";
+import { RULE_OPTIONS } from "./eslint-rules/no-raw-response-in-catch.options.mjs";
 
 // Local plugin: detect hardcoded Tailwind color classes that should use design tokens.
 // Pattern: bg-zinc-800, text-gray-300, border-slate-500, etc.
@@ -239,73 +240,11 @@ const localPlugin = {
   },
 };
 
-/**
- * Error classes whose `message` is authored HERE, for the user, and can never
- * carry upstream provider text. Adding a name is asserting exactly that.
- *
- *  - ApiKeyError (lib/keys/resolver.ts) — "You have no Meshy key configured".
- *  - PromptRejectedError (lib/game-creation/decomposer.ts) — our own
- *    safety-filter reason. Typed rather than prefix-matched, so an upstream
- *    error whose text happened to start "Prompt rejected:" cannot claim it.
- *  - EmptyArtifactError (lib/generate/emptyArtifactError.ts — which is the path
- *    createGenerationHandler imports it from; an earlier version of this line
- *    cited lib/api/errors.ts, where the class does not appear at all, so a
- *    reviewer following the citation to check the assertion arrived at the
- *    wrong file) — COMPOSES its message from two static nouns (the generation
- *    type and the artifact), so no provider text can reach a client through it.
- *
- * Only the properties in `clientSafeProperties` (message, code, status,
- * statusCode, reason, name) are exempt, and only inside the narrowed branch.
- * Passing the narrowed error WHOLE is still reported: the justification is that
- * the MESSAGE is ours, and it does not extend to `err.cause.body`.
- */
-const CLIENT_SAFE_ERRORS = ['ApiKeyError', 'PromptRejectedError', 'EmptyArtifactError'];
-
-/**
- * The response constructors that redact (`web/src/lib/api/errors.ts`). Any
- * other way of building a response is banned on the catch path, which is what
- * puts `redactSecrets` genuinely ON that path instead of adjacent to it.
- */
-const REDACTING_RESPONSE_HELPERS = [
-  'apiError',
-  'createErrorResponse',
-  'redactedJson',
-  'apiErrorResponse',
-  'badRequest',
-  'unauthorized',
-  'paymentRequired',
-  'forbidden',
-  'notFound',
-  'conflict',
-  'validationError',
-  'internalError',
-  'serviceUnavailable',
-];
-
-/**
- * The ALLOWLIST of terminal sinks the caught error may reach. It lives here,
- * not only in the rule, so a reviewer can audit what is permitted to consume an
- * error without reading the rule's implementation.
- *
- * The rule's model is that a caught error may go to our telemetry, our logs, or
- * back up the stack — and nowhere else. Everything not on this list is reported
- * wherever the value crosses OUT of the catch scope, which is what makes the
- * gate independent of the (open-ended) set of sinks somebody might invent.
- */
-const CATCH_ERROR_SINKS = [
-  'captureException',        // lib/monitoring/sentry.ts
-  'captureMessage',
-  'sampledCaptureException', // lib/monitoring/sampledCapture.ts
-  'captureGenerationError',
-  'reportError',
-  'Promise.reject',          // a rethrow, not an egress
-];
-
-/** Receivers whose every method is a log sink. */
-// `reqLog`/`log` are the two names this repo binds `logger.child(...)` to.
-const CATCH_LOGGER_OBJECTS = [
-  'console', 'logger', 'log', 'reqLog', 'Sentry', 'sentry', 'sentryLogger',
-];
+// The rule's option lists live in `eslint-rules/no-raw-response-in-catch.options.mjs`
+// so the RuleTester suite (`src/app/api/__tests__/noRawResponseInCatch.test.ts`)
+// runs against the SHIPPED options rather than a retyped copy of them. The suite
+// used to declare three `responseHelpers` where this config passed thirteen, with a
+// comment claiming they matched.
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -427,12 +366,7 @@ const eslintConfig = defineConfig([
     ],
     plugins: { spawnforge: localPlugin },
     rules: {
-      'spawnforge/no-raw-response-in-catch': ['error', {
-        clientSafeErrors: CLIENT_SAFE_ERRORS,
-        responseHelpers: REDACTING_RESPONSE_HELPERS,
-        errorSinks: CATCH_ERROR_SINKS,
-        loggerObjects: CATCH_LOGGER_OBJECTS,
-      }],
+      'spawnforge/no-raw-response-in-catch': ['error', RULE_OPTIONS],
     },
   },
   {

@@ -82,6 +82,39 @@ function rel(file: string): string {
   return path.relative(WEB_ROOT, file).split(path.sep).join('/');
 }
 
+/**
+ * Is the rule ON for this file — not merely PRESENT in its resolved config?
+ *
+ * The first version asked `if (!config.rules?.[RULE_ID])`, which is the property
+ * adjacent to the one that matters (lessons-learned #1).
+ * `calculateConfigForFile` returns the NORMALISED severity array: `[2]` for an
+ * enabled rule and `[0]` for one an override switched off — and `[0]` is
+ * TRUTHY. So a future override block in `web/eslint.config.mjs` disabling
+ * `spawnforge/no-raw-response-in-catch` for any directory would leave this test
+ * green while reporting those files as covered, which is exactly the failure
+ * this file's own docblock claims to close. Read the severity.
+ */
+function ruleIsOn(config: { rules?: Record<string, unknown> }): boolean {
+  const entry = config.rules?.[RULE_ID];
+  const severity = Array.isArray(entry) ? entry[0] : entry;
+  return severity === 2 || severity === 'error';
+}
+
+async function uncoveredIn(eslint: ESLint, files: string[]): Promise<string[]> {
+  const uncovered: string[] = [];
+  for (const file of files) {
+    const relative = rel(file);
+    if (EXCUSED.has(relative)) continue;
+    // Sequential on purpose: ESLint caches config resolution, so parallelising
+    // buys nothing and obscures which file failed.
+    const config = (await eslint.calculateConfigForFile(file)) as {
+      rules?: Record<string, unknown>;
+    };
+    if (!ruleIsOn(config)) uncovered.push(relative);
+  }
+  return uncovered;
+}
+
 describe('no-raw-response-in-catch coverage', () => {
   const responseBuilders = walkTs(SRC).filter((f) => CONSTRUCTS_RESPONSE.test(readFileSync(f, 'utf8')));
 
@@ -93,22 +126,31 @@ describe('no-raw-response-in-catch coverage', () => {
   });
 
   it('has the rule switched on for every file that builds a response', async () => {
-    const eslint = new ESLint({ cwd: WEB_ROOT });
-    const uncovered: string[] = [];
-
-    for (const file of responseBuilders) {
-      const relative = rel(file);
-      if (EXCUSED.has(relative)) continue;
-      // Sequential on purpose: ESLint caches config resolution, so
-      // parallelising buys nothing and obscures which file failed.
-      const config = await eslint.calculateConfigForFile(file) as { rules?: Record<string, unknown> };
-      if (!config.rules?.[RULE_ID]) uncovered.push(relative);
-    }
+    const uncovered = await uncoveredIn(new ESLint({ cwd: WEB_ROOT }), responseBuilders);
 
     expect(uncovered, `${uncovered.length} response builder(s) are not covered by ${RULE_ID}. `
       + 'Add them to the rule\'s `files` in web/eslint.config.mjs, or to EXCUSED in this test '
       + 'with a reason.').toEqual([]);
   }, 120_000);
+
+  it('REPORTS a file the config switches the rule OFF for — the negative control', async () => {
+    // Without this the severity check above is itself unproven: a corrected
+    // predicate that still cannot report anything is the same defect wearing a
+    // different value. An `off` override is normalised to `[0]`, which the old
+    // truthiness test accepted as coverage.
+    const target = responseBuilders.find((f) => !EXCUSED.has(rel(f)));
+    expect(target, 'no unexcused response builder to run the control against').toBeDefined();
+
+    const disabled = new ESLint({
+      cwd: WEB_ROOT,
+      overrideConfig: [{ files: [rel(target as string)], rules: { [RULE_ID]: 'off' } }],
+    });
+
+    expect(await uncoveredIn(disabled, [target as string])).toEqual([rel(target as string)]);
+    // ...and the same file is covered without the override, so the control is
+    // measuring the override rather than a file that was never gated.
+    expect(await uncoveredIn(new ESLint({ cwd: WEB_ROOT }), [target as string])).toEqual([]);
+  }, 60_000);
 
   it('excuses nothing that has stopped matching the scan', () => {
     // An EXCUSED entry for a file that no longer builds a response (or no

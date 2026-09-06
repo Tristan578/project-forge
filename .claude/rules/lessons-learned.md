@@ -274,7 +274,7 @@ is readable.
 **Ticket:** #9623
 
 ### 15. Upstream error text is not yours to forward
-**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeView|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
+**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeWithMap|redactJsonEscaped|reportGuardFailure|generate-route|nextjs-conventions|api-middleware-migrate|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
 **What happens:** A route answers a failure with the upstream provider's own
 words. It reads like good diagnostics and it is an egress channel: on the
 platform path the credential in play is the PLATFORM's, so a provider that
@@ -492,5 +492,52 @@ Three things to carry:
   structure", enumerate the positions a string can occupy — leaf, object key,
   Map key — and note that redacting keys can make two of them collide, which a
   plain assignment resolves by silently dropping one.
+
+
+
+**A SIXTH board found the fix to that had a MIRROR IMAGE, and this is the most
+transferable thing in the entry.** Teaching the SCAN a new decoding without
+teaching the REWRITE the same one produces DETECT-THEN-EMIT: `hasCandidate`
+learned to read JSON escapes, `redactString` stayed `redactLiteral` +
+`redactPercentEncoded`, and every text-mode path in the guard — a `text/plain`
+body, the malformed-JSON fallback, a header value, a `Set-Cookie`, `statusText`
+— flagged the credential, left the fast path, rewrote nothing and shipped it.
+Strictly worse than not detecting: the response pays the whole slow path AND
+leaks, and the control reports a rewrite that did not happen. Only the JSON-body
+path was covered, because the parse restores the leaf, so every existing runtime
+test passed while five channels leaked.
+
+- **A detector and a rewriter are two halves of one property, and the property
+  has to be asserted in BOTH directions.** `redact(t) !== t => detect(t)` is what
+  makes a fast path sound. `detect(t) => redact(t) !== t` is what stops the leak
+  above. The second was never written down, so nothing could notice when it went
+  false. Write both as sweeps over the transformation that separates them.
+- **Give the two halves ONE implementation of each decoding.** `jsonUnescapeView`
+  returned a string and only the scan called it; `decodeWithMap` returned an
+  index map and only the rewrite used it. Two decoders, two callers, one taught
+  a trick the other did not know. Now one `jsonUnescapeWithMap` feeds both, so a
+  future spelling cannot reach one half alone.
+- **When an agreement between two halves has gone false twice, stop relying on
+  it and CHECK THE OUTPUT.** The guard now re-scans what it is about to emit and
+  fails closed — placeholder for an envelope value, a fixed 500 for a body —
+  rather than trusting that the rewrite did what the scan predicted. Note the
+  assertion is "the output no longer matches", not "the rewrite changed
+  something": the second is the adjacent property and is satisfied by a rewrite
+  that removed one of two credentials.
+- **A fail-closed path with no telemetry is a control that can break silently in
+  the direction of an outage.** `catch { return fixed500(); }` recorded nothing,
+  so a defect in the guard would turn good responses into 500s indistinguishably
+  from an application error, for as long as nobody correlated user reports. Every
+  fail-closed branch reports now, and the reporter's whole body is wrapped —
+  reporting sits on the failure path of a function whose contract is "never
+  throws".
+- **When a control changes the SHAPE of the code that uses it, every recipe that
+  writes that code is part of the control.** The guard changed the export shape
+  of 102 route files, and `/generate-route`, the frontend Next.js reference and
+  `api-middleware-migrate` all still taught the old one — with validation
+  checklists that ran lint, types and integration tests, none of which can see an
+  unwrapped route. Following the docs produced the defect and reported green.
+  When you add a mandatory wrapper, grep the SKILLS and the always-loaded docs,
+  not only the source.
 
 **Ticket:** #9736

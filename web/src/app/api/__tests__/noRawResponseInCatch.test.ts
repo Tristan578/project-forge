@@ -25,6 +25,10 @@ import tsParser from '@typescript-eslint/parser';
 import { describe, it } from 'vitest';
 
 import rule from '../../../../eslint-rules/no-raw-response-in-catch.mjs';
+import {
+  REDACTING_RESPONSE_HELPERS,
+  RULE_OPTIONS,
+} from '../../../../eslint-rules/no-raw-response-in-catch.options.mjs';
 
 // RuleTester emits one `it()` per case. Wiring vitest's hooks in makes each
 // bypass shape a separately-named test rather than one opaque assertion.
@@ -39,24 +43,26 @@ const ruleTester = new RuleTester({
   },
 });
 
-/** Matches the options the flat config passes in `web/eslint.config.mjs`. */
-const HELPER_LIST = 'apiError, createErrorResponse, redactedJson';
+/**
+ * THE SHIPPED OPTIONS, imported rather than retyped.
+ *
+ * This used to be a hand-written copy under a comment claiming it matched the
+ * flat config. It did not: the config passed thirteen `responseHelpers` and this
+ * declared three, so nothing pinned that the rule accepts a sanctioned
+ * constructor for the other ten, and an edit to `REDACTING_RESPONSE_HELPERS`
+ * could not fail any test here. A citation a reviewer follows and finds false is
+ * the defect class this same change corrected twice elsewhere.
+ */
+const OPTIONS = [RULE_OPTIONS];
 
-const OPTIONS = [
-  {
-    clientSafeErrors: ['ApiKeyError', 'PromptRejectedError', 'EmptyArtifactError'],
-    responseHelpers: ['apiError', 'createErrorResponse', 'redactedJson'],
-    errorSinks: [
-      'captureException',
-      'captureMessage',
-      'sampledCaptureException',
-      'captureGenerationError',
-      'reportError',
-      'Promise.reject',
-    ],
-    loggerObjects: ['console', 'logger', 'log', 'reqLog', 'Sentry', 'sentry', 'sentryLogger'],
-  },
-];
+/**
+ * The rule interpolates the FIRST THREE sanctioned names into its message
+ * (`helperList` in the rule: `[...responseHelpers].slice(0, 3)`) so the sentence
+ * stays readable while the allowlist grows. Derived from the same source, so it
+ * cannot drift — the previous hardcoded copy happened to be right about these
+ * three and wrong about the other ten.
+ */
+const HELPER_LIST = REDACTING_RESPONSE_HELPERS.slice(0, 3).join(', ');
 
 ruleTester.run('no-raw-response-in-catch', rule, {
   valid: [
@@ -93,6 +99,24 @@ ruleTester.run('no-raw-response-in-catch', rule, {
           } catch (err) {
             console.error('load failed', err);
             return redactedJson({ error: 'load_failed', message: 'Please try again.' }, { status: 500 });
+          }
+        }
+      `,
+      options: OPTIONS,
+    },
+    {
+      // The shorthand constructors are ten of the thirteen sanctioned names and
+      // not one of them was exercised, because the suite passed a three-name
+      // copy of the list. `badRequest` stands for the group; the shared
+      // `RULE_OPTIONS` import is what makes an edit to the list reach here.
+      name: 'catch responds through a SHORTHAND redacting constructor',
+      code: `
+        export async function GET() {
+          try {
+            return NextResponse.json(await load());
+          } catch (err) {
+            console.error('load failed', err);
+            return badRequest('That request could not be read. Check the fields and try again.');
           }
         }
       `,
@@ -466,6 +490,24 @@ ruleTester.run('no-raw-response-in-catch', rule, {
       `,
       options: OPTIONS,
       errors: [{ messageId: 'rawResponseInCatch' }],
+    },
+    {
+      // The other side of the shorthand case above: the allowlist is a LIST, not
+      // a shape. A helper that merely looks like one of the sanctioned names is
+      // still an escape, and without this the valid case only proves the rule is
+      // permissive somewhere.
+      name: 'a helper that is NOT on the allowlist is still an escape',
+      code: `
+        export async function GET() {
+          try {
+            return await load();
+          } catch (err) {
+            return teapot({ detail: err.message }, { status: 500 });
+          }
+        }
+      `,
+      options: OPTIONS,
+      errors: [{ messageId: 'catchValueToUnknownSink' }],
     },
 
     // ---------------------------------------------------------------------

@@ -311,7 +311,6 @@ function guardFailureResponse(): NextResponse {
  */
 function reportGuardFailure(reason: string, error: unknown, detail?: Record<string, unknown>): void {
   try {
-    // eslint-disable-next-line no-console -- the only signal when SENTRY_DSN is unset.
     console.error(`[egressGuard] ${reason}`, detail ?? {});
     captureException(error instanceof Error ? error : new Error(reason), {
       egressGuardReason: reason,

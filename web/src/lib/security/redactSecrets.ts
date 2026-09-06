@@ -527,20 +527,42 @@ function spliceRanges(raw: string, ranges: [number, number][]): string {
   return out;
 }
 
+/**
+ * Where a view offset sits in the string it was decoded FROM. Half-open ranges
+ * found in a decoded view are translated through one of these, which is what
+ * lets the placeholder be spliced into the ORIGINAL bytes rather than into a
+ * re-encoding of them.
+ *
+ * A FUNCTION, not an array, because the two decoders have very different
+ * densities. Percent-decoding builds one entry per character and can afford to
+ * (it only runs on a string containing `%`); JSON-unescaping runs on any string
+ * containing a backslash, which includes a 350 KB scene whose script source has
+ * one — building 350,000 entries there cost +23.8 ms against the +5.0 ms the
+ * slice-based decoder pays, so that one computes offsets from a table of escape
+ * SITES instead. Both satisfy the same contract, including the sentinel:
+ * `map(view.length)` is the source's length.
+ */
+type IndexMap = (viewIndex: number) => number;
+
 /** Translate view-space ranges into RAW-space through an index map. */
-function toRawRanges(ranges: [number, number][], map: number[]): [number, number][] {
-  return ranges.map(([start, end]) => [map[start], map[end]] as [number, number]);
+function toRawRanges(ranges: [number, number][], map: IndexMap): [number, number][] {
+  return ranges.map(([start, end]) => [map(start), map(end)] as [number, number]);
 }
 
 /**
  * Compose two index maps. `outer` maps view-A offsets into RAW; `inner` maps
  * view-B offsets into view A. The result maps view-B offsets into RAW, which is
  * what lets a match visible only after BOTH decodings be cut out of the original
- * string. The sentinel entry composes correctly because `inner`'s last entry is
- * `viewA.length` and `outer[viewA.length]` is `raw.length`.
+ * string. The sentinel composes correctly because `inner(viewB.length)` is
+ * `viewA.length` and `outer(viewA.length)` is `raw.length`.
  */
-function composeMaps(outer: number[], inner: number[]): number[] {
-  return inner.map((i) => outer[i]);
+function composeMaps(outer: IndexMap, inner: IndexMap): IndexMap {
+  return (i) => outer(inner(i));
+}
+
+/** An array-backed map, for a decoder that produces one entry per character. */
+function arrayMap(map: number[]): IndexMap {
+  return (i) => map[i];
 }
 
 /**
@@ -552,7 +574,7 @@ function redactPercentEncoded(raw: string, ctx: RedactionContext): string {
   if (!raw.includes('%')) return raw;
   const { decoded, map } = decodeWithMap(raw);
   if (decoded === raw) return raw;
-  return spliceRanges(raw, toRawRanges(matchRanges(decoded, ctx), map));
+  return spliceRanges(raw, toRawRanges(matchRanges(decoded, ctx), arrayMap(map)));
 }
 
 /** The two-character JSON escapes, and what each stands for. */
@@ -600,14 +622,17 @@ const HEX_QUAD = /^[0-9a-fA-F]{4}$/;
  * and independently, so nothing that matched before can stop matching.
  *
  * WHAT IT COSTS, measured rather than assumed (`scripts/bench-egress-guard.ts`,
- * Node 24.5.0, win32 x64, Ryzen 7 3800X, 200 iterations after 30 warmup):
+ * Node 24.5.0, win32 x64, Ryzen 7 3800X, 200 iterations after 30 warmup, all
+ * three figures from ONE session so the comparison is not across machines —
+ * lessons-learned #8):
  *
- *   - a 350 KB scene with NO backslash anywhere: +2.361 ms vs +2.270 ms before.
- *     Unchanged — the whole view costs one `indexOf` that finds nothing, which
- *     is the overwhelming majority of bodies.
- *   - the same scene with escapes in one script source: +4.528 ms vs +2.388 ms.
- *     Roughly double, because the body is copied once and scanned a second
- *     time.
+ *   - a 350 KB scene with NO backslash anywhere: +3.044 ms, against +2.777 ms
+ *     for the same body before this view existed. Unchanged within noise — the
+ *     whole view costs one `indexOf` that finds nothing, which is the
+ *     overwhelming majority of bodies.
+ *   - the same scene with escapes in one script source: +5.238 ms against
+ *     +4.997 ms. Roughly double the no-escape figure, because the body is
+ *     copied once and scanned a second time.
  *
  * That second figure is a real cost on a real body and is stated rather than
  * buried. It is inherent to scanning what the rewrite sees: a match hidden by
@@ -617,58 +642,96 @@ const HEX_QUAD = /^[0-9a-fA-F]{4}$/;
  * an off-by-one to become a leak — so it is named here, not taken, and the
  * straightforward whole-view scan is what ships.
  *
- * IT RETURNS AN INDEX MAP, AND THAT IS THE POINT. `map[i]` is the offset in
- * `raw` at which decoded character `i` begins, with a final entry of
- * `raw.length` — the same contract as `decodeWithMap`. The first version of this
- * function returned only the decoded STRING, and only the scan ever called it:
- * `redactString` was `redactLiteral` + `redactPercentEncoded`, so percent-
- * encoding got a scan AND an index-mapped rewrite while JSON escaping got a scan
- * only. Every text-mode path in the guard — the malformed-JSON fallback, a
- * non-JSON buffered body, a header value, a `Set-Cookie`, the reason phrase —
- * therefore set `hasCandidate`, left the fast path, rewrote NOTHING and emitted
- * the credential. Detect-then-emit is worse than either half alone: it pays the
- * slow path and reports a rewrite that did not happen. ONE function now feeds
- * both `textHasCandidate` and `redactJsonEscaped`, so a future change cannot
- * teach one of them a decoding and not the other.
+ * IT NOW YIELDS AN INDEX MAP, AND THAT IS THE POINT. The first version returned
+ * only the decoded STRING, and only the scan ever called it: `redactString` was
+ * `redactLiteral` + `redactPercentEncoded`, so percent-encoding got a scan AND
+ * an index-mapped rewrite while JSON escaping got a scan only. Every text-mode
+ * path in the guard — the malformed-JSON fallback, a non-JSON buffered body, a
+ * header value, a `Set-Cookie`, the reason phrase — therefore set
+ * `hasCandidate`, left the fast path, rewrote NOTHING and emitted the
+ * credential. Detect-then-emit is worse than either half alone: it pays the slow
+ * path and reports a rewrite that did not happen. ONE function now feeds both
+ * `textHasCandidate` and `redactJsonEscaped`, so a future change cannot teach
+ * one of them a decoding and not the other.
+ *
+ * THE MAP IS A TABLE OF ESCAPE SITES, NOT ONE ENTRY PER CHARACTER, and that is a
+ * measured decision rather than a stylistic one. `decodeWithMap` (percent) can
+ * afford a per-character array because it only runs on a string containing `%`;
+ * this runs on any string containing a backslash, which includes a 350 KB scene
+ * whose script source has one. A per-character version of this function measured
+ * +23.847 ms on that body against the +4.997 ms the slice-based decoder pays —
+ * a 4.8x regression on the FAST path, for a map that is consulted only where a
+ * match is found. So the decode stays slice-and-concatenate, and `rawIndexIn`
+ * recovers any offset by binary search over the escape sites.
  *
  * Returns `null` when there is nothing to decode — no backslash at all, or no
  * backslash that begins a valid escape. Callers treat that as "this view is the
  * raw text", which is why neither has to compare strings to find out.
  */
-function jsonUnescapeWithMap(raw: string): { decoded: string; map: number[] } | null {
-  if (raw.indexOf('\\') === -1) return null;
-  const chars: string[] = [];
-  const map: number[] = [];
-  let changed = false;
-  let i = 0;
-  while (i < raw.length) {
-    if (raw[i] === '\\') {
-      const next = i + 1 < raw.length ? raw[i + 1] : '';
-      const simple = SIMPLE_JSON_ESCAPES.get(next);
-      if (simple !== undefined) {
-        chars.push(simple);
-        map.push(i);
-        i += 2;
-        changed = true;
-        continue;
-      }
-      if (next === 'u' && i + 6 <= raw.length && HEX_QUAD.test(raw.slice(i + 2, i + 6))) {
-        chars.push(String.fromCharCode(Number.parseInt(raw.slice(i + 2, i + 6), 16)));
-        map.push(i);
-        i += 6;
-        changed = true;
-        continue;
-      }
+interface UnescapedView {
+  decoded: string;
+  /** DECODED-space offset of each escape, ascending. */
+  sites: number[];
+  /** Raw characters consumed IN EXCESS of one, cumulative through `sites[i]`. */
+  cumulativeExtra: number[];
+}
+
+function jsonUnescapeWithMap(raw: string): UnescapedView | null {
+  let at = raw.indexOf('\\');
+  if (at === -1) return null;
+  let out = '';
+  let copied = 0;
+  let extra = 0;
+  const sites: number[] = [];
+  const cumulativeExtra: number[] = [];
+  while (at !== -1) {
+    const next = at + 1 < raw.length ? raw[at + 1] : '';
+    const simple = SIMPLE_JSON_ESCAPES.get(next);
+    let decoded: string | null = null;
+    let width = 0;
+    if (simple !== undefined) {
+      decoded = simple;
+      width = 2;
+    } else if (next === 'u' && at + 6 <= raw.length && HEX_QUAD.test(raw.slice(at + 2, at + 6))) {
+      decoded = String.fromCharCode(Number.parseInt(raw.slice(at + 2, at + 6), 16));
+      width = 6;
     }
-    // Not a JSON escape (or not a backslash at all): the character stands for
-    // itself, and the one after it is examined on its own terms next.
-    chars.push(raw[i]);
-    map.push(i);
-    i += 1;
+    if (decoded === null) {
+      // Not a JSON escape. Leave both characters alone and keep looking.
+      at = raw.indexOf('\\', at + 1);
+      continue;
+    }
+    out += raw.slice(copied, at) + decoded;
+    // `extra` still holds what PREVIOUS escapes consumed, so this escape's
+    // decoded offset is its raw offset less that.
+    sites.push(at - extra);
+    extra += width - 1;
+    cumulativeExtra.push(extra);
+    copied = at + width;
+    at = raw.indexOf('\\', copied);
   }
-  if (!changed) return null;
-  map.push(raw.length);
-  return { decoded: chars.join(''), map };
+  if (sites.length === 0) return null;
+  return { decoded: out + raw.slice(copied), sites, cumulativeExtra };
+}
+
+/**
+ * The RAW offset at which decoded character `i` begins, and `raw.length` for the
+ * sentinel `i === decoded.length` — the same contract `decodeWithMap`'s array
+ * satisfies, computed rather than stored.
+ *
+ * Every escape at a decoded offset strictly BELOW `i` pushed `i` further along
+ * the raw string, so the answer is `i` plus what those escapes consumed in
+ * excess of one character each. Binary search finds how many there are.
+ */
+function rawIndexIn(view: UnescapedView, i: number): number {
+  let lo = 0;
+  let hi = view.sites.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (view.sites[mid] < i) lo = mid + 1;
+    else hi = mid;
+  }
+  return i + (lo > 0 ? view.cumulativeExtra[lo - 1] : 0);
 }
 
 /**
@@ -695,11 +758,12 @@ function jsonUnescapeWithMap(raw: string): { decoded: string; map: number[] } | 
 function redactJsonEscaped(raw: string, ctx: RedactionContext): string {
   const view = jsonUnescapeWithMap(raw);
   if (view === null) return raw;
-  const ranges = toRawRanges(matchRanges(view.decoded, ctx), view.map);
+  const toRaw: IndexMap = (i) => rawIndexIn(view, i);
+  const ranges = toRawRanges(matchRanges(view.decoded, ctx), toRaw);
   if (ctx.percentAware && view.decoded.includes('%')) {
     const { decoded, map } = decodeWithMap(view.decoded);
     if (decoded !== view.decoded) {
-      ranges.push(...toRawRanges(matchRanges(decoded, ctx), composeMaps(view.map, map)));
+      ranges.push(...toRawRanges(matchRanges(decoded, ctx), composeMaps(toRaw, arrayMap(map))));
     }
   }
   return spliceRanges(raw, ranges);
