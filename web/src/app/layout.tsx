@@ -1,3 +1,4 @@
+import { CapabilitiesAuthSync } from '@/components/providers/CapabilitiesAuthSync';
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense, lazy } from "react";
@@ -151,6 +152,7 @@ export default function RootLayout({
       >
         {hasValidClerkKey ? (
           <ClerkProvider appearance={{ theme: dark }} afterSignOutUrl="/sign-in">
+            <CapabilitiesAuthSync />
             {bodyContent}
           </ClerkProvider>
         ) : (

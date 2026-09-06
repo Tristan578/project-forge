@@ -2,7 +2,7 @@
 /**
  * Tests for generationHandlers — AI asset generation commands.
  */
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import { generationHandlers } from '../generationHandlers';
 import { STATUS_ENDPOINTS } from '@/lib/generation/statusEndpoints';
@@ -10,6 +10,15 @@ import { STATUS_ENDPOINTS } from '@/lib/generation/statusEndpoints';
 // ---------------------------------------------------------------------------
 // Mock generationStore
 // ---------------------------------------------------------------------------
+// #9117: the providers module is real except `getCapabilityUnavailability`,
+// wrapped so a describe can bypass the static gate and keep the handler body
+// pinned while music is declared unavailable.
+vi.mock('@/lib/config/providers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/config/providers')>();
+  return { ...actual, getCapabilityUnavailability: vi.fn(actual.getCapabilityUnavailability) };
+});
+import { getCapabilityUnavailability } from '@/lib/config/providers';
+
 const mockAddJob = vi.fn();
 const mockUpdateJob = vi.fn();
 const mockGenJobs: Record<string, Record<string, unknown>> = {};
@@ -542,7 +551,19 @@ describe('generationHandlers', () => {
   // =========================================================================
   // generate_music
   // =========================================================================
-  describe('generate_music', () => {
+  // The handler body below the #9117 gate (sync import, async job tracking,
+  // defaults, autoPlace, the typeof-audioBase64 branch) is provider-independent
+  // and survives #9522, so it stays pinned with the gate bypassed.
+  describe('generate_music - handler body with the #9117 gate bypassed', () => {
+    beforeEach(() => {
+      vi.mocked(getCapabilityUnavailability).mockReturnValue(null);
+    });
+    afterEach(() => {
+      // Back to the REAL table: vi.fn(impl).mockRestore() reinstates the wrapped
+      // implementation, so the gate describe asserts UNAVAILABLE_CAPABILITIES itself.
+      vi.mocked(getCapabilityUnavailability).mockRestore();
+    });
+
     it('imports audio directly when sync response', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -628,6 +649,32 @@ describe('generationHandlers', () => {
       expect(store.importAudio).not.toHaveBeenCalled();
       expect(store.setAudio).not.toHaveBeenCalled();
       expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({ type: 'music' }));
+    });
+  });
+
+  describe('generate_music', () => {
+    // #9117: music is declared unavailable in code (UNAVAILABLE_CAPABILITIES),
+    // so the tool answers with the user-facing alternative and never calls the
+    // route. The sync/async import paths below the gate return with #9522.
+    it('returns the unavailable reason without calling the route while music is declared unavailable', async () => {
+      const { result } = await invoke('generate_music', {
+        prompt: 'epic battle theme',
+        entityId: 'ent-1',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not available yet/i);
+      expect(result.error).not.toMatch(/#\d+|PLATFORM_|Suno/);
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockAddJob).not.toHaveBeenCalled();
+    });
+
+    it('still rejects malformed arguments ahead of the gate, with the validation message', async () => {
+      const { result } = await invoke('generate_music', { prompt: '' });
+      expect(result.success).toBe(false);
+      // The VALIDATION error, not the gate's reason: proves parseArgs runs first.
+      expect(result.error).not.toMatch(/not available yet/i);
+      expect(result.error).toMatch(/prompt|argument|invalid/i);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 

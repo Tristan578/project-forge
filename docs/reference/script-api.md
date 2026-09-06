@@ -316,7 +316,7 @@ or zero-height region is a no-op.
 
 ## forge.ai
 
-All `forge.ai.*` methods are async and route to the AI generation provider.
+All `forge.ai.*` methods are async and route to the AI generation provider, except a method whose capability is declared unavailable in code (`UNAVAILABLE_CAPABILITIES`): it rejects immediately with a user-facing reason and never contacts a provider.
 
 | Function | Returns | Description |
 |----------|---------|-------------|
@@ -324,7 +324,7 @@ All `forge.ai.*` methods are async and route to the AI generation provider.
 | `forge.ai.generateModel(prompt, onProgress?)` | `Promise<{assetId, url} \| null>` | Generate a 3D model from a prompt |
 | `forge.ai.generateSound(prompt, onProgress?)` | `Promise<{assetId, url} \| null>` | Generate a sound effect from a prompt |
 | `forge.ai.generateVoice(text, onProgress?)` | `Promise<{assetId, url} \| null>` | Generate voice audio from text |
-| `forge.ai.generateMusic(prompt, onProgress?)` | `Promise<{assetId, url} \| null>` | Generate music from a prompt |
+| `forge.ai.generateMusic(prompt, onProgress?)` | `Promise<{assetId, url} \| null>` | **Not available yet** (#9522): rejects with "Music generation is not available yet…" before any request is sent |
 
 ## forge.asset
 

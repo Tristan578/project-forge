@@ -472,7 +472,7 @@ declare namespace forge {
     function generateSound(prompt: string, onProgress?: (percent: number) => void): Promise<{ assetId: string; url: string } | null>;
     /** Generate voice audio from text (async — uses AI generation provider) */
     function generateVoice(text: string, onProgress?: (percent: number) => void): Promise<{ assetId: string; url: string } | null>;
-    /** Generate music from a text prompt (async — uses AI generation provider) */
+    /** Generate music from a text prompt (async). NOT AVAILABLE YET (#9522): rejects with a user-facing reason before any request is sent. */
     function generateMusic(prompt: string, onProgress?: (percent: number) => void): Promise<{ assetId: string; url: string } | null>;
   }
 

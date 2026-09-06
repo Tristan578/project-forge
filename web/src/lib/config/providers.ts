@@ -195,6 +195,152 @@ export function getPlatformKeyEnvVar(provider: string): string | null {
 }
 
 /**
+ * Where a human mints each provider's platform key. `null` means the provider
+ * has NO self-serve console — its key cannot be obtained by anyone, so every
+ * capability it serves must be declared in `UNAVAILABLE_CAPABILITIES` (pinned
+ * by `capabilityAvailability.test.ts`, per #9522). Suno is the live case: no
+ * public API as of 2026-08, so `PLATFORM_SUNO_KEY` can never exist.
+ *
+ * URLs were confirmed against each vendor's current documentation for #9117;
+ * the OpenAI path is the standard console location (platform.openai.com
+ * refuses automated fetches, so it was not machine-verified).
+ */
+export const PLATFORM_KEY_CONSOLE_URL: Record<PlatformKeyProvider, string | null> = {
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  meshy: 'https://www.meshy.ai/settings/api',
+  hyper3d: 'https://developer.hyper3d.ai/',
+  elevenlabs: 'https://elevenlabs.io/app/settings/api-keys',
+  suno: null,
+  openai: 'https://platform.openai.com/api-keys',
+  replicate: 'https://replicate.com/account/api-tokens',
+  removebg: 'https://www.remove.bg/dashboard#api-key',
+};
+
+// ---------------------------------------------------------------------------
+// Capabilities the platform cannot offer (#9117)
+// ---------------------------------------------------------------------------
+
+export interface CapabilityUnavailability {
+  /**
+   * User-facing sentence shown verbatim in the editor, in chat tool results
+   * and in the 503 body. Plain product language only: no env-var names, no
+   * vendor names, no issue numbers, and it should offer the nearest thing the
+   * user CAN do instead.
+   */
+  reason: string;
+  /**
+   * GitHub issue tracking the fix. Machine-readable: exposed as a separate
+   * `issue` field on `/api/capabilities` and in the 503 `details`, never
+   * interpolated into `reason`.
+   */
+  issue: number;
+}
+
+/**
+ * Capabilities the Vercel AI Gateway can serve with `AI_GATEWAY_API_KEY` (or
+ * Vercel OIDC). Single source for `lib/providers/backends/vercelGateway.ts`
+ * and `web/scripts/verify-platform-generation.ts`, which disagreed about
+ * `image`/`embedding` until the #9725 review caught it.
+ */
+export const GATEWAY_CAPABILITIES = ['chat', 'embedding', 'image'] as const satisfies readonly ProviderCapability[];
+
+/**
+ * Capabilities that must be refused everywhere — `/api/capabilities`, the
+ * generation dialogs, and `createGenerationHandler` — regardless of which
+ * keys are set, because no key can make them work. Declared in code, not in
+ * an env var, so the product cannot drift back to offering something that
+ * 500s: a request for one of these is refused BEFORE any token is deducted.
+ *
+ * Remove an entry only when the capability has a provisionable provider and
+ * one real artifact has been generated through it (the #9117 done-when).
+ */
+export const UNAVAILABLE_CAPABILITIES: Partial<Record<ProviderCapability, CapabilityUnavailability>> = {
+  music: {
+    reason:
+      'Music generation is not available yet. Upload your own track from the Asset panel, or generate a sound effect instead.',
+    issue: 9522,
+  },
+};
+
+/** The unavailability record for a capability, or null when it is offered. */
+export function getCapabilityUnavailability(
+  capability: ProviderCapability,
+): CapabilityUnavailability | null {
+  return UNAVAILABLE_CAPABILITIES[capability] ?? null;
+}
+
+/**
+ * The generation capability each MCP/chat command spends, for commands that
+ * spend one. Used to withhold a command from the model's tool set (and from
+ * the system prompt) while its capability is declared unavailable — a tool the
+ * model is told to call and that can only fail is a guaranteed red card and
+ * wasted tokens on every orchestrated build (#9725 review).
+ */
+export const COMMAND_CAPABILITY: Readonly<Record<string, ProviderCapability>> = {
+  generate_3d_model: 'model3d',
+  generate_3d_from_image: 'model3d',
+  generate_character: 'sprite',
+  generate_texture: 'texture',
+  generate_pbr_maps: 'texture',
+  generate_skybox: 'texture',
+  generate_sfx: 'sfx',
+  generate_voice: 'voice',
+  generate_music: 'music',
+  generate_sprite: 'sprite',
+  generate_sprite_sheet: 'sprite',
+  generate_tileset: 'sprite',
+  generate_pixel_art: 'sprite',
+  remove_background: 'bg_removal',
+};
+
+/**
+ * The capability each generate route spends, keyed by the `route:` string its
+ * `createGenerationHandler` config declares. The handler's refuse-before-charge
+ * gate (step 1a) reads this table when a route does not declare `capability`
+ * itself, so a route cannot be left ungated by omission — a test walks every
+ * `web/src/app/api/generate/*\/route.ts` and fails on a route missing here.
+ * `localize` and `pacing` are LLM calls on the chat path.
+ */
+export const ROUTE_CAPABILITY: Readonly<Record<string, ProviderCapability>> = {
+  '/api/generate/localize': 'chat',
+  '/api/generate/model': 'model3d',
+  '/api/generate/music': 'music',
+  '/api/generate/pacing': 'chat',
+  '/api/generate/pixel-art': 'sprite',
+  '/api/generate/sfx': 'sfx',
+  '/api/generate/skybox': 'texture',
+  '/api/generate/sprite': 'sprite',
+  '/api/generate/sprite-sheet': 'sprite',
+  '/api/generate/texture': 'texture',
+  '/api/generate/tileset-gen': 'sprite',
+  '/api/generate/voice': 'voice',
+};
+
+/**
+ * Capabilities whose platform path resolves MORE than one provider key, all of
+ * which must be present for the capability to be usable. `sprite`:
+ * `/api/generate/sprite` picks the provider per request — `provider: 'auto'`
+ * (the dialog's and the chat tool's default) resolves DALL-E 3 on OpenAI for
+ * every style except pixel-art and Replicate SDXL for pixel-art — so a
+ * Replicate-only environment still fails the default sprite path. Read by
+ * `/api/capabilities` and `web/scripts/verify-platform-generation.ts` so the
+ * two cannot disagree (#9725 review, lesson 1).
+ */
+export const CAPABILITY_REQUIRED_PROVIDERS: Partial<Record<ProviderCapability, readonly PlatformKeyProvider[]>> = {
+  sprite: ['replicate', 'openai'],
+};
+
+/**
+ * Whether a command may be offered to the model: true for every command that
+ * spends no capability, and for capability commands whose capability is not
+ * declared unavailable. Static, so safe in module-load tool tables.
+ */
+export function isCommandAvailable(commandName: string): boolean {
+  const capability = COMMAND_CAPABILITY[commandName];
+  return capability === undefined || getCapabilityUnavailability(capability) === null;
+}
+
+/**
  * Env-var names for the multi-model routers, which front several providers at
  * once rather than mapping 1:1 to one. Kept beside `PLATFORM_KEY_ENV` so every
  * consumer — the chat-backend table below, `/api/capabilities`, the health

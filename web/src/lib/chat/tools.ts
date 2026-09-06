@@ -9,6 +9,7 @@
 // Sourced from mcp-server/manifest/commands.json — keep in sync when adding MCP commands
 import manifestJson from '@/data/commands.json';
 import { modelToolSchema } from '@/lib/ai/modelToolSchema';
+import { isCommandAvailable } from '@/lib/config/providers';
 
 interface ManifestCommand {
   name: string;
@@ -47,6 +48,9 @@ const manifest = manifestJson as { version: string; commands: ManifestCommand[] 
 export function getChatTools(): ClaudeTool[] {
   return manifest.commands
     .filter((cmd) => cmd.requiredScope.endsWith(':write') || cmd.category === 'query')
+    // #9117: never offer a tool whose capability is declared unavailable — the
+    // model would call it and the route would refuse it, every time.
+    .filter((cmd) => isCommandAvailable(cmd.name))
     .map((cmd) => ({
       name: cmd.name,
       description: cmd.description,

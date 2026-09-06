@@ -11,7 +11,7 @@ import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
 import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
-import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
+import { DIRECT_CAPABILITY_PROVIDER, getCapabilityUnavailability } from '@/lib/config/providers';
 import { STATUS_ENDPOINTS, resolveStatusEndpoint } from '@/lib/generation/statusEndpoints';
 
 /** Generate a unique ID for client-side job tracking. */
@@ -436,6 +436,15 @@ export const generationHandlers: Record<string, ToolHandler> = {
       targetEntityId: z.string().min(1).optional(),
     }), args);
     if (p.error) return p.error;
+
+    // #9117: music is declared unavailable in code. The tool is withheld from
+    // the model (`isCommandAvailable` in the tool filters) so this is defence
+    // in depth for a replayed or hand-crafted call: answer with the user-facing
+    // reason and never touch the route.
+    const unavailable = getCapabilityUnavailability('music');
+    if (unavailable) {
+      return { success: false, error: unavailable.reason };
+    }
 
     const result = await generateFetch('/api/generate/music', {
       prompt: enrichMusicPrompt(p.data.prompt, ctx.store),

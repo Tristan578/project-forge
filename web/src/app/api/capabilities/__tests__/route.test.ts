@@ -9,6 +9,23 @@ import { NextRequest } from 'next/server';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CapabilitiesResponse } from '../route';
 
+// The route is BYOK-aware since #9117: it consults Clerk and the key
+// resolver. These tests cover the anonymous, env-var-only surface, so both
+// are stubbed to "no user"; availability.test.ts covers the BYOK branch.
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/auth/safe-auth', () => ({
+  safeAuth: vi.fn(async () => ({ userId: null })),
+}));
+vi.mock('@/lib/auth/user-service', () => ({
+  getUserByClerkId: vi.fn(async () => null),
+}));
+vi.mock('@/lib/keys/resolver', () => ({
+  listConfiguredProviders: vi.fn(async () => []),
+}));
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+}));
+
 describe('GET /api/capabilities', () => {
   let GET: (req: NextRequest) => Promise<Response>;
 
@@ -76,6 +93,14 @@ describe('GET /api/capabilities', () => {
       const body: CapabilitiesResponse = await res.json();
       for (const cap of body.capabilities) {
         expect(cap.hint).toBeDefined();
+        if (cap.unprovisionable) {
+          // No key can help; the hint is the user-facing reason and the
+          // tracking issue rides in its own field (#9117).
+          expect(cap.issue).toBeGreaterThan(0);
+          expect(cap.hint).not.toMatch(/#\d+/);
+          expect(cap.requiredProviders).toBeUndefined();
+          continue;
+        }
         expect(cap.hint).toContain('Settings');
         expect(cap.requiredProviders).toBeDefined();
         expect(cap.requiredProviders!.length).toBeGreaterThan(0);
@@ -125,7 +150,7 @@ describe('GET /api/capabilities', () => {
       expect(voice?.available).toBe(true);
     });
 
-    it('marks music as available when PLATFORM_SUNO_KEY is set', async () => {
+    it('keeps music unavailable even when PLATFORM_SUNO_KEY is set (#9522: Suno has no API)', async () => {
       vi.stubEnv('PLATFORM_SUNO_KEY', 'suno-test');
       vi.resetModules();
       const mod = await import('../route');
@@ -133,7 +158,8 @@ describe('GET /api/capabilities', () => {
       const body: CapabilitiesResponse = await res.json();
 
       const music = body.capabilities.find((c) => c.capability === 'music');
-      expect(music?.available).toBe(true);
+      expect(music?.available).toBe(false);
+      expect(music?.unprovisionable).toBe(true);
     });
   });
 
@@ -204,8 +230,11 @@ describe('GET /api/capabilities', () => {
       const sfx = body.capabilities.find((c) => c.capability === 'sfx');
       expect(sfx?.hint).toContain('ElevenLabs');
 
+      // Unprovisionable: the hint is plain product copy; the tracking issue is
+      // a separate machine-readable field (#9117).
       const music = body.capabilities.find((c) => c.capability === 'music');
-      expect(music?.hint).toContain('Suno');
+      expect(music?.issue).toBe(9522);
+      expect(music?.hint).not.toMatch(/Suno|#9522/);
     });
 
     it('does not include hint for available capabilities', async () => {

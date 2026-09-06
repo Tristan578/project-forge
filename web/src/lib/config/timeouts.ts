@@ -277,6 +277,14 @@ export const TIP_COOLDOWN_MS = 30_000;
 /** Feature gating error TTL */
 export const ERROR_TTL_MS = 30_000;
 
+/**
+ * Feature gating success TTL (#9725). The capabilities body is per-user (BYOK),
+ * so a session-long client cache would keep serving the previous user's
+ * availability after a sign-out/sign-in. Matches the route's
+ * `Cache-Control: private, max-age=60`.
+ */
+export const CAPABILITIES_TTL_MS = 60_000;
+
 /** Health endpoint cache TTL */
 export const HEALTH_CACHE_TTL_MS = 30_000;
 

@@ -11,6 +11,11 @@ vi.mock('next/server', async (importOriginal) => {
 });
 
 vi.mock('server-only', () => ({}));
+// Capture the business metric so a test can assert the `outcome` facet the
+// handler stamps (generationMetrics.ts emits through Sentry.metrics.*).
+vi.mock('@sentry/nextjs', () => ({
+  metrics: { count: vi.fn(), distribution: vi.fn() },
+}));
 
 // Mock all dependencies
 vi.mock('@/lib/auth/api-auth', () => ({
@@ -891,5 +896,85 @@ describe('createGenerationHandler', () => {
     // sanitizePrompt called once (primary prompt only); numeric count is bypassed.
     expect(mockSanitize).toHaveBeenCalledTimes(1);
     expect(mockSanitize).toHaveBeenCalledWith('test prompt');
+  });
+
+  // #9117 / #9522: a capability declared unavailable in
+  // UNAVAILABLE_CAPABILITIES must be refused before the key resolves and before
+  // any token is deducted, with a message the caller can act on. Music is the
+  // live case — Suno has no API, so a request can never succeed and a charge
+  // would be an incorrect charge.
+  describe('unavailable capability gate (#9117)', () => {
+    const musicHandler = createGenerationHandler({
+      route: '/api/generate/music',
+      provider: 'suno',
+      capability: 'music',
+      operation: 'music_generation',
+      rateLimitKey: 'gen-music',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ jobId: 'never' }),
+    });
+
+    it('returns 503 SERVICE_UNAVAILABLE with the user-facing reason, the issue in details, and spends nothing', async () => {
+      const res = await musicHandler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.code).toBe('SERVICE_UNAVAILABLE');
+      expect(data.error).toMatch(/not available yet/i);
+      expect(data.error).not.toMatch(/#\d+|PLATFORM_/);
+      expect(data.details).toEqual({ capability: 'music', issue: 9522 });
+      // The gate runs right after auth: no rate-limit budget, no cache lookup,
+      // no key resolution, no deduction, nothing to refund.
+      expect(mockAggRateLimit).not.toHaveBeenCalled();
+      expect(mockRateLimit).not.toHaveBeenCalled();
+      expect(mockCachedGenerate).not.toHaveBeenCalled();
+      expect(mockResolve).not.toHaveBeenCalled();
+      expect(mockRefund).not.toHaveBeenCalled();
+      // Its own metrics bucket - never the `provider_unavailable` outage facet.
+      const { metrics } = await import('@sentry/nextjs');
+      expect(vi.mocked(metrics.count)).toHaveBeenCalledWith(
+        expect.any(String),
+        1,
+        expect.objectContaining({ attributes: expect.objectContaining({ outcome: 'capability_unavailable' }) }),
+      );
+    });
+
+    it('gates a route through ROUTE_CAPABILITY when the config omits `capability`', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/music',
+        provider: 'suno',
+        operation: 'music_generation',
+        rateLimitKey: 'gen-music',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ jobId: 'never' }),
+      });
+      const res = await handler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(503);
+      expect((await res.json()).details).toEqual({ capability: 'music', issue: 9522 });
+      expect(mockResolve).not.toHaveBeenCalled();
+    });
+
+    it('still requires authentication ahead of the gate', async () => {
+      mockAuth.mockResolvedValue({
+        ok: false,
+        response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+      });
+      const res = await musicHandler(makeRequest({ prompt: 'chiptune adventure' }));
+      expect(res.status).toBe(401);
+    });
+
+    it('leaves an available capability untouched', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/sfx',
+        provider: 'elevenlabs',
+        capability: 'sfx',
+        operation: 'sfx_generation',
+        rateLimitKey: 'gen-sfx',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'door creak' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledTimes(1);
+    });
   });
 });

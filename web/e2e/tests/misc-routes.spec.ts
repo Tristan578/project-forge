@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { getCapabilities } from '../helpers/capabilities';
 import {
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_NAV_MS,
@@ -73,7 +74,7 @@ test.describe('Misc Routes @ui', () => {
   // ---------------------------------------------------------------------------
   test.describe('Capabilities Endpoint', () => {
     test('GET /api/capabilities returns 200 with JSON', async ({ request }) => {
-      const response = await request.get('/api/capabilities');
+      const response = await getCapabilities(request);
       expect(response.status()).toBe(200);
       expect(response.headers()['content-type']).toContain('application/json');
     });
@@ -81,7 +82,7 @@ test.describe('Misc Routes @ui', () => {
     test('capabilities response has capabilities, available, and unavailable arrays', async ({
       request,
     }) => {
-      const response = await request.get('/api/capabilities');
+      const response = await getCapabilities(request);
       const body = await response.json();
 
       expect(Array.isArray(body.capabilities)).toBe(true);
@@ -92,7 +93,7 @@ test.describe('Misc Routes @ui', () => {
     test('available + unavailable cover all returned capabilities', async ({
       request,
     }) => {
-      const response = await request.get('/api/capabilities');
+      const response = await getCapabilities(request);
       const body = await response.json();
 
       const total = body.available.length + body.unavailable.length;
@@ -102,7 +103,7 @@ test.describe('Misc Routes @ui', () => {
     test('each capability entry has capability, available, and label', async ({
       request,
     }) => {
-      const response = await request.get('/api/capabilities');
+      const response = await getCapabilities(request);
       const body = await response.json();
 
       for (const cap of body.capabilities) {
@@ -112,24 +113,39 @@ test.describe('Misc Routes @ui', () => {
       }
     });
 
-    test('unavailable capabilities include requiredProviders hint', async ({
+    test('unavailable capabilities explain provisioning or declared unavailability', async ({
       request,
     }) => {
-      const response = await request.get('/api/capabilities');
+      const response = await getCapabilities(request);
       const body = await response.json();
 
       const unavailable = body.capabilities.filter(
         (c: { available: boolean }) => !c.available,
       );
       for (const cap of unavailable) {
-        expect(Array.isArray(cap.requiredProviders)).toBe(true);
-        expect(cap.requiredProviders.length).toBeGreaterThan(0);
+        if (cap.unprovisionable) {
+          expect(cap.issue).toBeGreaterThan(0);
+          expect(cap.requiredProviders).toBeUndefined();
+        } else {
+          expect(Array.isArray(cap.requiredProviders)).toBe(true);
+          expect(cap.requiredProviders.length).toBeGreaterThan(0);
+        }
         expect(typeof cap.hint).toBe('string');
       }
     });
 
+    test('music is declared unavailable and session responses stay private', async ({ request }) => {
+      const response = await getCapabilities(request);
+      expect(response.headers()['cache-control']).toContain('private');
+      const body = await response.json();
+      expect(body.capabilities.find((c: { capability: string }) => c.capability === 'music'))
+        .toMatchObject({ available: false, unprovisionable: true, issue: 9522 });
+      expect(body.available).not.toContain('music');
+      expect(body.unavailable).toContain('music');
+    });
+
     test('known capability names are present', async ({ request }) => {
-      const response = await request.get('/api/capabilities');
+      const response = await getCapabilities(request);
       const body = await response.json();
 
       const names = body.capabilities.map(
@@ -404,7 +420,7 @@ test.describe('Misc Routes @ui', () => {
     });
 
     test('/api/capabilities includes security headers', async ({ request }) => {
-      const response = await request.get('/api/capabilities');
+      const response = await getCapabilities(request);
       const headers = response.headers();
 
       expect(headers['x-content-type-options']).toBe('nosniff');

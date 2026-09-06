@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createAiHandler } from '../aiChannel';
+import { createAiHandler, AI_METHODS } from '../aiChannel';
+import { ROUTE_CAPABILITY } from '@/lib/config/providers';
 
 // Fast polling: override POLL_INTERVAL_MS by controlling Promise resolution
 function makeFetchJson(responses: unknown[]) {
@@ -67,13 +68,41 @@ describe('createAiHandler', () => {
     expect(result).toEqual({ url: 'texture.png' });
   });
 
-  it('submits to correct routes for all five generation methods', async () => {
+  // #9117: `music` is declared unavailable in code, so forge.ai.generateMusic
+  // is refused inside the worker with the same reason the editor shows —
+  // before any request leaves, so no fetch, no job, no poll.
+  it('refuses generateMusic without submitting while music is declared unavailable', async () => {
+    const fetchJson = makeFetchJson([{ jobId: 'never' }]);
+    const handler = createAiHandler({ fetchJson });
+    await expect(handler('generateMusic', {}, reportProgress, makeSignal())).rejects.toThrow(
+      /not available yet/i,
+    );
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  // AI_METHODS is a second route table beside ROUTE_CAPABILITY. The latter is
+  // validated against the routes on disk (routeCapability.test.ts); this ties
+  // the two together so a forge.ai.* method can neither post to a route that
+  // does not exist nor declare a capability the route does not spend. It
+  // would have failed on `generateSound -> /api/generate/sound` (a route that
+  // never existed; the on-disk route is `sfx`) — a mocked transport pinned
+  // the wrong contract for as long as nothing cross-checked it (lesson 14).
+  it('posts every forge.ai.* method to a route ROUTE_CAPABILITY knows, with the same capability', () => {
+    const methods = Object.entries(AI_METHODS);
+    expect(methods.length).toBeGreaterThan(0);
+    for (const [method, entry] of methods) {
+      expect(ROUTE_CAPABILITY[entry.route], `${method} posts to ${entry.route}, which is not a generate route`).toBe(
+        entry.capability,
+      );
+    }
+  });
+
+  it('submits to correct routes for the four offered generation methods', async () => {
     const methods = [
       ['generateTexture', '/api/generate/texture'],
       ['generateModel', '/api/generate/model'],
-      ['generateSound', '/api/generate/sound'],
+      ['generateSound', '/api/generate/sfx'],
       ['generateVoice', '/api/generate/voice'],
-      ['generateMusic', '/api/generate/music'],
     ] as const;
 
     for (const [method, expectedRoute] of methods) {
@@ -142,7 +171,7 @@ describe('createAiHandler', () => {
     ]);
     const handler = createAiHandler({ fetchJson });
 
-    const resultPromise = handler('generateMusic', {}, reportProgress, makeSignal());
+    const resultPromise = handler('generateTexture', {}, reportProgress, makeSignal());
     await vi.runAllTimersAsync();
     await resultPromise;
 

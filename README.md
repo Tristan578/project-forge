@@ -49,7 +49,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Compound AI Actions** — 8 high-level tools (`create_scene_from_description`, `setup_character`, `arrange_entities`, etc.) that batch dozens of operations into single AI calls
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
-- **AI Asset Generation** — Generate 3D models, textures, sound effects, voice lines, and music via 5 provider integrations (Meshy, ElevenLabs, Suno, DALL-E, Stable Diffusion)
+- **AI Asset Generation** — Generate 3D models, textures, sound effects, and voice lines via provider integrations (Meshy, ElevenLabs, DALL-E, Stable Diffusion). Music generation is not available yet — its move to ElevenLabs is tracked in [#9522](https://github.com/Tristan578/project-forge/issues/9522); platform provisioning status per capability is in [docs/guides/platform-keys.md](docs/guides/platform-keys.md)
 - **MCP Server** — 350 commands across 41 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required. See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making

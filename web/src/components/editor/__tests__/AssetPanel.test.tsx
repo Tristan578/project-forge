@@ -14,6 +14,12 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
+// Capability gate (#9117): default "available"; the gate describe below flips it.
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+}));
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+
 vi.mock('@/stores/userStore', () => ({
   useUserStore: vi.fn((selector: (s: { tier: string }) => unknown) =>
     selector({ tier: 'pro' }),
@@ -74,6 +80,69 @@ function setupStore(overrides: {
     return selector(state);
   });
 }
+
+describe('AssetPanel generation gate (#9117)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false }));
+  });
+
+  it('disables only the Generate Music item, with an Unavailable badge and the reason in its accessible name', () => {
+    // Every menu item asks the gate for its own capability; only music is blocked here.
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'music-generation'
+        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false, unprovisionable: true }
+        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+    );
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+    const music = screen.getByRole('menuitem', { name: /Generate Music — Music generation is not available yet\./ });
+    expect(music).toHaveAttribute('aria-disabled', 'true');
+    expect(music).toHaveTextContent('Unavailable');
+    expect(music).not.toHaveTextContent(/Hobbyist|Creator|Pro/);
+    expect(screen.getByRole('menuitem', { name: 'Generate 3D Model' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('gates every item by its own capability — a texture gate disables Texture AND Skybox, nothing else', () => {
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'texture-generation'
+        ? { blocked: true, reason: 'Texture generation is not available yet.', loading: false, unprovisionable: true }
+        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+    );
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+    expect(screen.getByRole('menuitem', { name: /Generate Texture — Texture generation is not available yet\./ })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('menuitem', { name: /Generate Skybox — Texture generation is not available yet\./ })).toHaveAttribute('aria-disabled', 'true');
+    for (const name of ['Generate 3D Model', 'Generate Sound', 'Generate Music']) {
+      expect(screen.getByRole('menuitem', { name })).not.toHaveAttribute('aria-disabled');
+    }
+    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false }));
+  });
+
+  // A missing platform key is not a dead end: the user can add their own key.
+  // Disabling the entry point put the ONLY copy of that instruction inside a
+  // dialog the click could no longer open, and made "not offered (#9522)" and
+  // "add your own key" read identically (#9725 p7).
+  it('keeps a merely unconfigured capability clickable so the dialog notice stays reachable', () => {
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'model-generation'
+        ? {
+            blocked: true,
+            reason: 'Configure Meshy API key in Settings to enable 3D Model Generation.',
+            loading: false,
+            unprovisionable: false,
+          }
+        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+    );
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+    const model = screen.getByRole('menuitem', { name: 'Generate 3D Model' });
+    expect(model).not.toHaveAttribute('aria-disabled');
+    expect(model).not.toHaveTextContent('Unavailable');
+    fireEvent.click(model);
+    expect(screen.getByTestId('gen-model-dialog')).toBeInTheDocument();
+  });
+});
 
 describe('AssetPanel', () => {
   beforeEach(() => {

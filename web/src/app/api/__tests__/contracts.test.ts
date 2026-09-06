@@ -375,9 +375,11 @@ describe('GET /api/capabilities — response shape contract', () => {
     const body = await res.json() as Record<string, unknown>;
 
     const caps = body.capabilities as Array<Record<string, unknown>>;
-    // Every unavailable capability must include requiredProviders
+    // Every unavailable capability must include requiredProviders — except one
+    // declared unprovisionable (#9117), where no key can help and the hint
+    // names the tracking issue instead.
     for (const cap of caps) {
-      if (!cap.available) {
+      if (!cap.available && !cap.unprovisionable) {
         expect(Array.isArray(cap.requiredProviders)).toBe(true);
         expect((cap.requiredProviders as unknown[]).length).toBeGreaterThan(0);
       }
