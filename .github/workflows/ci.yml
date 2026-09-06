@@ -669,8 +669,8 @@ jobs:
       - name: Board verdict decision logic
         run: bash scripts/__tests__/board-verdict.test.sh
 
-      - name: Shellcheck the verdict script and its suite
-        run: shellcheck -x scripts/board-verdict.sh scripts/__tests__/board-verdict.test.sh
+      - name: Shellcheck the verdict scripts and the suite
+        run: shellcheck -x scripts/board-verdict.sh scripts/post-board-verdict.sh scripts/__tests__/board-verdict.test.sh
 
   # ---- Agentic Config Sync ----
   # Runs when the single source of truth (tools/agentic-sync/canonical.json), the

@@ -2,7 +2,10 @@ export const meta = {
   name: 'review-board',
   description: 'Run the 5 specialized reviewers (architect/security/dx/ux/test) in parallel on the current branch; PASS only if all five PASS',
   whenToUse: 'Before opening a PR, or when /review-protocol asks for the review board. args: optional {base: "main", focus: "free text"}',
-  phases: [{ title: 'Review', detail: 'one agent per reviewer definition' }],
+  phases: [
+    { title: 'Review', detail: 'one agent per reviewer definition' },
+    { title: 'Publish', detail: 'post the verdict marker onto the PR so it becomes the review-board commit status' },
+  ],
 }
 
 // Reviewer roles follow .claude/skills/review-protocol/SKILL.md exactly: architect is the
@@ -64,4 +67,25 @@ const missing = REVIEWERS.map(r => r.key).filter(k => !boards.some(b => b.review
 const failed = boards.filter(b => b.verdict !== 'PASS' || (b.findings && b.findings.length > 0))
 const overall = missing.length === 0 && failed.length === 0 ? 'PASS' : 'FAIL'
 log(`review-board: ${overall} (${boards.length}/${REVIEWERS.length} reported, ${failed.length} failed, ${missing.length} missing)`)
-return { overall, missing, reviews: boards }
+
+// PUBLISH THE VERDICT ONTO THE PR, so it is a check next to CI rather than a
+// value returned into a conversation. #9725 merged with two majors open because
+// the board's FAIL existed only in chat and nothing on the PR contradicted
+// "ready". A verdict this workflow computes and does not publish leaves
+// `board-verdict.sh` with `success` and `failure` unreachable, i.e. permanently
+// pending — the same constant signal nobody reads (lessons-learned #13).
+//
+// It posts the sha the board ACTUALLY REVIEWED, read at publish time from the
+// same branch the reviewers diffed. If a push landed mid-review, that sha is no
+// longer the head, and `board-verdict.sh` reports the verdict as stale rather
+// than letting it grade code no reviewer saw.
+phase('Publish')
+const published = await agent(
+  `Publish the review board's verdict onto the pull request for the current branch.\n` +
+  `1. \`gh pr view --json number,headRefOid --jq '[.number, .headRefOid] | @tsv'\`. If there is no PR for this branch, stop and report that — do not create one.\n` +
+  `2. Run: bash scripts/post-board-verdict.sh <pr number> ${overall} <the head sha from step 1> "<one line: how many reviewers reported and how many failed>"\n` +
+  `3. Report the script's output verbatim. Do not edit any file, and do not post any other comment.`,
+  { label: 'publish:verdict', phase: 'Publish' }
+).catch(err => ({ error: String(err) }))
+
+return { overall, missing, reviews: boards, published }

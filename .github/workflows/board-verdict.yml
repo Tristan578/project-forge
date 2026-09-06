@@ -41,8 +41,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number || github.event.issue.number }}
-        # `|| true`: a FAIL verdict makes the script exit 1 so it is usable as a
-        # local gate, but here the FAILING STATUS is the signal. Reddening this
-        # job too would just duplicate it, and would make the job's own red
-        # indistinguishable from a tooling error.
-        run: bash scripts/board-verdict.sh "$PR" || true
+        # Exit 1 is the FAIL verdict, and it is swallowed on purpose: the
+        # failing STATUS is the signal here, so reddening the job as well would
+        # duplicate it and make a real tooling failure indistinguishable from a
+        # board FAIL.
+        #
+        # Exit 2 is NOT swallowed. `|| true` used to cover it, and that was the
+        # worse bug: on exit 2 the script posts no status at all, and an absent
+        # status renders as nothing rather than as pending — silence in exactly
+        # the place this whole design exists to remove.
+        run: bash scripts/board-verdict.sh "$PR" || [ $? -eq 1 ]

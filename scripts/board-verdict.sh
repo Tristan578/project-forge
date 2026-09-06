@@ -57,10 +57,18 @@ if [ -z "$head_sha" ]; then
 fi
 
 # Newest marker wins. Comments come back oldest-first, so take the last match.
+#
+# ONLY A WRITER'S COMMENT COUNTS. The status means "a review board ran", and a
+# check whose meaning is that must not be writable by the party under review: on
+# a public repository anyone who can comment could otherwise assert
+# `PASS sha=<head>` and turn their own PR green. `author_association` is
+# GitHub's own answer to who the commenter is relative to the repo, and it is
+# computed server-side from the comment, not from anything the commenter writes.
 if [ -n "${BOARD_VERDICT_COMMENTS_FILE:-}" ]; then
   comments="$(cat "$BOARD_VERDICT_COMMENTS_FILE" 2>/dev/null)"
 else
-  comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate --jq '.[].body' 2>/dev/null)"
+  comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+    --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' 2>/dev/null)"
 fi
 marker="$(echo "$comments" | grep -oE '<!-- board-verdict: (PASS|FAIL) sha=[0-9a-f]{40} -->' | tail -1)"
 
@@ -90,7 +98,16 @@ if [ "${BOARD_VERDICT_DRY_RUN:-}" = "true" ]; then
   exit 0
 fi
 
-gh api -X POST "repos/${REPO}/statuses/${head_sha}" \
+# THE WRITE GOES THROUGH A SEAM so the suite can observe it. Every test used to
+# stop at the dry-run exit above, which meant nothing asserted what is actually
+# PUBLISHED: hardcoding `state=success` on the line below, or writing the status
+# under a context nobody looks at, left all fourteen cases green while the gate
+# reported the opposite of its own decision. BOARD_VERDICT_GH_CMD is test-only —
+# the suite asserts no workflow sets it, since pointing it at `true` would make
+# the job succeed while publishing nothing.
+GH_CMD="${BOARD_VERDICT_GH_CMD:-gh}"
+
+"$GH_CMD" api -X POST "repos/${REPO}/statuses/${head_sha}" \
   -f state="$state" \
   -f context="review-board" \
   -f description="$description" >/dev/null || {
