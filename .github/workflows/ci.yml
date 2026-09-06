@@ -652,15 +652,19 @@ jobs:
         run: bash scripts/check-openapi-route-sync.sh
 
   # ---- Portable Paths ----
-  # Fails when a tracked file hardcodes a machine-local absolute path
-  # (`D:/repos/...`, `/Users/<name>/...`, `/home/<name>/...`). This is an open
-  # source repository, so a path that names one contributor's layout resolves to
-  # nothing for everyone else — and it fails SILENTLY, which is lessons-learned
-  # #9605 exactly: the lessons hook read such a path and took its `exit 0` branch
-  # on every other checkout, so enforcement was off for whole sessions with
-  # nothing saying so. Found live on 2026-09-06 in `.codex/config.toml` (an MCP
-  # server pinned to `D:/repos/into-rust/taskboard/taskboard.exe`) and in two
-  # skills that told the reader to `cd /Users/<name>/project-forge`.
+  # Fails when a tracked file hardcodes a machine-local absolute path — a
+  # Windows drive-letter path into a user or repo directory, or a POSIX home
+  # directory. This is an open source repository, so a path naming one
+  # contributor's layout resolves to nothing for everyone else, and it fails
+  # SILENTLY: lessons-learned #9605 is that exactly, where the lessons hook read
+  # such a path, took its `exit 0` branch on every other checkout, and left
+  # enforcement off for whole sessions with nothing saying so. Found live on
+  # 2026-09-06 in `.codex/config.toml` and in two skills.
+  #
+  # The forbidden shapes are NOT restated here. They live once, in the gate's
+  # own PATTERN, because a file that quotes an example is a file the gate then
+  # fails on — which is how this comment reddened its own PR. Read
+  # scripts/check-portable-paths.sh for the shapes and the allowlist rationale.
   #
   # Unconditional rather than path-gated: any file can introduce one, and the
   # whole check is a single grep pass over the tracked set (~2s on 3,482 files).
@@ -675,6 +679,16 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The gate's own decision logic runs first, in the same job: a gate whose
+      # allowlist silently stops matching reports a clean tree either way, so
+      # the suite is the only thing that can tell a passing gate from a dead
+      # one. It is hermetic (throwaway git repos, no network) and takes ~2s.
+      - name: Test the portable-paths gate's decision logic
+        run: bash scripts/__tests__/check-portable-paths.test.sh
+
+      - name: Shellcheck the gate and its suite
+        run: shellcheck -x scripts/check-portable-paths.sh scripts/__tests__/check-portable-paths.test.sh
 
       - name: Check for machine-local absolute paths in tracked files
         run: bash scripts/check-portable-paths.sh
