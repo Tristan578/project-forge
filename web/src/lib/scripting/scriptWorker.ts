@@ -456,9 +456,6 @@ function buildForgeApi(scriptEntityId: string) {
       applyImpulse: (eid: string, fx: number, fy: number, fz: number) => {
         pendingCommands.push({ cmd: 'apply_force', entityId: eid, force: [fx, fy, fz], isImpulse: true });
       },
-      setVelocity: (eid: string, vx: number, vy: number, vz: number) => {
-        pendingCommands.push({ cmd: 'set_velocity', entityId: eid, velocity: [vx, vy, vz] });
-      },
       /**
        * Whether the engine's kinematic character controller last reported this
        * entity as standing on something (PF-1214).
@@ -515,16 +512,10 @@ function buildForgeApi(scriptEntityId: string) {
       applyImpulse: (eid: string, impulseX: number, impulseY: number) => {
         pendingCommands.push({ cmd: 'apply_impulse2d', entityId: eid, impulseX, impulseY });
       },
-      setVelocity: (eid: string, vx: number, vy: number) => {
-        pendingCommands.push({ cmd: 'set_velocity2d', entityId: eid, velocityX: vx, velocityY: vy });
-      },
       getVelocity: (eid: string): { x: number; y: number } | null => {
         const state = physics2dVelocities[eid];
         if (!state) return null;
         return { x: state.velocity[0], y: state.velocity[1] };
-      },
-      setAngularVelocity: (eid: string, omega: number) => {
-        pendingCommands.push({ cmd: 'set_angular_velocity2d', entityId: eid, omega });
       },
       getAngularVelocity: (eid: string): number | null => {
         const state = physics2dVelocities[eid];
@@ -929,12 +920,6 @@ function buildForgeApi(scriptEntityId: string) {
       stopFollow: () => {
         pendingCommands.push({ cmd: 'camera_stop_follow' });
       },
-      setPosition: (x: number, y: number, z: number) => {
-        pendingCommands.push({ cmd: 'camera_set_position', position: [x, y, z] });
-      },
-      lookAt: (x: number, y: number, z: number) => {
-        pendingCommands.push({ cmd: 'camera_look_at', target: [x, y, z] });
-      },
       setMode: (mode: string) => {
         (self as unknown as Worker).postMessage({ type: 'camera_set_mode', mode });
       },
@@ -1071,24 +1056,12 @@ function buildForgeApi(scriptEntityId: string) {
           crossfade: options?.crossfade ?? 0.0,
         });
       },
-      stopAnimation: (eid: string) => {
-        pendingCommands.push({ cmd: 'stop_skeletal_animation2d', entityId: eid });
-      },
       setSkin: (eid: string, skinName: string) => {
         pendingCommands.push({ cmd: 'set_skeleton2d_skin', entityId: eid, skin_name: skinName });
       },
       getSkin: (eid: string) => {
         const skeleton = skeletonStates[eid];
         return skeleton?.activeSkin ?? null;
-      },
-      setIkTarget: (eid: string, constraintName: string, targetX: number, targetY: number) => {
-        pendingCommands.push({
-          cmd: 'set_ik_target2d',
-          entityId: eid,
-          constraint_name: constraintName,
-          target_x: targetX,
-          target_y: targetY,
-        });
       },
     },
 

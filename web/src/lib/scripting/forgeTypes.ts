@@ -87,8 +87,6 @@ declare namespace forge {
     function applyForce(entityId: string, fx: number, fy: number, fz: number): void;
     /** Apply an instant impulse */
     function applyImpulse(entityId: string, fx: number, fy: number, fz: number): void;
-    /** Set linear velocity directly */
-    function setVelocity(entityId: string, vx: number, vy: number, vz: number): void;
     /**
      * Whether the kinematic character controller last reported this entity
      * standing on something. False for an entity with no character controller.
@@ -119,12 +117,8 @@ declare namespace forge {
     function applyForce(entityId: string, forceX: number, forceY: number): void;
     /** Apply an instant impulse (2D) */
     function applyImpulse(entityId: string, impulseX: number, impulseY: number): void;
-    /** Set linear velocity directly (2D) */
-    function setVelocity(entityId: string, vx: number, vy: number): void;
     /** Get current velocity (2D) */
     function getVelocity(entityId: string): { x: number; y: number } | null;
-    /** Set angular velocity (radians per second) */
-    function setAngularVelocity(entityId: string, omega: number): void;
     /** Get current angular velocity (radians per second) */
     function getAngularVelocity(entityId: string): number | null;
     /** Perform a raycast and return the first hit */
@@ -436,14 +430,10 @@ declare namespace forge {
     function getBones(entityId: string): Array<{ name: string; parentBone: string | null; position: [number, number]; rotation: number; scale: [number, number]; length: number }> | null;
     /** Play a skeletal animation */
     function playAnimation(entityId: string, animName: string, options?: { loop?: boolean; speed?: number; crossfade?: number }): void;
-    /** Stop the current skeletal animation */
-    function stopAnimation(entityId: string): void;
     /** Set the active skin */
     function setSkin(entityId: string, skinName: string): void;
     /** Get the current active skin name */
     function getSkin(entityId: string): string | null;
-    /** Set an IK constraint target position */
-    function setIkTarget(entityId: string, constraintName: string, targetX: number, targetY: number): void;
   }
 
   namespace skeleton2d {

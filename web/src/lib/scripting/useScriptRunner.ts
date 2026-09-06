@@ -186,7 +186,20 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
                 continue;
               }
               if (!isScriptAllowedCommand(cmdName)) {
+                // THE AUTHOR HAS TO SEE THIS. A `console.warn` alone puts the
+                // only signal in the browser devtools rather than the in-editor
+                // script console the author is watching, so a call that did
+                // nothing also said nothing — the exact no-error-no-effect pair
+                // #9284 exists to remove. Removing a phantom `forge.*` method
+                // stops it being reachable; this is what happens if anything
+                // ever emits an unarmed name again.
                 console.warn(`[ScriptRunner] Blocked unauthorized command: ${cmdName}`);
+                addScriptLog({
+                  entityId: msg.entityId ?? 'unknown',
+                  level: 'error',
+                  message: `Blocked command "${cmdName}" — not in the script allowlist. If a forge.* method sent this, that method has no engine implementation.`,
+                  timestamp: Date.now(),
+                });
                 continue;
               }
               dispatchCommand(cmdName, payload);

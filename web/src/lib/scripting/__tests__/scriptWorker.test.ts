@@ -562,16 +562,21 @@ describe('scriptWorker', () => {
     );
   });
 
-  it('forge.physics.setVelocity pushes set_velocity command', async () => {
+  // `forge.physics.setVelocity` is GONE, along with six other methods whose
+  // command the engine never armed (#9284). This asserts the removal rather
+  // than deleting the case: while the method existed it pushed a command the
+  // engine discarded, so a script calling it got no error and no effect, and
+  // this test reported that as working. Calling it now throws a TypeError the
+  // author can actually see.
+  it('forge.physics.setVelocity no longer exists — it had no engine arm', async () => {
     const handler = await setupWorker();
     const code = 'function onStart() { forge.physics.setVelocity("e1", 10, 0, 0); }';
 
     await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
 
     const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
-    expect(cmdMsg![0].commands).toContainEqual(
-      expect.objectContaining({ cmd: 'set_velocity', entityId: 'e1', velocity: [10, 0, 0] })
-    );
+    const commands = (cmdMsg?.[0]?.commands ?? []) as Array<{ cmd: string }>;
+    expect(commands.some((c) => c.cmd === 'set_velocity')).toBe(false);
   });
 
   it('forge.physics.getContacts finds nearby entities', async () => {
@@ -634,8 +639,6 @@ describe('scriptWorker', () => {
     const code = `function onStart() {
       forge.physics2d.applyForce("e1", 10, 20);
       forge.physics2d.applyImpulse("e1", 5, 10);
-      forge.physics2d.setVelocity("e1", 1, 2);
-      forge.physics2d.setAngularVelocity("e1", 3.14);
       forge.physics2d.setGravity(0, -20);
     }`;
 
@@ -645,9 +648,12 @@ describe('scriptWorker', () => {
     const cmds = cmdMsg![0].commands;
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'apply_force2d', entityId: 'e1', forceX: 10, forceY: 20 }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'apply_impulse2d', entityId: 'e1', impulseX: 5, impulseY: 10 }));
-    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_velocity2d', entityId: 'e1', velocityX: 1, velocityY: 2 }));
-    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_angular_velocity2d', entityId: 'e1', omega: 3.14 }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_gravity2d', gravityX: 0, gravityY: -20 }));
+    // `setVelocity` and `setAngularVelocity` are gone: their commands had no
+    // engine arm, so both pushed something the engine discarded (#9284).
+    const names = (cmds as Array<{ cmd: string }>).map((c) => c.cmd);
+    expect(names).not.toContain('set_velocity2d');
+    expect(names).not.toContain('set_angular_velocity2d');
   });
 
   it('forge.physics2d.getVelocity reads from synced state', async () => {
@@ -814,8 +820,6 @@ describe('scriptWorker', () => {
     const handler = await setupWorker();
     const code = `function onStart() {
       forge.camera.follow("e1", [0, 5, -10]);
-      forge.camera.setPosition(1, 2, 3);
-      forge.camera.lookAt(0, 0, 0);
       forge.camera.stopFollow();
     }`;
 
@@ -824,9 +828,13 @@ describe('scriptWorker', () => {
     const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
     const cmds = cmdMsg![0].commands;
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_follow', entityId: 'e1', offset: [0, 5, -10] }));
-    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_set_position', position: [1, 2, 3] }));
-    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_look_at', target: [0, 0, 0] }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_stop_follow' }));
+    // `setPosition` and `lookAt` are gone: `camera_set_position` and
+    // `camera_look_at` have no engine arm, so both pushed a command the engine
+    // discarded and the camera never moved (#9284).
+    const names = (cmds as Array<{ cmd: string }>).map((c) => c.cmd);
+    expect(names).not.toContain('camera_set_position');
+    expect(names).not.toContain('camera_look_at');
   });
 
   it('forge.camera.setMode and shake post messages', async () => {
