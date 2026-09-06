@@ -12,6 +12,7 @@ import {
   PIXEL_ART_DITHERING_MODES,
   PIXEL_ART_STYLES,
 } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const VALID_SIZES: number[] = [...PIXEL_ART_SIZES];
 const VALID_DITHERING: string[] = [...PIXEL_ART_DITHERING_MODES];
@@ -34,7 +35,7 @@ interface PixelArtParams {
   resolvedProvider: 'replicate';
 }
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   PixelArtParams,
   {
     status: string;
@@ -138,3 +139,7 @@ export const POST = createGenerationHandler<
     };
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

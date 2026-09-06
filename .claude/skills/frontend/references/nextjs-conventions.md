@@ -133,15 +133,28 @@ remove this export.
 ## Route Handlers
 
 - File: `app/api/my-route/route.ts`
-- Export named functions: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`
+- Exports are named for the HTTP method: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`
+- **Every exported method must be a `withEgressGuard(...)` call** (#9736). Write the
+  handler as a local function and export the wrapped binding — a bare
+  `export async function GET(...)` sits outside the redaction chokepoint and is named
+  as a failure by `src/app/api/__tests__/egressGuardCoverage.test.ts`
 - No `page.tsx` in the same directory as `route.ts` — they conflict
 - No React DOM available — route handlers run in the Edge/Node runtime
 
 ```ts
 // app/api/example/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export async function GET(_req: NextRequest) {
+async function handleGET(_req: NextRequest) {
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withEgressGuard(handleGET);
 ```
+
+`withEgressGuard` redacts the body, every header value, every `Set-Cookie`, the
+`Location` and the reason phrase before the response is returned, so upstream text
+cannot carry a credential to a client however the response was assembled. The exported
+name has to RESOLVE to the import from `@/lib/security/egressGuard` — a local function
+or alias of the same name is rejected by the coverage test on purpose.

@@ -5,6 +5,8 @@ import { sellerProfiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const sellerProfileSchema = z.object({
   displayName: z.string().trim().min(2).max(100),
@@ -12,7 +14,7 @@ const sellerProfileSchema = z.object({
   portfolioUrl: z.string().trim().max(500).optional(),
 });
 
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -45,11 +47,11 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Error fetching seller profile:', error);
     captureException(error, { route: '/api/marketplace/seller', method: 'GET' });
-    return NextResponse.json({ error: 'Failed to fetch profile' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch profile' }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -92,6 +94,11 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('Error saving seller profile:', error);
     captureException(error, { route: '/api/marketplace/seller', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to save profile' }, { status: 500 });
+    return redactedJson({ error: 'Failed to save profile' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);

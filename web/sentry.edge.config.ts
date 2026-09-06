@@ -4,7 +4,19 @@ import {
   scrubSentryEvent,
   scrubSentryLog,
   scrubSentryMetric,
+  setSentryDeepRedactor,
 } from '@/lib/monitoring/sentryConfig';
+import { redactSecrets } from '@/lib/security/redactSecrets';
+
+// Install the DEEP redactor for this runtime, before any Sentry pipeline can
+// run. `sentryConfig` defaults to a shape-only pass, because it is also in the
+// browser bundle and `redactSecrets` — environment enumeration, tree traversal,
+// index-mapped decoders — has nothing to do there and pushed total client JS
+// past its hard limit. Server-side that exact-value match is the half the shape
+// list cannot have, so it is installed here rather than imported there.
+// `sentry-regressions.test.ts` pins this call: without it the shallow default
+// stays, every event still scrubs, and nothing fails.
+setSentryDeepRedactor((input: string) => redactSecrets(input) as string);
 
 const DSN = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';

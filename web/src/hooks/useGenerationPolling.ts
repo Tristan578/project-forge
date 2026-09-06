@@ -28,7 +28,8 @@ import { analyzeModelQuality } from '@/lib/generate/modelQuality';
 import { detectGridDimensions, sliceSheet, buildSpriteSheetData } from '@/lib/sprites/sheetImporter';
 import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
-import { showSuccess } from '@/lib/toast';
+import { showPersistentError, showSuccess } from '@/lib/toast';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -51,6 +52,19 @@ export function useGenerationPolling() {
   const startedAtRef = useRef<Record<string, number>>({});
   const durablePollsRef = useRef<Record<string, () => void>>({});
   const inFlightPollsRef = useRef<Record<string, true>>({});
+  /**
+   * The most recent message a status route sent with a non-OK response.
+   *
+   * #9736 replaced eight status routes' 500 bodies with sentences written for
+   * the user, and every one of them was dead copy: this poller threw on
+   * `!response.ok` BEFORE reading the body and swallowed the throw in a
+   * console.error, so a persistently failing status route showed a stalled
+   * progress bar for five minutes and then the bare "Generation timed out".
+   * Keeping the last message here is what actually puts the route's sentence in
+   * front of the person. Polling still CONTINUES on a non-OK read — a single
+   * 500 is usually transient — so this only surfaces once the job gives up.
+   */
+  const lastStatusErrorRef = useRef<Record<string, string>>({});
 
   // On mount: drain any refunds that failed in a previous session
   useEffect(() => {
@@ -124,10 +138,21 @@ export function useGenerationPolling() {
       // or the selected safety interval.
       if (Date.now() - startedAt >= MAX_POLL_DURATION_MS) {
         await triggerRefund(id);
-        updateJob(id, {
-          status: 'failed',
-          error: 'Generation timed out',
-        });
+        // Prefer whatever the status route last told us. "Generation timed
+        // out" is accurate but useless when the real story is "the status
+        // route has been returning 500 for five minutes".
+        //
+        // The FALLBACK carries `RETRY_GUIDANCE`, because this is the common
+        // case, not an edge one: `lastStatusErrorRef` is deleted on every
+        // successful poll, so an ordinary slow provider that never reaches a
+        // terminal state lands here with nothing but the bare sentence. That is
+        // the exact defect `retryGuidance.ts` was written for — a message that
+        // names the condition and gives someone whose five-minute generation
+        // just ended in an indefinite red toast nothing to do about it. A
+        // status route's own message already carries its guidance, so it is
+        // passed through unchanged.
+        failJob(id, lastStatusErrorRef.current[id] ?? withRetryGuidance('Generation timed out'));
+        delete lastStatusErrorRef.current[id];
         stopPolling(id);
         return;
       }
@@ -137,9 +162,18 @@ export function useGenerationPolling() {
         const response = await fetch(`${endpoint}?jobId=${jobId}`);
 
         if (!response.ok) {
+          // Read the body BEFORE throwing. The route's message is written for
+          // the user and is the only place that says what actually went wrong.
+          const body: unknown = await response.json().catch(() => null);
+          const message =
+            body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
+              ? (body as { error: string }).error
+              : null;
+          if (message) lastStatusErrorRef.current[id] = message;
           throw new Error(`Status check failed: ${response.status}`);
         }
 
+        delete lastStatusErrorRef.current[id];
         const data: StatusResponse = await response.json();
 
         if (data.status === 'completed') {
@@ -152,10 +186,10 @@ export function useGenerationPolling() {
           stopPolling(id);
         } else if (data.status === 'failed') {
           await triggerRefund(id);
-          updateJob(id, {
-            status: 'failed',
-            error: data.error || 'Generation failed',
-          });
+          // Same rule as the timeout fallback above: the provider reported a
+          // terminal failure with no message of its own, so the bare sentence
+          // gets the next step appended.
+          failJob(id, data.error || withRetryGuidance('Generation failed'));
 
           // Stop polling
           stopPolling(id);
@@ -474,17 +508,110 @@ export function useGenerationPolling() {
       // upstream, #8757). triggerRefund is idempotent server-side (refundTokens uses a
       // CTE ON CONFLICT keyed on usageId) and polling has already stopped by the time
       // this branch is reached, so it fires at most once per job.
-      await triggerRefund(id);
-      updateJob(id, {
-        status: 'failed',
-        error: err instanceof Error ? err.message : 'Download failed',
+      const refunded = await triggerRefund(id);
+      failJob(id, err instanceof Error ? err.message : 'Download failed', {
+        userFacing: false,
+        refunded,
       });
     }
   }
 
-  async function triggerRefund(id: string) {
+  /**
+   * Mark a job failed AND tell the user, with a message written FOR the user.
+   *
+   * Writing the message to the store is not showing it. `GenerationStatus`
+   * returns null when no job is pending/processing/downloading, so marking the
+   * only job failed unmounts the one component that renders the message at the
+   * instant it is written; with another job still running, the dropdown that
+   * would show it is closed by default. The status routes' messages were
+   * carefully worded and reached nobody. A toast is the part that makes them
+   * arrive (#9736).
+   *
+   * THREE THINGS THE FIRST VERSION OF THIS GOT WRONG, all found by review.
+   *
+   *  - It toasted `err.message` from the completion path, so 'No result URL',
+   *    'No texture maps' and 'Downloaded file is not a valid GLB model' were
+   *    promoted from a dropdown that is closed by default to the primary
+   *    user-facing channel, untranslated. For the audience this product targets,
+   *    'No texture maps' is indistinguishable from a crash. Internal diagnostics
+   *    now go to `job.error` and to the console; the TOAST gets fixed, actionable
+   *    text. A message that came from a server route is written for the user by
+   *    definition and is passed through.
+   *
+   *    THAT PREMISE WAS HALF FALSE and a fifth board caught it: the eight
+   *    status routes emitted 'Texture generation produced no maps', 'Model
+   *    generation produced no file' and siblings — the same register as the
+   *    strings this change removed, and with no next step for someone whose
+   *    five-minute generation just ended in an indefinite red toast. Rather
+   *    than filter them here (which would make the pass-through rule
+   *    unpredictable), the ROUTES were fixed: each now names what happened and
+   *    what to do about it. So "a server route wrote it for the user" is now
+   *    true of every string that reaches this line, and the tests in each
+   *    `status/route.test.ts` pin the wording.
+   *  - It used `showError`, which inherits sonner's 4 s auto-dismiss. This is a
+   *    TERMINAL failure on a job that may have run for five minutes in the
+   *    background while the person was looking elsewhere, and once the toast
+   *    expires there is no surface left that renders `job.error` at all — the
+   *    message is unrecoverable. `showPersistentError` is what `lib/toast.ts`
+   *    documents for exactly this class.
+   *  - It passed no toast id, so N concurrent jobs hitting the same timeout
+   *    emitted N identical stacked toasts.
+   *
+   *    THE FIRST FIX FOR THAT DID NOT WORK, and a sixth board caught it: the id
+   *    was `generation-failed-${id}` where `id` is the JOB id, so N concurrent
+   *    jobs had N DISTINCT keys and still produced N toasts. `toast.ts` states
+   *    the actual mechanism — "an id turns N concurrent failures that produce
+   *    the same MESSAGE into one toast" — so collapsing them requires a
+   *    MESSAGE-derived key, which is what the id is now. Batch-generating assets
+   *    that fail together leaves one dismissable toast rather than a stack of
+   *    indefinite ones, and two jobs that failed for genuinely different reasons
+   *    still get a toast each.
+   *
+   *  - AND THE REFUND PROMISE WAS NOT TRUE. The internal-failure branch said
+   *    "Your tokens have been refunded" unconditionally, from a call site that
+   *    runs after `triggerRefund` — which returns without refunding anything
+   *    when the job has no `usageId` (BYOK and cache-hit jobs, where no tokens
+   *    were deducted to begin with), and which on failure only queues the refund
+   *    for a FUTURE session. In both cases the user was told, in an indefinite
+   *    red toast, that money had already come back. `retryGuidance.ts` writes the
+   *    rule this broke twenty lines away ("promising one that did not occur is a
+   *    support ticket") and `emptyArtifactResponse` takes an explicit `refunded`
+   *    boolean for the same reason. So does this now: `triggerRefund` REPORTS
+   *    whether it refunded, and the sentence claims a refund only when one
+   *    actually happened. When it did not, the toast says nothing about tokens
+   *    rather than guessing.
+   */
+  function failJob(
+    id: string,
+    message: string,
+    options?: { userFacing?: boolean; refunded?: boolean },
+  ) {
+    // The store keeps the real diagnostic — the dropdown and any bug report
+    // still show what actually happened.
+    updateJob(id, { status: 'failed', error: message });
+    const text =
+      options?.userFacing === false
+        ? options.refunded === true
+          ? 'That generation could not be finished. Your tokens have been refunded — try again, or pick a different style.'
+          : 'That generation could not be finished. Try again, or pick a different style.'
+        : message;
+    // MESSAGE-derived, not job-derived: sonner dedupes by id, so this is what
+    // collapses N concurrent failures with the same wording into one toast.
+    showPersistentError(text, { id: `generation-failed:${text}` });
+  }
+
+  /**
+   * Refund the tokens a failed job was charged, and REPORT whether it happened.
+   *
+   * The boolean is the point. `failJob` used to promise a refund from a call
+   * site that could not know — this returns `false` for a job with no `usageId`
+   * (BYOK and cache hits are never charged tokens, so there is nothing to
+   * return) and `false` when the refund API fails after three attempts and the
+   * work is queued for a future session.
+   */
+  async function triggerRefund(id: string): Promise<boolean> {
     const job = useGenerationStore.getState().jobs[id];
-    if (!job?.usageId) return;
+    if (!job?.usageId) return false;
 
     try {
       await retryWithBackoff(
@@ -511,6 +638,7 @@ export function useGenerationPolling() {
       );
       await useUserStore.getState().fetchBalance();
       showSuccess('Tokens refunded for the failed generation.');
+      return true;
     } catch (err) {
       console.error('Token refund failed after retries — queuing for next session:', err);
       enqueueFailedRefund({
@@ -519,6 +647,7 @@ export function useGenerationPolling() {
         amount: 0,
         timestamp: Date.now(),
       });
+      return false;
     }
   }
 

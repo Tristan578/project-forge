@@ -1,5 +1,6 @@
 import type { Event } from '@sentry/nextjs';
 import * as Sentry from '@sentry/nextjs';
+import { redactShapeText } from '@/lib/security/redactShapes';
 
 // ---------------------------------------------------------------------------
 // Fingerprinting helpers
@@ -206,13 +207,47 @@ const SECRET_VALUE_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
 const REDACTED = '[REDACTED]';
 const MAX_SCRUB_DEPTH = 8;
 
+/**
+ * The extra redaction pass `scrubString` applies after its own patterns.
+ *
+ * WHY IT IS INJECTED rather than imported. This module runs in all three
+ * runtimes, and `instrumentation-client.ts` puts it in the BROWSER bundle.
+ * `redactSecrets` — which adds the half the pattern list above cannot have, an
+ * EXACT match against the values this process holds in its environment, so a
+ * provider added tomorrow whose key format nobody here has seen is still
+ * removed — is ~1,200 lines of environment enumeration, tree traversal and
+ * index-mapped decoders. Importing it here dragged all of that into the client
+ * bundle and pushed total JS past its hard limit, buying a capability that does
+ * nothing in a browser: there are no server environment secrets there to match.
+ *
+ * So the DEFAULT is the shape-only redactor, which is what a browser needs and
+ * all it can use, and the server and edge configs install the deep one at
+ * startup. `sentry-regressions.test.ts` pins that both of them do — a default
+ * left silently in place on the server would be exactly the "protection that
+ * quietly stopped applying" failure this file exists to prevent, and no runtime
+ * test can see it, because both redactors have the same signature and the
+ * shallow one succeeds on every input.
+ */
+let deepRedactString: (input: string) => string = redactShapeText;
+
+/**
+ * Install the server-side redactor. Called by `sentry.server.config.ts` and
+ * `sentry.edge.config.ts`; never by the client entry.
+ */
+export function setSentryDeepRedactor(redactor: (input: string) => string): void {
+  deepRedactString = redactor;
+}
+
 /** Apply every secret-value pattern to a single string. */
 function scrubString(input: string): string {
   let out = input;
   for (const [re, replacement] of SECRET_VALUE_PATTERNS) {
     out = out.replace(re, replacement);
   }
-  return out;
+  // Every Sentry pipeline — event, log and metric — funnels through this
+  // function, so wiring the extra pass here covers all three rather than
+  // trusting three call sites to stay in step.
+  return deepRedactString(out);
 }
 
 /**

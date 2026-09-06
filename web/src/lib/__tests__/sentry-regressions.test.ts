@@ -970,3 +970,79 @@ describe('Sentry profiling config must stay pinned', () => {
     expect(config).toContain('js-profiling');
   });
 });
+
+/**
+ * #9736: the Sentry redactor is INJECTED, and only a source check can see it.
+ *
+ * `sentryConfig.ts` runs in all three runtimes, including the browser through
+ * `instrumentation-client.ts`. Routing its `scrubString` through `redactSecrets`
+ * dragged a ~1,200-line server module — environment enumeration, tree traversal,
+ * index-mapped decoders — into the client bundle and pushed total JS past its
+ * hard limit, for a capability that can match nothing in a browser.
+ *
+ * So the module defaults to a shape-only pass and the server and edge configs
+ * install the deep one. NO RUNTIME TEST CAN CATCH A MISSING INSTALL: both
+ * redactors have the same signature, the shallow one succeeds on every input,
+ * and every event still comes back scrubbed — just without the exact-value half.
+ * That is the silent-downgrade shape this repo keeps paying for, so it is pinned
+ * on the source, the way the MCP bridge's literal-member-expression gate is.
+ */
+describe('#9736: the deep Sentry redactor is installed server-side and not imported client-side', () => {
+  /**
+   * Read a file with its COMMENTS STRIPPED, so every pin below asserts
+   * EXECUTABLE code.
+   *
+   * Anchoring to line start rejected a line comment but not a block comment:
+   * wrapping the install in a block comment still matched
+   * `/^setSentryDeepRedactor\(/m`, because the call keeps its own line inside
+   * the block. So the pin stayed green with the install gone — the same
+   * containment weakness one round earlier, one spelling further along.
+   * Stripping closes both at once.
+   *
+   * The strip is itself checked: one that ate the file would make every
+   * `not.toContain` pass and every `toMatch` fail for the wrong reason, which
+   * is a scan over nothing reading as coverage (lessons-learned #9).
+   */
+  const read = async (file: string) => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const raw = fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8');
+    const stripped = raw
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(stripped.trim().length).toBeGreaterThan(100);
+    return stripped;
+  };
+
+  it.each(['sentry.server.config.ts', 'sentry.edge.config.ts'])(
+    '%s installs redactSecrets as the deep redactor',
+    async (file) => {
+      const content = await read(file);
+      // An EXECUTABLE call at top level, not containment. `toContain` passed a
+      // commented-out call when I mutation-tested this assertion: the name
+      // stays byte-present in the comment while the install is gone. That is
+      // the containment-grep weakness this repo documents for its CI gates,
+      // and it applies just as well to a source pin.
+      expect(
+        content,
+        `${file} must CALL setSentryDeepRedactor — without it the shape-only default stays, every event still scrubs, and nothing fails while the exact-value half is silently gone`,
+      ).toMatch(/^setSentryDeepRedactor\(/m);
+      expect(content).toMatch(/^import\s+\{[^}]*\bredactSecrets\b[^}]*\}\s+from/m);
+    },
+  );
+
+  it('instrumentation-client.ts does not pull redactSecrets into the browser bundle', async () => {
+    const content = await read('instrumentation-client.ts');
+    expect(content).not.toContain('redactSecrets');
+    expect(content).not.toContain('setSentryDeepRedactor');
+  });
+
+  it('sentryConfig.ts imports only the client-safe shapes module', async () => {
+    const content = await read('src/lib/monitoring/sentryConfig.ts');
+    expect(content).toContain("from '@/lib/security/redactShapes'");
+    // A value import of redactSecrets here is the bundle edge itself. `import
+    // type` is erased and would be harmless, so the assertion is scoped to the
+    // value form rather than to the word appearing anywhere in the file.
+    expect(content).not.toMatch(/import\s+\{[^}]*\bredactSecrets\b[^}]*\}\s+from/);
+  });
+});

@@ -5,6 +5,8 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const createAssetSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -15,7 +17,7 @@ const createAssetSchema = z.object({
   tags: z.array(z.string()).max(20).optional().default([]),
 });
 
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -48,11 +50,11 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Error fetching seller assets:', error);
     captureException(error, { route: '/api/marketplace/seller/assets', method: 'GET' });
-    return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -82,6 +84,11 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('Error creating asset:', error);
     captureException(error, { route: '/api/marketplace/seller/assets', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to create asset' }, { status: 500 });
+    return redactedJson({ error: 'Failed to create asset' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);

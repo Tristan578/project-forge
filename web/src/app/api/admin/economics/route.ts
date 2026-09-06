@@ -6,8 +6,10 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, { requireAuth: true });
   if (mid.error) return mid.error;
   const { clerkId } = mid.authContext!;
@@ -68,6 +70,10 @@ export async function GET(req: NextRequest) {
   });
   } catch (error) {
     captureException(error, { route: '/api/admin/economics' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

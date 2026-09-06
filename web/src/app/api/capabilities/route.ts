@@ -13,6 +13,7 @@ import {
   getCapabilityUnavailability,
   isVercelRuntime,
 } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * Maps each provider capability to the environment variable(s) that must be set.
@@ -188,7 +189,7 @@ async function resolveCallerId(): Promise<{ userId: string | null; degraded: boo
  * `resolveApiKey` applies. Capabilities in `UNAVAILABLE_CAPABILITIES` are
  * never available. Secrets are checked server-side and never exposed.
  */
-export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
+async function GET_impl(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
   // 120/min per IP, up from 30 (#9725): the generation dialogs and the Asset
   // panel / Audio inspector entry points read this route, so every editor page
   // load costs one request and a shared-egress classroom would 429 on the old
@@ -291,3 +292,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
 }
 
 export const dynamic = 'force-dynamic';
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

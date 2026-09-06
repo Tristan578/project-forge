@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * POST /api/sentry
@@ -33,7 +35,7 @@ function parseTrustedSentryConfig(): { host: string; projectId: string } | null 
 
 const TRUSTED_SENTRY = parseTrustedSentryConfig();
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   const rateLimited = await rateLimitPublicRoute(request, 'sentry');
   if (rateLimited) return rateLimited;
 
@@ -53,7 +55,7 @@ export async function POST(request: NextRequest) {
     try {
       header = JSON.parse(firstLine);
     } catch {
-      return NextResponse.json({ error: 'Invalid envelope header' }, { status: 400 });
+      return redactedJson({ error: 'Invalid envelope header' }, { status: 400 });
     }
 
     const dsn = header.dsn;
@@ -66,7 +68,7 @@ export async function POST(request: NextRequest) {
     try {
       dsnUrl = new URL(dsn);
     } catch {
-      return NextResponse.json({ error: 'Invalid DSN URL' }, { status: 400 });
+      return redactedJson({ error: 'Invalid DSN URL' }, { status: 400 });
     }
 
     const dsnSegments = dsnUrl.pathname.split('/').filter(Boolean);
@@ -98,6 +100,10 @@ export async function POST(request: NextRequest) {
     });
   } catch {
     // Silently fail -- tunnel errors should not break the app
-    return NextResponse.json({ error: 'Tunnel error' }, { status: 500 });
+    return redactedJson({ error: 'Tunnel error' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

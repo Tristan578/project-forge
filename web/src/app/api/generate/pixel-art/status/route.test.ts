@@ -6,6 +6,7 @@ import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 const mockGetReplicateStatus = vi.hoisted(() => vi.fn());
 
@@ -96,7 +97,7 @@ describe('GET /api/generate/pixel-art/status', () => {
     expect(res.status).toBe(200);
     expect(data.jobId).toBe('pred_abc123');
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Pixel art generation failed');
+    expect(data.error).toBe(withRetryGuidance('Pixel art generation failed'));
     expect(data.resultUrl).toBeUndefined();
     expect(data.progress).toBe(10);
   });
@@ -112,7 +113,7 @@ describe('GET /api/generate/pixel-art/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Pixel art generation failed');
+    expect(data.error).toBe(withRetryGuidance('Pixel art generation failed'));
     expect(data.progress).toBe(10);
   });
 
@@ -132,7 +133,7 @@ describe('GET /api/generate/pixel-art/status', () => {
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
     expect(data.resultUrl).toBeUndefined();
-    expect(data.error).toBe('Pixel art generation produced no image');
+    expect(data.error).toBe(withRetryGuidance('Pixel art generation produced no image'));
   });
 
   it('returns processing status for in-progress prediction', async () => {
@@ -197,6 +198,10 @@ describe('GET /api/generate/pixel-art/status', () => {
     const data = await res.json();
 
     expect(res.status).toBe(500);
-    expect(data.error).toBe('Network timeout');
+    // The provider's own text must NOT come back: the generate clients fold
+    // the upstream RESPONSE BODY into the thrown error, and on the platform
+    // path the credential in play is the platform's (#9736).
+    expect(data.error).not.toContain('Network timeout');
+    expect(data.error).toBe('Could not read the Pixel Art generation status. Please try again.');
   });
 });

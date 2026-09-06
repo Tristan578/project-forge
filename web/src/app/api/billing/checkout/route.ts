@@ -20,6 +20,7 @@ import { getStripe } from '@/lib/billing/stripe-client';
 import { isStripeTaxEnabled } from '@/lib/billing/stripe-tax';
 import { checkBotIdGate } from '@/lib/security/botId';
 import type Stripe from 'stripe';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const checkoutSchema = z.object({
   tier: z.enum(['hobbyist', 'creator', 'pro']),
@@ -38,7 +39,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * Create a Stripe Checkout session for a subscription upgrade.
  * Body: { tier: 'hobbyist' | 'creator' | 'pro' }
  */
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   // BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
   // step-up/auth work, so a blocked bot never spends that budget.
   const botIdResponse = await checkBotIdGate();
@@ -130,3 +131,7 @@ export async function POST(req: NextRequest) {
     return internalError('Failed to create checkout session');
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

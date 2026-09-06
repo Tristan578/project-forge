@@ -39,7 +39,7 @@ import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { getCapabilityUnavailability, ROUTE_CAPABILITY, type ProviderCapability } from '@/lib/config/providers';
-import { ErrorCode } from './errors';
+import { ErrorCode, redactedJson } from './errors';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -74,12 +74,24 @@ const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try
  * formatting, but only when a platform deduction actually happened — a BYOK
  * request never charged anything, and a refund that itself throws is caught and
  * reported. Promising a refund in any of those cases is a support ticket.
+ *
+ * It takes the MESSAGE, not the error. Both call sites sit inside
+ * `if (err instanceof EmptyArtifactError)`, and `spawnforge/no-raw-response-in-catch`
+ * exempts a narrowed client-safe error's `message` but not the error object
+ * itself — handing the whole error to a helper is how `err.cause.body` used to
+ * ride out of a catch behind a narrowing that only justified the message.
  */
-function emptyArtifactResponse(err: EmptyArtifactError, refunded: boolean): NextResponse {
+function emptyArtifactResponse(baseMessage: string, refunded: boolean): NextResponse {
   const message = refunded
-    ? `${err.message}. Your tokens have been refunded — please try again.`
-    : `${err.message}. Please try again.`;
-  return NextResponse.json(
+    ? `${baseMessage}. Your tokens have been refunded — please try again.`
+    : `${baseMessage}. Please try again.`;
+  // `redactedJson`, not `NextResponse.json`. This helper is called FROM two
+  // catch blocks, so it is the one place in this repo that exercises the
+  // documented limit of `spawnforge/no-raw-response-in-catch`: the rule sees
+  // the call site, not the construction inside the callee (#9736). The message
+  // is safe by construction as described above; running it through the
+  // redactor costs nothing and closes the limit here rather than only noting it.
+  return redactedJson(
     { error: message, code: ErrorCode.SERVICE_UNAVAILABLE },
     { status: 503 }
   );
@@ -431,7 +443,7 @@ export function createGenerationHandler<TParams, TResult>(
       }
       rawBody = parsed as Record<string, unknown>;
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+      return redactedJson({ error: 'Invalid JSON' }, { status: 400 });
     }
 
     // 4. Validate
@@ -490,7 +502,7 @@ export function createGenerationHandler<TParams, TResult>(
       }
     } catch (err) {
       captureException(err, { route, action: 'resolve_billing_params' });
-      return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
+      return redactedJson({ error: 'Internal pricing error' }, { status: 500 });
     }
     mctx.provider = resolvedProvider;
     mctx.operation = resolvedOperation;
@@ -600,7 +612,7 @@ export function createGenerationHandler<TParams, TResult>(
         return NextResponse.json(responseResult, { status: successStatus, headers });
       } catch (err) {
         if (err instanceof ApiKeyError) {
-          return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+          return redactedJson({ error: err.message, code: err.code }, { status: 402 });
         }
         if (err instanceof EmptyArtifactError) {
           // The two nouns as structured extras, not just inside the message —
@@ -612,10 +624,10 @@ export function createGenerationHandler<TParams, TResult>(
             artifact: err.artifact,
           });
           mctx.outcome = 'empty_artifact';
-          return emptyArtifactResponse(err, tokensRefunded);
+          return emptyArtifactResponse(err.message, tokensRefunded);
         }
         captureException(err, { route });
-        return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
+        return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
       }
     }
 
@@ -632,14 +644,14 @@ export function createGenerationHandler<TParams, TResult>(
       if (usageId !== undefined) mctx.tokenCost = tokenCost;
     } catch (err) {
       if (err instanceof ApiKeyError) {
-        return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+        return redactedJson({ error: err.message, code: err.code }, { status: 402 });
       }
       // A non-ApiKeyError here is a server-side failure (missing platform key,
       // DB error, etc.). Re-throwing surfaced it as an uninstrumented unhandled
       // rejection with no Sentry signal and a generic framework 500. Convert it
       // to a structured 500 and alert Sentry, mirroring the cached path (#8597).
       captureException(err, { route });
-      return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
+      return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
 
     try {
@@ -672,10 +684,10 @@ export function createGenerationHandler<TParams, TResult>(
           artifact: err.artifact,
         });
         mctx.outcome = 'empty_artifact';
-        return emptyArtifactResponse(err, tokensRefunded);
+        return emptyArtifactResponse(err.message, tokensRefunded);
       }
       captureException(err, { route });
-      return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
+      return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
   });
 }

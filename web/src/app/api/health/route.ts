@@ -22,6 +22,8 @@ import { getClientIp, rateLimitPublicRoute, rateLimitResponse } from '@/lib/rate
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * Public status vocabulary for EACH SERVICE — 'healthy' is remapped to 'up'.
@@ -84,7 +86,7 @@ export function resetHealthCache(): void {
  *    to serve. Giving each surface its own bucket would not bound the fan-out,
  *    it would double it.
  */
-export async function GET(req: NextRequest): Promise<NextResponse> {
+async function GET_impl(req: NextRequest): Promise<NextResponse> {
   // Rate limit: 60 req/min per IP (generous for monitoring tools, blocks hammering)
   const limited = await rateLimitPublicRoute(req, 'health', 60, 60_000);
   if (limited) return limited;
@@ -179,8 +181,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     captureException(error, { route: '/api/health' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export const dynamic = 'force-dynamic';
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

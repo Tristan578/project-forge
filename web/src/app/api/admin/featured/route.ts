@@ -7,6 +7,8 @@ import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +19,7 @@ const featureGameSchema = z.object({
 });
 
 // GET: List currently featured games (admin)
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -61,7 +63,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'GET' });
     console.error('Failed to fetch featured games:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch featured games' },
       { status: 500 }
     );
@@ -69,7 +71,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST: Feature a game (admin)
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -131,7 +133,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'POST' });
     console.error('Failed to feature game:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to feature game' },
       { status: 500 }
     );
@@ -139,7 +141,7 @@ export async function POST(req: NextRequest) {
 }
 
 // DELETE: Unfeature a game (admin)
-export async function DELETE(req: NextRequest) {
+async function DELETE_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -165,9 +167,15 @@ export async function DELETE(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'DELETE' });
     console.error('Failed to unfeature game:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to unfeature game' },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);
+export const DELETE = withEgressGuard(DELETE_impl);

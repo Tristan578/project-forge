@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock @sentry/nextjs before importing the module under test so that
 // addEventProcessor is captured without running any real Sentry init.
@@ -25,8 +25,11 @@ import {
   scrubSentryMetric,
   scrubString,
   deepScrub,
+  setSentryDeepRedactor,
 } from '../sentryConfig';
 import type { Event } from '@sentry/nextjs';
+import { redactSecrets, resetSecretEnvCache } from '@/lib/security/redactSecrets';
+import { redactShapeText } from '@/lib/security/redactShapes';
 
 // ---------------------------------------------------------------------------
 // Helper builders
@@ -913,5 +916,74 @@ describe('scrubSentryMetric', () => {
       { name: 'generation.request', type: 'counter', value: 1 };
     const out = scrubSentryMetric(input);
     expect(out.attributes).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// redactSecrets wiring (#9736)
+// ---------------------------------------------------------------------------
+
+/**
+ * `scrubString` delegates to `redactSecrets`, which is what adds the half the
+ * pattern list above cannot have: an exact match against the values this
+ * process actually holds. Nothing pinned that wiring, so deleting the one-line
+ * call left the whole suite green while the environment half silently stopped
+ * applying to all three Sentry pipelines.
+ *
+ * The fixture is deliberately NOT a recognisable credential shape, so a pass
+ * proves the environment half ran rather than a `SECRET_VALUE_PATTERNS` entry
+ * firing by coincidence.
+ */
+describe('environment secret values are removed from every Sentry pipeline', () => {
+  const SECRET = 'not-a-known-shape-just-a-platform-secret-42';
+
+  // These assert the SERVER pipeline, so they install the same deep redactor
+  // `sentry.server.config.ts` and `sentry.edge.config.ts` install. The module
+  // default is shape-only on purpose: `sentryConfig` also runs in the browser,
+  // where `redactSecrets` is ~1,200 lines that can match nothing — there are no
+  // server environment secrets there — and importing it pushed total client JS
+  // past its hard limit. Installing it here rather than importing it into
+  // `sentryConfig` is what keeps those two facts from fighting.
+  beforeEach(() => {
+    setSentryDeepRedactor((input: string) => redactSecrets(input) as string);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetSecretEnvCache();
+    setSentryDeepRedactor(redactShapeText);
+  });
+
+  it('removes it from an event message, exception value and breadcrumb', () => {
+    vi.stubEnv('PLATFORM_MESHY_KEY', SECRET);
+    const event = scrubEvent(
+      makeEvent({
+        message: `upstream said ${SECRET}`,
+        exception: { values: [{ type: 'Error', value: `boom ${SECRET}` }] },
+        breadcrumbs: [{ message: `crumb ${SECRET}` }],
+      }),
+    );
+    expect(JSON.stringify(event)).not.toContain(SECRET);
+  });
+
+  it('removes it from a structured log message and attributes', () => {
+    vi.stubEnv('PLATFORM_MESHY_KEY', SECRET);
+    const log = scrubSentryLog({
+      level: 'error',
+      message: `upstream said ${SECRET}`,
+      attributes: { detail: `attr ${SECRET}` },
+    });
+    expect(JSON.stringify(log)).not.toContain(SECRET);
+  });
+
+  it('removes it from a metric name and attributes', () => {
+    vi.stubEnv('PLATFORM_MESHY_KEY', SECRET);
+    const metric = scrubSentryMetric({
+      name: `generation.request.${SECRET}`,
+      type: 'counter' as const,
+      value: 1,
+      attributes: { detail: `attr ${SECRET}` },
+    });
+    expect(JSON.stringify(metric)).not.toContain(SECRET);
   });
 });

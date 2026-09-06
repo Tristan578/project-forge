@@ -4,8 +4,11 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
-export async function GET(request: NextRequest) {
+async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     rateLimit: true,
@@ -34,7 +37,7 @@ export async function GET(request: NextRequest) {
     apiKey = resolved.key;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
     }
     throw err;
   }
@@ -76,12 +79,18 @@ export async function GET(request: NextRequest) {
       resultUrl: mappedStatus === 'completed' ? status.audioUrl : undefined,
       durationSeconds: status.durationSeconds,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Music generation produced no audio' : 'Music generation failed')
+        ? withRetryGuidance(succeededButEmpty ? 'Music generation produced no audio' : 'Music generation failed')
         : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/music/status', jobId });
-    const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    // The provider's own text stays server-side: `lib/generate/*Client.ts`
+    // folds the upstream RESPONSE BODY into the thrown error, and on the
+    // platform path the credential in play is the platform's (#9736).
+    return redactedJson({ error: 'Could not read the Music generation status. Please try again.' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

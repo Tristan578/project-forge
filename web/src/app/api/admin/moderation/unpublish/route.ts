@@ -8,6 +8,8 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +24,7 @@ const unpublishSchema = z.object({
  * Used for DMCA/IP-infringement takedowns and policy violations.
  * Body: { gameId: string, reason?: string }
  */
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -77,9 +79,13 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation/unpublish', method: 'POST' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to unpublish game' },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

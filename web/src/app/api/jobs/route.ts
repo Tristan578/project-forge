@@ -5,6 +5,8 @@ import { generationJobs } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +22,7 @@ const createJobSchema = z.object({
 });
 
 // POST: Create a job record (called by client after generation API returns)
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -53,7 +55,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ job: { id: job.id } }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/jobs', method: 'POST' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to create job' },
       { status: 500 }
     );
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest) {
 }
 
 // GET: Fetch user's active (in-progress) jobs for hydration on page load
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -93,7 +95,14 @@ export async function GET(req: NextRequest) {
         .limit(50)
     );
 
-    return NextResponse.json({
+    // STORE-AND-FORWARD (#9736). `errorMessage` below is a persisted column,
+    // written by `webhooks/generation-complete` and by this route's own PATCH.
+    // Every value written today is a fixed string, but this is a channel the
+    // catch-path lint rule structurally CANNOT see: a route can satisfy that
+    // rule and still return caught-error text a different route wrote earlier,
+    // possibly months ago. Redacting on the way out is the only control that
+    // covers rows already in the table.
+    return redactedJson({
       jobs: jobs.map((j) => ({
         id: j.id,
         providerJobId: j.providerJobId,
@@ -117,9 +126,14 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/jobs', method: 'GET' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch jobs' },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);
+export const GET = withEgressGuard(GET_impl);

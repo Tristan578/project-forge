@@ -3,13 +3,15 @@ import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * GET /api/openapi
  * Serves the OpenAPI 3.0 specification as JSON.
  * Used by the Swagger UI at /api-docs.
  */
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'openapi', 30, 60_000);
   if (limited) return limited;
   try {
@@ -35,7 +37,7 @@ export async function GET(req: NextRequest) {
       (err as NodeJS.ErrnoException).code === 'ENOENT';
 
     if (isNotFound) {
-      return NextResponse.json(
+      return redactedJson(
         { error: 'OpenAPI spec not found. Run the spec generation script to create docs/api/openapi.json.' },
         { status: 404 }
       );
@@ -47,9 +49,13 @@ export async function GET(req: NextRequest) {
     // openapi-route-sync CI gate keeps malformed specs out of production, so
     // this 500 path is a defense-in-depth backstop rather than a live route.
     captureException(err, { route: '/api/openapi' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to load the OpenAPI specification.' },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

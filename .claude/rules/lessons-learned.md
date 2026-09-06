@@ -272,3 +272,272 @@ of a `*.failOpen` Sentry action as a contract break to diagnose, not noise, and
 carry the provider's error body into the captured exception so the next break
 is readable.
 **Ticket:** #9623
+
+### 15. Upstream error text is not yours to forward
+**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeWithMap|redactJsonEscaped|reportGuardFailure|generate-route|nextjs-conventions|api-middleware-migrate|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
+**What happens:** A route answers a failure with the upstream provider's own
+words. It reads like good diagnostics and it is an egress channel: on the
+platform path the credential in play is the PLATFORM's, so a provider that
+echoes key material in a 401 body hands a platform secret to any signed-in
+user. Found on twelve routes at once (#9736), all of the same shape:
+
+    const error = await response.text().catch(() => 'Unknown error');
+    throw new Error(`Meshy status error (${response.status}): ${error}`);
+    ...
+    const message = err instanceof Error ? err.message : 'Provider error';
+    return NextResponse.json({ error: message }, { status: 500 });
+
+**Why:** Two habits meet. A client folds the response BODY into the thrown
+error so a human can debug it, and a route forwards `err.message` because it
+looks more helpful than a fixed string. Neither author sees the other half.
+And the risk is not only credentials: upstream text carries internal
+hostnames, SQL, and other tenants' identifiers, none of which a redactor can
+recognise.
+**Prevention:** A caught error goes to Sentry and to the server log; the client
+gets fixed text. Where the message genuinely IS yours and belongs to the user
+(a safety-filter reason), give it a **type** and narrow with `instanceof` —
+never a message prefix, which any upstream error can also produce.
+
+**And do not try to enforce this with a text detector.** The first attempt was
+one: a vitest source scan that looked for a caught binding flowing into a
+response body. A review board walked through it with ELEVEN ordinary shapes in
+one sitting — `err.toString()`, `err.response.data`, an `if` instead of a
+ternary, `const { message } = err`, `NextResponse.json(buildBody(err))`,
+`new NextResponse(JSON.stringify(...))`, a header set after construction, an
+assignment to an outer `let`, `parts.push(err.message)` then `join`, a promise
+`.catch((e) => ...)` callback, and a plain `new Response(String(err))`. Every
+one is the natural way to write the same thing. Enumerating how a body was
+ASSEMBLED is unwinnable, because the ways to build a string are unbounded.
+
+The second attempt fixed assembly and then enumerated the SITES: `.json`, an
+assignment to an outer binding, an argument to a sanctioned constructor. A
+second board defeated that one too, in an afternoon, with sinks the list did
+not name — the RETURN VALUE of a catch scope (`.catch((e) => e.message)`, with
+the response built at the call site), a header set on a SANCTIONED
+constructor's result, a `redirect` whose URL carries the text, a receiver
+rooted in a call (`getDb().update(x).set({ e: err.message })`), a stream's
+`enqueue`, and `import { NextResponse as NR }`. **The set of sinks is as
+unbounded as the set of ways to build a string.** Enumerating either one is the
+same mistake wearing a different hat.
+
+The third attempt inverted the model: instead of enumerating sinks, track the
+caught binding and every value derived from it, and report wherever it CROSSES
+OUT of the catch scope. The claim was that crossing out is a CLOSED set even
+though sinks are not. A third board disproved that too, and the bypasses were
+one-liners:
+
+    const sink = cache; sink.set('last', err.message);   // alias an outer Map
+    const R = NextResponse; return R.json({ detail });    // alias the ctor
+    function detail() { return String(err); }             // hoisted declaration
+    sql`UPDATE jobs SET error = ${err.message}`           // tagged template
+    yield String(err);                                    // a fifth exit
+
+The escape check compared NAME scope against REACHABILITY — "declared inside
+the catch" was treated as "cannot outlive the request" — so one `const` that
+aliased an outer object silenced every escape the previous two boards had
+pinned. And the rule's own message ("keep the error inside the catch") is what
+pushes an author toward writing exactly that alias.
+
+**THE ACTUAL LESSON, after three passes: a hand-written static analysis cannot
+carry a security property over an open-ended language. Put the control at
+RUNTIME, on the one path every byte takes.** `withEgressGuard`
+(`web/src/lib/security/egressGuard.ts`) wraps every App Router handler and
+redacts the body, every header value, every `Set-Cookie` and the `Location`
+before the response is returned. However the body was assembled — helper,
+alias, hoisted function, tagged template, stream, a shape nobody has thought of
+— it passes through one function. That property does not depend on anyone
+having predicted the attack, which is the exact thing each of the three static
+designs depended on.
+
+Enforcement then stops being a dataflow question and becomes a SHAPE question,
+which a parser can answer with certainty: `egressGuardCoverage.test.ts` walks
+every `src/app/**/route.ts` and names any exported HTTP method that is not a
+`withEgressGuard(...)` call. A route that forgets the wrapper is named; nothing
+has to be inferred.
+
+The lint rule is KEPT, and demoted to what it is: early feedback in the editor
+for the common shapes, not the guarantee. That is a real thing to want — it
+tells an author they are writing the defect before CI does — as long as nobody
+reads its green as proof. Use `createErrorResponse`, `apiError` or
+`redactedJson` from `@/lib/api/errors`; all of them run `redactSecrets`, and
+the guard runs it again on the way out.
+
+A generalisation worth carrying: when a control has a mandatory single path at
+runtime, put the control THERE and use static analysis for the coverage
+question ("is every handler wrapped?"), never for the semantic one ("can this
+value reach a client?"). The first is decidable. The second is not.
+
+Three more things this cost, each worth carrying forward:
+
+- **Scope the gate to the PROPERTY, not the filename.** The glob was
+  `src/app/api/**/route.ts` plus `src/lib/api`, which asserts "no route FILE
+  leaks". Five response builders sat outside it, and nothing failed when they
+  landed there. `noRawResponseInCatchCoverage.test.ts` now scans for every
+  module that constructs a response and asks ESLint's own
+  `calculateConfigForFile` whether the rule is on for it.
+- **Scope an exemption to the VALUE, not just the branch.** Scoping
+  `instanceof` narrowing to the branch (rather than to 400 nearby characters,
+  which is what the text detector did) was necessary and not sufficient:
+  `apiError(402, err.cause.body)` inside `if (err instanceof ApiKeyError)`
+  inherited an exemption justified by "the MESSAGE is ours". The exemption now
+  covers only the narrowed error's own message-shaped properties.
+- **A RuleTester case can be vacuous.** The case named for the header channel
+  built its response with a raw `NextResponse.json` on the line above, so its
+  one expected error came from the site ban and deleting the header line left
+  it green (lessons-learned #11, inside the file that cites #11). Write each
+  case so the line under test is the only thing that can report, then DELETE
+  that line and confirm the case fails.
+- **Percent-encoding defeats a `\b`-anchored pattern.** Every credential shape
+  in `redactSecrets` is left-anchored on a word boundary, and in
+  `?e=invalid%20key%20sk-ant-AAA` the character before `sk-ant-` is the `0` of
+  `%20` — a word character — so the boundary never matches. A redirect
+  `Location` and a `Set-Cookie` value are percent-encoded by the time they are
+  headers, so the two channels the guard closes structurally were passing the
+  key through verbatim until the guard matched against a DECODED view and
+  spliced the placeholder back at mapped offsets. Test a redactor on the
+  encoding its output actually travels in.
+**A FOURTH board found the runtime guard shipping a blocker of its own, and the
+shape of it is the most transferable thing in this entry.** Redacting every
+response meant parsing, walking and re-serialising every response — which
+carried `redactSecrets`' `MAX_DEPTH = 8` onto the SUCCESS path. Past the bound
+the sub-tree was replaced with the literal string
+`[REDACTED: nesting depth limit]`. On the error path that was right: truncating
+a diagnostic costs nothing, and the version before it emitted a deeply-nested
+secret verbatim. On a 200 it was catastrophic. At
+`{game:{sceneData:{entities:[{...}]}}}` an entity sits at depth 4, so a tilemap
+layer's `tiles`, a skeleton bone's `localPosition` and an animation track's
+`keyframes` all land at or past eight. Published games came back
+undeserialisable, the editor wrote the truncated scene back on the next save,
+and the GDPR export had holes in it. Silently — no status change, no log.
+
+That is lesson #1 in a new costume: **a control that asserts the right property
+on its old path and the wrong one on its new one.** When you move a control to a
+different path, re-derive every bound it carries against the new input class.
+"It was fail-closed where it came from" is not an argument that it is
+fail-closed here; on the error path a truncated diagnostic is free, and on the
+success path it is data loss served as if it were the data.
+
+Three more, each of which cost a review pass:
+
+- **The guard's own byte-identity test could not observe any of it.** The
+  fixture was `{ ok, items:[1,2,3], nested:{ a, b } }` — two levels, small
+  integers, nothing a JSON round-trip or a depth bound could damage — so the
+  assertion passed for any implementation that round-trips JSON at all. That is
+  #11, written by the same author who had just cited #11, in the file that cites
+  it. When you assert "unchanged", pick a fixture where each way it could
+  CHANGE is present and reachable, and prove the fixture is capable of failing.
+- **The fix for the blocker was also the fix for the lossiness and the
+  latency.** Scanning the raw text first and returning the ORIGINAL response
+  when nothing matches means a body with no secret is never parsed, never
+  walked, never re-serialised — so pretty-printing, integer-like key order,
+  integers past 2^53, `1e400` and `-0` all survive without anyone enumerating
+  them, and the cost falls to one linear pass. Reach for "do nothing when there
+  is nothing to do" before reaching for "do it more carefully".
+- **A redactor that runs on live output can BREAK the product it protects.**
+  Two here, both real: `ASSET_R2_ACCESS_KEY_ID` matches a secret-name pattern on
+  the word KEY and its value is embedded in every SigV4 presigned URL, so
+  redacting it made R2 answer 403 and every paid asset download failed silently;
+  and correcting the `forge_` shape (which could never match, because the route
+  mints 64 hex characters and the pattern said `{32}`) would have redacted the
+  key out of the 200 body whose entire purpose is to show it once. Before
+  widening a redactor, ask which legitimate output carries the thing you are
+  about to remove. A pattern with no match is useless; a pattern that fires on
+  the product working is worse than useless.
+
+And two enforcement notes: a gate that walks `route.ts` does not walk the files
+Next.js routes (`route.js`, `.jsx`, `.mjs`, `.tsx` all count, and a floor of
+"> 90 files" is satisfied by the ones you can see however many you cannot). A
+gate that accepts a wrapper by IDENTIFIER TEXT is defeated by
+`const withEgressGuard = (h) => h;` — the same aliasing that beat the three
+static passes, reappearing inside the enforcement half of the design that
+replaced them. Resolve the binding.
+
+**A FIFTH board found that the fast path from the fourth was unsound in exactly
+the scenario the feature exists for, and the mechanism is worth carrying on its
+own: TWO HALVES OF ONE PROPERTY CAN LIVE IN DIFFERENT STRING SPACES.** The
+scan ran on the SERIALISED body; the rewrite it claimed to over-approximate ran
+on the PARSED leaves. On the wire a newline inside a string is backslash-then-
+`n`, and `n` is a word character, so the `\b` every credential shape is anchored
+on could not match. `{"error":"Meshy status error (401): Unauthorized\nmsy_… is
+not valid"}` — the literal shape of the provider auth failure the whole change
+was opened for — scanned CLEAN, the guard granted byte identity, returned the
+handler's own bytes, and the client's `JSON.parse` restored the credential
+intact. The environment half failed identically: `includes` ran on escaped
+bytes, so any secret containing a quote, a backslash or a newline (every PEM
+`*_PRIVATE_KEY`, a `PGPASSWORD` with a quote — both selected by the name
+pattern) was never found on the wire and always found after parse.
+
+Three things to carry:
+
+- **State the invariant as the COMPOSITION the caller performs, not as a
+  property of the configuration.** The docblock said the scan and the rewrite
+  "read the same environment list and the same shape alternation off one
+  context". That is identical configuration, which is adjacent to what matters
+  and was TRUE while the property was false — lesson #1's family again. The
+  sentence that has to hold is
+  `stringify(redactValue(V)) !== stringify(V) => hasCandidate(stringify(V))`,
+  and it names both inputs, so the mismatch is visible on reading it.
+- **The test that guarded it compared the wrong pair, which is why four boards
+  passed over it.** It checked `hasCandidate(s)` against `redactText(s)` on the
+  SAME string — nearly trivially true, both call the same matchers on the same
+  input — and no sample in its corpus contained a JSON escape at all. It could
+  not fail for the defect it was named after (#11). When a test guards a
+  composition, the assertion must take the same two inputs the production code
+  takes, and the corpus must contain the transformation that separates them.
+- **A walk that rebuilds a container must redact its KEYS.** `Object.keys` went
+  straight into the rebuilt object, so `{"msy_…":"invalid"}` made the scan say
+  MATCH, took the slow path, paid the whole parse/walk/re-serialise round trip —
+  and shipped the credential anyway. The worst available outcome: the lossy path
+  AND the leak, reported as a rewrite. When you redact "every string in a
+  structure", enumerate the positions a string can occupy — leaf, object key,
+  Map key — and note that redacting keys can make two of them collide, which a
+  plain assignment resolves by silently dropping one.
+
+
+
+**A SIXTH board found the fix to that had a MIRROR IMAGE, and this is the most
+transferable thing in the entry.** Teaching the SCAN a new decoding without
+teaching the REWRITE the same one produces DETECT-THEN-EMIT: `hasCandidate`
+learned to read JSON escapes, `redactString` stayed `redactLiteral` +
+`redactPercentEncoded`, and every text-mode path in the guard — a `text/plain`
+body, the malformed-JSON fallback, a header value, a `Set-Cookie`, `statusText`
+— flagged the credential, left the fast path, rewrote nothing and shipped it.
+Strictly worse than not detecting: the response pays the whole slow path AND
+leaks, and the control reports a rewrite that did not happen. Only the JSON-body
+path was covered, because the parse restores the leaf, so every existing runtime
+test passed while five channels leaked.
+
+- **A detector and a rewriter are two halves of one property, and the property
+  has to be asserted in BOTH directions.** `redact(t) !== t => detect(t)` is what
+  makes a fast path sound. `detect(t) => redact(t) !== t` is what stops the leak
+  above. The second was never written down, so nothing could notice when it went
+  false. Write both as sweeps over the transformation that separates them.
+- **Give the two halves ONE implementation of each decoding.** `jsonUnescapeView`
+  returned a string and only the scan called it; `decodeWithMap` returned an
+  index map and only the rewrite used it. Two decoders, two callers, one taught
+  a trick the other did not know. Now one `jsonUnescapeWithMap` feeds both, so a
+  future spelling cannot reach one half alone.
+- **When an agreement between two halves has gone false twice, stop relying on
+  it and CHECK THE OUTPUT.** The guard now re-scans what it is about to emit and
+  fails closed — placeholder for an envelope value, a fixed 500 for a body —
+  rather than trusting that the rewrite did what the scan predicted. Note the
+  assertion is "the output no longer matches", not "the rewrite changed
+  something": the second is the adjacent property and is satisfied by a rewrite
+  that removed one of two credentials.
+- **A fail-closed path with no telemetry is a control that can break silently in
+  the direction of an outage.** `catch { return fixed500(); }` recorded nothing,
+  so a defect in the guard would turn good responses into 500s indistinguishably
+  from an application error, for as long as nobody correlated user reports. Every
+  fail-closed branch reports now, and the reporter's whole body is wrapped —
+  reporting sits on the failure path of a function whose contract is "never
+  throws".
+- **When a control changes the SHAPE of the code that uses it, every recipe that
+  writes that code is part of the control.** The guard changed the export shape
+  of 102 route files, and `/generate-route`, the frontend Next.js reference and
+  `api-middleware-migrate` all still taught the old one — with validation
+  checklists that ran lint, types and integration tests, none of which can see an
+  unwrapped route. Following the docs produced the defect and reported green.
+  When you add a mandatory wrapper, grep the SKILLS and the always-loaded docs,
+  not only the source.
+
+**Ticket:** #9736

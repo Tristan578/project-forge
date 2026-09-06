@@ -5,6 +5,8 @@ import {
   RATE_LIMIT_VITALS_MAX,
   RATE_LIMIT_VITALS_WINDOW_MS,
 } from '@/lib/config/timeouts';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * POST /api/vitals
@@ -32,7 +34,7 @@ const vitalsSchema = z.object({
   delta: z.number().finite(),
 });
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   const rateLimited = await rateLimitPublicRoute(
     request,
     'vitals',
@@ -45,7 +47,7 @@ export async function POST(request: NextRequest) {
   try {
     raw = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    return redactedJson({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const parsed = vitalsSchema.safeParse(raw);
@@ -91,3 +93,7 @@ export async function POST(request: NextRequest) {
 
   return new NextResponse(null, { status: 204 });
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

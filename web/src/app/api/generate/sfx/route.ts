@@ -3,8 +3,9 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   { prompt: string; durationSeconds: number },
   { audioBase64: string; durationSeconds: number; provider: string }
 >({
@@ -47,3 +48,7 @@ export const POST = createGenerationHandler<
     };
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

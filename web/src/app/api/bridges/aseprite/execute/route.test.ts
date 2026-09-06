@@ -20,6 +20,19 @@ async function importRoute() {
   return POST;
 }
 
+/**
+ * The user-facing failure sentence, written once.
+ *
+ * It used to be "Aseprite operation failed. Check Sentry for details.", pinned
+ * in three places, naming a next step the person on the other end cannot take —
+ * Sentry is an internal developer tool they have no access to. This bridge runs
+ * on the USER's own machine, so they are the only one who can fix it; the
+ * sibling `status` route already said so and this one copied the old string.
+ */
+const BRIDGE_FAILURE_MESSAGE =
+  'The Aseprite operation did not complete. Check that Aseprite is installed and the '
+  + 'local bridge is running, then try again.';
+
 const connectedConfig: BridgeToolConfig = {
   id: 'aseprite',
   name: 'Aseprite',
@@ -247,6 +260,52 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(data.metadata).toEqual({ width: 32, height: 32 });
   });
 
+  it('never forwards stdout or stderr to the client, on either outcome', async () => {
+    // The route used to `NextResponse.json(result)` verbatim, and a
+    // BridgeResult carries `stdout`, `stderr` and `error: stderr || ...` —
+    // which hold the child_process message: the full command line and the temp
+    // Lua script path under the server's tmpdir. This is the success path of
+    // the same egress class as #9736, and it is structurally invisible to
+    // `spawnforge/no-raw-response-in-catch` (no catch, no construction it can
+    // follow), so this assertion is the only thing holding it.
+    const leaky: BridgeResult = {
+      success: false,
+      error: "aseprite: /var/folders/xy/T/spawnforge-bridge/ab12.lua:4: attempt to index a nil value",
+      stdout: 'ERROR: sprite not found',
+      stderr: "aseprite --batch --script /var/folders/xy/T/spawnforge-bridge/ab12.lua",
+      exitCode: 1,
+    };
+    vi.doMock('@/lib/auth/api-auth', () => ({
+      authenticateRequest: vi.fn().mockResolvedValue({
+        ok: true as const,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+      }),
+    }));
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({
+      discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+    }));
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({
+      executeOperation: vi.fn().mockResolvedValue(leaky),
+    }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32 } }));
+
+    // Assert on the SERIALIZED body, not on parsed fields: a field renamed to
+    // `details` would still carry the path while a field-by-field check passed.
+    const raw = await res.text();
+    expect(raw).not.toContain('spawnforge-bridge');
+    expect(raw).not.toContain('.lua');
+    expect(raw).not.toContain('--batch');
+    expect(raw).not.toContain('stderr');
+    expect(raw).not.toContain('stdout');
+    expect(JSON.parse(raw)).toEqual({
+      success: false,
+      error: BRIDGE_FAILURE_MESSAGE,
+    });
+  });
+
   it('accepts null params and defaults to empty object', async () => {
     const nullParamsMock = vi.fn().mockResolvedValue(mockResult);
     vi.doMock('@/lib/auth/api-auth', () => ({
@@ -317,7 +376,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     // Route returns generic error message (not err.message) to prevent internal info leakage
-    expect(data.error).toBe('Aseprite operation failed. Check Sentry for details.');
+    expect(data.error).toBe(BRIDGE_FAILURE_MESSAGE);
   });
 
   it('returns 500 with fallback message when error is not an Error instance', async () => {
@@ -339,6 +398,6 @@ describe('POST /api/bridges/aseprite/execute', () => {
     const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Aseprite operation failed. Check Sentry for details.');
+    expect(data.error).toBe(BRIDGE_FAILURE_MESSAGE);
   });
 });

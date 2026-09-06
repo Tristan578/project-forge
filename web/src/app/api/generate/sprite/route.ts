@@ -10,10 +10,11 @@ import { SpriteClient } from '@/lib/generate/spriteClient';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS } from '@/lib/config/providers';
 import type { SpriteSize } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 type SpriteProvider = 'dalle3' | 'sdxl';
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   {
     prompt: string;
     style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
@@ -118,3 +119,7 @@ export const POST = createGenerationHandler<
     estimatedSeconds: SPRITE_ESTIMATED_SECONDS.sdxl,
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

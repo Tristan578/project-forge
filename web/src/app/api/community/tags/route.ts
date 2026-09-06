@@ -4,10 +4,12 @@ import { gameTags } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'community-tags', 30, 60_000);
   if (limited) return limited;
   try {
@@ -33,6 +35,10 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Failed to fetch tags:', error);
     captureException(error, { route: '/api/community/tags' });
-    return NextResponse.json({ error: 'Failed to fetch tags' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch tags' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

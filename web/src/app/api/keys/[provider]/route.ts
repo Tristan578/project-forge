@@ -9,13 +9,15 @@ import { requireOneOf } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BYOK_PROVIDERS } from '@/lib/config/providers';
 import { z } from 'zod';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const keySchema = z.object({
   key: z.string().trim().min(8).max(500),
 });
 
 /** PUT /api/keys/:provider — store/update a BYOK key */
-export async function PUT(
+async function PUT_impl(
   req: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
 ) {
@@ -46,12 +48,12 @@ export async function PUT(
     return NextResponse.json({ success: true, provider: providerResult.value, configured: true });
   } catch (err) {
     captureException(err, { route: '/api/keys/[provider]', method: 'PUT' });
-    return NextResponse.json({ error: 'Failed to store provider key' }, { status: 500 });
+    return redactedJson({ error: 'Failed to store provider key' }, { status: 500 });
   }
 }
 
 /** DELETE /api/keys/:provider — remove a BYOK key */
-export async function DELETE(
+async function DELETE_impl(
   req: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
 ) {
@@ -77,6 +79,11 @@ export async function DELETE(
     return NextResponse.json({ success: true, provider: providerResult.value, configured: false });
   } catch (err) {
     captureException(err, { route: '/api/keys/[provider]', method: 'DELETE' });
-    return NextResponse.json({ error: 'Failed to delete provider key' }, { status: 500 });
+    return redactedJson({ error: 'Failed to delete provider key' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const PUT = withEgressGuard(PUT_impl);
+export const DELETE = withEgressGuard(DELETE_impl);

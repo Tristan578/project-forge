@@ -180,6 +180,25 @@ Respond with ONLY valid JSON matching this exact structure (no markdown, no expl
 const MAX_RETRIES = 2;
 
 /**
+ * The prompt failed OUR safety filter (`sanitizePrompt`).
+ *
+ * A distinct type, not a string prefix, because `/api/game/decompose` returns
+ * this reason to the user verbatim and every other caught error must NOT be
+ * returned (#9736). `spawnforge/no-raw-response-in-catch` exempts a response
+ * only where the code narrows with `instanceof` to a class on its
+ * `clientSafeErrors` list (set in `web/eslint.config.mjs`), and even then only
+ * for the error's own message-shaped properties - so the exemption is visible
+ * in the type rather than resting on a message matching a prefix that any
+ * upstream error could also produce.
+ */
+export class PromptRejectedError extends Error {
+  constructor(public readonly reason: string) {
+    super(`Prompt rejected: ${reason}`);
+    this.name = 'PromptRejectedError';
+  }
+}
+
+/**
  * Decompose a natural language game description into a structured OrchestratorGDD.
  *
  * Calls the LLM with a systems-not-genres prompt, validates JSON output against
@@ -195,7 +214,11 @@ export async function decomposeIntoSystems(
   // [S3] Sanitize the user prompt before LLM call
   const sanitized = sanitizePrompt(prompt, 1000);
   if (!sanitized.safe) {
-    throw new Error(`Prompt rejected: ${sanitized.reason}`);
+    // The constructor already prefixes "Prompt rejected: ", so a fallback of
+    // 'Prompt rejected' composed into "Prompt rejected: Prompt rejected" — a
+    // string /api/game/decompose returns verbatim and orchestratorSlice shows
+    // to the user. The fallback has to be a REASON, not a repeat of the prefix.
+    throw new PromptRejectedError(sanitized.reason ?? 'content flagged by the safety filter');
   }
   const cleanPrompt = sanitized.filtered!;
 

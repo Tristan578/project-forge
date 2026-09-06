@@ -46,6 +46,8 @@ import type {
   AssistantModelMessage,
   ToolModelMessage,
 } from '@ai-sdk/provider-utils';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // ---------------------------------------------------------------------------
 // Docs loading (server-side, filesystem)
@@ -457,7 +459,7 @@ export function buildModelMessages(messages: IncomingMessage[]): BuiltModelMessa
 // Load manifest tools for AI SDK
 // ---------------------------------------------------------------------------
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   // 1. Authenticate + rate-limit via shared middleware pipeline
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
@@ -497,7 +499,7 @@ export async function POST(request: NextRequest) {
   try {
     body = JSON.parse(bodyText);
   } catch {
-    return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    return redactedJson({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const { messages, sceneContext, thinking, effort, systemOverride } = body;
@@ -662,7 +664,7 @@ export async function POST(request: NextRequest) {
       usageId = resolved.usageId;
     } catch (err) {
       if (err instanceof ApiKeyError) {
-        return Response.json({ error: err.message, code: err.code }, { status: 402 });
+        return redactedJson({ error: err.message, code: err.code }, { status: 402 });
       }
       throw err;
     }
@@ -1039,7 +1041,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const message = err instanceof Error ? err.message : 'AI API error';
-    return Response.json({ error: message }, { status: 500 });
+    // The model provider's text stays server-side: it is already on the
+    // Sentry event above, and an upstream body can carry the platform
+    // credential or backend identifiers (#9736).
+    return redactedJson({ error: 'The assistant could not complete that request. Please try again.' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

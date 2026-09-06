@@ -13,6 +13,8 @@ import {
 } from '@/lib/status/statusTypes';
 import { MONITORED_SERVICES } from '@/lib/status/statusConfig';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * GET /api/status
@@ -38,7 +40,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
  *             Status page consumers should inspect `overall` and `services`.
  * HTTP 429 — request volume or fan-out budget exceeded.
  */
-export async function GET(req: NextRequest): Promise<NextResponse> {
+async function GET_impl(req: NextRequest): Promise<NextResponse> {
   const rateLimitResult = await rateLimitPublicRoute(req, 'status');
   if (rateLimitResult) return rateLimitResult;
 
@@ -106,8 +108,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     captureException(error, { route: '/api/status' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export const dynamic = 'force-dynamic';
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

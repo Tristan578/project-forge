@@ -25,6 +25,7 @@ import { MeshyClient } from '@/lib/generate/meshyClient';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { pollProviderStatus, ASYNC_TYPE_TO_DB_CAPABILITY } from '../pollProviderStatus';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 const KEY = 'provider-key';
 
@@ -57,7 +58,7 @@ describe('pollProviderStatus — model (Meshy 3D)', () => {
   it('SUCCEEDED without a glb maps to failed + succeededButEmpty (#8757)', async () => {
     getTaskStatus.mockResolvedValueOnce({ status: 'SUCCEEDED', progress: 100, modelUrls: undefined });
     const r = await pollProviderStatus('model', 'job', KEY);
-    expect(r).toMatchObject({ status: 'failed', succeededButEmpty: true, errorMessage: 'Model generation produced no file' });
+    expect(r).toMatchObject({ status: 'failed', succeededButEmpty: true, errorMessage: withRetryGuidance('Model generation produced no file') });
   });
 
   it('FAILED and EXPIRED both map to failed (not succeededButEmpty)', async () => {
@@ -87,7 +88,7 @@ describe('pollProviderStatus — texture (Meshy)', () => {
   it('SUCCEEDED with an empty maps object is succeededButEmpty (Object.keys length 0)', async () => {
     getTextureStatus.mockResolvedValueOnce({ status: 'SUCCEEDED', progress: 100, maps: {} });
     const r = await pollProviderStatus('texture', 'job', KEY);
-    expect(r).toMatchObject({ status: 'failed', succeededButEmpty: true, errorMessage: 'Texture generation produced no maps' });
+    expect(r).toMatchObject({ status: 'failed', succeededButEmpty: true, errorMessage: withRetryGuidance('Texture generation produced no maps') });
   });
 
   it('SUCCEEDED with no maps field is succeededButEmpty', async () => {
@@ -99,7 +100,7 @@ describe('pollProviderStatus — texture (Meshy)', () => {
     for (const s of ['FAILED', 'EXPIRED']) {
       getTextureStatus.mockResolvedValueOnce({ status: s, progress: 0 });
       expect(await pollProviderStatus('texture', 'job', KEY)).toMatchObject({
-        status: 'failed', succeededButEmpty: false, errorMessage: 'Texture generation failed',
+        status: 'failed', succeededButEmpty: false, errorMessage: withRetryGuidance('Texture generation failed'),
       });
     }
     getTextureStatus.mockResolvedValueOnce({ status: 'IN_PROGRESS', progress: 60 });
@@ -119,7 +120,7 @@ describe('pollProviderStatus — skybox (Meshy single image)', () => {
   it('SUCCEEDED with no image is succeededButEmpty', async () => {
     getTextureStatus.mockResolvedValueOnce({ status: 'SUCCEEDED', progress: 100, maps: {} });
     expect(await pollProviderStatus('skybox', 'job', KEY)).toMatchObject({
-      status: 'failed', succeededButEmpty: true, errorMessage: 'Skybox generation produced no image',
+      status: 'failed', succeededButEmpty: true, errorMessage: withRetryGuidance('Skybox generation produced no image'),
     });
   });
 
@@ -127,7 +128,7 @@ describe('pollProviderStatus — skybox (Meshy single image)', () => {
     for (const s of ['FAILED', 'EXPIRED']) {
       getTextureStatus.mockResolvedValueOnce({ status: s, progress: 0 });
       expect(await pollProviderStatus('skybox', 'job', KEY)).toMatchObject({
-        status: 'failed', succeededButEmpty: false, errorMessage: 'Skybox generation failed',
+        status: 'failed', succeededButEmpty: false, errorMessage: withRetryGuidance('Skybox generation failed'),
       });
     }
     getTextureStatus.mockResolvedValueOnce({ status: 'IN_PROGRESS', progress: 60 });
@@ -150,7 +151,7 @@ describe('pollProviderStatus — music (Suno)', () => {
   it('success with no audio is succeededButEmpty', async () => {
     getStatus.mockResolvedValueOnce({ status: 'completed', progress: 100 });
     expect(await pollProviderStatus('music', 'job', KEY)).toMatchObject({
-      status: 'failed', succeededButEmpty: true, errorMessage: 'Music generation produced no audio',
+      status: 'failed', succeededButEmpty: true, errorMessage: withRetryGuidance('Music generation produced no audio'),
     });
   });
 
@@ -158,7 +159,7 @@ describe('pollProviderStatus — music (Suno)', () => {
     for (const s of ['failed', 'error']) {
       getStatus.mockResolvedValueOnce({ status: s, progress: 0 });
       expect(await pollProviderStatus('music', 'job', KEY)).toMatchObject({
-        status: 'failed', succeededButEmpty: false, errorMessage: 'Music generation failed',
+        status: 'failed', succeededButEmpty: false, errorMessage: withRetryGuidance('Music generation failed'),
       });
     }
     getStatus.mockResolvedValueOnce({ status: 'processing', progress: 10 });
@@ -179,31 +180,31 @@ describe('pollProviderStatus — sprite / sprite_sheet / tileset (Replicate SDXL
   it('succeeded with empty output is succeededButEmpty with a per-type message', async () => {
     getReplicateStatus.mockResolvedValueOnce({ status: 'succeeded', output: [] });
     expect(await pollProviderStatus('sprite', 'p', KEY)).toMatchObject({
-      status: 'failed', succeededButEmpty: true, errorMessage: 'Sprite generation produced no image',
+      status: 'failed', succeededButEmpty: true, errorMessage: withRetryGuidance('Sprite generation produced no image'),
     });
     getReplicateStatus.mockResolvedValueOnce({ status: 'succeeded', output: [] });
     expect(await pollProviderStatus('sprite_sheet', 'p', KEY)).toMatchObject({
-      errorMessage: 'Sprite sheet generation produced no image',
+      errorMessage: withRetryGuidance('Sprite sheet generation produced no image'),
     });
   });
 
   it('failed/canceled map to failed with a per-type message', async () => {
     getReplicateStatus.mockResolvedValueOnce({ status: 'canceled' });
     expect(await pollProviderStatus('tileset', 'p', KEY)).toMatchObject({
-      status: 'failed', succeededButEmpty: false, errorMessage: 'Tileset generation failed',
+      status: 'failed', succeededButEmpty: false, errorMessage: withRetryGuidance('Tileset generation failed'),
     });
   });
 
   it('every Replicate type carries its own empty + failed message', async () => {
     const empty: Record<string, string> = {
-      sprite: 'Sprite generation produced no image',
-      sprite_sheet: 'Sprite sheet generation produced no image',
-      tileset: 'Tileset generation produced no image',
+      sprite: withRetryGuidance('Sprite generation produced no image'),
+      sprite_sheet: withRetryGuidance('Sprite sheet generation produced no image'),
+      tileset: withRetryGuidance('Tileset generation produced no image'),
     };
     const failed: Record<string, string> = {
-      sprite: 'Sprite generation failed',
-      sprite_sheet: 'Sprite sheet generation failed',
-      tileset: 'Tileset generation failed',
+      sprite: withRetryGuidance('Sprite generation failed'),
+      sprite_sheet: withRetryGuidance('Sprite sheet generation failed'),
+      tileset: withRetryGuidance('Tileset generation failed'),
     };
     for (const type of ['sprite', 'sprite_sheet', 'tileset'] as const) {
       getReplicateStatus.mockResolvedValueOnce({ status: 'succeeded', output: [] });

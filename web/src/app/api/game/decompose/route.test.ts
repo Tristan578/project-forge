@@ -15,9 +15,15 @@ vi.mock('@/lib/api/middleware');
 // silently stop intercepting and run the real decomposer. The route imports the
 // module directly (not via the barrel) so a server bundle doesn't pull in the
 // client-only executor graph.
-vi.mock('@/lib/game-creation/decomposer', () => ({
-  decomposeIntoSystems: vi.fn(),
-}));
+vi.mock('@/lib/game-creation/decomposer', async (importOriginal) => {
+  // The route narrows on this class, so the mock exposes the REAL one via
+  // importOriginal. It used to define a look-alike here instead, whose comment
+  // said "must expose the real one" while doing the opposite: the duplicate
+  // re-implemented the message composition, so the 400 `prompt_rejected`
+  // contract stayed green no matter what the real class did (#9736).
+  const actual = await importOriginal<typeof import('@/lib/game-creation/decomposer')>();
+  return { ...actual, decomposeIntoSystems: vi.fn() };
+});
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
@@ -177,10 +183,11 @@ describe('POST /api/game/decompose', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 when prompt is rejected by sanitizer', async () => {
+  it('returns 400 with our safety-filter reason when the prompt is rejected', async () => {
     mockMiddlewareSuccess();
+    const { PromptRejectedError } = await import('@/lib/game-creation/decomposer');
     vi.mocked(decomposeIntoSystems).mockRejectedValue(
-      new Error('Prompt rejected: content unsafe'),
+      new PromptRejectedError('content unsafe'),
     );
 
     const { POST } = await import('./route');
@@ -189,6 +196,26 @@ describe('POST /api/game/decompose', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('prompt_rejected');
+    // This text is OURS and is meant for the user.
+    expect(body.message).toContain('content unsafe');
+  });
+
+  // The exemption is by TYPE, not by the message text: an upstream error that
+  // happens to start "Prompt rejected:" must not be able to claim it and have
+  // its own words forwarded to the caller (#9736).
+  it('does not forward a plain error that merely looks like a prompt rejection', async () => {
+    mockMiddlewareSuccess();
+    vi.mocked(decomposeIntoSystems).mockRejectedValue(
+      new Error('Prompt rejected: upstream said sk-ant-api03-SHOULD-NOT-APPEAR'),
+    );
+
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ prompt: 'x', projectType: '3d' }));
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe('decomposition_failed');
+    expect(JSON.stringify(body)).not.toContain('SHOULD-NOT-APPEAR');
   });
 
   it('returns 500 on LLM failure', async () => {
