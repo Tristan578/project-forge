@@ -55,6 +55,22 @@ case "$SHA" in
   *) echo "::error::sha must be 40 lowercase hex characters, got '${SHA}'" >&2; usage ;;
 esac
 
+# THE SHA MUST BE A COMMIT THAT EXISTS. Well-formed is not the same as real, and
+# the difference is a false claim: a verdict posted against a commit nobody ever
+# built says a board reviewed something that does not exist, and reads as
+# authoritative. Caught by making the mistake — a short sha padded out to forty
+# characters passed every check above and posted a PASS on a live PR.
+#
+# `git cat-file -e` is the cheapest possible check and needs no network. Skipped
+# only when this is not run inside a work tree, where there is nothing to check
+# against and refusing would block the legitimate case.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if ! git cat-file -e "${SHA}^{commit}" 2>/dev/null; then
+    echo "::error::${SHA} is not a commit in this repository — a verdict must name a commit that exists" >&2
+    exit 2
+  fi
+fi
+
 REPO="${GH_REPO:-Tristan578/project-forge}"
 # TEST-ONLY seam, never set in CI — the suite asserts no workflow sets it, since
 # pointing it at `true` would make this report success while posting nothing.

@@ -16,6 +16,11 @@ PASS=0
 FAIL=0
 
 HEAD="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+# A REAL commit, for the producer's positive cases only. The producer refuses a
+# sha that is not a commit in this repository, so those cases cannot use the
+# synthetic head above — and that refusal is the point, exercised by the
+# malformed-argument loop further down.
+REAL_SHA="$(git -C "$ROOT" rev-parse HEAD)"
 OTHER="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -143,21 +148,33 @@ post_case() {
 }
 
 post_case "a PASS comment carries the marker board-verdict.sh reads" \
-  "<!-- board-verdict: PASS sha=$HEAD -->" 1 PASS "$HEAD"
+  "<!-- board-verdict: PASS sha=$REAL_SHA -->" 1 PASS "$REAL_SHA"
 post_case "a FAIL comment carries the marker" \
-  "<!-- board-verdict: FAIL sha=$HEAD -->" 1 FAIL "$HEAD"
+  "<!-- board-verdict: FAIL sha=$REAL_SHA -->" 1 FAIL "$REAL_SHA"
 
 # The round trip is the point: what the producer writes must be what the
 # consumer recognises. Asserting the two regexes separately would let them drift.
 : > "$RECORD"
 GH_STUB_RECORD="$RECORD" BOARD_VERDICT_GH_CMD="$TMP/gh-stub" \
-  bash "$POST" 1 FAIL "$HEAD" "3 of 5 reviewers failed" >/dev/null 2>&1
-cp "$RECORD" "$TMP/comments.txt"
-run_case "a posted FAIL is read back as a failure" failure "$(cat "$TMP/comments.txt")"
+  bash "$POST" 1 FAIL "$REAL_SHA" "3 of 5 reviewers failed" >/dev/null 2>&1
+rt_out="$(BOARD_VERDICT_DRY_RUN=true \
+  BOARD_VERDICT_HEAD_SHA="$REAL_SHA" \
+  BOARD_VERDICT_COMMENTS_FILE="$RECORD" \
+  bash "$SCRIPT" 1 2>&1)"
+case "$rt_out" in
+  failure*) PASS=$((PASS+1)); echo "  ok   a posted FAIL is read back as a failure -> $rt_out" ;;
+  *) FAIL=$((FAIL+1)); echo "  FAIL a posted FAIL was not read back as a failure: $rt_out" ;;
+esac
 
 # Malformed input must not produce a comment that reads like a verdict to a
 # person and is invisible to the check.
-for bad in "1 MAYBE $HEAD" "1 PASS aaaaaaa" "1 PASS" "x PASS $HEAD"; do
+# `$HEAD` here is forty a's — well-formed and not a commit — so every case in
+# this loop also exercises the existence check. That check exists because I made
+# the mistake it catches: a short sha padded to forty characters passed every
+# shape test and posted a PASS on a live PR, against a commit that never existed.
+# Well-formed is not real, and a verdict naming a commit nobody built is a false
+# claim that reads as authoritative.
+for bad in "1 MAYBE $HEAD" "1 PASS aaaaaaa" "1 PASS" "x PASS $HEAD" "1 PASS $HEAD"; do
   : > "$RECORD"
   # shellcheck disable=SC2086
   GH_STUB_RECORD="$RECORD" BOARD_VERDICT_GH_CMD="$TMP/gh-stub" bash "$POST" $bad >/dev/null 2>&1
