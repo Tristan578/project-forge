@@ -28,6 +28,16 @@ Create a new `/api/generate/<route-name>` endpoint using `createGenerationHandle
 
 ## Step 1: Create the Route File
 
+**The exported binding must be a `withEgressGuard(...)` call.** `withEgressGuard`
+(`@/lib/security/egressGuard`, #9736) is the runtime chokepoint every API
+response leaves through: it redacts the body, every header value, every
+`Set-Cookie`, the `Location` and the reason phrase before the response reaches a
+client. A route that exports the handler directly is outside that control and
+ships unredacted upstream text — the leak the guard exists to stop. Assign the
+handler to `POST_impl` (or `GET_impl`, …) and export the wrapped call, exactly as
+below; the name must RESOLVE to an import from that module, because
+`egressGuardCoverage.test.ts` checks the binding, not the spelling.
+
 ```typescript
 // web/src/app/api/generate/<name>/route.ts
 
@@ -35,9 +45,10 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S (use 180 for h
 
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 // Import the provider client (e.g. ElevenLabsClient, MeshyClient, SunoClient)
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   { prompt: string; /* route-specific params */ },
   { /* response shape */ }
 >({
@@ -101,6 +112,10 @@ export const POST = createGenerationHandler<
     // return { audioBase64, durationSeconds, provider: DB_PROVIDER.<x> };
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);
 ```
 
 ## Step 2: Add Token Pricing
@@ -151,6 +166,11 @@ After creating the route, verify:
 
 ```bash
 cd web
+# The ONLY gate that detects an unwrapped route. Run it FIRST — lint, types and
+# the integration tests all pass on a route that exports the handler directly,
+# so a checklist without this line reports green on a route outside the control.
+npx vitest run src/app/api/__tests__/egressGuardCoverage.test.ts
+
 npx vitest run src/app/api/generate/<name>/
 npx vitest run src/app/api/generate/__tests__/route-integration.test.ts
 npx vitest run src/app/api/__tests__/sentry-regressions.test.ts
@@ -160,6 +180,7 @@ npx tsc --noEmit  # (may need NODE_OPTIONS="--max-old-space-size=4096")
 
 ## Common Mistakes to Avoid
 
+0. **Exporting the handler directly** — `export const POST = createGenerationHandler(...)` is the pre-#9736 shape and puts the route OUTSIDE `withEgressGuard`, so its responses are never redacted. Nothing in lint, types or the integration suite notices; only `egressGuardCoverage.test.ts` does. Always `const POST_impl = ...; export const POST = withEgressGuard(POST_impl);`, and import `withEgressGuard` from `@/lib/security/egressGuard` — an alias or a locally-defined function of the same name is rejected by the coverage test on purpose
 1. **Raw provider strings** — always use `DB_PROVIDER.<x>` from `@/lib/config/providers`, never `'anthropic'` or `'openai'` literals
 2. **Truthy checks for optional enum fields** — `if (style && ...)` misses `0`, `false`. Use `style !== undefined && typeof style !== 'string'`
 3. **Missing Number.isInteger() on counts** — `frameCount`, `itemCount` must be integers or billing gets fractional costs
