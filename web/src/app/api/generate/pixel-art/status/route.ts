@@ -6,6 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 // Async status endpoint for pixel-art generation. The POST /generate/pixel-art
 // route returns status:'pending' + jobId=predictionId for the DEFAULT Replicate
@@ -80,7 +81,7 @@ async function GET_impl(request: NextRequest) {
       progress: mappedStatus === 'completed' ? 100 : mappedStatus === 'processing' ? 50 : 10,
       resultUrl,
       error: mappedStatus === 'failed'
-        ? (result.status === 'succeeded'
+        ? withRetryGuidance(result.status === 'succeeded'
             ? 'Pixel art generation produced no image'
             : 'Pixel art generation failed')
         : undefined,

@@ -520,6 +520,17 @@ export function useGenerationPolling() {
    *    now go to `job.error` and to the console; the TOAST gets fixed, actionable
    *    text. A message that came from a server route is written for the user by
    *    definition and is passed through.
+   *
+   *    THAT PREMISE WAS HALF FALSE and a fifth board caught it: the eight
+   *    status routes emitted 'Texture generation produced no maps', 'Model
+   *    generation produced no file' and siblings — the same register as the
+   *    strings this change removed, and with no next step for someone whose
+   *    five-minute generation just ended in an indefinite red toast. Rather
+   *    than filter them here (which would make the pass-through rule
+   *    unpredictable), the ROUTES were fixed: each now names what happened and
+   *    what to do about it. So "a server route wrote it for the user" is now
+   *    true of every string that reaches this line, and the tests in each
+   *    `status/route.test.ts` pin the wording.
    *  - It used `showError`, which inherits sonner's 4 s auto-dismiss. This is a
    *    TERMINAL failure on a job that may have run for five minutes in the
    *    background while the person was looking elsewhere, and once the toast

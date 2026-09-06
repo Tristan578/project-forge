@@ -606,6 +606,54 @@ describe('useGenerationPolling', () => {
     fetchSpy.mockRestore();
   });
 
+  it('toasts FIXED text for an internal diagnostic while the store keeps the real one', async () => {
+    // `failJob`'s `userFacing: false` branch IS the review finding its docblock
+    // says was fixed — 'No result URL', 'No texture maps' and 'Downloaded file
+    // is not a valid GLB model' being promoted from a closed-by-default
+    // dropdown to the primary user-facing channel. Nothing covered that branch,
+    // so a regression that passed `err.message` straight through would have
+    // left the suite green (lessons-learned #11).
+    const FIXED =
+      'That generation could not be finished. Your tokens have been refunded — try again, or pick a different style.';
+    mockJobs['dl2'] = makeJob('dl2', { type: 'model', usageId: 'usage-dl2', autoPlace: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('refund')) return new Response('{}', { status: 200 });
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-dl2',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/model.glb',
+          }),
+        } as Response;
+      }
+      return { ok: false, status: 404 } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(mockShowPersistentError).toHaveBeenCalledWith(FIXED, { id: 'generation-failed-dl2' });
+
+    // The store still carries the real diagnostic — the dropdown and any bug
+    // report show what actually happened...
+    const failCall = mockUpdateJob.mock.calls.find(
+      (c: unknown[]) => c[0] === 'dl2' && (c[1] as Record<string, unknown>).status === 'failed',
+    );
+    expect(failCall).toBeDefined();
+    const stored = (failCall as unknown[])[1] as { error: string };
+    expect(typeof stored.error).toBe('string');
+    expect(stored.error.length).toBeGreaterThan(0);
+    expect(stored.error).not.toBe(FIXED);
+    // ...and it never reached the toast, which is the whole point.
+    const toasted = mockShowPersistentError.mock.calls.map((c: unknown[]) => c[0]);
+    expect(toasted).not.toContain(stored.error);
+    fetchSpy.mockRestore();
+  });
+
   // ---------------------------------------------------------------------------
   // triggerRefund :460 guard — pins both sides of `if (!job?.usageId) return`
   // ---------------------------------------------------------------------------

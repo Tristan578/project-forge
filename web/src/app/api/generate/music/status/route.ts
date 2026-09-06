@@ -6,6 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -78,7 +79,7 @@ async function GET_impl(request: NextRequest) {
       resultUrl: mappedStatus === 'completed' ? status.audioUrl : undefined,
       durationSeconds: status.durationSeconds,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Music generation produced no audio' : 'Music generation failed')
+        ? withRetryGuidance(succeededButEmpty ? 'Music generation produced no audio' : 'Music generation failed')
         : undefined,
     });
   } catch (err) {

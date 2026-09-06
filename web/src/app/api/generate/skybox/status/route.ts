@@ -6,6 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -84,7 +85,7 @@ async function GET_impl(request: NextRequest) {
       progress: status.progress,
       resultUrl: mappedStatus === 'completed' ? skyboxUrl : undefined,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Skybox generation produced no image' : 'Skybox generation failed')
+        ? withRetryGuidance(succeededButEmpty ? 'Skybox generation produced no image' : 'Skybox generation failed')
         : undefined,
     });
   } catch (err) {

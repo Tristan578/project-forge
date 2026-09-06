@@ -6,6 +6,7 @@ import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 const mockGetReplicateStatus = vi.hoisted(() => vi.fn());
 
@@ -111,7 +112,7 @@ describe('GET /api/generate/sprite/status', () => {
     expect(res.status).toBe(200);
     expect(data.jobId).toBe('pred_abc123');
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Sprite generation failed');
+    expect(data.error).toBe(withRetryGuidance('Sprite generation failed'));
     expect(data.resultUrl).toBeUndefined();
     expect(data.progress).toBe(10);
   });
@@ -127,7 +128,7 @@ describe('GET /api/generate/sprite/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Sprite generation failed');
+    expect(data.error).toBe(withRetryGuidance('Sprite generation failed'));
     expect(data.progress).toBe(10);
   });
 
@@ -150,7 +151,7 @@ describe('GET /api/generate/sprite/status', () => {
     expect(data.status).toBe('failed');
     expect(data.resultUrl).toBeUndefined();
     expect(data.progress).toBe(10);
-    expect(data.error).toBe('Sprite generation produced no image');
+    expect(data.error).toBe(withRetryGuidance('Sprite generation produced no image'));
   });
 
   it('does not leak a resultUrl while still processing', async () => {

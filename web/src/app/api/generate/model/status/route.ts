@@ -6,6 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 async function GET_impl(request: NextRequest) {
   // 1. Authenticate + rate limit
@@ -79,7 +80,7 @@ async function GET_impl(request: NextRequest) {
       resultUrl: mappedStatus === 'completed' ? status.modelUrls?.glb : undefined,
       thumbnailUrl: status.thumbnailUrl,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Model generation produced no file' : 'Model generation failed')
+        ? withRetryGuidance(succeededButEmpty ? 'Model generation produced no file' : 'Model generation failed')
         : undefined,
     });
   } catch (err) {

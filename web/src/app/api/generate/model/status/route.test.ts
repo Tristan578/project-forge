@@ -7,6 +7,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import type { User } from '@/lib/db/schema';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -100,7 +101,7 @@ describe('GET /api/generate/model/status', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Model generation failed');
+    expect(data.error).toBe(withRetryGuidance('Model generation failed'));
   });
 
   it('maps SUCCEEDED-with-no-model-file to failed (so the poller refunds, not hangs)', async () => {
@@ -125,7 +126,7 @@ describe('GET /api/generate/model/status', () => {
     const data = await res.json();
     expect(data.status).toBe('failed');
     expect(data.resultUrl).toBeUndefined();
-    expect(data.error).toBe('Model generation produced no file');
+    expect(data.error).toBe(withRetryGuidance('Model generation produced no file'));
   });
 
   it('does not leak a resultUrl while still processing', async () => {

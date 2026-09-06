@@ -6,6 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -88,7 +89,7 @@ async function GET_impl(request: NextRequest) {
       progress: mappedStatus === 'completed' ? 100 : mappedStatus === 'processing' ? 50 : 10,
       resultUrl,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Sprite sheet generation produced no image' : 'Sprite sheet generation failed')
+        ? withRetryGuidance(succeededButEmpty ? 'Sprite sheet generation produced no image' : 'Sprite sheet generation failed')
         : undefined,
     });
   } catch (err) {

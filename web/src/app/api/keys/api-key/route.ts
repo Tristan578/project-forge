@@ -45,7 +45,16 @@ async function POST_impl(req: NextRequest) {
     );
   }
 
-  // Generate key: forge_<32 random hex chars>
+  // Generate key: forge_ + 32 random BYTES rendered as 64 hex characters.
+  //
+  // The count matters and this comment used to get it wrong ("32 random hex
+  // chars"), which is exactly what produced `/\bforge_[0-9a-f]{32}\b/` in
+  // `redactSecrets.ts` — a pattern that could never match a real key, because
+  // `{32}` cannot backtrack and the 33rd hex character defeats the trailing
+  // `\b`. It was listed as coverage for the one credential class this codebase
+  // can name with certainty and provided none. The regex is corrected to {64};
+  // this line is corrected so the next reader does not re-derive the same
+  // wrong length.
   const rawKey = `forge_${randomBytes(32).toString('hex')}`;
   const prefix = rawKey.slice(0, 12); // "forge_xxxx" — enough for identification
   const keyHash = await bcrypt.hash(rawKey, 12);

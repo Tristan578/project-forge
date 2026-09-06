@@ -23,6 +23,7 @@
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 /**
  * Async generation types that have a status route and a `generation_jobs` row.
@@ -113,10 +114,10 @@ async function pollMeshyModel(jobId: string, apiKey: string): Promise<Normalized
     if (status.modelUrls?.glb) {
       return { status: 'completed', progress: status.progress, resultUrl: status.modelUrls.glb, succeededButEmpty: false };
     }
-    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: 'Model generation produced no file' };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: withRetryGuidance('Model generation produced no file') };
   }
   if (status.status === 'FAILED' || status.status === 'EXPIRED') {
-    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: 'Model generation failed' };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: withRetryGuidance('Model generation failed') };
   }
   if (status.status === 'IN_PROGRESS') {
     return { status: 'processing', progress: status.progress, succeededButEmpty: false };
@@ -133,10 +134,10 @@ async function pollMeshyTexture(jobId: string, apiKey: string): Promise<Normaliz
     if (hasMaps) {
       return { status: 'completed', progress: status.progress, resultMeta: status.maps, succeededButEmpty: false };
     }
-    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: 'Texture generation produced no maps' };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: withRetryGuidance('Texture generation produced no maps') };
   }
   if (status.status === 'FAILED' || status.status === 'EXPIRED') {
-    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: 'Texture generation failed' };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: withRetryGuidance('Texture generation failed') };
   }
   if (status.status === 'IN_PROGRESS') {
     return { status: 'processing', progress: status.progress, succeededButEmpty: false };
@@ -153,10 +154,10 @@ async function pollMeshySkybox(jobId: string, apiKey: string): Promise<Normalize
     if (skyboxUrl) {
       return { status: 'completed', progress: status.progress, resultUrl: skyboxUrl, succeededButEmpty: false };
     }
-    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: 'Skybox generation produced no image' };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: withRetryGuidance('Skybox generation produced no image') };
   }
   if (status.status === 'FAILED' || status.status === 'EXPIRED') {
-    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: 'Skybox generation failed' };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: withRetryGuidance('Skybox generation failed') };
   }
   if (status.status === 'IN_PROGRESS') {
     return { status: 'processing', progress: status.progress, succeededButEmpty: false };
@@ -172,10 +173,10 @@ async function pollSuno(jobId: string, apiKey: string): Promise<NormalizedProvid
     if (status.audioUrl) {
       return { status: 'completed', progress: status.progress, resultUrl: status.audioUrl, succeededButEmpty: false };
     }
-    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: 'Music generation produced no audio' };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: withRetryGuidance('Music generation produced no audio') };
   }
   if (status.status === 'failed' || status.status === 'error') {
-    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: 'Music generation failed' };
+    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: withRetryGuidance('Music generation failed') };
   }
   if (status.status === 'processing' || status.status === 'generating') {
     return { status: 'processing', progress: status.progress, succeededButEmpty: false };
@@ -206,10 +207,10 @@ async function pollReplicate(
     if (status.output?.length) {
       return { status: 'completed', progress: 100, resultUrl: status.output[0], succeededButEmpty: false };
     }
-    return { status: 'failed', progress: 100, succeededButEmpty: true, errorMessage: REPLICATE_EMPTY_MESSAGE[type] };
+    return { status: 'failed', progress: 100, succeededButEmpty: true, errorMessage: withRetryGuidance(REPLICATE_EMPTY_MESSAGE[type]) };
   }
   if (status.status === 'failed' || status.status === 'canceled') {
-    return { status: 'failed', progress: 10, succeededButEmpty: false, errorMessage: REPLICATE_FAILED_MESSAGE[type] };
+    return { status: 'failed', progress: 10, succeededButEmpty: false, errorMessage: withRetryGuidance(REPLICATE_FAILED_MESSAGE[type]) };
   }
   if (status.status === 'processing') {
     return { status: 'processing', progress: 50, succeededButEmpty: false };

@@ -6,6 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -81,7 +82,7 @@ async function GET_impl(request: NextRequest) {
       progress: status.progress,
       maps: mappedStatus === 'completed' ? status.maps : undefined,
       error: mappedStatus === 'failed'
-        ? (succeededButEmpty ? 'Texture generation produced no maps' : 'Texture generation failed')
+        ? withRetryGuidance(succeededButEmpty ? 'Texture generation produced no maps' : 'Texture generation failed')
         : undefined,
     });
   } catch (err) {

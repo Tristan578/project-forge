@@ -247,9 +247,12 @@ const localPlugin = {
  *  - PromptRejectedError (lib/game-creation/decomposer.ts) — our own
  *    safety-filter reason. Typed rather than prefix-matched, so an upstream
  *    error whose text happened to start "Prompt rejected:" cannot claim it.
- *  - EmptyArtifactError (lib/api/errors.ts) — COMPOSES its message from two
- *    static nouns (the generation type and the artifact), so no provider text
- *    can reach a client through it.
+ *  - EmptyArtifactError (lib/generate/emptyArtifactError.ts — which is the path
+ *    createGenerationHandler imports it from; an earlier version of this line
+ *    cited lib/api/errors.ts, where the class does not appear at all, so a
+ *    reviewer following the citation to check the assertion arrived at the
+ *    wrong file) — COMPOSES its message from two static nouns (the generation
+ *    type and the artifact), so no provider text can reach a client through it.
  *
  * Only the properties in `clientSafeProperties` (message, code, status,
  * statusCode, reason, name) are exempt, and only inside the narrowed branch.

@@ -7,6 +7,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import type { User } from '@/lib/db/schema';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -98,7 +99,7 @@ describe('GET /api/generate/music/status', () => {
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Music generation failed');
+    expect(data.error).toBe(withRetryGuidance('Music generation failed'));
   });
 
   it('maps success-with-no-audio to failed (so the poller refunds, not hangs)', async () => {
@@ -123,7 +124,7 @@ describe('GET /api/generate/music/status', () => {
     const data = await res.json();
     expect(data.status).toBe('failed');
     expect(data.resultUrl).toBeUndefined();
-    expect(data.error).toBe('Music generation produced no audio');
+    expect(data.error).toBe(withRetryGuidance('Music generation produced no audio'));
   });
 
   it('does not leak a resultUrl while still processing', async () => {
