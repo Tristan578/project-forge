@@ -254,19 +254,29 @@ describe('AudioInspector music gate (#9117)', () => {
 
   // Same reasoning as the Asset panel: a missing key is fixable, so the button
   // opens the dialog whose notice names the provider and links to Settings.
+  //
+  // BOTH capabilities behind the entry are blocked here, and that is the point.
+  // The Sound button reads `combineGenerationGates([sfx, voice])`, which returns
+  // the first UNBLOCKED gate — so a fixture blocking only sfx leaves voice open,
+  // the combiner hands back an open gate, and the button is clickable whichever
+  // field the component reads. That version of this test could not fail: the
+  // mutation it exists to catch (`!gate.unprovisionable` -> `!gate.blocked`)
+  // broke zero tests here, while the same mutation in `AssetPanel` was caught.
+  // It was asserting the combiner, which the case above already covers, and
+  // pinning nothing of its own (lessons-learned #11).
+  const UNCONFIGURED = {
+    blocked: true,
+    reason: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.',
+    loading: false,
+    unprovisionable: false,
+    byokConfigurable: true,
+  };
+
   it('keeps a merely unconfigured capability clickable and opens its dialog', () => {
     mockEditorStore();
     useUserStore.setState({ tier: 'creator' });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
-      featureId === 'sfx-generation'
-        ? {
-            blocked: true,
-            reason: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.',
-            loading: false,
-            unprovisionable: false,
-            byokConfigurable: true,
-          }
-        : OPEN,
+      featureId === 'sfx-generation' || featureId === 'voice-generation' ? UNCONFIGURED : OPEN,
     );
     render(<AudioInspector />);
     const sound = screen.getByRole('button', { name: 'Generate sound with AI' });
@@ -274,6 +284,27 @@ describe('AudioInspector music gate (#9117)', () => {
     expect(sound).not.toHaveTextContent('Unavailable');
     fireEvent.click(sound);
     expect(screen.getByRole('dialog', { name: 'sound-dialog-stub' })).toBeInTheDocument();
+  });
+
+  // The Music button had no case for this state at all, and it is the one where
+  // it matters most: music reaches ONE capability, so nothing masks a wrong
+  // read. Regressing it strands a BYOK-fixable capability behind a closed
+  // button, and that dialog's notice is the only place the provider is named
+  // and Settings is offered — #9725 p7, reintroduced silently.
+  it('keeps a merely unconfigured MUSIC capability clickable and opens its dialog', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'creator' });
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'music-generation'
+        ? { ...UNCONFIGURED, reason: 'Configure a Suno API key in Settings to enable Music Generation.' }
+        : OPEN,
+    );
+    render(<AudioInspector />);
+    const music = screen.getByRole('button', { name: 'Generate music with AI' });
+    expect(music).not.toHaveAttribute('aria-disabled');
+    expect(music).not.toHaveTextContent('Unavailable');
+    fireEvent.click(music);
+    expect(screen.getByRole('dialog', { name: 'music-dialog-stub' })).toBeInTheDocument();
   });
 
   // The default state for every free-tier user in production today: the tier
