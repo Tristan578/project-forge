@@ -27,6 +27,10 @@ import { useEditorStore } from '@/stores/editorStore';
 import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 import { audioManager } from '@/lib/audio/audioManager';
 import { handlePhysicsEvent } from '../physicsEvents';
+import {
+  awaitRaycast2dAnswer,
+  resetRaycast2dQueue,
+} from '@/lib/scripting/raycast2dRegistry';
 
 describe('handlePhysicsEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -839,16 +843,18 @@ describe('handlePhysicsEvent', () => {
      * UNHANDLED is the point: `handlePhysicsEvent` returning `false` is
      * what `useEngineEvents` reports as an unhandled event, so a future rename
      * back onto one of these names fails here instead of silently going dead
-     * again. `RAYCAST2D_HIT`/`RAYCAST2D_MISS` are real engine names that are
-     * still unhandled — deliberately, and tracked separately: 2D raycasts have
-     * no consumer at all.
+     * again.
+     *
+     * `RAYCAST2D_HIT`/`RAYCAST2D_MISS` used to sit in this list as real engine
+     * names with no consumer at all. They now have one — the script async
+     * channel, via `raycast2dRegistry` — and are covered by the round-trip
+     * block below (PF-1169 / #9271). They are NOT phantoms; adding either back
+     * to this list would assert the consumer away.
      */
     it.each([
       'PHYSICS2D_UPDATED',
       'JOINT2D_UPDATED',
       'RAYCAST2D_RESULT',
-      'RAYCAST2D_HIT',
-      'RAYCAST2D_MISS',
     ])('%s is reported unhandled and touches no store action', (eventName) => {
       const result = handlePhysicsEvent(
         eventName,
@@ -1188,4 +1194,98 @@ describe('handlePhysicsEvent', () => {
   // which asserts the opposite — and the opposite is correct: the engine emits
   // `RAYCAST2D_HIT`/`RAYCAST2D_MISS`, so a placeholder returning `true` claimed an
   // event was handled that could never arrive under that name (PF-1167).
+
+  /**
+   * PF-1169 / #9271. The payload keys below are copied from
+   * `engine/src/bridge/events.rs`: `Raycast2dHitPayload` is
+   * `#[serde(rename_all = "camelCase")]` over `entity_id, point_x, point_y,
+   * normal_x, normal_y, distance`, and `Raycast2dMissPayload` is an empty
+   * struct with no rename at all. Getting the casing wrong here is the whole
+   * failure mode this pin exists for.
+   */
+  describe('RAYCAST2D_HIT / RAYCAST2D_MISS', () => {
+    beforeEach(() => {
+      resetRaycast2dQueue();
+    });
+
+    it('resolves the awaiting request with the flattened hit', async () => {
+      const answer = awaitRaycast2dAnswer();
+
+      const handled = handlePhysicsEvent(
+        'RAYCAST2D_HIT',
+        {
+          entityId: 'ground-7',
+          pointX: 3.5,
+          pointY: -1.25,
+          normalX: 0,
+          normalY: 1,
+          distance: 4.5,
+        },
+        mockSetGet.set,
+        mockSetGet.get,
+      );
+
+      expect(handled).toBe(true);
+      await expect(answer).resolves.toEqual({
+        entityId: 'ground-7',
+        point: { x: 3.5, y: -1.25 },
+        normal: { x: 0, y: 1 },
+        distance: 4.5,
+      });
+    });
+
+    it('resolves the awaiting request with null on a miss', async () => {
+      const answer = awaitRaycast2dAnswer();
+      expect(handlePhysicsEvent('RAYCAST2D_MISS', {}, mockSetGet.set, mockSetGet.get)).toBe(true);
+      await expect(answer).resolves.toBeNull();
+    });
+
+    it('reports a hit with no request awaiting it as unhandled', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(
+        handlePhysicsEvent(
+          'RAYCAST2D_HIT',
+          { entityId: 'x', pointX: 0, pointY: 0, normalX: 0, normalY: 1, distance: 0 },
+          mockSetGet.set,
+          mockSetGet.get,
+        ),
+      ).toBe(false);
+      warn.mockRestore();
+    });
+
+    /**
+     * A hit whose `entityId` is not a string cannot be answered, but the slot
+     * is still consumed: the engine emitted one event for one request, so
+     * skipping it would shift every later answer by one.
+     */
+    it('consumes a malformed hit as a miss rather than desynchronising the queue', async () => {
+      const first = awaitRaycast2dAnswer();
+      const second = awaitRaycast2dAnswer();
+
+      handlePhysicsEvent('RAYCAST2D_HIT', { pointX: 1 }, mockSetGet.set, mockSetGet.get);
+      handlePhysicsEvent(
+        'RAYCAST2D_HIT',
+        { entityId: 'real', pointX: 1, pointY: 2, normalX: 0, normalY: 1, distance: 3 },
+        mockSetGet.set,
+        mockSetGet.get,
+      );
+
+      await expect(first).resolves.toBeNull();
+      await expect(second).resolves.toEqual({
+        entityId: 'real',
+        point: { x: 1, y: 2 },
+        normal: { x: 0, y: 1 },
+        distance: 3,
+      });
+    });
+
+    it('touches no store action', async () => {
+      const answer = awaitRaycast2dAnswer();
+      handlePhysicsEvent('RAYCAST2D_MISS', {}, mockSetGet.set, mockSetGet.get);
+      await answer;
+      expect(actions.applyPhysics2dFromEngine).not.toHaveBeenCalled();
+      expect(actions.setPrimaryJoint).not.toHaveBeenCalled();
+      expect(mockSetGet.set).not.toHaveBeenCalled();
+    });
+  });
 });
