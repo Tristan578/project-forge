@@ -274,7 +274,7 @@ is readable.
 **Ticket:** #9623
 
 ### 15. Upstream error text is not yours to forward
-**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
+**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeView|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
 **What happens:** A route answers a failure with the upstream provider's own
 words. It reads like good diagnostics and it is an egress channel: on the
 platform path the credential in play is the PLATFORM's, so a provider that
@@ -451,4 +451,46 @@ gate that accepts a wrapper by IDENTIFIER TEXT is defeated by
 `const withEgressGuard = (h) => h;` — the same aliasing that beat the three
 static passes, reappearing inside the enforcement half of the design that
 replaced them. Resolve the binding.
+
+**A FIFTH board found that the fast path from the fourth was unsound in exactly
+the scenario the feature exists for, and the mechanism is worth carrying on its
+own: TWO HALVES OF ONE PROPERTY CAN LIVE IN DIFFERENT STRING SPACES.** The
+scan ran on the SERIALISED body; the rewrite it claimed to over-approximate ran
+on the PARSED leaves. On the wire a newline inside a string is backslash-then-
+`n`, and `n` is a word character, so the `\b` every credential shape is anchored
+on could not match. `{"error":"Meshy status error (401): Unauthorized\nmsy_… is
+not valid"}` — the literal shape of the provider auth failure the whole change
+was opened for — scanned CLEAN, the guard granted byte identity, returned the
+handler's own bytes, and the client's `JSON.parse` restored the credential
+intact. The environment half failed identically: `includes` ran on escaped
+bytes, so any secret containing a quote, a backslash or a newline (every PEM
+`*_PRIVATE_KEY`, a `PGPASSWORD` with a quote — both selected by the name
+pattern) was never found on the wire and always found after parse.
+
+Three things to carry:
+
+- **State the invariant as the COMPOSITION the caller performs, not as a
+  property of the configuration.** The docblock said the scan and the rewrite
+  "read the same environment list and the same shape alternation off one
+  context". That is identical configuration, which is adjacent to what matters
+  and was TRUE while the property was false — lesson #1's family again. The
+  sentence that has to hold is
+  `stringify(redactValue(V)) !== stringify(V) => hasCandidate(stringify(V))`,
+  and it names both inputs, so the mismatch is visible on reading it.
+- **The test that guarded it compared the wrong pair, which is why four boards
+  passed over it.** It checked `hasCandidate(s)` against `redactText(s)` on the
+  SAME string — nearly trivially true, both call the same matchers on the same
+  input — and no sample in its corpus contained a JSON escape at all. It could
+  not fail for the defect it was named after (#11). When a test guards a
+  composition, the assertion must take the same two inputs the production code
+  takes, and the corpus must contain the transformation that separates them.
+- **A walk that rebuilds a container must redact its KEYS.** `Object.keys` went
+  straight into the rebuilt object, so `{"msy_…":"invalid"}` made the scan say
+  MATCH, took the slow path, paid the whole parse/walk/re-serialise round trip —
+  and shipped the credential anyway. The worst available outcome: the lossy path
+  AND the leak, reported as a rewrite. When you redact "every string in a
+  structure", enumerate the positions a string can occupy — leaf, object key,
+  Map key — and note that redacting keys can make two of them collide, which a
+  plain assignment resolves by silently dropping one.
+
 **Ticket:** #9736
