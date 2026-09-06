@@ -49,7 +49,7 @@ For web-only changes (TypeScript, React), you can skip step 3 — the editor wil
 ## Architecture Overview: The Sandwich
 
 ```
-MCP Server (322 commands, 37 categories)
+MCP Server (351 commands, 41 categories)
     | JSON commands
 React Shell (Next.js 16, Zustand, Tailwind)   <- Editor UI + AI chat
     | JSON events via wasm-bindgen

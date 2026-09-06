@@ -16,7 +16,7 @@ These features are complete, tested, and production-ready:
 
 - **2D Engine**: Sprites, tilemaps, 2D physics (Rapier2D), joints, sprite animation, camera
 - **3D Engine**: PBR materials, skeletal animation, physics (Rapier3D), particles, terrain, CSG, LOD
-- **AI Creation**: 322 MCP commands, natural language chat, compound actions, asset generation
+- **AI Creation**: 351 MCP commands, natural language chat, compound actions, asset generation
 - **Audio**: Spatial audio, bus mixer, reverb zones, adaptive music, snapshots
 - **Scripting**: TypeScript + visual scripting with 73 node types
 - **Export**: HTML5 bundles, cloud publishing, mobile touch controls

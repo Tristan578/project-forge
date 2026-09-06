@@ -50,6 +50,12 @@ const README_PATH = join(REPO_ROOT, 'README.md');
 const DOCS_SITE_COPY_PATH = join(REPO_ROOT, 'apps', 'docs', 'data', 'capability-matrix.json');
 const MANIFEST_PATH = join(REPO_ROOT, 'mcp-server', 'manifest', 'commands.json');
 
+/** Read a repo-relative path, or '' when it is missing. Callers assert non-empty. */
+const read = (repoRelative: string) => {
+  const abs = join(REPO_ROOT, ...repoRelative.split('/'));
+  return existsSync(abs) ? readFileSync(abs, 'utf8') : '';
+};
+
 export const MATRIX_STATUSES = [
   'proven',
   'implemented-unverified',
@@ -431,84 +437,172 @@ describe('docs/capability-matrix.md', () => {
 });
 
 /**
- * The README's command counts, derived rather than transcribed.
+ * Every command count this repo quotes in prose, derived rather than
+ * transcribed.
  *
  * The README said "350 commands" for months while the manifest held 351,
  * because the number was prose and nothing compared it against the artifact
- * (#9720). Fixing the digit without pinning it just resets the clock. Every
- * count the README quotes about the manifest is computed here from the same
- * sources the sentences cite: the manifest itself for the total / category /
- * public counts, `getChatTools()` for what the in-app AI is offered, and
- * `bridgeAllowedCommands()` for what the MCP bridge will execute.
+ * (#9720). Fixing the digit without pinning it just resets the clock — and
+ * pinning ONLY the README resets it everywhere else, which is exactly what
+ * happened: when this block was widened, `docs/capability-matrix.md` (the file
+ * the README now sends a prospective creator to) had two unpinned derived
+ * counts of its own, `docs/known-limitations.md` repeated one of them, and
+ * `docs/reference/commands.md`, `docs/features/limitations-guide.md`, the root
+ * `package.json` description, `CONTRIBUTING.md`'s architecture diagram, both
+ * `file-map.md` mirrors and `.claude/docs/engine-api-reference.md` were still
+ * quoting 322 / 350 with nothing comparing them against anything.
  *
- * Two halves, and both are needed. The positive assertions catch the counts
+ * Every count below is computed from the source the sentence cites: the
+ * manifest for the total / category / public counts, `getChatTools()` for what
+ * the in-app AI is offered, `bridgeAllowedCommands()` for what the MCP bridge
+ * will execute.
+ *
+ * Two halves, and both are needed. The positive claims catch a pinned sentence
  * going stale; the sweep catches a NEW sentence quoting a stale count, which
  * the positive list alone would not see (lesson #11 — assert on content, and
  * assert the walk was non-empty).
  */
-describe('README.md manifest counts', () => {
-  const readme = existsSync(README_PATH) ? readFileSync(README_PATH, 'utf8') : '';
+interface CountedDoc {
+  /** Repo-relative path, used in failure messages. */
+  path: string;
+  /** Substrings the file must carry verbatim, built from the derived counts. */
+  claims: string[];
+}
+
+/**
+ * The shapes in which a manifest count is quoted. Shape-based, not
+ * line-based: "returns 500" and "800 lines" sit on lines that mention commands
+ * and are not command counts, so the older line-scoped sweep could only be run
+ * over the README. Matching the noun instead lets the same sweep cover every
+ * file in the table.
+ *
+ * Group 1 (and group 2, where present) is a command count; `CATEGORY_PATTERN`
+ * captures a category count. `#`-prefixed and dotted numbers are excluded so
+ * issue references, `PF-330` and version strings are not swept up.
+ */
+const COMMAND_COUNT_PATTERNS = [
+  // "351 commands", "351 MCP commands", "351-command MCP manifest".
+  /(?<![#\w.])(\d{3})(?:-commands?\b|\s+(?:MCP\s+)?commands?\b)/g,
+  // "275 of the 351" — the entry-point subset sentences in the matrix.
+  /(?<![#\w.])(\d{3})\s+of\s+the\s+(\d{3})\b/g,
+] as const;
+/**
+ * A category count only counts as a MANIFEST category count when it is quoted
+ * next to a three-digit command count: "351 commands across 41 categories",
+ * "351 across 41 categories (282 public)", "MCP Server (351 commands, 41
+ * categories)". The README's "73 node types across 10 categories" is about
+ * visual-scripting nodes and must not be swept up.
+ */
+const CATEGORY_PATTERN = /(?<![#\w.])\d{3}\s*(?:commands?)?(?:\s+across\s+|,\s+)(\d{2,3})\s+categories\b/g;
+
+describe('command counts quoted across the repo', () => {
   const facts = readManifestFacts();
   const chatToolCount = getChatTools().length;
   const bridgeCount = bridgeAllowedCommands().length;
+  const total = facts.total;
+  const categoryCount = facts.categories.length;
 
-  it('is readable and non-empty (never a vacuous pass)', () => {
-    expect(existsSync(README_PATH), `${README_PATH} is missing`).toBe(true);
-    expect(readme.length).toBeGreaterThan(0);
-    expect(facts.total).toBeGreaterThan(0);
+  const docs: CountedDoc[] = [
+    {
+      path: 'README.md',
+      claims: [
+        // Line 3 — the opening sentence.
+        `${total}-command MCP manifest`,
+        // The stats table, and the repo-map comment near the bottom.
+        `${total} across ${categoryCount} categories (${facts.publicCount} public)`,
+        `${total} commands across ${categoryCount} categories`,
+        // The "What is SpawnForge" paragraph.
+        `${total} of them (${facts.publicCount} public)`,
+        // getChatTools(): every `:write`-scoped command plus the `query` category.
+        `offered ${chatToolCount} of the ${total} manifest commands`,
+        // bridgeAllowedCommands(): the allowlist minus the denied scopes.
+        `an allowlist of ${bridgeCount} commands`,
+        `drive ${bridgeCount} of those commands`,
+      ],
+    },
+    {
+      // The document this suite gates, and the one the README now points a
+      // prospective creator at. Both counts are derived; neither was pinned.
+      path: 'docs/capability-matrix.md',
+      claims: [`${chatToolCount} of the ${total}`, `executes ${bridgeCount} of the ${total} commands`],
+    },
+    {
+      path: 'docs/known-limitations.md',
+      claims: [`${bridgeCount} of the ${total} commands`],
+    },
+    {
+      // Generated by docs/scripts/generate-reference.ts, which derives the
+      // count — so a mismatch here means the file was not regenerated.
+      path: 'docs/reference/commands.md',
+      claims: [`all ${total} MCP commands`],
+    },
+    { path: 'docs/features/limitations-guide.md', claims: [`${total} MCP commands`] },
+    // The npm-visible description of the repo.
+    { path: 'package.json', claims: [`${total} MCP commands`] },
+    // The first architecture picture a new contributor sees.
+    { path: 'CONTRIBUTING.md', claims: [`MCP Server (${total} commands, ${categoryCount} categories)`] },
+    { path: '.claude/rules/file-map.md', claims: [`${total} commands across ${categoryCount} categories`] },
+    // The cross-IDE mirror of the file above (.claude/tools/dx-audit.sh).
+    { path: '.windsurf/rules/file-map.md', claims: [`${total} commands across ${categoryCount} categories`] },
+    { path: '.claude/docs/engine-api-reference.md', claims: [`${total} commands across ${categoryCount} categories`] },
+  ];
+
+  it('derives every count from code, and every listed file is readable (never a vacuous pass)', () => {
+    expect(total).toBeGreaterThan(0);
+    expect(categoryCount).toBeGreaterThan(0);
     expect(chatToolCount).toBeGreaterThan(0);
     expect(bridgeCount).toBeGreaterThan(0);
-  });
-
-  it('quotes the manifest total, category and public counts the manifest has', () => {
-    const claims = [
-      // Line 3 — the opening sentence.
-      `${facts.total}-command MCP manifest`,
-      // The stats table, and the repo-map comment near the bottom.
-      `${facts.total} across ${facts.categories.length} categories (${facts.publicCount} public)`,
-      `${facts.total} commands across ${facts.categories.length} categories`,
-      // The "What is SpawnForge" paragraph.
-      `${facts.total} of them (${facts.publicCount} public)`,
-    ];
-    for (const claim of claims) {
-      expect(readme, `README no longer says "${claim}"`).toContain(claim);
+    expect(docs.length).toBeGreaterThanOrEqual(10);
+    for (const doc of docs) {
+      expect(read(doc.path).length, `${doc.path} is missing or empty`).toBeGreaterThan(0);
     }
+    // README_PATH is what the older, README-only version of this block read.
+    expect(existsSync(README_PATH), `${README_PATH} is missing`).toBe(true);
   });
 
-  it('quotes the in-app AI and MCP bridge counts those code paths produce', () => {
-    // getChatTools(): every `:write`-scoped command plus the `query` category.
-    expect(readme, `README no longer says the in-app AI is offered ${chatToolCount}`).toContain(
-      `offered ${chatToolCount} of the ${facts.total} manifest commands`,
-    );
-    // bridgeAllowedCommands(): the allowlist minus the denied scopes.
-    expect(readme, `README no longer says the bridge allowlist is ${bridgeCount}`).toContain(
-      `an allowlist of ${bridgeCount} commands`,
-    );
-    expect(readme).toContain(`drive ${bridgeCount} of those commands`);
-  });
+  it.each(docs.map((doc) => [doc.path, doc.claims] as const))(
+    '%s quotes the counts the code produces',
+    (path, claims) => {
+      const text = read(path);
+      expect(claims.length, `${path} is listed with no claim to check`).toBeGreaterThan(0);
+      for (const claim of claims) {
+        expect(text, `${path} no longer says "${claim}"`).toContain(claim);
+      }
+    },
+  );
 
-  it('quotes no OTHER command count anywhere in the file', () => {
-    // Every three-digit number on a line that mentions commands must be one of
-    // the four derived counts. `#`-prefixed and dotted numbers are skipped so
-    // issue references and version strings are not swept up.
-    const allowed = new Set([facts.total, facts.publicCount, chatToolCount, bridgeCount]);
+  it('quotes no OTHER command or category count in any of them', () => {
+    const allowedCommands = new Set([total, facts.publicCount, chatToolCount, bridgeCount]);
     const offenders: string[] = [];
     let inspected = 0;
-    readme.split(/\r?\n/).forEach((line, i) => {
-      if (!/command/i.test(line)) return;
-      for (const match of line.matchAll(/(?<![#\w.])\d{3}(?![\w.])/g)) {
-        inspected += 1;
-        if (!allowed.has(Number(match[0]))) {
-          offenders.push(`README.md:${i + 1}: ${match[0]}`);
-        }
-      }
-    });
-    // A zero-item walk reads as zero problems found; it means the regex or the
-    // README changed shape, not that the counts are clean.
-    expect(inspected, 'the README sweep inspected no numbers at all').toBeGreaterThanOrEqual(4);
+    for (const doc of docs) {
+      read(doc.path)
+        .split(/\r?\n/)
+        .forEach((line, i) => {
+          for (const pattern of COMMAND_COUNT_PATTERNS) {
+            for (const match of line.matchAll(pattern)) {
+              for (const captured of match.slice(1).filter(Boolean)) {
+                inspected += 1;
+                if (!allowedCommands.has(Number(captured))) {
+                  offenders.push(`${doc.path}:${i + 1}: ${captured} commands`);
+                }
+              }
+            }
+          }
+          for (const match of line.matchAll(CATEGORY_PATTERN)) {
+            inspected += 1;
+            if (Number(match[1]) !== categoryCount) {
+              offenders.push(`${doc.path}:${i + 1}: ${match[1]} categories`);
+            }
+          }
+        });
+    }
+    // A zero-item walk reads as zero problems found; it would mean the
+    // patterns or the documents changed shape, not that the counts are clean.
+    expect(inspected, 'the count sweep inspected no numbers at all').toBeGreaterThanOrEqual(20);
     expect(
       offenders,
-      `\nREADME command counts that match none of ${[...allowed].join('/')}:\n${offenders.join('\n')}\n`,
+      `\ncounts matching none of ${[...allowedCommands].join('/')} commands or ${categoryCount} categories:\n${offenders.join('\n')}\n`,
     ).toEqual([]);
   });
 });
@@ -592,5 +686,45 @@ describe('checkMatrix on synthetic input (the checker can fail)', () => {
   it('ignores tables that carry no matrix rows, such as the legend', () => {
     const md = ['| Status | Meaning |', '|---|---|', '| `proven` | verified |'].join('\n');
     expect(parseMatrix(md)).toEqual([]);
+  });
+});
+
+/**
+ * `apps/docs/data/capability-matrix.json` is a generated copy of a repo-root
+ * source, living inside a deploy root that cannot see above itself — the same
+ * shape as the three artifacts `CLAUDE.md` already warns about, with the same
+ * failure: edit the source, skip the regen, ship a stale page. The contract
+ * only helps if it says so, and the always-loaded line said "Three" while this
+ * was the fourth. Pinned here because nothing else compares the prose to the
+ * artifact set it enumerates.
+ */
+describe('the capability-matrix copy is registered as a generated-artifact sync gate', () => {
+  const claudeMd = read('CLAUDE.md');
+  const recipe = read('.claude/rules/gotchas-build-ci.md');
+
+  it('both files are readable (never a vacuous pass)', () => {
+    expect(claudeMd.length, 'CLAUDE.md is missing or empty').toBeGreaterThan(0);
+    expect(recipe.length, '.claude/rules/gotchas-build-ci.md is missing or empty').toBeGreaterThan(0);
+  });
+
+  it('CLAUDE.md counts four artifacts and names every one of them', () => {
+    const line = claudeMd
+      .split(/\r?\n/)
+      .find((l) => /generated-artifact sync gates/.test(l));
+    expect(line, 'CLAUDE.md no longer carries the generated-artifact sync-gate line').toBeDefined();
+    expect(line).toContain('Four generated-artifact sync gates');
+    for (const artifact of [
+      'package-lock.json',
+      '*.lock.yml',
+      'docs/api/openapi.json',
+      'apps/docs/data/capability-matrix.json',
+    ]) {
+      expect(line, `the sync-gate line no longer names ${artifact}`).toContain(artifact);
+    }
+  });
+
+  it('the fix recipe CLAUDE.md points at carries the new artifact and its regen command', () => {
+    expect(recipe).toContain('apps/docs/data/capability-matrix.json');
+    expect(recipe).toContain('npm run sync:capability-matrix');
   });
 });

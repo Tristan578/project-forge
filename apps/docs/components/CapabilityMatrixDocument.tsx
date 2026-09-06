@@ -121,9 +121,20 @@ const cellStyle: CSSProperties = {
   lineHeight: 1.5,
 };
 
-function Table({ header, rows }: { header: string[]; rows: string[][] }) {
+function Table({ header, rows, label }: { header: string[]; rows: string[][]; label: string }) {
   return (
-    <div style={{ overflowX: 'auto', marginBottom: '1.5rem' }}>
+    // The table is forced to `minWidth: 48rem` inside an `overflow-x: auto`
+    // box, so below ~800px of viewport EVERY table here scrolls. A scroll
+    // container that is neither focusable nor holds a focusable descendant
+    // cannot be scrolled by keyboard at all — and the document's first table
+    // (the four entry-point definitions) holds none, so its entire "Meaning"
+    // column, the key to reading every badge below it, was unreachable without
+    // a pointer. `tabIndex` plus a NAMED `role="region"` is what axe's
+    // `scrollable-region-focusable` (serious; WCAG 2.1.1 Keyboard, Level A)
+    // asks for; the name comes from the section heading so one of four regions
+    // is identifiable. Do not add `outline: none` here — the focus ring is the
+    // only thing telling that user where they are.
+    <div role="region" aria-label={label} tabIndex={0} style={{ overflowX: 'auto', marginBottom: '1.5rem' }}>
       <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '48rem' }}>
         <thead>
           <tr>
@@ -141,11 +152,25 @@ function Table({ header, rows }: { header: string[]; rows: string[][] }) {
         <tbody>
           {rows.map((row, r) => (
             <tr key={r}>
-              {row.map((cell, c) => (
-                <td key={c} style={{ ...cellStyle, color: MUTED_TEXT }}>
-                  <Cell text={cell} />
-                </td>
-              ))}
+              {row.map((cell, c) =>
+                // Cell 0 carries the row key (`generation:music`,
+                // `commands:scene`) — what the whole row is ABOUT. As a `<td>`
+                // it was not associated with the rest of the row, so a
+                // screen-reader user moving cell by cell across a six-column
+                // matrix heard "In-app AI, unavailable" with the subject
+                // conveyed by visual position only (WCAG 1.3.1). `fontWeight`
+                // is restated because a `<th>` is bold by default and this
+                // column must look exactly as it did.
+                c === 0 ? (
+                  <th key={c} scope="row" style={{ ...cellStyle, color: MUTED_TEXT, fontWeight: 400 }}>
+                    <Cell text={cell} />
+                  </th>
+                ) : (
+                  <td key={c} style={{ ...cellStyle, color: MUTED_TEXT }}>
+                    <Cell text={cell} />
+                  </td>
+                ),
+              )}
             </tr>
           ))}
         </tbody>
@@ -154,7 +179,19 @@ function Table({ header, rows }: { header: string[]; rows: string[][] }) {
   );
 }
 
-function renderBlock(block: Block, key: number): ReactNode {
+/**
+ * The plain text of an inline-markdown string — backticks, bold markers and
+ * link syntax removed. Used for the scroll region's `aria-label`, which is
+ * announced verbatim and must not contain markup punctuation.
+ */
+function plainText(text: string): string {
+  return parseInline(text)
+    .map((node) => (node.type === 'issue' ? `#${node.number}` : node.text))
+    .join('')
+    .trim();
+}
+
+function renderBlock(block: Block, key: number, tableLabel: string): ReactNode {
   switch (block.type) {
     case 'heading': {
       // The document's `#` title is lifted out and rendered as the page h1 by
@@ -208,17 +245,34 @@ function renderBlock(block: Block, key: number): ReactNode {
         </ul>
       );
     default:
-      return <Table key={key} header={block.header} rows={block.rows} />;
+      return <Table key={key} header={block.header} rows={block.rows} label={tableLabel} />;
   }
 }
 
 export function CapabilityMatrixDocument({ doc }: { doc: MatrixDoc }) {
+  // Each table's scroll region needs an accessible name (see `Table`). Derive
+  // it from the section the table sits under, falling back to the document
+  // title for the table that opens the document before any `##` — an unnamed
+  // region is its own axe failure, so there is no "no heading yet" case.
+  // A section carrying more than one table disambiguates by position rather
+  // than shipping two regions with the same name.
+  let section = plainText(doc.title);
+  const tablesPerSection = new Map<string, number>();
   return (
     <article>
       <h1 style={{ fontSize: '1.875rem', fontWeight: 700, marginBottom: '0.5rem', color: FOREGROUND }}>
         {doc.title}
       </h1>
-      {doc.blocks.map(renderBlock)}
+      {doc.blocks.map((block, i) => {
+        if (block.type === 'heading') section = plainText(block.text);
+        let label = section;
+        if (block.type === 'table') {
+          const nth = (tablesPerSection.get(section) ?? 0) + 1;
+          tablesPerSection.set(section, nth);
+          if (nth > 1) label = `${section} (table ${nth})`;
+        }
+        return renderBlock(block, i, label);
+      })}
     </article>
   );
 }

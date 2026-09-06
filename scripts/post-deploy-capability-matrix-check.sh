@@ -75,8 +75,13 @@ fi
 #
 # The property a reader depends on: the response is a 200 whose body carries
 # the marker row rendered as a table cell. CapabilityMatrixDocument emits the
-# row key as an inline-code node directly inside the row's first <td> and
-# scope="col" on every header cell, so both are asserted on the SSR output.
+# row key as an inline-code node directly inside the row's first cell — a
+# <th scope="row">, because the row key is what the row is ABOUT (WCAG 1.3.1)
+# — and scope="col" on every header cell, so both are asserted on the SSR
+# output. Both regexes below are EXTRACTED and replayed against the real
+# renderToStaticMarkup output by
+# apps/docs/components/__tests__/CapabilityMatrixDocument.test.tsx, so a
+# markup change breaks CI here rather than CD there.
 # Returns 1 with a ::error:: line for every other shape.
 check_capability_matrix_body() {
   local code="$1" file="$2"
@@ -98,7 +103,7 @@ check_capability_matrix_body() {
     echo "::error::${PAGE_URL:-/capability-matrix} answered 200 but rendered no data table (no <th scope=\"col\">)"
     return 1
   fi
-  if ! grep -Eq "<td[^>]*><code[^>]*>${expect}</code>" "$file"; then
+  if ! grep -Eq "<th[^>]*><code[^>]*>${expect}</code>" "$file"; then
     echo "::error::${PAGE_URL:-/capability-matrix} rendered a table without the marker row \`${expect}\` as a cell (set MATRIX_CHECK_EXPECT_ROW if the row was renamed — and update the docs artifact test in the same PR)"
     return 1
   fi
@@ -113,7 +118,13 @@ fi
 
 for attempt in $(seq 1 "$RETRIES"); do
   echo "Attempt ${attempt}/${RETRIES}..."
-  code="$(curl "${CURL_ARGS[@]}" --output "$RESPONSE_FILE" --write-out '%{http_code}' "$PAGE_URL" || echo "000")"
+  # The `||` belongs to the ASSIGNMENT, not to the command substitution. On an
+  # unreachable host curl writes its own `%{http_code}` of 000 to stdout AND
+  # exits non-zero, so `$(curl ... || echo 000)` captures BOTH and the value
+  # becomes the two-line string "000\n000" — the diagnostic then reads
+  # "answered HTTP 000\n000, not 200". Assignment-level `||` REPLACES instead,
+  # which is what the sibling scripts/post-deploy-health-check.sh does.
+  code="$(curl "${CURL_ARGS[@]}" --output "$RESPONSE_FILE" --write-out '%{http_code}' "$PAGE_URL")" || code="000"
   if check_capability_matrix_body "$code" "$RESPONSE_FILE"; then
     echo "Capability matrix check passed: ${PAGE_URL} renders the matrix with row \`${EXPECT_ROW}\`."
     exit 0

@@ -24,6 +24,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$HERE/../post-deploy-capability-matrix-check.sh"
 CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
+ARTIFACT_TEST="$REPO_ROOT/apps/docs/lib/__tests__/capabilityMatrixArtifact.test.ts"
 
 PASS=0
 FAIL=0
@@ -43,10 +44,18 @@ if [ -z "$FN" ] || ! grep -q 'return 1' <<<"$FN"; then
 fi
 
 # The SSR output of CapabilityMatrixDocument for one matrix row: the row key is
-# an inline-code node directly inside the first <td>, the header cells carry
-# scope="col", and a status cell is a data-status badge. One line, as React
-# emits it.
-TABLE_HTML='<h1>Capability Matrix</h1><h2>Command categories</h2><div style="overflow-x:auto"><table><thead><tr><th scope="col" style="padding:0.5rem">Category</th><th scope="col">Human/UI</th><th scope="col">Notes</th></tr></thead><tbody><tr><td style="padding:0.5rem"><code style="font-family:ui-monospace">commands:scene</code></td><td><span data-status="proven">proven</span></td><td>26/0. Hierarchy.</td></tr></tbody></table></div>'
+# an inline-code node directly inside the row's first cell — a <th scope="row">,
+# because the row key is what the row is ABOUT (WCAG 1.3.1) — the header cells
+# carry scope="col", the scroll wrapper is a focusable named region (WCAG
+# 2.1.1), and a status cell is a data-status badge. One line, as React emits it.
+#
+# THIS FIXTURE IS STILL HAND-WRITTEN, and a hand-written fixture pins whatever
+# contract its author believed (lesson #14). The independent check is in
+# apps/docs/components/__tests__/CapabilityMatrixDocument.test.tsx, which
+# EXTRACTS the two greps out of the script above and replays them against the
+# real renderToStaticMarkup output of the real document. If you change the
+# markup, that test is what tells you — not this string.
+TABLE_HTML='<h1>Capability Matrix</h1><h2>Command categories</h2><div role="region" aria-label="Command categories" tabindex="0" style="overflow-x:auto"><table><thead><tr><th scope="col" style="padding:0.5rem">Category</th><th scope="col">Human/UI</th><th scope="col">Notes</th></tr></thead><tbody><tr><th scope="row" style="padding:0.5rem"><code style="font-family:ui-monospace">commands:scene</code></th><td><span data-status="proven">proven</span></td><td>26/0. Hierarchy.</td></tr></tbody></table></div>'
 # The page's explicit notice for a copy with no rows (page.tsx). This is what a
 # reader sees when the artifact is broken; it is a 200.
 NOTICE_HTML='<h1>Capability Matrix</h1><p role="alert" style="color:#fafafa">The capability matrix shipped with this deployment carries no rows. The canonical copy is at <a href="https://github.com/Tristan578/project-forge/blob/main/docs/capability-matrix.md">docs/capability-matrix.md</a>.</p>'
@@ -169,16 +178,22 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$out" ] && cat "$STUB_BODY" > "$out"
 printf '%s' "$STUB_STATUS"
+# Real curl writes %{http_code} (000) to stdout AND exits non-zero on a
+# connection/DNS/timeout error. The stub reproduces BOTH, because the exit
+# status is the half the caller has to handle correctly.
+exit "${STUB_EXIT:-0}"
 EOF
 chmod +x "$TMP/bin/curl"
 
-# e2e <status> <body> — remaining env comes from the caller.
+# e2e <status> <body> — remaining env comes from the caller ($STUB_EXIT, $RETRIES,
+# $URL, $VERCEL_AUTOMATION_BYPASS).
 e2e() {
   local status="$1" body="$2"
   printf '%s' "$body" > "$TMP/body"
   : > "$TMP/args"
   (
     PATH="$TMP/bin:$PATH" STUB_STATUS="$status" STUB_BODY="$TMP/body" STUB_ARGS="$TMP/args" \
+    STUB_EXIT="${STUB_EXIT:-0}" \
     MATRIX_RESPONSE_FILE="$TMP/resp.html" \
     MATRIX_CHECK_STABILIZE_S=0 MATRIX_CHECK_INTERVAL_S=0 MATRIX_CHECK_RETRIES="${RETRIES:-2}" \
     bash "$SCRIPT" "${URL:-https://docs.example.test/}" 2>&1
@@ -233,6 +248,65 @@ if [ "$RC" != 0 ] && grep -q 'Usage' <<<"$OUT"; then
   pass "a missing base URL is a usage error, not a pass"
 else
   fail "no base URL did not fail: rc=$RC $OUT"
+fi
+
+# --- an UNREACHABLE host: curl prints 000 AND exits non-zero ---
+#
+# The direct-function case above drives `check_capability_matrix_body 000`
+# straight, so it can never see how the caller CAPTURES the code. This case
+# does: with `$(curl ... || echo 000)` the substitution keeps curl's own 000
+# and appends a second one, so the value is the two-line string "000\n000"
+# and the only diagnostic the operator gets reads
+# "answered HTTP 000\n000, not 200". The `||` has to be on the ASSIGNMENT.
+OUT="$(STUB_EXIT=7 e2e 000 '')"; RC=$?
+if [ "$RC" != 0 ]; then
+  pass "an unreachable host (curl exits non-zero) fails end to end"
+else
+  fail "a failed curl passed end to end: $OUT"
+fi
+if grep -q 'answered HTTP 000, not 200' <<<"$OUT"; then
+  pass "the diagnostic names a single HTTP 000, not curl's status appended to the fallback"
+else
+  fail "the captured status is not a single 000 — check the '||' is on the assignment: $OUT"
+fi
+if ! grep -qE '^0{3}(,|$)' <<<"$OUT"; then
+  pass "no stray '000' line leaked out of the status capture"
+else
+  fail "the status capture produced a multi-line value: $OUT"
+fi
+
+# --- the marker row is stated in three places; pin them equal ---
+#
+# The top-level EXPECT_ROW feeds only the log lines; the function-local one
+# gates the exit (a deliberate seam — extracting the function standalone under
+# `set -u` would fail on an unbound $EXPECT_ROW). KNOWN_ROW in the docs
+# artifact test is the third. Nothing compared them, and the only thing asking
+# for them to move together was a prose comment.
+mapfile -t MARKER_DEFAULTS < <(grep -oE 'MATRIX_CHECK_EXPECT_ROW:-[^}]+' "$SCRIPT" | sed 's/^MATRIX_CHECK_EXPECT_ROW:-//')
+if [ "${#MARKER_DEFAULTS[@]}" = "2" ]; then
+  pass "the script states the marker-row default at exactly the two known sites"
+else
+  fail "expected 2 MATRIX_CHECK_EXPECT_ROW defaults in $SCRIPT, found ${#MARKER_DEFAULTS[@]}"
+fi
+if [ "${#MARKER_DEFAULTS[@]}" -ge 2 ] && [ "${MARKER_DEFAULTS[0]}" = "${MARKER_DEFAULTS[1]}" ]; then
+  pass "both marker-row defaults are byte-identical (${MARKER_DEFAULTS[0]})"
+else
+  fail "the marker-row defaults disagree: '${MARKER_DEFAULTS[0]:-}' vs '${MARKER_DEFAULTS[1]:-}' — the log lines would name a row the gate does not check"
+fi
+if [ -f "$ARTIFACT_TEST" ]; then
+  KNOWN_ROW="$(grep -E '^const KNOWN_ROW' "$ARTIFACT_TEST" | sed "s/.*= *//; s/;\$//; s/^'//; s/'\$//" | tr -d '`')"
+  if [ -n "$KNOWN_ROW" ]; then
+    pass "read KNOWN_ROW out of the docs artifact test ($KNOWN_ROW)"
+  else
+    fail "could not read KNOWN_ROW from $ARTIFACT_TEST — the comparison below would be vacuous"
+  fi
+  if [ "$KNOWN_ROW" = "${MARKER_DEFAULTS[0]:-}" ]; then
+    pass "the docs artifact test pins the same marker row the probe greps for"
+  else
+    fail "KNOWN_ROW ('$KNOWN_ROW') != the probe's marker row ('${MARKER_DEFAULTS[0]:-}') — rename both in the same commit"
+  fi
+else
+  fail "artifact test not found at $ARTIFACT_TEST"
 fi
 
 # --- no fail-open path may survive ---
