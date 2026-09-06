@@ -95,6 +95,19 @@ import {
  * the safe direction: it may buffer and rewrite a body that turns out to need
  * nothing.
  *
+ * A SEVENTH board found the invariant above still false, by construction rather
+ * than by example, and the counterexample ran. Teaching the scan to unescape
+ * once matched `redactString`, which unescapes once — but on a BODY the rewrite
+ * reaches each leaf through `JSON.parse`, which has ALREADY unescaped once. Two
+ * levels against one. A leaf carrying a literal `\n` escape immediately before a
+ * credential — what `await response.text()` yields whenever an upstream returns
+ * already-JSON error text — puts a word character in front of the prefix, so no
+ * shape matched in the raw bytes or in the first unescaped view, and the key
+ * shipped verbatim down the fast path. A JSON body is therefore scanned with
+ * `hasCandidateInParsedJson`, which adds exactly the level `JSON.parse` performs
+ * and no more: scanning deeper than the rewrite can reach would fail closed on
+ * responses that were never leaking.
+ *
  * AND THE SECOND HALF, which a SIXTH board found missing. Teaching the scan to
  * see JSON escapes fixed the direction above and opened its mirror image: the
  * REWRITE had not learned the same trick. `redactString` was `redactLiteral` +
@@ -121,6 +134,17 @@ import {
  * rather than a silent pass. Note what is asserted: not "the rewrite changed
  * something" (adjacent, and true of a rewrite that removed one of two
  * credentials) but "the output no longer matches" (the property).
+ *
+ * THE BODY HALF ASKS THAT QUESTION PER LEAF, and asking it over the serialised
+ * bytes was an outage. `redactValue` acts on parsed leaves; the serialised form
+ * has punctuation BETWEEN leaves that no leaf contains, so a shape can match
+ * across two adjacent fields and be permanently unrewritable. Measured: a
+ * published game titled `https://x` beside a description containing `y@z` made
+ * the connection-string shape match across the pair, the re-scan stayed true,
+ * and the public community gallery answered 500 to every visitor until the row
+ * was edited — reported as this guard's own security alarm. See
+ * `bodyStillHasCandidate`. The envelope half keeps the plain re-scan, because a
+ * header value is one string and scan and rewrite read it identically.
  *
  * WHAT IT DOES, in order:
  *  1. awaits the handler's `Response`;
@@ -198,6 +222,14 @@ import {
  *    NEW one is reported rather than joining the gap silently.
  *  - `proxy.ts` (Next middleware) is outside it, as is any response the
  *    framework itself produces.
+ *  - THE `apps/docs` DEPLOY ROOT IS A SECOND NEXT.JS APPLICATION and this guard
+ *    does not reach it. It has its own `next.config.ts`, its own `app/` tree,
+ *    its own `proxy.ts`, and — being a separate package — it cannot import this
+ *    module at all. It has no route handlers today, only `robots.ts` and
+ *    `sitemap.ts`, which are the same class of first-party producer named
+ *    above. `egressGuardCoverage.test.ts` asserts that route count stays zero,
+ *    so adding one there fails a test and forces a decision instead of landing
+ *    outside every control silently.
  *  - ONE DECODING ORDER IS NOT COVERED: percent-decoding BEFORE JSON-unescaping,
  *    i.e. `%5Cn` decoding to a backslash that then reads as an escape. The scan
  *    and the rewrite look at raw, percent-decoded, unescaped and
@@ -337,6 +369,11 @@ function reportGuardFailure(reason: string, error: unknown, detail?: Record<stri
  * comparison. "Changed" is adjacent to the property; "no longer matches" is the
  * property (lessons-learned #1). A rewrite that removed one of two credentials
  * would satisfy the first and fail the second.
+ *
+ * A re-scan is the right question HERE because an envelope value is one string:
+ * `hasCandidate` and `redactText` read the same bytes through the same decoders,
+ * so anything the scan can see the rewrite can reach. The body path is not like
+ * that, and asks a different question — see `guardResponse`.
  */
 function cleanEnvelopeValue(value: string, pass: RedactionPass, channel: string): string {
   const clean = pass.redactText(value);
@@ -416,6 +453,46 @@ function tryClone(res: Response): Response | null {
  * Propagates `RedactionBudgetExceededError` deliberately — see the header. Any
  * other parse failure means "not actually JSON", which is a text body.
  */
+/**
+ * Does anything redaction can still remove survive in `cleaned`?
+ *
+ * For a JSON body this asks the question ON THE REWRITE'S OWN DOMAIN — every
+ * parsed leaf and key — instead of re-scanning the serialised bytes. The two
+ * are not the same question, and the difference was a live outage.
+ *
+ * `redactValue` acts per leaf. The serialised form has punctuation BETWEEN
+ * leaves that no leaf contains, so a shape can match across two adjacent fields
+ * and be permanently unrewritable. Measured: a published game titled `https://x`
+ * beside a description containing `y@z` made the connection-string shape match
+ * across the pair — `https` + `x","b` + the next key's `:` + a later `@` — so
+ * the old serialised re-scan stayed true, the guard discarded the response for
+ * its fixed 500, and the public community gallery 500'd for every visitor until
+ * the row was edited. The guard reported it as its own security alarm.
+ *
+ * Scanning leaves keeps the protection this check exists for: a rewrite that
+ * detects a credential and fails to remove it leaves that credential IN A LEAF,
+ * where this still sees it. What it drops is only the class that no rewrite
+ * could ever have fixed. The shape is tightened too (see `redactSecrets.ts`),
+ * but the class is closed here.
+ *
+ * A body that will not parse falls back to scanning the text: for non-JSON,
+ * rewrite and scan share one string and the re-scan is exactly right.
+ */
+function bodyStillHasCandidate(cleaned: string, json: boolean, pass: RedactionPass): boolean {
+  if (!json) return pass.hasCandidate(cleaned);
+  let found = false;
+  try {
+    JSON.parse(cleaned, (key, value) => {
+      if (key !== '' && pass.hasCandidate(key)) found = true;
+      if (typeof value === 'string' && pass.hasCandidate(value)) found = true;
+      return value;
+    });
+  } catch {
+    return pass.hasCandidate(cleaned);
+  }
+  return found;
+}
+
 function redactBufferedBody(text: string, json: boolean, pass: RedactionPass): string {
   if (json) {
     let parsed: unknown;
@@ -468,7 +545,14 @@ async function guardResponse(res: Response): Promise<Response> {
     originalIntact = clone !== null;
     text = await (clone ?? res).text();
   }
-  const bodyTouched = text !== null && pass.hasCandidate(text);
+  // A JSON body is scanned one unescape level deeper than any other string,
+  // because the rewrite reaches its leaves through `JSON.parse`, which performs
+  // one before redaction sees anything. Scanning at the shallower depth let a
+  // credential behind a literal `\n` escape take the fast path and ship
+  // verbatim — see `textHasCandidateInParsedJson`.
+  const jsonBody = isJsonContentType(contentType);
+  const bodyTouched = text !== null
+    && (jsonBody ? pass.hasCandidateInParsedJson(text) : pass.hasCandidate(text));
 
   // THE FAST PATH. Nothing in this response would be rewritten, so nothing is.
   if (!envelopeTouched && !bodyTouched) {
@@ -504,18 +588,17 @@ async function guardResponse(res: Response): Promise<Response> {
     // A header matched but the body did not: the body keeps its ORIGINAL bytes.
     outBody = text;
   } else {
-    const json = isJsonContentType(contentType);
-    const cleaned = redactBufferedBody(text as string, json, pass);
-    // THE BOUNDARY ASSERTION for the body. See `cleanEnvelopeValue` for why this
-    // re-scans the output instead of asking whether the rewrite changed
-    // anything. A body the scan still flags cannot be emitted at ANY status, so
-    // this is the one place the guard turns a readable response into its fixed
-    // 500 on purpose rather than on an exception.
-    if (pass.hasCandidate(cleaned)) {
+    const cleaned = redactBufferedBody(text as string, jsonBody, pass);
+    // THE BOUNDARY ASSERTION for the body. A body still carrying something
+    // redaction can remove cannot be emitted at ANY status, so this is the one
+    // place the guard turns a readable response into its fixed 500 on purpose
+    // rather than on an exception. `bodyStillHasCandidate` explains why the
+    // question is asked per leaf and not over the serialised bytes.
+    if (bodyStillHasCandidate(cleaned, jsonBody, pass)) {
       reportGuardFailure(
         'a credential was detected in a response body that redaction did not remove',
         new Error('egress guard: detected-but-unrewritable body'),
-        { status, json, bytes: cleaned.length },
+        { status, json: jsonBody, bytes: cleaned.length },
       );
       return guardFailureResponse();
     }

@@ -235,7 +235,17 @@ const SECRET_SHAPES: readonly RegExp[] = [
   // cover for suno and hyper3d BYOK keys, which have no documented prefix.
   /\bBearer\s{1,8}[A-Za-z0-9._~+/=-]{12,400}/g,
   // Connection strings carry a password in the userinfo segment.
-  /\b[a-zA-Z][a-zA-Z0-9+.-]{0,20}:\/\/[^\s:/@]{1,100}:[^\s@]{1,200}@[^\s]{1,300}/g,
+  //
+  // Every class here excludes `"` deliberately. Without it this shape STRADDLES
+  // JSON string boundaries: in `{"a":"https://x","b":"y@z"}` the serialised
+  // bytes read as scheme `https`, userinfo `x","b`, the `:` the pattern needs is
+  // the separator after the NEXT key, and the `@` arrives from a later field. It
+  // is a match no per-leaf rewrite can ever remove, and it fired on ordinary
+  // user content — a published game titled with a URL beside a description
+  // containing an `@`. A real URL cannot carry an unescaped `"` in userinfo or
+  // host (it would be percent-encoded, which the decoded view still catches), so
+  // excluding it costs no coverage.
+  /\b[a-zA-Z][a-zA-Z0-9+.-]{0,20}:\/\/[^\s:/@"]{1,100}:[^\s@"]{1,200}@[^\s"]{1,300}/g,
 ];
 
 /**
@@ -820,7 +830,7 @@ function viewAndEncodingHaveCandidate(text: string, ctx: RedactionContext): bool
  * property was false (lessons-learned #1). `redactSecrets.test.ts` pins the
  * composition above over a corpus of escaped forms, not one example.
  *
- * It is achieved by scanning both the raw text and its JSON-unescaped view (see
+ * It is achieved by scanning the raw text and its JSON-unescaped views (see
  * `jsonUnescapeWithMap`), each with its percent-decoded spelling. It remains a
  * strict OVER-approximation: it may say "maybe" and be wrong, but it must never
  * say "no" where redaction would have said "yes", or a secret ships.
@@ -830,12 +840,49 @@ function viewAndEncodingHaveCandidate(text: string, ctx: RedactionContext): bool
  * same set rather than two sets that happen to overlap. `redactSecrets.test.ts`
  * pins the pair directly (`hasCandidate(s) => redactText(s) !== s`), and
  * `egressGuard.ts` still fails closed if they ever disagree anyway.
+ *
+ * This symmetry holds for ONE STRING. It does NOT hold when the caller hands
+ * over a JSON body — see `textHasCandidateInParsedJson`.
  */
 function textHasCandidate(text: string, ctx: RedactionContext): boolean {
   if (viewAndEncodingHaveCandidate(text, ctx)) return true;
   const view = jsonUnescapeWithMap(text);
   if (view === null) return false;
   return viewAndEncodingHaveCandidate(view.decoded, ctx);
+}
+
+/**
+ * `textHasCandidate` for text that a caller is about to REWRITE THROUGH
+ * `JSON.parse` — i.e. a JSON response body, where redaction runs per parsed
+ * leaf rather than on these bytes.
+ *
+ * On that path the plain scan is off by one, and the gap ships credentials.
+ * `redactString` unescapes once; but on a body the rewrite reaches each leaf
+ * through `JSON.parse`, which has ALREADY unescaped once — two levels from the
+ * serialised bytes, against the scan's one.
+ *
+ * It is reachable, and by an ordinary input. A leaf holding a literal `\n`
+ * escape immediately before a credential is what `await response.text()` yields
+ * whenever an upstream returns already-JSON error text. That escape puts a word
+ * character in front of the prefix, so `\bmsy_…` matches neither the raw bytes
+ * nor the first unescaped view, and appears only once the escape becomes a real
+ * newline. The scan said no, `redactValue` would have said yes, and the fast
+ * path handed back the handler's own response with the key on the wire.
+ *
+ * So this adds exactly one more unescape level: the one `JSON.parse` performs.
+ * Not a fixed point — the count is not arbitrary, it is the number of decoders
+ * between these bytes and the string `redactString` will actually see, and
+ * scanning deeper than the rewrite can reach would fail closed on responses that
+ * were never leaking.
+ */
+function textHasCandidateInParsedJson(text: string, ctx: RedactionContext): boolean {
+  if (viewAndEncodingHaveCandidate(text, ctx)) return true;
+  const once = jsonUnescapeWithMap(text);
+  if (once === null) return false;
+  if (viewAndEncodingHaveCandidate(once.decoded, ctx)) return true;
+  const twice = jsonUnescapeWithMap(once.decoded);
+  if (twice === null) return false;
+  return viewAndEncodingHaveCandidate(twice.decoded, ctx);
 }
 
 /**
@@ -1189,6 +1236,13 @@ export interface RedactionPass {
    * the invariant and why the serialised/parsed distinction matters.
    */
   hasCandidate(text: string): boolean;
+  /**
+   * `hasCandidate` for bytes the caller will rewrite THROUGH `JSON.parse`. It
+   * reaches one unescape level deeper, because the parse performs one before
+   * redaction ever sees a leaf. See `textHasCandidateInParsedJson` for the leak
+   * that made the difference load-bearing.
+   */
+  hasCandidateInParsedJson(text: string): boolean;
   /** Redact one string. Never throws. */
   redactText(text: string): string;
   /**
@@ -1221,6 +1275,7 @@ export function createRedactionPass(options?: RedactionPassOptions): RedactionPa
   let lastNodes = 0;
   return {
     hasCandidate: (text) => textHasCandidate(text, ctx),
+    hasCandidateInParsedJson: (text) => textHasCandidateInParsedJson(text, ctx),
     redactText: (text) => redactString(text, ctx),
     redactValue: <T,>(input: T): T => {
       const state = newTraversalState();

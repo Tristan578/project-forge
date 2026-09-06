@@ -161,6 +161,37 @@ describe('redactSecrets — value matching against the live environment', () => 
     const out = redactSecrets('deployed f2dd46e01ae691183e286492e48da9ac4d46227e');
     expect(out).toContain('f2dd46e01ae691183e286492e48da9ac4d46227e');
   });
+
+  // The 12-character floor, pinned at the boundary rather than somewhere in
+  // its neighbourhood. The suite's shortest redactable fixture was 23 chars
+  // and its shortest ignored one was 4, so every value in between could be
+  // chosen for the constant with nothing failing — a 19-wide interval around
+  // the number that decides which credentials are too short to protect.
+  it('redacts a value exactly at the length floor', () => {
+    vi.stubEnv('SOME_TOKEN', 'abcdefghijkl'); // 12
+    const out = redactSecrets('sent abcdefghijkl upstream');
+    expect(out).not.toContain('abcdefghijkl');
+    expect(out).toContain(REDACTION_PLACEHOLDER);
+  });
+
+  it('leaves a value one character below the floor alone', () => {
+    vi.stubEnv('SOME_TOKEN', 'abcdefghijk'); // 11
+    expect(redactSecrets('sent abcdefghijk upstream')).toBe('sent abcdefghijk upstream');
+  });
+
+  // Order matters when one secret is a substring of another. Removing the
+  // SHORTER one first leaves the longer one's tail in the output — a partial
+  // redaction that still ships credential bytes. Every other value-matching
+  // test here stubs exactly one variable, so the longest-first sort had no
+  // gate at all and deleting it was invisible.
+  it('removes the longer secret first when one contains the other', () => {
+    vi.stubEnv('SOME_TOKEN', 'abcdefghijklmnop');
+    vi.stubEnv('OTHER_TOKEN', 'abcdefghijklmnopQRSTUVWXYZ');
+    resetSecretEnvCache();
+    const out = redactSecrets('upstream said abcdefghijklmnopQRSTUVWXYZ');
+    expect(out).not.toContain('QRSTUVWXYZ');
+    expect(out).not.toContain('abcdefghijklmnop');
+  });
 });
 
 describe('redactSecrets — behaviour on ordinary input', () => {
@@ -189,11 +220,15 @@ describe('redactSecrets — behaviour on ordinary input', () => {
     expect(JSON.stringify(out)).not.toContain('el-secret-value-not-a-known-shape');
   });
 
-  it('does not recurse without bound on a self-referencing object', () => {
-    const cyclic: Record<string, unknown> = { a: 'safe' };
-    cyclic.self = cyclic;
-    expect(() => redactSecrets(cyclic)).not.toThrow();
-  });
+  // A `not.toThrow()` on a self-referencing object used to sit here. It could
+  // not fail: `redactSecrets` wraps its whole body in a catch that returns a
+  // placeholder, so no input throws and no production change makes one throw.
+  // Delete the cycle guard and the walk spins to the node budget, raises
+  // RedactionBudgetExceededError, and that same catch swallows it — green
+  // either way. The property it was named for is asserted on CONTENT by
+  // "replaces only the CYCLE, and keeps the rest of the structure" below,
+  // which DOES fail under that mutation. Keeping both would have counted the
+  // vacuous one as coverage.
 });
 
 describe('redactSecrets — DEPTH DOES NOT DESTROY DATA, and a secret at any depth is still removed', () => {
@@ -910,11 +945,24 @@ describe('the environment name pattern exempts a PUBLIC identifier', () => {
     expect(out).toContain(REDACTION_PLACEHOLDER);
   });
 
-  it('the exemption is anchored, so it does not swallow an ordinary _KEY variable', () => {
-    vi.stubEnv('SOME_PROVIDER_KEY', 'cccccccccccccccccccccccccccccccc');
+  // BOTH anchors of /(^|_)KEY_ID$/, because this is the one pattern in the file
+  // whose job is to carve a hole in coverage — widening it stops redacting real
+  // credentials, and nothing else would notice. The bare-`_KEY` case alone left
+  // `/KEY_ID/` (no anchors at all) passing the whole suite, so each anchor gets
+  // a name that the unanchored form would newly exempt.
+  it.each([
+    ['a trailing suffix past the identifier', 'FOO_KEY_ID_SECRET', 'dddddddddddddddddddddddddddddddd'],
+    // Reaches SECRET_NAME_PATTERN on the word SECRET, and ends in KEY_ID with
+    // a letter in front of it — so the LEADING anchor is what keeps it
+    // redacted. A bare `MONKEY_ID` proves nothing here: `(^|_)KEY(_|$)` never
+    // matches it, so it is not secret-named and never reaches the exemption.
+    ['a name that merely ends in KEY_ID', 'SECRET_MONKEY_ID', 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'],
+    ['an ordinary _KEY variable', 'SOME_PROVIDER_KEY', 'cccccccccccccccccccccccccccccccc'],
+  ])('the exemption is anchored, so it does not swallow %s', (_label, name, value) => {
+    vi.stubEnv(name, value);
     resetSecretEnvCache();
-    expect(redactSecrets('used cccccccccccccccccccccccccccccccc')).not.toContain(
-      'cccccccccccccccccccccccccccccccc',
-    );
+    const out = redactSecrets(`used ${value}`);
+    expect(out).not.toContain(value);
+    expect(out).toContain(REDACTION_PLACEHOLDER);
   });
 });

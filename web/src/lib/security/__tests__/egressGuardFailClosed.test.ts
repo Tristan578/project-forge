@@ -47,6 +47,12 @@ vi.mock('@/lib/security/redactSecrets', async (importOriginal) => {
     ...actual,
     createRedactionPass: () => ({
       hasCandidate: (text: string) => stub.hasCandidate(text),
+      // Answers the same way as the plain scan on purpose. This file drives the
+      // guard's DECISION; the extra unescape level a JSON body gets is a
+      // property of DETECTION, and `egressGuard.test.ts` pins that on real
+      // input. Leaving it off the stub does not weaken a case here — it makes
+      // the guard call `undefined` and every case fail for the wrong reason.
+      hasCandidateInParsedJson: (text: string) => stub.hasCandidate(text),
       redactText: (text: string) => stub.redactText(text),
       redactValue: <T,>(value: T): T => value,
       lastNodeCount: () => 0,

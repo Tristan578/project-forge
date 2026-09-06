@@ -514,11 +514,24 @@ describe('withEgressGuard — a response with nothing to redact is returned UNTO
     expect([...got]).toEqual([...bytes]);
   });
 
-  it('still buffers and redacts an ERROR body with no content-type', async () => {
-    // The absent-type rule is scoped to success. Any status >= 400 is buffered
-    // whatever the type, because that is where the leak class lives.
+  // The absent-type rule is scoped to success: any status >= 400 is buffered
+  // whatever the content type, because that is where the leak class lives.
+  // Pinned AT the boundary and above it. A 500-only fixture left `>= 400`
+  // mutable to `>= 500` with the whole suite green, and 401/403 is exactly
+  // where an upstream provider's auth failure lands — the class #9736 was
+  // opened for. The two content-type shapes that take the fast path on a 2xx,
+  // absent and explicitly binary, are both covered here.
+  it.each([
+    ['400, the boundary itself, with no content-type', 400, undefined],
+    ['401 with no content-type', 401, undefined],
+    ['403 declared as binary', 403, 'application/octet-stream'],
+    ['500 with no content-type', 500, undefined],
+  ])('still buffers and redacts an error body: %s', async (_label, status, contentType) => {
     const handler = withEgressGuard(async () =>
-      new Response(`boom ${SECRET}`, { status: 500 }));
+      new Response(`boom ${SECRET}`, {
+        status: status as number,
+        headers: contentType ? { 'content-type': contentType as string } : undefined,
+      }));
 
     const text = await (await handler()).text();
 
@@ -877,5 +890,83 @@ describe('withEgressGuard — cost', () => {
 
     // One derive plus at most one fingerprint check.
     expect(after - before).toBeLessThanOrEqual(2);
+  });
+});
+
+/**
+ * Two defects the pass-7 review board found by construction rather than by
+ * example, both with a runnable request. Each test below fails on the code as
+ * it stood before that board.
+ */
+describe('withEgressGuard — regressions the pass-7 board found', () => {
+  beforeEach(() => {
+    resetSecretEnvCache();
+  });
+
+  // THE LEAK. The scan reads the SERIALISED bytes and unescaped them once; the
+  // rewrite reaches a leaf through JSON.parse, which has already unescaped once,
+  // and then unescapes again. Two levels against one. A leaf carrying a literal
+  // `\n` escape immediately before a credential — which is exactly what
+  // `await response.text()` yields when an upstream returns already-JSON error
+  // text — puts a word character in front of the prefix, so `\bmsy_…` matches
+  // neither the raw bytes nor the first unescaped view. The scan said no, the
+  // rewrite would have said yes, and the fast path returned the handler's own
+  // response with the key on the wire.
+  it('redacts a credential hidden behind a literal JSON escape in a leaf', async () => {
+    const key = 'msy_ABCDEFGHIJKLMNOP';
+    // A LITERAL backslash-n in the leaf, not a newline. `String.fromCharCode`
+    // rather than an escape, because this file has already been through a
+    // shell heredoc once and lost the second backslash — which quietly turned
+    // this into the one-level case the ESCAPES block above already covers, and
+    // the test passed while proving nothing (lessons-learned #5).
+    const backslash = String.fromCharCode(92);
+    const leaf = `Meshy status error (401): Unauthorized${backslash}n${key} is not valid`;
+    const handler = withEgressGuard(async () =>
+      new NextResponse(JSON.stringify({ error: leaf }), {
+        headers: { 'content-type': 'application/json' },
+      }));
+
+    const text = await (await handler()).text();
+
+    expect(text).not.toContain(key);
+    expect(text).toContain(REDACTION_PLACEHOLDER);
+  });
+
+  // THE OUTAGE. The connection-string shape used to straddle two adjacent JSON
+  // fields: `https://x` in one and `y@z` in the next read as scheme + userinfo
+  // + the NEXT key's `:` separator + a later `@`. No per-leaf rewrite can
+  // remove punctuation between leaves, so the old serialised re-scan stayed
+  // true and the guard discarded the response for its fixed 500 — taking the
+  // public community gallery down for every visitor over one published game
+  // title, and reporting it as a security alarm. Nothing here is a credential.
+  it('does not 500 a benign body whose adjacent fields look like a connection string', async () => {
+    const body = JSON.stringify({
+      games: [{ id: '9b1f', title: 'https://x', description: 'y@z', slug: 'g' }],
+      hasMore: false,
+    });
+    const handler = withEgressGuard(async () =>
+      new NextResponse(body, { headers: { 'content-type': 'application/json' } }));
+
+    const res = await handler();
+    const text = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(text).toBe(body);
+    expect(text).not.toContain(REDACTION_PLACEHOLDER);
+  });
+
+  // The same shape must still catch a real connection string in one leaf.
+  it('still redacts an actual connection string carrying a password', async () => {
+    const dsn = 'postgres://appuser:hunter2hunter2@db.example.com:5432/forge';
+    const handler = withEgressGuard(async () =>
+      new NextResponse(JSON.stringify({ error: `connect failed: ${dsn}` }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }));
+
+    const text = await (await handler()).text();
+
+    expect(text).not.toContain('hunter2hunter2');
+    expect(text).toContain(REDACTION_PLACEHOLDER);
   });
 });

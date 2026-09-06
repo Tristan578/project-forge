@@ -31,7 +31,7 @@
  * `src/lib/security/__tests__/egressGuard.test.ts`, which drives real leaking
  * handlers through it and asserts on the SERIALIZED response.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -306,6 +306,30 @@ describe('withEgressGuard coverage', () => {
     expect(analyseRouteModule(
       `import { ${GUARD} } from './local-helper';\nexport const GET = ${GUARD}(handleGET);`,
     )).toEqual([{ method: 'GET', wrapped: false, shape: unresolved }]);
+  });
+
+  /**
+   * THE SECOND DEPLOY ROOT. `apps/docs` is its own Next.js application, with its
+   * own `next.config.ts`, its own `app/` tree and its own `proxy.ts`. The walk
+   * above derives its root from THIS file's location, so it structurally cannot
+   * see that tree — a route handler added there would be unwrapped AND unnamed,
+   * which is the outcome the KNOWN GAPS list exists to prevent.
+   *
+   * It cannot just be added to the walk: `apps/docs` is a separate package and
+   * cannot import `@/lib/security/egressGuard` at all. So the assertion is the
+   * honest one — that root has NO route handlers today, and adding one has to
+   * fail here and force a decision rather than ship quietly. The two guards
+   * around it stop this becoming a walk over nothing that passes for free: the
+   * directory must exist, and the walk must actually reach files
+   * (lessons-learned #9).
+   */
+  it('the apps/docs deploy root still has no route handlers to guard', () => {
+    const docsApp = path.join(WEB_ROOT, '..', 'apps', 'docs', 'app');
+    expect(existsSync(docsApp)).toBe(true);
+
+    const found = walkApp(docsApp);
+    expect(found.producers.length).toBeGreaterThan(0); // robots.ts, sitemap.ts
+    expect(found.routes.map((f) => path.relative(docsApp, f))).toEqual([]);
   });
 
   it('parses a .tsx route, the spelling the old walk could not see', () => {
