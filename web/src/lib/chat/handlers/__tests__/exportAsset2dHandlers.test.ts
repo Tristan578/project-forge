@@ -1981,6 +1981,89 @@ describe('handlers2d 2D physics commands', () => {
       expect(result.error).not.toContain('Play mode');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // The engine reads that had no producer (#9351)
+  // -------------------------------------------------------------------------
+  const baseJoint2d = {
+    jointType: 'revolute' as const,
+    connectedEntityId: 'ent-2',
+    anchorSelf: [0, 0] as [number, number],
+    anchorOther: [1, 0] as [number, number],
+    limits: null,
+    motor: null,
+  };
+
+  describe('get_joint_2d', () => {
+    it('returns the joint for an entity', async () => {
+      const { result } = await invoke2d(
+        'get_joint_2d',
+        { entityId: 'ent-1' },
+        { joints2d: { 'ent-1': baseJoint2d } },
+      );
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual(baseJoint2d);
+    });
+
+    it('reports a missing entity by name', async () => {
+      const { result } = await invoke2d('get_joint_2d', { entityId: 'ent-none' }, { joints2d: {} });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('ent-none');
+    });
+
+    // `zEntityId` is `z.string().min(1)`, so `'__proto__'` is a legal argument.
+    // A bare `joints2d['__proto__']` returns `Object.prototype` — truthy — so
+    // the missing-entity branch would never fire and the handler would answer
+    // with a joint that does not exist (PF-1167).
+    it('does not answer with Object.prototype for __proto__', async () => {
+      const { result } = await invoke2d('get_joint_2d', { entityId: '__proto__' }, { joints2d: {} });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('__proto__');
+    });
+
+    it('rejects a call with no entityId', async () => {
+      const { result } = await invoke2d('get_joint_2d', {}, { joints2d: {} });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('list_joints_2d', () => {
+    it('lists every joint with its entity id and a count', async () => {
+      const { result } = await invoke2d(
+        'list_joints_2d',
+        {},
+        { joints2d: { 'ent-1': baseJoint2d, 'ent-3': baseJoint2d } },
+      );
+      expect(result.success).toBe(true);
+      const payload = result.result as { joints: Array<{ entityId: string }>; count: number };
+      expect(payload.count).toBe(2);
+      expect(payload.joints.map((j) => j.entityId).sort()).toEqual(['ent-1', 'ent-3']);
+    });
+
+    it('reports an empty scene as zero joints, not as a failure', async () => {
+      const { result } = await invoke2d('list_joints_2d', {}, { joints2d: {} });
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual({ joints: [], count: 0 });
+    });
+  });
+
+  describe('get_camera_2d', () => {
+    const camera = { position: [0, 0] as [number, number], zoom: 1, rotation: 0 };
+
+    it('returns the scene camera', async () => {
+      const { result } = await invoke2d('get_camera_2d', {}, { camera2dData: camera });
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual(camera);
+    });
+
+    // `null` means the scene HAS no 2D camera. Answering with an empty object
+    // would make "no camera" and "a camera with no settings" the same reply.
+    it('reports the absence of a camera rather than an empty one', async () => {
+      const { result } = await invoke2d('get_camera_2d', {}, { camera2dData: null });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/no 2D camera/i);
+    });
+  });
 });
 
 // ===========================================================================
