@@ -564,7 +564,11 @@ describe('redactSecrets — cost', () => {
 });
 
 describe('redactSecrets — source invariants', () => {
-  const source = readFileSync(join(__dirname, '..', 'redactSecrets.ts'), 'utf8');
+  // The shapes live in `redactShapes.ts`, which is the client-safe half of this
+  // module. This scan follows them there rather than being deleted: the
+  // bounded-quantifier invariant is a property of the PATTERNS, wherever they
+  // sit, and it matters more now that they also ship to the browser.
+  const source = readFileSync(join(__dirname, '..', 'redactShapes.ts'), 'utf8');
 
   it('has no unbounded quantifier in any credential shape', () => {
     // `sentryConfig.ts` documents that every quantifier on attacker-influenced

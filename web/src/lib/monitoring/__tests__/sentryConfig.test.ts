@@ -25,9 +25,11 @@ import {
   scrubSentryMetric,
   scrubString,
   deepScrub,
+  setSentryDeepRedactor,
 } from '../sentryConfig';
 import type { Event } from '@sentry/nextjs';
-import { resetSecretEnvCache } from '@/lib/security/redactSecrets';
+import { redactSecrets, resetSecretEnvCache } from '@/lib/security/redactSecrets';
+import { redactShapeText } from '@/lib/security/redactShapes';
 
 // ---------------------------------------------------------------------------
 // Helper builders
@@ -935,9 +937,21 @@ describe('scrubSentryMetric', () => {
 describe('environment secret values are removed from every Sentry pipeline', () => {
   const SECRET = 'not-a-known-shape-just-a-platform-secret-42';
 
+  // These assert the SERVER pipeline, so they install the same deep redactor
+  // `sentry.server.config.ts` and `sentry.edge.config.ts` install. The module
+  // default is shape-only on purpose: `sentryConfig` also runs in the browser,
+  // where `redactSecrets` is ~1,200 lines that can match nothing — there are no
+  // server environment secrets there — and importing it pushed total client JS
+  // past its hard limit. Installing it here rather than importing it into
+  // `sentryConfig` is what keeps those two facts from fighting.
+  beforeEach(() => {
+    setSentryDeepRedactor((input: string) => redactSecrets(input) as string);
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     resetSecretEnvCache();
+    setSentryDeepRedactor(redactShapeText);
   });
 
   it('removes it from an event message, exception value and breadcrumb', () => {

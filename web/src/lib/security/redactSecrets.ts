@@ -62,8 +62,13 @@
  * trying.
  */
 
-/** What a removed value is replaced with. Stable so tests and greps can pin it. */
-export const REDACTION_PLACEHOLDER = '[REDACTED]';
+// The credential SHAPES and the placeholder live in `redactShapes.ts`, which is
+// client-safe. They are re-exported here so every existing importer of this
+// module keeps working — one definition, two entry points, no second copy of a
+// credential pattern list to drift out of step. See that file for why the split
+// exists (this module is ~1,300 lines and was reaching the browser bundle).
+export { REDACTION_PLACEHOLDER } from '@/lib/security/redactShapes';
+import { REDACTION_PLACEHOLDER, shapesFor } from '@/lib/security/redactShapes';
 
 /**
  * What a CYCLE is replaced with. A structure that points back at itself cannot
@@ -183,99 +188,6 @@ export class RedactionBudgetExceededError extends Error {
   }
 }
 
-/**
- * Credential shapes seen in provider error bodies, or documented by the
- * provider as its key format. Ordered longest-prefix-first where prefixes
- * overlap (`sk-ant-` before `sk-`) so the more specific pattern wins.
- *
- * Each entry cites what it covers. A shape nobody has cited is a guess, and a
- * guess here is worse than nothing: it creates the impression of coverage.
- *
- * EVERY QUANTIFIER IS UPPER-BOUNDED. `sentryConfig.ts` documents that invariant
- * for its own patterns — matching must stay linear on attacker-influenced text
- * — and this module is called from `scrubString`, on exactly that input class.
- * An unbounded `{16,}` here would regress the invariant through the back door.
- */
-const SECRET_SHAPES: readonly RegExp[] = [
-  // Anthropic: https://docs.anthropic.com/en/api/getting-started
-  /\bsk-ant-[A-Za-z0-9_-]{16,200}/g,
-  // OpenAI, including the project-scoped form: https://platform.openai.com/api-keys
-  // (OpenRouter's `sk-or-v1-...` matches this too.)
-  //
-  // A 20-character UNBROKEN run is required somewhere after the prefix, with a
-  // short hyphenated segment allowed before it (`proj-`, `or-v1-`). The
-  // previous form — twenty-or-more of any word character INCLUDING the hyphen
-  // — fired on ordinary hyphenated text that merely begins "sk-", so
-  // `sk-learn-preprocessing-module-name` became
-  // `[REDACTED]`. Harmless in Sentry, but this now runs on API response
-  // bodies, where silently rewriting a legitimate identifier corrupts the
-  // payload with no signal.
-  /\bsk-[A-Za-z0-9_-]{0,20}[A-Za-z0-9_]{20,200}[A-Za-z0-9_-]{0,200}/g,
-  // ElevenLabs: `sk_` + hex. Underscore, not the hyphen OpenAI uses — the
-  // hyphenated pattern above cannot match it, which is why elevenlabs (one of
-  // the three providers whose bodies caused #9736) had no cover at all.
-  // https://elevenlabs.io/docs/api-reference/authentication
-  /\bsk_[0-9a-fA-F]{32,64}\b/g,
-  // Meshy: `msy_` + token. https://docs.meshy.ai/api/authentication
-  /\bmsy_[A-Za-z0-9]{16,200}/g,
-  // Stripe secret and restricted keys, live and test: https://docs.stripe.com/keys
-  // Clerk's `sk_live_`/`sk_test_` keys share this shape.
-  /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,200}/g,
-  // Stripe webhook signing secret: https://docs.stripe.com/webhooks
-  /\bwhsec_[A-Za-z0-9]{16,200}/g,
-  // Replicate: https://replicate.com/account/api-tokens
-  /\br8_[A-Za-z0-9]{20,200}/g,
-  // GitHub classic tokens: https://docs.github.com/en/authentication
-  /\bgh[pousr]_[A-Za-z0-9]{20,200}/g,
-  // GitHub fine-grained PATs, which do NOT match the classic shape above.
-  // `GITHUB_MODELS_PAT` is one of this deployment's own variables.
-  /\bgithub_pat_[A-Za-z0-9_]{20,200}/g,
-  // Any bearer credential, whatever the token's shape. Catches an upstream
-  // echoing back the Authorization header it was sent, and is the ONLY shape
-  // cover for suno and hyper3d BYOK keys, which have no documented prefix.
-  /\bBearer\s{1,8}[A-Za-z0-9._~+/=-]{12,400}/g,
-  // Connection strings carry a password in the userinfo segment.
-  //
-  // Every class here excludes `"` deliberately. Without it this shape STRADDLES
-  // JSON string boundaries: in `{"a":"https://x","b":"y@z"}` the serialised
-  // bytes read as scheme `https`, userinfo `x","b`, the `:` the pattern needs is
-  // the separator after the NEXT key, and the `@` arrives from a later field. It
-  // is a match no per-leaf rewrite can ever remove, and it fired on ordinary
-  // user content — a published game titled with a URL beside a description
-  // containing an `@`. A real URL cannot carry an unescaped `"` in userinfo or
-  // host (it would be percent-encoded, which the decoded view still catches), so
-  // excluding it costs no coverage.
-  /\b[a-zA-Z][a-zA-Z0-9+.-]{0,20}:\/\/[^\s:/@"]{1,100}:[^\s@"]{1,200}@[^\s"]{1,300}/g,
-];
-
-/**
- * Shapes applied ONLY where the text is diagnostic — an error body, or a Sentry
- * event. They are excluded from a SUCCESS body, because on this surface the
- * credential they describe is one the product deliberately shows the user once.
- *
- * `forge_` is the whole list, and it carries two corrections at once:
- *
- *  - The pattern was `/\bforge_[0-9a-f]{32}\b/g` and could NEVER match. The
- *    route it cites mints `forge_${randomBytes(32).toString('hex')}` — 32
- *    BYTES, which is 64 hex characters. `{32}` cannot backtrack, so the 33rd
- *    hex character defeats the trailing `\b` and the match always failed. It
- *    was listed as coverage while providing none (lessons-learned #11), for the
- *    one credential class this module can name with certainty.
- *  - Correcting it to `{64}` is not enough on its own, because
- *    `POST /api/keys/api-key` returns `key: rawKey` in its 200 body for the
- *    one-time display that is the entire point of creating a key. A shape that
- *    fired there would redact the key out of the response and break the API
- *    Keys UI — the same class of harm as the depth bound above.
- *
- * So the shape is corrected AND scoped: it fires on status >= 400 and in Sentry,
- * where a `forge_` key appearing in text is always a leak, and never on a 2xx
- * body, where it is the product working. `withEgressGuard` picks the set from
- * the response status; `redactSecrets` (the Sentry path) always includes it.
- */
-const SELF_ISSUED_SHAPES: readonly RegExp[] = [
-  // SpawnForge's own API keys — `forge_` + 64 hex (web/src/app/api/keys/api-key/route.ts:49).
-  /\bforge_[0-9a-f]{64}\b/g,
-];
 
 // ---------------------------------------------------------------------------
 // Environment value list, memoised
@@ -413,34 +325,20 @@ interface RedactionContext {
 const HEX_PAIR = /^[0-9a-fA-F]{2}$/;
 
 /**
- * The shapes as ONE alternation, so a string is scanned once instead of
- * thirteen times.
+ * WHY ONE ALTERNATION rather than a pass per shape — the reasoning belongs with
+ * this module, because this is the caller that pays for it.
  *
- * This runs on every string leaf of every API response now that
- * `withEgressGuard` sits on the response path, and thirteen separate passes
- * over a 13 KB listing body measured at ~1.1 ms of added latency per request —
- * most of it the repeated scanning, not the matching. Alternation preserves the
+ * `shapesFor` runs on every string leaf of every API response now that
+ * `withEgressGuard` sits on the response path, and thirteen separate passes over
+ * a 13 KB listing body measured at ~1.1 ms of added latency per request, most of
+ * it the repeated scanning rather than the matching. Alternation preserves the
  * array's precedence exactly: a JS regex tries alternatives left to right at
- * each position, which is the same "longest-prefix-first where prefixes
- * overlap" ordering the array documents (`sk-ant-` before `sk-`).
+ * each position, which is the same "longest-prefix-first where prefixes overlap"
+ * ordering the shape list documents (`sk-ant-` before `sk-`).
  *
- * Derived from `SECRET_SHAPES` rather than written out, so the cited,
- * individually-reviewed patterns stay the source of truth and the
- * bounded-quantifier test still scans the thing that is actually used.
- *
- * Two of them, because `SELF_ISSUED_SHAPES` is scoped to diagnostic text (see
- * its comment). A context carries whichever one applies.
+ * The alternation itself is built in `redactShapes.ts`, so the client-side
+ * Sentry scrubber shares it instead of carrying a second copy.
  */
-const ALL_SECRET_SHAPES = new RegExp(SECRET_SHAPES.map((s) => s.source).join('|'), 'g');
-const ALL_SECRET_SHAPES_WITH_SELF_ISSUED = new RegExp(
-  [...SECRET_SHAPES, ...SELF_ISSUED_SHAPES].map((s) => s.source).join('|'),
-  'g',
-);
-
-/** The alternation a pass should use. Exported shape set is chosen once, not per string. */
-function shapesFor(includeSelfIssued: boolean): RegExp {
-  return includeSelfIssued ? ALL_SECRET_SHAPES_WITH_SELF_ISSUED : ALL_SECRET_SHAPES;
-}
 
 function redactLiteral(input: string, ctx: RedactionContext): string {
   let out = input;
