@@ -309,15 +309,46 @@ assignment to an outer `let`, `parts.push(err.message)` then `join`, a promise
 one is the natural way to write the same thing. Enumerating how a body was
 ASSEMBLED is unwinnable, because the ways to build a string are unbounded.
 
-The rule that holds forbids the SITE instead: `spawnforge/no-raw-response-in-catch`
-(`web/eslint-rules/`) bans constructing a response inside a catch scope at all,
-so it stops mattering how the body was built. Use `createErrorResponse`,
-`apiError` or `redactedJson` from `@/lib/api/errors` — all of which run
-`redactSecrets`. That is also what put redaction genuinely ON the path: the
-earlier version claimed it as a second layer while 89 of 101 route files built
-error bodies with a raw `NextResponse.json`, so it covered none of the routes
-that had the defect. And when you exempt a case, scope the exemption to the
-narrowed BRANCH — the text detector matched `instanceof` within 400 characters,
-so the fall-through response after a narrowing `if` inherited the exemption and
-leaked silently.
+The second attempt fixed assembly and then enumerated the SITES: `.json`, an
+assignment to an outer binding, an argument to a sanctioned constructor. A
+second board defeated that one too, in an afternoon, with sinks the list did
+not name — the RETURN VALUE of a catch scope (`.catch((e) => e.message)`, with
+the response built at the call site), a header set on a SANCTIONED
+constructor's result, a `redirect` whose URL carries the text, a receiver
+rooted in a call (`getDb().update(x).set({ e: err.message })`), a stream's
+`enqueue`, and `import { NextResponse as NR }`. **The set of sinks is as
+unbounded as the set of ways to build a string.** Enumerating either one is the
+same mistake wearing a different hat.
+
+What holds is an ALLOWLIST at the BOUNDARY. `spawnforge/no-raw-response-in-catch`
+(`web/eslint-rules/`) tracks the caught binding and every value derived from it
+through the catch scope, and reports wherever that value CROSSES OUT —
+returned, written into anything not declared inside the catch, passed to a
+response constructor, or passed to a call that is not on the sink allowlist
+(`errorSinks`/`loggerObjects`, set in `web/eslint.config.mjs` so they are
+auditable there). Crossing out IS closed, unlike the sinks: a value that never
+leaves the scope cannot reach a client. Derivations stay quiet, which is what
+keeps the rule usable. Use `createErrorResponse`, `apiError` or `redactedJson`
+from `@/lib/api/errors` — all of which run `redactSecrets`.
+
+Three more things this cost, each worth carrying forward:
+
+- **Scope the gate to the PROPERTY, not the filename.** The glob was
+  `src/app/api/**/route.ts` plus `src/lib/api`, which asserts "no route FILE
+  leaks". Five response builders sat outside it, and nothing failed when they
+  landed there. `noRawResponseInCatchCoverage.test.ts` now scans for every
+  module that constructs a response and asks ESLint's own
+  `calculateConfigForFile` whether the rule is on for it.
+- **Scope an exemption to the VALUE, not just the branch.** Scoping
+  `instanceof` narrowing to the branch (rather than to 400 nearby characters,
+  which is what the text detector did) was necessary and not sufficient:
+  `apiError(402, err.cause.body)` inside `if (err instanceof ApiKeyError)`
+  inherited an exemption justified by "the MESSAGE is ours". The exemption now
+  covers only the narrowed error's own message-shaped properties.
+- **A RuleTester case can be vacuous.** The case named for the header channel
+  built its response with a raw `NextResponse.json` on the line above, so its
+  one expected error came from the site ban and deleting the header line left
+  it green (lessons-learned #11, inside the file that cites #11). Write each
+  case so the line under test is the only thing that can report, then DELETE
+  that line and confirm the case fails.
 **Ticket:** #9736

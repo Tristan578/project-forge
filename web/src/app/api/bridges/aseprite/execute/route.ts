@@ -69,7 +69,34 @@ export async function POST(req: NextRequest) {
       params: params ?? {},
     });
 
-    return NextResponse.json(result);
+    // Forwarding `result` verbatim is a leak on the SUCCESS path (#9736): a
+    // BridgeResult carries `stdout`, `stderr` and `error: stderr || ...`, which
+    // hold the child_process message — the full command line and the temp Lua
+    // script path under the server's tmpdir. The catch below already says the
+    // intent ("avoid leaking internal paths or system details"); this is the
+    // half that was not doing it. The rule cannot see this shape: no catch, no
+    // construction it can follow, so only a test can hold the line.
+    if (!result.success) {
+      captureException(
+        new Error(`Aseprite operation failed: ${operation}`),
+        {
+          route: '/api/bridges/aseprite/execute',
+          operation,
+          exitCode: result.exitCode,
+          stderr: result.stderr,
+        },
+      );
+      return redactedJson(
+        { success: false, error: 'Aseprite operation failed. Check Sentry for details.' },
+        { status: 502 },
+      );
+    }
+
+    return redactedJson({
+      success: true,
+      outputFiles: result.outputFiles,
+      metadata: result.metadata,
+    });
   } catch (err) {
     captureException(err, { route: '/api/bridges/aseprite/execute' });
     // Return a generic error message to avoid leaking internal paths or system details.

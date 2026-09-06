@@ -17,11 +17,13 @@ const mockJobs: Record<string, Record<string, unknown>> = {};
 const {
   mockFetchBalance,
   mockShowSuccess,
+  mockShowError,
   mockEnqueueFailedRefund,
   mockProcessFailedRefunds,
 } = vi.hoisted(() => ({
   mockFetchBalance: vi.fn<() => Promise<void>>(),
   mockShowSuccess: vi.fn(),
+  mockShowError: vi.fn(),
   mockEnqueueFailedRefund: vi.fn(),
   mockProcessFailedRefunds: vi.fn<() => Promise<void>>(),
 }));
@@ -68,7 +70,7 @@ vi.mock('@/stores/userStore', () => ({
 
 vi.mock('@/lib/toast', () => ({
   showSuccess: mockShowSuccess,
-  showError: vi.fn(),
+  showError: mockShowError,
   showInfo: vi.fn(),
 }));
 
@@ -770,6 +772,35 @@ describe('useGenerationPolling', () => {
       (c: unknown[]) => (c[1] as Record<string, unknown>).error === ROUTE_MESSAGE,
     );
     expect(failCall).toBeDefined();
+
+    // Writing it to the store is not showing it. `GenerationStatus` renders
+    // only while a job is pending/processing/downloading, so marking the last
+    // job failed unmounts the sole renderer at the instant the message is
+    // written — the sentence reached the store and nobody else. The toast is
+    // what makes it arrive.
+    expect(mockShowError).toHaveBeenCalledWith(ROUTE_MESSAGE);
+  });
+
+  it('toasts the provider failure reason when the status route reports failed', async () => {
+    const PROVIDER_MESSAGE = 'The 3D model provider rejected the prompt.';
+    mockJobs['t3'] = makeJob('t3', { usageId: 'usage-t3' });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ jobId: 'job-t3', status: 'failed', error: PROVIDER_MESSAGE }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    expect(mockShowError).toHaveBeenCalledWith(PROVIDER_MESSAGE);
   });
 
   // ---------------------------------------------------------------------------

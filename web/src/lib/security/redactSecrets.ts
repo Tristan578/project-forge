@@ -175,7 +175,19 @@ const SECRET_SHAPES: readonly RegExp[] = [
  *    number of environment keys (catches a variable added or removed) AND the
  *    current value of every name already in the cache (catches a value replaced
  *    in place — which is what `vi.stubEnv` does to a variable that is already
- *    set). Both checks are direct reads: no allocation, no regex, no sort.
+ *    set).
+ *
+ * What the fingerprint costs, stated precisely, because the first version of
+ * this comment claimed "no allocation" and was wrong: the key-count check IS an
+ * enumeration — `Object.keys(process.env)` allocates one array of ~100 strings.
+ * What the memo removes is the per-call regex test of every name and the sort,
+ * which is the ~0.3 ms. The value check is a direct read per cached name, no
+ * allocation.
+ *
+ * And note where this runs. `sentryConfig.ts`'s `scrubString` calls
+ * `redactSecrets` on every string LEAF, so the fingerprint — enumeration
+ * included — runs once per leaf, not once per event. An event with 300 strings
+ * pays 300 enumerations and ONE derive, where it used to pay 300 derives.
  */
 interface EnvSecretCache {
   /** Secret-named variables, in enumeration order. */

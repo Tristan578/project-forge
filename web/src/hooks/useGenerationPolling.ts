@@ -28,7 +28,7 @@ import { analyzeModelQuality } from '@/lib/generate/modelQuality';
 import { detectGridDimensions, sliceSheet, buildSpriteSheetData } from '@/lib/sprites/sheetImporter';
 import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
-import { showSuccess } from '@/lib/toast';
+import { showError, showSuccess } from '@/lib/toast';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -137,13 +137,10 @@ export function useGenerationPolling() {
       // or the selected safety interval.
       if (Date.now() - startedAt >= MAX_POLL_DURATION_MS) {
         await triggerRefund(id);
-        updateJob(id, {
-          status: 'failed',
-          // Prefer whatever the status route last told us. "Generation timed
-          // out" is accurate but useless when the real story is "the status
-          // route has been returning 500 for five minutes".
-          error: lastStatusErrorRef.current[id] ?? 'Generation timed out',
-        });
+        // Prefer whatever the status route last told us. "Generation timed
+        // out" is accurate but useless when the real story is "the status
+        // route has been returning 500 for five minutes".
+        failJob(id, lastStatusErrorRef.current[id] ?? 'Generation timed out');
         delete lastStatusErrorRef.current[id];
         stopPolling(id);
         return;
@@ -178,10 +175,7 @@ export function useGenerationPolling() {
           stopPolling(id);
         } else if (data.status === 'failed') {
           await triggerRefund(id);
-          updateJob(id, {
-            status: 'failed',
-            error: data.error || 'Generation failed',
-          });
+          failJob(id, data.error || 'Generation failed');
 
           // Stop polling
           stopPolling(id);
@@ -501,11 +495,24 @@ export function useGenerationPolling() {
       // CTE ON CONFLICT keyed on usageId) and polling has already stopped by the time
       // this branch is reached, so it fires at most once per job.
       await triggerRefund(id);
-      updateJob(id, {
-        status: 'failed',
-        error: err instanceof Error ? err.message : 'Download failed',
-      });
+      failJob(id, err instanceof Error ? err.message : 'Download failed');
     }
+  }
+
+  /**
+   * Mark a job failed AND tell the user.
+   *
+   * Writing the message to the store is not showing it. `GenerationStatus`
+   * returns null when no job is pending/processing/downloading, so marking the
+   * only job failed unmounts the one component that renders the message at the
+   * instant it is written; with another job still running, the dropdown that
+   * would show it is closed by default. The status routes' messages were
+   * carefully worded and reached nobody. A toast is the part that makes them
+   * arrive (#9736).
+   */
+  function failJob(id: string, message: string) {
+    updateJob(id, { status: 'failed', error: message });
+    showError(message);
   }
 
   async function triggerRefund(id: string) {
