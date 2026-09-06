@@ -32,6 +32,8 @@ import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
 import { dbCircuitBreaker } from '@/lib/db/circuitBreaker';
 import {
   CAPABILITY_LABELS,
+  DIRECT_CAPABILITY_PROVIDER,
+  isByokProvider,
   DB_PROVIDER,
   PLATFORM_KEY_ENV,
   listUnconfiguredCapabilities,
@@ -603,14 +605,19 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
     // vocabulary a status-page visitor already sees in Settings, never ids or
     // env vars — and states the BYOK caveat: this probe grades the PLATFORM
     // path only, and a creator using their own keys is unaffected.
-    const labels = unconfiguredCapabilities.map((cap) => CAPABILITY_LABELS[cap]).join(', ');
+    const userConfigurable = unconfiguredCapabilities.filter((cap) => isByokProvider(DIRECT_CAPABILITY_PROVIDER[cap]));
+    const platformOnly = unconfiguredCapabilities.filter((cap) => !isByokProvider(DIRECT_CAPABILITY_PROVIDER[cap]));
+    const summary = [
+      userConfigurable.length ? `Available only with your own API key: ${userConfigurable.map((cap) => CAPABILITY_LABELS[cap]).join(', ')}` : '',
+      platformOnly.length ? `Unavailable on this platform: ${platformOnly.map((cap) => CAPABILITY_LABELS[cap]).join(', ')}` : '',
+    ].filter(Boolean).join('. ');
     return {
       name: 'AI Providers',
       status: 'degraded',
       latencyMs: 0,
       lastChecked,
       error: `Generation unavailable on the platform path for ${ids} — no platform key or gateway route configured`,
-      summary: `Available only with your own API key: ${labels}`,
+      summary,
       // Suppress only an explicit deployment baseline, never infer intent
       // from the absence of a key. Remove entries when provisioning them.
       ...(isExpectedConfigurationGap(unconfiguredCapabilities) ? { configurationOnly: true } : {}),

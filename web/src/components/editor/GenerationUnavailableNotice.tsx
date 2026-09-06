@@ -17,6 +17,8 @@ interface GenerationUnavailableNoticeProps {
    * Settings cannot fix would be a dead end of its own (#9725 p7).
    */
   unprovisionable?: boolean;
+  /** Only show Settings when it supports the missing provider. */
+  byokConfigurable?: boolean;
 }
 
 /**
@@ -39,6 +41,7 @@ export function GenerationUnavailableNotice({
   id,
   reason,
   unprovisionable,
+  byokConfigurable,
 }: GenerationUnavailableNoticeProps) {
   return (
     <div
@@ -48,7 +51,7 @@ export function GenerationUnavailableNotice({
     >
       <span className="font-semibold">Unavailable. </span>
       <span>{reason ?? 'This generation feature is not available yet.'}</span>
-      {unprovisionable === false && (
+      {unprovisionable === false && byokConfigurable === true && (
         <>
           {' '}
           <a

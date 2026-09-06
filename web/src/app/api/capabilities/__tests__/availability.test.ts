@@ -175,20 +175,22 @@ describe('GET /api/capabilities availability', () => {
     expect(sprite.providerAvailability).toEqual({ replicate: false, openai: false });
     expect(sprite.requiredProviders).toEqual(['Replicate', 'OpenAI']);
     expect(sprite.hint).toContain('Replicate or OpenAI');
+    expect(sprite.hint).not.toContain('Settings');
+    expect(sprite.byokConfigurable).toBe(false);
   });
 
-  it.each(['replicate', 'openai'])('allows a sprite path with only its BYOK key (%s)', async (provider) => {
+  it.each(['replicate', 'openai'])('ignores unsupported sprite BYOK rows (%s)', async (provider) => {
     signedInWithByok([provider]);
     const { body } = await call();
-    expect(status(body, 'sprite').available).toBe(true);
-    expect(status(body, 'sprite').providerAvailability).toEqual({ replicate: provider === 'replicate', openai: provider === 'openai' });
+    expect(status(body, 'sprite').available).toBe(false);
+    expect(status(body, 'sprite').providerAvailability).toEqual({ replicate: false, openai: false });
   });
 
-  it('combines platform and BYOK sprite options per provider', async () => {
+  it('does not advertise unsupported BYOK options beside a platform key', async () => {
     vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
     signedInWithByok(['openai']);
     const { body } = await call();
-    expect(status(body, 'sprite').providerAvailability).toEqual({ replicate: true, openai: true });
+    expect(status(body, 'sprite').providerAvailability).toEqual({ replicate: true, openai: false });
   });
 
   // Fail-open on the SERVER became fail-closed on the CLIENT: the route

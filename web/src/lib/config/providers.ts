@@ -51,6 +51,10 @@ export const BYOK_PROVIDERS = [
 
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
 
+export function isByokProvider(provider: string): provider is ByokProvider {
+  return (BYOK_PROVIDERS as readonly string[]).includes(provider);
+}
+
 // ---------------------------------------------------------------------------
 // Backend identifiers
 // ---------------------------------------------------------------------------
@@ -598,8 +602,16 @@ export const CIRCUIT_BREAKER_DEFAULTS = {
 } as const;
 
 /** Shared by the sprite route and dialog so provider selection cannot drift. */
-export function resolveSpriteProvider(provider: SpriteProvider = 'auto', style?: string): Exclude<SpriteProvider, 'auto'> {
+export function resolveSpriteProvider(style: SpriteStyle | undefined, provider: SpriteProvider = 'auto'): Exclude<SpriteProvider, 'auto'> {
   return provider === 'auto' ? (style === 'pixel-art' ? 'sdxl' : 'dalle3') : provider;
 }
 
 export const SPRITE_PROVIDER_KEY = { dalle3: 'openai', sdxl: 'replicate' } as const;
+
+export const SPRITE_STYLES = ['pixel-art', 'hand-drawn', 'vector', 'realistic'] as const;
+export type SpriteStyle = (typeof SPRITE_STYLES)[number];
+
+/** Shared quote and charge for the selected sprite provider. */
+export function spriteTokenCost(style: SpriteStyle | undefined, provider: SpriteProvider = 'auto'): number {
+  return SPRITE_TOKEN_COST[resolveSpriteProvider(style, provider)];
+}

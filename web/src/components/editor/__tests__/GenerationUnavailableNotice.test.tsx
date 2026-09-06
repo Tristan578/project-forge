@@ -29,7 +29,7 @@ describe('GenerationUnavailableNotice', () => {
       <GenerationUnavailableNotice
         id="x"
         reason="Configure Meshy API key in Settings to enable 3D Model Generation."
-        unprovisionable={false}
+        unprovisionable={false} byokConfigurable={true}
       />,
     );
     expect(screen.getByRole('link', { name: /settings/i })).toHaveAttribute('href', '/settings');
@@ -47,4 +47,9 @@ describe('GenerationUnavailableNotice', () => {
     );
     expect(screen.queryByRole('link')).toBeNull();
   });
+});
+
+it('does not link to Settings for an unsupported provider', () => {
+  render(<GenerationUnavailableNotice id="sprite" reason="Needs platform configuration." unprovisionable={false} byokConfigurable={false} />);
+  expect(screen.queryByRole('link')).not.toBeInTheDocument();
 });

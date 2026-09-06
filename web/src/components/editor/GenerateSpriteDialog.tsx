@@ -7,7 +7,7 @@ import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
-import { resolveSpriteProvider, SPRITE_PROVIDER_KEY } from '@/lib/config/providers';
+import { resolveSpriteProvider, SPRITE_PROVIDER_KEY, spriteTokenCost } from '@/lib/config/providers';
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
 
@@ -36,9 +36,9 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
   const addJob = useGenerationStore((s) => s.addJob);
   const dialogRef = useDialogA11y(onClose);
 
-  const tokenCost = activeTab === 'single' ? 15 : activeTab === 'sheet' ? frameCount * 15 : 50;
+  const tokenCost = activeTab === 'single' ? spriteTokenCost(style) : activeTab === 'sheet' ? frameCount * 15 : 50;
   // Capability gate (#9117): blocked only on a positive "unavailable" report.
-  const gate = useGenerationGate('sprite-generation', activeTab === 'single' ? SPRITE_PROVIDER_KEY[resolveSpriteProvider('auto', style)] : 'replicate');
+  const gate = useGenerationGate('sprite-generation', activeTab === 'single' ? SPRITE_PROVIDER_KEY[resolveSpriteProvider(style)] : 'replicate');
   const canSubmit =
     !gate.blocked &&
     prompt.trim().length >= 3 &&
@@ -185,7 +185,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-sprite-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sprite-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
           {/* Prompt (all tabs) */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

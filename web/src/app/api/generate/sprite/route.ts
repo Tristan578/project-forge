@@ -7,8 +7,7 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
-import { TOKEN_COSTS } from '@/lib/tokens/pricing';
-import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS, resolveSpriteProvider, SPRITE_PROVIDER_KEY } from '@/lib/config/providers';
+import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS, resolveSpriteProvider, SPRITE_PROVIDER_KEY, spriteTokenCost } from '@/lib/config/providers';
 import type { SpriteSize } from '@/lib/config/providers';
 
 type SpriteProvider = 'dalle3' | 'sdxl';
@@ -35,10 +34,7 @@ export const POST = createGenerationHandler<
   operation: 'sprite_generation',
   rateLimitKey: 'gen-sprite',
   successStatus: 201,
-  tokenCost: (params) =>
-    params.provider === 'dalle3'
-      ? TOKEN_COSTS.sprite_generation_dalle3
-      : TOKEN_COSTS.sprite_generation_replicate,
+  tokenCost: (params) => spriteTokenCost(params.style, params.provider),
   validate: (body) => {
     const {
       prompt,
@@ -66,7 +62,7 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'removeBackground must be a boolean' };
     }
 
-    const actualProvider = resolveSpriteProvider(provider as 'auto' | SpriteProvider, style as string | undefined);
+    const actualProvider = resolveSpriteProvider(style as import('@/lib/config/providers').SpriteStyle | undefined, provider as 'auto' | SpriteProvider);
     const serviceName = SPRITE_PROVIDER_KEY[actualProvider];
 
     return {

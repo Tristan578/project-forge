@@ -9,6 +9,7 @@ import {
   CAPABILITY_ENV_VARS,
   CAPABILITY_LABELS,
   CAPABILITY_PROVIDER_OPTIONS,
+  isByokProvider,
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
   getCapabilityUnavailability,
@@ -46,6 +47,8 @@ export interface CapabilityStatus {
   requiredProviders?: string[];
   /** Per-user provider options for operation-specific generation gates. */
   providerAvailability?: Record<string, boolean>;
+  /** Whether a user can enable this capability through supported key setup. */
+  byokConfigurable?: boolean;
   /** Helpful setup hint */
   hint?: string;
   /**
@@ -115,7 +118,7 @@ async function resolveByokProviders(clerkId: string | null): Promise<ByokLookup>
     // No local row is a real answer, not a failure: the user holds no keys.
     if (!user) return { providers: new Set(), degraded: false };
     const rows = await listConfiguredProviders(user.id);
-    return { providers: new Set(rows.map((r) => r.provider)), degraded: false };
+    return { providers: new Set(rows.map((r) => r.provider).filter(isByokProvider)), degraded: false };
   } catch (err) {
     captureException(err, { route: '/api/capabilities', action: 'byok_lookup' });
     return { providers: new Set(), degraded: true };
@@ -211,7 +214,10 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
       const uniqueProviders = [...new Set(providerNames)];
       status.requiredProviders = uniqueProviders;
       const named = options ? uniqueProviders.join(' or ') : uniqueProviders[0];
-      status.hint = `Configure ${named} API key in Settings to enable ${CAPABILITY_LABELS[cap]}.`;
+      status.byokConfigurable = options ? options.some(isByokProvider) : isByokProvider(DIRECT_CAPABILITY_PROVIDER[cap]);
+      status.hint = status.byokConfigurable
+        ? `Configure ${named} API key in Settings to enable ${CAPABILITY_LABELS[cap]}.`
+        : `${CAPABILITY_LABELS[cap]} needs ${named} API key, which only this deployment can configure.`;
     }
 
     return status;

@@ -794,7 +794,7 @@ describe('healthChecks', () => {
       // tell a creator whose own Meshy/ElevenLabs keys work that those features
       // are down (#9727 review).
       expect(result.summary).toBe(
-        'Available only with your own API key: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation, Sprite Generation, Background Removal',
+        'Available only with your own API key: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation. Unavailable on this platform: Sprite Generation, Background Removal',
       );
       expect(result.summary).not.toContain('PLATFORM_');
       // music is declared unavailable (#9522), not unconfigured.
