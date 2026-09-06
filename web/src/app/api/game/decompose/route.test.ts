@@ -15,18 +15,15 @@ vi.mock('@/lib/api/middleware');
 // silently stop intercepting and run the real decomposer. The route imports the
 // module directly (not via the barrel) so a server bundle doesn't pull in the
 // client-only executor graph.
-vi.mock('@/lib/game-creation/decomposer', () => ({
-  decomposeIntoSystems: vi.fn(),
-  // The route narrows on this class, so the mock must expose the real one:
-  // a stand-in would make `instanceof` false and silently route every
-  // rejection to the 500 branch (#9736).
-  PromptRejectedError: class PromptRejectedError extends Error {
-    constructor(public readonly reason: string) {
-      super(`Prompt rejected: ${reason}`);
-      this.name = 'PromptRejectedError';
-    }
-  },
-}));
+vi.mock('@/lib/game-creation/decomposer', async (importOriginal) => {
+  // The route narrows on this class, so the mock exposes the REAL one via
+  // importOriginal. It used to define a look-alike here instead, whose comment
+  // said "must expose the real one" while doing the opposite: the duplicate
+  // re-implemented the message composition, so the 400 `prompt_rejected`
+  // contract stayed green no matter what the real class did (#9736).
+  const actual = await importOriginal<typeof import('@/lib/game-creation/decomposer')>();
+  return { ...actual, decomposeIntoSystems: vi.fn() };
+});
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));

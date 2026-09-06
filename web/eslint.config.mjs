@@ -409,8 +409,10 @@ const eslintConfig = defineConfig([
       'src/app/api/**/*.ts',
       'src/lib/api/**/*.ts',
       'src/lib/auth/api-auth.ts',
+      'src/lib/auth/step-up.ts',
       'src/lib/rateLimit.ts',
       'src/lib/apiValidation.ts',
+      'src/lib/security/botId.ts',
       'src/proxy.ts',
     ],
     ignores: [

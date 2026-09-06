@@ -131,10 +131,11 @@ export function createErrorResponse(
   options?: ApiErrorOptions,
 ): NextResponse {
   // Redact on the way out (#9736). Routes must not put upstream text in a
-  // response at all - `src/app/api/__tests__/noRawErrorEgress.test.ts` is what
-  // enforces that - but a static gate cannot see a string assembled at
-  // runtime, so this is the net under it. `details` is included because it is
-  // the field most likely to carry a raw object.
+  // response at all - `spawnforge/no-raw-response-in-catch`
+  // (`web/eslint-rules/no-raw-response-in-catch.mjs`) is what enforces that -
+  // but a static gate cannot see a string assembled at runtime, and it does not
+  // see the non-throwing path at all, so this is the net under it. `details` is
+  // included because it is the field most likely to carry a raw object.
   const body: Record<string, unknown> = { error: redactSecrets(message) };
   if (options?.code) body.code = options.code;
   if (options?.details) body.details = redactSecrets(options.details);
