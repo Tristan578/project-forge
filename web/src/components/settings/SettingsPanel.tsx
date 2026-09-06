@@ -27,6 +27,33 @@ export function SettingsPanel({ onClose, initialTab = 'tokens' }: SettingsPanelP
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // `useState(initialTab)` reads the prop ONCE, at mount. `Sidebar` renders this
+  // panel as `{settingsTab && <SettingsPanel initialTab={settingsTab} …/>}`, so
+  // while the panel is open the element keeps its position and its type and
+  // React updates it in place — no remount, and the initial tab is never
+  // re-read.
+  //
+  // That breaks the escape path this PR exists to restore. A user with Settings
+  // already open on `tokens`, who hits a blocked capability and clicks the
+  // notice's Settings link, calls `openSettings('keys')`: the store changes, the
+  // prop changes, and the panel goes on showing `tokens`. The API Keys field it
+  // sent them to is one more click away, with nothing saying so.
+  //
+  // Syncing on CHANGE rather than on every render is what keeps this from
+  // fighting the user: switching tabs by hand does not move `initialTab`, so
+  // nothing fires and the manual choice stands.
+  //
+  // Adjusted DURING RENDER, not in an effect. React documents this as the way to
+  // reset state on a prop change, and `react-hooks` rejects the effect form here
+  // — correctly: a `setState` in an effect renders the old tab first and the new
+  // one immediately after, so the panel would visibly flash the wrong tab on the
+  // way to the right one. This form re-renders before anything is committed.
+  const [lastRequestedTab, setLastRequestedTab] = useState<Tab>(initialTab);
+  if (initialTab !== lastRequestedTab) {
+    setLastRequestedTab(initialTab);
+    setActiveTab(initialTab);
+  }
+
   // Close on Escape + focus trap
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
