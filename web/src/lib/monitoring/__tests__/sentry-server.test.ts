@@ -20,9 +20,14 @@ describe('sentry-server', () => {
     vi.resetModules();
   });
 
-  describe('when SENTRY_DSN is not set', () => {
+  // "Not configured" means BOTH spellings absent. Each of these used to stub
+  // `SENTRY_DSN` alone and passed only because the public one happens to be
+  // unset in this environment — a fixture leaning on ambient state instead of
+  // stating its own condition.
+  describe('when neither DSN variable is set', () => {
     it('captureException no-ops', async () => {
       vi.stubEnv('SENTRY_DSN', '');
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', '');
       const { captureException } = await import('../sentry-server');
       captureException(new Error('test'));
       expect(Sentry.captureException).not.toHaveBeenCalled();
@@ -31,6 +36,7 @@ describe('sentry-server', () => {
 
     it('captureMessage no-ops', async () => {
       vi.stubEnv('SENTRY_DSN', '');
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', '');
       const { captureMessage } = await import('../sentry-server');
       captureMessage('hello');
       expect(Sentry.captureMessage).not.toHaveBeenCalled();
@@ -39,6 +45,7 @@ describe('sentry-server', () => {
 
     it('startSpan still executes the callback', async () => {
       vi.stubEnv('SENTRY_DSN', '');
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', '');
       const { startSpan } = await import('../sentry-server');
       const result = startSpan({ name: 'op' }, () => 42);
       expect(result).toBe(42);
@@ -48,6 +55,7 @@ describe('sentry-server', () => {
 
     it('sentryLogger.info/warn/error all no-op (PF-967 / #8956)', async () => {
       vi.stubEnv('SENTRY_DSN', '');
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', '');
       const { sentryLogger } = await import('../sentry-server');
       sentryLogger.info('job completed', { jobId: '1' });
       sentryLogger.warn('job timed out', { jobId: '2' });
@@ -135,5 +143,37 @@ describe('sentry-server', () => {
       expect(Sentry.logger.info).toHaveBeenCalledWith('no-attribute log', undefined);
       vi.unstubAllEnvs();
     });
+  });
+});
+
+describe('the DSN guard matches what actually initialises Sentry', () => {
+  // `sentry.server.config.ts`, `sentry.edge.config.ts` and `cronMonitors.ts` all
+  // accept `NEXT_PUBLIC_SENTRY_DSN` as a fallback; this module used to read
+  // `SENTRY_DSN` alone. A deployment carrying only the public variable therefore
+  // initialised Sentry and registered cron check-ins — looking healthy — while
+  // every capture here returned early and dropped the error. Monitoring that
+  // reports itself as working and delivers nothing is worse than monitoring that
+  // is plainly off.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it('captures through the NEXT_PUBLIC_SENTRY_DSN fallback', async () => {
+    vi.stubEnv('SENTRY_DSN', '');
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://key@sentry.io/123');
+    const { captureException } = await import('../sentry-server');
+    captureException(new Error('dropped before this fix'));
+    expect(Sentry.captureException).toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
+  it('still no-ops when neither is set', async () => {
+    vi.stubEnv('SENTRY_DSN', '');
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', '');
+    const { captureException } = await import('../sentry-server');
+    captureException(new Error('nothing is listening'));
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
   });
 });
