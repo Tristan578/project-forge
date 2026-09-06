@@ -51,6 +51,19 @@ export function useGenerationPolling() {
   const startedAtRef = useRef<Record<string, number>>({});
   const durablePollsRef = useRef<Record<string, () => void>>({});
   const inFlightPollsRef = useRef<Record<string, true>>({});
+  /**
+   * The most recent message a status route sent with a non-OK response.
+   *
+   * #9736 replaced eight status routes' 500 bodies with sentences written for
+   * the user, and every one of them was dead copy: this poller threw on
+   * `!response.ok` BEFORE reading the body and swallowed the throw in a
+   * console.error, so a persistently failing status route showed a stalled
+   * progress bar for five minutes and then the bare "Generation timed out".
+   * Keeping the last message here is what actually puts the route's sentence in
+   * front of the person. Polling still CONTINUES on a non-OK read — a single
+   * 500 is usually transient — so this only surfaces once the job gives up.
+   */
+  const lastStatusErrorRef = useRef<Record<string, string>>({});
 
   // On mount: drain any refunds that failed in a previous session
   useEffect(() => {
@@ -126,8 +139,12 @@ export function useGenerationPolling() {
         await triggerRefund(id);
         updateJob(id, {
           status: 'failed',
-          error: 'Generation timed out',
+          // Prefer whatever the status route last told us. "Generation timed
+          // out" is accurate but useless when the real story is "the status
+          // route has been returning 500 for five minutes".
+          error: lastStatusErrorRef.current[id] ?? 'Generation timed out',
         });
+        delete lastStatusErrorRef.current[id];
         stopPolling(id);
         return;
       }
@@ -137,9 +154,18 @@ export function useGenerationPolling() {
         const response = await fetch(`${endpoint}?jobId=${jobId}`);
 
         if (!response.ok) {
+          // Read the body BEFORE throwing. The route's message is written for
+          // the user and is the only place that says what actually went wrong.
+          const body: unknown = await response.json().catch(() => null);
+          const message =
+            body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
+              ? (body as { error: string }).error
+              : null;
+          if (message) lastStatusErrorRef.current[id] = message;
           throw new Error(`Status check failed: ${response.status}`);
         }
 
+        delete lastStatusErrorRef.current[id];
         const data: StatusResponse = await response.json();
 
         if (data.status === 'completed') {

@@ -178,6 +178,6 @@ describe('GET /api/generate/skybox/status', () => {
     // the upstream RESPONSE BODY into the thrown error, and on the platform
     // path the credential in play is the platform's (#9736).
     expect(data.error).not.toContain('Network error');
-    expect(data.error).toBe('Could not read the skybox generation status. Please try again.');
+    expect(data.error).toBe('Could not read the Skybox generation status. Please try again.');
   });
 });

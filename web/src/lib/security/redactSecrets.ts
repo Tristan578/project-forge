@@ -115,7 +115,16 @@ const SECRET_SHAPES: readonly RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{16,200}/g,
   // OpenAI, including the project-scoped form: https://platform.openai.com/api-keys
   // (OpenRouter's `sk-or-v1-...` matches this too.)
-  /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,200}/g,
+  //
+  // A 20-character UNBROKEN run is required somewhere after the prefix, with a
+  // short hyphenated segment allowed before it (`proj-`, `or-v1-`). The
+  // previous form — twenty-or-more of any word character INCLUDING the hyphen
+  // — fired on ordinary hyphenated text that merely begins "sk-", so
+  // `sk-learn-preprocessing-module-name` became
+  // `[REDACTED]`. Harmless in Sentry, but this now runs on API response
+  // bodies, where silently rewriting a legitimate identifier corrupts the
+  // payload with no signal.
+  /\bsk-[A-Za-z0-9_-]{0,20}[A-Za-z0-9_]{20,200}[A-Za-z0-9_-]{0,200}/g,
   // ElevenLabs: `sk_` + hex. Underscore, not the hyphen OpenAI uses — the
   // hyphenated pattern above cannot match it, which is why elevenlabs (one of
   // the three providers whose bodies caused #9736) had no cover at all.

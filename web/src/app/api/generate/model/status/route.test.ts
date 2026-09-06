@@ -193,6 +193,6 @@ describe('GET /api/generate/model/status', () => {
     // upstream RESPONSE BODY into the thrown error, and on the platform path
     // the credential in play is the platform's (#9736).
     expect(data.error).not.toContain('Meshy API timeout');
-    expect(data.error).toBe('Could not read the model generation status. Please try again.');
+    expect(data.error).toBe('Could not read the 3D Model generation status. Please try again.');
   });
 });

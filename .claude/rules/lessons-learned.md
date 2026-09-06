@@ -274,7 +274,7 @@ is readable.
 **Ticket:** #9623
 
 ### 15. Upstream error text is not yours to forward
-**Applies:** catch (err|err.message|String(err)|createErrorResponse|apiError|NextResponse.json|captureException|response.text()
+**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch
 **What happens:** A route answers a failure with the upstream provider's own
 words. It reads like good diagnostics and it is an egress channel: on the
 platform path the credential in play is the PLATFORM's, so a provider that
@@ -296,9 +296,28 @@ recognise.
 **Prevention:** A caught error goes to Sentry and to the server log; the client
 gets fixed text. Where the message genuinely IS yours and belongs to the user
 (a safety-filter reason), give it a **type** and narrow with `instanceof` —
-never a message prefix, which any upstream error can also produce. The gate is
-`web/src/app/api/__tests__/noRawErrorEgress.test.ts`; `redactSecrets()` in the
-response constructors and the Sentry scrubber is the net under it, not a
-licence to forward. A grep that is clean today is not a guarantee: the next
-route someone writes is the one that matters, so the rule has to be enforced.
+never a message prefix, which any upstream error can also produce.
+
+**And do not try to enforce this with a text detector.** The first attempt was
+one: a vitest source scan that looked for a caught binding flowing into a
+response body. A review board walked through it with ELEVEN ordinary shapes in
+one sitting — `err.toString()`, `err.response.data`, an `if` instead of a
+ternary, `const { message } = err`, `NextResponse.json(buildBody(err))`,
+`new NextResponse(JSON.stringify(...))`, a header set after construction, an
+assignment to an outer `let`, `parts.push(err.message)` then `join`, a promise
+`.catch((e) => ...)` callback, and a plain `new Response(String(err))`. Every
+one is the natural way to write the same thing. Enumerating how a body was
+ASSEMBLED is unwinnable, because the ways to build a string are unbounded.
+
+The rule that holds forbids the SITE instead: `spawnforge/no-raw-response-in-catch`
+(`web/eslint-rules/`) bans constructing a response inside a catch scope at all,
+so it stops mattering how the body was built. Use `createErrorResponse`,
+`apiError` or `redactedJson` from `@/lib/api/errors` — all of which run
+`redactSecrets`. That is also what put redaction genuinely ON the path: the
+earlier version claimed it as a second layer while 89 of 101 route files built
+error bodies with a raw `NextResponse.json`, so it covered none of the routes
+that had the defect. And when you exempt a case, scope the exemption to the
+narrowed BRANCH — the text detector matched `instanceof` within 400 characters,
+so the fall-through response after a narrowing `if` inherited the exemption and
+leaked silently.
 **Ticket:** #9736

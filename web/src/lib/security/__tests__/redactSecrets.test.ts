@@ -78,6 +78,18 @@ describe('redactSecrets — shape matching', () => {
     expect(out).toContain('401');
   });
 
+  it('removes an OpenRouter key, which carries a hyphenated version segment', () => {
+    const key = 'sk-' + 'or-v1-' + '0123456789abcdef0123456789abcdef';
+    expect(redactSecrets(`rejected ${key}`)).not.toContain(key);
+  });
+
+  it('leaves ordinary hyphenated text that merely begins "sk-" alone', () => {
+    // This now runs on API response bodies, where rewriting a legitimate
+    // identifier corrupts the payload with no signal to anyone.
+    const text = 'module sk-learn-preprocessing-module-name failed to load';
+    expect(redactSecrets(text)).toBe(text);
+  });
+
   it('removes a bearer credential regardless of the token shape', () => {
     const out = redactSecrets('upstream sent Authorization: Bearer aVeryLongOpaqueTokenValue123456');
     expect(out).not.toContain('aVeryLongOpaqueTokenValue123456');

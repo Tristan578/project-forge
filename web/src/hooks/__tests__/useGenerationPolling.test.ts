@@ -740,6 +740,38 @@ describe('useGenerationPolling', () => {
     expect(failCall).toBeDefined();
   });
 
+  it('surfaces the status route message when the job gives up (#9736)', async () => {
+    // The eight status routes were given sentences written for the user, and
+    // nobody ever saw one: this poller threw on `!response.ok` before reading
+    // the body, so a route returning 500 for five minutes produced a stalled
+    // progress bar and then the bare 'Generation timed out'.
+    const ROUTE_MESSAGE = 'Could not read the 3D Model generation status. Please try again.';
+    mockJobs['t2'] = makeJob('t2', { usageId: 'usage-t2' });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return {
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: ROUTE_MESSAGE }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+
+    for (let i = 0; i < 101; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+    }
+
+    const failCall = mockUpdateJob.mock.calls.find(
+      (c: unknown[]) => (c[1] as Record<string, unknown>).error === ROUTE_MESSAGE,
+    );
+    expect(failCall).toBeDefined();
+  });
+
   // ---------------------------------------------------------------------------
   // Skybox completion — verifies the generated image is forwarded to the engine
   // ---------------------------------------------------------------------------

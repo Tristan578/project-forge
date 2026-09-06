@@ -190,6 +190,6 @@ describe('GET /api/generate/music/status', () => {
     // the upstream RESPONSE BODY into the thrown error, and on the platform
     // path the credential in play is the platform's (#9736).
     expect(data.error).not.toContain('Suno API down');
-    expect(data.error).toBe('Could not read the music generation status. Please try again.');
+    expect(data.error).toBe('Could not read the Music generation status. Please try again.');
   });
 });

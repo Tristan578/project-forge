@@ -22,8 +22,15 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     captureException(err, { route: '/api/bridges/aseprite/status' });
     return redactedJson(
-      // Fixed text: the bridge's own error can name a local path or port (#9736).
-      { error: 'Status check failed' },
+      // Fixed text rather than the caught message, which can name a local path
+      // or port (#9736) — but still ACTIONABLE. This bridge runs on the user's
+      // own machine and they are the only person who can fix it, so a bare
+      // "Status check failed" removed the one thing that made the message
+      // useful without protecting anything extra.
+      {
+        error:
+          'Could not reach the local Aseprite bridge. Check that Aseprite is installed and the bridge is running, then try again.',
+      },
       { status: 500 }
     );
   }

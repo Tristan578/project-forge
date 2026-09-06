@@ -222,6 +222,6 @@ describe('GET /api/generate/sprite/status', () => {
     // the upstream RESPONSE BODY into the thrown error, and on the platform
     // path the credential in play is the platform's (#9736).
     expect(data.error).not.toContain('Network timeout');
-    expect(data.error).toBe('Could not read the sprite generation status. Please try again.');
+    expect(data.error).toBe('Could not read the Sprite generation status. Please try again.');
   });
 });

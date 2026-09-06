@@ -89,6 +89,6 @@ export async function GET(request: NextRequest) {
     // The provider's own text stays server-side: `lib/generate/*Client.ts`
     // folds the upstream RESPONSE BODY into the thrown error, and on the
     // platform path the credential in play is the platform's (#9736).
-    return redactedJson({ error: 'Could not read the pixel-art generation status. Please try again.' }, { status: 500 });
+    return redactedJson({ error: 'Could not read the Pixel Art generation status. Please try again.' }, { status: 500 });
   }
 }

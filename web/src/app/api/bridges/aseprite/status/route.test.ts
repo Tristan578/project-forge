@@ -78,7 +78,9 @@ describe('GET /api/bridges/aseprite/status', () => {
     // the upstream RESPONSE BODY into the thrown error, and on the platform
     // path the credential in play is the platform's (#9736).
     expect(data.error).not.toContain('Config file corrupted');
-    expect(data.error).toBe('Status check failed');
+    expect(data.error).toBe(
+      'Could not reach the local Aseprite bridge. Check that Aseprite is installed and the bridge is running, then try again.',
+    );
   });
 
   it('returns 500 with fallback message when error is not an Error instance', async () => {
@@ -87,6 +89,8 @@ describe('GET /api/bridges/aseprite/status', () => {
     const res = await GET(new NextRequest('http://localhost/api/bridges/aseprite/status'));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Status check failed');
+    expect(data.error).toBe(
+      'Could not reach the local Aseprite bridge. Check that Aseprite is installed and the bridge is running, then try again.',
+    );
   });
 });

@@ -212,7 +212,11 @@ export async function decomposeIntoSystems(
   // [S3] Sanitize the user prompt before LLM call
   const sanitized = sanitizePrompt(prompt, 1000);
   if (!sanitized.safe) {
-    throw new PromptRejectedError(sanitized.reason ?? 'Prompt rejected');
+    // The constructor already prefixes "Prompt rejected: ", so a fallback of
+    // 'Prompt rejected' composed into "Prompt rejected: Prompt rejected" — a
+    // string /api/game/decompose returns verbatim and orchestratorSlice shows
+    // to the user. The fallback has to be a REASON, not a repeat of the prefix.
+    throw new PromptRejectedError(sanitized.reason ?? 'content flagged by the safety filter');
   }
   const cleanPrompt = sanitized.filtered!;
 
