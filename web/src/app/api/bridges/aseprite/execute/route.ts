@@ -87,8 +87,19 @@ async function POST_impl(req: NextRequest) {
           stderr: result.stderr,
         },
       );
+      // Fixed text rather than `stderr`, which names the child_process command
+      // line and the temp Lua script path — AND actionable, for the same reason
+      // the sibling `status` route is: this bridge runs on the USER's machine
+      // and they are the only person who can fix it. "Check Sentry for details"
+      // named a next step the person on the other end cannot take; Sentry is an
+      // internal developer tool they have no access to.
       return redactedJson(
-        { success: false, error: 'Aseprite operation failed. Check Sentry for details.' },
+        {
+          success: false,
+          error:
+            'The Aseprite operation did not complete. Check that Aseprite is installed and the '
+            + 'local bridge is running, then try again.',
+        },
         { status: 502 },
       );
     }
@@ -100,10 +111,15 @@ async function POST_impl(req: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/bridges/aseprite/execute' });
-    // Return a generic error message to avoid leaking internal paths or system details.
-    // The full error is captured by Sentry above for debugging.
+    // Fixed text to avoid leaking internal paths or system details; the full
+    // error is captured by Sentry above. Same wording as the `!result.success`
+    // branch — the user cannot tell the two apart and the remedy is identical.
     return redactedJson(
-      { error: 'Aseprite operation failed. Check Sentry for details.' },
+      {
+        error:
+          'The Aseprite operation did not complete. Check that Aseprite is installed and the '
+          + 'local bridge is running, then try again.',
+      },
       { status: 500 }
     );
   }

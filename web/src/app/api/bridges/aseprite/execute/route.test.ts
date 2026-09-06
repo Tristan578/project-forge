@@ -20,6 +20,19 @@ async function importRoute() {
   return POST;
 }
 
+/**
+ * The user-facing failure sentence, written once.
+ *
+ * It used to be "Aseprite operation failed. Check Sentry for details.", pinned
+ * in three places, naming a next step the person on the other end cannot take —
+ * Sentry is an internal developer tool they have no access to. This bridge runs
+ * on the USER's own machine, so they are the only one who can fix it; the
+ * sibling `status` route already said so and this one copied the old string.
+ */
+const BRIDGE_FAILURE_MESSAGE =
+  'The Aseprite operation did not complete. Check that Aseprite is installed and the '
+  + 'local bridge is running, then try again.';
+
 const connectedConfig: BridgeToolConfig = {
   id: 'aseprite',
   name: 'Aseprite',
@@ -289,7 +302,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(raw).not.toContain('stdout');
     expect(JSON.parse(raw)).toEqual({
       success: false,
-      error: 'Aseprite operation failed. Check Sentry for details.',
+      error: BRIDGE_FAILURE_MESSAGE,
     });
   });
 
@@ -363,7 +376,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     // Route returns generic error message (not err.message) to prevent internal info leakage
-    expect(data.error).toBe('Aseprite operation failed. Check Sentry for details.');
+    expect(data.error).toBe(BRIDGE_FAILURE_MESSAGE);
   });
 
   it('returns 500 with fallback message when error is not an Error instance', async () => {
@@ -385,6 +398,6 @@ describe('POST /api/bridges/aseprite/execute', () => {
     const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Aseprite operation failed. Check Sentry for details.');
+    expect(data.error).toBe(BRIDGE_FAILURE_MESSAGE);
   });
 });

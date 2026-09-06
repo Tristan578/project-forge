@@ -127,6 +127,9 @@ vi.mock('@/lib/sprites/sheetImporter', () => ({
 }));
 
 import { useGenerationPolling } from '../useGenerationPolling';
+// Imported, not retyped: the guidance sentence is the catalogue's, and a test
+// that hardcoded it would pass while the two drifted apart.
+import { RETRY_GUIDANCE } from '@/lib/generate/retryGuidance';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -503,7 +506,7 @@ describe('useGenerationPolling', () => {
 
     expect(mockUpdateJob).toHaveBeenCalledWith('f2', {
       status: 'failed',
-      error: 'Generation failed',
+      error: `Generation failed. ${RETRY_GUIDANCE}`,
     });
   });
 
@@ -636,7 +639,12 @@ describe('useGenerationPolling', () => {
     renderHook(() => useGenerationPolling());
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
-    expect(mockShowPersistentError).toHaveBeenCalledWith(FIXED, { id: 'generation-failed-dl2' });
+    // The refund really did succeed here — the job carries a usageId and the
+    // refund fetch returns 200 — which is the ONLY case in which this sentence
+    // is true. The two cases in which it is NOT are covered immediately below.
+    expect(mockShowPersistentError).toHaveBeenCalledWith(FIXED, {
+      id: `generation-failed:${FIXED}`,
+    });
 
     // The store still carries the real diagnostic — the dropdown and any bug
     // report show what actually happened...
@@ -651,6 +659,123 @@ describe('useGenerationPolling', () => {
     // ...and it never reached the toast, which is the whole point.
     const toasted = mockShowPersistentError.mock.calls.map((c: unknown[]) => c[0]);
     expect(toasted).not.toContain(stored.error);
+    fetchSpy.mockRestore();
+  });
+
+  /**
+   * THE REFUND PROMISE, on the two paths where it was false.
+   *
+   * The sentence above was hardcoded, from a call site that runs after
+   * `triggerRefund` — which returns without refunding when the job has no
+   * `usageId` (BYOK and cache-hit jobs, never charged tokens), and which on
+   * failure only queues the refund for a FUTURE session. Both told the user, in
+   * an indefinite red toast, that money had already come back. The old test
+   * exercised only `usageId: 'usage-dl2'` with the refund returning 200 and
+   * pinned the sentence verbatim, so the false promise was locked in as
+   * expected behaviour and neither branch was reachable by any assertion.
+   */
+  const NO_REFUND_CLAIM =
+    'That generation could not be finished. Try again, or pick a different style.';
+
+  it('does NOT promise a refund for a job that was never charged tokens (BYOK / cache hit)', async () => {
+    // No usageId: `triggerRefund` returns immediately, nothing is refunded, and
+    // nothing was charged either.
+    mockJobs['byok1'] = makeJob('byok1', { type: 'model', autoPlace: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-byok1',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/model.glb',
+          }),
+        } as Response;
+      }
+      return { ok: false, status: 404 } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(mockShowPersistentError).toHaveBeenCalledWith(NO_REFUND_CLAIM, {
+      id: `generation-failed:${NO_REFUND_CLAIM}`,
+    });
+    // The claim is absent, not merely different.
+    const toasted = mockShowPersistentError.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(toasted.some((t) => t.includes('have been refunded'))).toBe(false);
+    // ...and no refund was even attempted, which is why claiming one was wrong.
+    expect(fetchSpy).not.toHaveBeenCalledWith('/api/generate/refund', expect.anything());
+    fetchSpy.mockRestore();
+  });
+
+  it('does NOT promise a refund when the refund API failed and was queued for a later session', async () => {
+    mockJobs['rf1'] = makeJob('rf1', { type: 'model', usageId: 'usage-rf1', autoPlace: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('refund')) return { ok: false, status: 500 } as Response;
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-rf1',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/model.glb',
+          }),
+        } as Response;
+      }
+      return { ok: false, status: 404 } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+    expect(mockEnqueueFailedRefund).toHaveBeenCalled();
+    expect(mockShowPersistentError).toHaveBeenCalledWith(NO_REFUND_CLAIM, {
+      id: `generation-failed:${NO_REFUND_CLAIM}`,
+    });
+    const toasted = mockShowPersistentError.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(toasted.some((t) => t.includes('have been refunded'))).toBe(false);
+    fetchSpy.mockRestore();
+  });
+
+  it('dedupes N concurrent failures with the SAME message into one toast id', async () => {
+    // The previous id was `generation-failed-${jobId}`, so N concurrent jobs had
+    // N DISTINCT keys and still stacked N indefinite red toasts — the exact
+    // outcome the id was added to prevent, with a docblock claiming otherwise
+    // and a test asserting only the literal key (lessons-learned #11).
+    // `toast.ts` states the mechanism: an id collapses failures that produce the
+    // same MESSAGE, so the key has to be message-derived.
+    mockJobs['b1'] = makeJob('b1', { type: 'model', autoPlace: true });
+    mockJobs['b2'] = makeJob('b2', { type: 'model', autoPlace: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-b',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/model.glb',
+          }),
+        } as Response;
+      }
+      return { ok: false, status: 404 } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    const ids = mockShowPersistentError.mock.calls.map(
+      (c: unknown[]) => (c[1] as { id?: string } | undefined)?.id,
+    );
+    // Non-vacuous: both jobs really did fail and really did toast.
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(ids).size).toBe(1);
     fetchSpy.mockRestore();
   });
 
@@ -783,11 +908,47 @@ describe('useGenerationPolling', () => {
       });
     }
 
-    // Should have been called with 'failed' and 'Generation timed out'
+    // The FALLBACK sentence, with a next step attached. This is the common
+    // timeout case, not an edge one — `lastStatusErrorRef` is cleared on every
+    // successful poll, so an ordinary slow provider that never reaches a
+    // terminal state lands here. Before, it produced an indefinite red toast
+    // reading 'Generation timed out' and nothing else, which is precisely the
+    // defect `retryGuidance.ts` was added in this change to fix.
     const failCall = mockUpdateJob.mock.calls.find(
-      (c: unknown[]) => (c[1] as Record<string, unknown>).error === 'Generation timed out',
+      (c: unknown[]) =>
+        (c[1] as Record<string, unknown>).error === `Generation timed out. ${RETRY_GUIDANCE}`,
     );
     expect(failCall).toBeDefined();
+    expect(mockShowPersistentError).toHaveBeenCalledWith(
+      `Generation timed out. ${RETRY_GUIDANCE}`,
+      expect.anything(),
+    );
+  });
+
+  it('attaches the next step to the bare provider-failure fallback too', async () => {
+    // The `status: 'failed'` branch with no `error` from the provider. Same
+    // reasoning as the timeout fallback: a terminal red toast naming a
+    // condition and nothing to do about it.
+    mockJobs['gf1'] = makeJob('gf1', { usageId: 'usage-gf1' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ jobId: 'job-gf1', status: 'failed' }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+
+    expect(mockShowPersistentError).toHaveBeenCalledWith(
+      `Generation failed. ${RETRY_GUIDANCE}`,
+      expect.anything(),
+    );
+    fetchSpy.mockRestore();
   });
 
   it('surfaces the status route message when the job gives up (#9736)', async () => {
@@ -828,9 +989,12 @@ describe('useGenerationPolling', () => {
     // what makes it arrive.
     // Persistent, not the 4 s default: this is terminal, on a job that ran in
     // the background for up to five minutes, and once the toast expires no
-    // surface renders `job.error` at all. Keyed by job id so N concurrent
-    // timeouts do not stack N identical toasts.
-    expect(mockShowPersistentError).toHaveBeenCalledWith(ROUTE_MESSAGE, { id: 'generation-failed-t2' });
+    // surface renders `job.error` at all. Keyed by the MESSAGE, so N concurrent
+    // timeouts collapse into one toast — the job id did not, because N jobs
+    // produce N distinct keys.
+    expect(mockShowPersistentError).toHaveBeenCalledWith(ROUTE_MESSAGE, {
+      id: `generation-failed:${ROUTE_MESSAGE}`,
+    });
   });
 
   it('toasts the provider failure reason when the status route reports failed', async () => {
@@ -852,7 +1016,9 @@ describe('useGenerationPolling', () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
 
-    expect(mockShowPersistentError).toHaveBeenCalledWith(PROVIDER_MESSAGE, { id: 'generation-failed-t3' });
+    expect(mockShowPersistentError).toHaveBeenCalledWith(PROVIDER_MESSAGE, {
+      id: `generation-failed:${PROVIDER_MESSAGE}`,
+    });
   });
 
   // ---------------------------------------------------------------------------
