@@ -17,13 +17,13 @@ const mockJobs: Record<string, Record<string, unknown>> = {};
 const {
   mockFetchBalance,
   mockShowSuccess,
-  mockShowError,
+  mockShowPersistentError,
   mockEnqueueFailedRefund,
   mockProcessFailedRefunds,
 } = vi.hoisted(() => ({
   mockFetchBalance: vi.fn<() => Promise<void>>(),
   mockShowSuccess: vi.fn(),
-  mockShowError: vi.fn(),
+  mockShowPersistentError: vi.fn(),
   mockEnqueueFailedRefund: vi.fn(),
   mockProcessFailedRefunds: vi.fn<() => Promise<void>>(),
 }));
@@ -70,7 +70,7 @@ vi.mock('@/stores/userStore', () => ({
 
 vi.mock('@/lib/toast', () => ({
   showSuccess: mockShowSuccess,
-  showError: mockShowError,
+  showPersistentError: mockShowPersistentError,
   showInfo: vi.fn(),
 }));
 
@@ -778,7 +778,11 @@ describe('useGenerationPolling', () => {
     // job failed unmounts the sole renderer at the instant the message is
     // written — the sentence reached the store and nobody else. The toast is
     // what makes it arrive.
-    expect(mockShowError).toHaveBeenCalledWith(ROUTE_MESSAGE);
+    // Persistent, not the 4 s default: this is terminal, on a job that ran in
+    // the background for up to five minutes, and once the toast expires no
+    // surface renders `job.error` at all. Keyed by job id so N concurrent
+    // timeouts do not stack N identical toasts.
+    expect(mockShowPersistentError).toHaveBeenCalledWith(ROUTE_MESSAGE, { id: 'generation-failed-t2' });
   });
 
   it('toasts the provider failure reason when the status route reports failed', async () => {
@@ -800,7 +804,7 @@ describe('useGenerationPolling', () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
 
-    expect(mockShowError).toHaveBeenCalledWith(PROVIDER_MESSAGE);
+    expect(mockShowPersistentError).toHaveBeenCalledWith(PROVIDER_MESSAGE, { id: 'generation-failed-t3' });
   });
 
   // ---------------------------------------------------------------------------

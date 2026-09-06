@@ -28,7 +28,7 @@ import { analyzeModelQuality } from '@/lib/generate/modelQuality';
 import { detectGridDimensions, sliceSheet, buildSpriteSheetData } from '@/lib/sprites/sheetImporter';
 import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
-import { showError, showSuccess } from '@/lib/toast';
+import { showPersistentError, showSuccess } from '@/lib/toast';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -495,12 +495,12 @@ export function useGenerationPolling() {
       // CTE ON CONFLICT keyed on usageId) and polling has already stopped by the time
       // this branch is reached, so it fires at most once per job.
       await triggerRefund(id);
-      failJob(id, err instanceof Error ? err.message : 'Download failed');
+      failJob(id, err instanceof Error ? err.message : 'Download failed', { userFacing: false });
     }
   }
 
   /**
-   * Mark a job failed AND tell the user.
+   * Mark a job failed AND tell the user, with a message written FOR the user.
    *
    * Writing the message to the store is not showing it. `GenerationStatus`
    * returns null when no job is pending/processing/downloading, so marking the
@@ -509,10 +509,36 @@ export function useGenerationPolling() {
    * would show it is closed by default. The status routes' messages were
    * carefully worded and reached nobody. A toast is the part that makes them
    * arrive (#9736).
+   *
+   * THREE THINGS THE FIRST VERSION OF THIS GOT WRONG, all found by review.
+   *
+   *  - It toasted `err.message` from the completion path, so 'No result URL',
+   *    'No texture maps' and 'Downloaded file is not a valid GLB model' were
+   *    promoted from a dropdown that is closed by default to the primary
+   *    user-facing channel, untranslated. For the audience this product targets,
+   *    'No texture maps' is indistinguishable from a crash. Internal diagnostics
+   *    now go to `job.error` and to the console; the TOAST gets fixed, actionable
+   *    text. A message that came from a server route is written for the user by
+   *    definition and is passed through.
+   *  - It used `showError`, which inherits sonner's 4 s auto-dismiss. This is a
+   *    TERMINAL failure on a job that may have run for five minutes in the
+   *    background while the person was looking elsewhere, and once the toast
+   *    expires there is no surface left that renders `job.error` at all — the
+   *    message is unrecoverable. `showPersistentError` is what `lib/toast.ts`
+   *    documents for exactly this class.
+   *  - It passed no toast id, so N concurrent jobs hitting the same timeout
+   *    emitted N identical stacked toasts. The job id dedupes them.
    */
-  function failJob(id: string, message: string) {
+  function failJob(id: string, message: string, options?: { userFacing?: boolean }) {
+    // The store keeps the real diagnostic — the dropdown and any bug report
+    // still show what actually happened.
     updateJob(id, { status: 'failed', error: message });
-    showError(message);
+    showPersistentError(
+      options?.userFacing === false
+        ? 'That generation could not be finished. Your tokens have been refunded — try again, or pick a different style.'
+        : message,
+      { id: `generation-failed-${id}` },
+    );
   }
 
   async function triggerRefund(id: string) {

@@ -19,9 +19,13 @@ export function showError(message: string): void {
  * Stays up until dismissed, and carries the close control that makes dismissing
  * it possible — an indefinite toast with no way to close it is an obstruction,
  * not a warning.
+ *
+ * `id` DEDUPES. sonner keys toasts by id, so an id turns N concurrent failures
+ * that produce the same message into one toast rather than a stack of
+ * identical ones. Optional, because most callers raise a one-off.
  */
-export function showPersistentError(message: string): void {
-  toast.error(message, { duration: Infinity, closeButton: true });
+export function showPersistentError(message: string, options?: { id?: string }): void {
+  toast.error(message, { duration: Infinity, closeButton: true, id: options?.id });
 }
 
 export function showSuccess(message: string): void {
