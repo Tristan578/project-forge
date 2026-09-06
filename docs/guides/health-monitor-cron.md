@@ -248,26 +248,33 @@ section proves less than it looks like it proves.
 **What this rehearsal proves:** the route detects a degraded service and raises
 a Sentry issue for it.
 
-**A preview issue is NOT filtered out — it is tagged `production`, and this
-rehearsal can page on-call.** All three Sentry inits set
+**A preview issue is NOT distinguishable by environment — it is tagged
+`production`.** All three Sentry inits set
 `environment: process.env.NODE_ENV ?? 'development'`
 (`web/sentry.server.config.ts`, `web/sentry.edge.config.ts`,
 `web/instrumentation-client.ts`). None reads `VERCEL_ENV`, and there is no
 `SENTRY_ENVIRONMENT` anywhere in `web/`. A preview deployment is a production
 Next.js build, so `NODE_ENV` is `production` there and its issues carry
-`environment: production` like any other. `docs/sentry-alert-rules.md` requires
-Environment = `production` on all P1/P2 rules, so a synthetic failure raised
-here can match them.
+`environment: production` like any other.
 
-Tell someone before you run this, or pick a window where a spurious P1 is
-acceptable. And read silence here as a fault worth investigating — it is not the
-environment filter doing its job.
+So a synthetic failure raised by this rehearsal is indistinguishable, by
+environment, from a real production one — in the Sentry issue stream and to any
+rule filtering on that tag. Two things follow.
 
-Two things follow. Adding `preview` to a rule's environment filter is a
-**no-op**: no issue this codebase emits ever carries that tag, so the filter
-matches nothing and you will conclude the alert path is broken when it is not.
-And genuinely separating preview from production in Sentry is a code change —
-set `environment` from `VERCEL_ENV` — not a rule edit.
+Adding `preview` to a rule's environment filter is a **no-op**: no issue this
+codebase emits ever carries that tag, so the filter matches nothing. Separating
+preview from production in Sentry needs a code change — set `environment` from
+`VERCEL_ENV` — not a rule edit.
+
+And silence here does not tell you the environment filter worked, because there
+is no such filtering to observe. If you are using this rehearsal to test whether
+a rule delivers, the environment tag cannot be the thing that explains a
+negative result; look at whether the rule exists and what its other conditions
+are. **What `docs/sentry-alert-rules.md` describes is not necessarily
+configured** — that file says so in its own opening: the rules it lists are
+recommendations, and "actual rules must be created in the Sentry dashboard".
+Check the dashboard for what is really there before drawing any conclusion from
+this step.
 
 Note too that `captureException` reads **`SENTRY_DSN` alone** and
 no-ops without it (`web/src/lib/monitoring/sentry-server.ts`) - unlike
