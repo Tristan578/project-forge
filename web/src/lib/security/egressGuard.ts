@@ -488,11 +488,42 @@ function bodyStillHasCandidate(cleaned: string, json: boolean, pass: RedactionPa
       return value;
     });
   } catch {
-    return pass.hasCandidate(cleaned);
+    // A JSON-TYPED BODY THAT WILL NOT PARSE IS VERIFIED AT THE DEPTH IT WAS
+    // DETECTED AT, which is the deeper one. Falling back to `hasCandidate` here
+    // asked a SHALLOWER question than the scan that routed the response down
+    // this path, and that gap was a silent detect-then-emit: a malformed
+    // `application/json` body carrying a credential behind a literal escape was
+    // flagged by `hasCandidateInParsedJson`, could not be rewritten (the parse
+    // failed, so `redactBufferedBody` fell back to text mode, which reaches one
+    // level less deep), and then passed this check because this check could not
+    // see it either. The credential went out at status 500 with `console.error`
+    // and `captureException` called zero times — the outcome
+    // `cleanEnvelopeValue` calls the worst available.
+    //
+    // Verified at the same depth, the disagreement now fires: the response
+    // becomes the fixed 500 and the guard reports it.
+    return pass.hasCandidateInParsedJson(cleaned);
   }
   return found;
 }
 
+/**
+ * Rewrite a buffered body, and HAND BACK THE ORIGINAL BYTES WHEN NOTHING
+ * CHANGED.
+ *
+ * That last part is what lets the shapes stay broad. The scan reads serialised
+ * bytes and can match across two adjacent JSON fields, on punctuation no leaf
+ * contains — so a benign body can be routed down this path by a false positive.
+ * Re-serialising it would reorder integer-like keys, round integers past 2^53,
+ * turn `1e400` into `null`, `-0` into `0`, and destroy the pretty-printing on
+ * the `/api/user/export-data` attachment: corrupting a response that was never
+ * leaking, to fix nothing.
+ *
+ * So the comparison is made on the round-tripped form both times, which answers
+ * exactly "did any leaf change", and the ORIGINAL text is returned when the
+ * answer is no. A false positive now costs one parse and one walk and nothing
+ * else.
+ */
 function redactBufferedBody(text: string, json: boolean, pass: RedactionPass): string {
   if (json) {
     let parsed: unknown;
@@ -501,7 +532,9 @@ function redactBufferedBody(text: string, json: boolean, pass: RedactionPass): s
     } catch {
       return pass.redactText(text);
     }
-    return JSON.stringify(pass.redactValue(parsed)) ?? '';
+    const before = JSON.stringify(parsed);
+    const after = JSON.stringify(pass.redactValue(parsed)) ?? '';
+    return after === before ? text : after;
   }
   return pass.redactText(text);
 }

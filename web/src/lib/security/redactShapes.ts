@@ -75,16 +75,27 @@ const SECRET_SHAPES: readonly RegExp[] = [
   /\bBearer\s{1,8}[A-Za-z0-9._~+/=-]{12,400}/g,
   // Connection strings carry a password in the userinfo segment.
   //
-  // Every class here excludes `"` deliberately. Without it this shape STRADDLES
-  // JSON string boundaries: in `{"a":"https://x","b":"y@z"}` the serialised
-  // bytes read as scheme `https`, userinfo `x","b`, the `:` the pattern needs is
-  // the separator after the NEXT key, and the `@` arrives from a later field. It
-  // is a match no per-leaf rewrite can ever remove, and it fired on ordinary
-  // user content — a published game titled with a URL beside a description
-  // containing an `@`. A real URL cannot carry an unescaped `"` in userinfo or
-  // host (it would be percent-encoded, which the decoded view still catches), so
-  // excluding it costs no coverage.
-  /\b[a-zA-Z][a-zA-Z0-9+.-]{0,20}:\/\/[^\s:/@"]{1,100}:[^\s@"]{1,200}@[^\s"]{1,300}/g,
+  // THE CLASSES ADMIT `"`, AND THAT IS DELIBERATE. An earlier version excluded
+  // it and claimed the exclusion "costs no coverage". That was false, and
+  // measured false: a password containing a quote — which reaches a parsed leaf
+  // as a literal `"` — stopped matching entirely, so
+  //     {"error":"connect failed: postgres://appuser:hun\"ter2pw@host:5432/db"}
+  // went out verbatim, password intact, at both 200 and 500, while the same DSN
+  // without the quote was redacted. The justification was inverted as well:
+  // `%22` is caught by the RAW view, not the decoded one, since the decoded view
+  // holds a literal quote and could not match either.
+  //
+  // The exclusion existed because this shape can STRADDLE JSON string
+  // boundaries — in `{"a":"https://x","b":"y@z"}` the serialised bytes read as
+  // scheme `https`, userinfo `x","b`, the `:` from the next key's separator, and
+  // an `@` from a later field — which once turned the public gallery into a 500
+  // for every visitor. That is fixed where it belongs, in `egressGuard.ts`:
+  // `bodyStillHasCandidate` verifies per leaf, so a match no leaf contains
+  // cannot fail closed, and `redactBufferedBody` returns the original bytes when
+  // no leaf changed, so a false positive costs one parse rather than a corrupted
+  // response. Narrowing a credential pattern to work around a verification bug
+  // traded real coverage for a fix that was already in the right place.
+  /\b[a-zA-Z][a-zA-Z0-9+.-]{0,20}:\/\/[^\s:/@]{1,100}:[^\s@]{1,200}@[^\s]{1,300}/g,
 ];
 
 /**

@@ -988,10 +988,30 @@ describe('Sentry profiling config must stay pinned', () => {
  * on the source, the way the MCP bridge's literal-member-expression gate is.
  */
 describe('#9736: the deep Sentry redactor is installed server-side and not imported client-side', () => {
+  /**
+   * Read a file with its COMMENTS STRIPPED, so every pin below asserts
+   * EXECUTABLE code.
+   *
+   * Anchoring to line start rejected a line comment but not a block comment:
+   * wrapping the install in a block comment still matched
+   * `/^setSentryDeepRedactor\(/m`, because the call keeps its own line inside
+   * the block. So the pin stayed green with the install gone — the same
+   * containment weakness one round earlier, one spelling further along.
+   * Stripping closes both at once.
+   *
+   * The strip is itself checked: one that ate the file would make every
+   * `not.toContain` pass and every `toMatch` fail for the wrong reason, which
+   * is a scan over nothing reading as coverage (lessons-learned #9).
+   */
   const read = async (file: string) => {
     const fs = await import('fs');
     const path = await import('path');
-    return fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8');
+    const raw = fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8');
+    const stripped = raw
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(stripped.trim().length).toBeGreaterThan(100);
+    return stripped;
   };
 
   it.each(['sentry.server.config.ts', 'sentry.edge.config.ts'])(

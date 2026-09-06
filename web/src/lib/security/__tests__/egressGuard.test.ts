@@ -969,4 +969,59 @@ describe('withEgressGuard — regressions the pass-7 board found', () => {
     expect(text).not.toContain('hunter2hunter2');
     expect(text).toContain(REDACTION_PLACEHOLDER);
   });
+
+  // A password containing a QUOTE. A previous fix excluded `"` from the
+  // connection-string shape to stop it straddling JSON fields, with a comment
+  // claiming that cost no coverage. It cost exactly this: the quote reaches the
+  // parsed leaf as a literal character, so the whole match died and the DSN went
+  // out verbatim at both 200 and 500. The straddle is handled in the guard now
+  // — per-leaf verification, and original bytes back when no leaf changed — so
+  // the shape does not have to be narrowed to compensate.
+  it('redacts a connection string whose password contains a quote', async () => {
+    const quote = String.fromCharCode(34);
+    const dsn = `postgres://appuser:hun${quote}ter2pw1234@db.example.com:5432/forge`;
+    const handler = withEgressGuard(async () =>
+      new NextResponse(JSON.stringify({ error: `connect failed: ${dsn}` }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }));
+
+    const text = await (await handler()).text();
+
+    expect(text).not.toContain('ter2pw1234');
+    expect(text).toContain(REDACTION_PLACEHOLDER);
+  });
+
+  // A JSON body the scan flags and no leaf can account for must come back with
+  // its ORIGINAL BYTES, not a re-serialised copy. The round trip reorders
+  // integer-like keys and rounds integers past 2^53, so a false positive would
+  // corrupt a response that was never leaking.
+  it('returns original bytes when a scan match belongs to no leaf', async () => {
+    const body = '{"10":"a","2":"b","big":9007199254740993,"t":"https://x","d":"y@z"}';
+    const handler = withEgressGuard(async () =>
+      new NextResponse(body, { headers: { 'content-type': 'application/json' } }));
+
+    const res = await handler();
+    const text = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(text).toBe(body);
+  });
+
+  // A malformed `application/json` body is DETECTED one unescape level deeper
+  // than the text-mode rewrite can reach, so it cannot be cleaned. Verifying it
+  // at the shallower depth let it out silently — detected, slow path taken,
+  // nothing rewritten, credential emitted, and no report. It must fail closed.
+  it('fails closed on a malformed JSON body it detected but cannot rewrite', async () => {
+    const backslash = String.fromCharCode(92);
+    const key = 'msy_ABCDEFGHIJKLMNOP';
+    const broken = `{"error": "upstream said x${backslash}${backslash}n${key}"`;
+    const handler = withEgressGuard(async () =>
+      new NextResponse(broken, { status: 500, headers: { 'content-type': 'application/json' } }));
+
+    const res = await handler();
+    const text = await res.text();
+
+    expect(text).not.toContain(key);
+  });
 });
