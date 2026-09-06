@@ -1,82 +1,15 @@
+# SpawnForge — OpenAI Codex project configuration
+# See: https://developers.openai.com/codex/config-reference/
+
+# Model & approval
 model = "gpt-5.3-codex"
 approval_policy = "never"
 
+# Sandbox: allow writes only within the project
 [sandbox_workspace_write]
 allow = ["**/*"]
 
+# Disable features that could bypass workflow
 [features]
 shell_tool = false
 web_search = false
-
-[shell_environment_policy]
-inherit = "core"
-
-[shell_environment_policy.set]
-CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1"
-
-[mcp_servers.context7]
-command = "npx"
-args = [
-    "-y",
-    "@upstash/context7-mcp@latest",
-]
-
-[mcp_servers.github]
-command = "npx"
-args = [
-    "-y",
-    "@modelcontextprotocol/server-github",
-]
-
-[mcp_servers.neon]
-command = "npx"
-args = [
-    "-y",
-    "@neondatabase/mcp-server-neon",
-]
-env_vars = ["NEON_API_KEY"]
-
-[mcp_servers.playwright]
-command = "npx"
-args = [
-    "-y",
-    "@playwright/mcp@latest",
-]
-
-[mcp_servers.sentry]
-command = "npx"
-args = [
-    "-y",
-    "@sentry/mcp-server@latest",
-]
-env_vars = ["SENTRY_AUTH_TOKEN"]
-
-[mcp_servers.sentry.env]
-SENTRY_ORG = "tristan-nolan"
-SENTRY_PROJECT = "spawnforge-ai"
-
-[mcp_servers.stripe]
-command = "npx"
-args = [
-    "-y",
-    "@stripe/mcp@latest",
-]
-env_vars = ["STRIPE_SECRET_KEY"]
-
-# NOTE: no `[mcp_servers.taskboard]` here on purpose. The taskboard binary
-# lives OUTSIDE the repo at a path that differs per machine, and the tracked
-# `.mcp.json` registers no taskboard server for the same reason. A server that
-# needs a machine-local path belongs in a personal Codex config, not in a file
-# every contributor checks out — an absolute path here resolves to nothing on
-# any other machine and fails silently (see lessons-learned #9605).
-
-[mcp_servers.upstash]
-command = "npx"
-args = [
-    "-y",
-    "@upstash/mcp-server@latest",
-]
-env_vars = [
-    "UPSTASH_REDIS_REST_URL",
-    "UPSTASH_REDIS_REST_TOKEN",
-]

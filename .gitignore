@@ -169,7 +169,7 @@ apps/docs/content/mcp/*.mdx
 .codex/hooks/.sync.log
 *.bak
 
-# --- Half-finished cross-tool port: untracked on purpose (see #PORTISSUE) ---
+# --- Half-finished cross-tool port: untracked on purpose (see #9745) ---
 # `.codex/agents`, `.codex/hooks`, `.codex/hooks.json` and the project-specific
 # skills copied into `.agents/skills/` are a port of the `.claude/` tree that is
 # not finished, and committing it would ship instructions that do not work:
