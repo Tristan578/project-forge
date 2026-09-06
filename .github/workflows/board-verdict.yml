@@ -1,0 +1,48 @@
+name: Board Verdict
+
+# Publishes the latest review-board verdict as a commit status on the PR, so a
+# red board is visible next to CI instead of living only in a conversation.
+#
+# #9725 merged with two board majors open: CI was green, no threads were
+# unresolved, and the board's FAIL existed only in chat. Both blockers reached
+# `main`. The check is PENDING until a board has run against the current head,
+# so "nobody looked" and "someone looked and it was clean" cannot look the same.
+#
+# Re-evaluated when a PR head moves (a new push invalidates an older verdict)
+# and when a comment is posted or edited (that is how a verdict arrives).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  # Per PR, cancelling stale evaluations: only the newest verdict matters.
+  group: board-verdict-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  verdict:
+    name: Board Verdict
+    # `issue_comment` fires for plain issues too; those have no head to status.
+    if: ${{ github.event_name == 'pull_request' || github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Publish the latest board verdict as a commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        # `|| true`: a FAIL verdict makes the script exit 1 so it is usable as a
+        # local gate, but here the FAILING STATUS is the signal. Reddening this
+        # job too would just duplicate it, and would make the job's own red
+        # indistinguishable from a tooling error.
+        run: bash scripts/board-verdict.sh "$PR" || true
