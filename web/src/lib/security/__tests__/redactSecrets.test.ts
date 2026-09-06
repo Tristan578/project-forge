@@ -27,10 +27,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   redactSecrets,
-  redactSecretsAll,
+  createRedactionPass,
   resetSecretEnvCache,
+  RedactionBudgetExceededError,
+  MAX_REDACTION_NODES,
   REDACTION_PLACEHOLDER,
-  DEPTH_LIMIT_PLACEHOLDER,
+  CIRCULAR_PLACEHOLDER,
 } from '../redactSecrets';
 
 afterEach(() => {
@@ -67,7 +69,14 @@ describe('redactSecrets — shape matching', () => {
     // underscore-form `sk_` key could ever match it.
     ['Meshy key', 'msy' + '_' + mixed.slice(0, 28)],
     ['ElevenLabs key', 'sk' + '_' + '0123456789abcdef0123456789abcdef'],
-    ['SpawnForge API key', 'forge' + '_' + '0123456789abcdef0123456789abcdef'],
+    // SIXTY-FOUR hex, which is what `randomBytes(32).toString('hex')` produces
+    // (web/src/app/api/keys/api-key/route.ts:49). The previous fixture was 32
+    // hex, built to match a pattern that said `{32}` — so the fixture and the
+    // pattern agreed with each other and neither agreed with the artifact, and
+    // a REAL key passed through unredacted while the suite stayed green
+    // (lessons-learned #14). `{32}` cannot backtrack, so the 33rd hex character
+    // defeated the trailing `\b` and the match always failed.
+    ['SpawnForge API key', 'forge' + '_' + '0123456789abcdef'.repeat(4)],
   ];
 
   it.each(SHAPES)('removes a %s from surrounding text', (_label, secret) => {
@@ -186,26 +195,98 @@ describe('redactSecrets — behaviour on ordinary input', () => {
   });
 });
 
-describe('redactSecrets — the depth bound REDACTS rather than passing through', () => {
-  // The previous implementation returned the sub-tree unchanged past MAX_DEPTH,
-  // so a secret nested nine levels deep in `details` was emitted verbatim. The
-  // only test on the bound asserted a cyclic input did not throw — which pins
-  // termination and would pass over a total leak (lessons-learned #11).
+describe('redactSecrets — DEPTH DOES NOT DESTROY DATA, and a secret at any depth is still removed', () => {
+  // History, because it is the whole point of this block. The bound was
+  // `MAX_DEPTH = 8` and past it the sub-tree was REPLACED with a placeholder
+  // string. On the error path that was right: truncating a diagnostic costs
+  // nothing, and the version before it emitted a deeply-nested secret verbatim.
+  // Then `withEgressGuard` moved the same code onto every 200 body, where the
+  // bound silently destroyed tilemap tiles, skeleton bones and animation
+  // keyframes — see MAX_REDACTION_NODES. Depth is now unbounded; only cycles
+  // and a total node budget bound the walk.
   const nest = (depth: number, leaf: unknown): unknown =>
     depth === 0 ? leaf : { level: nest(depth - 1, leaf) };
 
-  it('replaces a sub-tree past the bound instead of emitting it', () => {
-    vi.stubEnv('PLATFORM_MESHY_KEY', 'deep-secret-value-not-a-known-shape');
-    const out = redactSecrets(nest(12, 'leaked deep-secret-value-not-a-known-shape'));
-    const json = JSON.stringify(out);
-    expect(json).not.toContain('deep-secret-value-not-a-known-shape');
-    expect(json).toContain(DEPTH_LIMIT_PLACEHOLDER);
+  it('returns a 40-level structure with every leaf intact', () => {
+    const deep = nest(40, { tiles: [1, 2, 3], name: 'ground' });
+    expect(redactSecrets(deep)).toEqual(deep);
   });
 
-  it('still redacts everything ABOVE the bound', () => {
+  it('still removes a secret nested 40 levels down — depth is not a hiding place', () => {
+    vi.stubEnv('PLATFORM_MESHY_KEY', 'deep-secret-value-not-a-known-shape');
+    const out = redactSecrets(nest(40, 'leaked deep-secret-value-not-a-known-shape'));
+    const json = JSON.stringify(out);
+    expect(json).not.toContain('deep-secret-value-not-a-known-shape');
+    expect(json).toContain(REDACTION_PLACEHOLDER);
+  });
+
+  it('still redacts everything above a deep sub-tree', () => {
     vi.stubEnv('PLATFORM_MESHY_KEY', 'shallow-secret-value-not-a-shape');
-    const out = redactSecrets({ a: 'shallow-secret-value-not-a-shape', deep: nest(12, 'x') });
+    const out = redactSecrets({ a: 'shallow-secret-value-not-a-shape', deep: nest(40, 'x') });
     expect(JSON.stringify(out)).not.toContain('shallow-secret-value-not-a-shape');
+  });
+
+  it('replaces only the CYCLE, and keeps the rest of the structure', () => {
+    const cyclic: Record<string, unknown> = { a: 'safe', list: [1, 2] };
+    cyclic.self = cyclic;
+    const out = redactSecrets(cyclic) as Record<string, unknown>;
+    expect(out.a).toBe('safe');
+    expect(out.list).toEqual([1, 2]);
+    expect(out.self).toBe(CIRCULAR_PLACEHOLDER);
+  });
+
+  it('does NOT treat a DAG as a cycle — one object referenced twice is data, not recursion', () => {
+    // The naive "everything I have already seen" guard fails this, and failing
+    // it would destroy legitimate data exactly as the depth bound did: a shared
+    // material or tileset referenced by two entities is an ordinary shape.
+    const shared = { tileset: 'grass', frames: [0, 1, 2] };
+    const out = redactSecrets({ a: shared, b: shared }) as Record<string, unknown>;
+    expect(out.a).toEqual(shared);
+    expect(out.b).toEqual(shared);
+  });
+
+  it('keeps a `__proto__` key as DATA instead of silently dropping it', () => {
+    // `result[key] = value` invokes Object.prototype's setter for this one key,
+    // so the key disappeared from the output and an object value was installed
+    // as a prototype. `sceneData` is `z.record(z.string(), z.unknown())`, so the
+    // key is reachable from user- and engine-authored JSON.
+    const body = JSON.parse('{"__proto__":{"a":1},"b":2}') as Record<string, unknown>;
+    const out = redactSecrets(body);
+    expect(JSON.stringify(out)).toBe('{"__proto__":{"a":1},"b":2}');
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+  });
+});
+
+describe('createRedactionPass — the node budget FAILS CLOSED', () => {
+  it('throws past the budget rather than returning a truncated value', () => {
+    // The bound exists so a pathological body cannot pin a request. It THROWS
+    // because the alternative — emitting a partially-walked structure — is the
+    // depth bound's mistake again: a corrupted payload served as if it were the
+    // real one. `withEgressGuard` turns this into its fixed 500.
+    //
+    // Sized off the exported constant, so lowering the budget cannot leave this
+    // asserting against a number that no longer exists.
+    const pass = createRedactionPass();
+    const over = new Array<number>(MAX_REDACTION_NODES + 1).fill(0);
+    expect(() => pass.redactValue(over)).toThrow(RedactionBudgetExceededError);
+  });
+
+  it('does not throw just under the budget — the bound is not firing on ordinary width', () => {
+    const pass = createRedactionPass();
+    const under = new Array<number>(1000).fill(0);
+    expect(pass.redactValue(under)).toEqual(under);
+  });
+
+  it('walks a 50,000-level structure without a stack overflow', () => {
+    // A recursive walk dies here with RangeError at roughly ten thousand
+    // frames, which would make "depth never destroys data" false at a limit
+    // nobody chose. The traversal is iterative over an explicit stack.
+    let node: Record<string, unknown> = { leaf: 'bottom' };
+    for (let i = 0; i < 50_000; i += 1) node = { n: node };
+    const pass = createRedactionPass();
+    let out = pass.redactValue(node);
+    for (let i = 0; i < 50_000; i += 1) out = (out as Record<string, unknown>).n as typeof out;
+    expect(out).toEqual({ leaf: 'bottom' });
   });
 });
 
@@ -254,7 +335,6 @@ describe('SECRET_NAME_PATTERN covers the variable names this deployment receives
    */
   const COVERED = [
     'GITHUB_MODELS_PAT',        // ours; ends _PAT, missed by the old suffix list
-    'ASSET_R2_ACCESS_KEY_ID',   // ours; ends _ID
     'ASSET_R2_SECRET_ACCESS_KEY',
     'ENCRYPTION_MASTER_KEY',
     'PLATFORM_SUNO_KEY',
@@ -267,7 +347,6 @@ describe('SECRET_NAME_PATTERN covers the variable names this deployment receives
     'PGPASSWORD',               // Neon/Postgres; no underscore before PASSWORD
     'POSTGRES_URL',
     'DATABASE_URL_UNPOOLED',
-    'AWS_ACCESS_KEY_ID',
     'AWS_SECRET_ACCESS_KEY',
   ];
 
@@ -277,7 +356,17 @@ describe('SECRET_NAME_PATTERN covers the variable names this deployment receives
     expect(redactSecrets(`upstream said ${value}`)).not.toContain(value);
   });
 
-  const NOT_COVERED = ['VERCEL_GIT_COMMIT_SHA', 'ASSET_CDN_HOSTS', 'MCP_RELAY_EDITOR_ORIGINS'];
+  const NOT_COVERED = [
+    'VERCEL_GIT_COMMIT_SHA',
+    'ASSET_CDN_HOSTS',
+    'MCP_RELAY_EDITOR_ORIGINS',
+    // A SigV4 access key id is a public identifier, not a credential, and it
+    // travels in the clear inside every presigned URL this deployment mints.
+    // Redacting it rewrote the signed `Location` of the marketplace download
+    // route and R2 answered 403. See PUBLIC_IDENTIFIER_NAME_PATTERN.
+    'ASSET_R2_ACCESS_KEY_ID',
+    'AWS_ACCESS_KEY_ID',
+  ];
 
   it.each(NOT_COVERED)('leaves the value of %s alone', (name) => {
     const value = `value-for-${name.toLowerCase()}-0123456789`;
@@ -385,34 +474,104 @@ describe('redactSecrets — source invariants', () => {
   });
 });
 
-describe('redactSecretsAll', () => {
+describe('createRedactionPass', () => {
   const KEY = 'sk-ant-api03-0123456789abcdefghijKLMNOPQRSTUVWXYZ';
 
-  it('redacts each input as its own root, so nesting depth is not consumed by batching', () => {
-    // Eight levels is `MAX_DEPTH`. If the batch wrapped its inputs in one
-    // carrier object, this body would be truncated to the depth placeholder by
-    // the mere act of guarding it.
+  it('redacts a secret at depth 8, where the old MAX_DEPTH bound used to truncate', () => {
+    // This exact shape — eight levels — is what `withEgressGuard` handed the
+    // redactor for every response, and the sub-tree at level 8 came back as the
+    // string '[REDACTED: nesting depth limit]'. Both halves are asserted: the
+    // structure survives AND the secret inside it is gone.
     const deep = { a: { b: { c: { d: { e: { f: { g: `key ${KEY}` } } } } } } };
-    const [out] = redactSecretsAll([deep]) as [typeof deep];
+    const out = createRedactionPass().redactValue(deep);
     expect(out.a.b.c.d.e.f.g).toBe(`key ${REDACTION_PLACEHOLDER}`);
   });
 
-  it('derives the environment list ONCE for the whole batch', () => {
+  it('derives the environment list ONCE for the whole pass', () => {
     resetSecretEnvCache();
     const spy = vi.spyOn(Object, 'keys');
     const before = spy.mock.calls.filter((c) => c[0] === process.env).length;
-    redactSecretsAll(['a', 'b', 'c', 'd', 'e', 'f']);
+    const pass = createRedactionPass();
+    for (const s of ['a', 'b', 'c', 'd', 'e', 'f']) pass.redactValue(s);
     const after = spy.mock.calls.filter((c) => c[0] === process.env).length;
     spy.mockRestore();
     // One derive, plus at most one fingerprint check.
     expect(after - before).toBeLessThanOrEqual(2);
   });
 
-  it('one hostile input does not stop the others being redacted', () => {
+  it('throws on a hostile input rather than emitting it, so the caller can fail closed', () => {
+    // `redactSecrets` swallows this (Sentry must never be broken by its own
+    // scrubber); a pass hands the decision to the caller, and `withEgressGuard`
+    // answers with its fixed 500.
     const hostile = { get boom(): string { throw new Error('nope'); } };
-    const out = redactSecretsAll([hostile, `key ${KEY}`]);
-    expect(out[0]).toBeUndefined();
-    expect(out[1]).toBe(`key ${REDACTION_PLACEHOLDER}`);
+    const pass = createRedactionPass();
+    expect(() => pass.redactValue(hostile)).toThrow();
+    expect(pass.redactValue(`key ${KEY}`)).toBe(`key ${REDACTION_PLACEHOLDER}`);
+  });
+
+  describe('hasCandidate — the scan the fast path depends on', () => {
+    it('says NO for ordinary text, which is what lets a body keep its original bytes', () => {
+      const pass = createRedactionPass();
+      expect(pass.hasCandidate('{"ok":true,"name":"Grass Tileset"}')).toBe(false);
+    });
+
+    it('says YES for every shape and every environment value redaction would act on', () => {
+      vi.stubEnv('PLATFORM_MESHY_KEY', 'not-a-known-shape-but-still-a-secret');
+      resetSecretEnvCache();
+      const pass = createRedactionPass();
+      expect(pass.hasCandidate(`echo ${KEY}`)).toBe(true);
+      expect(pass.hasCandidate('echo not-a-known-shape-but-still-a-secret')).toBe(true);
+    });
+
+    it('OVER-approximates: it never says no where redactText would change the string', () => {
+      // The soundness property the fast path rests on, checked by construction
+      // rather than by example. A `false` here with a changed string is a leak.
+      vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'env-value-with-no-known-shape-at-all');
+      resetSecretEnvCache();
+      const pass = createRedactionPass({ percentAware: true });
+      const samples = [
+        'plain text with nothing in it',
+        `bearer-ish ${KEY}`,
+        'env-value-with-no-known-shape-at-all inline',
+        `encoded%20${encodeURIComponent(KEY)}%20tail`,
+        `encoded%20${encodeURIComponent('env-value-with-no-known-shape-at-all')}`,
+        'postgresql://user:hunter2ispassword@db.example.com:5432/main',
+        'a%20b%20c',
+        '{"tiles":[1,2,3,null,4]}',
+      ];
+      for (const sample of samples) {
+        const changed = pass.redactText(sample) !== sample;
+        if (changed) expect(pass.hasCandidate(sample), sample).toBe(true);
+      }
+      // ...and the sweep is not vacuous: at least some samples DID change.
+      expect(samples.filter((s) => pass.redactText(s) !== s).length).toBeGreaterThan(3);
+    });
+  });
+
+  describe('includeSelfIssuedShapes — the forge_ key is scoped to diagnostic text', () => {
+    // 64 hex, which is what randomBytes(32).toString('hex') actually produces.
+    const FORGE_KEY = `forge_${'0123456789abcdef'.repeat(4)}`;
+
+    it('removes it by default, which is the Sentry and error-body path', () => {
+      expect(createRedactionPass().redactText(`rejected ${FORGE_KEY}`)).not.toContain(FORGE_KEY);
+    });
+
+    it('leaves it alone when the caller opts out, so the one-time key display still works', () => {
+      // POST /api/keys/api-key returns `key: rawKey` in its 200 body — that IS
+      // the feature. A shape firing there would empty the API Keys UI.
+      const pass = createRedactionPass({ includeSelfIssuedShapes: false });
+      const body = `{"key":"${FORGE_KEY}","warning":"Save this key now."}`;
+      expect(pass.redactText(body)).toBe(body);
+      expect(pass.hasCandidate(body)).toBe(false);
+    });
+
+    it('the old 32-hex pattern could not have matched a real key at all', () => {
+      // Kept as a named regression: `{32}` cannot backtrack, so the 33rd hex
+      // character defeated the trailing \b. The shape was listed as coverage
+      // and provided none.
+      expect(/\bforge_[0-9a-f]{32}\b/.test(FORGE_KEY)).toBe(false);
+      expect(/\bforge_[0-9a-f]{64}\b/.test(FORGE_KEY)).toBe(true);
+    });
   });
 
   describe('percentAware', () => {
@@ -425,13 +584,12 @@ describe('redactSecretsAll', () => {
     const encoded = `https://x.test/fail?e=invalid%20key%20${KEY}%22%7D`;
 
     it('is OFF by default, so the Sentry path and the response constructors are unchanged', () => {
-      const [out] = redactSecretsAll([encoded]) as [string];
-      expect(out).toBe(encoded);
+      expect(createRedactionPass().redactText(encoded)).toBe(encoded);
       expect(redactSecrets(encoded)).toBe(encoded);
     });
 
     it('removes a secret that is only visible once escapes are resolved', () => {
-      const [out] = redactSecretsAll([encoded], { percentAware: true }) as [string];
+      const out = createRedactionPass({ percentAware: true }).redactText(encoded);
       expect(out).not.toContain(KEY);
       expect(out).toContain(REDACTION_PLACEHOLDER);
       // The surrounding encoding is untouched — only the matched run is cut, so
@@ -443,21 +601,51 @@ describe('redactSecretsAll', () => {
       vi.stubEnv('PROVIDER_ACCESS_TOKEN', 'value with spaces and /slashes/');
       resetSecretEnvCache();
       const raw = 'detail=value%20with%20spaces%20and%20%2Fslashes%2F&ok=1';
-      const [out] = redactSecretsAll([raw], { percentAware: true }) as [string];
+      const out = createRedactionPass({ percentAware: true }).redactText(raw);
       expect(out).toBe(`detail=${REDACTION_PLACEHOLDER}&ok=1`);
     });
 
     it('leaves a string with no escapes, and a string whose escapes hide nothing, exactly as it was', () => {
-      const plain = 'nothing to see here';
-      const harmless = 'a%20b%20c';
-      const out = redactSecretsAll([plain, harmless], { percentAware: true });
-      expect(out).toEqual([plain, harmless]);
+      const pass = createRedactionPass({ percentAware: true });
+      expect(pass.redactText('nothing to see here')).toBe('nothing to see here');
+      expect(pass.redactText('a%20b%20c')).toBe('a%20b%20c');
     });
 
     it('does not corrupt a multi-byte UTF-8 escape sequence it cannot decode to ASCII', () => {
       const emoji = 'note%20%F0%9F%94%92%20locked';
-      const [out] = redactSecretsAll([emoji], { percentAware: true }) as [string];
-      expect(out).toBe(emoji);
+      expect(createRedactionPass({ percentAware: true }).redactText(emoji)).toBe(emoji);
     });
+  });
+});
+
+describe('the environment name pattern exempts a PUBLIC identifier', () => {
+  // ASSET_R2_ACCESS_KEY_ID matches the secret-name pattern on the word KEY, and
+  // its value appears verbatim in every SigV4 presigned URL as
+  // X-Amz-Credential=<AKID>/<date>/auto/s3/aws4_request. Redacting it rewrote
+  // the Location of /api/marketplace/assets/[id]/download, R2 answered 403
+  // InvalidAccessKeyId, and every paid asset download failed silently.
+  it('does NOT redact an access key ID out of a presigned URL', () => {
+    vi.stubEnv('ASSET_R2_ACCESS_KEY_ID', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    resetSecretEnvCache();
+    const url =
+      'https://acct.r2.cloudflarestorage.com/bucket/key?X-Amz-Credential='
+      + 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%2F20260906%2Fauto%2Fs3%2Faws4_request';
+    expect(createRedactionPass({ percentAware: true }).redactText(url)).toBe(url);
+  });
+
+  it('DOES still redact the paired secret access key', () => {
+    vi.stubEnv('ASSET_R2_SECRET_ACCESS_KEY', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    resetSecretEnvCache();
+    const out = redactSecrets('signing failed with bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    expect(out).not.toContain('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    expect(out).toContain(REDACTION_PLACEHOLDER);
+  });
+
+  it('the exemption is anchored, so it does not swallow an ordinary _KEY variable', () => {
+    vi.stubEnv('SOME_PROVIDER_KEY', 'cccccccccccccccccccccccccccccccc');
+    resetSecretEnvCache();
+    expect(redactSecrets('used cccccccccccccccccccccccccccccccc')).not.toContain(
+      'cccccccccccccccccccccccccccccccc',
+    );
   });
 });
