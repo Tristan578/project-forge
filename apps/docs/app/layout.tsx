@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
 import { DOCS_URL } from '../lib/site';
 import { hasValidClerkKey } from '../lib/clerk';
+import { DOCS_COMMIT_META_NAME, commitStampOf } from '../lib/commit';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,12 @@ export const metadata: Metadata = {
       'MCP command reference and API docs for SpawnForge — the AI-native browser game engine.',
     siteName: 'SpawnForge Docs',
     type: 'website',
+  },
+  // The deployed commit, so scripts/post-deploy-docs-check.sh can prove the
+  // production alias is serving THIS build and not the previous one. See
+  // lib/commit.ts; pinned by app/__tests__/layout-commit-stamp.test.ts.
+  other: {
+    [DOCS_COMMIT_META_NAME]: commitStampOf(process.env),
   },
 };
 

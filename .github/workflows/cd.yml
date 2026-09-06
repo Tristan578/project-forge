@@ -1799,6 +1799,23 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel deploy --prod --archive=tgz --token="$VERCEL_TOKEN"
 
+      # docs.spawnforge.ai/mcp 500'd in production for weeks with this job green
+      # (#9718): the manifest was never traced into the function, and nothing
+      # here looked at what had just been published. This probes the production
+      # alias (the deployment URL is SSO-protected and unobservable from here)
+      # and fails on a non-200 OR on a 200 with no commands rendered — the
+      # "0 commands" page is a 200, so status alone is the wrong property
+      # (lessons-learned #1). The commit assertion is what ties the probe to
+      # THIS deploy: the alias can still be serving the previous build (alias
+      # lag, or a deploy whose domain set missed docs.spawnforge.ai), and the
+      # page stamps VERCEL_GIT_COMMIT_SHA so the script can tell. Pinned by
+      # scripts/__tests__/post-deploy-docs-check.test.sh.
+      - name: Post-deploy check (docs MCP reference)
+        env:
+          DOCS_URL: https://docs.spawnforge.ai
+          DOCS_CHECK_EXPECT_COMMIT: ${{ github.sha }}
+        run: bash scripts/post-deploy-docs-check.sh "$DOCS_URL"
+
   # ---- Design Workbench Deploy ----
   # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
   deploy-design:
