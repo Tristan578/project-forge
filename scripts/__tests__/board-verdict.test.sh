@@ -66,16 +66,23 @@ run_case "prose mentioning PASS"         pending "the board came back PASS at $H
 echo "the published status"
 
 RECORD="$TMP/gh-calls.txt"
+# ONE ARGUMENT PER LINE, so an assertion can demand an EXACT argv element. The
+# first version recorded `$*` and matched with `grep -qF`, which is containment:
+# renaming the context to `review-board-shadow` — putting the status somewhere
+# nobody watches — kept every case green, and the commit message claimed
+# otherwise. That is lessons-learned #11 in the suite written to prevent it.
 cat > "$TMP/gh-stub" <<'STUB'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$GH_STUB_RECORD"
+printf '%s\n' "$@" >> "$GH_STUB_RECORD"
 exit 0
 STUB
 chmod +x "$TMP/gh-stub"
 
-# publish_case <name> <expected substring> <comments body>
+# publish_case <name> <exact argv element | substring> <comments body> [mode]
+# mode `exact` (default) demands a whole argv element; `contains` allows a
+# substring, for the URL, which carries the sha inside a longer path.
 publish_case() {
-  local name="$1" expected="$2" body="$3"
+  local name="$1" expected="$2" body="$3" mode="${4:-exact}"
   : > "$RECORD"
   printf '%s\n' "$body" > "$TMP/comments.txt"
   GH_STUB_RECORD="$RECORD" \
@@ -83,19 +90,27 @@ publish_case() {
     BOARD_VERDICT_HEAD_SHA="$HEAD" \
     BOARD_VERDICT_COMMENTS_FILE="$TMP/comments.txt" \
     bash "$SCRIPT" 1 >/dev/null 2>&1
-  if grep -qF "$expected" "$RECORD"; then
+  local found=1
+  if [ "$mode" = "exact" ]; then
+    grep -qxF "$expected" "$RECORD" || found=0
+  else
+    grep -qF "$expected" "$RECORD" || found=0
+  fi
+  if [ "$found" -eq 1 ]; then
     PASS=$((PASS+1)); echo "  ok   $name"
   else
-    FAIL=$((FAIL+1)); echo "  FAIL $name: nothing published matching '$expected'"
-    sed 's/^/         /' "$RECORD" | head -3
+    FAIL=$((FAIL+1)); echo "  FAIL $name: no argv element matching '$expected' ($mode)"
+    sed 's/^/         /' "$RECORD" | head -8
   fi
 }
 
 publish_case "a FAIL verdict publishes state=failure"  'state=failure' "<!-- board-verdict: FAIL sha=$HEAD -->"
 publish_case "a PASS verdict publishes state=success"  'state=success' "<!-- board-verdict: PASS sha=$HEAD -->"
 publish_case "no verdict publishes state=pending"      'state=pending' "nothing to see here"
-publish_case "the status is written under review-board" 'context=review-board' "<!-- board-verdict: FAIL sha=$HEAD -->"
-publish_case "the status is written against the head"  "statuses/$HEAD" "<!-- board-verdict: PASS sha=$HEAD -->"
+# EXACT: `review-board-shadow` and `review-boardX` are different checks, and a
+# status under either is invisible to everyone watching for this one.
+publish_case "the status is written under exactly review-board" 'context=review-board' "<!-- board-verdict: FAIL sha=$HEAD -->"
+publish_case "the status is written against the head"  "statuses/$HEAD" "<!-- board-verdict: PASS sha=$HEAD -->" contains
 
 # A FAIL must publish AND exit non-zero, so the script is usable as a local gate
 # even though the workflow deliberately keeps the failing STATUS as the signal.
@@ -163,12 +178,20 @@ else
   FAIL=$((FAIL+1)); echo "  FAIL any commenter could assert a verdict"
 fi
 
-# --- the seams must never be wired into CI ---
+# --- the seams must never be wired into CI, OR into the board workflow ---
+#
+# `.claude/workflows/` matters as much as `.github/workflows/`: the producer runs
+# from there, not from Actions, so `BOARD_VERDICT_GH_CMD=true` in ITS environment
+# makes `post-board-verdict.sh` print "posted board verdict PASS" while posting
+# nothing. Scanning only the CI directory left that entire path uncovered.
 echo "seam hygiene"
-if grep -rlE 'BOARD_VERDICT_(HEAD_SHA|COMMENTS_FILE|DRY_RUN|GH_CMD)' "$ROOT/.github/workflows" 2>/dev/null | grep -q .; then
-  FAIL=$((FAIL+1)); echo "  FAIL a workflow sets a test-only seam"
+seam_hits="$(grep -rlE 'BOARD_VERDICT_(HEAD_SHA|COMMENTS_FILE|DRY_RUN|GH_CMD)' \
+  "$ROOT/.github/workflows" "$ROOT/.claude/workflows" "$ROOT/.claude/skills/review-protocol" 2>/dev/null || true)"
+if [ -n "$seam_hits" ]; then
+  FAIL=$((FAIL+1)); echo "  FAIL a workflow or skill sets a test-only seam:"
+  printf '%s\n' "$seam_hits" | sed 's/^/         /'
 else
-  PASS=$((PASS+1)); echo "  ok   no workflow sets a test-only seam"
+  PASS=$((PASS+1)); echo "  ok   no workflow or skill sets a test-only seam"
 fi
 
 # --- the workflow must actually invoke the script, and not be neuterable ---
@@ -190,6 +213,29 @@ if [ "$run_count" -eq 1 ]; then
 else
   FAIL=$((FAIL+1)); echo "  FAIL board-verdict.yml has $run_count run: keys (expected 1)"
 fi
+
+# The same last-key-wins vector on the JOB's `if:`, which the run: count does not
+# reach. Measured: appending `    if: false` anywhere under the job — before or
+# after `steps:` — skips it on every PR, and the suite was green. The count is
+# ANCHORED TO THE JOB'S INDENT (4 spaces), because a `run:` step could carry its
+# own `if:` at 8 and that is legitimate.
+job_if_count="$(grep -cE '^    if:' "$WF" 2>/dev/null || true)"
+if [ "$job_if_count" -eq 1 ]; then
+  PASS=$((PASS+1)); echo "  ok   board-verdict.yml has exactly one job-level if: key"
+else
+  FAIL=$((FAIL+1)); echo "  FAIL board-verdict.yml has $job_if_count job-level if: keys (expected 1)"
+fi
+
+# A workflow that no longer fires on the events a verdict arrives by is a
+# workflow that publishes nothing, silently. Stripping `on:` down to
+# `workflow_dispatch:` left the suite green.
+for trigger in 'pull_request:' 'issue_comment:'; do
+  if grep -qE "^  ${trigger}$" "$WF" 2>/dev/null; then
+    PASS=$((PASS+1)); echo "  ok   board-verdict.yml still triggers on ${trigger%:}"
+  else
+    FAIL=$((FAIL+1)); echo "  FAIL board-verdict.yml no longer triggers on ${trigger%:}"
+  fi
+done
 
 if grep -qE '^ +continue-on-error:' "$WF" 2>/dev/null; then
   FAIL=$((FAIL+1)); echo "  FAIL continue-on-error would hide a tooling failure"
