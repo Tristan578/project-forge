@@ -13,6 +13,9 @@ export const POST = createGenerationHandler<
   // agent derives its step-timeout cap against the real 180s budget.
   maxDurationSeconds: 180,
   provider: DB_PROVIDER.music,
+  // Declared unavailable in UNAVAILABLE_CAPABILITIES until #9522 lands: every
+  // request is refused 503 before any token is deducted (#9117).
+  capability: 'music',
   operation: 'music_generation',
   rateLimitKey: 'gen-music',
   successStatus: 201,

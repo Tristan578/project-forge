@@ -506,7 +506,7 @@ Pre-built behavior components: CharacterController, Health, Collectible, Enemy, 
 
 ## AI Asset Generation Commands (generation category)
 
-Integrates with Meshy (3D/texture), ElevenLabs (SFX/voice), Suno (music).
+Integrates with Meshy (3D/texture) and ElevenLabs (SFX/voice). Music generation is not available yet — its provider is being replaced (#9522) and `generate_music` is withheld from AI tool sets and refused by the route until then.
 
 | Command | Description | Undo |
 |---------|-------------|------|
@@ -514,7 +514,7 @@ Integrates with Meshy (3D/texture), ElevenLabs (SFX/voice), Suno (music).
 | `generate_texture` | Generate PBR texture maps from prompt. | No |
 | `generate_sfx` | Generate sound effects via ElevenLabs. | No |
 | `generate_voice` | Generate voice line from text + voice profile. | No |
-| `generate_music` | Generate background music via Suno. | No |
+| `generate_music` | Generate background music. **Not available yet** (#9522): withheld from AI tool sets, refused 503 by the route. | No |
 | `generate_skybox` | Generate HDR skybox from prompt. | No |
 | `generate_sprite` | Generate 2D sprite from prompt. | No |
 | `generate_sprite_sheet` | Generate sprite sheet from prompt. | No |

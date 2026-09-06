@@ -34,6 +34,45 @@ vi.mock('lucide-react', () => ({
   Loader2: (props: Record<string, unknown>) => <span data-testid="loader-icon" {...props} />,
 }));
 
+// Capability gate (#9117): default to "available" so the submit tests below
+// exercise the real path; the unavailable cases flip it explicitly.
+vi.mock('@/hooks/useGenerationGate', () => ({
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+}));
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+
+describe('GenerateMusicDialog capability gate (#9117)', () => {
+  beforeEach(() => {
+    vi.mocked(useUserStore).mockImplementation(((selector: (s: unknown) => unknown) =>
+      selector({ tokenBalance: { total: 1000, monthlyRemaining: 1000, addon: 0 } })) as never);
+    vi.mocked(useEditorStore).mockImplementation(((selector: (s: unknown) => unknown) =>
+      selector({ primaryName: '' })) as never);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
+  });
+
+  it('shows the unavailable notice and disables Generate when the capability is unavailable', () => {
+    vi.mocked(useGenerationGate).mockReturnValue({
+      blocked: true,
+      reason: 'Music generation is unavailable (#9522).',
+      loading: false,
+      unprovisionable: true,
+    });
+    render(<GenerateMusicDialog isOpen={true} onClose={vi.fn()} />);
+    expect(useGenerationGate).toHaveBeenCalledWith('music-generation');
+    expect(screen.getByRole('status')).toHaveTextContent('Music generation is unavailable (#9522).');
+    fireEvent.change(screen.getByPlaceholderText(/chiptune/i), { target: { value: 'a valid prompt' } });
+    expect(screen.getByText('Generate').closest('button')).toBeDisabled();
+  });
+
+  it('renders no notice when the capability is available', () => {
+    render(<GenerateMusicDialog isOpen={true} onClose={vi.fn()} />);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
 describe('GenerateMusicDialog', () => {
   const mockOnClose = vi.fn();
   const importAudio = vi.fn();
@@ -73,11 +112,6 @@ describe('GenerateMusicDialog', () => {
   it('renders Generate Music heading', () => {
     render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
     expect(screen.getByText('Generate Music')).toBeInTheDocument();
-  });
-
-  it('renders preview notice about Suno API', () => {
-    render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText(/Music generation is in preview/)).toBeInTheDocument();
   });
 
   it('renders prompt textarea', () => {

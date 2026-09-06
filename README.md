@@ -12,7 +12,7 @@
 ## Why SpawnForge
 
 - **Browser-native** — No download, no IDE setup. Open a URL and start building 2D or 3D games.
-- **AI-first** — 25+ AI modules; the in-app AI is offered 275 of the 351 manifest commands (every `:write`-scoped command plus the `query` category) to drive the editor. External MCP agents can attach only in local builds, through an allowlist of 293 commands, and that path is not yet verified end to end (production access is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722)). Describe a scene in plain text and watch it materialize. Which capabilities are proven, unverified or unavailable per entry point: [capability matrix](docs/capability-matrix.md).
+- **AI-first** — 25+ AI modules; the in-app AI is offered 274 of the 351 manifest commands (every `:write`-scoped command plus the `query` category) to drive the editor. External MCP agents can attach only in local builds, through an allowlist of 293 commands, and that path is not yet verified end to end (production access is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722)). Describe a scene in plain text and watch it materialize. Which capabilities are proven, unverified or unavailable per entry point: [capability matrix](docs/capability-matrix.md).
 - **Real engine** — Bevy ECS compiled to WebAssembly, WebGPU rendering (WebGL2 fallback), Rapier physics, spatial audio, GPU particles, skeletal animation. Not a toy.
 - **One command interface** — The visual editor, AI chat, and external MCP agents all call the same `handle_command()` JSON API. There is no separate "AI mode."
 - **Publish instantly** — One-click publish to a shareable URL. Export as a standalone ZIP with PWA support.

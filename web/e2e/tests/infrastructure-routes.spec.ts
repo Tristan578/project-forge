@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { getCapabilities, isolatedClientHeaders } from '../helpers/capabilities';
 
 /**
  * PF-14: Infrastructure routes E2E tests — covers remaining gaps
@@ -97,12 +98,15 @@ test.describe('Infrastructure Routes @api', () => {
       expect(elapsed).toBeLessThan(5_000);
     });
 
+    // Through the shared helper: probing the route bare keys the same
+    // `public:capabilities:unknown` bucket every other job and worker shares,
+    // so this would 429 the next time the window is hot and report it as an
+    // unreadable `expect(200)` failure (#9725 p7).
     test('/api/capabilities responds within 3 seconds', async ({ request }) => {
       const start = Date.now();
-      const response = await request.get('/api/capabilities');
+      await getCapabilities(request);
       const elapsed = Date.now() - start;
 
-      expect(response.status()).toBe(200);
       expect(elapsed).toBeLessThan(3_000);
     });
   });
@@ -115,8 +119,12 @@ test.describe('Infrastructure Routes @api', () => {
       const endpoints = ['/api/health', '/api/status', '/api/capabilities', '/api/docs'];
 
       for (const endpoint of endpoints) {
-        const response = await request.get(endpoint);
-        expect(response.status()).toBe(200);
+        // Only /api/capabilities is public-rate-limited per client here; give
+        // it its own address so this sweep cannot 429 (#9725 p7).
+        const response = await request.get(endpoint, {
+          headers: endpoint === '/api/capabilities' ? isolatedClientHeaders() : undefined,
+        });
+        expect(response.status(), `${endpoint}: ${await response.text()}`).toBe(200);
         expect(response.headers()['content-type']).toContain('application/json');
       }
     });

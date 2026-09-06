@@ -1,7 +1,7 @@
 ---
 title: Known Limitations & Workarounds
 description: What SpawnForge can and can't do today, with workarounds for common gaps
-lastUpdated: 2026-03-16
+lastUpdated: 2026-09-05
 relatedFiles:
   - docs/known-limitations.md
 ---
@@ -16,7 +16,7 @@ These features are complete, tested, and production-ready:
 
 - **2D Engine**: Sprites, tilemaps, 2D physics (Rapier2D), joints, sprite animation, camera
 - **3D Engine**: PBR materials, skeletal animation, physics (Rapier3D), particles, terrain, CSG, LOD
-- **AI Creation**: 351 MCP commands, natural language chat, compound actions, asset generation
+- **AI Creation**: 351 MCP commands, natural language chat, compound actions, asset generation (3D models, textures, sound effects, voice; music generation is not available yet, see limitation 6)
 - **Audio**: Spatial audio, bus mixer, reverb zones, adaptive music, snapshots
 - **Scripting**: TypeScript + visual scripting with 73 node types
 - **Export**: HTML5 bundles, cloud publishing, mobile touch controls
@@ -51,6 +51,12 @@ These features are complete, tested, and production-ready:
 **What works**: Published games play on mobile with touch controls (5 presets).
 **What's missing**: The editor itself is not optimized for mobile screens (no touch-based entity manipulation).
 **Workaround**: Use a tablet in landscape mode for light editing. Full editing requires desktop/laptop.
+
+### 6. Music Generation — Not Available Yet
+**What works**: Sound effects and voice lines generate normally; music you upload yourself plays through the same audio system (buses, spatial audio, adaptive stems).
+**What's missing**: The Generate Music dialog, the Asset panel's "Generate Music" item, the Audio inspector's Music button, the `generate_music` command and `forge.ai.generateMusic` all show an explicit unavailable state while the music provider is replaced. Nothing is charged.
+**Workaround**: Upload a track from the Asset panel, or generate a sound effect and loop it.
+**Timeline**: Tracked in known-limitations.md (music generation entry); returns when the new provider is wired.
 
 ## Performance Targets
 
