@@ -534,7 +534,19 @@ function buildForgeApi(scriptEntityId: string) {
         return asyncRequest('physics', 'raycast2d', { originX, originY, dirX, dirY, maxDistance: maxDistance ?? 100 });
       },
       isGrounded: async (eid: string, distance?: number) => {
-        return asyncRequest('physics', 'isGrounded', { entityId: eid, distance: distance ?? 0.1 });
+        // The ground check is a downward ray FROM THE ENTITY, so the origin has
+        // to come from here — the handler has no entity positions. It used to
+        // send only `{entityId, distance}`, and the engine has no
+        // "cast from this entity" mode, so the cast happened from the world
+        // origin for every entity (#9271).
+        const state = entityStates[eid];
+        if (!state) return false;
+        return asyncRequest('physics', 'isGrounded', {
+          entityId: eid,
+          originX: state.position[0],
+          originY: state.position[1],
+          distance: distance ?? 0.1,
+        });
       },
       setGravity: (x: number, y: number) => {
         pendingCommands.push({ cmd: 'set_gravity2d', gravityX: x, gravityY: y });

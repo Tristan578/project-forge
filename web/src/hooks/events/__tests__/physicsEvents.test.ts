@@ -1209,7 +1209,7 @@ describe('handlePhysicsEvent', () => {
     });
 
     it('resolves the awaiting request with the flattened hit', async () => {
-      const answer = awaitRaycast2dAnswer();
+      const answer = awaitRaycast2dAnswer().answer;
 
       const handled = handlePhysicsEvent(
         'RAYCAST2D_HIT',
@@ -1235,7 +1235,7 @@ describe('handlePhysicsEvent', () => {
     });
 
     it('resolves the awaiting request with null on a miss', async () => {
-      const answer = awaitRaycast2dAnswer();
+      const answer = awaitRaycast2dAnswer().answer;
       expect(handlePhysicsEvent('RAYCAST2D_MISS', {}, mockSetGet.set, mockSetGet.get)).toBe(true);
       await expect(answer).resolves.toBeNull();
     });
@@ -1259,8 +1259,8 @@ describe('handlePhysicsEvent', () => {
      * skipping it would shift every later answer by one.
      */
     it('consumes a malformed hit as a miss rather than desynchronising the queue', async () => {
-      const first = awaitRaycast2dAnswer();
-      const second = awaitRaycast2dAnswer();
+      const first = awaitRaycast2dAnswer().answer;
+      const second = awaitRaycast2dAnswer().answer;
 
       handlePhysicsEvent('RAYCAST2D_HIT', { pointX: 1 }, mockSetGet.set, mockSetGet.get);
       handlePhysicsEvent(
@@ -1280,7 +1280,7 @@ describe('handlePhysicsEvent', () => {
     });
 
     it('touches no store action', async () => {
-      const answer = awaitRaycast2dAnswer();
+      const answer = awaitRaycast2dAnswer().answer;
       handlePhysicsEvent('RAYCAST2D_MISS', {}, mockSetGet.set, mockSetGet.get);
       await answer;
       expect(actions.applyPhysics2dFromEngine).not.toHaveBeenCalled();

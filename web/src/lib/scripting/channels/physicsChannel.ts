@@ -17,11 +17,7 @@
 // dispatch, await. The order matters — see `castRay2d`.
 
 import type { AsyncHandler } from '../asyncChannelRouter';
-import {
-  awaitRaycast2dAnswer,
-  deliverRaycast2dAnswer,
-  type Raycast2dHit,
-} from '../raycast2dRegistry';
+import { awaitRaycast2dAnswer, type Raycast2dHit } from '../raycast2dRegistry';
 
 export interface PhysicsChannelDeps {
   dispatchCommand: (command: string, payload: unknown) => unknown;
@@ -70,17 +66,22 @@ export function createPhysicsHandler(deps: PhysicsChannelDeps): AsyncHandler {
     payload: Raycast2dArgs,
     signal: AbortSignal | undefined,
   ): Promise<Raycast2dHit | null> {
-    const answer = awaitRaycast2dAnswer(signal);
+    const slot = awaitRaycast2dAnswer(signal);
     // Settled here so a rejection on the failure path below is never reported
     // as unhandled; the caller still sees the throw.
-    answer.catch(() => undefined);
+    slot.answer.catch(() => undefined);
     try {
       acceptedOrThrow(deps.dispatchCommand('raycast2d', payload));
     } catch (err) {
-      deliverRaycast2dAnswer(null);
+      // `slot.abandon`, NOT `deliverRaycast2dAnswer(null)`. The latter settles
+      // the QUEUE HEAD, which is a different request whenever anything else is
+      // in flight — so a refusal here handed that request a MISS the engine
+      // never sent, and its real answer later settled this orphaned slot and
+      // was discarded. Measured on two overlapping casts.
+      slot.abandon(err instanceof Error ? err.message : '2D raycast dispatch failed');
       throw err;
     }
-    return answer;
+    return slot.answer;
   }
 
   return async (method: string, args: Record<string, unknown>, _reportProgress, signal) => {
@@ -114,7 +115,20 @@ export function createPhysicsHandler(deps: PhysicsChannelDeps): AsyncHandler {
         // false rather than casting from somewhere arbitrary.
         const originX = args.originX;
         const originY = args.originY;
-        if (typeof originX !== 'number' || typeof originY !== 'number') return false;
+        const casterId = args.entityId;
+        // `entityId` is required, not optional, because the self-hit check below
+        // is the only thing separating "standing on the ground" from "standing
+        // inside my own collider". Without it, `undefined !== 'player'` scores a
+        // distance-0 self-hit as ground and every entity reads as permanently
+        // grounded — a wrong answer, which is worse here than no answer.
+        if (
+          typeof originX !== 'number'
+          || typeof originY !== 'number'
+          || typeof casterId !== 'string'
+          || casterId === ''
+        ) {
+          return false;
+        }
 
         const hit = await castRay2d(
           {
@@ -131,7 +145,7 @@ export function createPhysicsHandler(deps: PhysicsChannelDeps): AsyncHandler {
         // has no self-exclusion, so a ray starting inside the caller's own
         // collider answers with the caller at distance 0. Standing on yourself
         // is not standing on the ground.
-        return hit.entityId !== args.entityId;
+        return hit.entityId !== casterId;
       }
       case 'overlapSphere': {
         const result = deps.dispatchCommand('overlap_sphere_query', {

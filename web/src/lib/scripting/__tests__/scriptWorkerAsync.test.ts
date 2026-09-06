@@ -395,28 +395,59 @@ describe('scriptWorker forge.* async method wiring', () => {
     expect((reqs[0].args as Record<string, unknown>).maxDistance).toBe(100);
   });
 
-  it('forge.physics2d.isGrounded sends async_request to physics/isGrounded', async () => {
+  // `isGrounded` casts a downward ray FROM THE ENTITY, so the worker looks the
+  // entity's position up and sends it as the origin. These used to pass
+  // `entities: {}` and assert `{entityId, distance}` — a shape the handler
+  // cannot act on, because it has no entity positions and the engine has no
+  // "cast from this entity" mode. The handler answered false without
+  // dispatching, so `isGrounded` was dead in production while these passed
+  // (lessons-learned #14).
+  const GROUNDED_ENTITIES = {
+    'entity-abc': { position: [4, 2, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  };
+
+  it('forge.physics2d.isGrounded sends the entity position as the ray origin', async () => {
     const handler = await setupWorker();
     const source = `
       function onStart() {
         forge.physics2d.isGrounded('entity-abc', 0.2);
       }
     `;
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source }]));
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source }], { entities: GROUNDED_ENTITIES }));
 
     const reqs = getAsyncRequests('physics', 'isGrounded');
     expect(reqs).toHaveLength(1);
-    expect(reqs[0].args).toEqual({ entityId: 'entity-abc', distance: 0.2 });
+    expect(reqs[0].args).toEqual({
+      entityId: 'entity-abc',
+      originX: 4,
+      originY: 2,
+      distance: 0.2,
+    });
+  });
+
+  it('forge.physics2d.isGrounded does not dispatch for an entity it has no position for', async () => {
+    const handler = await setupWorker();
+    const source = `
+      function onStart() {
+        forge.physics2d.isGrounded('never-seen');
+      }
+    `;
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source }], { entities: GROUNDED_ENTITIES }));
+
+    // No origin can be supplied, so there is no question to ask. Dispatching
+    // anyway would cast from the world origin and answer about a place the
+    // entity is not.
+    expect(getAsyncRequests('physics', 'isGrounded')).toHaveLength(0);
   });
 
   it('forge.physics2d.isGrounded uses default distance of 0.1 when omitted', async () => {
     const handler = await setupWorker();
     const source = `
       function onStart() {
-        forge.physics2d.isGrounded('entity-xyz');
+        forge.physics2d.isGrounded('entity-abc');
       }
     `;
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source }]));
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source }], { entities: GROUNDED_ENTITIES }));
 
     const reqs = getAsyncRequests('physics', 'isGrounded');
     expect(reqs).toHaveLength(1);
@@ -630,13 +661,15 @@ describe('scriptWorker forge.* async method wiring', () => {
     const source = `
       function onStart() {
         forge.physics2d.raycast(0, 0, 1, 0);
-        forge.physics2d.isGrounded('e1');
+        forge.physics2d.isGrounded('entity-abc');
         forge.audio.detectLoopPoints('a1');
         forge.audio.getWaveform('a1');
         forge.animation.listClips('e2');
       }
     `;
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source }]));
+    // `isGrounded` needs a known position or it answers false without
+    // dispatching, so this counts four requests instead of five otherwise.
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source }], { entities: GROUNDED_ENTITIES }));
 
     const allReqs = mockPostMessage.mock.calls
       .filter((call: unknown[]) => (call[0] as Record<string, unknown>).type === 'async_request')

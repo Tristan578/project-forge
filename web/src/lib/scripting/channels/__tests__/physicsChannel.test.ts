@@ -235,6 +235,52 @@ describe('createPhysicsHandler', () => {
       await expect(second).resolves.toEqual(secondHit);
     });
 
+    /**
+     * THE CROSSING THE COUNT COULD NOT SEE. The refusal path used to call
+     * `deliverRaycast2dAnswer(null)`, which shifts the QUEUE HEAD — a different
+     * request whenever anything else is in flight. So a refusal handed request A
+     * a MISS the engine never sent, and A's real answer later settled B's
+     * orphaned slot and was discarded.
+     *
+     * The existing case below asserts `pendingRaycast2dCount() === 0` on an
+     * EMPTY queue, where the count recovers even though the identity is wrong,
+     * so it can never observe this. Asserting on WHO got the answer is what
+     * catches it (lessons-learned #11: a count standing in for an identity).
+     */
+    it('a refused cast does not settle a different request that is still waiting', async () => {
+      const accepting = vi.fn(() => ACCEPTED);
+      const handler = createPhysicsHandler({ dispatchCommand: accepting });
+
+      let aSettled: unknown = 'PENDING';
+      const a = handler('raycast2d', { originX: 0, originY: 0, dirX: 1, dirY: 0 }, noProgress, makeSignal())
+        .then((v) => { aSettled = v; });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(pendingRaycast2dCount()).toBe(1);
+
+      const refusing = vi.fn(() => ({ success: false, error: 'boom' }));
+      const refused = createPhysicsHandler({ dispatchCommand: refusing });
+      await expect(
+        refused('raycast2d', { originX: 9, originY: 9, dirX: -1, dirY: 0 }, noProgress, makeSignal()),
+      ).rejects.toThrow(/boom/);
+
+      // A is untouched: no engine event has been delivered for it.
+      await Promise.resolve();
+      expect(aSettled).toBe('PENDING');
+      expect(pendingRaycast2dCount()).toBe(1);
+
+      // And A's own answer still reaches A.
+      const hit: Raycast2dHit = {
+        entityId: 'a-target',
+        point: { x: 1, y: 0 },
+        normal: { x: -1, y: 0 },
+        distance: 1,
+      };
+      deliverRaycast2dAnswer(hit);
+      await a;
+      expect(aSettled).toEqual(hit);
+    });
+
     it('throws when the engine refuses the command, and claims no slot', async () => {
       const dispatchCommand = vi.fn(() => ({ success: false, error: 'Invalid raycast2d payload' }));
       const handler = createPhysicsHandler({ dispatchCommand });

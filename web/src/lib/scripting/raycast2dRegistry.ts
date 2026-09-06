@@ -75,28 +75,72 @@ export function pendingRaycast2dCount(): number {
 }
 
 /**
+ * One claimed slot: the answer it is owed, and the means to give it back.
+ *
+ * `abandon` exists because a caller can discover, AFTER claiming, that no
+ * answer is coming — the engine refused the command, or was not there. It
+ * removes THIS slot by identity, which is the whole point: this queue
+ * correlates by POSITION, so releasing "the head" instead settles whichever
+ * request happens to be oldest and hands a stranger's caller an answer the
+ * engine never sent. See `abandonSlot`.
+ */
+export interface Raycast2dSlot {
+  /** Resolves with the engine's answer, or rejects if the slot is discarded. */
+  readonly answer: Promise<Raycast2dHit | null>;
+  /** Give this slot back. Safe to call twice; a no-op once settled. */
+  abandon(reason: string): void;
+}
+
+/**
+ * Remove one entry BY IDENTITY and reject it.
+ *
+ * Deliberately not `queue.shift()`. A refused dispatch must take back its OWN
+ * slot: the engine sends nothing for a command it rejected, so leaving the slot
+ * would put every later answer one position out — and settling the HEAD instead
+ * resolves a different, still-legitimate request with an answer that does not
+ * exist. The second was measured: request A received a spurious MISS because an
+ * unrelated request B was refused, with no engine event delivered at all.
+ *
+ * Splicing is correct precisely because no answer is owed for this entry, so
+ * the slots that remain still line up with the answers still coming.
+ */
+function abandonSlot(entry: PendingRaycast2d, reason: string): void {
+  const at = queue.indexOf(entry);
+  if (at !== -1) queue.splice(at, 1);
+  if (entry.settled) return;
+  entry.settled = true;
+  entry.detach();
+  entry.reject(new Error(reason));
+}
+
+/** A slot that was never enqueued: its answer is already rejected. */
+function rejectedSlot(message: string): Raycast2dSlot {
+  const answer = Promise.reject(new Error(message));
+  // Nothing was queued, so there is nothing to give back.
+  return { answer, abandon: () => {} };
+}
+
+/**
  * Claim the next answer the engine will emit.
  *
- * Call this ONLY after the `raycast2d` command was accepted: an unaccepted
- * command produces no event, and a slot claimed for it would swallow the
- * answer belonging to the request after it.
+ * The slot is claimed BEFORE the dispatch, so a claim can never race an answer,
+ * and is given back through `abandon` when the dispatch turns out to fail.
  */
-export function awaitRaycast2dAnswer(signal?: AbortSignal): Promise<Raycast2dHit | null> {
+export function awaitRaycast2dAnswer(signal?: AbortSignal): Raycast2dSlot {
   if (signal?.aborted) {
-    // Reject WITHOUT enqueuing: no command has been accepted on this path yet,
-    // so no answer is owed and the queue must stay aligned.
-    return Promise.reject(new Error('2D raycast aborted before it was dispatched'));
+    // Not enqueued: nothing has been dispatched on this path, so no answer is
+    // owed and the queue must stay aligned.
+    return rejectedSlot('2D raycast aborted before it was dispatched');
   }
   if (queue.length >= MAX_PENDING_RAYCASTS_2D) {
-    return Promise.reject(
-      new Error(
-        `Too many 2D raycasts awaiting an answer (${MAX_PENDING_RAYCASTS_2D}); the engine is not replying`,
-      ),
+    return rejectedSlot(
+      `Too many 2D raycasts awaiting an answer (${MAX_PENDING_RAYCASTS_2D}); the engine is not replying`,
     );
   }
 
-  return new Promise<Raycast2dHit | null>((resolve, reject) => {
-    const entry: PendingRaycast2d = {
+  let entry!: PendingRaycast2d;
+  const answer = new Promise<Raycast2dHit | null>((resolve, reject) => {
+    entry = {
       settled: false,
       resolve,
       reject,
@@ -116,6 +160,8 @@ export function awaitRaycast2dAnswer(signal?: AbortSignal): Promise<Raycast2dHit
 
     queue.push(entry);
   });
+
+  return { answer, abandon: (reason: string) => abandonSlot(entry, reason) };
 }
 
 /**

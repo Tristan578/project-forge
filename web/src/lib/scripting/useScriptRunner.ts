@@ -16,6 +16,7 @@ import { showError } from '@/lib/toast';
 import { DeltaSerializer, type SceneSnapshot } from '@/lib/engine/deltaSerializer';
 import { checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
 import { getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
+import { resetRaycast2dQueue } from '@/lib/scripting/raycast2dRegistry';
 import { isScriptAllowedCommand } from '@/lib/scripting/scriptAllowlist';
 
 const WATCHDOG_TIMEOUT_MS = 5000;
@@ -620,6 +621,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         routerRef.current = null;
       }
       clearGroundedStates();
+      // Any 2D raycast still awaiting an engine answer will never get one:
+      // the worker is being terminated. Dropping the slots rejects those
+      // promises now instead of leaving a restarted session inheriting the
+      // previous one's queue alignment (#9271).
+      resetRaycast2dQueue();
       workerRef.current.postMessage({ type: 'stop' });
       workerRef.current.terminate();
       workerRef.current = null;
@@ -655,6 +661,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         workerRef.current = null;
       }
       clearGroundedStates();
+      // Any 2D raycast still awaiting an engine answer will never get one:
+      // the worker is being terminated. Dropping the slots rejects those
+      // promises now instead of leaving a restarted session inheriting the
+      // previous one's queue alignment (#9271).
+      resetRaycast2dQueue();
       // Reset async channel router to abort in-flight operations and prevent leaks
       if (routerRef.current) {
         routerRef.current.reset();

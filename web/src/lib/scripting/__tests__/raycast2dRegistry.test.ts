@@ -37,7 +37,7 @@ describe('raycast2dRegistry', () => {
   });
 
   it('resolves a pending request with the hit that follows it', async () => {
-    const answer = awaitRaycast2dAnswer();
+    const answer = awaitRaycast2dAnswer().answer;
     expect(pendingRaycast2dCount()).toBe(1);
 
     expect(deliverRaycast2dAnswer(HIT)).toBe(true);
@@ -46,14 +46,14 @@ describe('raycast2dRegistry', () => {
   });
 
   it('resolves with null on a miss', async () => {
-    const answer = awaitRaycast2dAnswer();
+    const answer = awaitRaycast2dAnswer().answer;
     expect(deliverRaycast2dAnswer(null)).toBe(true);
     await expect(answer).resolves.toBeNull();
   });
 
   it('does not cross the answers of two overlapping raycasts', async () => {
-    const first = awaitRaycast2dAnswer();
-    const second = awaitRaycast2dAnswer();
+    const first = awaitRaycast2dAnswer().answer;
+    const second = awaitRaycast2dAnswer().answer;
 
     const firstHit = { ...HIT, entityId: 'first-target' };
     const secondHit = { ...HIT, entityId: 'second-target' };
@@ -66,9 +66,9 @@ describe('raycast2dRegistry', () => {
   });
 
   it('keeps a MISS in the right slot when it lands between two hits', async () => {
-    const a = awaitRaycast2dAnswer();
-    const b = awaitRaycast2dAnswer();
-    const c = awaitRaycast2dAnswer();
+    const a = awaitRaycast2dAnswer().answer;
+    const b = awaitRaycast2dAnswer().answer;
+    const c = awaitRaycast2dAnswer().answer;
 
     deliverRaycast2dAnswer(HIT);
     deliverRaycast2dAnswer(null);
@@ -94,8 +94,8 @@ describe('raycast2dRegistry', () => {
    */
   it('discards the answer owed to an abandoned request without shifting the rest', async () => {
     const controller = new AbortController();
-    const abandoned = awaitRaycast2dAnswer(controller.signal);
-    const live = awaitRaycast2dAnswer();
+    const abandoned = awaitRaycast2dAnswer(controller.signal).answer;
+    const live = awaitRaycast2dAnswer().answer;
 
     controller.abort();
     await expect(abandoned).rejects.toThrow(/abort/i);
@@ -111,7 +111,7 @@ describe('raycast2dRegistry', () => {
   it('rejects immediately when the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(awaitRaycast2dAnswer(controller.signal)).rejects.toThrow(/abort/i);
+    await expect(awaitRaycast2dAnswer(controller.signal).answer).rejects.toThrow(/abort/i);
     // Nothing was enqueued, so no answer is owed and alignment is untouched.
     expect(pendingRaycast2dCount()).toBe(0);
   });
@@ -120,9 +120,9 @@ describe('raycast2dRegistry', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const inFlight: Promise<unknown>[] = [];
     for (let i = 0; i < MAX_PENDING_RAYCASTS_2D; i++) {
-      inFlight.push(awaitRaycast2dAnswer().catch(() => null));
+      inFlight.push(awaitRaycast2dAnswer().answer.catch(() => null));
     }
-    await expect(awaitRaycast2dAnswer()).rejects.toThrow(/too many/i);
+    await expect(awaitRaycast2dAnswer().answer).rejects.toThrow(/too many/i);
     expect(pendingRaycast2dCount()).toBe(MAX_PENDING_RAYCASTS_2D);
 
     resetRaycast2dQueue();
@@ -131,7 +131,7 @@ describe('raycast2dRegistry', () => {
   });
 
   it('rejects everything still waiting when the queue is reset', async () => {
-    const pending = awaitRaycast2dAnswer();
+    const pending = awaitRaycast2dAnswer().answer;
     resetRaycast2dQueue();
     await expect(pending).rejects.toThrow(/stopped/i);
     expect(pendingRaycast2dCount()).toBe(0);
