@@ -94,7 +94,14 @@ export async function GET(req: NextRequest) {
         .limit(50)
     );
 
-    return NextResponse.json({
+    // STORE-AND-FORWARD (#9736). `errorMessage` below is a persisted column,
+    // written by `webhooks/generation-complete` and by this route's own PATCH.
+    // Every value written today is a fixed string, but this is a channel the
+    // catch-path lint rule structurally CANNOT see: a route can satisfy that
+    // rule and still return caught-error text a different route wrote earlier,
+    // possibly months ago. Redacting on the way out is the only control that
+    // covers rows already in the table.
+    return redactedJson({
       jobs: jobs.map((j) => ({
         id: j.id,
         providerJobId: j.providerJobId,
