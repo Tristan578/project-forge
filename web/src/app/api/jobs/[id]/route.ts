@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ const patchJobSchema = z.object({
 });
 
 // PATCH: Update job status (used by polling to sync provider status to DB)
-export async function PATCH(
+async function PATCH_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -80,3 +81,7 @@ export async function PATCH(
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const PATCH = withEgressGuard(PATCH_impl);

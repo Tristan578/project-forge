@@ -7,6 +7,7 @@ import {
   CHAT_BACKEND_ENV_VARS,
   isVercelRuntime,
 } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * Maps each provider capability to the environment variable(s) that must be set.
@@ -93,7 +94,7 @@ export interface CapabilitiesResponse {
  * Returns which AI capabilities are available based on configured API keys.
  * Checks env vars server-side so secrets are never exposed to the client.
  */
-export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
+async function GET_impl(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
   const limited = await rateLimitPublicRoute(req, 'capabilities', 30, 60_000);
   if (limited) return limited as NextResponse<CapabilitiesResponse>;
   const allCapabilities: ProviderCapability[] = [
@@ -147,3 +148,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
 }
 
 export const dynamic = 'force-dynamic';
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

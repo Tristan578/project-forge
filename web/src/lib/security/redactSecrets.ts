@@ -361,3 +361,36 @@ export function redactSecrets<T>(input: T): T {
     return (typeof input === 'string' ? REDACTION_PLACEHOLDER : undefined) as T;
   }
 }
+
+/**
+ * Redact several INDEPENDENT values in one environment derivation.
+ *
+ * `redactSecrets` derives (or fingerprints) the environment list once per call,
+ * and the fingerprint check enumerates `process.env`. `withEgressGuard` has to
+ * redact a body, an array of header values and an array of `Set-Cookie` values
+ * for every single response; calling `redactSecrets` three times would pay that
+ * enumeration three times per request. This pays it once.
+ *
+ * Each input is redacted as its OWN root at depth 0. That matters: wrapping
+ * them in one carrier object would consume a level of `MAX_DEPTH`, so a
+ * legitimate response body nested eight deep would start being truncated by the
+ * act of guarding it.
+ *
+ * Never throws, for the same reason `redactSecrets` does not — and a failure on
+ * one input does not affect the others.
+ */
+export function redactSecretsAll(inputs: readonly unknown[]): unknown[] {
+  let envValues: readonly string[];
+  try {
+    envValues = secretEnvValues();
+  } catch {
+    envValues = [];
+  }
+  return inputs.map((input) => {
+    try {
+      return redactWith(input, envValues, 0);
+    } catch {
+      return typeof input === 'string' ? REDACTION_PLACEHOLDER : undefined;
+    }
+  });
+}

@@ -6,6 +6,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
 import { buildPortalSessionParams } from '@/lib/billing/portal-config';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
@@ -19,7 +20,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * `?flow=cancel` query param deep-links the customer straight into the
  * cancellation/retention flow. See `buildPortalSessionParams`.
  */
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -59,3 +60,7 @@ export async function POST(req: NextRequest) {
     return redactedJson({ error: 'Failed to create billing portal session' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

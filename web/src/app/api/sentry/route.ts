@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * POST /api/sentry
@@ -34,7 +35,7 @@ function parseTrustedSentryConfig(): { host: string; projectId: string } | null 
 
 const TRUSTED_SENTRY = parseTrustedSentryConfig();
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   const rateLimited = await rateLimitPublicRoute(request, 'sentry');
   if (rateLimited) return rateLimited;
 
@@ -102,3 +103,7 @@ export async function POST(request: NextRequest) {
     return redactedJson({ error: 'Tunnel error' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

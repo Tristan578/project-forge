@@ -5,8 +5,9 @@ import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export async function GET(request: NextRequest) {
+async function GET_impl(request: NextRequest) {
   // 1. Authenticate + rate limit
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
@@ -89,3 +90,7 @@ export async function GET(request: NextRequest) {
     return redactedJson({ error: 'Could not read the 3D Model generation status. Please try again.' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

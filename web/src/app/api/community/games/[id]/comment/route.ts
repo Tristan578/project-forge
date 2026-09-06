@@ -9,6 +9,7 @@ import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const commentSchema = z.object({
   content: z.string().trim().min(1).max(1000),
@@ -18,7 +19,7 @@ const commentSchema = z.object({
 export const dynamic = 'force-dynamic';
 
 // Get comments for a game
-export async function GET(
+async function GET_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -68,7 +69,7 @@ export async function GET(
 }
 
 // Post a comment
-export async function POST(
+async function POST_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -153,3 +154,8 @@ export async function POST(
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);

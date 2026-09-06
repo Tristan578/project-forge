@@ -12,6 +12,7 @@ import {
   LEADERBOARD_METADATA_MAX_BYTES,
 } from '@/lib/config/databaseLimits';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -116,7 +117,7 @@ function validateMetadata(raw: unknown): MetadataCheck {
 // Returns top N scores for the named leaderboard.
 // ---------------------------------------------------------------------------
 
-export async function GET(
+async function GET_impl(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; slug: string }> }
 ) {
@@ -188,7 +189,7 @@ export async function GET(
 // Rate limited: 10 submissions per minute per IP.
 // ---------------------------------------------------------------------------
 
-export async function POST(
+async function POST_impl(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; slug: string }> }
 ) {
@@ -376,3 +377,8 @@ async function pruneLeaderboard(
     await queryWithResilience(() => getDb().delete(leaderboardEntries).where(eq(leaderboardEntries.id, id)));
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);

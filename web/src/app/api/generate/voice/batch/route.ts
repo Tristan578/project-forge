@@ -12,6 +12,7 @@ import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
 
@@ -34,7 +35,7 @@ const voiceBatchSchema = z.object({
   }),
 });
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     validate: voiceBatchSchema,
@@ -145,3 +146,7 @@ export async function POST(request: NextRequest) {
     totalFailed: errors.length,
   });
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

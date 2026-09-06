@@ -8,6 +8,7 @@ import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const asepriteExecuteSchema = z.object({
   operation: z.string().min(1).max(100),
@@ -27,7 +28,7 @@ async function getCachedTool(): Promise<BridgeToolConfig> {
   return config;
 }
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -107,3 +108,7 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

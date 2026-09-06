@@ -24,6 +24,7 @@ import {
 } from '@/lib/auth/webhookRetry';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /** Process a verified webhook event. Extracted so it can be used by the retry queue. */
 async function handleWebhookEvent(
@@ -57,7 +58,7 @@ async function handleWebhookEvent(
   }
 }
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   // Passed explicitly: verifyWebhook's own env fallback is
   // CLERK_WEBHOOK_SIGNING_SECRET, while this deployment's variable is
   // CLERK_WEBHOOK_SECRET (web/.env.example). Relying on the fallback would
@@ -106,3 +107,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ received: true });
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

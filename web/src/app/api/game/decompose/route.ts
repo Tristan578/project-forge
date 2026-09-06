@@ -31,6 +31,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { refundTokens } from '@/lib/tokens/service';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // One substantial single-shot LLM call producing a full GDD — priced at
 // parity with what this route billed under before #9339, when
@@ -48,7 +49,7 @@ const requestSchema = z.object({
   projectType: z.enum(['2d', '3d']),
 });
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   // BotID gate (PF-975 / #8948 pattern) — before any rate-limit consumption
   // or token deduction, so a blocked bot never spends either budget.
   const botIdResponse = await checkBotIdGate();
@@ -160,3 +161,7 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

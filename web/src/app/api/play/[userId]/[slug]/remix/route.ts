@@ -8,6 +8,7 @@ import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { quarantineRemixedScripts } from '@/lib/security/remixSanitizer';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,7 @@ export const dynamic = 'force-dynamic';
  * quarantined (kept, but disabled) on the way across the user boundary — see
  * `@/lib/security/remixSanitizer` and SEC-2 in CLAUDE.md.
  */
-export async function POST(
+async function POST_impl(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; slug: string }> }
 ) {
@@ -162,3 +163,7 @@ export async function POST(
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

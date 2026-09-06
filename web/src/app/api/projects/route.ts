@@ -4,6 +4,7 @@ import { listProjects, createProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { apiError, internalError } from '@/lib/api/errors';
 import { z } from 'zod';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -14,7 +15,7 @@ const createProjectSchema = z.object({
  * GET /api/projects
  * List all projects for the authenticated user.
  */
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
  * Create a new project.
  * Body: { name: string, sceneData: object }
  */
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -71,3 +72,8 @@ export async function POST(req: NextRequest) {
     return internalError();
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);

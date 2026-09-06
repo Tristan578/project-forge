@@ -389,8 +389,8 @@ const eslintConfig = defineConfig([
      * `route.ts`.
      *
      * A glob restricted to route.ts files asserts "no route FILE leaks", not
-     * "no API response leaks" (lessons-learned #1). The excluded files each
-     * construct a NextResponse that is returned straight to a client:
+     * "no API response leaks" (lessons-learned #1). The files ADDED to the glob
+     * below each construct a NextResponse returned straight to a client:
      * `lib/api` (createGenerationHandler is the single response constructor
      * for all twelve /api/generate/* routes), `lib/auth/api-auth.ts`,
      * `lib/rateLimit.ts`, `lib/apiValidation.ts`, `proxy.ts`, and every route
@@ -413,6 +413,7 @@ const eslintConfig = defineConfig([
       'src/lib/rateLimit.ts',
       'src/lib/apiValidation.ts',
       'src/lib/security/botId.ts',
+      'src/lib/security/egressGuard.ts',
       'src/proxy.ts',
     ],
     ignores: [

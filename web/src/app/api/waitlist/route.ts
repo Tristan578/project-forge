@@ -4,6 +4,7 @@ import { waitlistSignups } from '@/lib/db/schema';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * POST /api/waitlist — public waitlist lead capture (#8730).
@@ -46,7 +47,7 @@ function successResponse(): NextResponse {
   );
 }
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   const rateLimited = await rateLimitPublicRoute(
     request,
     'waitlist',
@@ -100,3 +101,7 @@ export async function POST(request: NextRequest) {
 
   return successResponse();
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

@@ -6,6 +6,7 @@ import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const patchLeaderboardSchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional(),
@@ -33,7 +34,7 @@ async function findBoard(gameId: string, boardName: string) {
 }
 
 // PATCH /api/publish/[id]/leaderboards/[name] — update leaderboard config
-export async function PATCH(
+async function PATCH_impl(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; name: string }> }
 ) {
@@ -108,7 +109,7 @@ export async function PATCH(
 }
 
 // DELETE /api/publish/[id]/leaderboards/[name] — delete leaderboard and all entries
-export async function DELETE(
+async function DELETE_impl(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; name: string }> }
 ) {
@@ -147,3 +148,8 @@ export async function DELETE(
     return redactedJson({ error: 'Failed to delete leaderboard' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const PATCH = withEgressGuard(PATCH_impl);
+export const DELETE = withEgressGuard(DELETE_impl);

@@ -40,6 +40,7 @@ import { DB_PROVIDER } from '@/lib/config/providers';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // This callback makes the same outbound provider-status HTTP calls the generate
 // routes make, so it gets the same execution budget (the generate routes export
@@ -97,7 +98,7 @@ async function finalizeFailedAndRefund(
   }
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function POST_impl(request: NextRequest): Promise<NextResponse> {
   if (!isQstashConfigured()) {
     return NextResponse.json({ error: 'QStash not configured' }, { status: 401 });
   }
@@ -172,3 +173,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return redactedJson({ error: 'Poll failed' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

@@ -6,6 +6,7 @@ import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const createLeaderboardSchema = z.object({
   name: z.string().trim().min(1).max(64),
@@ -29,7 +30,7 @@ async function verifyGameOwnership(gameId: string, userId: string) {
 }
 
 // GET /api/publish/[id]/leaderboards — list all leaderboards for a game
-export async function GET(
+async function GET_impl(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -68,7 +69,7 @@ export async function GET(
 }
 
 // POST /api/publish/[id]/leaderboards — create a new leaderboard
-export async function POST(
+async function POST_impl(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -125,3 +126,8 @@ export async function POST(
     return redactedJson({ error: 'Failed to create leaderboard' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);

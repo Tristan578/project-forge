@@ -9,6 +9,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { z } from 'zod';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 interface PacingSegment {
   sceneIndex: number;
@@ -50,7 +51,7 @@ Your task is to:
 2. Add 2–4 additional AI-generated suggestions that are specific, actionable, and grounded in established game design theory.
 3. Each suggestion must include: title (max 10 words), description (2-3 sentences), targetSceneIndex (null or 0-based integer), priority ("low" | "medium" | "high").`;
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   { report: PacingReport },
   PacingReport
 >({
@@ -150,3 +151,7 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
     };
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

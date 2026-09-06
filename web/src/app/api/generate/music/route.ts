@@ -3,8 +3,9 @@ export const maxDuration = 180; // API_MAX_DURATION_HEAVY_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   { prompt: string; durationSeconds: number; instrumental: boolean },
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
@@ -64,3 +65,7 @@ export const POST = createGenerationHandler<
     estimatedSeconds: 60,
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

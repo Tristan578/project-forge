@@ -12,6 +12,7 @@ import {
 } from '@/lib/storage/r2';
 import { captureException, captureMessage } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const ALLOWED_PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_ASSET_TYPES = [
@@ -28,7 +29,7 @@ const MAX_ASSET_SIZE = 100 * 1024 * 1024; // 100 MB
  * Accepts multipart/form-data with `preview` and/or `asset` file fields.
  * Uploads to Cloudflare R2 and updates the asset record with CDN URLs.
  */
-export async function POST(
+async function POST_impl(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
@@ -173,3 +174,7 @@ export async function POST(
     return redactedJson({ error: 'Failed to upload files' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

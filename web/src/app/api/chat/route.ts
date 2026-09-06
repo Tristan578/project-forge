@@ -46,6 +46,7 @@ import type {
   ToolModelMessage,
 } from '@ai-sdk/provider-utils';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // ---------------------------------------------------------------------------
 // Docs loading (server-side, filesystem)
@@ -444,7 +445,7 @@ export function buildModelMessages(messages: IncomingMessage[]): BuiltModelMessa
 // Load manifest tools for AI SDK
 // ---------------------------------------------------------------------------
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   // 1. Authenticate + rate-limit via shared middleware pipeline
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
@@ -1032,3 +1033,7 @@ export async function POST(request: NextRequest) {
     return redactedJson({ error: 'The assistant could not complete that request. Please try again.' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

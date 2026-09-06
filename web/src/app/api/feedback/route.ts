@@ -8,6 +8,7 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const feedbackSchema = z.object({
   type: z.enum(['bug', 'feature', 'general']),
@@ -15,7 +16,7 @@ const feedbackSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   const session = await authenticateClerkSession();
   if (!session.ok) return session.response;
   const clerkId = session.clerkId;
@@ -64,3 +65,7 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

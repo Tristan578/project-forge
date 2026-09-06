@@ -11,6 +11,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { API_KEY_SCOPES, findInvalidScopes, type ApiKeyScope } from '@/lib/config/scopes';
 import { RATE_LIMIT_ADMIN_WINDOW_MS } from '@/lib/config/timeouts';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const createApiKeySchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
@@ -18,7 +19,7 @@ const createApiKeySchema = z.object({
 });
 
 /** POST /api/keys/api-key — generate a new MCP API key */
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
 }
 
 /** GET /api/keys/api-key — list API keys (no secrets) */
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, { requireAuth: true });
   if (mid.error) return mid.error;
 
@@ -111,3 +112,8 @@ export async function GET(req: NextRequest) {
     return redactedJson({ error: 'Failed to list API keys' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);
+export const GET = withEgressGuard(GET_impl);

@@ -8,6 +8,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,7 @@ const featureGameSchema = z.object({
 });
 
 // GET: List currently featured games (admin)
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST: Feature a game (admin)
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -140,7 +141,7 @@ export async function POST(req: NextRequest) {
 }
 
 // DELETE: Unfeature a game (admin)
-export async function DELETE(req: NextRequest) {
+async function DELETE_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
     if (mid.error) return mid.error;
@@ -172,3 +173,9 @@ export async function DELETE(req: NextRequest) {
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);
+export const DELETE = withEgressGuard(DELETE_impl);

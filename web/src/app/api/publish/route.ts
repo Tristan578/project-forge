@@ -11,6 +11,7 @@ import { logger } from '@/lib/logging/logger';
 import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const publishSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -28,7 +29,7 @@ const publishSchema = z.object({
 // whether a projectId is safe to compare against a uuid column.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   try {
   const requestId = extractRequestId(request.headers);
   const reqLog = logger.child({ requestId, endpoint: 'POST /api/publish' });
@@ -328,3 +329,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

@@ -40,6 +40,7 @@ import {
   handleDisputeCreated,
 } from '@/lib/billing/radar-review';
 import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // Map Stripe price IDs to tiers
 function tierFromPriceId(priceId: string): Tier | null {
@@ -59,7 +60,7 @@ function resolveCustomerId(
   return typeof customer === 'string' ? customer : customer.id;
 }
 
-export async function POST(req: Request) {
+async function POST_impl(req: Request) {
   const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
   if (!WEBHOOK_SECRET) {
     return NextResponse.json({ error: 'Stripe webhook secret not configured' }, { status: 500 });
@@ -331,3 +332,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
     }
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

@@ -4,6 +4,7 @@ import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const VOICE_STYLE_MAP: Record<string, number> = {
   neutral: 0,
@@ -13,7 +14,7 @@ const VOICE_STYLE_MAP: Record<string, number> = {
   sinister: 0.7,
 };
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   {
     text: string;
     textLength: number;
@@ -112,3 +113,7 @@ export const POST = createGenerationHandler<
     };
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);
