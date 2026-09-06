@@ -204,6 +204,10 @@ describe('GET /api/generate/texture/status', () => {
     const data = await res.json();
 
     expect(res.status).toBe(500);
-    expect(data.error).toBe('Provider error');
+    // The provider's own text must NOT come back: the generate clients fold
+    // the upstream RESPONSE BODY into the thrown error, and on the platform
+    // path the credential in play is the platform's (#9736).
+    expect(data.error).not.toContain('Provider error');
+    expect(data.error).toBe('Could not read the texture generation status. Please try again.');
   });
 });

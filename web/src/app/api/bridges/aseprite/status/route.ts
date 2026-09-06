@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     captureException(err, { route: '/api/bridges/aseprite/status' });
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Status check failed' },
+      // Fixed text: the bridge's own error can name a local path or port (#9736).
+      { error: 'Status check failed' },
       { status: 500 }
     );
   }

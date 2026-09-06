@@ -180,6 +180,23 @@ Respond with ONLY valid JSON matching this exact structure (no markdown, no expl
 const MAX_RETRIES = 2;
 
 /**
+ * The prompt failed OUR safety filter (`sanitizePrompt`).
+ *
+ * A distinct type, not a string prefix, because `/api/game/decompose` returns
+ * this reason to the user verbatim and every other caught error must NOT be
+ * returned (#9736). `noRawErrorEgress.test.ts` exempts a response only where
+ * the code narrows with `instanceof` to a class on its client-safe list, so
+ * the exemption is visible in the type rather than resting on a message
+ * matching a prefix that any upstream error could also produce.
+ */
+export class PromptRejectedError extends Error {
+  constructor(public readonly reason: string) {
+    super(`Prompt rejected: ${reason}`);
+    this.name = 'PromptRejectedError';
+  }
+}
+
+/**
  * Decompose a natural language game description into a structured OrchestratorGDD.
  *
  * Calls the LLM with a systems-not-genres prompt, validates JSON output against
@@ -195,7 +212,7 @@ export async function decomposeIntoSystems(
   // [S3] Sanitize the user prompt before LLM call
   const sanitized = sanitizePrompt(prompt, 1000);
   if (!sanitized.safe) {
-    throw new Error(`Prompt rejected: ${sanitized.reason}`);
+    throw new PromptRejectedError(sanitized.reason ?? 'Prompt rejected');
   }
   const cleanPrompt = sanitized.filtered!;
 

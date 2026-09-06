@@ -1025,7 +1025,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const message = err instanceof Error ? err.message : 'AI API error';
-    return Response.json({ error: message }, { status: 500 });
+    // The model provider's text stays server-side: it is already on the
+    // Sentry event above, and an upstream body can carry the platform
+    // credential or backend identifiers (#9736).
+    return Response.json({ error: 'The assistant could not complete that request. Please try again.' }, { status: 500 });
   }
 }

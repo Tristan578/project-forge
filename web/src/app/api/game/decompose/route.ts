@@ -23,7 +23,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { assertTier } from '@/lib/auth/api-auth';
-import { decomposeIntoSystems } from '@/lib/game-creation/decomposer';
+import { decomposeIntoSystems, PromptRejectedError } from '@/lib/game-creation/decomposer';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
@@ -132,16 +132,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const message = err instanceof Error ? err.message : String(err);
-
-    // Prompt rejection is a 400, not a 500. This message is safety-filter
-    // guidance, not an internal error, so it's fine to return verbatim.
-    if (message.startsWith('Prompt rejected:')) {
+    // Prompt rejection is a 400, not a 500, and its text is OURS — written by
+    // `sanitizePrompt` for the user — so it is returned verbatim. Narrowed by
+    // type rather than by a message prefix: an upstream error could produce
+    // that prefix too, and every other caught error must not reach the client
+    // (#9736).
+    if (err instanceof PromptRejectedError) {
       return NextResponse.json(
-        { error: 'prompt_rejected', message },
+        { error: 'prompt_rejected', message: err.message },
         { status: 400 },
       );
     }
+
+    const message = err instanceof Error ? err.message : String(err);
 
     captureException(err instanceof Error ? err : new Error(message), {
       extra: { endpoint: 'POST /api/game/decompose', projectType },

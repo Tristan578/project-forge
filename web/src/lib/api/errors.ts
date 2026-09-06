@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { redactSecrets } from '@/lib/security/redactSecrets';
 
 // ---------------------------------------------------------------------------
 // Plan E: ApiErrorResponse + apiError() helper
@@ -23,11 +24,16 @@ export function apiError(
   code?: string,
   details?: unknown,
 ): NextResponse<ApiErrorResponse> {
+  // Redacted like `createErrorResponse` (#9736). This is a SECOND response
+  // constructor that does not delegate to that one, so a net applied only
+  // there would leave every `apiError` caller uncovered — exactly the gap that
+  // appears when one of two parallel paths is hardened and the other is
+  // assumed to match.
   return NextResponse.json(
     {
-      error,
+      error: redactSecrets(error),
       ...(code && { code }),
-      ...(details !== undefined && { details }),
+      ...(details !== undefined && { details: redactSecrets(details) }),
     },
     { status },
   );
@@ -97,9 +103,14 @@ export function createErrorResponse(
   message: string,
   options?: ApiErrorOptions,
 ): NextResponse {
-  const body: Record<string, unknown> = { error: message };
+  // Redact on the way out (#9736). Routes must not put upstream text in a
+  // response at all - `src/app/api/__tests__/noRawErrorEgress.test.ts` is what
+  // enforces that - but a static gate cannot see a string assembled at
+  // runtime, so this is the net under it. `details` is included because it is
+  // the field most likely to carry a raw object.
+  const body: Record<string, unknown> = { error: redactSecrets(message) };
   if (options?.code) body.code = options.code;
-  if (options?.details) body.details = options.details;
+  if (options?.details) body.details = redactSecrets(options.details);
 
   return NextResponse.json(body, {
     status,

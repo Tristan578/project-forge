@@ -174,6 +174,10 @@ describe('GET /api/generate/skybox/status', () => {
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Network error');
+    // The provider's own text must NOT come back: the generate clients fold
+    // the upstream RESPONSE BODY into the thrown error, and on the platform
+    // path the credential in play is the platform's (#9736).
+    expect(data.error).not.toContain('Network error');
+    expect(data.error).toBe('Could not read the skybox generation status. Please try again.');
   });
 });

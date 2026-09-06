@@ -1,5 +1,6 @@
 import type { Event } from '@sentry/nextjs';
 import * as Sentry from '@sentry/nextjs';
+import { redactSecrets } from '@/lib/security/redactSecrets';
 
 // ---------------------------------------------------------------------------
 // Fingerprinting helpers
@@ -212,7 +213,13 @@ function scrubString(input: string): string {
   for (const [re, replacement] of SECRET_VALUE_PATTERNS) {
     out = out.replace(re, replacement);
   }
-  return out;
+  // Then the shared redactor (#9736). It adds the half the pattern list above
+  // cannot have: an EXACT match against the values this process actually holds
+  // in its environment, so a provider added tomorrow, whose key format nobody
+  // here has seen, is still removed. Every Sentry pipeline - event, log and
+  // metric - funnels through this function, so wiring it here covers all three
+  // rather than trusting three call sites to stay in step.
+  return redactSecrets(out);
 }
 
 /**

@@ -94,7 +94,9 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     captureException(err, { route: '/api/docs' });
     return NextResponse.json(
-      { error: 'Failed to load documentation', details: err instanceof Error ? err.message : 'Unknown error' },
+      // `details` used to forward the caught error's text; it is on the
+      // Sentry event above instead (#9736).
+      { error: 'Failed to load documentation' },
       { status: 500 }
     );
   }

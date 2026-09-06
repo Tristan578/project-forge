@@ -82,7 +82,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/model/status', jobId });
-    const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    // The provider's own text stays server-side: `lib/generate/*Client.ts`
+    // folds the upstream RESPONSE BODY into the thrown error, and on the
+    // platform path the credential in play is the platform's (#9736).
+    return NextResponse.json({ error: 'Could not read the model generation status. Please try again.' }, { status: 500 });
   }
 }

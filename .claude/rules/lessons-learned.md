@@ -272,3 +272,33 @@ of a `*.failOpen` Sentry action as a contract break to diagnose, not noise, and
 carry the provider's error body into the captured exception so the next break
 is readable.
 **Ticket:** #9623
+
+### 15. Upstream error text is not yours to forward
+**Applies:** catch (err|err.message|String(err)|createErrorResponse|apiError|NextResponse.json|captureException|response.text()
+**What happens:** A route answers a failure with the upstream provider's own
+words. It reads like good diagnostics and it is an egress channel: on the
+platform path the credential in play is the PLATFORM's, so a provider that
+echoes key material in a 401 body hands a platform secret to any signed-in
+user. Found on twelve routes at once (#9736), all of the same shape:
+
+    const error = await response.text().catch(() => 'Unknown error');
+    throw new Error(`Meshy status error (${response.status}): ${error}`);
+    ...
+    const message = err instanceof Error ? err.message : 'Provider error';
+    return NextResponse.json({ error: message }, { status: 500 });
+
+**Why:** Two habits meet. A client folds the response BODY into the thrown
+error so a human can debug it, and a route forwards `err.message` because it
+looks more helpful than a fixed string. Neither author sees the other half.
+And the risk is not only credentials: upstream text carries internal
+hostnames, SQL, and other tenants' identifiers, none of which a redactor can
+recognise.
+**Prevention:** A caught error goes to Sentry and to the server log; the client
+gets fixed text. Where the message genuinely IS yours and belongs to the user
+(a safety-filter reason), give it a **type** and narrow with `instanceof` —
+never a message prefix, which any upstream error can also produce. The gate is
+`web/src/app/api/__tests__/noRawErrorEgress.test.ts`; `redactSecrets()` in the
+response constructors and the Sentry scrubber is the net under it, not a
+licence to forward. A grep that is clean today is not a guarantee: the next
+route someone writes is the one that matters, so the rule has to be enforced.
+**Ticket:** #9736
