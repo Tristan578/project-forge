@@ -337,17 +337,11 @@ export const ROUTE_CAPABILITY: Readonly<Record<string, ProviderCapability>> = {
   '/api/generate/voice': 'voice',
 };
 
-/**
- * Capabilities whose platform path resolves MORE than one provider key, all of
- * which must be present for the capability to be usable. `sprite`:
- * `/api/generate/sprite` picks the provider per request — `provider: 'auto'`
- * (the dialog's and the chat tool's default) resolves DALL-E 3 on OpenAI for
- * every style except pixel-art and Replicate SDXL for pixel-art — so a
- * Replicate-only environment still fails the default sprite path. Read by
- * `/api/capabilities` and `web/scripts/verify-platform-generation.ts` so the
- * two cannot disagree (#9725 review, lesson 1).
+/** Alternative providers for operation-dependent capabilities. Each request
+ * uses one provider; aggregate availability means at least one path works.
+ * The capabilities response exposes each option so dialogs gate the chosen path.
  */
-export const CAPABILITY_REQUIRED_PROVIDERS: Partial<Record<ProviderCapability, readonly PlatformKeyProvider[]>> = {
+export const CAPABILITY_PROVIDER_OPTIONS: Partial<Record<ProviderCapability, readonly PlatformKeyProvider[]>> = {
   sprite: ['replicate', 'openai'],
 };
 
@@ -497,10 +491,8 @@ export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> 
   sfx: [PLATFORM_KEY_ENV.elevenlabs],
   voice: [PLATFORM_KEY_ENV.elevenlabs],
   music: [PLATFORM_KEY_ENV.suno],
-  // Every key sprite spends (CAPABILITY_REQUIRED_PROVIDERS): the default path
-  // is DALL-E 3 on OpenAI, pixel-art is Replicate SDXL. Listing Replicate
-  // alone told a Replicate-only environment to configure the key it had.
-  sprite: CAPABILITY_REQUIRED_PROVIDERS.sprite!.map((p) => PLATFORM_KEY_ENV[p]),
+  // Independent sprite paths: OpenAI or Replicate.
+  sprite: CAPABILITY_PROVIDER_OPTIONS.sprite!.map((p) => PLATFORM_KEY_ENV[p]),
   bg_removal: [PLATFORM_KEY_ENV.removebg],
 };
 
@@ -510,12 +502,10 @@ export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> 
  * Vercel (OIDC auto-auth needs no explicit key).
  */
 export function isCapabilityConfigured(capability: ProviderCapability): boolean {
-  // A capability that spends more than one key is configured only when every
-  // one of them is present (CAPABILITY_REQUIRED_PROVIDERS - sprite's default
-  // path is DALL-E 3 on OpenAI, its pixel-art path is Replicate).
-  const required = CAPABILITY_REQUIRED_PROVIDERS[capability];
+  // Operation-dependent capabilities need any one supported provider.
+  const required = CAPABILITY_PROVIDER_OPTIONS[capability];
   if (required) {
-    return required.every((provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]));
+    return required.some((provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]));
   }
   const envVars = CAPABILITY_ENV_VARS[capability];
   const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
@@ -606,3 +596,10 @@ export const CIRCUIT_BREAKER_DEFAULTS = {
   minRequestsToEvaluate: 3,
   costAnomalyMultiplier: 2,
 } as const;
+
+/** Shared by the sprite route and dialog so provider selection cannot drift. */
+export function resolveSpriteProvider(provider: SpriteProvider = 'auto', style?: string): Exclude<SpriteProvider, 'auto'> {
+  return provider === 'auto' ? (style === 'pixel-art' ? 'sdxl' : 'dalle3') : provider;
+}
+
+export const SPRITE_PROVIDER_KEY = { dalle3: 'openai', sdxl: 'replicate' } as const;

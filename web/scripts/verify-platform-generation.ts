@@ -46,7 +46,7 @@ import {
   PLATFORM_KEY_CONSOLE_URL,
   GATEWAY_KEY_ENV,
   GATEWAY_CAPABILITIES,
-  CAPABILITY_REQUIRED_PROVIDERS,
+  CAPABILITY_PROVIDER_OPTIONS,
   getCapabilityUnavailability,
   type ProviderCapability,
   type PlatformKeyProvider,
@@ -187,12 +187,10 @@ export function buildPlan(env: Readonly<Record<string, string | undefined>>): Pl
       }];
     }
 
-    // One row per provider the capability's platform path can resolve - a
-    // capability that spends more than one key needs every one of them.
-    // One row per key the capability's platform path can resolve — shared with
-    // /api/capabilities through CAPABILITY_REQUIRED_PROVIDERS so the two agree.
+    // Each alternative stays visible in the report; one successful sprite
+    // provider verifies the aggregate capability, not every operation.
     const providers: readonly PlatformKeyProvider[] =
-      CAPABILITY_REQUIRED_PROVIDERS[capability] ?? [provider as PlatformKeyProvider];
+      CAPABILITY_PROVIDER_OPTIONS[capability] ?? [provider as PlatformKeyProvider];
     return providers.map((platformProvider): PlanRow => {
       const envVar = PLATFORM_KEY_ENV[platformProvider];
       return {
@@ -301,17 +299,17 @@ export function formatTable(results: ProbeResult[]): string {
 export interface Summary {
   /** Capabilities not declared unavailable (sprite's two rows count once). */
   offered: number;
-  /** Offered capabilities whose EVERY row passed. */
+  /** Offered capabilities with a verified usable path. */
   verified: number;
   /** Capabilities declared unavailable in code. */
   unavailable: number;
-  /** Rows that failed or whose key is missing — any of these is a non-zero exit. */
+  /** Offered capabilities without a verified path — any causes a non-zero exit. */
   failing: number;
 }
 
 /**
  * Count CAPABILITIES, not rows: a capability with two keys (sprite) is one
- * capability, verified only when every one of its rows passed, and `missing`
+ * capability, verified when a supported alternative passes. A missing sole path
  * counts as failing because an unset platform key is exactly what this
  * script exists to catch. Pure, so the exit-code decision is testable.
  */
@@ -320,8 +318,10 @@ export function summarize(results: ProbeResult[]): Summary {
   for (const r of results) byCapability.set(r.capability, [...(byCapability.get(r.capability) ?? []), r]);
   const groups = [...byCapability.values()];
   const offered = groups.filter((rows) => rows.every((r) => r.status !== 'unavailable'));
-  const verified = offered.filter((rows) => rows.every((r) => r.status === 'pass'));
-  const failing = results.filter((r) => r.status === 'fail' || r.status === 'missing');
+  const verified = offered.filter((rows) => CAPABILITY_PROVIDER_OPTIONS[rows[0].capability]
+    ? rows.some((r) => r.status === 'pass')
+    : rows.every((r) => r.status === 'pass'));
+  const failing = offered.filter((rows) => !verified.includes(rows));
   return {
     offered: offered.length,
     verified: verified.length,

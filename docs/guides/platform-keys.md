@@ -54,7 +54,7 @@ An actual `down` verdict is never suppressed.
 ## Decision per capability
 
 Decided from `DIRECT_CAPABILITY_PROVIDER`, `PLATFORM_KEY_ENV`,
-`GATEWAY_CAPABILITIES` and `CAPABILITY_REQUIRED_PROVIDERS` in
+`GATEWAY_CAPABILITIES` and `CAPABILITY_PROVIDER_OPTIONS` in
 `web/src/lib/config/providers.ts` — the same tables
 `web/scripts/verify-platform-generation.ts` reads, so its `provider` and
 `route` columns match the "Provider" and "Route" columns here (the env var is
@@ -67,7 +67,7 @@ to mint" columns are this runbook's; keep them in step when the tables change.
 | `model3d`, `texture` (also skybox) | Meshy | platform-key | `PLATFORM_MESHY_KEY` | **Platform key** (owner) | https://www.meshy.ai/settings/api — shown once, prefix `msy_` |
 | `sfx`, `voice` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key | https://elevenlabs.io/app/settings/api-keys |
 | `music` | (Suno → ElevenLabs) | unavailable | — | **Unavailable** until #9522 lands; then covered by `PLATFORM_ELEVENLABS_KEY` | n/a — Suno has no public API |
-| `sprite` (and pixel art) | Replicate **and** OpenAI | platform-key x2 | `PLATFORM_REPLICATE_KEY` + `PLATFORM_OPENAI_KEY` | **Two platform keys** (owner): `/api/generate/sprite` resolves DALL-E 3 on OpenAI for every style except pixel-art (the dialog's and the chat tool's default) and Replicate SDXL for pixel-art. A Replicate-only environment still fails the default path. #9523 may later fold the OpenAI half into the gateway | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
+| `sprite` (and pixel art) | Replicate or OpenAI, per operation | platform-key | `PLATFORM_REPLICATE_KEY` or `PLATFORM_OPENAI_KEY` | Pixel-art sprites, sprite sheets and tilesets use Replicate. Other single-sprite styles use OpenAI. Either enables the aggregate capability; the dialog gates each selected operation independently. Provision both to support every operation. | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
 | `bg_removal` | remove.bg | platform-key | `PLATFORM_REMOVEBG_KEY` | **Platform key** (owner) | https://www.remove.bg/dashboard#api-key |
 
 Not in the table: `ANTHROPIC_API_KEY` is only a chat fallback when the gateway
@@ -146,7 +146,7 @@ The script prints one row per provider key a capability needs (`sprite` therefor
 | `missing` | the env var is not set; `detail` names where to mint it |
 | `unavailable` | declared in `UNAVAILABLE_CAPABILITIES`; never probed |
 
-Exit code is 1 when any row is `missing` or `fail`; the summary line counts capabilities, and a multi-key capability is verified only when every one of its rows passed. The probes
+Exit code is 1 when an offered capability has no verified path. Sprite is verified when either provider passes; both provider rows remain visible so a missing or failed alternative is not mistaken for a verified operation. The probes
 are `GET` calls to each vendor's account/balance endpoint (URLs and doc links
 in `PROVIDER_PROBES`); they cost nothing and prove authentication, not output.
 

@@ -37,7 +37,7 @@ describe('GenerateSpriteDialog capability gate (#9117)', () => {
 
   it('asks the gate for sprite-generation', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={vi.fn()} />);
-    expect(useGenerationGate).toHaveBeenCalledWith('sprite-generation');
+    expect(useGenerationGate).toHaveBeenCalledWith('sprite-generation', 'replicate');
   });
 
   it('shows the notice and disables Generate when blocked', () => {
@@ -47,7 +47,8 @@ describe('GenerateSpriteDialog capability gate (#9117)', () => {
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-describedby', 'generate-sprite-unavailable');
     expect(screen.getByText('Generate').closest('button')).toBeDisabled();
     expect(screen.getByRole('textbox')).toBeDisabled();
-    for (const select of screen.getAllByRole('combobox')) expect(select).toBeDisabled();
+    expect(screen.getAllByRole('combobox')[0]).toBeEnabled(); // Allow switching to a supported provider.
+    expect(screen.getAllByRole('combobox')[1]).toBeDisabled();
   });
 });
 

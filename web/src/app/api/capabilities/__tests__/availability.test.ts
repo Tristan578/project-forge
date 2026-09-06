@@ -159,62 +159,36 @@ describe('GET /api/capabilities availability', () => {
     }
   });
 
-  it('treats a multi-key capability (sprite) as available only when every key is present', async () => {
-    vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
-    const replicateOnly = await call();
-    expect(status(replicateOnly.body, 'sprite').available).toBe(false);
-    vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk');
-    const both = await call();
-    expect(status(both.body, 'sprite').available).toBe(true);
+  it.each(['replicate', 'openai'])('allows a sprite path with only its platform key (%s)', async (provider) => {
+    vi.stubEnv(provider === 'replicate' ? 'PLATFORM_REPLICATE_KEY' : 'PLATFORM_OPENAI_KEY', 'key');
+    const { body } = await call();
+    const sprite = status(body, 'sprite');
+    expect(sprite.available).toBe(true);
+    expect(sprite.providerAvailability).toEqual({ replicate: provider === 'replicate', openai: provider === 'openai' });
+    expect(sprite.requiredProviders).toBeUndefined();
   });
 
-  // `available` for sprite is decided from CAPABILITY_REQUIRED_PROVIDERS
-  // (Replicate AND OpenAI); the explanation beside it must come from the same
-  // list, naming only what is MISSING. Deriving it from the single-key map
-  // told a Replicate-only environment to "Configure Replicate" — the one key
-  // it already had — and never named OpenAI (lesson 1 family).
-  it('names only the missing provider for sprite in a Replicate-only environment', async () => {
-    vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
+  it('names either provider when neither sprite path is available', async () => {
     const { body } = await call();
     const sprite = status(body, 'sprite');
     expect(sprite.available).toBe(false);
-    expect(sprite.requiredProviders).toEqual(['OpenAI']);
-    expect(sprite.hint).toContain('OpenAI');
-    expect(sprite.hint).not.toContain('Replicate');
-    expect(sprite.hint).toContain('Settings');
+    expect(sprite.providerAvailability).toEqual({ replicate: false, openai: false });
+    expect(sprite.requiredProviders).toEqual(['Replicate', 'OpenAI']);
+    expect(sprite.hint).toContain('Replicate or OpenAI');
   });
 
-  it('names every missing provider for sprite when neither key is present', async () => {
+  it.each(['replicate', 'openai'])('allows a sprite path with only its BYOK key (%s)', async (provider) => {
+    signedInWithByok([provider]);
     const { body } = await call();
-    const sprite = status(body, 'sprite');
-    expect(sprite.available).toBe(false);
-    expect(sprite.requiredProviders).toEqual(expect.arrayContaining(['Replicate', 'OpenAI']));
-    expect(sprite.requiredProviders).toHaveLength(2);
-    expect(sprite.hint).toContain('Replicate');
-    expect(sprite.hint).toContain('OpenAI');
+    expect(status(body, 'sprite').available).toBe(true);
+    expect(status(body, 'sprite').providerAvailability).toEqual({ replicate: provider === 'replicate', openai: provider === 'openai' });
   });
 
-  // `resolveApiKey` resolves each provider independently, BYOK first — so a
-  // user holding their own OpenAI key on a Replicate-only deployment can run
-  // both sprite paths. Availability must OR the sources per provider, not
-  // demand that every key come from the same side.
-  it('lets a BYOK key supply the half of sprite the platform lacks', async () => {
+  it('combines platform and BYOK sprite options per provider', async () => {
     vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
     signedInWithByok(['openai']);
     const { body } = await call();
-    expect(status(body, 'sprite').available).toBe(true);
-    expect(status(body, 'sprite').requiredProviders).toBeUndefined();
-  });
-
-  it('requires every sprite provider from BYOK when the platform has none', async () => {
-    signedInWithByok(['replicate']);
-    const replicateOnly = await call();
-    expect(status(replicateOnly.body, 'sprite').available).toBe(false);
-    expect(status(replicateOnly.body, 'sprite').requiredProviders).toEqual(['OpenAI']);
-
-    signedInWithByok(['replicate', 'openai']);
-    const both = await call();
-    expect(status(both.body, 'sprite').available).toBe(true);
+    expect(status(body, 'sprite').providerAvailability).toEqual({ replicate: true, openai: true });
   });
 
   // Fail-open on the SERVER became fail-closed on the CLIENT: the route

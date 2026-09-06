@@ -534,9 +534,9 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
  *               unconfigured capabilities are named in `error`, in
  *               `details.unconfiguredCapabilities`, and — because the public
  *               body strips both of those — in `summary`. Marked
- *               `configurationOnly` (#9727): production runs this way by
- *               decision, so the verdict stands but does not drive the
- *               top-level `overall` or the 15-minute Sentry page
+ *               `configurationOnly` only when an explicit deployment baseline
+ *               declares all the missing capabilities. Otherwise it affects
+ *               overall health and synthetic-monitor paging
  *   healthy   — chat resolves and every capability in CAPABILITY_ENV_VARS is
  *               configured
  *

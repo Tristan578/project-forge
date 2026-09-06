@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   CAPABILITY_ENV_VARS,
   CAPABILITY_LABELS,
-  CAPABILITY_REQUIRED_PROVIDERS,
+  CAPABILITY_PROVIDER_OPTIONS,
   GATEWAY_CAPABILITIES,
   PROVIDER_CAPABILITIES,
   PLATFORM_KEY_ENV,
@@ -64,14 +64,9 @@ describe('CAPABILITY_ENV_VARS', () => {
     }
   });
 
-  // `isCapabilityConfigured` short-circuits on CAPABILITY_REQUIRED_PROVIDERS
-  // and never reads CAPABILITY_ENV_VARS for such a capability, while
-  // /api/capabilities builds its user-facing `missingEnvVars`/`hint` from the
-  // row. They agree today only because sprite's row is written as a `.map()`
-  // over the required providers; written out by hand they could diverge, and a
-  // user would be told to set a key the predicate does not grade (#9727).
-  it('a multi-key capability row is exactly the key set the predicate grades', () => {
-    const entries = Object.entries(CAPABILITY_REQUIRED_PROVIDERS) as [
+  // The API, health probe, and verification script share these alternatives.
+  it('an operation-dependent capability lists exactly its provider options', () => {
+    const entries = Object.entries(CAPABILITY_PROVIDER_OPTIONS) as [
       ProviderCapability,
       readonly (keyof typeof PLATFORM_KEY_ENV)[],
     ][];
@@ -104,9 +99,9 @@ describe('isCapabilityConfigured', () => {
     expect(isCapabilityConfigured('sfx')).toBe(false);
   });
 
-  it('requires every key of a multi-key capability (sprite: Replicate AND OpenAI)', () => {
+  it('allows either sprite provider without requiring the other key', () => {
     vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
-    expect(isCapabilityConfigured('sprite')).toBe(false);
+    expect(isCapabilityConfigured('sprite')).toBe(true);
     vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk');
     expect(isCapabilityConfigured('sprite')).toBe(true);
   });

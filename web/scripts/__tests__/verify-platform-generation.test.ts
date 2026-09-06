@@ -269,7 +269,7 @@ describe('summarize', () => {
     detail: '',
   });
 
-  it('counts a two-row capability (sprite) once, verified only when both rows pass', () => {
+  it('counts a two-row capability (sprite) once, with both providers verified', () => {
     const summary = summarize([
       row('sprite', 'replicate', 'pass'),
       row('sprite', 'openai', 'pass'),
@@ -278,13 +278,13 @@ describe('summarize', () => {
     expect(summary).toEqual({ offered: 2, verified: 2, unavailable: 0, failing: 0 });
   });
 
-  it('does not count a capability with one missing row as verified, and fails the run', () => {
+  it('verifies sprite when one alternative passes and leaves the missing row visible', () => {
     const summary = summarize([
       row('sprite', 'replicate', 'pass'),
       row('sprite', 'openai', 'missing'),
       row('model3d', 'meshy', 'pass'),
     ]);
-    expect(summary).toEqual({ offered: 2, verified: 1, unavailable: 0, failing: 1 });
+    expect(summary).toEqual({ offered: 2, verified: 2, unavailable: 0, failing: 0 });
   });
 
   it('keeps an unavailable capability out of offered, and counts fail and missing as failing', () => {

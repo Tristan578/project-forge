@@ -182,7 +182,9 @@ The `AI Providers` check grades per capability (#9719), not per key:
 
 An unset `PLATFORM_*` key therefore yields **`degraded`, never "outage"** — and that is
 production's expected steady state today (`docs/guides/platform-keys.md`: no `PLATFORM_*` key
-is set, deliberately). Because it is expected, that entry carries `configurationOnly: true`,
+is set, deliberately). Remove a capability from the declaration when provisioning it;
+missing or invalid declarations do not suppress faults. Only when every missing capability is explicitly listed in the deployment setting
+`HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES` does the entry carry `configurationOnly: true`,
 which keeps it out of the top-level `overall` and out of the 15-minute synthetic monitor's
 Sentry pages (#9727) — the entry itself still reads `degraded` on the status page. So: an
 amber AI Providers card with no `/health` banner and no Sentry page is the documented

@@ -8,7 +8,7 @@ import {
   GATEWAY_KEY_ENV,
   CAPABILITY_ENV_VARS,
   CAPABILITY_LABELS,
-  CAPABILITY_REQUIRED_PROVIDERS,
+  CAPABILITY_PROVIDER_OPTIONS,
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
   getCapabilityUnavailability,
@@ -44,6 +44,8 @@ export interface CapabilityStatus {
   label: string;
   /** Which providers could enable this capability (only shown if unavailable) */
   requiredProviders?: string[];
+  /** Per-user provider options for operation-specific generation gates. */
+  providerAvailability?: Record<string, boolean>;
   /** Helpful setup hint */
   hint?: string;
   /**
@@ -185,50 +187,31 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     }
 
     const envVars = CAPABILITY_KEY_MAP[cap];
-    const required = CAPABILITY_REQUIRED_PROVIDERS[cap];
-    let isAvailable: boolean;
-    /** The env vars whose providers the user could still configure. */
-    let missingEnvVars: string[];
-    if (required) {
-      // A capability that spends more than one key is available only when
-      // EVERY one of them is present, otherwise its default request 500s.
-      // `resolveApiKey` resolves each provider on its own, BYOK first, so the
-      // sources OR per provider: a user's own OpenAI key on a Replicate-only
-      // deployment can run both sprite paths. Naming only what is missing
-      // is what keeps the hint from telling a Replicate-only environment to
-      // "Configure Replicate" (the key it already has).
-      const missing = required.filter(
-        (provider) => !process.env[PLATFORM_KEY_ENV[provider]] && !byokProviders.has(provider),
-      );
-      isAvailable = missing.length === 0;
-      missingEnvVars = missing.map((provider) => PLATFORM_KEY_ENV[provider]);
-    } else {
-      // Platform path: `isCapabilityConfigured` folds in Vercel OIDC for the
-      // gateway-served capabilities — the same predicate the AI Providers
-      // health probe grades (#9719), so the two can never disagree. BYOK: the
-      // signed-in user's own key for the capability's provider.
-      isAvailable = isCapabilityConfigured(cap) || byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
-      missingEnvVars = [...envVars];
-    }
+    const options = CAPABILITY_PROVIDER_OPTIONS[cap];
+    const providerAvailability = options ? Object.fromEntries(options.map((provider) => [
+      provider, Boolean(process.env[PLATFORM_KEY_ENV[provider]]) || byokProviders.has(provider),
+    ])) : undefined;
+    const isAvailable = providerAvailability
+      ? Object.values(providerAvailability).some(Boolean)
+      : isCapabilityConfigured(cap) || byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
 
     const status: CapabilityStatus = {
       capability: cap,
       available: isAvailable,
+      ...(providerAvailability ? { providerAvailability } : {}),
       label: CAPABILITY_LABELS[cap],
     };
 
     if (!isAvailable) {
-      // Tell the user which providers they could configure. For a single-key
-      // capability every listed provider is an alternative (name the first);
-      // for a multi-key one every listed provider is still missing (name all).
-      const providerNames = missingEnvVars.map(
+      // Name alternative providers; operation-specific hints use the
+      // providerAvailability map in the dialog gate.
+      const providerNames = envVars.map(
         (envVar) => ENV_VAR_PROVIDER_NAMES[envVar] || 'Unknown Provider'
       );
       const uniqueProviders = [...new Set(providerNames)];
       status.requiredProviders = uniqueProviders;
-      const named = required ? uniqueProviders.join(' and ') : uniqueProviders[0];
-      const plural = required && uniqueProviders.length > 1 ? 'keys' : 'key';
-      status.hint = `Configure ${named} API ${plural} in Settings to enable ${CAPABILITY_LABELS[cap]}.`;
+      const named = options ? uniqueProviders.join(' or ') : uniqueProviders[0];
+      status.hint = `Configure ${named} API key in Settings to enable ${CAPABILITY_LABELS[cap]}.`;
     }
 
     return status;

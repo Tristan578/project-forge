@@ -8,7 +8,7 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
-import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS } from '@/lib/config/providers';
+import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS, resolveSpriteProvider, SPRITE_PROVIDER_KEY } from '@/lib/config/providers';
 import type { SpriteSize } from '@/lib/config/providers';
 
 type SpriteProvider = 'dalle3' | 'sdxl';
@@ -66,12 +66,8 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'removeBackground must be a boolean' };
     }
 
-    const actualProvider: SpriteProvider =
-      (!provider || provider === 'auto')
-        ? (style === 'pixel-art' ? 'sdxl' : 'dalle3')
-        : (provider as SpriteProvider);
-
-    const serviceName = actualProvider === 'dalle3' ? 'openai' as const : 'replicate' as const;
+    const actualProvider = resolveSpriteProvider(provider as 'auto' | SpriteProvider, style as string | undefined);
+    const serviceName = SPRITE_PROVIDER_KEY[actualProvider];
 
     return {
       ok: true,

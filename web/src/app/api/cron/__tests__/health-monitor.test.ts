@@ -139,6 +139,31 @@ describe('GET /api/cron/health-monitor', () => {
     vi.resetModules();
   });
 
+  it('pages when an expected provider key disappears after provisioning', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/monitoring/healthChecks')>('@/lib/monitoring/healthChecks');
+    const { PLATFORM_KEY_ENV } = await import('@/lib/config/providers');
+    for (const key of Object.values(PLATFORM_KEY_ENV)) vi.stubEnv(key, '');
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw');
+    vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', 'sfx,voice,sprite,bg_removal');
+    vi.stubEnv('PLATFORM_MESHY_KEY', 'provisioned');
+    const { GET } = await import('@/app/api/cron/health-monitor/route');
+    const setReport = async () => {
+      const ai = await actual.checkAiProviders();
+      const report = allHealthyReport();
+      report.services = report.services.map((s) => s.name === 'AI Providers' ? ai : s);
+      report.overall = actual.computeOverallStatus(report.services);
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      return report;
+    };
+    expect((await setReport()).overall).toBe('healthy');
+    await GET(makeRequest());
+    expect(mockCaptureException).not.toHaveBeenCalled();
+    vi.stubEnv('PLATFORM_MESHY_KEY', '');
+    expect((await setReport()).overall).toBe('degraded');
+    await GET(makeRequest());
+    expect(mockCaptureException).toHaveBeenCalledTimes(1);
+  });
+
   // -------------------------------------------------------------------------
   // Authorization
   // -------------------------------------------------------------------------
