@@ -29,8 +29,12 @@ three more layers keep it from reaching that point:
 | Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; the `generate_music` chat tool; `forge.ai.generateMusic` | Each shows the reason and refuses to submit. The dialog gate blocks on a successful per-user `available:false` response; loading and failed fetches stay enabled. Auth changes and successful BYOK saves/removals immediately refresh mounted consumers, bypassing the browser cache and discarding older in-flight responses. |
 | Route gate | `capability:` option on `createGenerationHandler` (step 1a) | 503 `SERVICE_UNAVAILABLE` right after authentication — before rate limits, validation, key resolution or any deduction. |
 
-The health probe (`/api/health` → AI Providers) is the subject of #9719 and
-is not evidence for anything in this document.
+The health probe (`/api/health` → AI Providers) grades the same table this
+document decides from: since #9719 it and `/api/capabilities` both read
+`isCapabilityConfigured` in `web/src/lib/config/providers.ts`, so the two
+cannot disagree about what "configured" means. It grades the PLATFORM path
+only — a user's own key never makes it green, and its public `summary` says
+so.
 
 ## Decision per capability
 

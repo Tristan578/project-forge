@@ -208,14 +208,13 @@ const STRIPE_BALANCE_URL = 'https://api.stripe.com/v1/balance';
  * key for real, per Stripe's documented status meanings
  * (https://docs.stripe.com/api/errors):
  *
- *  - 2xx  → healthy. A test-mode key running in production is `degraded`
- *           instead: Stripe accepts it, but it charges nobody
- *           (https://docs.stripe.com/keys#test-live-modes).
+ *  - 2xx or 403 → the key was ACCEPTED, so both take the same mode rule: a
+ *           test-mode key running in production is `degraded` (Stripe accepts
+ *           it and it charges nobody — https://docs.stripe.com/keys#test-live-modes),
+ *           otherwise `healthy`. 403 is "The API key doesn't have permissions
+ *           to perform the request": a restricted key without `balance:read`,
+ *           recorded in `details.probeResult`, never an outage.
  *  - 401  → down. "No valid API key provided" — every checkout will fail.
- *  - 403  → healthy, probe-cannot-assess. "The API key doesn't have
- *           permissions to perform the request": the key authenticated, it
- *           is a restricted key without `balance:read`. Recorded in
- *           `details.probeResult`; not an outage.
  *  - 5xx, timeout, network → degraded, never thrown, so a Stripe blip does
  *           not page as a SpawnForge outage.
  *
@@ -274,19 +273,29 @@ export async function checkPayments(): Promise<ServiceHealth> {
   const latencyMs = Date.now() - start;
   const lastChecked = new Date().toISOString();
 
-  if (status >= 200 && status < 300) {
+  // 403 says the key authenticated and merely lacks `balance:read`, so it is an
+  // ACCEPTED response like a 2xx and must be graded by the same rules. Grading
+  // it healthy on its own let a restricted test-mode key pass in production.
+  const accepted = (status >= 200 && status < 300) || status === 403;
+  if (accepted) {
+    const acceptedDetails =
+      status === 403
+        ? { ...details, probeResult: 'key accepted; balance not readable by this key (403)' }
+        : details;
     if (mode === 'test' && process.env.VERCEL_ENV === 'production') {
+      // No `summary`: it reaches the unauthenticated body, and announcing that
+      // production checkout is in test mode is an invitation. The degraded
+      // badge is the public signal; the reason stays operator-side.
       return {
         name,
         status: 'degraded',
         latencyMs,
         lastChecked,
         error: 'STRIPE_SECRET_KEY is a test-mode key in the production environment',
-        summary: 'Test-mode Stripe key in production',
-        details,
+        details: acceptedDetails,
       };
     }
-    return { name, status: 'healthy', latencyMs, lastChecked, details };
+    return { name, status: 'healthy', latencyMs, lastChecked, details: acceptedDetails };
   }
   if (status === 401) {
     return {
@@ -295,17 +304,9 @@ export async function checkPayments(): Promise<ServiceHealth> {
       latencyMs,
       lastChecked,
       error: 'Stripe rejected STRIPE_SECRET_KEY (auth 401) on GET /v1/balance',
-      summary: 'Stripe rejected the platform key',
+      // Public copy: what a visitor can act on, not which credential is wrong.
+      summary: 'Payments are unavailable',
       details,
-    };
-  }
-  if (status === 403) {
-    return {
-      name,
-      status: 'healthy',
-      latencyMs,
-      lastChecked,
-      details: { ...details, probeResult: 'key accepted; balance not readable by this key (403)' },
     };
   }
   return {
@@ -528,15 +529,19 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
       latencyMs: 0,
       lastChecked,
       error: 'No chat backend is configured',
-      summary: 'No chat backend is configured',
+      // Public copy: the feature label a visitor already sees in Settings, and
+      // the BYOK caveat — a user with their own Anthropic key is unaffected.
+      summary: `${CAPABILITY_LABELS.chat} is unavailable without your own API key`,
       details,
     };
   }
 
   if (unconfiguredCapabilities.length > 0) {
     const ids = unconfiguredCapabilities.join(', ');
-    // The summary reaches the public body: feature labels, the vocabulary a
-    // status-page visitor already sees in Settings, never ids or env vars.
+    // The summary reaches the public body, so it uses feature labels — the
+    // vocabulary a status-page visitor already sees in Settings, never ids or
+    // env vars — and states the BYOK caveat: this probe grades the PLATFORM
+    // path only, and a creator using their own keys is unaffected.
     const labels = unconfiguredCapabilities.map((cap) => CAPABILITY_LABELS[cap]).join(', ');
     return {
       name: 'AI Providers',
@@ -544,7 +549,7 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
       latencyMs: 0,
       lastChecked,
       error: `Generation unavailable on the platform path for ${ids} — no platform key or gateway route configured`,
-      summary: `Unavailable: ${labels}`,
+      summary: `Available only with your own API key: ${labels}`,
       details,
     };
   }

@@ -256,7 +256,11 @@ describe('healthChecks', () => {
       expect(result.error).toMatch(/401/);
       expect(result.error).toMatch(/rejected|auth/i);
       expect(result.error).not.toContain('sk_test_revoked');
-      expect(result.summary).toBe('Stripe rejected the platform key');
+      // `summary` survives sanitizeForPublic into the unauthenticated body, so
+      // it says what a visitor can act on ("don't try to buy right now"), never
+      // which credential the operator has to fix.
+      expect(result.summary).toBe('Payments are unavailable');
+      expect(result.summary).not.toMatch(/key|Stripe|401/i);
     });
 
     it('treats 403 as "key accepted, balance scope not granted" rather than an outage', async () => {
@@ -315,8 +319,27 @@ describe('healthChecks', () => {
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
       expect(result.status).toBe('degraded');
-      expect(result.summary).toBe('Test-mode Stripe key in production');
+      expect(result.error).toContain('test-mode');
+      // Naming a key-mode misconfiguration on the public status page tells
+      // anyone polling it that checkout is not taking real money. The degraded
+      // badge is the public signal; the reason stays in `error`/`details`.
+      expect(result.summary).toBeUndefined();
       expect(result.details?.mode).toBe('test');
+    });
+
+    // 403 means Stripe ACCEPTED the key, so it is an accepted response like a
+    // 2xx and must be graded by the same mode rule. Grading it healthy first
+    // let a restricted test-mode key pass in production (#9727 review).
+    it('degrades a restricted test-mode key in production even though 403 is "accepted"', async () => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'rk_test_restricted');
+      vi.stubEnv('VERCEL_ENV', 'production');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{}}', { status: 403 })));
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('test-mode');
+      expect(result.details?.probeResult).toBe('key accepted; balance not readable by this key (403)');
     });
 
     it('returns healthy for a live key in production and a test key in preview', async () => {
@@ -639,6 +662,10 @@ describe('healthChecks', () => {
       expect(result.details?.chatBackend).toBeNull();
       expect(result.details?.chatBackendConfigured).toBe(false);
       expect(result.error).toContain('No chat backend is configured');
+      // Public vocabulary: the feature label a visitor sees in Settings, and
+      // the BYOK caveat, not "chat backend".
+      expect(result.summary).toBe('AI Chat is unavailable without your own API key');
+      expect(result.summary).not.toMatch(/backend|PLATFORM_|API_KEY/);
     });
 
     // #9719: the gateway key serves chat only. With no generation key set the
@@ -662,8 +689,11 @@ describe('healthChecks', () => {
       // Public-safe summary survives sanitizeForPublic; it carries the
       // user-facing feature labels (CAPABILITY_LABELS) — the vocabulary the
       // status page's visitors already know — never ids or env var names.
+      // The probe grades the PLATFORM path only, so the public copy must not
+      // tell a creator whose own Meshy/ElevenLabs keys work that those features
+      // are down (#9727 review).
       expect(result.summary).toBe(
-        'Unavailable: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation, Sprite Generation, Background Removal',
+        'Available only with your own API key: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation, Sprite Generation, Background Removal',
       );
       expect(result.summary).not.toContain('PLATFORM_');
       // music is declared unavailable (#9522), not unconfigured.
@@ -740,8 +770,18 @@ describe('healthChecks', () => {
       vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-abc');
       const { checkAiProviders } = await import('@/lib/monitoring/healthChecks');
       const result = await checkAiProviders();
-      expect(result.status).not.toBe('down');
+      // Deterministic under #9719: the direct backend resolves chat, so the
+      // probe is not `down`; but a direct-only deployment routes nothing else,
+      // so every other capability is unconfigured and the probe is `degraded`.
+      // `not.toBe('down')` also passed on a false-green `healthy` (lesson 11).
+      expect(result.status).toBe('degraded');
       expect(result.details?.chatBackend).toBe('direct');
+      const missing = result.details?.unconfiguredCapabilities as string[];
+      expect(missing).toContain('embedding');
+      expect(missing).toContain('image');
+      expect(missing).not.toContain('chat');
+      expect(result.summary).toContain('Semantic Search');
+      expect(result.summary).toContain('Image Generation');
     });
   });
 

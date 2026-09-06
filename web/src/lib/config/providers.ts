@@ -271,10 +271,11 @@ export function getCapabilityUnavailability(
 
 /**
  * User-facing feature name per capability — the vocabulary the Settings
- * panel, `/api/capabilities` and the public status page all share. Anything
- * that names a capability to a person reads from here so the three cannot
- * drift (#9727 review: the health probe was emitting raw ids like `model3d`
- * into the public body while Settings said "3D Model Generation").
+ * panel, `/api/capabilities`, `useFeatureGating` and the public status page
+ * all share. Anything that names a capability to a person reads from here (the
+ * hook derives its `FEATURE_LABELS` from this table) so they cannot drift
+ * (#9727 review: the health probe was emitting raw ids like `model3d` into the
+ * public body while Settings said "3D Model Generation").
  */
 export const CAPABILITY_LABELS: Record<ProviderCapability, string> = {
   chat: 'AI Chat',
