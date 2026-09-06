@@ -629,6 +629,83 @@ describe('createRedactionPass', () => {
       expect(samples.filter((s) => pass.redactText(s) !== s).length).toBeGreaterThan(3);
     });
 
+    describe('THE OTHER DIRECTION: detected implies rewritten', () => {
+      /**
+       * `hasCandidate(t)` TRUE must imply `redactText(t) !== t`.
+       *
+       * The sweep above is the converse — it proves the scan never says NO
+       * where the rewrite would act. Nothing pinned this side, and it went
+       * false the moment the scan learned to read JSON escapes and
+       * `redactString` did not: the scan found the credential in the unescaped
+       * view and said candidate, while `redactLiteral` + `redactPercentEncoded`
+       * changed nothing. `withEgressGuard` then left the fast path, rewrote
+       * nothing and emitted the credential on five text-mode channels — worse
+       * than never detecting, because the response also pays the slow path.
+       *
+       * Each escape is placed IMMEDIATELY BEFORE the credential, which is the
+       * position that defeats the `\b` every shape is left-anchored on.
+       */
+      const BS = String.fromCharCode(92);
+      const ESCAPE_FORMS: Array<[string, string]> = [
+        ['backslash-n', `${BS}n`],
+        ['backslash-r', `${BS}r`],
+        ['backslash-t', `${BS}t`],
+        ['backslash-f', `${BS}f`],
+        ['backslash-b', `${BS}b`],
+        ['an escaped quote', `${BS}"`],
+        ['an escaped backslash', `${BS}${BS}`],
+        ['a u-escape', `${BS}u0020`],
+      ];
+
+      it.each(ESCAPE_FORMS)('rewrites a credential hidden behind %s', (_label, escape) => {
+        const pass = createRedactionPass({ percentAware: true });
+        const text = `Meshy status error (401): Unauthorized${escape}${KEY} is not valid`;
+
+        expect(pass.hasCandidate(text)).toBe(true);
+        expect(pass.redactText(text)).not.toContain(KEY);
+        expect(pass.redactText(text)).toContain(REDACTION_PLACEHOLDER);
+      });
+
+      it('rewrites a credential hidden behind an escape AND percent-encoding', () => {
+        // The fourth of the four spellings both halves look at: unescape, then
+        // percent-decode. The rewrite maps the match back through BOTH index
+        // maps to cut it out of the original string.
+        const pass = createRedactionPass({ percentAware: true });
+        const text = `detail=x${BS}n%73k-ant-api03-0123456789abcdefghijKLMNOPQRSTUVWXYZ&ok=1`;
+
+        expect(pass.hasCandidate(text)).toBe(true);
+        expect(pass.redactText(text)).toContain(REDACTION_PLACEHOLDER);
+      });
+
+      it('holds as a SWEEP: nothing the scan flags survives the rewrite unchanged', () => {
+        // The property, not eight examples of it. A future decoding taught to
+        // one half and not the other fails here rather than in production.
+        vi.stubEnv('PGPASSWORD', 'line-one-is-long-and-unique');
+        resetSecretEnvCache();
+        const pass = createRedactionPass({ percentAware: true });
+        const samples = [
+          ...ESCAPE_FORMS.map(([, e]) => `401:${e}${KEY} rejected`),
+          ...ESCAPE_FORMS.map(([, e]) => `db said${e}line-one-is-long-and-unique`),
+          `encoded%20${encodeURIComponent(KEY)}`,
+          `sess=x${BS}n${KEY}; Path=/`,
+          'plain text with nothing in it',
+          `busy${BS}nretry later`,
+        ];
+
+        for (const sample of samples) {
+          if (pass.hasCandidate(sample)) {
+            expect(pass.redactText(sample), sample).not.toBe(sample);
+          }
+        }
+        // Non-vacuous on BOTH sides: most samples were flagged, and at least one
+        // was not — a scan that answered yes to everything would satisfy the
+        // loop above while destroying the guard's fast path.
+        const flagged = samples.filter((s) => pass.hasCandidate(s));
+        expect(flagged.length).toBeGreaterThan(15);
+        expect(flagged.length).toBeLessThan(samples.length);
+      });
+    });
+
     describe('THE INVARIANT: if the parsed leaves would be redacted, the scan says candidate', () => {
       /**
        * The property above compares `hasCandidate(s)` with `redactText(s)` on

@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
-import { createRedactionPass, type RedactionPass } from '@/lib/security/redactSecrets';
+import { captureException } from '@/lib/monitoring/sentry-server';
+import {
+  createRedactionPass,
+  REDACTION_PLACEHOLDER,
+  type RedactionPass,
+} from '@/lib/security/redactSecrets';
 
 /**
  * `withEgressGuard` — the single runtime chokepoint every API response passes
@@ -90,6 +95,33 @@ import { createRedactionPass, type RedactionPass } from '@/lib/security/redactSe
  * the safe direction: it may buffer and rewrite a body that turns out to need
  * nothing.
  *
+ * AND THE SECOND HALF, which a SIXTH board found missing. Teaching the scan to
+ * see JSON escapes fixed the direction above and opened its mirror image: the
+ * REWRITE had not learned the same trick. `redactString` was `redactLiteral` +
+ * `redactPercentEncoded`, so percent-encoding had a scan and an index-mapped
+ * rewrite while JSON escaping had a scan only. Every text-mode path here — the
+ * malformed-JSON fallback in `redactBufferedBody`, a non-JSON buffered body, a
+ * header value, a `Set-Cookie`, the reason phrase — set `hasCandidate`, left the
+ * fast path, rewrote NOTHING and emitted the credential. Detect-then-emit is
+ * worse than never detecting: the response pays the slow path and leaks anyway,
+ * and the guard reports success. `redactJsonEscaped` closes it at the source,
+ * off the SAME decoder the scan uses.
+ *
+ * THAT FIX IS NOT TRUSTED ON ITS OWN. Both failures were an agreement between
+ * two halves quietly going false, so this function now RE-SCANS WHAT IT IS ABOUT
+ * TO EMIT and fails closed when the answer is still "candidate":
+ *
+ *   - an envelope value (header, `Set-Cookie`, `statusText`) that the rewrite
+ *     could not clear is replaced wholesale with the placeholder;
+ *   - a BODY that the rewrite could not clear is not emitted at all — the
+ *     response becomes the fixed 500.
+ *
+ * Both report through `reportGuardFailure`. A value that was detected and could
+ * not be rewritten never leaves this function, and the disagreement is loud
+ * rather than a silent pass. Note what is asserted: not "the rewrite changed
+ * something" (adjacent, and true of a rewrite that removed one of two
+ * credentials) but "the output no longer matches" (the property).
+ *
  * WHAT IT DOES, in order:
  *  1. awaits the handler's `Response`;
  *  2. redacts every response HEADER value, including `Set-Cookie` and
@@ -120,12 +152,15 @@ import { createRedactionPass, type RedactionPass } from '@/lib/security/redactSe
  * The cost of that choice is named in KNOWN GAPS below. It is a real gap, not
  * a covered case.
  *
- * NEVER THROWS. A guard that throws converts a handled error into an unhandled
- * one — the exact failure this whole change exists to avoid. Every step of the
- * guard's own work is wrapped, and any failure inside it yields a fixed 500
- * carrying no upstream text. That includes `RedactionBudgetExceededError`:
- * failing closed on a pathological body is the point, and it is the reason the
- * redactor throws instead of returning something truncated.
+ * NEVER THROWS, AND NEVER SILENT. A guard that throws converts a handled error
+ * into an unhandled one — the exact failure this whole change exists to avoid.
+ * Every step of the guard's own work is wrapped, and any failure inside it
+ * yields a fixed 500 carrying no upstream text. That includes
+ * `RedactionBudgetExceededError`: failing closed on a pathological body is the
+ * point, and it is the reason the redactor throws instead of returning something
+ * truncated. Every one of those paths reports through `reportGuardFailure`
+ * first, because a control that turns good responses into 500s with no signal is
+ * indistinguishable from an application bug and can run for weeks.
  *
  * KNOWN GAPS — each is a property this function structurally cannot provide.
  * They are listed so a reader does not infer coverage from silence.
@@ -163,6 +198,19 @@ import { createRedactionPass, type RedactionPass } from '@/lib/security/redactSe
  *    NEW one is reported rather than joining the gap silently.
  *  - `proxy.ts` (Next middleware) is outside it, as is any response the
  *    framework itself produces.
+ *  - ONE DECODING ORDER IS NOT COVERED: percent-decoding BEFORE JSON-unescaping,
+ *    i.e. `%5Cn` decoding to a backslash that then reads as an escape. The scan
+ *    and the rewrite look at raw, percent-decoded, unescaped and
+ *    unescaped-then-percent-decoded — four spellings, the same four on both
+ *    sides — and neither looks at that fifth one. It is named as a gap rather
+ *    than a disagreement precisely because both halves miss it identically, so
+ *    the fail-closed check above will not fire on it. No channel here writes
+ *    that shape today (a percent-encoded backslash inside JSON that a client
+ *    then decodes twice), which is why it is a line here and not a fix.
+ *  - The fail-closed check protects what this function EMITS. A `Set-Cookie`
+ *    replaced by the placeholder is a broken cookie, and a body replaced by the
+ *    fixed 500 is a lost response — both are deliberate, both are reported, and
+ *    neither is a silent degradation.
  *  - Enforcement that every route is wrapped is a SHAPE check, not a runtime
  *    one: `src/app/api/__tests__/egressGuardCoverage.test.ts` walks every
  *    `src/app/**\/route.{ts,tsx,js,jsx,mjs}` — all five spellings the App
@@ -235,6 +283,71 @@ function guardFailureResponse(): NextResponse {
     status: 500,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+/**
+ * Report a failure of the GUARD ITSELF, and never become one.
+ *
+ * Every path that produces `guardFailureResponse()` comes through here, because
+ * the alternative — a bare `catch { return guardFailureResponse(); }` — is a
+ * control that converts a handler's real response into a fixed 500 with no
+ * signal anywhere. In production that is indistinguishable from an application
+ * error, so a guard defect (a `clone()` that throws, a bug in the walk, a
+ * `RedactionBudgetExceededError` on a body nobody expected to be pathological)
+ * could run for weeks with user reports as the only symptom. This file argues
+ * exactly that rule forty lines above for the handler-throw case: swallowing an
+ * error to keep instrumentation quiet is the worse trade.
+ *
+ * `captureException` no-ops without `SENTRY_DSN`, so `console.error` runs
+ * unconditionally as well — the local and preview signal, where a DSN often is
+ * not set and where a guard defect is most likely to be introduced.
+ *
+ * THE WHOLE BODY IS WRAPPED. Reporting sits on the failure path of a function
+ * whose contract is "never throws"; a throw from Sentry or from a console that
+ * has been replaced would turn a fail-closed 500 into an unhandled rejection —
+ * the failure this module exists to prevent, reintroduced by the code that
+ * reports it. Nothing derived from the response is passed: `detail` carries only
+ * values this file computed.
+ */
+function reportGuardFailure(reason: string, error: unknown, detail?: Record<string, unknown>): void {
+  try {
+    // eslint-disable-next-line no-console -- the only signal when SENTRY_DSN is unset.
+    console.error(`[egressGuard] ${reason}`, detail ?? {});
+    captureException(error instanceof Error ? error : new Error(reason), {
+      egressGuardReason: reason,
+      ...detail,
+    });
+  } catch {
+    // A reporter that throws must not defeat the guard it is reporting on.
+  }
+}
+
+/**
+ * Redact one envelope value (a header, a `Set-Cookie`, the reason phrase) and
+ * VERIFY THE RESULT, because "detected" and "rewritten" are two claims and this
+ * module has shipped the first without the second.
+ *
+ * The scan said this value carries a credential. If the rewrite hands back
+ * something the scan STILL flags, the value is detected-but-unrewritable and
+ * must not go out — so it is replaced wholesale with the placeholder and the
+ * disagreement is reported loudly. Silently emitting it is the worst available
+ * outcome: the response pays the slow path and leaks anyway, and the guard
+ * reports success.
+ *
+ * This is deliberately a re-scan of the OUTPUT rather than a `clean !== value`
+ * comparison. "Changed" is adjacent to the property; "no longer matches" is the
+ * property (lessons-learned #1). A rewrite that removed one of two credentials
+ * would satisfy the first and fail the second.
+ */
+function cleanEnvelopeValue(value: string, pass: RedactionPass, channel: string): string {
+  const clean = pass.redactText(value);
+  if (!pass.hasCandidate(clean)) return clean;
+  reportGuardFailure(
+    'a credential was detected in an envelope value that redaction did not remove',
+    new Error('egress guard: detected-but-unrewritable envelope value'),
+    { channel },
+  );
+  return REDACTION_PLACEHOLDER;
 }
 
 interface HeaderPlan {
@@ -373,12 +486,14 @@ async function guardResponse(res: Response): Promise<Response> {
   }
 
   const cleanHeaderValues = envelopeTouched
-    ? headerValues.map((value) => pass.redactText(value))
+    ? headerValues.map((value, index) => cleanEnvelopeValue(value, pass, plan.entries[index][0]))
     : headerValues;
   const cleanCookies = envelopeTouched
-    ? plan.cookies.map((value) => pass.redactText(value))
+    ? plan.cookies.map((value) => cleanEnvelopeValue(value, pass, 'set-cookie'))
     : plan.cookies;
-  const cleanStatusText = envelopeTouched ? pass.redactText(statusText) : statusText;
+  const cleanStatusText = envelopeTouched
+    ? cleanEnvelopeValue(statusText, pass, 'statusText')
+    : statusText;
 
   let outBody: BodyInit | null = null;
   let bodyRewritten = false;
@@ -390,7 +505,22 @@ async function guardResponse(res: Response): Promise<Response> {
     // A header matched but the body did not: the body keeps its ORIGINAL bytes.
     outBody = text;
   } else {
-    outBody = redactBufferedBody(text as string, isJsonContentType(contentType), pass);
+    const json = isJsonContentType(contentType);
+    const cleaned = redactBufferedBody(text as string, json, pass);
+    // THE BOUNDARY ASSERTION for the body. See `cleanEnvelopeValue` for why this
+    // re-scans the output instead of asking whether the rewrite changed
+    // anything. A body the scan still flags cannot be emitted at ANY status, so
+    // this is the one place the guard turns a readable response into its fixed
+    // 500 on purpose rather than on an exception.
+    if (pass.hasCandidate(cleaned)) {
+      reportGuardFailure(
+        'a credential was detected in a response body that redaction did not remove',
+        new Error('egress guard: detected-but-unrewritable body'),
+        { status, json, bytes: cleaned.length },
+      );
+      return guardFailureResponse();
+    }
+    outBody = cleaned;
     bodyRewritten = true;
   }
 
@@ -419,10 +549,14 @@ export function withEgressGuard<A extends unknown[], R extends Response>(
     const res = await handler(...args);
     try {
       return await guardResponse(res);
-    } catch {
+    } catch (error) {
       // Includes `RedactionBudgetExceededError`: a body too large to redact
       // safely becomes a fixed 500, never a truncated body served as if it were
       // the real one.
+      //
+      // REPORTED, never silent. A guard defect turning good responses into 500s
+      // is invisible from the outside; see `reportGuardFailure`.
+      reportGuardFailure('the guard itself failed; response replaced with a fixed 500', error);
       return guardFailureResponse();
     }
   };

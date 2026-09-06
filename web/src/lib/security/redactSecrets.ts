@@ -506,6 +506,44 @@ function matchRanges(decoded: string, ctx: RedactionContext): [number, number][]
 }
 
 /**
+ * Cut RAW-space `ranges` out of `raw`, each replaced by the placeholder.
+ * Overlaps are merged and the splices run back-to-front so earlier offsets stay
+ * valid. Shared by both decoded-view rewrites so they cannot splice differently.
+ */
+function spliceRanges(raw: string, ranges: [number, number][]): string {
+  if (ranges.length === 0) return raw;
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const [start, end] of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+  let out = raw;
+  for (let i = merged.length - 1; i >= 0; i -= 1) {
+    const [start, end] = merged[i];
+    out = out.slice(0, start) + REDACTION_PLACEHOLDER + out.slice(end);
+  }
+  return out;
+}
+
+/** Translate view-space ranges into RAW-space through an index map. */
+function toRawRanges(ranges: [number, number][], map: number[]): [number, number][] {
+  return ranges.map(([start, end]) => [map[start], map[end]] as [number, number]);
+}
+
+/**
+ * Compose two index maps. `outer` maps view-A offsets into RAW; `inner` maps
+ * view-B offsets into view A. The result maps view-B offsets into RAW, which is
+ * what lets a match visible only after BOTH decodings be cut out of the original
+ * string. The sentinel entry composes correctly because `inner`'s last entry is
+ * `viewA.length` and `outer[viewA.length]` is `raw.length`.
+ */
+function composeMaps(outer: number[], inner: number[]): number[] {
+  return inner.map((i) => outer[i]);
+}
+
+/**
  * Remove anything that only becomes visible once percent-escapes are resolved.
  * Runs AFTER `redactLiteral`, so a secret written plainly is already gone and
  * this pass only has to catch the encoded spelling of one.
@@ -514,29 +552,7 @@ function redactPercentEncoded(raw: string, ctx: RedactionContext): string {
   if (!raw.includes('%')) return raw;
   const { decoded, map } = decodeWithMap(raw);
   if (decoded === raw) return raw;
-  const ranges = matchRanges(decoded, ctx);
-  if (ranges.length === 0) return raw;
-
-  // Merge overlaps, then splice from the end so earlier offsets stay valid.
-  ranges.sort((a, b) => a[0] - b[0]);
-  const merged: [number, number][] = [];
-  for (const [start, end] of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
-    else merged.push([start, end]);
-  }
-
-  let out = raw;
-  for (let i = merged.length - 1; i >= 0; i -= 1) {
-    const [start, end] = merged[i];
-    out = out.slice(0, map[start]) + REDACTION_PLACEHOLDER + out.slice(map[end]);
-  }
-  return out;
-}
-
-function redactString(input: string, ctx: RedactionContext): string {
-  const literal = redactLiteral(input, ctx);
-  return ctx.percentAware ? redactPercentEncoded(literal, ctx) : literal;
+  return spliceRanges(raw, toRawRanges(matchRanges(decoded, ctx), map));
 }
 
 /** The two-character JSON escapes, and what each stands for. */
@@ -601,35 +617,103 @@ const HEX_QUAD = /^[0-9a-fA-F]{4}$/;
  * an off-by-one to become a leak — so it is named here, not taken, and the
  * straightforward whole-view scan is what ships.
  *
- * Returns `raw` itself when there is nothing to decode.
+ * IT RETURNS AN INDEX MAP, AND THAT IS THE POINT. `map[i]` is the offset in
+ * `raw` at which decoded character `i` begins, with a final entry of
+ * `raw.length` — the same contract as `decodeWithMap`. The first version of this
+ * function returned only the decoded STRING, and only the scan ever called it:
+ * `redactString` was `redactLiteral` + `redactPercentEncoded`, so percent-
+ * encoding got a scan AND an index-mapped rewrite while JSON escaping got a scan
+ * only. Every text-mode path in the guard — the malformed-JSON fallback, a
+ * non-JSON buffered body, a header value, a `Set-Cookie`, the reason phrase —
+ * therefore set `hasCandidate`, left the fast path, rewrote NOTHING and emitted
+ * the credential. Detect-then-emit is worse than either half alone: it pays the
+ * slow path and reports a rewrite that did not happen. ONE function now feeds
+ * both `textHasCandidate` and `redactJsonEscaped`, so a future change cannot
+ * teach one of them a decoding and not the other.
+ *
+ * Returns `null` when there is nothing to decode — no backslash at all, or no
+ * backslash that begins a valid escape. Callers treat that as "this view is the
+ * raw text", which is why neither has to compare strings to find out.
  */
-function jsonUnescapeView(raw: string): string {
-  let at = raw.indexOf('\\');
-  if (at === -1) return raw;
-  let out = '';
-  let copied = 0;
-  while (at !== -1) {
-    const next = at + 1 < raw.length ? raw[at + 1] : '';
-    const simple = SIMPLE_JSON_ESCAPES.get(next);
-    let decoded: string | null = null;
-    let width = 0;
-    if (simple !== undefined) {
-      decoded = simple;
-      width = 2;
-    } else if (next === 'u' && at + 6 <= raw.length && HEX_QUAD.test(raw.slice(at + 2, at + 6))) {
-      decoded = String.fromCharCode(Number.parseInt(raw.slice(at + 2, at + 6), 16));
-      width = 6;
+function jsonUnescapeWithMap(raw: string): { decoded: string; map: number[] } | null {
+  if (raw.indexOf('\\') === -1) return null;
+  const chars: string[] = [];
+  const map: number[] = [];
+  let changed = false;
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === '\\') {
+      const next = i + 1 < raw.length ? raw[i + 1] : '';
+      const simple = SIMPLE_JSON_ESCAPES.get(next);
+      if (simple !== undefined) {
+        chars.push(simple);
+        map.push(i);
+        i += 2;
+        changed = true;
+        continue;
+      }
+      if (next === 'u' && i + 6 <= raw.length && HEX_QUAD.test(raw.slice(i + 2, i + 6))) {
+        chars.push(String.fromCharCode(Number.parseInt(raw.slice(i + 2, i + 6), 16)));
+        map.push(i);
+        i += 6;
+        changed = true;
+        continue;
+      }
     }
-    if (decoded === null) {
-      // Not a JSON escape. Leave both characters alone and keep looking.
-      at = raw.indexOf('\\', at + 1);
-      continue;
-    }
-    out += raw.slice(copied, at) + decoded;
-    copied = at + width;
-    at = raw.indexOf('\\', copied);
+    // Not a JSON escape (or not a backslash at all): the character stands for
+    // itself, and the one after it is examined on its own terms next.
+    chars.push(raw[i]);
+    map.push(i);
+    i += 1;
   }
-  return copied === 0 ? raw : out + raw.slice(copied);
+  if (!changed) return null;
+  map.push(raw.length);
+  return { decoded: chars.join(''), map };
+}
+
+/**
+ * The REWRITE half of what `textHasCandidate` scans for: remove anything that
+ * only becomes visible once JSON escapes are resolved, splicing the placeholder
+ * back into the RAW string at mapped offsets so the surrounding text keeps its
+ * own escaping byte for byte.
+ *
+ * Unconditional, not gated on `percentAware`, because the SCAN is unconditional
+ * — `textHasCandidate` always looks at the unescaped view. A gate here would
+ * recreate the disagreement this function exists to close.
+ *
+ * When the pass is percent-aware it also matches the percent-decoded spelling of
+ * the unescaped view, mapping back through both index maps at once. That covers
+ * the scan's fourth and last view (`viewAndEncodingHaveCandidate` applied to the
+ * unescaped text), so scan and rewrite look at exactly the same four spellings:
+ * raw, percent-decoded, unescaped, unescaped-then-percent-decoded.
+ *
+ * The one ordering NEITHER covers is percent-decode BEFORE unescape (`%5Cn`
+ * decoding to a backslash that then reads as an escape). They agree about
+ * missing it, so it is a named gap rather than a disagreement — see KNOWN GAPS
+ * in `egressGuard.ts`.
+ */
+function redactJsonEscaped(raw: string, ctx: RedactionContext): string {
+  const view = jsonUnescapeWithMap(raw);
+  if (view === null) return raw;
+  const ranges = toRawRanges(matchRanges(view.decoded, ctx), view.map);
+  if (ctx.percentAware && view.decoded.includes('%')) {
+    const { decoded, map } = decodeWithMap(view.decoded);
+    if (decoded !== view.decoded) {
+      ranges.push(...toRawRanges(matchRanges(decoded, ctx), composeMaps(view.map, map)));
+    }
+  }
+  return spliceRanges(raw, ranges);
+}
+
+/**
+ * The four spellings, in the order the scan checks them. Each pass runs on the
+ * previous one's output, so a secret already removed cannot be matched twice and
+ * a splice cannot invalidate a later pass's offsets.
+ */
+function redactString(input: string, ctx: RedactionContext): string {
+  const literal = redactLiteral(input, ctx);
+  const percent = ctx.percentAware ? redactPercentEncoded(literal, ctx) : literal;
+  return redactJsonEscaped(percent, ctx);
 }
 
 /** One view scanned: an `includes` per environment value plus one regex test. */
@@ -673,16 +757,21 @@ function viewAndEncodingHaveCandidate(text: string, ctx: RedactionContext): bool
  * composition above over a corpus of escaped forms, not one example.
  *
  * It is achieved by scanning both the raw text and its JSON-unescaped view (see
- * `jsonUnescapeView`), each with its percent-decoded spelling. It remains a
+ * `jsonUnescapeWithMap`), each with its percent-decoded spelling. It remains a
  * strict OVER-approximation: it may say "maybe" and be wrong, but it must never
  * say "no" where redaction would have said "yes", or a secret ships.
+ *
+ * The four views scanned here are the four `redactString` rewrites, one for one,
+ * off the same two decoders — that is what makes "detected" and "rewritten" the
+ * same set rather than two sets that happen to overlap. `redactSecrets.test.ts`
+ * pins the pair directly (`hasCandidate(s) => redactText(s) !== s`), and
+ * `egressGuard.ts` still fails closed if they ever disagree anyway.
  */
 function textHasCandidate(text: string, ctx: RedactionContext): boolean {
   if (viewAndEncodingHaveCandidate(text, ctx)) return true;
-  if (!text.includes('\\')) return false;
-  const unescaped = jsonUnescapeView(text);
-  if (unescaped === text) return false;
-  return viewAndEncodingHaveCandidate(unescaped, ctx);
+  const view = jsonUnescapeWithMap(text);
+  if (view === null) return false;
+  return viewAndEncodingHaveCandidate(view.decoded, ctx);
 }
 
 /**
@@ -821,9 +910,21 @@ function disambiguateKeys(keys: unknown[]): unknown[] {
  * and it falsified the module's own claim that HOWEVER a response was assembled
  * it is redacted here.
  *
- * Non-string keys (a `Map` keyed by an object or a number) are passed through:
- * they carry no text, and walking INTO a key would change what the key IS,
- * which is a different operation from redacting one.
+ * Non-string keys (a `Map` keyed by an object or a number) are passed through,
+ * and the REASON is that a key is not walked — not that a key holds no text. An
+ * earlier version of this comment said "they carry no text", which is simply
+ * false and demonstrably so: `redactSecrets({ m: new Map([[{ token: 'msy_…' },
+ * 'v']]) })` returns that key with the credential intact. Walking INTO a key
+ * would change what the key IS, which is a different operation from redacting
+ * one, and rebuilding an object key would break identity for every `Map` that
+ * depends on it. So the pass-through stays and the gap is NAMED — a false
+ * premise for a security gap is what lessons-learned #11 is about, and a reader
+ * who believed the old sentence would not go looking for the case.
+ *
+ * KNOWN GAP, and unreachable on today's paths: `JSON.parse` produces no `Map`
+ * and no non-string key, so no response body can carry one, and `sentryConfig`
+ * hands this module strings. It is listed so a future caller that walks a
+ * hand-built structure knows the edge exists.
  */
 function redactKeys(keys: unknown[], ctx: RedactionContext): unknown[] {
   let changed = false;
@@ -986,12 +1087,25 @@ export interface RedactionPassOptions {
  * `Set-Cookie` and the `statusText` for every single response; a call each would
  * pay that enumeration a dozen times per request. A pass pays it once.
  *
- * It also keeps the SCAN and the REWRITE in step. `hasCandidate` is what lets
- * the guard return a body's original bytes untouched, and it is only sound if
- * it over-approximates `redactValue`. Sharing one context makes them
- * identically CONFIGURED; what makes them agree on the SERIALISED-versus-PARSED
- * difference is `jsonUnescapeView` — see the invariant on `textHasCandidate`,
- * which is the property the tests pin.
+ * It also keeps the SCAN and the REWRITE in step, which has now failed twice in
+ * two different directions and is worth stating as two separate properties:
+ *
+ *   1. `hasCandidate(t)` is TRUE wherever redaction would act. This is what lets
+ *      the guard return a body's original bytes untouched. It broke when the
+ *      scan read the SERIALISED body and the rewrite read the PARSED leaves — a
+ *      JSON escape hid the credential from the scan, and the guard granted byte
+ *      identity to a body carrying one.
+ *   2. `hasCandidate(t)` TRUE implies `redactText(t) !== t`. This is what stops
+ *      the opposite failure: detect, take the slow path, rewrite nothing, and
+ *      emit the credential anyway. It broke because the scan learned to see JSON
+ *      escapes and `redactString` did not.
+ *
+ * Both now come from the same two decoders — `decodeWithMap` and
+ * `jsonUnescapeWithMap`, each used by both halves — so neither can be taught a
+ * spelling the other does not know. `redactSecrets.test.ts` sweeps both
+ * directions, and `withEgressGuard` re-scans its own output and fails closed if
+ * they disagree regardless, because a property this file has broken twice should
+ * not be the only thing standing between a credential and a client.
  *
  * Each value handed to `redactValue` is redacted as its OWN root with its own
  * traversal budget, so one large body does not consume the budget the headers

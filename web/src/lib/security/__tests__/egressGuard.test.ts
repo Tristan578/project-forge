@@ -20,10 +20,14 @@
  * environment variable to exercise the value half.
  */
 import { NextResponse } from 'next/server';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { isTextualContentType, withEgressGuard } from '@/lib/security/egressGuard';
-import { REDACTION_PLACEHOLDER, resetSecretEnvCache } from '@/lib/security/redactSecrets';
+import {
+  MAX_REDACTION_NODES,
+  REDACTION_PLACEHOLDER,
+  resetSecretEnvCache,
+} from '@/lib/security/redactSecrets';
 import { buildDeepSceneBody } from './deepSceneBody';
 
 /** Matches `/\bsk-ant-[A-Za-z0-9_-]{16,200}/` in redactSecrets' shape list. */
@@ -594,7 +598,140 @@ describe('withEgressGuard — SELF_ISSUED_SHAPES are scoped to the error path', 
     expect(text).toContain(REDACTION_PLACEHOLDER);
   });
 });
+
+/**
+ * DETECT-THEN-EMIT — the mirror image of the fifth board's finding.
+ *
+ * The fifth board taught the SCAN to see JSON escapes. The REWRITE never
+ * learned the same trick: `redactString` was `redactLiteral` +
+ * `redactPercentEncoded`, so percent-encoding had a scan AND an index-mapped
+ * rewrite while JSON escaping had a scan only. Every text-mode path in the guard
+ * — the malformed-JSON fallback, a non-JSON buffered body, a header value, a
+ * `Set-Cookie`, the reason phrase — therefore set `hasCandidate`, left the fast
+ * path, rewrote NOTHING, and emitted the credential. That is worse than never
+ * detecting: the response pays the slow path and leaks anyway.
+ *
+ * The JSON-body path was covered, because the parse restores the leaf and the
+ * rewrite then sees the credential unescaped — which is why every existing case
+ * in this file passed while five channels leaked. These are the five that do
+ * NOT parse.
+ */
+describe('withEgressGuard — the five text-mode channels, detected AND rewritten', () => {
+  // Built rather than written, so the source carries no escaped escape and there
+  // is no ambiguity about how many backslashes reach the response.
+  const BS = String.fromCharCode(92);
+
+  const ESCAPES: Array<[string, string]> = [
+    ['a literal backslash-n', `${BS}n`],
+    ['a literal backslash-t', `${BS}t`],
+    ['a literal u-escape sequence', `${BS}u0020`],
+  ];
+
+  interface Channel {
+    name: string;
+    build: (payload: string) => Response;
+    read: (res: Response) => Promise<string>;
+  }
+
+  const CHANNELS: Channel[] = [
+    {
+      name: 'a text/plain body',
+      build: (payload) =>
+        new Response(payload, { status: 500, headers: { 'content-type': 'text/plain' } }),
+      read: (res) => res.text(),
+    },
+    {
+      name: 'a malformed body under an application/json content-type',
+      // `/api/sentry` forwards an arbitrary upstream body under a hard-coded
+      // application/json, so `JSON.parse` throwing here is a real shape rather
+      // than a contrived one. `redactBufferedBody` falls back to `redactText`.
+      build: (payload) =>
+        new Response(`not json at all: ${payload}`, {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        }),
+      read: (res) => res.text(),
+    },
+    {
+      name: 'a response header value',
+      build: (payload) => {
+        const res = new Response('{}', {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        });
+        res.headers.set('x-upstream-detail', payload);
+        return res;
+      },
+      read: (res) => Promise.resolve(res.headers.get('x-upstream-detail') ?? ''),
+    },
+    {
+      name: 'a Set-Cookie value',
+      build: (payload) => {
+        const res = new Response('{}', {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        });
+        res.headers.append('set-cookie', `sess=${payload}; Path=/`);
+        return res;
+      },
+      read: (res) => Promise.resolve(res.headers.getSetCookie().join('\n')),
+    },
+    {
+      name: 'the statusText reason phrase',
+      build: (payload) =>
+        new Response('{}', {
+          status: 500,
+          statusText: `upstream ${payload}`,
+          headers: { 'content-type': 'application/json' },
+        }),
+      read: (res) => Promise.resolve(res.statusText),
+    },
+  ];
+
+  const cases = CHANNELS.flatMap((channel) =>
+    ESCAPES.map(([label, escape]) => [channel.name, label, escape, channel] as const));
+
+  it.each(cases)('removes a credential behind %s in %s', async (_channelName, _label, escape, channel) => {
+    const payload = `Meshy status error (401): Unauthorized${escape}${SECRET} is not valid`;
+    const res = await withEgressGuard(async () => channel.build(payload))();
+    const out = await channel.read(res);
+
+    expect(out).not.toContain(SECRET);
+    expect(out).toContain(REDACTION_PLACEHOLDER);
+    // NOT the fail-closed 500 — the rewrite succeeded. That is the difference
+    // between these cases and `egressGuardFailClosed.test.ts`.
+    expect(res.status).toBe(500);
+  });
+
+  it.each(CHANNELS.map((c) => [c.name, c] as const))(
+    'leaves %s alone when there is no credential behind the escape',
+    async (_name, channel) => {
+      // The other side of the sweep. A guard that answered "candidate" for every
+      // escaped string would satisfy every assertion above while destroying the
+      // fast path (lessons-learned #11).
+      const res = await withEgressGuard(async () =>
+        channel.build(`Meshy status error (503): busy${BS}nretry later`))();
+
+      expect(await channel.read(res)).not.toContain(REDACTION_PLACEHOLDER);
+    },
+  );
+});
+
 describe('withEgressGuard — failure behaviour', () => {
+  // Every fail-closed path reports through `reportGuardFailure`, whose
+  // `console.error` is the only signal when SENTRY_DSN is unset — which it is
+  // here. Silenced so the suite output stays readable, and asserted where the
+  // reporting itself is what is under test.
+  let consoleError: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleError.mockRestore();
+  });
+
   it('never throws from its own work: a response it cannot read becomes a fixed 500', async () => {
     const hostile = {
       status: 200,
@@ -610,6 +747,39 @@ describe('withEgressGuard — failure behaviour', () => {
     expect(res.status).toBe(500);
     expect(text).not.toContain(SECRET);
     expect(JSON.parse(text)).toEqual({ error: 'Internal server error' });
+  });
+
+  it('turns a READABLE body that blows the node budget into the fixed 500, end to end', async () => {
+    // `redactSecrets.test.ts` proves `redactValue` throws past the budget, and
+    // the case above exercises the shared catch through a `text()` rejection —
+    // but that response is unreadable from the start. The materially different
+    // case is a large, fully readable, secret-carrying body that passes
+    // `hasCandidate`, is parsed, and blows the budget MID-WALK. A regression
+    // that swallowed the budget error and emitted the partially-walked body
+    // would leave every other assertion in this file green.
+    //
+    // Sized off the exported constant so lowering the budget cannot leave this
+    // asserting against a number that no longer exists. Numbers, not strings,
+    // so the fixture is ~4 MB rather than ~50 MB.
+    const over: unknown[] = new Array<number>(MAX_REDACTION_NODES).fill(0);
+    over.push(`leaked ${SECRET}`);
+
+    const res = await withEgressGuard(async () =>
+      new NextResponse(JSON.stringify(over), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }))();
+    const text = await res.text();
+
+    expect(res.status).toBe(500);
+    expect(text).toBe(JSON.stringify({ error: 'Internal server error' }));
+    expect(text).not.toContain(SECRET);
+    // ...and it was REPORTED. A guard defect that turns good responses into
+    // 500s is invisible from the outside otherwise.
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('[egressGuard]'),
+      expect.anything(),
+    );
   });
 
   it('re-throws an uncaught handler error rather than converting it — the documented gap', async () => {
