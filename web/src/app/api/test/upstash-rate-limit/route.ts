@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ ok: true, remaining: result.remaining });
   } catch {
-    return NextResponse.json(
+    return redactedJson(
       { error: 'CI Upstash integration unavailable' },
       { status: 503 }
     );

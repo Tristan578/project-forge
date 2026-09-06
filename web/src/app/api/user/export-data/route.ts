@@ -26,6 +26,7 @@ import {
   sellerProfiles,
   moderationAppeals,
 } from '@/lib/db/schema';
+import { redactedJson } from '@/lib/api/errors';
 
 /**
  * GET /api/user/export-data
@@ -300,7 +301,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/user/export-data' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to export user data' },
       { status: 500 }
     );

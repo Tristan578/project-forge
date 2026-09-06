@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { PROJECT_LIMITS } from '@/lib/projects/limits';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,6 +99,6 @@ export async function POST(
     return NextResponse.json({ projectId: newProject.id }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/fork' });
-    return NextResponse.json({ error: 'Failed to fork game' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fork game' }, { status: 500 });
   }
 }

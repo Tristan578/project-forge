@@ -5,6 +5,7 @@ import { desc, asc, eq, ilike, and, or, sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { parsePaginationParams } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function GET(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'marketplace-assets', 30, 5 * 60 * 1000);
@@ -122,6 +123,6 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets' });
     console.error('Error fetching marketplace assets:', error);
-    return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 }

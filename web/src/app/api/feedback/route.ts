@@ -7,6 +7,7 @@ import { feedback } from '@/lib/db/schema';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const feedbackSchema = z.object({
   type: z.enum(['bug', 'feature', 'general']),
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
     }
     body = result.data;
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return redactedJson({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
   try {
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('Feedback submission error:', err);
     captureException(err, { route: '/api/feedback' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to submit feedback' },
       { status: 500 }
     );

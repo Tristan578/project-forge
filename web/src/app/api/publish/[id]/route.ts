@@ -4,6 +4,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function DELETE(
   request: NextRequest,
@@ -26,6 +27,6 @@ export async function DELETE(
     return NextResponse.json({ success: true });
   } catch (err) {
     captureException(err, { route: '/api/publish/[id]', method: 'DELETE', id });
-    return NextResponse.json({ error: 'Failed to unpublish game' }, { status: 500 });
+    return redactedJson({ error: 'Failed to unpublish game' }, { status: 500 });
   }
 }

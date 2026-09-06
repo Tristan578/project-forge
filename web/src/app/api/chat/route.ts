@@ -45,6 +45,7 @@ import type {
   AssistantModelMessage,
   ToolModelMessage,
 } from '@ai-sdk/provider-utils';
+import { redactedJson } from '@/lib/api/errors';
 
 // ---------------------------------------------------------------------------
 // Docs loading (server-side, filesystem)
@@ -483,7 +484,7 @@ export async function POST(request: NextRequest) {
   try {
     body = JSON.parse(bodyText);
   } catch {
-    return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    return redactedJson({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const { messages, sceneContext, thinking, effort, systemOverride } = body;
@@ -648,7 +649,7 @@ export async function POST(request: NextRequest) {
       usageId = resolved.usageId;
     } catch (err) {
       if (err instanceof ApiKeyError) {
-        return Response.json({ error: err.message, code: err.code }, { status: 402 });
+        return redactedJson({ error: err.message, code: err.code }, { status: 402 });
       }
       throw err;
     }
@@ -1028,6 +1029,6 @@ export async function POST(request: NextRequest) {
     // The model provider's text stays server-side: it is already on the
     // Sentry event above, and an upstream body can carry the platform
     // credential or backend identifiers (#9736).
-    return Response.json({ error: 'The assistant could not complete that request. Please try again.' }, { status: 500 });
+    return redactedJson({ error: 'The assistant could not complete that request. Please try again.' }, { status: 500 });
   }
 }

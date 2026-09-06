@@ -7,6 +7,7 @@ import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const tokenConfigSchema = z.object({
   type: z.literal('token_config'),
@@ -83,6 +84,6 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error) {
     captureException(error, { route: '/api/admin/economics/config', method: 'PUT' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }

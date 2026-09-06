@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const refundSchema = z.object({
   usageId: z.string().min(1).max(100),
@@ -38,6 +39,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/refund', usageId });
-    return NextResponse.json({ error: 'Refund failed' }, { status: 500 });
+    return redactedJson({ error: 'Refund failed' }, { status: 500 });
   }
 }

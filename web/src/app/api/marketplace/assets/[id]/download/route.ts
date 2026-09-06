@@ -5,6 +5,7 @@ import { marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/
 import { eq, and, sql } from 'drizzle-orm';
 import { getSignedDownloadUrl, resolveOwnedAssetKey } from '@/lib/storage/r2';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function GET(
   req: NextRequest,
@@ -123,13 +124,13 @@ export async function GET(
         return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
       }
     } catch {
-      return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
+      return redactedJson({ error: 'Invalid file URL' }, { status: 400 });
     }
 
     return NextResponse.redirect(asset.assetFileUrl);
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets/[id]/download', assetId });
     console.error('Error downloading asset:', error);
-    return NextResponse.json({ error: 'Failed to download asset' }, { status: 500 });
+    return redactedJson({ error: 'Failed to download asset' }, { status: 500 });
   }
 }

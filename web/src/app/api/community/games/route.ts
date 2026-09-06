@@ -5,6 +5,7 @@ import { eq, sql, and, or, ilike, desc } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { parsePaginationParams } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -186,7 +187,7 @@ export async function GET(req: NextRequest) {
     return response;
   } catch (error) {
     captureException(error, { route: '/api/community/games' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch games' },
       { status: 500 }
     );

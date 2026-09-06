@@ -5,6 +5,7 @@ import { assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
+import { redactedJson } from '@/lib/api/errors';
 
 const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
@@ -84,6 +85,6 @@ export async function POST(
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets/[id]/review' });
     console.error('Error submitting review:', error);
-    return NextResponse.json({ error: 'Failed to submit review' }, { status: 500 });
+    return redactedJson({ error: 'Failed to submit review' }, { status: 500 });
   }
 }

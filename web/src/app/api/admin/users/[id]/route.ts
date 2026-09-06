@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { applyAdminTierChange } from '@/lib/billing/admin-tier-grant';
+import { redactedJson } from '@/lib/api/errors';
 
 const patchUserSchema = z
   .object({
@@ -58,7 +59,7 @@ export async function GET(
     return NextResponse.json({ user });
   } catch (error) {
     captureException(error, { route: '/api/admin/users/[id]', method: 'GET' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -160,6 +161,6 @@ export async function PATCH(
     return NextResponse.json({ user: updated });
   } catch (error) {
     captureException(error, { route: '/api/admin/users/[id]', method: 'PATCH' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }

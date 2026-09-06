@@ -39,6 +39,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 // This callback makes the same outbound provider-status HTTP calls the generate
 // routes make, so it gets the same execution budget (the generate routes export
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     payload = JSON.parse(body) as GenerationCallbackPayload;
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return redactedJson({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
   const { userId, providerJobId, type, tokenUsageId } = payload;
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       captureException(err, { route: ROUTE, action: 'resolve_key', providerJobId });
     }
     await finalizeFailedAndRefund(userId, providerJobId, tokenUsageId, 'Provider key unavailable for status check');
-    return NextResponse.json({ ok: true, finalized: 'failed', reason: 'key_unavailable' });
+    return redactedJson({ ok: true, finalized: 'failed', reason: 'key_unavailable' });
   }
 
   try {
@@ -168,6 +169,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (err) {
     // Transport / provider error → 500 so QStash retries with its own backoff.
     captureException(err, { route: ROUTE, action: 'poll', providerJobId, type });
-    return NextResponse.json({ error: 'Poll failed' }, { status: 500 });
+    return redactedJson({ error: 'Poll failed' }, { status: 500 });
   }
 }

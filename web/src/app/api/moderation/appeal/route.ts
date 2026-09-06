@@ -11,6 +11,7 @@ import {
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ id: appeal.id, status: appeal.status }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/moderation/appeal' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to submit appeal' },
       { status: 500 }
     );

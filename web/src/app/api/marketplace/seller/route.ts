@@ -5,6 +5,7 @@ import { sellerProfiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
+import { redactedJson } from '@/lib/api/errors';
 
 const sellerProfileSchema = z.object({
   displayName: z.string().trim().min(2).max(100),
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Error fetching seller profile:', error);
     captureException(error, { route: '/api/marketplace/seller', method: 'GET' });
-    return NextResponse.json({ error: 'Failed to fetch profile' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch profile' }, { status: 500 });
   }
 }
 
@@ -92,6 +93,6 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('Error saving seller profile:', error);
     captureException(error, { route: '/api/marketplace/seller', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to save profile' }, { status: 500 });
+    return redactedJson({ error: 'Failed to save profile' }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const createAssetSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Error fetching seller assets:', error);
     captureException(error, { route: '/api/marketplace/seller/assets', method: 'GET' });
-    return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 }
 
@@ -82,6 +83,6 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('Error creating asset:', error);
     captureException(error, { route: '/api/marketplace/seller/assets', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to create asset' }, { status: 500 });
+    return redactedJson({ error: 'Failed to create asset' }, { status: 500 });
   }
 }

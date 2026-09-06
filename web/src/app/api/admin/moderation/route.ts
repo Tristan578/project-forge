@@ -8,6 +8,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { parsePaginationParams } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -169,7 +170,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation', method: 'GET' });
     console.error('Failed to fetch moderation queue:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch moderation queue' },
       { status: 500 }
     );
@@ -317,7 +318,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation', method: 'POST' });
     console.error('Failed to perform moderation action:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to perform moderation action' },
       { status: 500 }
     );

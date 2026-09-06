@@ -9,6 +9,7 @@ import { requireOneOf } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BYOK_PROVIDERS } from '@/lib/config/providers';
 import { z } from 'zod';
+import { redactedJson } from '@/lib/api/errors';
 
 const keySchema = z.object({
   key: z.string().trim().min(8).max(500),
@@ -46,7 +47,7 @@ export async function PUT(
     return NextResponse.json({ success: true, provider: providerResult.value, configured: true });
   } catch (err) {
     captureException(err, { route: '/api/keys/[provider]', method: 'PUT' });
-    return NextResponse.json({ error: 'Failed to store provider key' }, { status: 500 });
+    return redactedJson({ error: 'Failed to store provider key' }, { status: 500 });
   }
 }
 
@@ -77,6 +78,6 @@ export async function DELETE(
     return NextResponse.json({ success: true, provider: providerResult.value, configured: false });
   } catch (err) {
     captureException(err, { route: '/api/keys/[provider]', method: 'DELETE' });
-    return NextResponse.json({ error: 'Failed to delete provider key' }, { status: 500 });
+    return redactedJson({ error: 'Failed to delete provider key' }, { status: 500 });
   }
 }

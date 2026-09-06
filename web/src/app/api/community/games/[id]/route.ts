@@ -4,6 +4,7 @@ import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments }
 import { eq, sql, and } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,7 +138,7 @@ export async function GET(
   } catch (error) {
     console.error('Failed to fetch game:', error);
     captureException(error, { route: '/api/community/games/[id]' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch game' },
       { status: 500 }
     );

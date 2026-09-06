@@ -53,6 +53,13 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const err = error as Error & { limit?: number };
     if (err.message === 'Project limit exceeded') {
+      // The only value read from the caught error here is `err.limit`, a number
+      // that `lib/projects/service.ts` attaches itself. The sentence is ours and
+      // no upstream text can reach it. The rule's `instanceof` exemption does
+      // not apply because this error is narrowed by MESSAGE rather than by type;
+      // typing it would ripple through the remix route and four suites, which is
+      // a refactor this security fix should not be carrying.
+      // eslint-disable-next-line spawnforge/no-raw-response-in-catch -- err.limit is a number we set; see above
       return apiError(
         403,
         `Your plan allows ${err.limit} project${err.limit === 1 ? '' : 's'}. Upgrade to create more.`,

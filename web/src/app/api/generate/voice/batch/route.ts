@@ -11,6 +11,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
+import { redactedJson } from '@/lib/api/errors';
 
 const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try again later.';
 
@@ -77,10 +78,10 @@ export async function POST(request: NextRequest) {
     usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
     }
     captureException(err, { route: '/api/generate/voice/batch', action: 'resolve_api_key' });
-    return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
+    return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
   }
 
   const client = new ElevenLabsClient({ apiKey });

@@ -5,6 +5,7 @@ import { gameComments } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,7 +54,7 @@ export async function POST(
     return NextResponse.json({ flagged: true });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/flag' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to flag comment' },
       { status: 500 }
     );

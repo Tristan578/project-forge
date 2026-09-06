@@ -10,6 +10,7 @@ import {
 } from '@/lib/providers/circuitBreaker';
 import { PROVIDER_NAMES, type ProviderName } from '@/lib/config/providers';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const circuitBreakerActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('reset_all') }),
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/circuit-breaker', method: 'GET' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -97,6 +98,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/circuit-breaker', method: 'POST' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }

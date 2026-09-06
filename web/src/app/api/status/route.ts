@@ -13,6 +13,7 @@ import {
 } from '@/lib/status/statusTypes';
 import { MONITORED_SERVICES } from '@/lib/status/statusConfig';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 /**
  * GET /api/status
@@ -106,7 +107,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     captureException(error, { route: '/api/status' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
 

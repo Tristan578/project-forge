@@ -10,6 +10,7 @@ import { PUBLISH_LIMITS } from '@/lib/projects/limits';
 import { logger } from '@/lib/logging/logger';
 import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const publishSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -323,7 +324,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ publication: { ...publication, url: gameUrl } });
   } catch (err) {
     captureException(err, { route: '/api/publish', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to publish game' }, { status: 500 });
+    return redactedJson({ error: 'Failed to publish game' }, { status: 500 });
   }
 }
 

@@ -65,6 +65,7 @@ import {
   REPORT_RATE_LIMIT_MAX,
   REPORT_RATE_LIMIT_WINDOW_SECONDS,
 } from '@/lib/config/moderation';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -241,6 +242,6 @@ export async function POST(
     });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/report' });
-    return NextResponse.json({ error: 'Failed to report game' }, { status: 500 });
+    return redactedJson({ error: 'Failed to report game' }, { status: 500 });
   }
 }

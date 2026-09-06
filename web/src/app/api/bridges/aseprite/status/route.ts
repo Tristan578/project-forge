@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/bridges/aseprite/status' });
-    return NextResponse.json(
+    return redactedJson(
       // Fixed text: the bridge's own error can name a local path or port (#9736).
       { error: 'Status check failed' },
       { status: 500 }

@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { reserveTokenBudget, releaseUnusedBudget, recordStepUsage } from '@/lib/tokens/budget';
+import { redactedJson } from '@/lib/api/errors';
 
 const MAX_PIPELINE_TOKENS = 1_000_000;
 
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
+    return redactedJson(
       { error: 'validation_error', details: ['Invalid JSON body'] },
       { status: 400 },
     );

@@ -8,6 +8,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation/unpublish', method: 'POST' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to unpublish game' },
       { status: 500 }
     );

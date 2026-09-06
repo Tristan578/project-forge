@@ -5,6 +5,7 @@ import { deleteUserAccount } from '@/lib/auth/user-service';
 import { requireStepUp } from '@/lib/auth/step-up';
 import { STEP_UP_ROUTES } from '@/lib/auth/security-policy';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 /**
  * POST /api/user/delete
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
     await deleteUserAccount(mid.userId!);
   } catch (err) {
     captureException(err, { route: '/api/user/delete' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to delete account' },
       { status: 500 }
     );

@@ -23,6 +23,7 @@ import {
   processRetryQueue,
 } from '@/lib/auth/webhookRetry';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 /** Process a verified webhook event. Extracted so it can be used by the retry queue. */
 async function handleWebhookEvent(
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
     const verified = await verifyWebhook(req, { signingSecret });
     event = { type: verified.type, data: verified.data as unknown as Record<string, unknown> };
   } catch {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+    return redactedJson({ error: 'Invalid signature' }, { status: 400 });
   }
 
   try {
@@ -88,12 +89,12 @@ export async function POST(req: NextRequest) {
     if (isTransientError(error)) {
       enqueueRetry(event.type, event.data, error);
       // Return 200 so Clerk doesn't retry its own delivery (we handle retries internally)
-      return NextResponse.json({ received: true, queued: true });
+      return redactedJson({ received: true, queued: true });
     }
     // Permanent error — log, capture in Sentry, and return error status
     console.error('[Webhook] Permanent error processing event:', event.type, error);
     captureException(error, { context: 'clerk webhook permanent error', eventType: event.type });
-    return NextResponse.json({ error: 'Failed to process event' }, { status: 500 });
+    return redactedJson({ error: 'Failed to process event' }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

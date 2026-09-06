@@ -5,6 +5,7 @@ import { STEP_UP_ROUTES } from '@/lib/auth/security-policy';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
 import { buildPortalSessionParams } from '@/lib/billing/portal-config';
+import { redactedJson } from '@/lib/api/errors';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
@@ -55,6 +56,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ url: session.url });
   } catch (error) {
     captureException(error, { route: '/api/billing/portal' });
-    return NextResponse.json({ error: 'Failed to create billing portal session' }, { status: 500 });
+    return redactedJson({ error: 'Failed to create billing portal session' }, { status: 500 });
   }
 }

@@ -3,6 +3,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { getStripe } from '@/lib/billing/stripe-client';
+import { redactedJson } from '@/lib/api/errors';
 
 /**
  * GET /api/billing/status
@@ -61,6 +62,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/billing/status', method: 'GET' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }

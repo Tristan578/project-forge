@@ -5,6 +5,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const patchLeaderboardSchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional(),
@@ -102,7 +103,7 @@ export async function PATCH(
     return NextResponse.json({ success: true, updated: Object.keys(updates) });
   } catch (err) {
     captureException(err, { route: '/api/publish/[id]/leaderboards/[name]', method: 'PATCH' });
-    return NextResponse.json({ error: 'Failed to update leaderboard' }, { status: 500 });
+    return redactedJson({ error: 'Failed to update leaderboard' }, { status: 500 });
   }
 }
 
@@ -143,6 +144,6 @@ export async function DELETE(
     return NextResponse.json({ success: true });
   } catch (err) {
     captureException(err, { route: '/api/publish/[id]/leaderboards/[name]', method: 'DELETE' });
-    return NextResponse.json({ error: 'Failed to delete leaderboard' }, { status: 500 });
+    return redactedJson({ error: 'Failed to delete leaderboard' }, { status: 500 });
   }
 }

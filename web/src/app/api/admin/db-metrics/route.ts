@@ -21,6 +21,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getMetrics } from '@/lib/db/queryMonitor';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, { requireAuth: true });
@@ -38,6 +39,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(metrics);
   } catch (error) {
     captureException(error, { route: '/api/admin/db-metrics' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }

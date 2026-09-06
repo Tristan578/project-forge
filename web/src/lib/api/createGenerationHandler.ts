@@ -38,7 +38,7 @@ import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
-import { ErrorCode } from './errors';
+import { ErrorCode, redactedJson } from './errors';
 
 /** Default initial delay before the first durable generation callback (PF-906). */
 const DEFAULT_CALLBACK_DELAY_SECONDS = 30;
@@ -399,7 +399,7 @@ export function createGenerationHandler<TParams, TResult>(
       }
       rawBody = parsed as Record<string, unknown>;
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+      return redactedJson({ error: 'Invalid JSON' }, { status: 400 });
     }
 
     // 4. Validate
@@ -458,7 +458,7 @@ export function createGenerationHandler<TParams, TResult>(
       }
     } catch (err) {
       captureException(err, { route, action: 'resolve_billing_params' });
-      return NextResponse.json({ error: 'Internal pricing error' }, { status: 500 });
+      return redactedJson({ error: 'Internal pricing error' }, { status: 500 });
     }
     mctx.provider = resolvedProvider;
     mctx.operation = resolvedOperation;
@@ -568,7 +568,7 @@ export function createGenerationHandler<TParams, TResult>(
         return NextResponse.json(responseResult, { status: successStatus, headers });
       } catch (err) {
         if (err instanceof ApiKeyError) {
-          return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+          return redactedJson({ error: err.message, code: err.code }, { status: 402 });
         }
         if (err instanceof EmptyArtifactError) {
           // The two nouns as structured extras, not just inside the message —
@@ -583,7 +583,7 @@ export function createGenerationHandler<TParams, TResult>(
           return emptyArtifactResponse(err, tokensRefunded);
         }
         captureException(err, { route });
-        return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
+        return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
       }
     }
 
@@ -600,14 +600,14 @@ export function createGenerationHandler<TParams, TResult>(
       if (usageId !== undefined) mctx.tokenCost = tokenCost;
     } catch (err) {
       if (err instanceof ApiKeyError) {
-        return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+        return redactedJson({ error: err.message, code: err.code }, { status: 402 });
       }
       // A non-ApiKeyError here is a server-side failure (missing platform key,
       // DB error, etc.). Re-throwing surfaced it as an uninstrumented unhandled
       // rejection with no Sentry signal and a generic framework 500. Convert it
       // to a structured 500 and alert Sentry, mirroring the cached path (#8597).
       captureException(err, { route });
-      return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
+      return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
 
     try {
@@ -643,7 +643,7 @@ export function createGenerationHandler<TParams, TResult>(
         return emptyArtifactResponse(err, tokensRefunded);
       }
       captureException(err, { route });
-      return NextResponse.json({ error: GENERIC_500_MESSAGE }, { status: 500 });
+      return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
     }
   });
 }

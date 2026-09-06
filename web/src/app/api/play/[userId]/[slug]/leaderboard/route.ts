@@ -11,6 +11,7 @@ import {
   PG_INT4_MAX,
   LEADERBOARD_METADATA_MAX_BYTES,
 } from '@/lib/config/databaseLimits';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -177,7 +178,7 @@ export async function GET(
     return response;
   } catch (error) {
     captureException(error, { route: '/api/play/[userId]/[slug]/leaderboard GET' });
-    return NextResponse.json({ error: 'Failed to fetch leaderboard' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch leaderboard' }, { status: 500 });
   }
 }
 
@@ -202,7 +203,7 @@ export async function POST(
     try {
       body = await req.json();
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+      return redactedJson({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
     // Validate fields
@@ -345,7 +346,7 @@ export async function POST(
     }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/play/[userId]/[slug]/leaderboard POST' });
-    return NextResponse.json({ error: 'Failed to submit score' }, { status: 500 });
+    return redactedJson({ error: 'Failed to submit score' }, { status: 500 });
   }
 }
 

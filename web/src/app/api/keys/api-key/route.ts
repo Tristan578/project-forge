@@ -10,6 +10,7 @@ import { apiKeys } from '@/lib/db/schema';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { API_KEY_SCOPES, findInvalidScopes, type ApiKeyScope } from '@/lib/config/scopes';
 import { RATE_LIMIT_ADMIN_WINDOW_MS } from '@/lib/config/timeouts';
+import { redactedJson } from '@/lib/api/errors';
 
 const createApiKeySchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
   });
   } catch (err) {
     captureException(err, { route: '/api/keys/api-key', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to create API key' }, { status: 500 });
+    return redactedJson({ error: 'Failed to create API key' }, { status: 500 });
   }
 }
 
@@ -107,6 +108,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/keys/api-key', method: 'GET' });
-    return NextResponse.json({ error: 'Failed to list API keys' }, { status: 500 });
+    return redactedJson({ error: 'Failed to list API keys' }, { status: 500 });
   }
 }

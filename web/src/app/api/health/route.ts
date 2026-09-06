@@ -22,6 +22,7 @@ import { getClientIp, rateLimitPublicRoute, rateLimitResponse } from '@/lib/rate
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
+import { redactedJson } from '@/lib/api/errors';
 
 /**
  * Public status vocabulary for EACH SERVICE — 'healthy' is remapped to 'up'.
@@ -179,7 +180,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   } catch (error) {
     captureException(error, { route: '/api/health' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
 

@@ -2,6 +2,33 @@ import { NextResponse } from 'next/server';
 import { redactSecrets } from '@/lib/security/redactSecrets';
 
 // ---------------------------------------------------------------------------
+// Redacting drop-in for NextResponse.json
+// ---------------------------------------------------------------------------
+
+/**
+ * `NextResponse.json` with the body run through `redactSecrets` (#9736).
+ *
+ * WHY THIS EXISTS rather than "just use createErrorResponse everywhere". The
+ * lint rule `spawnforge/no-raw-response-in-catch` bans raw response
+ * construction on the catch path, and the API has many bespoke error envelopes
+ * that clients already read — `{ error: 'prompt_rejected', message }`,
+ * `{ error, code }`, `{ status, reason }`. Forcing all of them into this
+ * module's `{ error, code?, details? }` shape would be a client-visible
+ * refactor riding along with a security fix, and the friction of that refactor
+ * is precisely what would push the next author back to `NextResponse.json`.
+ *
+ * So: keep your envelope, get redaction. Prefer `createErrorResponse` when you
+ * do not need a bespoke shape — it also carries the status-code convention
+ * documented below.
+ *
+ * Redaction is a net, not a licence. A fixed message is still the requirement,
+ * and the same lint rule reports a caught error's value reaching this call.
+ */
+export function redactedJson<T>(body: T, init?: ResponseInit): NextResponse {
+  return NextResponse.json(redactSecrets(body), init);
+}
+
+// ---------------------------------------------------------------------------
 // Plan E: ApiErrorResponse + apiError() helper
 // ---------------------------------------------------------------------------
 

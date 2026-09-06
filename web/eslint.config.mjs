@@ -2,6 +2,11 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+// Rules with enough logic to deserve their own tests live in ./eslint-rules and
+// are exercised through ESLint's RuleTester from a vitest suite. The inline
+// rules below predate that split; new ones belong in a file.
+import noRawResponseInCatch from "./eslint-rules/no-raw-response-in-catch.mjs";
+
 // Local plugin: detect hardcoded Tailwind color classes that should use design tokens.
 // Pattern: bg-zinc-800, text-gray-300, border-slate-500, etc.
 // These should be replaced with CSS custom property references (e.g., bg-[var(--sf-bg-surface)]).
@@ -230,8 +235,41 @@ const localPlugin = {
     'no-hardcoded-primitives': noHardcodedPrimitives,
     'no-empty-test-assertion': noEmptyTestAssertion,
     'no-bare-dialogue-tree-index': noBareDialogueTreeIndex,
+    'no-raw-response-in-catch': noRawResponseInCatch,
   },
 };
+
+/**
+ * Error classes whose `message` is authored HERE, for the user, and can never
+ * carry upstream provider text. Adding a name is asserting exactly that.
+ *
+ *  - ApiKeyError (lib/keys/resolver.ts) — "You have no Meshy key configured".
+ *  - PromptRejectedError (lib/game-creation/decomposer.ts) — our own
+ *    safety-filter reason. Typed rather than prefix-matched, so an upstream
+ *    error whose text happened to start "Prompt rejected:" cannot claim it.
+ */
+const CLIENT_SAFE_ERRORS = ['ApiKeyError', 'PromptRejectedError'];
+
+/**
+ * The response constructors that redact (`web/src/lib/api/errors.ts`). Any
+ * other way of building a response is banned on the catch path, which is what
+ * puts `redactSecrets` genuinely ON that path instead of adjacent to it.
+ */
+const REDACTING_RESPONSE_HELPERS = [
+  'apiError',
+  'createErrorResponse',
+  'redactedJson',
+  'apiErrorResponse',
+  'badRequest',
+  'unauthorized',
+  'paymentRequired',
+  'forbidden',
+  'notFound',
+  'conflict',
+  'validationError',
+  'internalError',
+  'serviceUnavailable',
+];
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -309,6 +347,25 @@ const eslintConfig = defineConfig([
     plugins: { 'spawnforge': localPlugin },
     rules: {
       'spawnforge/no-hardcoded-primitives': 'off',
+    },
+  },
+  {
+    /**
+     * Catch-path secret egress (#9736). Scoped to the files that BUILD API
+     * responses: the routes themselves, plus the shared constructors under
+     * lib/api that several routes delegate to — `createGenerationHandler` is
+     * the single response constructor for all twelve /api/generate/* routes, so
+     * a gate over `route.ts` alone would assert "no route file leaks" rather
+     * than "no API response leaks".
+     */
+    files: ['src/app/api/**/route.ts', 'src/lib/api/**/*.ts'],
+    ignores: ['src/lib/api/**/__tests__/**', 'src/lib/api/**/*.test.ts'],
+    plugins: { spawnforge: localPlugin },
+    rules: {
+      'spawnforge/no-raw-response-in-catch': ['error', {
+        clientSafeErrors: CLIENT_SAFE_ERRORS,
+        responseHelpers: REDACTING_RESPONSE_HELPERS,
+      }],
     },
   },
   {

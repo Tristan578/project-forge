@@ -11,6 +11,7 @@ import {
   withStatusSidecars,
 } from '@/lib/storage/r2';
 import { captureException, captureMessage } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const ALLOWED_PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_ASSET_TYPES = [
@@ -169,6 +170,6 @@ export async function POST(
   } catch (error) {
     captureException(error, { route: '/api/marketplace/seller/assets/[id]/upload', assetId });
     console.error('Error uploading asset files:', error);
-    return NextResponse.json({ error: 'Failed to upload files' }, { status: 500 });
+    return redactedJson({ error: 'Failed to upload files' }, { status: 500 });
   }
 }

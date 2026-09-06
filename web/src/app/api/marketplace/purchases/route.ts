@@ -4,6 +4,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { assetPurchases } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function GET(req: NextRequest) {
   try {
@@ -24,6 +25,6 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Error fetching purchases:', error);
     captureException(error, { route: '/api/marketplace/purchases' });
-    return NextResponse.json({ error: 'Failed to fetch purchases' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch purchases' }, { status: 500 });
   }
 }

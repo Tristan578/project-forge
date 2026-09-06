@@ -7,6 +7,7 @@ import type { BridgeToolConfig } from '@/lib/bridges/types';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
+import { redactedJson } from '@/lib/api/errors';
 
 const asepriteExecuteSchema = z.object({
   operation: z.string().min(1).max(100),
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
     captureException(err, { route: '/api/bridges/aseprite/execute' });
     // Return a generic error message to avoid leaking internal paths or system details.
     // The full error is captured by Sentry above for debugging.
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Aseprite operation failed. Check Sentry for details.' },
       { status: 500 }
     );

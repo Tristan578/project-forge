@@ -3,6 +3,7 @@ import { readdir, readFile } from 'fs/promises';
 import path from 'path';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 interface DocEntry {
   path: string;
@@ -93,7 +94,7 @@ export async function GET(req: NextRequest) {
     return response;
   } catch (err) {
     captureException(err, { route: '/api/docs' });
-    return NextResponse.json(
+    return redactedJson(
       // `details` used to forward the caught error's text; it is on the
       // Sentry event above instead (#9736).
       { error: 'Failed to load documentation' },

@@ -30,6 +30,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { refundTokens } from '@/lib/tokens/service';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
+import { redactedJson } from '@/lib/api/errors';
 
 // One substantial single-shot LLM call producing a full GDD — priced at
 // parity with what this route billed under before #9339, when
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
+    return redactedJson(
       { error: 'validation_error', details: ['Invalid JSON body'] },
       { status: 400 },
     );
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
     usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
     }
     throw err;
   }
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
     // that prefix too, and every other caught error must not reach the client
     // (#9736).
     if (err instanceof PromptRejectedError) {
-      return NextResponse.json(
+      return redactedJson(
         { error: 'prompt_rejected', message: err.message },
         { status: 400 },
       );
@@ -153,7 +154,7 @@ export async function POST(req: NextRequest) {
     // Everything else is an internal/provider failure — the real message is
     // already on the Sentry event above; don't forward it to the client,
     // where it could carry backend identifiers or stack fragments.
-    return NextResponse.json(
+    return redactedJson(
       { error: 'decomposition_failed', message: 'Failed to generate game design. Please try again.' },
       { status: 500 },
     );

@@ -5,6 +5,7 @@ import {
   RATE_LIMIT_VITALS_MAX,
   RATE_LIMIT_VITALS_WINDOW_MS,
 } from '@/lib/config/timeouts';
+import { redactedJson } from '@/lib/api/errors';
 
 /**
  * POST /api/vitals
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
   try {
     raw = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    return redactedJson({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const parsed = vitalsSchema.safeParse(raw);

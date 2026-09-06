@@ -7,6 +7,7 @@ import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'GET' });
     console.error('Failed to fetch featured games:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch featured games' },
       { status: 500 }
     );
@@ -131,7 +132,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'POST' });
     console.error('Failed to feature game:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to feature game' },
       { status: 500 }
     );
@@ -165,7 +166,7 @@ export async function DELETE(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'DELETE' });
     console.error('Failed to unfeature game:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to unfeature game' },
       { status: 500 }
     );

@@ -6,6 +6,7 @@ import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation/appeals' });
     console.error('Failed to fetch appeals:', error);
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch appeals' },
       { status: 500 }
     );

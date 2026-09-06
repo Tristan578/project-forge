@@ -39,6 +39,7 @@ import {
   handleReviewClosed,
   handleDisputeCreated,
 } from '@/lib/billing/radar-review';
+import { redactedJson } from '@/lib/api/errors';
 
 // Map Stripe price IDs to tiers
 function tierFromPriceId(priceId: string): Tier | null {
@@ -74,7 +75,7 @@ export async function POST(req: Request) {
   try {
     event = getStripe().webhooks.constructEvent(body, sig, WEBHOOK_SECRET);
   } catch {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+    return redactedJson({ error: 'Invalid signature' }, { status: 400 });
   }
 
   // Idempotency: atomically claim the event so only one concurrent
@@ -103,7 +104,7 @@ export async function POST(req: Request) {
     captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
     // Return 500 so Stripe retries the webhook delivery.
-    return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
+    return redactedJson({ error: 'Processing failed' }, { status: 500 });
   }
 
   // Processing succeeded — extend the claim TTL to the full 72h window

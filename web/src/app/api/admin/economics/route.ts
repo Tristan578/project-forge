@@ -6,6 +6,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function GET(req: NextRequest) {
   const mid = await withApiMiddleware(req, { requireAuth: true });
@@ -68,6 +69,6 @@ export async function GET(req: NextRequest) {
   });
   } catch (error) {
     captureException(error, { route: '/api/admin/economics' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }

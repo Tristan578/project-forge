@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { redactedJson } from '@/lib/api/errors';
 
 /**
  * POST /api/sentry
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
     try {
       header = JSON.parse(firstLine);
     } catch {
-      return NextResponse.json({ error: 'Invalid envelope header' }, { status: 400 });
+      return redactedJson({ error: 'Invalid envelope header' }, { status: 400 });
     }
 
     const dsn = header.dsn;
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
     try {
       dsnUrl = new URL(dsn);
     } catch {
-      return NextResponse.json({ error: 'Invalid DSN URL' }, { status: 400 });
+      return redactedJson({ error: 'Invalid DSN URL' }, { status: 400 });
     }
 
     const dsnSegments = dsnUrl.pathname.split('/').filter(Boolean);
@@ -98,6 +99,6 @@ export async function POST(request: NextRequest) {
     });
   } catch {
     // Silently fail -- tunnel errors should not break the app
-    return NextResponse.json({ error: 'Tunnel error' }, { status: 500 });
+    return redactedJson({ error: 'Tunnel error' }, { status: 500 });
   }
 }

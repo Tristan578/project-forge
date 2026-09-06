@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { discoverTool, isAllowedToolId } from '@/lib/bridges/bridgeManager';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const discoverSchema = z.object({
   toolId: z.string().min(1).max(100),
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
     captureException(err, { route: '/api/bridges/discover' });
     // Return a generic error message to avoid leaking internal paths or
     // child-process error text. Full error is captured by Sentry above.
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Discovery failed' },
       { status: 500 }
     );

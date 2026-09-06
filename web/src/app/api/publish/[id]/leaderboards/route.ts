@@ -5,6 +5,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, leaderboards } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const createLeaderboardSchema = z.object({
   name: z.string().trim().min(1).max(64),
@@ -62,7 +63,7 @@ export async function GET(
     return NextResponse.json({ leaderboards: boards });
   } catch (err) {
     captureException(err, { route: '/api/publish/[id]/leaderboards', method: 'GET' });
-    return NextResponse.json({ error: 'Failed to list leaderboards' }, { status: 500 });
+    return redactedJson({ error: 'Failed to list leaderboards' }, { status: 500 });
   }
 }
 
@@ -118,9 +119,9 @@ export async function POST(
   } catch (err) {
     const pgErr = err as { code?: string };
     if (pgErr.code === '23505') {
-      return NextResponse.json({ error: 'A leaderboard with this name already exists for this game' }, { status: 409 });
+      return redactedJson({ error: 'A leaderboard with this name already exists for this game' }, { status: 409 });
     }
     captureException(err, { route: '/api/publish/[id]/leaderboards', method: 'POST' });
-    return NextResponse.json({ error: 'Failed to create leaderboard' }, { status: 500 });
+    return redactedJson({ error: 'Failed to create leaderboard' }, { status: 500 });
   }
 }

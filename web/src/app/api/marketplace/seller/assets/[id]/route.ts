@@ -5,6 +5,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const patchAssetSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
@@ -82,6 +83,6 @@ export async function PATCH(
   } catch (error) {
     console.error('Error updating asset:', error);
     captureException(error, { route: '/api/marketplace/seller/assets/[id]', method: 'PATCH' });
-    return NextResponse.json({ error: 'Failed to update asset' }, { status: 500 });
+    return redactedJson({ error: 'Failed to update asset' }, { status: 500 });
   }
 }

@@ -7,6 +7,7 @@ import { createProject } from '@/lib/projects/service';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { quarantineRemixedScripts } from '@/lib/security/remixSanitizer';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -149,13 +150,13 @@ export async function POST(
     );
   } catch (error) {
     if (error instanceof Error && error.message === 'Project limit exceeded') {
-      return NextResponse.json(
+      return redactedJson(
         { error: 'Project limit reached — upgrade your plan to remix more games' },
         { status: 403 }
       );
     }
     captureException(error, { route: '/api/play/[userId]/[slug]/remix' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to remix game' },
       { status: 500 }
     );

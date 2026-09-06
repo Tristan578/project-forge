@@ -4,6 +4,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function GET(request: NextRequest) {
   // 1. Authenticate + rate limit
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
     apiKey = resolved.key;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
     }
     throw err;
   }
@@ -85,6 +86,6 @@ export async function GET(request: NextRequest) {
     // The provider's own text stays server-side: `lib/generate/*Client.ts`
     // folds the upstream RESPONSE BODY into the thrown error, and on the
     // platform path the credential in play is the platform's (#9736).
-    return NextResponse.json({ error: 'Could not read the model generation status. Please try again.' }, { status: 500 });
+    return redactedJson({ error: 'Could not read the model generation status. Please try again.' }, { status: 500 });
   }
 }

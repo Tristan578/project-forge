@@ -5,6 +5,7 @@ import { generationJobs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +74,7 @@ export async function PATCH(
   } catch (error) {
     console.error('Failed to update job:', error);
     captureException(error, { route: '/api/jobs/[id]', method: 'PATCH' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to update job' },
       { status: 500 }
     );

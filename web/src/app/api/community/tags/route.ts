@@ -4,6 +4,7 @@ import { gameTags } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +34,6 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Failed to fetch tags:', error);
     captureException(error, { route: '/api/community/tags' });
-    return NextResponse.json({ error: 'Failed to fetch tags' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch tags' }, { status: 500 });
   }
 }

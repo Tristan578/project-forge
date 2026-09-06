@@ -6,6 +6,7 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { ilike, or, desc } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -67,6 +68,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ users: rows, limit, offset });
   } catch (error) {
     captureException(error, { route: '/api/admin/users' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }

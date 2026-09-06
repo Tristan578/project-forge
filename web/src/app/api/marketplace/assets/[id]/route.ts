@@ -4,6 +4,7 @@ import { marketplaceAssets, sellerProfiles, assetReviews, users } from '@/lib/db
 import { eq, desc, and } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
 
 export async function GET(
   req: NextRequest,
@@ -111,6 +112,6 @@ export async function GET(
   } catch (error) {
     console.error('Error fetching asset details:', error);
     captureException(error, { route: '/api/marketplace/assets/[id]' });
-    return NextResponse.json({ error: 'Failed to fetch asset' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch asset' }, { status: 500 });
   }
 }

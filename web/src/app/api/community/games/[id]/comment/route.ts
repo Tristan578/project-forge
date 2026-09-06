@@ -8,6 +8,7 @@ import { moderateContent } from '@/lib/moderation/contentFilter';
 import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
+import { redactedJson } from '@/lib/api/errors';
 
 const commentSchema = z.object({
   content: z.string().trim().min(1).max(1000),
@@ -59,7 +60,7 @@ export async function GET(
     return NextResponse.json({ comments: formattedComments });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/comment', method: 'GET' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to fetch comments' },
       { status: 500 }
     );
@@ -146,7 +147,7 @@ export async function POST(
     );
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/comment', method: 'POST' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to post comment' },
       { status: 500 }
     );
