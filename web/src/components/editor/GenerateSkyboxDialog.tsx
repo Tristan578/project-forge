@@ -30,6 +30,10 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
   // Capability gate (#9117): skybox is served by the Meshy texture pipeline.
   const gate = useGenerationGate('texture-generation');
   const canSubmit =
+    // `blocked` is false until the first /api/capabilities body lands, so
+    // without this a permanently-unavailable capability presented a live
+    // Generate button with no notice beside it (#9725 p8).
+    !gate.loading &&
     !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
@@ -97,7 +101,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-skybox-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-skybox-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

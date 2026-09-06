@@ -8,7 +8,8 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
-import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS } from '@/lib/config/providers';
+import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS, resolveSpriteProvider } from '@/lib/config/providers';
+import type { SpriteStyle } from '@/lib/config/providers';
 import type { SpriteSize } from '@/lib/config/providers';
 
 type SpriteProvider = 'dalle3' | 'sdxl';
@@ -66,10 +67,13 @@ export const POST = createGenerationHandler<
       return { ok: false, error: 'removeBackground must be a boolean' };
     }
 
-    const actualProvider: SpriteProvider =
-      (!provider || provider === 'auto')
-        ? (style === 'pixel-art' ? 'sdxl' : 'dalle3')
-        : (provider as SpriteProvider);
+    // Shared with GenerateSpriteDialog so the quote the user is shown, the
+    // balance the dialog gates on, and the amount charged here cannot disagree
+    // (#9741).
+    const actualProvider = resolveSpriteProvider(
+      style as SpriteStyle | undefined,
+      (provider ?? 'auto') as SpriteProvider,
+    );
 
     const serviceName = actualProvider === 'dalle3' ? 'openai' as const : 'replicate' as const;
 

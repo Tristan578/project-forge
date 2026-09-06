@@ -7,16 +7,24 @@ import { ApiKeyManager } from './ApiKeyManager';
 import { BillingTab } from './BillingTab';
 import { AppearanceTab } from './AppearanceTab';
 
-type Tab = 'tokens' | 'keys' | 'billing' | 'appearance';
+import type { SettingsTabId } from '@/stores/workspaceStore';
+
+type Tab = SettingsTabId;
 
 const TAB_ORDER: Tab[] = ['tokens', 'keys', 'billing', 'appearance'];
 
 interface SettingsPanelProps {
   onClose: () => void;
+  /**
+   * Tab to open on. The generation dialogs' unavailable notice opens this
+   * panel straight on `keys`, because the key it is asking for is the only
+   * reason the user was sent here (#9725 p8).
+   */
+  initialTab?: Tab;
 }
 
-export function SettingsPanel({ onClose }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<Tab>('tokens');
+export function SettingsPanel({ onClose, initialTab = 'tokens' }: SettingsPanelProps) {
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape + focus trap

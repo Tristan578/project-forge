@@ -15,6 +15,9 @@ export interface CustomPreset {
   layout: SerializedDockview;
 }
 
+/** Tabs of the in-editor Settings modal (`components/settings/SettingsPanel`). */
+export type SettingsTabId = 'tokens' | 'keys' | 'billing' | 'appearance';
+
 export interface WorkspaceState {
   /** The dockview API instance, set once on mount */
   api: DockviewApi | null;
@@ -26,6 +29,15 @@ export interface WorkspaceState {
   customPresets: CustomPreset[];
   /** Current docs navigation path */
   docsPath: string | null;
+  /**
+   * Which Settings tab is open, or null when the Settings modal is closed.
+   * Store-level rather than local to the Sidebar because the generation
+   * dialogs need to send a user to the BYOK form without leaving the editor:
+   * the notice used to be an `<a href="/settings">`, and a full document load
+   * tears down the Bevy/WASM session, unloads the scene and discards the
+   * prompt the user just typed (#9725 p8).
+   */
+  settingsTab: SettingsTabId | null;
 
   // Actions
   setApi: (api: DockviewApi) => void;
@@ -44,6 +56,10 @@ export interface WorkspaceState {
   getOpenPanelIds: () => string[];
   /** Open docs panel and navigate to a specific path */
   navigateDocs: (path: string) => void;
+  /** Open the in-editor Settings modal on a given tab (default: tokens) */
+  openSettings: (tab?: SettingsTabId) => void;
+  /** Close the in-editor Settings modal */
+  closeSettings: () => void;
 }
 
 function loadCustomPresets(): CustomPreset[] {
@@ -64,6 +80,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   // mounts client-side (in setApi), avoiding SSR hydration mismatch.
   customPresets: [],
   docsPath: null,
+  settingsTab: null,
 
   setApi: (api) => {
     // Load persisted custom presets now that we are definitely client-side.
@@ -249,6 +266,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ docsPath: path });
     get().openPanel('docs');
   },
+
+  openSettings: (tab = 'tokens') => set({ settingsTab: tab }),
+  closeSettings: () => set({ settingsTab: null }),
 
   openScriptEditor: (_entityId, entityName) => {
     const { api } = get();

@@ -9,9 +9,13 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
-// Capability gate (#9117): default "available"; the gate describe at the end flips it.
-vi.mock('@/hooks/useGenerationGate', () => ({
-  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+// Capability gate (#9117): default "available"; the gate describe at the end
+// flips it. Only `useGenerationGate` is stubbed — `combineGenerationGates` is
+// pure and comes through as the REAL implementation, because stubbing it would
+// make the Sound button's sfx-OR-voice rule untestable.
+vi.mock('@/hooks/useGenerationGate', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false })),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({
@@ -165,19 +169,22 @@ describe('AudioInspector', () => {
   });
 });
 
+/** The default "nothing is blocked" gate result. */
+const OPEN = { blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false } as const;
+
 describe('AudioInspector music gate (#9117)', () => {
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false }));
+    vi.mocked(useGenerationGate).mockImplementation(() => OPEN);
   });
 
-  it('gates the Sound button by its own capability too', () => {
+  it('gates the Sound button when NEITHER sfx nor voice can run', () => {
     mockEditorStore();
     useUserStore.setState({ tier: 'creator' });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
-      featureId === 'sfx-generation'
-        ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true }
-        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+      featureId === 'sfx-generation' || featureId === 'voice-generation'
+        ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
+        : OPEN,
     );
     render(<AudioInspector />);
     const sound = screen.getByRole('button', { name: 'Generate sound with AI — Sound effect generation is not available yet.' });
@@ -186,14 +193,53 @@ describe('AudioInspector music gate (#9117)', () => {
     expect(screen.getByRole('button', { name: 'Generate music with AI' })).not.toHaveAttribute('aria-disabled');
   });
 
+  // The Sound dialog covers sfx AND voice and deliberately keeps its type
+  // radios enabled so the user can switch to whichever still works. Gating the
+  // entry on sfx alone would make voice generation unreachable from the UI the
+  // moment sfx were declared unavailable, and the in-dialog escape hatch
+  // impossible to exercise (#9725 p8).
+  it('keeps the Sound button open while voice is still available', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'creator' });
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'sfx-generation'
+        ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
+        : OPEN,
+    );
+    render(<AudioInspector />);
+    const sound = screen.getByRole('button', { name: 'Generate sound with AI' });
+    expect(sound).not.toHaveAttribute('aria-disabled');
+    expect(sound).not.toHaveTextContent('Unavailable');
+    fireEvent.click(sound);
+    expect(screen.getByRole('dialog', { name: 'sound-dialog-stub' })).toBeInTheDocument();
+  });
+
+  // The first paint of a fresh session must not show a ready affordance that
+  // then contradicts itself: while /api/capabilities is in flight `blocked` is
+  // false, so both buttons used to paint enabled with a Sparkles icon and flip
+  // to a disabled amber badge when the body landed (#9725 p8).
+  it('does not present a ready button while the gate is still loading', () => {
+    mockEditorStore();
+    useUserStore.setState({ tier: 'creator' });
+    vi.mocked(useGenerationGate).mockImplementation(() => ({
+      blocked: false, reason: undefined, loading: true, unprovisionable: false, byokConfigurable: false,
+    }));
+    render(<AudioInspector />);
+    const music = screen.getByRole('button', { name: 'Generate music with AI — checking availability' });
+    expect(music).toHaveAttribute('aria-disabled', 'true');
+    expect(music).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(music);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('disables the Music button with the reason in its name and a distinct Unavailable badge, and never opens the dialog', () => {
     mockEditorStore();
     useUserStore.setState({ tier: 'creator' });
     // Both buttons ask the gate for their own capability; only music is blocked here.
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'music-generation'
-        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false, unprovisionable: true }
-        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
+        : OPEN,
     );
     render(<AudioInspector />);
     const btn = screen.getByRole('button', { name: 'Generate music with AI — Music generation is not available yet.' });
@@ -218,8 +264,9 @@ describe('AudioInspector music gate (#9117)', () => {
             reason: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.',
             loading: false,
             unprovisionable: false,
+            byokConfigurable: true,
           }
-        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+        : OPEN,
     );
     render(<AudioInspector />);
     const sound = screen.getByRole('button', { name: 'Generate sound with AI' });
@@ -228,4 +275,36 @@ describe('AudioInspector music gate (#9117)', () => {
     fireEvent.click(sound);
     expect(screen.getByRole('dialog', { name: 'sound-dialog-stub' })).toBeInTheDocument();
   });
+
+  // The default state for every free-tier user in production today: the tier
+  // locks the button AND the capability has no platform key, so `blocked` is
+  // true while `unprovisionable` is false. Keying the badge on `blocked` and
+  // the accessible name on `unprovisionable` made the two contradict each
+  // other — an amber "Unavailable" (we do not offer this) beside a name
+  // saying "requires Starter tier" (buy a plan), with the Lock + tier chip
+  // every other locked control shows gone, and the visible word "Unavailable"
+  // absent from the accessible name (WCAG 2.5.3). Both must read from
+  // `unprovisionable`, as AssetPanel already does (#9725 p8).
+  it.each(['sound', 'music'] as const)(
+    'shows the tier lock, not an Unavailable badge, when a tier-locked %s capability is merely unconfigured',
+    (which) => {
+      mockEditorStore();
+      useUserStore.setState({ tier: 'starter' });
+      vi.mocked(useGenerationGate).mockImplementation(() => ({
+        blocked: true,
+        reason: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.',
+        loading: false,
+        unprovisionable: false,
+        byokConfigurable: true,
+      }));
+      render(<AudioInspector />);
+      const label = which === 'sound' ? 'sound' : 'music';
+      const btn = screen.getByRole('button', {
+        name: `Generate ${label} with AI — requires Starter tier`,
+      });
+      expect(btn).toHaveAttribute('aria-disabled', 'true');
+      expect(btn).not.toHaveTextContent('Unavailable');
+      expect(btn).toHaveTextContent('Starter');
+    },
+  );
 });

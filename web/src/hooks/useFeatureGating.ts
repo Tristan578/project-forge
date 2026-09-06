@@ -110,10 +110,22 @@ function notifySubscribers(): void {
  * sign-out/sign-in by more than the route's own max-age — #9725).
  */
 function isCacheStale(): boolean {
-  if (!cachedState || cachedState.loading) return false;
+  if (!cachedState) return false;
   // `fetchPromise` is nulled when a request settles, so a non-null one means a
   // revalidation is already in flight: never start a second.
   if (fetchPromise) return false;
+  // A loading placeholder with nothing in flight is an ABANDONED request, and
+  // it must be restarted or the module never leaves `loading: true`. The way
+  // in: a consumer mounts and starts the first fetch, unmounts before it
+  // settles, then invalidateCapabilitiesCache() nulls `fetchPromise` and
+  // starts no replacement because `subscribers` is empty. The old code
+  // returned false here — for the rest of the SPA session — so every later
+  // mount was a no-op and `useGenerationGate` reported blocked:false and
+  // unprovisionable:false for EVERY capability, music included: the whole
+  // #9117 gate off with no notice (#9725 p8). This check must precede the
+  // `revalidationPending` and TTL branches below, both of which read fields
+  // that a loading placeholder has never had set.
+  if (cachedState.loading) return true;
   if (revalidationPending) return true;
   if (cachedState.error) {
     return errorCachedAt !== null && Date.now() - errorCachedAt >= ERROR_TTL_MS;
