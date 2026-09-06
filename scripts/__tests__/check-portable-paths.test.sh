@@ -241,7 +241,9 @@ fi
 # The two parallel arrays are a bash 3.2 stand-in for a map. A reason added
 # without an entry (or the reverse) shifts every later reason onto the wrong
 # entry, so the mismatch is a fail-closed tooling error, not a silent misreport.
-if grep -q 'ALLOW_ENTRIES\[@\]}" -ne "${#ALLOW_REASONS\[@\]}' "$SCRIPT"; then
+# Written without a `$` inside the single quotes on purpose: shellcheck's SC2016
+# is info-level, which the local default ignores and CI treats as fatal.
+if grep -qE 'ALLOW_ENTRIES\[@\][^;]*-ne[^;]*ALLOW_REASONS\[@\]' "$SCRIPT"; then
   PASS=$((PASS + 1)); echo "  ok   the entry/reason arrays are length-checked"
 else
   FAIL=$((FAIL + 1)); echo "  FAIL nothing checks ALLOW_ENTRIES against ALLOW_REASONS"
