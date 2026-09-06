@@ -73,11 +73,17 @@ const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try
  * formatting, but only when a platform deduction actually happened — a BYOK
  * request never charged anything, and a refund that itself throws is caught and
  * reported. Promising a refund in any of those cases is a support ticket.
+ *
+ * It takes the MESSAGE, not the error. Both call sites sit inside
+ * `if (err instanceof EmptyArtifactError)`, and `spawnforge/no-raw-response-in-catch`
+ * exempts a narrowed client-safe error's `message` but not the error object
+ * itself — handing the whole error to a helper is how `err.cause.body` used to
+ * ride out of a catch behind a narrowing that only justified the message.
  */
-function emptyArtifactResponse(err: EmptyArtifactError, refunded: boolean): NextResponse {
+function emptyArtifactResponse(baseMessage: string, refunded: boolean): NextResponse {
   const message = refunded
-    ? `${err.message}. Your tokens have been refunded — please try again.`
-    : `${err.message}. Please try again.`;
+    ? `${baseMessage}. Your tokens have been refunded — please try again.`
+    : `${baseMessage}. Please try again.`;
   // `redactedJson`, not `NextResponse.json`. This helper is called FROM two
   // catch blocks, so it is the one place in this repo that exercises the
   // documented limit of `spawnforge/no-raw-response-in-catch`: the rule sees
@@ -586,7 +592,7 @@ export function createGenerationHandler<TParams, TResult>(
             artifact: err.artifact,
           });
           mctx.outcome = 'empty_artifact';
-          return emptyArtifactResponse(err, tokensRefunded);
+          return emptyArtifactResponse(err.message, tokensRefunded);
         }
         captureException(err, { route });
         return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });
@@ -646,7 +652,7 @@ export function createGenerationHandler<TParams, TResult>(
           artifact: err.artifact,
         });
         mctx.outcome = 'empty_artifact';
-        return emptyArtifactResponse(err, tokensRefunded);
+        return emptyArtifactResponse(err.message, tokensRefunded);
       }
       captureException(err, { route });
       return redactedJson({ error: GENERIC_500_MESSAGE }, { status: 500 });

@@ -247,8 +247,16 @@ const localPlugin = {
  *  - PromptRejectedError (lib/game-creation/decomposer.ts) — our own
  *    safety-filter reason. Typed rather than prefix-matched, so an upstream
  *    error whose text happened to start "Prompt rejected:" cannot claim it.
+ *  - EmptyArtifactError (lib/api/errors.ts) — COMPOSES its message from two
+ *    static nouns (the generation type and the artifact), so no provider text
+ *    can reach a client through it.
+ *
+ * Only the properties in `clientSafeProperties` (message, code, status,
+ * statusCode, reason, name) are exempt, and only inside the narrowed branch.
+ * Passing the narrowed error WHOLE is still reported: the justification is that
+ * the MESSAGE is ours, and it does not extend to `err.cause.body`.
  */
-const CLIENT_SAFE_ERRORS = ['ApiKeyError', 'PromptRejectedError'];
+const CLIENT_SAFE_ERRORS = ['ApiKeyError', 'PromptRejectedError', 'EmptyArtifactError'];
 
 /**
  * The response constructors that redact (`web/src/lib/api/errors.ts`). Any
@@ -269,6 +277,31 @@ const REDACTING_RESPONSE_HELPERS = [
   'validationError',
   'internalError',
   'serviceUnavailable',
+];
+
+/**
+ * The ALLOWLIST of terminal sinks the caught error may reach. It lives here,
+ * not only in the rule, so a reviewer can audit what is permitted to consume an
+ * error without reading the rule's implementation.
+ *
+ * The rule's model is that a caught error may go to our telemetry, our logs, or
+ * back up the stack — and nowhere else. Everything not on this list is reported
+ * wherever the value crosses OUT of the catch scope, which is what makes the
+ * gate independent of the (open-ended) set of sinks somebody might invent.
+ */
+const CATCH_ERROR_SINKS = [
+  'captureException',        // lib/monitoring/sentry.ts
+  'captureMessage',
+  'sampledCaptureException', // lib/monitoring/sampledCapture.ts
+  'captureGenerationError',
+  'reportError',
+  'Promise.reject',          // a rethrow, not an egress
+];
+
+/** Receivers whose every method is a log sink. */
+// `reqLog`/`log` are the two names this repo binds `logger.child(...)` to.
+const CATCH_LOGGER_OBJECTS = [
+  'console', 'logger', 'log', 'reqLog', 'Sentry', 'sentry', 'sentryLogger',
 ];
 
 const eslintConfig = defineConfig([
@@ -351,20 +384,48 @@ const eslintConfig = defineConfig([
   },
   {
     /**
-     * Catch-path secret egress (#9736). Scoped to the files that BUILD API
-     * responses: the routes themselves, plus the shared constructors under
-     * lib/api that several routes delegate to — `createGenerationHandler` is
-     * the single response constructor for all twelve /api/generate/* routes, so
-     * a gate over `route.ts` alone would assert "no route file leaks" rather
-     * than "no API response leaks".
+     * Catch-path secret egress (#9736). Scoped to every file that BUILDS a
+     * response returned to a client — which is deliberately wider than
+     * `route.ts`.
+     *
+     * A glob restricted to route.ts files asserts "no route FILE leaks", not
+     * "no API response leaks" (lessons-learned #1). The excluded files each
+     * construct a NextResponse that is returned straight to a client:
+     * `lib/api` (createGenerationHandler is the single response constructor
+     * for all twelve /api/generate/* routes), `lib/auth/api-auth.ts`,
+     * `lib/rateLimit.ts`, `lib/apiValidation.ts`, `proxy.ts`, and every route
+     * handler under `src/app` that is not below `src/app/api` (the blog feed).
+     * None of them leaked when this was widened — the point is that nothing
+     * failed when the next one landed outside the glob.
+     *
+     * The `src/app/api` entry is a directory-wide glob rather than a filename
+     * one, so a non-`route.ts` module colocated under it — a co-located handler
+     * or body builder — is covered from the day it is created rather than
+     * silently unlinted. `noRawResponseInCatch.coverage.test.ts` fails if any
+     * response-building file stops being covered.
      */
-    files: ['src/app/api/**/route.ts', 'src/lib/api/**/*.ts'],
-    ignores: ['src/lib/api/**/__tests__/**', 'src/lib/api/**/*.test.ts'],
+    files: [
+      'src/app/**/route.ts',
+      'src/app/api/**/*.ts',
+      'src/lib/api/**/*.ts',
+      'src/lib/auth/api-auth.ts',
+      'src/lib/rateLimit.ts',
+      'src/lib/apiValidation.ts',
+      'src/proxy.ts',
+    ],
+    ignores: [
+      'src/lib/api/**/__tests__/**',
+      'src/lib/api/**/*.test.ts',
+      'src/app/api/**/__tests__/**',
+      'src/app/api/**/*.test.ts',
+    ],
     plugins: { spawnforge: localPlugin },
     rules: {
       'spawnforge/no-raw-response-in-catch': ['error', {
         clientSafeErrors: CLIENT_SAFE_ERRORS,
         responseHelpers: REDACTING_RESPONSE_HELPERS,
+        errorSinks: CATCH_ERROR_SINKS,
+        loggerObjects: CATCH_LOGGER_OBJECTS,
       }],
     },
   },

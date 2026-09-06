@@ -87,6 +87,13 @@ export async function POST(req: NextRequest) {
     await handleWebhookEvent(event.type, event.data);
   } catch (error) {
     if (isTransientError(error)) {
+      // The caught error is STORED, not sent: `enqueueRetry` keeps
+      // `error.message` on an in-memory RetryEntry (lib/auth/webhookRetry.ts)
+      // that `processRetryQueue` replays, and no route reads that queue back
+      // out to a client. The response two lines down carries two fixed
+      // booleans. Re-check this if a retry-queue inspection endpoint is ever
+      // added — the rule is right that this is a store-and-forward channel.
+      // eslint-disable-next-line spawnforge/no-raw-response-in-catch -- stored for replay, never sent to a client (#9736)
       enqueueRetry(event.type, event.data, error);
       // Return 200 so Clerk doesn't retry its own delivery (we handle retries internally)
       return redactedJson({ received: true, queued: true });

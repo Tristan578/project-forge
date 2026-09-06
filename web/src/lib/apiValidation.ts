@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { redactedJson } from '@/lib/api/errors';
 
 /**
  * Validates and parses a JSON request body. Returns the parsed body or a 400 error response.
@@ -13,7 +14,10 @@ export async function parseJsonBody(req: Request): Promise<
     }
     return { ok: true, body: body as Record<string, unknown> };
   } catch {
-    return { ok: false, response: NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }) };
+    // `redactedJson`, not `NextResponse.json`: a raw constructor inside a catch
+    // is banned (#9736). The body is a fixed string; the redactor is what keeps
+    // that true if a future change ever folds the parse error into it.
+    return { ok: false, response: redactedJson({ error: 'Invalid JSON body' }, { status: 400 }) };
   }
 }
 
