@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createPhysicsHandler } from '../channels/physicsChannel';
+import { deliverRaycast2dAnswer, resetRaycast2dQueue } from '../raycast2dRegistry';
 import { createAiHandler } from '../channels/aiChannel';
 import { createAssetHandler } from '../channels/assetChannel';
 import { createAudioHandler } from '../channels/audioChannel';
@@ -12,6 +13,10 @@ describe('Channel Handlers', () => {
   // ─── Physics ──────────────────────────────────────────────────
 
   describe('physicsChannel', () => {
+    beforeEach(() => {
+      resetRaycast2dQueue();
+    });
+
     it('dispatches raycast to WASM handle_command', async () => {
       const dispatchCommand = vi.fn().mockReturnValue({ hit: true, distance: 3.5 });
       const handler = createPhysicsHandler({ dispatchCommand });
@@ -40,34 +45,50 @@ describe('Channel Handlers', () => {
       }));
     });
 
-    it('dispatches raycast2d', async () => {
-      const dispatchCommand = vi.fn().mockReturnValue({ entityId: 'e1' });
+    /**
+     * The 2D path is ASYNCHRONOUS and its answer arrives as an engine event, so
+     * the cases here assert only what this file is for — that the handler sends
+     * the right command. The end-to-end behaviour across the correlation seam
+     * (hit, miss, overlapping casts, refusal, self-hit) is covered by
+     * `channels/__tests__/physicsChannel.test.ts`.
+     *
+     * These two used to assert `raycast2d_query` — a command the engine has
+     * never implemented — with `handle_command`'s acceptance envelope read as
+     * the raycast answer, and `isGrounded` returning true from that envelope
+     * with no origin supplied at all. They passed for as long as they existed
+     * because the mock agreed (lessons-learned #14), and they were pinning
+     * #9271 in place.
+     */
+    it('dispatches the real raycast2d command and does not answer synchronously', async () => {
+      const dispatchCommand = vi.fn().mockReturnValue({ success: true });
       const handler = createPhysicsHandler({ dispatchCommand });
 
-      const result = await handler('raycast2d', {
+      let settled = false;
+      const pending = handler('raycast2d', {
         originX: 0, originY: 0, dirX: 1, dirY: 0, maxDistance: 10,
-      }, noProgress, neverAbort);
+      }, noProgress, neverAbort).then(() => { settled = true; });
+      await Promise.resolve();
+      await Promise.resolve();
 
-      expect(dispatchCommand).toHaveBeenCalledWith('raycast2d_query', expect.objectContaining({
+      expect(dispatchCommand).toHaveBeenCalledWith('raycast2d', expect.objectContaining({
         originX: 0, dirX: 1, maxDistance: 10,
       }));
-      expect(result).toEqual({ entityId: 'e1' });
+      // No engine event has been delivered, so no answer exists yet.
+      expect(settled).toBe(false);
+
+      deliverRaycast2dAnswer(null);
+      await pending;
+      expect(settled).toBe(true);
     });
 
-    it('isGrounded returns boolean', async () => {
-      const dispatchCommand = vi.fn().mockReturnValue({ entityId: 'ground' });
+    it('isGrounded answers false without dispatching when given no position', async () => {
+      const dispatchCommand = vi.fn().mockReturnValue({ success: true });
       const handler = createPhysicsHandler({ dispatchCommand });
 
       const result = await handler('isGrounded', { entityId: 'player', distance: 0.2 }, noProgress, neverAbort);
-      expect(result).toBe(true);
-    });
 
-    it('isGrounded returns false when no hit', async () => {
-      const dispatchCommand = vi.fn().mockReturnValue(null);
-      const handler = createPhysicsHandler({ dispatchCommand });
-
-      const result = await handler('isGrounded', { entityId: 'player' }, noProgress, neverAbort);
       expect(result).toBe(false);
+      expect(dispatchCommand).not.toHaveBeenCalled();
     });
 
     it('throws for unknown method', async () => {
