@@ -276,12 +276,20 @@ recommendations, and "actual rules must be created in the Sentry dashboard".
 Check the dashboard for what is really there before drawing any conclusion from
 this step.
 
-Note too that `captureException` reads **`SENTRY_DSN` alone** and
-no-ops without it (`web/src/lib/monitoring/sentry-server.ts`) - unlike
-`withCronMonitor`, which also accepts `NEXT_PUBLIC_SENTRY_DSN`. A preview
-carrying only the public variable satisfies a loose "has a DSN" check and still
-raises no issue, which reads exactly like a broken alert rule. Confirm
-`SENTRY_DSN` specifically before drawing that conclusion.
+**The DSN trap this section used to describe is fixed, not documented.** An
+earlier draft warned that `captureException` read `SENTRY_DSN` alone while
+`withCronMonitor` and the Sentry init also accepted `NEXT_PUBLIC_SENTRY_DSN` —
+so a deployment carrying only the public variable registered cron check-ins and
+looked healthy while every captured exception was silently dropped. Writing that
+down would have left a real silent-failure path in place with a paragraph
+telling you to work around it. All four call sites now read
+`SENTRY_DSN || NEXT_PUBLIC_SENTRY_DSN`, so the guard no-ops exactly when Sentry
+is uninitialised and never when it is not.
+
+What remains true and worth checking: if **neither** variable is set, Sentry is
+not initialised at all, no exception is captured, and no check-in is registered.
+That is the one configuration in which silence here means "nothing is
+listening" rather than "nothing went wrong".
 
 ## Rotation
 
