@@ -343,17 +343,19 @@ describe('Script Sandbox Security', () => {
       expect(SCRIPT_ALLOWED_COMMANDS.has('delete_entities')).toBe(true);
     });
 
-    it('should allow physics commands', () => {
+    it('should allow the physics commands the engine actually arms', () => {
       expect(SCRIPT_ALLOWED_COMMANDS.has('apply_force')).toBe(true);
       expect(SCRIPT_ALLOWED_COMMANDS.has('apply_impulse')).toBe(true);
-      expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity')).toBe(true);
+      // No engine arm — a call returned silently (#9284).
+      expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity')).toBe(false);
     });
 
-    it('should allow 2D physics commands', () => {
+    it('should allow the 2D physics commands the engine actually arms', () => {
       expect(SCRIPT_ALLOWED_COMMANDS.has('apply_force2d')).toBe(true);
       expect(SCRIPT_ALLOWED_COMMANDS.has('apply_impulse2d')).toBe(true);
-      expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity2d')).toBe(true);
-      expect(SCRIPT_ALLOWED_COMMANDS.has('set_angular_velocity2d')).toBe(true);
+      // No engine arm — both returned silently (#9284).
+      expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity2d')).toBe(false);
+      expect(SCRIPT_ALLOWED_COMMANDS.has('set_angular_velocity2d')).toBe(false);
     });
 
     it('should allow audio commands', () => {
@@ -368,10 +370,11 @@ describe('Script Sandbox Security', () => {
       expect(SCRIPT_ALLOWED_COMMANDS.has('play_sprite_animation')).toBe(true);
     });
 
-    it('should allow camera commands', () => {
+    it('should allow the camera commands the engine actually arms', () => {
       expect(SCRIPT_ALLOWED_COMMANDS.has('camera_follow')).toBe(true);
-      expect(SCRIPT_ALLOWED_COMMANDS.has('camera_set_position')).toBe(true);
-      expect(SCRIPT_ALLOWED_COMMANDS.has('camera_look_at')).toBe(true);
+      // No engine arm — both returned silently (#9284).
+      expect(SCRIPT_ALLOWED_COMMANDS.has('camera_set_position')).toBe(false);
+      expect(SCRIPT_ALLOWED_COMMANDS.has('camera_look_at')).toBe(false);
     });
 
     it('should allow tilemap commands', () => {
@@ -389,10 +392,11 @@ describe('Script Sandbox Security', () => {
       }
     });
 
-    it('should allow skeleton 2D commands', () => {
+    it('should allow the skeleton 2D commands the engine actually arms', () => {
       expect(SCRIPT_ALLOWED_COMMANDS.has('create_skeleton2d')).toBe(true);
       expect(SCRIPT_ALLOWED_COMMANDS.has('play_skeletal_animation2d')).toBe(true);
-      expect(SCRIPT_ALLOWED_COMMANDS.has('set_ik_target2d')).toBe(true);
+      // No engine arm — returned silently (#9284).
+      expect(SCRIPT_ALLOWED_COMMANDS.has('set_ik_target2d')).toBe(false);
     });
 
     it('should block dangerous commands not in whitelist', () => {
@@ -783,11 +787,11 @@ describe('Script Sandbox Security', () => {
       expect(typeof badCommand.cmd).not.toBe('string');
     });
 
-    it('should have expected total command count in whitelist', () => {
+    it('should have exactly 55 commands in the whitelist', () => {
       // Keeps whitelist size visible — any additions should update this count.
       // This now pins the SHIPPED set: the former local copy had silently
       // drifted three names behind it and still asserted 59.
-      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(62);
+      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(55);
     });
   });
 

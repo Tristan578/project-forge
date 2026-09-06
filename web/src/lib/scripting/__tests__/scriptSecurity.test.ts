@@ -658,13 +658,16 @@ describe('Script Sandbox Security: Command Whitelist', () => {
   it('allows update_material', () => expect(SCRIPT_ALLOWED_COMMANDS.has('update_material')).toBe(true));
 
   it('allows apply_force', () => expect(SCRIPT_ALLOWED_COMMANDS.has('apply_force')).toBe(true));
-  it('allows set_velocity', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity')).toBe(true));
+  it('does NOT allow set_velocity — no engine arm', () =>
+    expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity')).toBe(false));
   it('allows apply_impulse', () => expect(SCRIPT_ALLOWED_COMMANDS.has('apply_impulse')).toBe(true));
 
   it('allows apply_force2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('apply_force2d')).toBe(true));
   it('allows apply_impulse2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('apply_impulse2d')).toBe(true));
-  it('allows set_velocity2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity2d')).toBe(true));
-  it('allows set_angular_velocity2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_angular_velocity2d')).toBe(true));
+  it('does NOT allow set_velocity2d — no engine arm', () =>
+    expect(SCRIPT_ALLOWED_COMMANDS.has('set_velocity2d')).toBe(false));
+  it('does NOT allow set_angular_velocity2d — no engine arm', () =>
+    expect(SCRIPT_ALLOWED_COMMANDS.has('set_angular_velocity2d')).toBe(false));
   it('allows set_gravity2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_gravity2d')).toBe(true));
 
   it('allows play_audio', () => expect(SCRIPT_ALLOWED_COMMANDS.has('play_audio')).toBe(true));
@@ -687,8 +690,10 @@ describe('Script Sandbox Security: Command Whitelist', () => {
 
   it('allows camera_follow', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_follow')).toBe(true));
   it('allows camera_stop_follow', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_stop_follow')).toBe(true));
-  it('allows camera_set_position', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_set_position')).toBe(true));
-  it('allows camera_look_at', () => expect(SCRIPT_ALLOWED_COMMANDS.has('camera_look_at')).toBe(true));
+  it('does NOT allow camera_set_position — no engine arm', () =>
+    expect(SCRIPT_ALLOWED_COMMANDS.has('camera_set_position')).toBe(false));
+  it('does NOT allow camera_look_at — no engine arm', () =>
+    expect(SCRIPT_ALLOWED_COMMANDS.has('camera_look_at')).toBe(false));
 
   it('allows paint_tile', () => expect(SCRIPT_ALLOWED_COMMANDS.has('paint_tile')).toBe(true));
   it('allows erase_tile', () => expect(SCRIPT_ALLOWED_COMMANDS.has('erase_tile')).toBe(true));
@@ -700,7 +705,8 @@ describe('Script Sandbox Security: Command Whitelist', () => {
 
   it('allows create_skeleton2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('create_skeleton2d')).toBe(true));
   it('allows play_skeletal_animation2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('play_skeletal_animation2d')).toBe(true));
-  it('allows set_ik_target2d', () => expect(SCRIPT_ALLOWED_COMMANDS.has('set_ik_target2d')).toBe(true));
+  it('does NOT allow set_ik_target2d — no engine arm', () =>
+    expect(SCRIPT_ALLOWED_COMMANDS.has('set_ik_target2d')).toBe(false));
 
   it('allows vibrate', () => expect(SCRIPT_ALLOWED_COMMANDS.has('vibrate')).toBe(true));
   it('allows stop (for scene reset)', () => expect(SCRIPT_ALLOWED_COMMANDS.has('stop')).toBe(true));
@@ -726,10 +732,15 @@ describe('Script Sandbox Security: Command Whitelist', () => {
   it('blocks update_terrain', () => expect(SCRIPT_ALLOWED_COMMANDS.has('update_terrain')).toBe(false));
   it('blocks load_scene', () => expect(SCRIPT_ALLOWED_COMMANDS.has('load_scene')).toBe(false));
 
-  it('whitelist has exactly 62 commands', () => {
+  // These seven were in the allowlist with NO engine arm: `route_domain`
+  // did not name them and no domain module armed them, so a script calling
+  // one got no error and no effect. Asserting they are ABSENT is what stops
+  // a name being re-added without an arm — the tests below used to assert
+  // the opposite, which pinned the defect in place (#9284).
+  it('whitelist has exactly 55 commands', () => {
     // Pins the SHIPPED set: the former local copy had silently drifted three
     // names behind it and still asserted 59.
-    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(62);
+    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(55);
   });
 });
 
