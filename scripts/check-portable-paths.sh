@@ -39,12 +39,25 @@ PATTERN='([A-Za-z]:[\\/](Users|repos)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z
 
 # Files where such a string is legitimate. Each entry states why, and each entry
 # EXEMPTS SOMETHING TODAY — an allowlist entry that covers no file is not
-# harmless, it is unreviewed breadth waiting for a file to wander into it. Five
-# entries were pruned for exempting nothing: `docs/audits/`, `.gitignore`, and
-# the unanchored `check-vitest-exit`, `db-migration-guard` and
-# `sentry-to-test-stub`, whose only matches were `/home/runner/` lines the filter
-# below already strips. The anti-rot note at the end of this script reports any
-# entry that stops exempting something, so the list cannot rot again silently.
+# harmless, it is unreviewed breadth waiting for a file to wander into it. Six
+# entries were pruned for exempting nothing: `docs/audits/`, `.gitignore`, the
+# unanchored `check-vitest-exit`, `db-migration-guard` and `sentry-to-test-stub`
+# (whose only matches were `/home/runner/` lines the filter below already
+# strips), and THIS SCRIPT.
+#
+# That last one is worth stating, because keeping it was the tempting choice.
+# PATTERN is written so it does not match its own text, so the entry had never
+# exempted anything, and a first version of this list kept it anyway on the
+# reasoning that the gate "must be able to document the shapes it forbids". It
+# does not need to: the shapes are the pattern, and prose describes them. An
+# entry held for a hypothetical is the same unreviewed breadth as one held out
+# of habit. If someone does write a literal example here, this gate fails on
+# itself immediately and obviously, which is a better outcome than a standing
+# exemption nobody re-reads.
+#
+# The anti-rot note at the end reports any entry that stops exempting something,
+# and the suite asserts the real tree produces NO such note — so the note has a
+# consumer rather than being a message into the void.
 #
 # Matched against the FILE PATH ALONE, never the `path:line:content` string that
 # grep emits. Against the whole string every `$`-anchored entry here is
@@ -57,7 +70,6 @@ PATTERN='([A-Za-z]:[\\/](Users|repos)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z
 # parallel indexed arrays. Keep them the same length; the script checks.
 ALLOW_ENTRIES=(
   '^docs/(reviews|coverage)/'
-  '^scripts/check-portable-paths\.sh$'
   '^scripts/__tests__/check-portable-paths\.test\.sh$'
   'provision-billing-meter'
   'mockOnceGuard'
@@ -66,7 +78,6 @@ ALLOW_ENTRIES=(
 )
 ALLOW_REASONS=(
   'dated records of what a tool printed; rewriting them would falsify the record'
-  'this gate, which must be able to document the shapes it forbids'
   "this gate's own suite, which builds the shapes it tests"
   'code ABOUT path handling — the literal is the subject, not a path to follow'
   'test infrastructure ABOUT path handling'
@@ -120,11 +131,14 @@ while IFS= read -r line; do
   file="${line%%:*}"
   exempt=0
   index=0
+  # NO `break`: every entry that covers this file is marked, not just the first.
+  # Stopping at the first match reports a SHADOWED entry as rot even while it
+  # genuinely covers files, and a notice with false positives is one people stop
+  # reading — which would defeat the note more completely than deleting it.
   for entry in "${ALLOW_ENTRIES[@]}"; do
     if grep -qE "$entry" <<<"$file"; then
       exempt=1
       allow_used="${allow_used:0:index}1${allow_used:$((index + 1))}"
-      break
     fi
     index=$((index + 1))
   done

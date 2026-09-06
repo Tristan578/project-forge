@@ -167,7 +167,13 @@ apps/docs/content/mcp/*.mdx
 .codex/hooks/.sync-push.lock
 .codex/hooks/.sync-lock-wanted
 .codex/hooks/.sync.log
-*.bak
+# Scoped to the hook directory that writes them. A repo-wide `*.bak` sat here
+# under this Codex-scoped heading, which is far broader than the heading claims
+# — in a PR whose own review finding was scope creep. One tracked file already
+# matches it (.claude/hooks/github-project-map.json.bak); ignoring a pattern
+# does not untrack such a file, so nothing broke, but the next .bak someone
+# means to commit would have vanished from `git status` with no explanation.
+.codex/hooks/*.bak
 
 # --- Half-finished cross-tool port: untracked on purpose (see #9745) ---
 # `.codex/agents`, `.codex/hooks`, `.codex/hooks.json` and the project-specific
