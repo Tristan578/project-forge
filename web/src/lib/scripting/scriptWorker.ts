@@ -36,6 +36,20 @@ interface EntityInfo {
   name: string;
   type: string;
   colliderRadius: number;
+  /**
+   * How far this entity's 2D collider reaches BELOW its transform origin.
+   *
+   * Unlike `colliderRadius` above — which `useScriptRunner` has always set to
+   * the literal 0.5 for every entity — this is computed from the entity's real
+   * `Physics2dData`. `physics2d.isGrounded` needs it because the ray it casts
+   * has to start at the entity's FEET: the transform position is the collider's
+   * CENTRE, so a ray from there with the default 0.1 length stops 0.4 units
+   * above the bottom of a default 1x1 collider and can never reach the floor.
+   *
+   * 0 for an entity with no 2D physics, which is also the safe reading: the
+   * ray then starts at the transform origin, exactly as before.
+   */
+  collider2dHalfHeight: number;
   currentFrame?: number;
 }
 
@@ -541,10 +555,19 @@ function buildForgeApi(scriptEntityId: string) {
         // origin for every entity (#9271).
         const state = entityStates[eid];
         if (!state) return false;
+        // FROM THE FEET, NOT THE CENTRE. `state.position` is the transform
+        // origin and every 2D collider is built around it
+        // (`make_collider_2d`), so `distance` measured from there is measured
+        // from inside the entity. With the default 1x1 collider and the default
+        // 0.1 distance the ray ended 0.4 units ABOVE the entity's own bottom
+        // edge — so once the caster was excluded from the cast it hit nothing
+        // and every entity read as airborne. Subtracting the half-height makes
+        // `distance` mean what the caller reads it as: how far below my feet.
+        const halfHeight = entityInfos[eid]?.collider2dHalfHeight ?? 0;
         return asyncRequest('physics', 'isGrounded', {
           entityId: eid,
           originX: state.position[0],
-          originY: state.position[1],
+          originY: state.position[1] - halfHeight,
           distance: distance ?? 0.1,
         });
       },
@@ -1429,7 +1452,10 @@ self.onmessage = (e: MessageEvent) => {
           }
           for (const [eid, components] of Object.entries(delta.changed)) {
             if (!updated[eid]) {
-              updated[eid] = { name: '', type: 'unknown', colliderRadius: 0.5 };
+              // 0, not a guess: an entity first seen through a delta has no
+              // collider information here, and 0 makes `isGrounded` cast from
+              // the transform origin rather than from a made-up offset.
+              updated[eid] = { name: '', type: 'unknown', colliderRadius: 0.5, collider2dHalfHeight: 0 };
             }
             updated[eid] = { ...updated[eid], ...components } as EntityInfo;
           }

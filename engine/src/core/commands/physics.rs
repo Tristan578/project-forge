@@ -1492,6 +1492,65 @@ mod tests {
         );
     }
 
+    // === raycast2d: exclude_entity_id ===
+    //
+    // THE WIRE NAME IS PINNED HERE, NOT ONLY IN THE BROWSER SUITE. The only
+    // thing asserting `excludeEntityId` was a `toHaveBeenCalledWith` on a mocked
+    // `dispatchCommand` in `physicsChannel.test.ts` — and a mock cannot disagree
+    // with you (lessons-learned #14). That is precisely how `raycast2d_query`,
+    // a command this file has never implemented, stayed asserted for months.
+    // `#[serde(rename_all = "camelCase")]` is what maps `exclude_entity_id` to
+    // the name the browser sends, and renaming the field would silently move it.
+
+    /// The field arrives from the browser as `excludeEntityId`.
+    #[test]
+    fn raycast2d_reads_the_camel_case_exclude_entity_id() {
+        let payload: Raycast2dPayload = serde_json::from_value(json!({
+            "originX": 1.0,
+            "originY": 2.0,
+            "dirX": 0.0,
+            "dirY": -1.0,
+            "maxDistance": 0.1,
+            "excludeEntityId": "player-1",
+        }))
+        .expect("a payload using the browser's field names must deserialize");
+        assert_eq!(payload.exclude_entity_id.as_deref(), Some("player-1"));
+    }
+
+    /// And it is OPTIONAL. `#[serde(default)]` is the only thing keeping every
+    /// caller that predates the exclusion working; without it a plain script
+    /// raycast fails to parse and no 2D raycast works at all — a far wider
+    /// break than the ground check this field was added for.
+    #[test]
+    fn raycast2d_without_an_exclusion_parses_as_none() {
+        let payload: Raycast2dPayload = serde_json::from_value(json!({
+            "originX": 1.0,
+            "originY": 2.0,
+            "dirX": 1.0,
+            "dirY": 0.0,
+            "maxDistance": 100.0,
+        }))
+        .expect("a payload with no excludeEntityId must still deserialize");
+        assert!(payload.exclude_entity_id.is_none());
+    }
+
+    /// The rest of the payload still uses `dirX`/`dirY`, not `directionX`. The
+    /// manifest's `raycast2d` entry declares `directionX`/`directionY` for the
+    /// CHAT tool, which is a stub that never dispatches to the engine — so the
+    /// two contracts differ legitimately, and this states which one the engine
+    /// holds so a future "fix" does not align them the wrong way.
+    #[test]
+    fn raycast2d_direction_is_dir_x_not_direction_x() {
+        let wrong = serde_json::from_value::<Raycast2dPayload>(json!({
+            "originX": 0.0,
+            "originY": 0.0,
+            "directionX": 1.0,
+            "directionY": 0.0,
+            "maxDistance": 1.0,
+        }));
+        assert!(wrong.is_err(), "directionX must NOT satisfy the engine payload");
+    }
+
     /// The router's fallthrough, so the assertion above is not vacuously true for
     /// any string at all.
     #[test]

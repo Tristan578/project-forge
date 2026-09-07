@@ -406,23 +406,76 @@ describe('scriptWorker forge.* async method wiring', () => {
     'entity-abc': { position: [4, 2, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
   };
 
-  it('forge.physics2d.isGrounded sends the entity position as the ray origin', async () => {
+  /**
+   * THE ORIGIN IS THE ENTITY'S FEET, NOT ITS CENTRE, and that distinction is the
+   * difference between a working ground check and one that can only ever answer
+   * false. `position` is the transform origin and every 2D collider is built
+   * around it (`make_collider_2d`), so a `distance` of 0.2 measured from there
+   * is measured from INSIDE the entity: with the default 1x1 collider the ray
+   * ends 0.3 units above the entity's own bottom edge. That was survivable only
+   * while the caster itself was the reported hit; excluding the caster turned it
+   * into a permanent false. `collider2dHalfHeight` is what the worker subtracts.
+   */
+  const GROUNDED_INFOS = {
+    'entity-abc': { name: 'Player', type: 'cube', colliderRadius: 0.5, collider2dHalfHeight: 0.5 },
+  };
+
+  it('casts from the feet: the origin is the position minus the collider half-height', async () => {
     const handler = await setupWorker();
     const source = `
       function onStart() {
         forge.physics2d.isGrounded('entity-abc', 0.2);
       }
     `;
-    await handler(initMsg([{ entityId: 'e1', enabled: true, source }], { entities: GROUNDED_ENTITIES }));
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source }],
+      { entities: GROUNDED_ENTITIES, entityInfos: GROUNDED_INFOS },
+    ));
 
     const reqs = getAsyncRequests('physics', 'isGrounded');
     expect(reqs).toHaveLength(1);
     expect(reqs[0].args).toEqual({
       entityId: 'entity-abc',
       originX: 4,
-      originY: 2,
+      // 2 - 0.5. Sending the bare `2` here is the defect: the ray would start
+      // at the centre and stop 0.3 above the collider's own lowest point.
+      originY: 1.5,
       distance: 0.2,
     });
+  });
+
+  it('casts from the position itself when the entity has no 2D collider', async () => {
+    const handler = await setupWorker();
+    const source = `
+      function onStart() {
+        forge.physics2d.isGrounded('entity-abc', 0.2);
+      }
+    `;
+    // No `entityInfos` entry at all: nothing is known about the collider, so a
+    // guessed offset would be worse than none.
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source }], { entities: GROUNDED_ENTITIES }));
+
+    const reqs = getAsyncRequests('physics', 'isGrounded');
+    expect(reqs).toHaveLength(1);
+    expect((reqs[0].args as Record<string, unknown>).originY).toBe(2);
+  });
+
+  it('offsets by the real half-height, not a constant', async () => {
+    const handler = await setupWorker();
+    const source = `
+      function onStart() {
+        forge.physics2d.isGrounded('entity-abc');
+      }
+    `;
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source }], {
+      entities: GROUNDED_ENTITIES,
+      entityInfos: {
+        'entity-abc': { name: 'Tall', type: 'cube', colliderRadius: 0.5, collider2dHalfHeight: 3 },
+      },
+    }));
+
+    const reqs = getAsyncRequests('physics', 'isGrounded');
+    expect((reqs[0].args as Record<string, unknown>).originY).toBe(-1);
   });
 
   it('forge.physics2d.isGrounded does not dispatch for an entity it has no position for', async () => {

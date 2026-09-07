@@ -17,6 +17,7 @@ import { DeltaSerializer, type SceneSnapshot } from '@/lib/engine/deltaSerialize
 import { checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
 import { getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
 import { resetRaycast2dQueue } from '@/lib/scripting/raycast2dRegistry';
+import { collider2dHalfHeight } from '@/lib/scripting/collider2dExtent';
 import { isScriptAllowedCommand } from '@/lib/scripting/scriptAllowlist';
 
 const WATCHDOG_TIMEOUT_MS = 5000;
@@ -393,12 +394,23 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       }
 
       // Build initial entityInfos from scene graph
-      const entityInfos: Record<string, { name: string; type: string; colliderRadius: number }> = {};
+      const entityInfos: Record<
+        string,
+        { name: string; type: string; colliderRadius: number; collider2dHalfHeight: number }
+      > = {};
       for (const [eid, node] of Object.entries(store.sceneGraph.nodes)) {
+        // `collider2dHalfHeight` is REAL, unlike `colliderRadius` beside it,
+        // which has always been the literal 0.5 for every entity in the scene.
+        // `forge.physics2d.isGrounded` casts from the entity's feet, and its
+        // feet are wherever its collider ends — so a constant here would put
+        // the ray origin inside the collider of anything taller than 1 unit and
+        // above the collider of anything shorter.
+        const physics2d = Object.hasOwn(store.physics2d, eid) ? store.physics2d[eid] : undefined;
         entityInfos[eid] = {
           name: node.name,
           type: node.components.find(c => c.startsWith('EntityType')) || 'unknown',
           colliderRadius: 0.5,
+          collider2dHalfHeight: physics2d ? collider2dHalfHeight(physics2d) : 0,
         };
       }
 
@@ -516,7 +528,28 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         // Instead of sending the full scene every frame, only changed components are sent.
         // The worker receives deltas and reconstructs full state locally.
         const entitiesSnapshot = tickData.entities as SceneSnapshot;
-        const entityInfosSnapshot = tickData.entityInfos as SceneSnapshot;
+        // THE ENGINE'S entityInfos DO NOT CARRY THE 2D COLLIDER EXTENT, and the
+        // worker REPLACES its map with what arrives here. So the half-height
+        // seeded at play start would be erased on the very first tick, and
+        // `isGrounded` would quietly go back to casting from the entity's
+        // centre — the defect this is here to fix, undone one frame in. The
+        // extent is re-derived from the store per tick so a collider resized
+        // mid-play is reflected too; it is a lookup and an arithmetic op per
+        // entity, on a map that changes rarely enough to warrant a 300-frame
+        // delta window.
+        const liveStore = useEditorStore.getState();
+        const engineInfos = tickData.entityInfos as Record<string, Record<string, unknown>>;
+        const entityInfosSnapshot = Object.fromEntries(
+          Object.entries(engineInfos ?? {}).map(([eid, info]) => [
+            eid,
+            {
+              ...info,
+              collider2dHalfHeight: Object.hasOwn(liveStore.physics2d, eid)
+                ? collider2dHalfHeight(liveStore.physics2d[eid])
+                : 0,
+            },
+          ]),
+        ) as SceneSnapshot;
 
         const entitiesDelta = entityDeltaRef.current
           ? entityDeltaRef.current.computeDelta(entitiesSnapshot)
@@ -532,7 +565,10 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           // Send deltas when available, fall back to full state
           entities: entitiesDelta ? undefined : tickData.entities,
           entitiesDelta: entitiesDelta ?? undefined,
-          entityInfos: entityInfosDelta ? undefined : tickData.entityInfos,
+          // The ENRICHED map on the fallback path too — `tickData.entityInfos`
+          // is the engine's, without the extent the delta above was computed
+          // against, so sending it would desynchronise the two paths.
+          entityInfos: entityInfosDelta ? undefined : entityInfosSnapshot,
           entityInfosDelta: entityInfosDelta ?? undefined,
           inputState: tickData.inputState,
           audioPlayingStates: audioManager.getPlayingStates(),

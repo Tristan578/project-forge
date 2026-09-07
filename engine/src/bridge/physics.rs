@@ -639,6 +639,19 @@ pub(super) fn apply_impulse_applications2d(
 }
 
 /// System that processes 2D raycast requests using Rapier 2D context.
+///
+/// EVERY BRANCH OF THIS LOOP MUST EMIT EXACTLY ONE EVENT PER DRAINED REQUEST.
+/// The payloads carry no correlation id, so the browser matches answers to
+/// requests by QUEUE POSITION (`web/src/lib/scripting/raycast2dRegistry.ts`):
+/// the Nth answer settles the Nth outstanding request. A branch that returns
+/// without emitting therefore does not merely lose one answer — it shifts every
+/// later answer by one, so each subsequent script raycast resolves with a
+/// different caster's hit, indefinitely, with nothing logged anywhere.
+///
+/// That is why the "no Rapier context" and "hit an entity with no EntityId"
+/// paths emit a MISS rather than `continue`. If a new early exit is added here,
+/// it emits too. Adding a `request_id` to the payloads is the only thing that
+/// would make this loop's shape stop mattering.
 pub(super) fn apply_raycast2d_requests(
     mut pending: ResMut<PendingCommands>,
     rapier_context: bevy_rapier2d::prelude::ReadRapierContext,
