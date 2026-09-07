@@ -12138,6 +12138,53 @@
       "requiredScope": "scene:write",
       "destructive": true,
       "visibility": "public"
+    },
+    {
+      "name": "get_joint_2d",
+      "description": "Query the 2D joint attached to an entity",
+      "category": "physics2d",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID whose 2D joint to read"
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "list_joints_2d",
+      "description": "List every 2D joint in the scene",
+      "category": "physics2d",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "get_camera_2d",
+      "description": "Query the scene's 2D camera settings",
+      "category": "camera",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
     }
   ],
   "resources": [

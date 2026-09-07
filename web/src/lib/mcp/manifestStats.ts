@@ -3,7 +3,7 @@
  *
  * These are declared rather than imported from `@/data/commands.json` on
  * purpose: the consumers are marketing pages and metadata, and pulling the
- * whole 351-entry manifest into each of those route bundles to count its
+ * whole 354-entry manifest into each of those route bundles to count its
  * length is a poor trade. `__tests__/manifestStats.test.ts` asserts both
  * numbers against the manifest, so a command added without updating them
  * fails a test rather than silently ageing the copy — which is exactly how
@@ -11,7 +11,7 @@
  */
 
 /** Total commands in `mcp-server/manifest/commands.json`. */
-export const MCP_COMMAND_COUNT = 351;
+export const MCP_COMMAND_COUNT = 354;
 
 /** Distinct categories those commands are grouped into. */
 export const MCP_CATEGORY_COUNT = 41;
