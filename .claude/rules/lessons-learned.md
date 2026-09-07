@@ -272,3 +272,25 @@ of a `*.failOpen` Sentry action as a contract break to diagnose, not noise, and
 carry the provider's error body into the captured exception so the next break
 is readable.
 **Ticket:** #9623
+
+### 18. A backtick in a comment ends the template literal the comment is inside
+**Applies:** data/templates|scriptTemplates|forgeTypes|FORGE_TYPE_DEFINITIONS|source: `|SYSTEM_PROMPT|`
+**What happens:** A file that parsed a moment ago stops parsing, and the error
+points at prose rather than at the string it broke. Hit three times in one
+session — twice while rewriting game-template scripts, once in `forgeTypes.ts`,
+which already carries a warning about it at the top of the file.
+**Why:** These files hold CODE INSIDE A STRING: a game script lives in
+`source: \`…\``, and the whole `.d.ts` surface lives in one template literal.
+Ordinary comment style — naming an identifier in backticks, the way every other
+comment in the repo does — terminates that string. The habit is right
+everywhere else, which is exactly why it keeps happening here, and the tooling
+does not help: `oxc` reports "Expected `,` or `}`" at the line where the
+literal was OPENED, several hundred lines above the backtick that closed it.
+A `${` in prose is the same failure with a different message.
+**Prevention:** Inside a template literal, write identifiers bare — `opened`,
+not `` `opened` ``. Before trusting an edit to one of these files, `npx tsc
+--noEmit` or run any suite that imports it; the parse error is immediate and
+unmistakable, and it is much cheaper than reading a diff for a stray character.
+When sweeping a whole directory, strip backticks from comment lines inside every
+`source:` block rather than trusting a visual scan.
+**Ticket:** #9763
