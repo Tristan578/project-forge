@@ -55,7 +55,20 @@ const VERDICT = {
   },
 }
 
-const base = (args && args.base) || 'main'
+// `origin/main`, NOT `main`. A worktree's local branch ref is only as fresh as
+// the last checkout or pull in THAT worktree, and a long-lived review worktree's
+// `main` drifts behind while the branch under review is rebased onto the real
+// one. Measured on PR #9748: local `main` was 105 files behind origin, so
+// `git diff main...HEAD` handed the reviewers 105 changed files instead of the
+// PR's 16 — and two of the five graded code that had already merged, reporting
+// findings that read as defects in the PR and were not. A base ref one commit
+// stale is adjacent to the real base, which is lesson #1's family: the check ran
+// and answered about the wrong thing.
+//
+// A caller may still pass a qualified ref (`args.base = 'origin/release'`);
+// only a bare branch name is rewritten.
+const rawBase = (args && args.base) || 'main'
+const base = rawBase.includes('/') ? rawBase : `origin/${rawBase}`
 const focus = (args && args.focus) ? `\nFocus area from the orchestrator: ${args.focus}\n` : ''
 
 phase('Review')
@@ -64,9 +77,10 @@ const results = await parallel(REVIEWERS.map(r => () =>
     `You are the ${r.key} reviewer on the SpawnForge review board. This is a READ-ONLY review: do NOT create, edit or delete files, commit, push, or move taskboard tickets — this rule overrides anything in the role definition below that tells you to write tests, fix code or commit. Where the definition would have you write something, record it as a finding instead.\n` +
     `1. Resolve the agent definition \`${r.def}\` — it may be a shell glob, so run \`ls ${r.def}\` first; exactly one file must match. Read that file and adopt its role, standards and checklist as a reviewer. If zero or more than one file matches, return verdict FAIL with a single finding naming the unresolved definition — never substitute a generic reviewer.\n` +
     `2. Run \`git rev-parse HEAD\` FIRST and return it as \`sha\`. That is the commit your review covers, and it is what the published verdict is recorded against — so read it before you read the diff, not after.\n` +
-    `3. Review the diff of the current branch against ${base}: run \`git diff ${base}...HEAD\` and read every changed file in full.\n` +
-    `4. Verdict is PASS or FAIL only — ANY finding at ANY severity is a FAIL (no "pass with issues").\n` +
-    `5. Before returning, run \`git status --porcelain\`; if it shows anything you changed, revert it and add a finding saying the review attempted a write.${focus}\n` +
+    `3. Run \`git fetch origin --quiet\` before anything else, so ${base} is the trunk as it stands NOW rather than as this worktree last saw it.\n` +
+    `4. Review the diff of the current branch against ${base}: run \`git diff ${base}...HEAD --stat\` first, then \`git diff ${base}...HEAD\`, and read every changed file in full. If that diff is much larger than the change the orchestrator described, STOP and return FAIL with one finding saying so — a diff far bigger than the PR means the base is wrong, and every finding you would write is about somebody else's already-merged work.\n` +
+    `5. Verdict is PASS or FAIL only — ANY finding at ANY severity is a FAIL (no "pass with issues").\n` +
+    `6. Before returning, run \`git status --porcelain\`; if it shows anything you changed, revert it and add a finding saying the review attempted a write.${focus}\n` +
     `Return the structured verdict.`,
     { label: `review:${r.key}`, phase: 'Review', schema: VERDICT }
   ).then(v => ({ reviewer: r.key, ...v }))
