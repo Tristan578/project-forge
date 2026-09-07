@@ -680,7 +680,10 @@ describe('compoundHandlers', () => {
       expect(store.togglePhysics).toHaveBeenCalledWith('char-1', true);
       expect(store.updatePhysics).toHaveBeenCalled();
       expect(store.addGameComponent).toHaveBeenCalled();
-      expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
+      // No preset unless the caller named one. It used to default to
+      // 'platformer', which replaced the scene's bindings on the strength of a
+      // guess nobody made (#9764).
+      expect(store.setInputPreset).not.toHaveBeenCalled();
     });
 
     it('uses custom name, position, and entityType', async () => {
@@ -1095,8 +1098,11 @@ describe('compoundHandlers', () => {
       );
       expect(winCalls).toHaveLength(1);
 
-      // Input preset + camera-follow script targeting the player by id.
-      expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
+      // NO INPUT PRESET. The planner used to read the description for "fps",
+      // "racing" and so on and fall back to 'platformer' for anything it did
+      // not recognise — so a creator describing something else was told what
+      // they were making, and their action map was replaced to match.
+      expect(store.setInputPreset).not.toHaveBeenCalled();
       const scriptCall = (store.setScript as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(scriptCall[0]).toBe('id-Player');
       expect(scriptCall[1]).toContain('forge.camera.setTarget("id-Player")');
