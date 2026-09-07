@@ -107,8 +107,8 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "list_joints_2d" => Some(super::handle_query(QueryRequest::ListJoints2d)),
         "apply_force_2d" => Some(handle_apply_force2d(payload.clone())),
         "apply_impulse_2d" => Some(handle_apply_impulse2d(payload.clone())),
-        "set_linear_velocity_2d" => Some(Err("Not yet implemented: set_linear_velocity_2d".to_string())),
-        "set_angular_velocity_2d" => Some(Err("Not yet implemented: set_angular_velocity_2d".to_string())),
+        "set_linear_velocity_2d" => Some(handle_set_linear_velocity_2d(payload.clone())),
+        "set_angular_velocity_2d" => Some(handle_set_angular_velocity_2d(payload.clone())),
         "get_velocity_2d" => Some(Err("Not yet implemented: get_velocity_2d".to_string())),
         "get_collisions" => Some(Err("Not yet implemented: get_collisions".to_string())),
         "get_collisions_2d" => Some(Err("Not yet implemented: get_collisions_2d".to_string())),
@@ -881,6 +881,77 @@ fn handle_apply_impulse2d(payload: serde_json::Value) -> super::CommandResult {
 
     if queue_impulse_application2d_from_bridge(application) {
         tracing::info!("Queued 2D impulse application for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for set_linear_velocity_2d.
+///
+/// `x` AND `y` ARE BOTH OPTIONAL, and omitting one means "leave it alone"
+/// rather than "set it to zero". A platformer controller writes horizontal
+/// speed every frame; if that also zeroed the vertical component it would
+/// cancel gravity and erase the jump impulse applied a frame earlier, so the
+/// entity would hover and never fall. Zeroing is still expressible — send 0.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetLinearVelocity2dPayload {
+    entity_id: String,
+    #[serde(default)]
+    x: Option<f32>,
+    #[serde(default)]
+    y: Option<f32>,
+}
+
+/// Handle set_linear_velocity_2d.
+fn handle_set_linear_velocity_2d(payload: serde_json::Value) -> super::CommandResult {
+    let data: SetLinearVelocity2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_linear_velocity_2d payload: {}", e))?;
+
+    // A request naming neither axis would queue work that changes nothing and
+    // report success, which is the shape of every defect this command family
+    // was written to remove. Refused with a message that says what to send.
+    if data.x.is_none() && data.y.is_none() {
+        return Err(
+            "set_linear_velocity_2d requires at least one of x or y".to_string()
+        );
+    }
+
+    let request = LinearVelocity2dSet {
+        entity_id: data.entity_id.clone(),
+        x: data.x,
+        y: data.y,
+    };
+
+    if queue_linear_velocity2d_set_from_bridge(request) {
+        tracing::info!("Queued 2D linear velocity for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for set_angular_velocity_2d.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetAngularVelocity2dPayload {
+    entity_id: String,
+    omega: f32,
+}
+
+/// Handle set_angular_velocity_2d.
+fn handle_set_angular_velocity_2d(payload: serde_json::Value) -> super::CommandResult {
+    let data: SetAngularVelocity2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_angular_velocity_2d payload: {}", e))?;
+
+    let request = AngularVelocity2dSet {
+        entity_id: data.entity_id.clone(),
+        omega: data.omega,
+    };
+
+    if queue_angular_velocity2d_set_from_bridge(request) {
+        tracing::info!("Queued 2D angular velocity for entity: {}", data.entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

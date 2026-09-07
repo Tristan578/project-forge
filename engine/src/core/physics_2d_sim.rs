@@ -133,6 +133,14 @@ fn manage_physics2d_lifecycle(
             let mut ec = commands.entity(entity);
             ec.insert(rigid_body)
               .insert(collider)
+              // ATTACHED SO IT CAN BE READ AND WRITTEN. Without a `Velocity`
+              // component rapier still simulates the body, but nothing outside
+              // the solver can see or set its velocity — which is why
+              // `set_linear_velocity_2d` was a stub and `forge.physics2d.getVelocity`
+              // reads a mirror that is never populated. The Play->Edit branch
+              // below has always removed one; this is the insert that makes
+              // that removal symmetric.
+              .insert(bevy_rapier2d::prelude::Velocity::zero())
               .insert(Restitution::coefficient(physics_data.restitution))
               .insert(Friction::coefficient(physics_data.friction))
               .insert(ColliderMassProperties::Density(physics_data.mass))

@@ -118,6 +118,31 @@ pub struct ImpulseApplication2d {
     pub impulse_y: f32,
 }
 
+/// A partial write of a 2D body's linear velocity.
+///
+/// BOTH AXES ARE OPTIONAL, AND THAT IS THE POINT. A platformer controller sets
+/// horizontal speed every frame and must leave the vertical component alone, or
+/// it cancels gravity and the jump it just applied. Expressing that as a
+/// read-modify-write from a script needs the CURRENT velocity, which the browser
+/// does not have (the mirror it reads is populated with an empty map), and would
+/// be a frame stale even if it did. So the partial update is expressed on the
+/// wire and applied against the live component here.
+#[derive(Debug, Clone)]
+pub struct LinearVelocity2dSet {
+    pub entity_id: String,
+    /// New horizontal velocity, or `None` to leave it as it is.
+    pub x: Option<f32>,
+    /// New vertical velocity, or `None` to leave it as it is.
+    pub y: Option<f32>,
+}
+
+/// A write of a 2D body's angular velocity, in radians per second.
+#[derive(Debug, Clone)]
+pub struct AngularVelocity2dSet {
+    pub entity_id: String,
+    pub omega: f32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Raycast2dRequest {
     pub origin_x: f32,
@@ -201,6 +226,14 @@ impl PendingCommands {
         self.impulse_applications2d.push(application);
     }
 
+    pub fn queue_linear_velocity2d_set(&mut self, request: LinearVelocity2dSet) {
+        self.linear_velocity2d_sets.push(request);
+    }
+
+    pub fn queue_angular_velocity2d_set(&mut self, request: AngularVelocity2dSet) {
+        self.angular_velocity2d_sets.push(request);
+    }
+
     pub fn queue_raycast2d(&mut self, request: Raycast2dRequest) {
         self.raycast2d_requests.push(request);
     }
@@ -274,6 +307,14 @@ pub fn queue_force_application2d_from_bridge(application: ForceApplication2d) ->
 
 pub fn queue_impulse_application2d_from_bridge(application: ImpulseApplication2d) -> bool {
     super::with_pending(|pc| pc.queue_impulse_application2d(application)).is_some()
+}
+
+pub fn queue_linear_velocity2d_set_from_bridge(request: LinearVelocity2dSet) -> bool {
+    super::with_pending(|pc| pc.queue_linear_velocity2d_set(request)).is_some()
+}
+
+pub fn queue_angular_velocity2d_set_from_bridge(request: AngularVelocity2dSet) -> bool {
+    super::with_pending(|pc| pc.queue_angular_velocity2d_set(request)).is_some()
 }
 
 pub fn queue_raycast2d_from_bridge(request: Raycast2dRequest) -> bool {
