@@ -65,7 +65,7 @@
     "@changesets/cli": "^3.0.1",
     "@storybook/react": "^10.5.10",
     "@storybook/react-vite": "^10.5.10",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.0",
     "jsdom": "^30.0.1",
     "storybook": "^10.4.6",
     "turbo": "^2.10.12",
