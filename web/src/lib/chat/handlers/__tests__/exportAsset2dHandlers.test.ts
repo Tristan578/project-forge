@@ -9,7 +9,7 @@ import { assetHandlers } from '../assetHandlers';
 import { handlers2d } from '../handlers2d';
 import { MAX_IK_BONE_CHAIN_2D } from '@/lib/skeleton2d/skeletonPayload';
 import type { ToolCallContext, ExecutionResult } from '../types';
-import type { SkeletonData2d } from '@/stores/slices/types';
+import type { SkeletonData2d, Joint2dData, Camera2dData } from '@/stores/slices/types';
 
 // ---------------------------------------------------------------------------
 // Mock the export engine so tests don't perform real file I/O
@@ -1985,13 +1985,18 @@ describe('handlers2d 2D physics commands', () => {
   // -------------------------------------------------------------------------
   // The engine reads that had no producer (#9351)
   // -------------------------------------------------------------------------
-  const baseJoint2d = {
-    jointType: 'revolute' as const,
-    connectedEntityId: 'ent-2',
-    anchorSelf: [0, 0] as [number, number],
-    anchorOther: [1, 0] as [number, number],
-    limits: null,
-    motor: null,
+  // ANNOTATED, so `tsc` checks it against the shape the store actually holds.
+  // `invoke2d`'s `storeOverrides` is `Record<string, unknown>`, so an unannotated
+  // fixture compiles whatever its fields are called — and the first version of
+  // this one had `connectedEntityId`, `anchorSelf`, `anchorOther` and a `motor`,
+  // none of which exist on `Joint2dData`. Every assertion below still passed,
+  // because a handler that returns what you put in returns anything you put in.
+  // The type annotation is what makes these tests about a joint.
+  const baseJoint2d: Joint2dData = {
+    targetEntityId: 'ent-2',
+    jointType: 'revolute',
+    localAnchor1: [0, 0],
+    localAnchor2: [1, 0],
   };
 
   describe('get_joint_2d', () => {
@@ -2048,7 +2053,10 @@ describe('handlers2d 2D physics commands', () => {
   });
 
   describe('get_camera_2d', () => {
-    const camera = { position: [0, 0] as [number, number], zoom: 1, rotation: 0 };
+    // Annotated for the same reason as `baseJoint2d`: the first version had
+    // `position` and `rotation`, neither of which is on `Camera2dData`, and was
+    // missing both `pixelPerfect` and `bounds`.
+    const camera: Camera2dData = { zoom: 1, pixelPerfect: false, bounds: null };
 
     it('returns the scene camera', async () => {
       const { result } = await invoke2d('get_camera_2d', {}, { camera2dData: camera });

@@ -78,7 +78,7 @@ describe('bridge allowlist (#9293)', () => {
     }
   });
 
-  it('allows only the enumerated categories, and 293 of the 351 manifest commands', () => {
+  it('allows only the enumerated categories, and 296 of the 354 manifest commands', () => {
     const allowed = new Set(bridgeAllowedCommands());
     const deniedScopes = new Set(['ai:generate', 'project:manage']);
     for (const cmd of manifest.commands) {
@@ -87,8 +87,8 @@ describe('bridge allowlist (#9293)', () => {
     }
     // Pinned, not "greater than": the previous deny-list allowed 308, and a
     // ">250" assertion could not tell the two apart.
-    expect(manifest.commands.length).toBe(351);
-    expect(allowed.size).toBe(293);
+    expect(manifest.commands.length).toBe(354);
+    expect(allowed.size).toBe(296);
   });
 });
 
