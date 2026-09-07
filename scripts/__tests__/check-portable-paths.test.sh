@@ -602,6 +602,28 @@ while IFS= read -r entry; do
     *) anchor_bad="$anchor_bad $entry" ;;
   esac
 done <<<"$anchor_entries"
+# NO ALTERNATION AND NO OPTIONAL GROUP IN AN ENTRY. The anti-rot flag is per
+# ENTRY, so `^docs/(reviews|coverage|audits)/` stays "used" while one of its
+# three branches goes dead — the dead branch is then unreviewed breadth that
+# nothing can report, which is the exact argument the gate makes about whole
+# entries (found in review; latent rather than live, all branches matched at the
+# time). Splitting entries makes the note exact by construction, and this rule
+# is what keeps them split, since the alternative was parsing these regexes to
+# find their branches.
+group_bad=""
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  case "$entry" in
+    *'|'*)  group_bad="$group_bad $entry" ;;
+    *')?'*) group_bad="$group_bad $entry" ;;
+  esac
+done <<<"$anchor_entries"
+if [ -n "$group_bad" ]; then
+  FAIL=$((FAIL + 1)); echo "  FAIL allowlist entr(ies) cover several files through one pattern —$group_bad. The anti-rot note is per entry, so such an entry stays 'used' while one of its branches goes dead and that branch becomes breadth nothing can report. Split it into one entry per file or directory, each with its own reason."
+else
+  PASS=$((PASS + 1)); echo "  ok   no allowlist entry hides several files behind an alternation or optional group"
+fi
+
 if [ -n "$anchor_bad" ]; then
   FAIL=$((FAIL + 1)); echo "  FAIL unanchored allowlist entr(ies) —$anchor_bad. Entries are matched with grep -qE against the path, so a bare substring exempts every path containing it: an entry named for a test exempts its production sibling too. Anchor to a file or a directory."
 else

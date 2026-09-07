@@ -141,6 +141,15 @@ POSIX_PATTERN='(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)([^A-Za-z0-9._-]|$)
 # leaked the other way and exempted any line whose CONTENT merely said
 # `mockOnceGuard`. Both directions are pinned by the suite.
 #
+# ONE ENTRY PER FILE OR DIRECTORY — NO ALTERNATION, NO OPTIONAL GROUP. The
+# anti-rot flag below is per ENTRY, so an entry covering several files through
+# `(a|b)` or `(...)?` stays "used" while one of its branches goes dead, and that
+# branch then sits here as unreviewed breadth that nothing can report (found in
+# review). Splitting them makes the anti-rot note exact by construction rather
+# than by parsing these regexes, and it forces each covered file to carry its
+# OWN reason — the grouped `mockOnceGuard` entry had one sentence explaining two
+# different files. The suite refuses an entry containing either construct.
+#
 # EVERY ENTRY IS ANCHORED TO THE FILES ITS REASON NAMES. Entries are matched
 # with `grep -qE` against the path, so a bare substring exempts every path
 # containing it — `reaperBridge` covered `reaperBridge.ts`, production source,
@@ -154,19 +163,27 @@ POSIX_PATTERN='(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)([^A-Za-z0-9._-]|$)
 # bash 3.2 has no associative arrays, so the entries and their reasons are two
 # parallel indexed arrays. Keep them the same length; the script checks.
 ALLOW_ENTRIES=(
-  '^docs/(reviews|coverage|audits)/'
+  '^docs/reviews/'
+  '^docs/coverage/'
+  '^docs/audits/'
   '^scripts/__tests__/check-portable-paths\.test\.sh$'
-  '^web/scripts/(__tests__/)?provision-billing-meter(\.test)?\.ts$'
-  '^web/(vitest\.mockOnceGuard\.ts|src/lib/testing/__tests__/mockOnceGuard\.test\.ts)$'
+  '^web/scripts/provision-billing-meter\.ts$'
+  '^web/scripts/__tests__/provision-billing-meter\.test\.ts$'
+  '^web/vitest\.mockOnceGuard\.ts$'
+  '^web/src/lib/testing/__tests__/mockOnceGuard\.test\.ts$'
   '^scripts/__tests__/generate-wasm-manifests\.test\.sh$'
   '^web/src/lib/bridges/__tests__/reaperBridge\.test\.ts$'
   '^web/src/lib/bridges/__tests__/fmodBridge\.test\.ts$'
 )
 ALLOW_REASONS=(
-  'dated records of what a tool printed, audits included; rewriting them would falsify the record'
+  'dated review records; rewriting them would falsify what the reviewer saw'
+  'dated coverage records; the numbers are a snapshot, not instructions'
+  'dated audit records; one carries the reviewers own checkout path in a quoted transcript'
   "this gate's own suite, which builds the shapes it tests"
   'code ABOUT path handling — the literal is the subject, not a path to follow'
-  'test infrastructure ABOUT path handling'
+  'that scripts test, which quotes real paths as fixtures'
+  'test infrastructure ABOUT path handling — a comment on a path with a space in it'
+  'its test, which asserts on the same path shapes'
   'the generator TEST, which quotes real paths as fixtures; the generator itself is not exempt'
   'a path-handling test: 8 hits, of which 2 are refused inputs (one traversal, one NUL byte)'
   'asserts isSafePath ACCEPTS a Windows absolute path; the literal is the subject'
