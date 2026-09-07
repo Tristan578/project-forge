@@ -201,6 +201,35 @@ d="$(make_repo url_route)"
 add_file "$d" "docs/e2e.md" "await page.goto(\"/users/test-user/settings\");"
 run_case "a lowercase /users/ URL route is not a home directory" 0 "$d"
 
+# --- an allowlist entry exempts ONLY the files its reason names ---
+#
+# Entries are matched with `grep -qE` against the path, so a bare substring
+# exempted every path containing it. `reaperBridge` covered production source on
+# the strength of a reason describing its TEST; `generate-wasm-manifests` covered
+# a shell build script, among the likeliest places for a real machine-local path
+# to land (found in review). Both were invisible to the anti-rot note, because
+# the entry was still "used" by its test file.
+#
+# One case per formerly-unanchored entry, so un-anchoring any of them again fails
+# a case that names the file it would wrongly exempt.
+for pair in \
+  "web/src/lib/bridges/reaperBridge.ts:the allowlisted reaperBridge TEST" \
+  "scripts/generate-wasm-manifests.sh:the allowlisted generate-wasm-manifests TEST" \
+  "web/vitest.mockOnceGuard.fixtures.config.ts:the allowlisted mockOnceGuard files"
+do
+  sibling="${pair%%:*}"
+  d="$(make_repo "sibling_$(basename "$sibling" | tr '.' '_')")"
+  add_file "$d" "$sibling" "Run it from $MAC_PATH first."
+  run_case "a machine-local path in $sibling is NOT exempted by ${pair#*:}" 1 "$d"
+done
+
+# And the anchored entries still exempt the files they name, so the fix did not
+# simply delete the allowlist.
+d="$(make_repo anchored_still_exempt)"
+add_file "$d" "web/src/lib/bridges/__tests__/reaperBridge.test.ts" "expects('$MAC_PATH/track.wav')"
+add_file "$d" "scripts/__tests__/generate-wasm-manifests.test.sh" "fixture=\"$MAC_PATH/out\""
+run_case "the anchored entries still exempt the files their reasons name" 0 "$d"
+
 # --- a malformed allowlist regex is a hard error, not a silent non-match ---
 #
 # The per-hit match is `grep -qE "$entry"`, and grep exits 2 on a bad pattern —
@@ -223,6 +252,10 @@ awk 'BEGIN { q = sprintf("%c", 39) }
      /^ALLOW_ENTRIES=\(/ { print; print "  " q "a[" q; next }
      /^ALLOW_REASONS=\(/ { print; print "  " q "a deliberately malformed fixture entry" q; next }
      { print }' "$SCRIPT" > "$broken"
+# Staged, so `git ls-files` is non-empty. Without this the vacuity floor
+# fires first and supplies the exit 2 this case asserts, which would make
+# the case pass even if the guard under test were deleted.
+(cd "$d" && git add -A) >/dev/null 2>&1
 out="$(cd "$d" && PORTABLE_PATHS_MIN_FILES=1 bash "$broken" 2>&1)"; status=$?
 if [ "$status" -eq 2 ] && grep -q "malformed regex" <<<"$out"; then
   PASS=$((PASS + 1)); echo "  ok   a malformed allowlist regex is a hard error, named"
@@ -256,10 +289,15 @@ d="$(make_repo allow_suite)"
 add_file "$d" "scripts/__tests__/check-portable-paths.test.sh" "# fixture $WIN_PATH"
 run_case "this suite may carry the shapes it tests" 0 "$d"
 
-# Unanchored entries are path SUBSTRINGS. The file is exempt; content is not.
+# Entries match the PATH, and the whole path: the exempt file is exempt, its
+# content is not consulted. This case used an invented path
+# (`web/src/lib/__tests__/…`) back when entries were bare substrings and any
+# path containing the name matched. That substring behaviour is exactly what the
+# anchoring removed, so the case now names the file the entry actually covers —
+# a fixture path that no longer exists would assert the old, wrong rule.
 d="$(make_repo allow_subject)"
-add_file "$d" "web/src/lib/__tests__/mockOnceGuard.test.ts" "const p = '$MAC_PATH';"
-run_case "a path-handling test file is exempt by its name" 0 "$d"
+add_file "$d" "web/src/lib/testing/__tests__/mockOnceGuard.test.ts" "const p = '$MAC_PATH';"
+run_case "an allowlisted path-handling test is exempt" 0 "$d"
 
 d="$(make_repo allow_docs)"
 add_file "$d" "docs/reviews/2026-01-01-run.md" "log line: $LINUX_PATH/out"
@@ -318,6 +356,39 @@ else
   FAIL=$((FAIL + 1)); echo "  FAIL the default floor did not fail closed"
 fi
 
+# --- the annotation has to point at the offending LINE, and the summary has to
+# --- survive GitHub's per-step annotation cap ---
+#
+# `::error file=X::` with no `line=` defaults to line 1, and GitHub renders
+# inline annotations only on lines present in the diff — so a path added deep in
+# an otherwise-untouched file got a marker nowhere near the edit. grep -n had the
+# number all along (found in review).
+#
+# The summary is emitted BEFORE the per-file loop because GitHub keeps only the
+# first 10 error annotations per step, dropping the rest in creation order: last
+# meant first-dropped, and the summary is the only line carrying the total.
+d="$(make_repo annotation_shape)"
+add_file "$d" "deep/nested/tool.sh" "line one
+line two
+line three
+SYNC=\"$MAC_PATH\""
+(cd "$d" && git add -A) >/dev/null 2>&1
+ann="$(cd "$d" && PORTABLE_PATHS_MIN_FILES=3 bash "$SCRIPT" 2>&1)"
+if grep -q '::error file=deep/nested/tool.sh,line=4::' <<<"$ann"; then
+  PASS=$((PASS + 1)); echo "  ok   the annotation carries the offending line number"
+else
+  FAIL=$((FAIL + 1)); echo "  FAIL annotation is missing line=4 (defaults to line 1, rendering nowhere near the edit):"
+  printf '%s\n' "$ann" | grep '::error file=' | sed 's/^/         /' | head -2
+fi
+
+summary_at="$(printf '%s\n' "$ann" | grep -n '::error::.*machine-local absolute path(s) in tracked files' | head -1 | cut -d: -f1)"
+first_file_at="$(printf '%s\n' "$ann" | grep -n '::error file=' | head -1 | cut -d: -f1)"
+if [ -n "$summary_at" ] && [ -n "$first_file_at" ] && [ "$summary_at" -lt "$first_file_at" ]; then
+  PASS=$((PASS + 1)); echo "  ok   the count summary precedes the per-file annotations (survives the 10-annotation cap)"
+else
+  FAIL=$((FAIL + 1)); echo "  FAIL the summary is at line ${summary_at:-none} and the first per-file annotation at ${first_file_at:-none} — emitted last, it is the first thing GitHub drops past 10 findings"
+fi
+
 # --- the failure report has to name the file ---
 
 d="$(make_repo names_file)"
@@ -361,13 +432,72 @@ fi
 # The two parallel arrays are a bash 3.2 stand-in for a map. A reason added
 # without an entry (or the reverse) shifts every later reason onto the wrong
 # entry, so the mismatch is a fail-closed tooling error, not a silent misreport.
-# Written without a `$` inside the single quotes on purpose: shellcheck's SC2016
-# is info-level, which the local default ignores and CI treats as fatal.
-if grep -qE 'ALLOW_ENTRIES\[@\][^;]*-ne[^;]*ALLOW_REASONS\[@\]' "$SCRIPT"; then
-  PASS=$((PASS + 1)); echo "  ok   the entry/reason arrays are length-checked"
+#
+# BEHAVIOURAL, not a containment grep. This used to be
+# `grep -qE 'ALLOW_ENTRIES\[@\].*-ne.*ALLOW_REASONS\[@\]'`, which passed with
+# the entire length check COMMENTED OUT (measured in review — lesson #16, the
+# same defect as the wiring pin below). What that let through, reproduced: an
+# eighth entry with no reason pairs every anti-rot notice with the WRONG reason,
+# then the gate dies on `ALLOW_REASONS[$index]: unbound variable` and exits 1 on
+# a CLEAN tree — a red build naming nothing.
+#
+# A spliced copy of the real script, like the malformed-regex case, so no
+# production seam is added for a test.
+d="$(make_repo len_mismatch)"
+add_file "$d" "docs/setup.md" "nothing to see"
+mismatch="$TMP/length-mismatch.sh"
+awk 'BEGIN { q = sprintf("%c", 39) }
+     /^ALLOW_ENTRIES=\(/ { print; print "  " q "an-eighth-entry-with-no-reason" q; next }
+     { print }' "$SCRIPT" > "$mismatch"
+# Staged, so `git ls-files` is non-empty. Without this the vacuity floor
+# fires first and supplies the exit 2 this case asserts, which would make
+# the case pass even if the guard under test were deleted.
+(cd "$d" && git add -A) >/dev/null 2>&1
+out="$(cd "$d" && PORTABLE_PATHS_MIN_FILES=1 bash "$mismatch" 2>&1)"; status=$?
+if [ "$status" -eq 2 ] && grep -q "differ in length" <<<"$out"; then
+  PASS=$((PASS + 1)); echo "  ok   an entry with no matching reason is a hard error, before any reason is read"
 else
-  FAIL=$((FAIL + 1)); echo "  FAIL nothing checks ALLOW_ENTRIES against ALLOW_REASONS"
+  FAIL=$((FAIL + 1)); echo "  FAIL entry/reason length mismatch: expected exit 2 naming the mismatch, got $status: $out"
 fi
+
+# --- a malformed SCAN pattern is a hard error, not a silent clean tree ---
+#
+# The allowlist compile pass was added first, and it guards the half that fails
+# LOUDLY: a broken allowlist entry reports files it should have exempted. The
+# scan patterns had no such pass, and they fail SILENTLY in the opposite
+# direction — grep exits 2, both pipelines end in `|| true`, and the gate prints
+# "no machine-local absolute paths" and exits 0 on a dirty tree. Measured in
+# review with one bracket typo. Both patterns are pinned, separately, so
+# dropping either compile_check call fails a named case.
+#
+# Each fixture carries a path ONLY THAT PATTERN can catch — a Windows one for
+# WIN_PATTERN, a POSIX one for POSIX_PATTERN. With a shared fixture the other
+# arm still reports the file, so the case would pass for the wrong reason and
+# could not show the failure it exists for. Measured with the isolating
+# fixtures: broken pattern + no compile pass -> `no machine-local absolute
+# paths`, exit 0, on a tree that provably contains one.
+for pat_var in WIN_PATTERN POSIX_PATTERN; do
+  d="$(make_repo "bad_${pat_var}")"
+  if [ "$pat_var" = "WIN_PATTERN" ]; then
+    add_file "$d" "docs/setup.md" "Clone to $WIN_PATH first."
+  else
+    add_file "$d" "docs/setup.md" "Run it from $MAC_PATH first."
+  fi
+  broken_pat="$TMP/broken-${pat_var}.sh"
+  awk -v v="$pat_var" 'BEGIN { q = sprintf("%c", 39) }
+       $0 ~ "^" v "=" { print v "=" q "a[" q; next }
+       { print }' "$SCRIPT" > "$broken_pat"
+  # Staged, so `git ls-files` is non-empty. Without this the vacuity floor
+  # fires first and supplies the exit 2 this case asserts, which would make
+  # the case pass even if the guard under test were deleted.
+  (cd "$d" && git add -A) >/dev/null 2>&1
+  out="$(cd "$d" && PORTABLE_PATHS_MIN_FILES=1 bash "$broken_pat" 2>&1)"; status=$?
+  if [ "$status" -eq 2 ] && grep -q "$pat_var is a malformed regex" <<<"$out"; then
+    PASS=$((PASS + 1)); echo "  ok   a malformed $pat_var is a hard error, named"
+  else
+    FAIL=$((FAIL + 1)); echo "  FAIL malformed $pat_var: expected exit 2 naming it, got $status: $out"
+  fi
+done
 
 # --- the seam must never be wired into CI ---
 
@@ -379,11 +509,62 @@ else
 fi
 
 # --- the workflow must actually invoke the gate ---
+#
+# THIS WAS A CONTAINMENT GREP AND IT COULD NOT FAIL. `grep -q
+# 'scripts/check-portable-paths.sh' ci.yml` also matches the job's own doc
+# comment and the shellcheck step's ARGUMENT, so it passed with every `run:`
+# line in the job commented out — measured that way by four reviewers
+# independently, on a working tree where the gate was in fact disarmed. The job
+# then has no executable step, so it still concludes `success`,
+# `check_unconditional` reads success, and CI Success certifies green while the
+# required gate does not run at all. Lessons #15 and #16.
+#
+# So: cut the JOB BLOCK, strip comments, and COUNT executable invocations.
+# Counting rather than containing also closes YAML's last-key-wins vector — an
+# appended `run: true` replaces the effective command while the original `run:`
+# line stays byte-present — which is the same reason board-verdict.test.sh
+# counts `run:` keys and check-ci-success.test.sh counts them per step.
+CI_YML="$ROOT/.github/workflows/ci.yml"
+pp_block="$(awk '
+  /^  portable-paths:/ {f=1}
+  f && /^  [A-Za-z_"'"'"']/ && !/^  portable-paths:/ {exit}
+  f {print}
+' "$CI_YML" 2>/dev/null | grep -v '^[[:space:]]*#')"
 
-if grep -q 'scripts/check-portable-paths.sh' "$ROOT/.github/workflows/ci.yml" 2>/dev/null; then
-  PASS=$((PASS + 1)); echo "  ok   ci.yml invokes the gate"
+# Vacuity guard FIRST: an awk cut that reads nothing makes every count below
+# zero, and "expected exactly 1, got 0" would then be reported as a wiring
+# defect when the truth is that this assertion stopped being able to see the
+# job at all. A renamed job must say so in its own words.
+if [ -z "$pp_block" ]; then
+  FAIL=$((FAIL + 1)); echo "  FAIL could not find the portable-paths job in ci.yml — renamed? the wiring pins below cannot run"
 else
-  FAIL=$((FAIL + 1)); echo "  FAIL ci.yml does not invoke the gate"
+  PASS=$((PASS + 1)); echo "  ok   found the portable-paths job block in ci.yml"
+
+  gate_runs="$(grep -cE '^[[:space:]]*run:[[:space:]]*bash[[:space:]]+scripts/check-portable-paths\.sh[[:space:]]*$' <<<"$pp_block" || true)"
+  if [ "$gate_runs" -eq 1 ]; then
+    PASS=$((PASS + 1)); echo "  ok   the job runs the gate exactly once (executable run:, not a comment)"
+  else
+    FAIL=$((FAIL + 1)); echo "  FAIL the portable-paths job has $gate_runs executable 'run: bash scripts/check-portable-paths.sh' line(s), expected exactly 1 — the gate is not wired to run"
+  fi
+
+  suite_runs="$(grep -cE '^[[:space:]]*run:[[:space:]]*bash[[:space:]]+scripts/__tests__/check-portable-paths\.test\.sh[[:space:]]*$' <<<"$pp_block" || true)"
+  if [ "$suite_runs" -eq 1 ]; then
+    PASS=$((PASS + 1)); echo "  ok   the job runs this suite exactly once"
+  else
+    FAIL=$((FAIL + 1)); echo "  FAIL the portable-paths job has $suite_runs executable run: line(s) for this suite, expected exactly 1 — a gate whose allowlist silently stops matching reports a clean tree either way, so the suite is the only thing that tells a passing gate from a dead one"
+  fi
+
+  # `continue-on-error` makes a failing step conclude `success`, so the job
+  # reports success, `check_unconditional` is satisfied, and the gate becomes
+  # report-only — the exact "reports rather than gates" state this job was moved
+  # into the required aggregate to leave. check-ci-success.test.sh already pins
+  # this for design-internal-gate; it was not carried across when these two jobs
+  # were promoted.
+  if grep -q 'continue-on-error' <<<"$pp_block"; then
+    FAIL=$((FAIL + 1)); echo "  FAIL the portable-paths job carries continue-on-error — a failing gate would still conclude success"
+  else
+    PASS=$((PASS + 1)); echo "  ok   the portable-paths job has no continue-on-error"
+  fi
 fi
 
 # --- the tree the gate defends must itself be clean ---

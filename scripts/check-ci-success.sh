@@ -65,6 +65,7 @@ fi
 #    its `if:` — guarding only one arm would leave the other as a silent
 #    single-line `if: false` skip vector.
 tamper=""
+unconditional=""
 drift=""
 check_triggered() {
   local job="$1"; shift
@@ -117,15 +118,21 @@ check_triggered() {
 #
 # Without this form the only options were "leave the job out of ci-success", so
 # its failure cannot block a merge, or "map it to a trigger it does not have",
-# which is a lie the drift branch would report every run. Both were taken at
-# some point: `portable-paths` and `board-verdict-tests` each shipped outside
-# the required aggregate, each with a comment explaining that wiring it in was
-# somebody else's problem (#9746).
+# which is a lie the drift branch would report every run. The first was taken
+# twice on this branch: `board-verdict-tests` landed outside the aggregate, and
+# `portable-paths` was added outside it and then wired in, reverted, and wired
+# in again through this form (#9746). Both reverts are in this branch's history
+# rather than in `main` — the deferral was the reasoning, not a shipped state.
 check_unconditional() {
   local job="$1" result
   result="$(jq -r --arg j "$job" '.[$j].result // "absent"' "$needs_file")"
   if [ "$result" != "success" ]; then
-    tamper="$tamper"$'\n'"  - $job (unconditional job, result=$result)"
+    # A SEPARATE accumulator, because the two forms fail for different
+    # reasons and the operator reading the error has to know which. These
+    # jobs have no trigger by construction, so reporting them under
+    # "skipped despite its trigger firing" sends the reader looking for a
+    # ci-gate output that does not exist (found in review).
+    unconditional="$unconditional"$'\n'"  - $job (result=$result)"
   fi
 }
 
@@ -205,6 +212,13 @@ fi
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"
+  exit 1
+fi
+if [ -n "$unconditional" ]; then
+  echo "::error::Unconditional gate(s) did not succeed. These jobs have no job-level if:,"
+  echo "::error::so they run on every PR and must always succeed - a skipped or absent"
+  echo "::error::result means the job was unwired or dropped from ci-success needs:"
+  echo "$unconditional"
   exit 1
 fi
 

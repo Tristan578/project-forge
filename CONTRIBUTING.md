@@ -328,6 +328,68 @@ silently onboarding the next contributor against a broken board:
   always use `taskboard start --port 3010`, letting it use the OS-default DB
   path). Both gates are wired into the required **CI Success** aggregate.
 
+## Machine-local absolute paths
+
+A tracked file must not hardcode a path that only exists on one machine. Such a
+path resolves to nothing on every other checkout, and it fails **silently** —
+#9605 is exactly that: an enforcement hook read a path containing one
+contributor's username, so on every other machine it took its no-op branch and
+the hook was off for entire sessions with nothing saying so.
+
+The required **`Portable Paths`** gate
+(`scripts/check-portable-paths.sh`, wired into the **CI Success** aggregate)
+greps every tracked file for two shapes: a Windows drive-letter path into a
+common checkout root, and a POSIX home directory. Run it yourself before
+pushing:
+
+```bash
+bash scripts/check-portable-paths.sh
+```
+
+It prints the offending `file:line:content` for each hit and exits non-zero.
+`/home/runner/` is exempt — it is the GitHub Actions HOME and identical on every
+Linux runner — but only that occurrence, so a personal home path on the same
+line is still reported.
+
+**Use instead**, in rough order of preference:
+
+| Instead of a machine-local path | Use |
+|---|---|
+| `cd` into your own home directory | `cd "$(git rev-parse --show-toplevel)"` |
+| an absolute path in a script or doc | a repo-relative path, from the repo root |
+| a tool that genuinely needs your own layout | an environment variable, or a personal config that is **not** tracked |
+
+> The rows above describe the forbidden shapes rather than showing them. That is
+> not squeamishness: the gate greps every tracked file, so a document quoting a
+> real example is a document the gate then fails on — which is what happened
+> when this section was first written, and the annotation pointed right here.
+> The shapes live once, in the gate's own patterns.
+
+For the last case: a real machine-local path belongs in an untracked file. The
+repo ignores the usual per-machine config locations; if the tool insists on a
+tracked file, that is worth raising rather than working around, because whatever
+you commit becomes everyone's path.
+
+### If the gate flags something legitimate
+
+Some files are *about* path handling — a test asserting that a Windows absolute
+path is accepted, a generator whose fixtures quote real paths. Those are
+exempted by an allowlist in the gate, and each entry carries a reason and is
+anchored to the exact file it covers. Add an entry in the same PR as the file
+that needs it, with a one-line reason saying why the literal is the subject
+rather than a path anyone follows.
+
+Two things to know about that allowlist, both of which will otherwise surprise
+you:
+
+- **Anchor the entry to the file.** A bare substring exempts every path
+  containing it — an entry named for a test once exempted its production sibling
+  too.
+- **An entry that stops exempting anything fails the build.** The gate emits a
+  `::notice::`, and the gate's own suite asserts the real tree emits none. So if
+  you delete or rename the last file an entry covered, prune the entry in the
+  same change.
+
 ### Allowlisted homes for retired IDs
 
 A retired ID may legitimately survive in exactly two places, and nowhere else:

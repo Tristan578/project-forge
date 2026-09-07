@@ -77,10 +77,17 @@ Fetch the top releases for Tier 1 and Tier 2 systems. Only check Tier 3/4 when t
 
 Read the actual installed versions:
 
+Both commands `cd` to the repo root themselves rather than carrying a comment
+telling you to. The shell's working directory persists between steps, and this
+repo's own instructions are full of `cd web && …`, so "run from the repo root"
+is a precondition the next reader silently violates — and the failure then reads
+as a broken checkout rather than a wrong directory.
+
 ```bash
 # JavaScript dependencies
+cd "$(git rev-parse --show-toplevel)"
 node -e "
-const pkg = require('./web/package.json');  // run from the repo root
+const pkg = require('./web/package.json');
 const deps = {...pkg.dependencies, ...pkg.devDependencies};
 const tracked = ['next','@clerk/nextjs','stripe','@sentry/nextjs','posthog-js',
   '@upstash/redis','@neondatabase/serverless','drizzle-orm','ai','@ai-sdk/react',
@@ -88,8 +95,20 @@ const tracked = ['next','@clerk/nextjs','stripe','@sentry/nextjs','posthog-js',
 tracked.forEach(d => deps[d] && console.log(d + ': ' + deps[d]));
 "
 
-# Rust dependencies
-grep -E '^(bevy|bevy_rapier|wasm-bindgen)\s' engine/Cargo.toml
+# Rust dependencies. Bevy and Rapier are declared as [dependencies.<name>]
+# TABLES, not top-level keys, so an anchored `^(bevy|bevy_rapier)` matched
+# neither — this step reported only wasm-bindgen while claiming to read "the
+# actual installed versions", and Bevy is the skill's own Tier 1 system.
+# Match both spellings and print the version line that follows a table header.
+cd "$(git rev-parse --show-toplevel)"
+awk '
+  /^(bevy|bevy_rapier[23]d|wasm-bindgen)[[:space:]]*=/ { print; next }
+  /^\[dependencies\.(bevy|bevy_rapier[23]d|wasm-bindgen)\]$/ {
+    name = $0; sub(/^\[dependencies\./, "", name); sub(/\]$/, "", name); pending = name; next
+  }
+  pending && /^version[[:space:]]*=/ { print pending " " $0; pending = ""; next }
+  /^\[/ { pending = "" }
+' engine/Cargo.toml
 ```
 
 ### Step 3: Generate Report
