@@ -49,7 +49,33 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # A root nobody has thought of still escapes; that is the cost of the allowlist
 # direction, and it is the right cost, because the other direction produces
 # false failures on standard system paths and gets the gate switched off.
-PATTERN='([A-Za-z]:[\\/](Users|repos|dev|src|code|work|workspace|projects|git)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'
+#
+# THE SEPARATORS TAKE `+`. A TOML basic string, a JSON string and a JavaScript
+# string literal all ESCAPE a backslash, so a Windows path stored in one carries
+# a DOUBLED backslash on disk, and a class matching exactly one separator
+# matched none of it (found in review). The measured example is this repo's own
+# `fmodBridge.test.ts`, which asserts on a Windows path in a TS literal and was
+# invisible to this gate until the `+` — it is on the allowlist now, and it was
+# not on it before, because nothing had ever reported it.
+#
+# The uncommitted `.codex/config.toml` that motivated this gate spells its paths
+# with forward slashes, which the single-separator form already caught. So this
+# is a hole that find would NOT have shown, rather than one it did.
+#
+# TWO PATTERNS, BECAUSE THE TWO FILESYSTEMS DISAGREE ABOUT CASE. Windows paths
+# are case-insensitive, so a lowercase or capitalised spelling of a root this
+# list already names walked straight through, and the Windows pass runs under
+# `grep -i`. POSIX paths are NOT, and `/users/` is a different path from
+# `/Users/` — under a blanket `-i` this gate reported two Playwright docs for
+# `/users/<id>/settings`, which is a URL route, not a home directory. One blob
+# cannot hold both rules, so it is two passes over the same file set; each is
+# ~2s, and a false failure on a URL is how a gate gets switched off.
+#
+# Case-insensitivity does not widen the allowlist direction: the roots are still
+# an enumerated list, and the standard-system-path case in the suite pins that
+# `Program Files` and `Windows` keep passing.
+WIN_PATTERN='[A-Za-z]:[\\/]+(Users|repos|dev|src|code|work|workspace|projects|git)[\\/]+'
+POSIX_PATTERN='(/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'
 
 # Files where such a string is legitimate. Each entry states why, and each entry
 # EXEMPTS SOMETHING TODAY — an allowlist entry that covers no file is not
@@ -89,6 +115,7 @@ ALLOW_ENTRIES=(
   'mockOnceGuard'
   'generate-wasm-manifests'
   'reaperBridge'
+  '^web/src/lib/bridges/__tests__/fmodBridge\.test\.ts$'
 )
 ALLOW_REASONS=(
   'dated records of what a tool printed; rewriting them would falsify the record'
@@ -97,6 +124,7 @@ ALLOW_REASONS=(
   'test infrastructure ABOUT path handling'
   'a generator whose test quotes real paths as fixtures'
   'asserts a traversal attempt is REFUSED; the literal is the attack'
+  'asserts isSafePath ACCEPTS a Windows absolute path; the literal is the subject'
 )
 if [ "${#ALLOW_ENTRIES[@]}" -ne "${#ALLOW_REASONS[@]}" ]; then
   echo "::error::check-portable-paths: ALLOW_ENTRIES and ALLOW_REASONS differ in length" >&2
@@ -151,10 +179,13 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # the closed direction, but it turns an exempt file into a red build with a
 # nonsense name, and no fixture can reach it: the suite's repos are small enough
 # to be one batch.
-raw="$(git ls-files -z \
-  | xargs -0 grep -HInE "$PATTERN" 2>/dev/null \
+win_hits="$(git ls-files -z \
+  | xargs -0 grep -HIinE "$WIN_PATTERN" 2>/dev/null || true)"
+posix_hits="$(git ls-files -z \
+  | xargs -0 grep -HInE "$POSIX_PATTERN" 2>/dev/null \
   | sed 's#/home/runner/#{RUNNER_HOME}/#g' \
-  | grep -E "$PATTERN" || true)"
+  | grep -E "$POSIX_PATTERN" || true)"
+raw="$(printf '%s\n%s\n' "$win_hits" "$posix_hits" | grep . || true)"
 
 # The allowlist is applied per hit, to the path grep prefixed onto the line, so
 # an entry can be anchored to a whole path without also having to survive the

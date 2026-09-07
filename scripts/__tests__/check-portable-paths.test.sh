@@ -108,8 +108,10 @@ d="$(make_repo runner)"
 add_file "$d" ".github/workflows/x.yml" "  path: $RUNNER_PATH/cache"
 run_case "the GitHub Actions HOME is portable and passes" 0 "$d"
 
-# A file may hold both. Filtering /home/runner/ by LINE, not by dropping it from
-# the pattern, is what keeps the real path visible in a file that also has one.
+# A file may hold both. Exempting the runner OCCURRENCE, rather than dropping it
+# from the pattern, is what keeps the real path visible in a file that also has
+# one. This case has them on separate lines; the one below has them on the same
+# line, which is what the original line-level filter could not see.
 d="$(make_repo mixed)"
 add_file "$d" ".github/workflows/x.yml" "  cache: $RUNNER_PATH
   home: $LINUX_PATH"
@@ -149,6 +151,55 @@ done
 d="$(make_repo win_system)"
 add_file "$d" "docs/setup.md" "Install to C:\\Program Files\\MSVC and add C:\\Windows\\System32 to PATH."
 run_case "a standard Windows system path passes" 0 "$d"
+
+# --- the two ways a Windows path hides from a literal match --------------------
+#
+# ESCAPED SEPARATORS. A TOML basic string, a JSON string and a JavaScript string
+# literal all escape a backslash, so a Windows path stored in one carries a
+# DOUBLED backslash on disk and a separator class matching exactly one of them
+# matched none of it (found in review). Not hypothetical: this repo's own
+# `fmodBridge.test.ts` asserts on a Windows path in a TS literal and was
+# invisible to this gate until the separators took `+`.
+#
+# CASE. Windows paths are case-insensitive, so a checkout under a lowercase or
+# capitalised spelling of a root the list ALREADY names walked straight through.
+# The match is now case-insensitive; the standard-system-path case above is what
+# holds that from widening into false failures, so keep the two together.
+#
+# Assembled at runtime, like the paths at the top of this file, so the suite does
+# not ship strings that read as real machine-local paths.
+# `%c` of 92 is a backslash. Built from the character code rather than written,
+# because a literal backslash here has to survive the shell's quoting and then
+# whatever reads it — the class of corruption lessons-learned #5 is about — and
+# because shellcheck reads a lone quoted backslash as a probable typo (SC1003).
+# Same idiom as the single quote in the malformed-regex fixture below.
+ESC="$(awk 'BEGIN { printf "%c%c", 92, 92 }')"
+
+d="$(make_repo esc_toml)"
+add_file "$d" ".codex/config.toml" "cwd = \"C:${ESC}Users${ESC}someone${ESC}project-forge\""
+run_case "an escaped Windows path in a TOML string fails" 1 "$d"
+
+d="$(make_repo esc_json)"
+add_file "$d" ".vscode/settings.json" "{\"cwd\": \"D:${ESC}repos${ESC}project-forge\"}"
+run_case "an escaped Windows path in a JSON string fails" 1 "$d"
+
+d="$(make_repo lower_root)"
+add_file "$d" "docs/setup.md" "Clone to c:${SLASH:-/}users${SLASH:-/}someone${SLASH:-/}project-forge first."
+run_case "a lowercase Windows checkout root fails" 1 "$d"
+
+d="$(make_repo mixed_root)"
+add_file "$d" "docs/setup.md" "Clone to D:${SLASH:-/}Repos${SLASH:-/}project-forge first."
+run_case "a mixed-case Windows checkout root fails" 1 "$d"
+
+# The other half of the case rule, and the reason it is two passes instead of
+# one blob under `grep -i`: on a POSIX filesystem `/users/` is NOT `/Users/`.
+# A blanket -i reported two Playwright docs for a lowercase URL ROUTE. The real
+# tree happens to contain such a route today, so this would fail either way for
+# now — but that is coverage by coincidence, and it evaporates the moment those
+# two files change. This pins the rule directly.
+d="$(make_repo url_route)"
+add_file "$d" "docs/e2e.md" "await page.goto(\"/users/test-user/settings\");"
+run_case "a lowercase /users/ URL route is not a home directory" 0 "$d"
 
 # --- a malformed allowlist regex is a hard error, not a silent non-match ---
 #
