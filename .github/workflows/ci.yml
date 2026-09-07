@@ -680,7 +680,9 @@ jobs:
   # SILENTLY: lessons-learned #9605 is that exactly, where the lessons hook read
   # such a path, took its `exit 0` branch on every other checkout, and left
   # enforcement off for whole sessions with nothing saying so. Found live on
-  # 2026-09-06 in `.codex/config.toml` and in two skills.
+  # 2026-09-06 in two tracked skills, and — in an untracked WORKING COPY of
+  # `.codex/config.toml`, so no CI run could have seen it, which is the point of
+  # gating the tracked set before such a path becomes everybody's.
   #
   # The forbidden shapes are NOT restated here. They live once, in the gate's
   # own patterns, because a file that quotes an example is a file the gate then

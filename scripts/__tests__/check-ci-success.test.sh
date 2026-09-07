@@ -1078,8 +1078,11 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   # pass by iterating an empty list — the precise way a structural pin fails
   # green.
   #
-  # THE FLOOR IS DERIVED, NOT A CONSTANT. It was `-lt 15` against a list of 23,
-  # so up to eight jobs could fall out of the cut with the guard still green —
+  # A DERIVED CROSS-CHECK, BESIDE THE CONSTANT FLOOR — not instead of it. An
+  # earlier version of this comment said the floor had been replaced; it has
+  # not, and both are load-bearing (found in review). The constant was `-lt 15`
+  # against a list of 23, so up to eight jobs could fall out of the cut with the
+  # guard still green —
   # and the comment three lines up records exactly that happening ("17 of 23 is
   # >= 15"). A constant floor set below the truth is a guard that tolerates the
   # bug it is written to catch. Truncation always drops the TAIL, and the tail
@@ -1087,7 +1090,9 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   # looks for two jobs at the HEAD of the list) could never have caught it
   # either.
   #
-  # Counted by a different route than the awk cut it audits — sed spans from the
+  # The cross-check catches a cut that reads FEWER jobs than the block holds; the
+  # constant floor below still catches the case they agree on because both read
+  # zero. Counted by a different route than the awk cut it audits — spans from the
   # `needs:` key to the next job-level key and counts `- ` items in between, so
   # a cut that stops early (at a comment, say) disagrees with it. Scoped to that
   # span on purpose: counting `- ` over the WHOLE job block reads the STEPS too,
@@ -1145,15 +1150,52 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
           fail "check_unconditional names '$ujob' but no such job exists in ci.yml — the verifier would report result=absent on every run"
           continue
         fi
-        if grep -qE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ublock"; then
-          fail "$ujob has a job-level if: but is asserted by check_unconditional, whose premise is that it has none — every PR that misses that trigger now fails ci-success naming a trigger the verifier cannot report"
+        # ANY INDENT, not just the job's own four spaces. A STEP-level `if:`
+        # skips that step, a skipped step does not fail its job, the job
+        # concludes `success`, and check_unconditional reads success — the gate
+        # never ran and the aggregate is green. The four-space form closed half
+        # of this and was found by both reviewers on the re-run. Neither of
+        # these jobs has any legitimate conditional, so any `if:` in the block
+        # is the finding.
+        if grep -qE '^[[:space:]]+["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$ublock"; then
+          fail "$ujob has an if: (job- or step-level) but is asserted by check_unconditional, whose premise is that its work always runs — a skipped step still concludes success, so the verifier certifies a gate that never executed"
         else
-          pass "$ujob has no job-level if: (check_unconditional's premise holds)"
+          pass "$ujob has no if: at any level (check_unconditional's premise holds)"
         fi
         if grep -q 'continue-on-error' <<<"$ublock"; then
           fail "$ujob carries continue-on-error — a failing step still concludes success, so check_unconditional is satisfied and the gate becomes report-only"
         else
           pass "$ujob has no continue-on-error"
+        fi
+
+        # AND THE JOB MUST ACTUALLY RUN SOMETHING. `portable-paths` got a
+        # structural pin in its own suite; `board-verdict-tests` was promoted in
+        # the SAME commit and got none, so commenting out its two steps left a
+        # job that concludes `success` with the board-verdict suite and the
+        # lint of board-verdict.sh never running again (found in review).
+        # (That sentence must not begin a line with the word shellcheck: a
+        # comment starting with it is parsed as a DIRECTIVE, and a malformed
+        # one is an ERROR-severity finding, which CI treats as fatal.)
+        # Generic, and per STEP, so it covers whatever job is added next:
+        # at least one executable `run:`, and no step carrying a duplicate
+        # `run:` key — YAML keeps the LAST duplicate, so an appended
+        # `run: "true"` replaces the command while the original line stays
+        # byte-present and any containment grep stays green.
+        urun_total="$(grep -cE '^[[:space:]]*run:' <<<"$ublock" || true)"
+        if [ "$urun_total" -ge 1 ]; then
+          pass "$ujob runs $urun_total executable step command(s)"
+        else
+          fail "$ujob has no executable run: step — a job with nothing to run concludes success, and check_unconditional then certifies it green while the work it was promoted to guarantee never happens"
+        fi
+        udup="$(awk '
+          /^      - / { if (n) print runs; n = 1; runs = 0; next }
+          n && /^[[:space:]]*run:/ { runs++ }
+          END { if (n) print runs }
+        ' <<<"$ublock" | awk '$1 > 1 { c++ } END { print c + 0 }')"
+        if [ "$udup" -eq 0 ]; then
+          pass "$ujob has no step with a duplicate run: key"
+        else
+          fail "$ujob has $udup step(s) with more than one run: key — YAML keeps the last, so the effective command is not the one that is pinned"
         fi
       done <<<"$uncond_jobs"
     fi

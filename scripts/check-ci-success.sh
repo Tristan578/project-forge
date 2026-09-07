@@ -118,11 +118,19 @@ check_triggered() {
 #
 # Without this form the only options were "leave the job out of ci-success", so
 # its failure cannot block a merge, or "map it to a trigger it does not have",
-# which is a lie the drift branch would report every run. The first was taken
-# twice on this branch: `board-verdict-tests` landed outside the aggregate, and
-# `portable-paths` was added outside it and then wired in, reverted, and wired
-# in again through this form (#9746). Both reverts are in this branch's history
-# rather than in `main` — the deferral was the reasoning, not a shipped state.
+# which is a lie the drift branch would report every run.
+#
+# The first was taken for real. `board-verdict-tests` shipped in #9744
+# (d9a3ce89) OUTSIDE the aggregate, and that state is live on `main` until this
+# PR merges: the job exists there and `ci-success`'s needs: list does not name
+# it. `portable-paths` is created by this PR, was wired in, reverted once
+# (0307f27c) when the map-completeness assertion refused a job with no trigger,
+# and is wired in again here through this form (#9746).
+#
+# This comment has now been wrong twice — first claiming both jobs shipped that
+# way with deferral comments attached, then claiming neither did. Each sentence
+# above is checkable with one command against origin/main, which is what it
+# should have taken the first time.
 check_unconditional() {
   local job="$1" result
   result="$(jq -r --arg j "$job" '.[$j].result // "absent"' "$needs_file")"

@@ -499,6 +499,38 @@ for pat_var in WIN_PATTERN POSIX_PATTERN; do
   fi
 done
 
+# --- every allowlist entry is anchored ---
+#
+# The sibling cases above prove three specific entries stopped over-matching.
+# They cannot cover an entry nobody has written yet, and one of the four the
+# last round anchored — `provision-billing-meter` — had no case at all: reverting
+# it to a bare substring left the suite green (found in review). This closes the
+# class instead of adding a fourth case: an entry must start with `^` and end
+# with `$` or `/`, so it names a file or a directory rather than a substring any
+# future path can wander into.
+anchor_bad=""
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  case "$entry" in
+    '^'*'$'|'^'*'/') ;;
+    *) anchor_bad="$anchor_bad $entry" ;;
+  esac
+done <<<"$(sed -n '/^ALLOW_ENTRIES=(/,/^)/p' "$SCRIPT" | sed -n "s/^  '\(.*\)'$/\1/p")"
+if [ -n "$anchor_bad" ]; then
+  FAIL=$((FAIL + 1)); echo "  FAIL unanchored allowlist entr(ies) —$anchor_bad. Entries are matched with grep -qE against the path, so a bare substring exempts every path containing it: an entry named for a test exempts its production sibling too. Anchor with ^…\$ for a file or ^…/ for a directory."
+else
+  PASS=$((PASS + 1)); echo "  ok   every allowlist entry is anchored to a file or a directory"
+fi
+
+# And the cut is not vacuous: if the ALLOW_ENTRIES block stops parsing, the loop
+# above iterates nothing and reports success having checked no entries.
+anchor_seen="$(sed -n '/^ALLOW_ENTRIES=(/,/^)/p' "$SCRIPT" | sed -n "s/^  '\(.*\)'\$/\1/p" | grep -c . || true)"
+if [ "$anchor_seen" -ge 5 ]; then
+  PASS=$((PASS + 1)); echo "  ok   read $anchor_seen allowlist entries to check for anchoring"
+else
+  FAIL=$((FAIL + 1)); echo "  FAIL read only $anchor_seen allowlist entr(ies) — the ALLOW_ENTRIES cut is broken, so the anchoring check above passed without inspecting them"
+fi
+
 # --- the seam must never be wired into CI ---
 
 echo "seam hygiene"
@@ -553,6 +585,45 @@ else
   else
     FAIL=$((FAIL + 1)); echo "  FAIL the portable-paths job has $suite_runs executable run: line(s) for this suite, expected exactly 1 — a gate whose allowlist silently stops matching reports a clean tree either way, so the suite is the only thing that tells a passing gate from a dead one"
   fi
+
+  # PER STEP, NOT PER JOB, and counting `run:` KEYS rather than one command.
+  # The counts above match a SPECIFIC command line, which an appended second
+  # `run:` does not disturb — YAML keeps the last duplicate key, so
+  #     run: bash scripts/check-portable-paths.sh
+  #     run: "true"
+  # replaces the effective command while the pinned line stays byte-present and
+  # counted. Measured: the suite stayed at PASS=53 FAIL=0 with that appended.
+  # The comment here previously claimed counting closed this vector; it did not,
+  # and the precedents it cited (check-ci-success.test.sh's dig_run_count,
+  # board-verdict.test.sh:227) both count KEYS, which is the difference.
+  #
+  # A STEP-LEVEL `if:` is the other one-line disarm, and it is worse because it
+  # needs no duplicate: `if: false` on the gate step skips it, a skipped step
+  # does not fail its job, the job concludes `success`, and check_unconditional
+  # reads success. Both reviewers on the re-run found this independently, after
+  # the job-level `if:` pin was added — four spaces was half the fix.
+  for step_name in "Check for machine-local absolute paths in tracked files" "Test the portable-paths gate's decision logic"; do
+    step_blk="$(awk -v n="$step_name" '
+      index($0, "- name: " n) { f = 1; print; next }
+      f && /^      - / { exit }
+      f { print }
+    ' <<<"$pp_block")"
+    if [ -z "$step_blk" ]; then
+      FAIL=$((FAIL + 1)); echo "  FAIL could not find the '$step_name' step in the portable-paths job — renamed? its run:/if: pins cannot run"
+      continue
+    fi
+    step_run_keys="$(grep -cE '^[[:space:]]*run:' <<<"$step_blk" || true)"
+    if [ "$step_run_keys" -eq 1 ]; then
+      PASS=$((PASS + 1)); echo "  ok   '$step_name' has exactly one run: key"
+    else
+      FAIL=$((FAIL + 1)); echo "  FAIL '$step_name' has $step_run_keys run: keys, expected exactly 1 — YAML keeps the LAST duplicate, so a second run: silently replaces the command while the original line stays present"
+    fi
+    if grep -qE '^[[:space:]]*if[[:space:]]*:' <<<"$step_blk"; then
+      FAIL=$((FAIL + 1)); echo "  FAIL '$step_name' carries a step-level if: — a skipped step does not fail its job, so the job still concludes success and check_unconditional certifies the gate green while it never ran"
+    else
+      PASS=$((PASS + 1)); echo "  ok   '$step_name' has no step-level if:"
+    fi
+  done
 
   # `continue-on-error` makes a failing step conclude `success`, so the job
   # reports success, `check_unconditional` is satisfied, and the gate becomes

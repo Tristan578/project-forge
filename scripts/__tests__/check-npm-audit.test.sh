@@ -3366,7 +3366,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=592
+readonly SELF_EXEC_EXPECTED_DROP=610
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3520,6 +3520,8 @@ IFS= read -r -d '' expected_steps_1 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_2 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_3 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_4 @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_pp @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_bvt @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_5 @@'STEPS_EOF' || true
 STEPS_EOF
 readonly expected_openers
@@ -3809,6 +3811,52 @@ STEPS_EOF
 readonly expected_steps_4
 assert_steps_block "${ci_success_block:-}" "ci.yml ci-success job steps:" "${expected_steps_4%$'\n'}"
 
+# --- the two UNCONDITIONAL gate jobs (#9740) --------------------------------
+#
+# Both were promoted into the required `CI Success` aggregate through
+# `check_unconditional`, which asks only "did this job succeed". A job whose
+# gate step is removed, commented out or given `if: false` still concludes
+# SUCCESS, so that question is satisfied while the work never happens. The
+# per-job pins in check-portable-paths.test.sh and check-ci-success.test.sh
+# catch a full neuter, a duplicate `run:` key and a step-level `if:` — but a
+# PARTIAL neuter, removing ONE step of two and leaving the other, keeps every
+# one of them green. Measured: commenting out board-verdict-tests' suite step
+# left `check-ci-success.test.sh` reporting "All tests passed".
+#
+# This is the assertion that closes it, and it is the one this repo already
+# uses for five other gate-bearing jobs: pin the step block LINE FOR LINE, so
+# removing, renaming, reordering or adding a step is a diff to the literal
+# below and a reviewer sees it.
+ci_pp_block="$(awk -v re="$job_key_re" '/^  portable-paths:/{f=1} f{print} f && $0 ~ re && !/^  portable-paths:/{exit}' <<<"$ci_exec")"
+readonly ci_pp_block
+
+IFS= read -r -d '' expected_steps_pp <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test the portable-paths gate's decision logic
+        run: bash scripts/__tests__/check-portable-paths.test.sh
+      - name: Shellcheck the gate and its suite
+        run: shellcheck -x scripts/check-portable-paths.sh scripts/__tests__/check-portable-paths.test.sh
+      - name: Check for machine-local absolute paths in tracked files
+        run: bash scripts/check-portable-paths.sh
+STEPS_EOF
+readonly expected_steps_pp
+assert_steps_block "${ci_pp_block:-}" "ci.yml portable-paths job steps:" "${expected_steps_pp%$'\n'}"
+
+ci_bvt_block="$(awk -v re="$job_key_re" '/^  board-verdict-tests:/{f=1} f{print} f && $0 ~ re && !/^  board-verdict-tests:/{exit}' <<<"$ci_exec")"
+readonly ci_bvt_block
+
+IFS= read -r -d '' expected_steps_bvt <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Board verdict decision logic
+        run: bash scripts/__tests__/board-verdict.test.sh
+      - name: Shellcheck the verdict scripts and the suite
+        run: shellcheck -x scripts/board-verdict.sh scripts/post-board-verdict.sh scripts/__tests__/board-verdict.test.sh
+STEPS_EOF
+readonly expected_steps_bvt
+assert_steps_block "${ci_bvt_block:-}" "ci.yml board-verdict-tests job steps:" "${expected_steps_bvt%$'\n'}"
+
 # ci-gate's detect step: the one block that decides whether the caller above
 # runs at all. `any_code=false` is a one-token edit that skips every npm audit
 # on the PR path with the suite green and the required check green (round 26).
@@ -3943,6 +3991,10 @@ expected_steps_1
 expected_steps_2
 expected_steps_3
 expected_steps_4
+ci_pp_block
+expected_steps_pp
+ci_bvt_block
+expected_steps_bvt
 expected_steps_5
 SELF_EXEC_FILTER
 SELF_EXEC

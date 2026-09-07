@@ -148,7 +148,7 @@ ALLOW_REASONS=(
   'code ABOUT path handling — the literal is the subject, not a path to follow'
   'test infrastructure ABOUT path handling'
   'the generator TEST, which quotes real paths as fixtures; the generator itself is not exempt'
-  'a path-handling test: two hits are refused traversal attempts, the rest are ordinary fixtures'
+  'a path-handling test: 8 hits, of which 2 are refused inputs (one traversal, one NUL byte)'
   'asserts isSafePath ACCEPTS a Windows absolute path; the literal is the subject'
 )
 if [ "${#ALLOW_ENTRIES[@]}" -ne "${#ALLOW_REASONS[@]}" ]; then
@@ -208,12 +208,19 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # Replacing the runner occurrences with a token that cannot match, then
 # re-applying POSIX_PATTERN, keeps every other match on the line.
 #
-# LINUX AND MACOS RUNNERS ONLY. GitHub's Windows runners use a drive-letter home
-# under `Users`, which the Windows pass matches and this exemption does not
-# touch — it is applied to the POSIX pipeline alone. This repo does run Windows
-# CI (`hook-tests-windows`), so a suite that quotes Windows runner output would
-# be reported as machine-local. Nothing has yet; when something does, the fix is
-# an anchored allowlist entry naming that file, not widening this exemption.
+# LINUX RUNNERS ONLY, despite "every runner" above — the exemption is the
+# literal string `/home/runner/`, and the other two hosted platforms do not use
+# it:
+#
+#   * macOS runners have HOME=/Users/runner, which POSIX_PATTERN matches and
+#     this sed does not touch.
+#   * Windows runners have a drive-letter home under `Users`, which the Windows
+#     pass matches, and the sed is applied to the POSIX pipeline alone.
+#
+# So a tracked file quoting macOS or Windows runner output is reported as
+# machine-local. Nothing does today. When something does, the fix is an anchored
+# allowlist entry naming that file — not widening this exemption, which would
+# also exempt a contributor whose own username happens to be `runner`.
 #
 # `-H` IS LOAD-BEARING. Without it grep prints `path:line:content` only when it
 # is handed more than one file, and `line:content` when handed exactly one.
@@ -222,8 +229,10 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # hits. `${line%%:*}` then reads a LINE NUMBER, no allowlist entry can ever
 # match it, and the file is reported as `::error file=<lineno>::`. It fails in
 # the closed direction, but it turns an exempt file into a red build with a
-# nonsense name, and no fixture can reach it: the suite's repos are small enough
-# to be one batch.
+# nonsense name. The suite DOES reach it: the `one_file` case builds a one-file
+# repo for exactly that purpose, which is the only way a fixture can. Removing
+# `-H` fails that case and only that one. An earlier version of this sentence
+# said no fixture could reach it, in the same commit that added the case.
 win_hits="$(git ls-files -z \
   | xargs -0 grep -HIinE "$WIN_PATTERN" 2>/dev/null || true)"
 posix_hits="$(git ls-files -z \
