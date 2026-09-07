@@ -87,6 +87,18 @@ export function pendingRaycast2dCount(): number {
 export interface Raycast2dSlot {
   /** Resolves with the engine's answer, or rejects if the slot is discarded. */
   readonly answer: Promise<Raycast2dHit | null>;
+  /**
+   * Whether a slot was actually taken.
+   *
+   * FALSE means no answer is owed and the caller MUST NOT dispatch. Two paths
+   * return a slot that was never enqueued — an already-aborted signal, and the
+   * outstanding-request ceiling — and dispatching on either sends the engine a
+   * request nobody is waiting for. Its answer then goes to the head of the
+   * queue: a different caller, resolved with a stranger's hit. That is the same
+   * crossing this module exists to prevent, arriving through the door the
+   * refusal path had just been closed on.
+   */
+  readonly queued: boolean;
   /** Give this slot back. Safe to call twice; a no-op once settled. */
   abandon(reason: string): void;
 }
@@ -105,9 +117,15 @@ export interface Raycast2dSlot {
  * the slots that remain still line up with the answers still coming.
  */
 function abandonSlot(entry: PendingRaycast2d, reason: string): void {
+  // A SETTLED entry is a TOMBSTONE and must stay in the queue. It was abandoned
+  // by an abort AFTER the command was dispatched, so the engine still owes it
+  // an answer, and that answer is consumed — and discarded — when it arrives.
+  // Splicing it out would hand the answer it is holding a place for to the next
+  // request in line. The settled check therefore comes BEFORE the splice; the
+  // other order removed a slot the engine still owed.
+  if (entry.settled) return;
   const at = queue.indexOf(entry);
   if (at !== -1) queue.splice(at, 1);
-  if (entry.settled) return;
   entry.settled = true;
   entry.detach();
   entry.reject(new Error(reason));
@@ -116,8 +134,9 @@ function abandonSlot(entry: PendingRaycast2d, reason: string): void {
 /** A slot that was never enqueued: its answer is already rejected. */
 function rejectedSlot(message: string): Raycast2dSlot {
   const answer = Promise.reject(new Error(message));
-  // Nothing was queued, so there is nothing to give back.
-  return { answer, abandon: () => {} };
+  // Nothing was queued, so there is nothing to give back — and nothing may be
+  // dispatched either, which `queued: false` is what tells the caller.
+  return { answer, queued: false, abandon: () => {} };
 }
 
 /**
@@ -161,7 +180,7 @@ export function awaitRaycast2dAnswer(signal?: AbortSignal): Raycast2dSlot {
     queue.push(entry);
   });
 
-  return { answer, abandon: (reason: string) => abandonSlot(entry, reason) };
+  return { answer, queued: true, abandon: (reason: string) => abandonSlot(entry, reason) };
 }
 
 /**

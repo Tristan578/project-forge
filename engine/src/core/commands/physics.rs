@@ -896,6 +896,9 @@ struct Raycast2dPayload {
     dir_x: f32,
     dir_y: f32,
     max_distance: f32,
+    /// Optional: an entity the ray must ignore. See `Raycast2dRequest`.
+    #[serde(default)]
+    exclude_entity_id: Option<String>,
 }
 
 /// Handle raycast2d command.
@@ -909,6 +912,7 @@ fn handle_raycast2d(payload: serde_json::Value) -> super::CommandResult {
         dir_x: data.dir_x,
         dir_y: data.dir_y,
         max_distance: data.max_distance,
+        exclude_entity_id: data.exclude_entity_id,
     };
 
     if queue_raycast2d_from_bridge(request) {

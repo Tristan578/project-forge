@@ -74,7 +74,7 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
   'lib/scripting/channels/physicsChannel.ts': {
     calls: 0,
     reason:
-      'prose only: explains why `handle_command`'s return value cannot carry a raycast answer, which is the whole reason the 2D path is correlated through raycast2dRegistry (#9271). It dispatches through ctx.dispatchCommand, never directly',
+      'prose only: explains why the return value of handle_command cannot carry a raycast answer, which is the whole reason the 2D path is correlated through raycast2dRegistry (#9271). It dispatches through ctx.dispatchCommand, never directly',
   },
   'lib/engine/commandPayloadGuard.ts': { calls: 0, reason: 'the guard, describing what it protects' },
   'lib/engine/loadPlayEngine.ts': { calls: 0, reason: 'type declaration only' },

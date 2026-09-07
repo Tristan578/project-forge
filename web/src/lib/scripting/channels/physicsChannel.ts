@@ -30,6 +30,12 @@ interface Raycast2dArgs {
   dirX: number;
   dirY: number;
   maxDistance: number;
+  /**
+   * An entity the engine must filter out of this cast
+   * (`QueryFilter::exclude_collider`). Omitted for an ordinary script raycast —
+   * see `isGrounded`, which is the only caller with a reason to set it.
+   */
+  excludeEntityId?: string;
 }
 
 /**
@@ -61,6 +67,16 @@ export function createPhysicsHandler(deps: PhysicsChannelDeps): AsyncHandler {
    * belonging to the NEXT request, putting every later raycast off by one —
    * exactly the crossing the registry exists to prevent. The slot is released
    * on the failure path rather than left for the queue to drift on.
+   *
+   * AND NO COMMAND MAY GO OUT WITHOUT A SLOT, which is the same fault mirrored.
+   * `awaitRaycast2dAnswer` refuses two ways — an already-aborted signal, and the
+   * outstanding-request ceiling — and both hand back a slot that was never
+   * enqueued. Dispatching on one sends the engine a request nobody is waiting
+   * for, and its answer is not discarded: it goes to the head of the queue, so
+   * a live caller is resolved with a stranger's hit. Measured before the
+   * `queued` check existed: one dispatch after a pre-aborted signal, one after
+   * the ceiling, and the following cast receiving the answer to neither of its
+   * own.
    */
   async function castRay2d(
     payload: Raycast2dArgs,
@@ -70,6 +86,9 @@ export function createPhysicsHandler(deps: PhysicsChannelDeps): AsyncHandler {
     // Settled here so a rejection on the failure path below is never reported
     // as unhandled; the caller still sees the throw.
     slot.answer.catch(() => undefined);
+    // No slot, no dispatch. `slot.answer` already carries the registry's own
+    // reason for the refusal, so it is returned rather than restated.
+    if (!slot.queued) return slot.answer;
     try {
       acceptedOrThrow(deps.dispatchCommand('raycast2d', payload));
     } catch (err) {
@@ -137,14 +156,23 @@ export function createPhysicsHandler(deps: PhysicsChannelDeps): AsyncHandler {
             dirX: 0,
             dirY: -1,
             maxDistance: (args.distance as number | undefined) ?? 0.1,
+            // WITHOUT THIS THE QUESTION IS UNANSWERABLE. The ray starts at the
+            // entity's own position, which is inside its own collider, and
+            // `apply_raycast2d_requests` calls `cast_ray` with `solid: true` —
+            // a ray originating inside a shape reports that shape at `toi = 0`.
+            // So the closest hit is always the caster, every real surface is
+            // behind it, and the check below turns that into a permanent
+            // `false`. `exclude_collider` on the engine side is what lets the
+            // ray reach the floor at all.
+            excludeEntityId: casterId,
           },
           signal,
         );
         if (hit === null) return false;
-        // `apply_raycast2d_requests` casts with `QueryFilter::default()`, which
-        // has no self-exclusion, so a ray starting inside the caller's own
-        // collider answers with the caller at distance 0. Standing on yourself
-        // is not standing on the ground.
+        // Kept even with the exclusion above: an engine build that ignores the
+        // field, or a caster whose id the engine cannot resolve to an entity,
+        // falls back to the unfiltered cast — and standing on yourself is not
+        // standing on the ground.
         return hit.entityId !== casterId;
       }
       case 'overlapSphere': {

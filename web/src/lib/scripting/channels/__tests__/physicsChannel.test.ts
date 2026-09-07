@@ -17,9 +17,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPhysicsHandler } from '../physicsChannel';
 import {
+  awaitRaycast2dAnswer,
   deliverRaycast2dAnswer,
   pendingRaycast2dCount,
   resetRaycast2dQueue,
+  MAX_PENDING_RAYCASTS_2D,
   type Raycast2dHit,
 } from '../../raycast2dRegistry';
 
@@ -302,6 +304,85 @@ describe('createPhysicsHandler', () => {
       ).rejects.toThrow(/engine/i);
       expect(pendingRaycast2dCount()).toBe(0);
     });
+
+    // The three cases below are the OPPOSITE direction of the fault the two
+    // above cover. There, a slot was claimed for a command the engine never
+    // received. Here, a command reaches the engine with no slot claimed for it —
+    // and that direction is the worse of the two, because the surplus answer is
+    // not dropped. It is handed to whichever request sits at the head of the
+    // queue: a live caller, resolved with a stranger's hit.
+
+    it('does not dispatch when the signal was already aborted', async () => {
+      const dispatchCommand = vi.fn(() => ACCEPTED);
+      const handler = createPhysicsHandler({ dispatchCommand });
+
+      await expect(
+        handler(
+          'raycast2d',
+          { originX: 0, originY: 0, dirX: 0, dirY: -1 },
+          noProgress,
+          AbortSignal.abort(),
+        ),
+      ).rejects.toThrow(/aborted/i);
+      expect(dispatchCommand).not.toHaveBeenCalled();
+      expect(pendingRaycast2dCount()).toBe(0);
+    });
+
+    it('an aborted cast does not give the next cast an answer that is not its own', async () => {
+      const dispatchCommand = vi.fn(() => ACCEPTED);
+      const handler = createPhysicsHandler({ dispatchCommand });
+
+      await handler(
+        'raycast2d',
+        { originX: 0, originY: 0, dirX: 0, dirY: -1 },
+        noProgress,
+        AbortSignal.abort(),
+      ).catch(() => undefined);
+
+      // The engine owes exactly one answer from here. Had the aborted cast
+      // dispatched it would owe two, the first belonging to nobody — and that
+      // first one is what would settle the slot claimed below.
+      const live = await answerNextRaycast(
+        () =>
+          handler(
+            'raycast2d',
+            { originX: 9, originY: 9, dirX: 1, dirY: 0 },
+            noProgress,
+            makeSignal(),
+          ),
+        { entityId: 'wall', point: { x: 10, y: 9 }, normal: { x: -1, y: 0 }, distance: 1 },
+      );
+
+      expect(live).toEqual(expect.objectContaining({ entityId: 'wall' }));
+      expect(dispatchCommand).toHaveBeenCalledTimes(1);
+      expect(dispatchCommand).toHaveBeenCalledWith(
+        'raycast2d',
+        expect.objectContaining({ originX: 9 }),
+      );
+    });
+
+    it('does not dispatch when the outstanding-request ceiling is already reached', async () => {
+      // Filled through the registry directly: the ceiling is the registry's
+      // property, and what is under test is what the CHANNEL does on hitting it.
+      const held = Array.from({ length: MAX_PENDING_RAYCASTS_2D }, () =>
+        awaitRaycast2dAnswer());
+      held.forEach((slot) => slot.answer.catch(() => undefined));
+      expect(pendingRaycast2dCount()).toBe(MAX_PENDING_RAYCASTS_2D);
+
+      const dispatchCommand = vi.fn(() => ACCEPTED);
+      const handler = createPhysicsHandler({ dispatchCommand });
+
+      await expect(
+        handler(
+          'raycast2d',
+          { originX: 0, originY: 0, dirX: 0, dirY: -1 },
+          noProgress,
+          makeSignal(),
+        ),
+      ).rejects.toThrow(/Too many 2D raycasts/);
+      expect(dispatchCommand).not.toHaveBeenCalled();
+      expect(pendingRaycast2dCount()).toBe(MAX_PENDING_RAYCASTS_2D);
+    });
   });
 
   describe('isGrounded', () => {
@@ -331,8 +412,72 @@ describe('createPhysicsHandler', () => {
         dirX: 0,
         dirY: -1,
         maxDistance: 0.15,
+        excludeEntityId: 'player',
       });
       expect(result).toBe(true);
+    });
+
+    /**
+     * THE EXCLUSION IS THE ONLY THING THAT MAKES THIS ANSWERABLE, and it has to
+     * be asked for on the wire. `cast_ray` is called with `solid: true`, which
+     * returns `toi = 0` for a ray whose origin lies INSIDE a collider — and a
+     * ground check starts at the entity's own position, inside its own. So the
+     * closest hit is always the caster itself, at distance 0, and every other
+     * collider is behind it and never reported.
+     *
+     * The `hit.entityId !== casterId` check below turns that into `false`, which
+     * is the right answer to the wrong question: it means a grounded entity
+     * reads as airborne, permanently. Filtering the caster out in the engine is
+     * what lets the ray reach the floor at all, so what this pins is that the
+     * channel actually SENDS the exclusion. Drop the field and the payload is
+     * still valid, the engine still answers, and every `isGrounded` is false.
+     */
+    it('asks the engine to exclude the caster from its own ground ray', async () => {
+      const dispatchCommand = vi.fn(() => ACCEPTED);
+      const handler = createPhysicsHandler({ dispatchCommand });
+
+      await answerNextRaycast(
+        () =>
+          handler(
+            'isGrounded',
+            { entityId: 'player', originX: 0, originY: 0 },
+            noProgress,
+            makeSignal(),
+          ),
+        null,
+      );
+
+      expect(dispatchCommand).toHaveBeenCalledWith(
+        'raycast2d',
+        expect.objectContaining({ excludeEntityId: 'player' }),
+      );
+    });
+
+    /**
+     * A plain `raycast2d` from a script is NOT a ground check: it is asked from
+     * an arbitrary origin at an arbitrary target, and excluding anything would
+     * be inventing a filter the caller never asked for.
+     */
+    it('sends no exclusion for a plain raycast2d', async () => {
+      // Parameters declared so `mock.calls[0][1]` has a type; the payload is
+      // read positionally below rather than matched, because what is asserted
+      // is the ABSENCE of a key and `objectContaining` cannot express that.
+      const dispatchCommand = vi.fn((_command: string, _payload: unknown) => ACCEPTED);
+      const handler = createPhysicsHandler({ dispatchCommand });
+
+      await answerNextRaycast(
+        () =>
+          handler(
+            'raycast2d',
+            { originX: 0, originY: 0, dirX: 1, dirY: 0 },
+            noProgress,
+            makeSignal(),
+          ),
+        null,
+      );
+
+      const payload = dispatchCommand.mock.calls[0][1] as Record<string, unknown>;
+      expect(payload).not.toHaveProperty('excludeEntityId');
     });
 
     it('returns false on a MISS', async () => {

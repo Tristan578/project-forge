@@ -108,12 +108,54 @@ describe('raycast2dRegistry', () => {
     await expect(live).resolves.toEqual({ ...HIT, entityId: 'answer-for-live' });
   });
 
+  /**
+   * The same alignment guarantee, reached the other way round. A slot can be
+   * abandoned TWICE: once by an abort, and then again by the caller's own
+   * failure path — the physics channel calls `abandon` on any dispatch that
+   * throws, and a cast can abort while that dispatch is in flight.
+   *
+   * The second call must do nothing. The first abandonment already tombstoned
+   * the slot, and a tombstone is a slot the engine still owes an answer to; the
+   * only reason it stays in the queue is to absorb that answer. Removing it
+   * hands the engine's next reply to the request behind it, which is the
+   * off-by-one this module exists to prevent — arriving through the release
+   * path meant to prevent it.
+   */
+  it('does not remove an already-tombstoned slot when it is abandoned again', async () => {
+    const controller = new AbortController();
+    const slot = awaitRaycast2dAnswer(controller.signal);
+    const abandoned = slot.answer;
+    const live = awaitRaycast2dAnswer().answer;
+
+    controller.abort();
+    await expect(abandoned).rejects.toThrow(/abort/i);
+
+    // The caller's failure path now runs on a slot the abort already settled.
+    slot.abandon('dispatch failed');
+    expect(pendingRaycast2dCount()).toBe(2);
+
+    // The engine answers the tombstone first, exactly as it would have.
+    deliverRaycast2dAnswer({ ...HIT, entityId: 'answer-for-abandoned' });
+    deliverRaycast2dAnswer({ ...HIT, entityId: 'answer-for-live' });
+
+    await expect(live).resolves.toEqual({ ...HIT, entityId: 'answer-for-live' });
+  });
+
   it('rejects immediately when the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(awaitRaycast2dAnswer(controller.signal).answer).rejects.toThrow(/abort/i);
-    // Nothing was enqueued, so no answer is owed and alignment is untouched.
+    const slot = awaitRaycast2dAnswer(controller.signal);
+    await expect(slot.answer).rejects.toThrow(/abort/i);
+    // Nothing was enqueued, so no answer is owed and alignment is untouched —
+    // and `queued` is what says so to the caller, which must not dispatch.
+    expect(slot.queued).toBe(false);
     expect(pendingRaycast2dCount()).toBe(0);
+  });
+
+  it('reports a claimed slot as queued, so its caller may dispatch', () => {
+    const slot = awaitRaycast2dAnswer();
+    expect(slot.queued).toBe(true);
+    slot.answer.catch(() => undefined);
   });
 
   it('rejects a new request once the queue is saturated', async () => {
@@ -122,7 +164,10 @@ describe('raycast2dRegistry', () => {
     for (let i = 0; i < MAX_PENDING_RAYCASTS_2D; i++) {
       inFlight.push(awaitRaycast2dAnswer().answer.catch(() => null));
     }
-    await expect(awaitRaycast2dAnswer().answer).rejects.toThrow(/too many/i);
+    const refused = awaitRaycast2dAnswer();
+    await expect(refused.answer).rejects.toThrow(/too many/i);
+    // Same as the pre-aborted case: nothing enqueued, so nothing may be sent.
+    expect(refused.queued).toBe(false);
     expect(pendingRaycast2dCount()).toBe(MAX_PENDING_RAYCASTS_2D);
 
     resetRaycast2dQueue();
