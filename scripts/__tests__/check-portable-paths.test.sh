@@ -498,10 +498,34 @@ else
   FAIL=$((FAIL + 1)); echo "  FAIL no anti-rot note for an unused allowlist entry"
 fi
 # ...and the entry that DID exempt something is not named as unused.
-if grep -q "'\^docs/(reviews|coverage)/'" <<<"$note"; then
-  FAIL=$((FAIL + 1)); echo "  FAIL an entry that exempted a file was reported as unused"
+#
+# DERIVED FROM THE GATE, NOT TYPED HERE. This used to grep for the literal
+# `^docs/(reviews|coverage)/`. That entry was then widened to include `audits`,
+# and later split into three — and the literal matched neither, so this
+# assertion could not fail and reported green either way (found in review).
+# Third stale literal in this PR, so: ask the gate which of its entries covers
+# the fixture, and assert the note does not name THAT.
+rot_entries="$(grep -oE "^[[:space:]]*'[^']*'" "$SCRIPT" | sed -e "s/^[[:space:]]*'//" -e "s/'$//")"
+rot_covering=""
+while IFS= read -r e; do
+  [ -n "$e" ] || continue
+  if grep -qE "$e" <<<"docs/coverage/dashboard.md"; then
+    rot_covering="$rot_covering $e"
+  fi
+done <<<"$rot_entries"
+
+if [ -z "$rot_covering" ]; then
+  FAIL=$((FAIL + 1)); echo "  FAIL no allowlist entry covers this case's fixture — the assertion below would pass having checked nothing (the fixture or the entry was renamed)"
 else
-  PASS=$((PASS + 1)); echo "  ok   an entry that exempted a file is not reported as unused"
+  rot_named=""
+  for e in $rot_covering; do
+    grep -qF "'$e'" <<<"$note" && rot_named="$rot_named $e"
+  done
+  if [ -n "$rot_named" ]; then
+    FAIL=$((FAIL + 1)); echo "  FAIL entr(ies) that exempted a file were reported as unused —$rot_named"
+  else
+    PASS=$((PASS + 1)); echo "  ok   the entry that exempted a file is not reported as unused"
+  fi
 fi
 
 # The two parallel arrays are a bash 3.2 stand-in for a map. A reason added
