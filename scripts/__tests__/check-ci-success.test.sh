@@ -92,14 +92,15 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 # `command-parity`, `build-nextjs`, `test-e2e-ui` and `test-e2e-api` are hardcoded to success for
 # the same reason and overridden with jq in the #9437 cases at the end.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}" bvt="${27:-success}" pp="${28:-success}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
     --arg nonboarding "$nonboarding" --arg tog "$tog" --arg ncodex "$ncodex" --arg ccg "$ccg" \
     --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" --arg te2ej "$te2ej" --arg nweb "$nweb" \
     --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
-    --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" '
+    --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" \
+    --arg bvt "$bvt" --arg pp "$pp" '
     {
       "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true" } },
       "quality-gates":        { result: $qg },
@@ -121,7 +122,13 @@ mk() {
       "test-e2e-ui":          { result: "success" },
       "test-e2e-api":         { result: "success" },
       "test-e2e-journey":     { result: $te2ej },
-      "test-e2e-engine-smoke": { result: $te2es }
+      "test-e2e-engine-smoke": { result: $te2es },
+      # Unconditional jobs. They have no ci-gate trigger, so every fixture
+      # carries them as success and the dedicated cases below flip them —
+      # otherwise `check_unconditional` would fire on every fixture and the
+      # whole suite would fail for a reason unrelated to what it is testing.
+      "board-verdict-tests":  { result: $bvt },
+      "portable-paths":       { result: $pp }
     }'
 }
 
@@ -889,6 +896,43 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "a skipped ci-gate (no outputs) fails closed (exit 1)"; else fail "skipped ci-gate should exit 1, got $rc"; fi
 if echo "$out" | grep -q "missing from ci-gate outputs"; then pass "skipped ci-gate is reported as config drift"; else fail "skipped ci-gate drift message missing"; fi
 
+# --- 73-76. UNCONDITIONAL jobs: skipped or absent is tamper --------------------
+# `portable-paths` and `board-verdict-tests` have no `if:`, so there is no
+# trigger to map them to and `check_triggered` cannot model them: it asks "did a
+# trigger fire while the job skipped", and a job with no trigger has no such
+# question. That is not a reason to leave them outside the required aggregate —
+# each shipped that way, unable to block a merge (#9746) — it is the reason they
+# need the SIMPLER assertion. A job that always runs must always have succeeded.
+#
+# Both directions are pinned per job, so deleting either `check_unconditional`
+# call fails a case that names that job rather than a single lumped one.
+for job in portable-paths board-verdict-tests; do
+  for state in skipped absent; do
+    if [ "$state" = "absent" ]; then
+      needs="$(mk true true success success success | jq -c --arg j "$job" 'del(.[$j])')"
+    else
+      needs="$(mk true true success success success | jq -c --arg j "$job" '.[$j].result = "skipped"')"
+    fi
+    res="$(run_verify "$needs")"
+    rc="${res%%|*}"; out="${res#*|}"
+    if [ "$rc" = "1" ]; then
+      pass "$state $job (unconditional) fails (exit 1)"
+    else
+      fail "$state $job should exit 1, got $rc — an unwired unconditional gate certifies green"
+    fi
+    if echo "$out" | grep -q "$job"; then
+      pass "the $state $job is named in the failure"
+    else
+      fail "$state $job not named: $out"
+    fi
+  done
+done
+
+# And the other direction: both succeeding is not itself a failure, or the two
+# cases above would pass for the wrong reason on every fixture in this file.
+res="$(run_verify "$(mk true true success success success)")"
+if [ "${res%%|*}" = "0" ]; then pass "both unconditional jobs succeeding still exits 0"; else fail "unconditional jobs at success should exit 0, got ${res%%|*}"; fi
+
 # --- Structural: the REAL workflow wiring (not hermetic fixtures) ---------------
 # The hermetic cases above prove this verifier's decision logic against synthetic
 # NEEDS_JSON; none of them can catch a PR that reworks the real wiring the logic
@@ -1018,6 +1062,14 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
     /^    ["'"'"']?needs["'"'"']?[[:space:]]*:[[:space:]]*$/ {n=1; next}
     n && /^      -[[:space:]]/ { sub(/^      -[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, ""); sub(/[[:space:]]+$/, ""); gsub(/["'"'"']/, ""); if ($0 != "") print; next }
     n && /^[[:space:]]*$/ { next }
+    # A FULL-LINE COMMENT IS NOT THE END OF THE LIST. Without this rule the cut
+    # stopped at the first comment line inside needs:, silently dropping every
+    # job below it — and a SHORTER list makes the completeness assertion below
+    # pass VACUOUSLY for exactly the jobs it stopped seeing (lessons-learned #9).
+    # The reverse direction is what caught it: the map named jobs "absent from
+    # needs:" that were plainly there, the moment a comment was added above the
+    # unconditional jobs. The vacuity floor would not have — 17 of 23 is >= 15.
+    n && /^[[:space:]]*#/ { next }
     n {exit}
   ' <<<"$ci_success_blk")"
   ci_success_needs_count="$(printf '%s\n' "$ci_success_needs" | grep -c . || true)"
@@ -1030,7 +1082,11 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
     fail "parsed ci-success needs: list is missing known jobs (ci-gate / quality-gates) — the cut is wrong, so the map-completeness assertions below are unreliable"
   else
     pass "parsed ci-success's needs: list from ci.yml ($ci_success_needs_count jobs)"
-    map_jobs="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Eo '^check_triggered[[:space:]]+"[^"]+"' | sed -E 's/^check_triggered[[:space:]]+"([^"]+)"$/\1/')"
+    # EITHER FORM COUNTS, because either one closes the hole. A path-gated job
+    # is mapped to its triggers; an unconditional one is asserted to have
+    # succeeded. What must never happen is a job in `needs:` with neither —
+    # that is the silent `if: false` vector this whole assertion exists for.
+    map_jobs="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Eo '^check_(triggered|unconditional)[[:space:]]+"[^"]+"' | sed -E 's/^check_(triggered|unconditional)[[:space:]]+"([^"]+)"$/\2/')"
     unmapped=""
     while IFS= read -r job; do
       [ -n "$job" ] || continue
@@ -1038,7 +1094,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
       grep -qx -- "$job" <<<"$map_jobs" || unmapped="$unmapped $job"
     done <<<"$ci_success_needs"
     if [ -n "$unmapped" ]; then
-      fail "job(s) in ci-success's needs: list have NO check_triggered entry in $SCRIPT —$unmapped. Each is a silent \`if: false\` vector: the job skips, ci-success's needs: still resolves, and the verifier fails only on failure/cancelled, so the unwiring certifies green. Add a check_triggered entry naming EVERY arm of the job's own if:."
+      fail "job(s) in ci-success's needs: list have NO check_triggered or check_unconditional entry in $SCRIPT —$unmapped. Each is a silent \`if: false\` vector: the job skips, ci-success's needs: still resolves, and the verifier fails only on failure/cancelled, so the unwiring certifies green. Add a check_triggered entry naming EVERY arm of the job's own if:, or check_unconditional if the job has none."
     else
       pass "every job in ci-success's needs: list is covered by the anti-tamper map (exempt: $CI_SUCCESS_MAP_EXEMPT)"
     fi

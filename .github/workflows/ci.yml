@@ -689,9 +689,9 @@ jobs:
   #
   # Unconditional rather than path-gated: any file can introduce one, and the
   # whole check is a single grep pass over the tracked set (~2s on 3,482 files).
-  # NOT yet in the required `CI Success` aggregate — that verifier is pinned
-  # line-for-line by check-npm-audit.test.sh, so wiring it there is a separate,
-  # deliberate change rather than a drive-by.
+  # It IS in the required `CI Success` aggregate, asserted by that verifier's
+  # `check_unconditional` — there is no ci-gate trigger to map it to, and a gate
+  # outside the aggregate reports rather than gates.
   portable-paths:
     name: Portable Paths
     runs-on: ubuntu-latest
@@ -2018,6 +2018,12 @@ jobs:
       - ghaw-lock-sync
       - openapi-route-sync
       - actions-pin-check
+      # Unconditional jobs, asserted by `check_unconditional` rather than mapped
+      # to a ci-gate trigger — they have no `if:` to map to. Outside this list
+      # they run on every PR and their failure changes nothing, which is a gate
+      # that reports rather than one that gates.
+      - board-verdict-tests
+      - portable-paths
       - test-e2e-ui
       - test-e2e-api
       - test-e2e-journey

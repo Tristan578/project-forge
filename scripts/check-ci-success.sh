@@ -108,6 +108,30 @@ check_triggered() {
 # `needs:` with no entry here, i.e. three silent `if: false` vectors). The suite
 # now asserts the map covers the real `needs:` list, so a newly added job that is
 # never mapped fails check-ci-success.test.sh instead of shipping as a hole.
+# An UNCONDITIONAL job has no trigger to consult, and the map above cannot model
+# it: `check_triggered` asks "did a trigger fire while the job skipped", and a
+# job with no `if:` has no trigger. That is not a reason to leave it out of the
+# aggregate — it is a reason it needs the SIMPLER assertion. A job that always
+# runs must always have succeeded, and a `skipped` or `absent` result means
+# somebody unwired it.
+#
+# Without this form the only options were "leave the job out of ci-success", so
+# its failure cannot block a merge, or "map it to a trigger it does not have",
+# which is a lie the drift branch would report every run. Both were taken at
+# some point: `portable-paths` and `board-verdict-tests` each shipped outside
+# the required aggregate, each with a comment explaining that wiring it in was
+# somebody else's problem (#9746).
+check_unconditional() {
+  local job="$1" result
+  result="$(jq -r --arg j "$job" '.[$j].result // "absent"' "$needs_file")"
+  if [ "$result" != "success" ]; then
+    tamper="$tamper"$'\n'"  - $job (unconditional job, result=$result)"
+  fi
+}
+
+check_unconditional "portable-paths"
+check_unconditional "board-verdict-tests"
+
 check_triggered "lockfile-sync"             "needs-deps"
 check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding" "needs-codex"
 check_triggered "agentic-sync"              "needs-agentic"
