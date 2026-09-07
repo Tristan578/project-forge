@@ -680,9 +680,11 @@ jobs:
   # SILENTLY: lessons-learned #9605 is that exactly, where the lessons hook read
   # such a path, took its `exit 0` branch on every other checkout, and left
   # enforcement off for whole sessions with nothing saying so. Found live on
-  # 2026-09-06 in two tracked skills, and — in an untracked WORKING COPY of
-  # `.codex/config.toml`, so no CI run could have seen it, which is the point of
-  # gating the tracked set before such a path becomes everybody's.
+  # 2026-09-06 in two tracked skills, and as an UNCOMMITTED EDIT to the tracked
+  # `.codex/config.toml` — that file is scanned on every run; the edit had simply
+  # not been committed yet, which is exactly what a gate over tracked files is
+  # for. (An earlier version of this sentence called the FILE untracked. It is
+  # not, and saying so inverted the distinction the gate is built on.)
   #
   # The forbidden shapes are NOT restated here. They live once, in the gate's
   # own patterns, because a file that quotes an example is a file the gate then

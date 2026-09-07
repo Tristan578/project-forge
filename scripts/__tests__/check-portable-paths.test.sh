@@ -35,6 +35,10 @@ WIN_PATH="D:${SLASH:-/}repos${SLASH:-/}into-rust${SLASH:-/}tool.exe"
 MAC_PATH="/Users/somebody/project-forge"
 LINUX_PATH="/home/somebody/project-forge"
 RUNNER_PATH="/home/runner/work/project-forge"
+# The same two homes with NO trailing component — the shape that escaped the
+# pattern until review found it.
+MAC_HOME="/Users/somebody"
+LINUX_HOME="/home/somebody"
 
 # make_repo <name> — a git repo with `pad` filler files, so a case can choose a
 # tracked-file count independently of the fixtures it cares about.
@@ -151,6 +155,77 @@ done
 d="$(make_repo win_system)"
 add_file "$d" "docs/setup.md" "Install to C:\\Program Files\\MSVC and add C:\\Windows\\System32 to PATH."
 run_case "a standard Windows system path passes" 0 "$d"
+
+# --- the three ways a POSIX home path hid from this gate ----------------------
+#
+# All three reported by review on the pushed head, all three reproduced before
+# fixing.
+#
+# 1. A HOME DIRECTORY AS THE FINAL COMPONENT. The pattern required a slash
+#    AFTER the username, so `cd /home/somebody` — the exact shape the two skills
+#    that motivated this gate used — passed clean. With the trailing slash it
+#    was caught. That is the canonical case, and it was the one that escaped.
+# 2. `/root`, the root user's home, was not in the pattern at all.
+# 3. A FILENAME BEGINNING WITH `-` reached grep as an OPTION. `git ls-files`
+#    emits bare names, so `-dash.md` parsed as `-d`/`--directories`, grep exited
+#    123, and `2>/dev/null || true` swallowed it — silently discarding the WHOLE
+#    xargs batch, so a real hit in a normal file batched beside it went
+#    unreported too. Worse than "that one file is skipped".
+
+d="$(make_repo home_final_linux)"
+add_file "$d" "docs/setup.md" "Run: cd $LINUX_HOME && npm ci"
+run_case "a Linux home directory as the final path component fails" 1 "$d"
+
+d="$(make_repo home_final_mac)"
+add_file "$d" "docs/setup.md" "Run: cd $MAC_HOME && npm ci"
+run_case "a macOS home directory as the final path component fails" 1 "$d"
+
+# `/root` IS DELIBERATELY NOT MATCHED, and this case pins that decision so it
+# cannot be reversed by someone reading the review thread that proposed it.
+# It is the same path on every machine, so it names nobody's checkout — the
+# opposite of what this gate is for. Measured before deciding: adding it
+# reported seven container `HOME` settings in the Playwright skills, where the
+# path is portable by construction, plus a URL whose path component spelled it.
+# If a future change does want container paths gated, that is a different gate
+# with a different contract, not a wider alternative in this pattern.
+d="$(make_repo root_home)"
+add_file "$d" ".github/workflows/x.yml" "  env:
+    HOME: /root"
+run_case "the root user's home is NOT machine-local (same on every machine)" 0 "$d"
+
+# The boundary, so widening the pattern did not turn it into a substring match.
+# `/homebrew/bin` and `/rootkit/scan` contain `/home` and `/root` and are not
+# home directories; neither is a lone `/home`.
+d="$(make_repo posix_boundary)"
+add_file "$d" "docs/setup.md" "Install to /homebrew/bin, scan with /rootkit/scan, list /home and /root-backup."
+run_case "paths that merely START with /home or /root are not home directories" 0 "$d"
+
+# The runner exemption has to survive the same widening: with the trailing slash
+# no longer required, a bare `/home/runner` at the end of a command would newly
+# match, and it is still the Actions HOME.
+d="$(make_repo runner_final)"
+add_file "$d" ".github/workflows/x.yml" "  run: cd /home/runner"
+run_case "the Actions HOME as the final path component is still portable" 0 "$d"
+
+# ...but a contributor whose account merely STARTS with `runner` is not exempt.
+d="$(make_repo runner_prefix)"
+add_file "$d" ".github/workflows/x.yml" "  run: cd /home/runnerbee/project"
+run_case "a home directory that merely starts with 'runner' is not exempt" 1 "$d"
+
+# A FILENAME THAT IS A GREP OPTION. Two files, so the case also pins that the
+# hit in the NORMAL file survives: the failure mode was the whole batch being
+# discarded, not just the odd filename.
+d="$(make_repo dash_filename)"
+add_file "$d" "-dash.md" "Run it from $LINUX_PATH first."
+add_file "$d" "normal.md" "Run it from $LINUX_PATH first."
+run_case "a filename beginning with - does not void the scan" 1 "$d"
+dash_report="$(cd "$d" && PORTABLE_PATHS_MIN_FILES=3 bash "$SCRIPT" 2>&1)"
+if grep -q 'normal\.md' <<<"$dash_report" && grep -q -- '-dash\.md' <<<"$dash_report"; then
+  PASS=$((PASS + 1)); echo "  ok   both the dash-named file and its batch-mate are reported"
+else
+  FAIL=$((FAIL + 1)); echo "  FAIL a dash-named file suppressed part of its batch:"
+  printf '%s\n' "$dash_report" | grep '::error file=' | sed 's/^/         /' | head -3
+fi
 
 # --- the two ways a Windows path hides from a literal match --------------------
 #
@@ -508,6 +583,17 @@ done
 # class instead of adding a fourth case: an entry must start with `^` and end
 # with `$` or `/`, so it names a file or a directory rather than a substring any
 # future path can wander into.
+# THE CUT ACCEPTS ANY SPELLING BASH DOES. It used to require exactly two spaces
+# and single quotes, so a double-quoted entry — identical at runtime, and an
+# over-matching substring — was invisible to it and the suite stayed green
+# (found in review). Strip either quote style at any indent, and drop trailing
+# comments.
+allow_block="$(sed -n '/^ALLOW_ENTRIES=(/,/^)/p' "$SCRIPT")"
+anchor_entries="$(printf '%s\n' "$allow_block" | sed -e '1d' -e '$d' \
+  | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+  | grep -v '^$' \
+  | sed -e "s/^'\(.*\)'$/\1/" -e 's/^"\(.*\)"$/\1/')"
+
 anchor_bad=""
 while IFS= read -r entry; do
   [ -n "$entry" ] || continue
@@ -515,20 +601,25 @@ while IFS= read -r entry; do
     '^'*'$'|'^'*'/') ;;
     *) anchor_bad="$anchor_bad $entry" ;;
   esac
-done <<<"$(sed -n '/^ALLOW_ENTRIES=(/,/^)/p' "$SCRIPT" | sed -n "s/^  '\(.*\)'$/\1/p")"
+done <<<"$anchor_entries"
 if [ -n "$anchor_bad" ]; then
-  FAIL=$((FAIL + 1)); echo "  FAIL unanchored allowlist entr(ies) —$anchor_bad. Entries are matched with grep -qE against the path, so a bare substring exempts every path containing it: an entry named for a test exempts its production sibling too. Anchor with ^…\$ for a file or ^…/ for a directory."
+  FAIL=$((FAIL + 1)); echo "  FAIL unanchored allowlist entr(ies) —$anchor_bad. Entries are matched with grep -qE against the path, so a bare substring exempts every path containing it: an entry named for a test exempts its production sibling too. Anchor to a file or a directory."
 else
   PASS=$((PASS + 1)); echo "  ok   every allowlist entry is anchored to a file or a directory"
 fi
 
-# And the cut is not vacuous: if the ALLOW_ENTRIES block stops parsing, the loop
-# above iterates nothing and reports success having checked no entries.
-anchor_seen="$(sed -n '/^ALLOW_ENTRIES=(/,/^)/p' "$SCRIPT" | sed -n "s/^  '\(.*\)'\$/\1/p" | grep -c . || true)"
-if [ "$anchor_seen" -ge 5 ]; then
-  PASS=$((PASS + 1)); echo "  ok   read $anchor_seen allowlist entries to check for anchoring"
+# VACUITY, BY A DERIVED CROSS-CHECK RATHER THAN A CONSTANT FLOOR. This was
+# `-ge 5` against a real count of 7, so a cut that lost two entries still
+# passed — a guard set below the truth tolerates the bug it is written to
+# catch, which is the sentence this same PR wrote about the needs:-list floor
+# and then did not apply here (found in review). Count the quoted lines in the
+# array a second way and require EQUALITY with what the cut produced.
+anchor_seen="$(printf '%s\n' "$anchor_entries" | grep -c . || true)"
+anchor_declared="$(printf '%s\n' "$allow_block" | sed -e '1d' -e '$d' | grep -cE "^[[:space:]]*['\"]" || true)"
+if [ "$anchor_seen" -eq "$anchor_declared" ] && [ "$anchor_seen" -gt 0 ]; then
+  PASS=$((PASS + 1)); echo "  ok   inspected all $anchor_seen allowlist entries for anchoring"
 else
-  FAIL=$((FAIL + 1)); echo "  FAIL read only $anchor_seen allowlist entr(ies) — the ALLOW_ENTRIES cut is broken, so the anchoring check above passed without inspecting them"
+  FAIL=$((FAIL + 1)); echo "  FAIL inspected $anchor_seen of $anchor_declared allowlist entr(ies) — the cut is dropping entries, and every entry it drops is one the anchoring check above never looked at"
 fi
 
 # --- the seam must never be wired into CI ---
@@ -612,13 +703,17 @@ else
       FAIL=$((FAIL + 1)); echo "  FAIL could not find the '$step_name' step in the portable-paths job — renamed? its run:/if: pins cannot run"
       continue
     fi
-    step_run_keys="$(grep -cE '^[[:space:]]*run:' <<<"$step_blk" || true)"
+    # `["'"]?run["'"]?` because a quoted key is the SAME key to YAML and was
+    # invisible to an unquoted-only grep (found in review); check-npm-audit.test.sh
+    # documents this convention and the sibling pin in check-ci-success.test.sh
+    # already followed it.
+    step_run_keys="$(grep -cE '^[[:space:]]*["'"'"']?run["'"'"']?[[:space:]]*:' <<<"$step_blk" || true)"
     if [ "$step_run_keys" -eq 1 ]; then
       PASS=$((PASS + 1)); echo "  ok   '$step_name' has exactly one run: key"
     else
       FAIL=$((FAIL + 1)); echo "  FAIL '$step_name' has $step_run_keys run: keys, expected exactly 1 — YAML keeps the LAST duplicate, so a second run: silently replaces the command while the original line stays present"
     fi
-    if grep -qE '^[[:space:]]*if[[:space:]]*:' <<<"$step_blk"; then
+    if grep -qE '^[[:space:]]*["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$step_blk"; then
       FAIL=$((FAIL + 1)); echo "  FAIL '$step_name' carries a step-level if: — a skipped step does not fail its job, so the job still concludes success and check_unconditional certifies the gate green while it never ran"
     else
       PASS=$((PASS + 1)); echo "  ok   '$step_name' has no step-level if:"

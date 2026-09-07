@@ -89,8 +89,28 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # Case-insensitivity does not widen the allowlist direction: the roots are still
 # an enumerated list, and the standard-system-path case in the suite pins that
 # `Program Files` and `Windows` keep passing.
+#
+# THE POSIX SIDE DOES NOT REQUIRE A TRAILING COMPONENT. Each alternative used to
+# end with a slash, so a `cd` into a home directory with nothing after it — the
+# exact form the two skills that motivated this gate used — matched nothing,
+# while the same path with a trailing slash matched. The canonical case was the
+# one that escaped (found in review). A home directory is a home directory
+# whether or not something follows it, so the trailing slash is now a BOUNDARY:
+# one character that cannot continue a name, or end of line. Described rather
+# than shown, like the Windows roots above: this gate reads its own source.
+#
+# The boundary is what keeps the widening from becoming a substring match. A
+# path that merely BEGINS with the letters of a home root — a Homebrew prefix,
+# say — is not a home directory, and the suite pins that direction beside this
+# one.
+#
+# `/root` was proposed in review and is deliberately NOT here. It is the same on
+# every machine, so it names nobody's checkout, and the measurement said so:
+# adding it reported seven container `HOME` settings in the Playwright skills,
+# where that path is portable by construction, plus a URL whose path component
+# happened to spell it. This gate is for paths that name ONE machine.
 WIN_PATTERN='[A-Za-z]:[\\/]+(Users|repos|dev|src|code|work|workspace|projects|git)[\\/]+'
-POSIX_PATTERN='(/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'
+POSIX_PATTERN='(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)([^A-Za-z0-9._-]|$)'
 
 # Files where such a string is legitimate. Each entry states why, and each entry
 # EXEMPTS SOMETHING TODAY — an allowlist entry that covers no file is not
@@ -134,7 +154,7 @@ POSIX_PATTERN='(/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'
 # bash 3.2 has no associative arrays, so the entries and their reasons are two
 # parallel indexed arrays. Keep them the same length; the script checks.
 ALLOW_ENTRIES=(
-  '^docs/(reviews|coverage)/'
+  '^docs/(reviews|coverage|audits)/'
   '^scripts/__tests__/check-portable-paths\.test\.sh$'
   '^web/scripts/(__tests__/)?provision-billing-meter(\.test)?\.ts$'
   '^web/(vitest\.mockOnceGuard\.ts|src/lib/testing/__tests__/mockOnceGuard\.test\.ts)$'
@@ -143,7 +163,7 @@ ALLOW_ENTRIES=(
   '^web/src/lib/bridges/__tests__/fmodBridge\.test\.ts$'
 )
 ALLOW_REASONS=(
-  'dated records of what a tool printed; rewriting them would falsify the record'
+  'dated records of what a tool printed, audits included; rewriting them would falsify the record'
   "this gate's own suite, which builds the shapes it tests"
   'code ABOUT path handling — the literal is the subject, not a path to follow'
   'test infrastructure ABOUT path handling'
@@ -208,12 +228,19 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # Replacing the runner occurrences with a token that cannot match, then
 # re-applying POSIX_PATTERN, keeps every other match on the line.
 #
+# The exemption carries the SAME boundary rule as the pattern, for the same
+# reason: once the pattern stopped requiring a trailing component, the runner's
+# HOME at the end of a command newly matched, and it is still portable.
+# Exempting it WITHOUT a boundary would be worse than the bug — it would also
+# exempt any contributor whose username merely begins with those six letters.
+# The suite pins both directions.
+#
 # LINUX RUNNERS ONLY, despite "every runner" above — the exemption is the
 # literal string `/home/runner/`, and the other two hosted platforms do not use
 # it:
 #
-#   * macOS runners have HOME=/Users/runner, which POSIX_PATTERN matches and
-#     this sed does not touch.
+#   * macOS runners put HOME under the mac home root rather than the Linux one,
+#     so POSIX_PATTERN matches it and this sed does not touch it.
 #   * Windows runners have a drive-letter home under `Users`, which the Windows
 #     pass matches, and the sed is applied to the POSIX pipeline alone.
 #
@@ -221,6 +248,14 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # machine-local. Nothing does today. When something does, the fix is an anchored
 # allowlist entry naming that file — not widening this exemption, which would
 # also exempt a contributor whose own username happens to be `runner`.
+#
+# `--` IS LOAD-BEARING TOO, AND SO IS `-e`. `git ls-files` emits BARE names, so
+# a tracked file called `-dash.md` reaches grep as an OPTION: `-d` parses as
+# `--directories`, grep exits 123 having scanned nothing, and `2>/dev/null ||
+# true` swallows the complaint. That does not merely skip the odd file — xargs
+# hands grep a whole BATCH, so one such name silently discards every hit in it,
+# including a real one in an ordinary file beside it. Measured that way in
+# review. `--` ends option parsing; `-e` does the same for the pattern.
 #
 # `-H` IS LOAD-BEARING. Without it grep prints `path:line:content` only when it
 # is handed more than one file, and `line:content` when handed exactly one.
@@ -234,10 +269,10 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # `-H` fails that case and only that one. An earlier version of this sentence
 # said no fixture could reach it, in the same commit that added the case.
 win_hits="$(git ls-files -z \
-  | xargs -0 grep -HIinE "$WIN_PATTERN" 2>/dev/null || true)"
+  | xargs -0 grep -HIinE -e "$WIN_PATTERN" -- 2>/dev/null || true)"
 posix_hits="$(git ls-files -z \
-  | xargs -0 grep -HInE "$POSIX_PATTERN" 2>/dev/null \
-  | sed 's#/home/runner/#{RUNNER_HOME}/#g' \
+  | xargs -0 grep -HInE -e "$POSIX_PATTERN" -- 2>/dev/null \
+  | sed -E 's#/home/runner([^A-Za-z0-9._-]|$)#{RUNNER_HOME}\1#g' \
   | grep -E "$POSIX_PATTERN" || true)"
 raw="$(printf '%s\n%s\n' "$win_hits" "$posix_hits" | grep . || true)"
 

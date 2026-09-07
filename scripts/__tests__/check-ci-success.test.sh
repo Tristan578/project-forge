@@ -1189,13 +1189,27 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
         fi
         udup="$(awk '
           /^      - / { if (n) print runs; n = 1; runs = 0; next }
-          n && /^[[:space:]]*run:/ { runs++ }
+          n && /^[[:space:]]*["'"'"']?run["'"'"']?[[:space:]]*:/ { runs++ }
           END { if (n) print runs }
         ' <<<"$ublock" | awk '$1 > 1 { c++ } END { print c + 0 }')"
         if [ "$udup" -eq 0 ]; then
           pass "$ujob has no step with a duplicate run: key"
         else
           fail "$ujob has $udup step(s) with more than one run: key — YAML keeps the last, so the effective command is not the one that is pinned"
+        fi
+
+        # AND THE PARTIAL-NEUTER CLASS MUST BE CLOSED FOR THIS JOB TOO. The
+        # checks above catch a job with NOTHING to run and a step with a
+        # duplicate key; removing ONE step of several passes all of them, and
+        # is closed only by the line-for-line step-block pins in
+        # check-npm-audit.test.sh. Those are hardcoded per job, so a THIRD
+        # unconditional job added later would silently have no such pin — the
+        # reviewer who found the board-verdict-tests gap flagged exactly that.
+        # Assert the pin exists, by name, for every job this script asserts.
+        if grep -q "ci.yml ${ujob} job steps:" "$REPO_ROOT/scripts/__tests__/check-npm-audit.test.sh"; then
+          pass "$ujob has a line-for-line step-block pin (partial neuter is caught)"
+        else
+          fail "$ujob is asserted by check_unconditional but has no step-block pin in check-npm-audit.test.sh — removing ONE of its steps leaves every other assertion green, so the job concludes success with its work partly gone. Add an assert_steps_block call naming it."
         fi
       done <<<"$uncond_jobs"
     fi
