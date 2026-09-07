@@ -678,9 +678,16 @@ pub(super) fn apply_raycast2d_requests(
                 .find(|(_, eid)| &eid.0 == wanted)
                 .map(|(entity, _)| entity)
         });
+        // SENSORS ARE NOT GROUND. `QueryFilter::default()` leaves the flags
+        // empty, so `EXCLUDE_SENSORS` is unset and a `Sensor` collider — a
+        // pickup zone, a hazard trigger, a one-way-platform volume — answers
+        // the cast like a solid floor. A character standing inside one would
+        // read as grounded and its jump gate would open in mid-air. Nothing
+        // could observe this before, because these events reached no consumer.
+        let base = bevy_rapier2d::prelude::QueryFilter::default().exclude_sensors();
         let filter = match excluded {
-            Some(entity) => bevy_rapier2d::prelude::QueryFilter::default().exclude_collider(entity),
-            None => bevy_rapier2d::prelude::QueryFilter::default(),
+            Some(entity) => base.exclude_collider(entity),
+            None => base,
         };
 
         if let Some((entity, toi)) = rapier_context.cast_ray(

@@ -20,6 +20,25 @@ import { resetRaycast2dQueue } from '@/lib/scripting/raycast2dRegistry';
 import { collider2dHalfHeight } from '@/lib/scripting/collider2dExtent';
 import { isScriptAllowedCommand } from '@/lib/scripting/scriptAllowlist';
 
+/**
+ * The Y scale the engine reported for one entity this tick, or 1.
+ *
+ * `1`, not `0`: rapier multiplies the collider by this, so an absent or
+ * unreadable value must leave the collider at its authored size. A `0` would
+ * claim every collider is flat and put every ground ray at the entity's centre.
+ */
+function tickScaleY(entities: unknown, entityId: string): number {
+  if (typeof entities !== 'object' || entities === null) return 1;
+  if (!Object.hasOwn(entities, entityId)) return 1;
+  const entry = (entities as Record<string, unknown>)[entityId];
+  if (typeof entry !== 'object' || entry === null) return 1;
+  const scale = (entry as { scale?: unknown }).scale;
+  if (!Array.isArray(scale) || typeof scale[1] !== 'number' || !Number.isFinite(scale[1])) {
+    return 1;
+  }
+  return scale[1];
+}
+
 const WATCHDOG_TIMEOUT_MS = 5000;
 const OCCLUSION_RAYCAST_INTERVAL_MS = 250; // Check occlusion 4x per second
 
@@ -405,12 +424,19 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         // feet are wherever its collider ends — so a constant here would put
         // the ray origin inside the collider of anything taller than 1 unit and
         // above the collider of anything shorter.
-        const physics2d = Object.hasOwn(store.physics2d, eid) ? store.physics2d[eid] : undefined;
         entityInfos[eid] = {
           name: node.name,
           type: node.components.find(c => c.startsWith('EntityType')) || 'unknown',
           colliderRadius: 0.5,
-          collider2dHalfHeight: physics2d ? collider2dHalfHeight(physics2d) : 0,
+          // 0 UNTIL THE ENGINE REPORTS A TRANSFORM, and deliberately not a
+          // guess. Rapier scales every collider by the entity's transform
+          // scale, `SceneNode` carries no transform, and the store keeps no
+          // per-entity transform map — so the half-height is genuinely unknown
+          // here. The per-tick enrichment below computes it from the scale the
+          // engine reports and overwrites this on the first frame; a ground
+          // check before then casts from the entity's origin, which is the
+          // behaviour that predates all of this rather than a new wrong answer.
+          collider2dHalfHeight: 0,
         };
       }
 
@@ -545,7 +571,16 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             {
               ...info,
               collider2dHalfHeight: Object.hasOwn(liveStore.physics2d, eid)
-                ? collider2dHalfHeight(liveStore.physics2d[eid])
+                ? collider2dHalfHeight(
+                    liveStore.physics2d[eid],
+                    // The scale the ENGINE just reported, not the store's: an
+                    // entity scaled by a script mid-play has moved on from what
+                    // the scene graph says, and rapier scales the collider by
+                    // whatever the transform currently holds. Defaulting to 1
+                    // when the engine reports no scale keeps the collider at
+                    // its authored size rather than collapsing it to nothing.
+                    tickScaleY(tickData.entities, eid),
+                  )
                 : 0,
             },
           ]),

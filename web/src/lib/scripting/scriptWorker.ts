@@ -564,6 +564,15 @@ function buildForgeApi(scriptEntityId: string) {
         // and every entity read as airborne. Subtracting the half-height makes
         // `distance` mean what the caller reads it as: how far below my feet.
         const halfHeight = entityInfos[eid]?.collider2dHalfHeight ?? 0;
+        // NOTE: `state.position` is the entity's LOCAL transform. The engine's
+        // tick forwards `Transform.translation`, not `GlobalTransform`, so for
+        // a PARENTED entity this origin is in parent space while the collider
+        // rapier placed is in world space — the ray then asks about a point
+        // unrelated to the entity. That predates this method having any origin
+        // at all (it used to send 0,0), and fixing it means sending the global
+        // translation on the tick. Stated here so the correctness argument
+        // above is not read as covering the parented case, which it does not.
+        
         return asyncRequest('physics', 'isGrounded', {
           entityId: eid,
           originX: state.position[0],

@@ -25,6 +25,25 @@
  * that match so the two cannot drift apart silently.
  */
 
+/**
+ * Do these points enclose no area?
+ *
+ * `Collider::convex_hull` answers `None` for input with no interior, and the
+ * engine then falls back to the box — so this has to agree with it or the
+ * browser and the engine disagree about where the collider is. Collinearity is
+ * the reachable case: every cross product about the first point is zero.
+ */
+function isDegenerateHull(points: [number, number][]): boolean {
+  const [ox, oy] = points[0];
+  for (let i = 1; i < points.length - 1; i++) {
+    const cross =
+      (points[i][0] - ox) * (points[i + 1][1] - oy)
+      - (points[i][1] - oy) * (points[i + 1][0] - ox);
+    if (Math.abs(cross) > 1e-9) return false;
+  }
+  return true;
+}
+
 /** The 2D collider fields this needs, as the store holds them. */
 export interface Collider2dShape {
   colliderShape: 'box' | 'circle' | 'capsule' | 'convex_polygon' | 'edge' | 'auto';
@@ -34,14 +53,34 @@ export interface Collider2dShape {
 }
 
 /**
- * Distance from the transform origin down to the collider's lowest point.
+ * Distance from the transform origin down to the collider's lowest point,
+ * INCLUDING the entity's transform scale.
+ *
+ * THE SCALE IS NOT OPTIONAL AND NOT THE CALLER'S JOB. bevy_rapier's
+ * `apply_scale` (`plugin/systems/collider.rs`) multiplies every collider by the
+ * entity's `GlobalTransform` scale whenever no `ColliderScale` component is
+ * present, and this repo inserts none — so the shape `make_collider_2d` builds
+ * is never the shape that is simulated unless the scale happens to be 1.
+ *
+ * The first version of this function returned the unscaled half-height and left
+ * the multiply to the one call site, which is a defect waiting for the second
+ * call site. It also would have been wrong immediately: the shipped 2D
+ * templates use `[2,1,1]`, `[3,0.5,1]`, `[0.6,0.6,1]` and `[1,2,1]`, so a
+ * `scale.y` of 2 puts the feet 1.0 below the origin while 0.5 is subtracted —
+ * the 0.1 ray then ends 0.4 short and `isGrounded` is permanently false, which
+ * is the exact defect this file exists to fix. A `scale.y` below 1 is worse: the
+ * origin lands BELOW the feet, inside the floor, and `cast_ray(solid: true)`
+ * answers `toi = 0`, so an airborne entity reads as grounded.
+ *
+ * `scaleY` therefore has no default. Omitting it must be impossible, not quiet.
  *
  * Returns `0` for a shape with no vertical extent, and for anything whose
  * numbers are not finite — a `NaN` here would propagate into the ray origin and
  * make the engine's answer meaningless rather than merely wrong.
  */
-export function collider2dHalfHeight(shape: Collider2dShape): number {
-  const half = (n: number) => (Number.isFinite(n) ? Math.abs(n) * 0.5 : 0);
+export function collider2dHalfHeight(shape: Collider2dShape, scaleY: number): number {
+  const scale = Number.isFinite(scaleY) ? Math.abs(scaleY) : 0;
+  const half = (n: number) => (Number.isFinite(n) ? Math.abs(n) * 0.5 * scale : 0);
 
   switch (shape.colliderShape) {
     // `Collider::cuboid(size[0] * 0.5, size[1] * 0.5)`.
@@ -49,9 +88,10 @@ export function collider2dHalfHeight(shape: Collider2dShape): number {
     case 'auto':
       return half(shape.size?.[1]);
 
-    // `Collider::ball(radius)` — the radius IS the half-height.
+    // `Collider::ball(radius)` — the radius IS the half-height, and it is
+    // scaled like everything else.
     case 'circle':
-      return Number.isFinite(shape.radius) ? Math.abs(shape.radius) : 0;
+      return Number.isFinite(shape.radius) ? Math.abs(shape.radius) * scale : 0;
 
     // `Collider::capsule_y(half_height, radius)` where
     // `half_height = (size[1] * 0.5 - radius).max(0.0)`. The capsule's total
@@ -59,19 +99,26 @@ export function collider2dHalfHeight(shape: Collider2dShape): number {
     // exceeds `size[1] * 0.5` is a ball of that radius and reaches further than
     // `size[1] * 0.5` would suggest.
     case 'capsule': {
-      const radius = Number.isFinite(shape.radius) ? Math.abs(shape.radius) : 0;
+      // Scaled, because `half()` above is: mixing a scaled half-height with an
+      // unscaled radius would get the `.max(0.0)` clamp wrong in both directions.
+      const radius = (Number.isFinite(shape.radius) ? Math.abs(shape.radius) : 0) * scale;
       return Math.max(half(shape.size?.[1]) - radius, 0) + radius;
     }
 
-    // `Collider::convex_hull(vertices)`, falling back to the box when there are
-    // fewer than three points. The hull's lowest point is the lowest vertex, so
-    // this measures rather than assumes.
+    // `Collider::convex_hull(vertices)`, falling back to
+    // `Collider::cuboid(size * 0.5)` in TWO cases the engine treats alike: fewer
+    // than three points, and a hull rapier refuses to build. The second is not
+    // a count — `convex_hull` returns `None` for degenerate input, the clearest
+    // case being three or more COLLINEAR points, which enclose no area. Missing
+    // that arm would put the ray origin somewhere the collider does not reach.
     case 'convex_polygon': {
-      const ys = (shape.vertices ?? [])
-        .map((v) => v?.[1])
-        .filter((y): y is number => Number.isFinite(y));
-      if (ys.length < 3) return half(shape.size?.[1]);
-      return Math.max(0, -Math.min(...ys));
+      const points = (shape.vertices ?? []).filter(
+        (v): v is [number, number] =>
+          Array.isArray(v) && Number.isFinite(v[0]) && Number.isFinite(v[1]),
+      );
+      if (points.length < 3 || isDegenerateHull(points)) return half(shape.size?.[1]);
+      const lowest = Math.min(...points.map((v) => v[1]));
+      return Math.max(0, -lowest) * scale;
     }
 
     // `Collider::segment((-half_x, 0), (half_x, 0))` — a horizontal line
