@@ -245,25 +245,6 @@ const TEMPLATE_SOURCES = await collectTemplateSources();
  * the three capabilities that would have to exist first.
  */
 const TEMPLATE_BASELINE: Record<string, readonly string[]> = {
-  '2d-platformer': [
-    'forge.input.isKeyDown',
-    'forge.input.isKeyPressed',
-    'forge.onStart',
-    'forge.onUpdate',
-    'forge.physics2d.setVelocity',
-    'forge.physics2d.setVelocityX',
-    'forge.transform.getPosition',
-    'forge.transform.setPosition',
-  ],
-  '2d-topdown': [
-    'forge.input.isKeyDown',
-    'forge.input.isKeyPressed',
-    'forge.onStart',
-    'forge.onUpdate',
-    'forge.scene.getComponent',
-    'forge.transform.getPosition',
-    'forge.transform.setPosition',
-  ],
   '2d-shmup': [
     'forge.input.isKeyDown',
     'forge.onStart',
@@ -448,13 +429,11 @@ describe('forge API conformance', () => {
       expect(Object.keys(TEMPLATE_BASELINE).sort()).toEqual([
         '2d-fighter',
         '2d-metroidvania',
-        '2d-platformer',
         '2d-puzzle',
         '2d-shmup',
-        '2d-topdown',
       ]);
       const total = Object.values(TEMPLATE_BASELINE).reduce((n, list) => n + list.length, 0);
-      expect(total).toBe(48);
+      expect(total).toBe(33);
     });
 
     it('calls functions and reads values, never the other way round', () => {

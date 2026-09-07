@@ -643,8 +643,8 @@ pub(super) fn apply_impulse_applications2d(
 /// `Velocity` IS QUERIED MUTABLY, NOT INSERTED. `manage_physics2d_lifecycle`
 /// attaches one to every 2D body on entering Play, so it is already there and
 /// already carrying whatever the simulation last wrote. Inserting a fresh one
-/// here would replace the whole component — including `angvel`, which this
-/// command has no business touching — and would discard the current `linvel`
+/// here would replace the whole component - including `angular`, which this
+/// command has no business touching - and would discard the current `linear`
 /// on the axis the caller deliberately left out.
 ///
 /// An entity with no `Velocity` is one with no 2D rigid body, so there is no
@@ -665,10 +665,10 @@ pub(super) fn apply_linear_velocity2d_sets(
                 // Per axis, so an omitted one keeps the value the simulation
                 // computed. This is the whole reason the payload is optional.
                 if let Some(x) = request.x {
-                    velocity.linvel.x = x;
+                    velocity.linear.x = x;
                 }
                 if let Some(y) = request.y {
-                    velocity.linvel.y = y;
+                    velocity.linear.y = y;
                 }
                 break;
             }
@@ -690,7 +690,7 @@ pub(super) fn apply_angular_velocity2d_sets(
     for request in pending.angular_velocity2d_sets.drain(..) {
         for (entity_id, mut velocity) in query.iter_mut() {
             if entity_id.0 == request.entity_id {
-                velocity.angvel = request.omega;
+                velocity.angular = request.omega;
                 break;
             }
         }

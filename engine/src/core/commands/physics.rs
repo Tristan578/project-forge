@@ -1559,6 +1559,113 @@ mod tests {
         );
     }
 
+    // === set_linear_velocity_2d / set_angular_velocity_2d ===
+    //
+    // BOTH WERE `Not yet implemented` STUBS. A stub is worse than a missing
+    // command: `route_domain` names it, so it reaches this module and answers
+    // an Err the caller discards, and every inventory that counts routed names
+    // counts it as present. These tests assert the arms are real AND that they
+    // stay real — an accidental revert to the stub fails on the error text.
+
+    /// The partial write is the point: a platformer sets horizontal speed every
+    /// frame and must not touch the vertical component.
+    #[test]
+    fn set_linear_velocity_2d_accepts_x_alone() {
+        assert_routed_and_reaches_handler(
+            "set_linear_velocity_2d",
+            json!({ "entityId": "player", "x": 4.5 }),
+        );
+    }
+
+    #[test]
+    fn set_linear_velocity_2d_accepts_y_alone() {
+        assert_routed_and_reaches_handler(
+            "set_linear_velocity_2d",
+            json!({ "entityId": "player", "y": -9.0 }),
+        );
+    }
+
+    #[test]
+    fn set_linear_velocity_2d_accepts_both_axes() {
+        assert_routed_and_reaches_handler(
+            "set_linear_velocity_2d",
+            json!({ "entityId": "player", "x": 1.0, "y": 2.0 }),
+        );
+    }
+
+    /// Zero is a VALUE, not an absence. "Stop moving horizontally" is the most
+    /// common thing a controller asks for, and a payload that treated 0 as
+    /// missing would make it unexpressible.
+    #[test]
+    fn set_linear_velocity_2d_accepts_zero_as_a_real_value() {
+        assert_routed_and_reaches_handler(
+            "set_linear_velocity_2d",
+            json!({ "entityId": "player", "x": 0.0 }),
+        );
+    }
+
+    /// A request naming neither axis changes nothing. Accepting it would report
+    /// success for work that cannot happen — the exact shape this command
+    /// family exists to remove.
+    #[test]
+    fn set_linear_velocity_2d_rejects_a_request_with_no_axis() {
+        let err = run("set_linear_velocity_2d", json!({ "entityId": "player" }))
+            .expect_err("a payload naming no axis must be refused");
+        assert!(err.contains("x or y"), "the error must say what to send, got: {err}");
+    }
+
+    #[test]
+    fn set_linear_velocity_2d_rejects_a_missing_entity_id() {
+        let err = run("set_linear_velocity_2d", json!({ "x": 1.0 }))
+            .expect_err("a payload with no entityId must be refused");
+        assert!(err.contains("Invalid set_linear_velocity_2d payload"), "got: {err}");
+    }
+
+    /// The stub answered this exact string. If anything reverts these arms, the
+    /// tests above would still pass on a stub that returned Ok, so this pins
+    /// the text that would come back instead.
+    #[test]
+    fn neither_2d_velocity_command_is_a_stub_any_more() {
+        for command in ["set_linear_velocity_2d", "set_angular_velocity_2d"] {
+            let err = super::super::dispatch(command, json!({ "entityId": "e", "x": 1.0, "omega": 1.0 }))
+                .expect_err("no pending queue under native test");
+            assert!(
+                !err.contains("Not yet implemented"),
+                "{command} answered the stub: {err}"
+            );
+            // And it is still ROUTED — otherwise the assertion above would be
+            // satisfied by `Unknown command`, which is not the property wanted.
+            assert!(
+                !err.contains("Unknown command"),
+                "{command} is no longer routed: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn set_angular_velocity_2d_is_routed_and_deserializes() {
+        assert_routed_and_reaches_handler(
+            "set_angular_velocity_2d",
+            json!({ "entityId": "player", "omega": 2.5 }),
+        );
+    }
+
+    #[test]
+    fn set_angular_velocity_2d_requires_omega() {
+        let err = run("set_angular_velocity_2d", json!({ "entityId": "player" }))
+            .expect_err("omega is required");
+        assert!(err.contains("Invalid set_angular_velocity_2d payload"), "got: {err}");
+    }
+
+    /// The 3D counterpart is still a stub, and saying so here keeps the pair
+    /// honest: the next reader can see which half was done deliberately.
+    #[test]
+    fn the_3d_linear_velocity_command_is_still_a_stub() {
+        let err = super::super::dispatch("set_linear_velocity", json!({ "entityId": "e" }))
+            .expect_err("it is not implemented");
+        assert!(err.contains("Not yet implemented"), "got: {err}");
+    }
+
     /// The router's fallthrough, so the assertion above is not vacuously true for
     /// any string at all.
     #[test]

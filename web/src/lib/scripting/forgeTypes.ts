@@ -45,6 +45,8 @@ declare namespace forge {
     function findByName(name: string): string[];
     /** Find entities whose name exactly matches the string (case-sensitive) */
     function findByNameExact(name: string): string[];
+    /** Find entities whose type contains the search string (case-insensitive) */
+    function findByType(type: string): string[];
     /** Get entity display name */
     function getEntityName(entityId: string): string | null;
     /** Get entity type (e.g. "cube", "sphere", "point_light") */
@@ -123,6 +125,20 @@ declare namespace forge {
     function getVelocity(entityId: string): { x: number; y: number } | null;
     /** Get current angular velocity (radians per second) */
     function getAngularVelocity(entityId: string): number | null;
+    /** Set both components of the linear velocity */
+    function setVelocity(entityId: string, vx: number, vy: number): void;
+    /**
+     * Set horizontal velocity, leaving the vertical component alone.
+     * This is the platformer primitive: writing both every frame would cancel
+     * gravity and erase the jump impulse applied on the frame before.
+     */
+    function setVelocityX(entityId: string, vx: number): void;
+    /** Set vertical velocity, leaving the horizontal component alone */
+    function setVelocityY(entityId: string, vy: number): void;
+    /** Set angular velocity (radians per second) */
+    function setAngularVelocity(entityId: string, omega: number): void;
+    /** Turn this entity's 2D physics simulation on or off */
+    function setEnabled(entityId: string, enabled: boolean): void;
     /** Perform a raycast and return the first hit */
     function raycast(originX: number, originY: number, dirX: number, dirY: number, maxDistance?: number): Promise<{
       entityId: string;
