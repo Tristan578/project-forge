@@ -32,10 +32,24 @@ set -uo pipefail
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 
-# Absolute forms that name one machine: a Windows drive-letter path into a user
-# or repo directory, or a POSIX home directory. Deliberately NOT anchored to a
+# Absolute forms that name one machine: a Windows drive-letter path into a
+# checkout root, or a POSIX home directory. Deliberately NOT anchored to a
 # username, so a different contributor's path is caught too.
-PATTERN='([A-Za-z]:[\\/](Users|repos)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'
+#
+# THE WINDOWS ROOT LIST IS AN ALLOWLIST OF CHECKOUT HABITS, not of everything
+# after a drive letter. `C:\Program Files\...` and `C:\Windows\...` are the
+# same on every Windows machine and appear legitimately in build notes, so
+# matching every `C:\` would fail on paths that are perfectly portable. The
+# roots here are the ones people actually clone into. `Users` and `repos` were
+# the original two, and a checkout under a `dev` directory sitting directly
+# below a drive letter escaped both (found in review). Described rather than
+# shown, for the same reason as the runner note further down: this gate reads
+# its own source, so a literal example fails it.
+#
+# A root nobody has thought of still escapes; that is the cost of the allowlist
+# direction, and it is the right cost, because the other direction produces
+# false failures on standard system paths and gets the gate switched off.
+PATTERN='([A-Za-z]:[\\/](Users|repos|dev|src|code|work|workspace|projects|git)[\\/]|/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'
 
 # Files where such a string is legitimate. Each entry states why, and each entry
 # EXEMPTS SOMETHING TODAY — an allowlist entry that covers no file is not
@@ -89,6 +103,23 @@ if [ "${#ALLOW_ENTRIES[@]}" -ne "${#ALLOW_REASONS[@]}" ]; then
   exit 2
 fi
 
+# EVERY ENTRY IS COMPILED BEFORE ANY OF THEM IS TRUSTED. The per-hit match
+# below is `grep -qE "$entry"`, and a malformed regex makes grep exit 2 with a
+# message on stderr — which an `if` reads as "no match". The allowlist entry
+# then silently stops exempting anything and its files are reported as
+# violations, so a typo in this array turns into a red build blaming an
+# unrelated file. Failing here names the entry instead (found in review).
+for entry in "${ALLOW_ENTRIES[@]}"; do
+  if ! printf '' | grep -qE "$entry" 2>/dev/null; then
+    # grep exits 1 on "no match" and 2 on a bad pattern; only 2 is a defect.
+    printf '' | grep -qE "$entry" 2>/dev/null
+    if [ "$?" -gt 1 ]; then
+      echo "::error::check-portable-paths: ALLOW_ENTRIES contains a malformed regex: ${entry}" >&2
+      exit 2
+    fi
+  fi
+done
+
 ALLOW_RE=""
 for entry in "${ALLOW_ENTRIES[@]}"; do
   if [ -z "$ALLOW_RE" ]; then ALLOW_RE="$entry"; else ALLOW_RE="${ALLOW_RE}|${entry}"; fi
@@ -98,8 +129,18 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 
 # `/home/runner/` is the GitHub Actions HOME — identical on every runner, so it
 # is portable by construction. Workflows set cache dirs under it and several
-# suites quote CI output containing it. Filtered by LINE rather than removed
-# from PATTERN, so a genuine `/home/<someone>/` in the same file still fails.
+# suites quote CI output containing it.
+#
+# THE OCCURRENCE IS EXEMPT, NOT THE LINE. This used to be
+# `grep -v '/home/runner/'`, which drops the whole line — so a line carrying
+# BOTH the runner path and a contributor's own home directory — a copy out of a
+# runner work directory into a personal one — vanished entirely, and the
+# machine-local half went unreported (found in review). Described rather than
+# shown: this gate reads its own source, so a literal example fails it, which is
+# how the first version of this comment was caught.
+#
+# Replacing the runner occurrences with a token that cannot match, then
+# re-applying PATTERN, keeps every other match on the line.
 #
 # `-H` IS LOAD-BEARING. Without it grep prints `path:line:content` only when it
 # is handed more than one file, and `line:content` when handed exactly one.
@@ -112,7 +153,8 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # to be one batch.
 raw="$(git ls-files -z \
   | xargs -0 grep -HInE "$PATTERN" 2>/dev/null \
-  | grep -v '/home/runner/' || true)"
+  | sed 's#/home/runner/#{RUNNER_HOME}/#g' \
+  | grep -E "$PATTERN" || true)"
 
 # The allowlist is applied per hit, to the path grep prefixed onto the line, so
 # an entry can be anchored to a whole path without also having to survive the

@@ -115,6 +115,70 @@ add_file "$d" ".github/workflows/x.yml" "  cache: $RUNNER_PATH
   home: $LINUX_PATH"
 run_case "a real home path in a file that also has the runner's still fails" 1 "$d"
 
+# THE SAME LINE, which is the case the line filter could not see. The exemption
+# used to be `grep -v /home/runner/`, dropping the whole line — so a copy out of
+# a runner directory into a personal one hid the personal half completely. Two
+# lines already passed; one line did not (found in review). Reverting to the
+# line filter fails this and leaves the two-line case above green, which is why
+# both are here.
+d="$(make_repo same_line)"
+add_file "$d" ".github/workflows/x.yml" "  run: cp $RUNNER_PATH/out $LINUX_PATH/backup"
+run_case "a real home path on the SAME LINE as the runner's still fails" 1 "$d"
+
+# And the runner path alone on a busy line is still exempt, so the fix above did
+# not simply stop exempting anything.
+d="$(make_repo same_line_runner_only)"
+add_file "$d" ".github/workflows/x.yml" "  run: cp $RUNNER_PATH/a $RUNNER_PATH/b"
+run_case "two runner paths on one line are still portable" 0 "$d"
+
+# --- Windows checkout roots beyond Users and repos ---
+#
+# `Users` and `repos` were the original two, and a checkout under a `dev`
+# directory below a drive letter matched neither (found in review). Each root is
+# asserted on its own so removing one from PATTERN fails a named case rather
+# than a single lumped one.
+for root in dev src code work workspace projects git; do
+  d="$(make_repo "win_$root")"
+  add_file "$d" "docs/setup.md" "Clone to C:\\${root}\\project-forge and run the build."
+  run_case "a Windows checkout under $root fails" 1 "$d"
+done
+
+# The other direction: a drive-letter path that is the SAME on every Windows
+# machine is portable and must not fail, or the gate starts reporting standard
+# build notes and gets switched off.
+d="$(make_repo win_system)"
+add_file "$d" "docs/setup.md" "Install to C:\\Program Files\\MSVC and add C:\\Windows\\System32 to PATH."
+run_case "a standard Windows system path passes" 0 "$d"
+
+# --- a malformed allowlist regex is a hard error, not a silent non-match ---
+#
+# The per-hit match is `grep -qE "$entry"`, and grep exits 2 on a bad pattern —
+# which an `if` reads as "no match". The entry then silently stops exempting
+# anything and its files are reported instead, blaming a file whose only fault
+# is being covered by a typo (found in review). The compile pass names the
+# entry.
+# No production seam is added for this: a COPY of the real script with a broken
+# entry spliced into ALLOW_ENTRIES exercises the real compile pass, and an env
+# var that injected allowlist entries would be a way to widen the allowlist at
+# runtime, which is the opposite of what this gate is for.
+d="$(make_repo bad_allow)"
+add_file "$d" "docs/setup.md" "nothing to see"
+broken="$TMP/broken-allow.sh"
+# `sprintf("%c", 39)` is a single quote. Writing one literally here would need
+# to survive awk's quoting and the shell's at once, which is its own trap.
+# Both arrays, because the length check runs first and would otherwise be what
+# fails — a fixture that trips a different guard proves nothing about this one.
+awk 'BEGIN { q = sprintf("%c", 39) }
+     /^ALLOW_ENTRIES=\(/ { print; print "  " q "a[" q; next }
+     /^ALLOW_REASONS=\(/ { print; print "  " q "a deliberately malformed fixture entry" q; next }
+     { print }' "$SCRIPT" > "$broken"
+out="$(cd "$d" && PORTABLE_PATHS_MIN_FILES=1 bash "$broken" 2>&1)"; status=$?
+if [ "$status" -eq 2 ] && grep -q "malformed regex" <<<"$out"; then
+  PASS=$((PASS + 1)); echo "  ok   a malformed allowlist regex is a hard error, named"
+else
+  FAIL=$((FAIL + 1)); echo "  FAIL malformed allowlist regex: expected exit 2 with a name, got $status: $out"
+fi
+
 # --- the allowlist: matched against the path, not the whole grep line ---
 
 # Anchored entries. Both of these pass on a `path:line:content` match only by
