@@ -651,6 +651,27 @@ jobs:
       - name: Check OpenAPI spec is valid and in sync with API routes
         run: bash scripts/check-openapi-route-sync.sh
 
+  # ---- Board Verdict Tests ----
+  # Decision-logic suite for scripts/board-verdict.sh, which publishes the
+  # latest review-board verdict as a commit status. That check is what stops a
+  # PR reading as ready while a board is red — #9725 merged in exactly that
+  # state and both blockers reached `main` — so its logic needs a gate of its
+  # own. Hermetic (test-only seams, no network), so it is cheap and always runs.
+  board-verdict-tests:
+    name: Board Verdict Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Board verdict decision logic
+        run: bash scripts/__tests__/board-verdict.test.sh
+
+      - name: Shellcheck the verdict scripts and the suite
+        run: shellcheck -x scripts/board-verdict.sh scripts/post-board-verdict.sh scripts/__tests__/board-verdict.test.sh
+
   # ---- Agentic Config Sync ----
   # Runs when the single source of truth (tools/agentic-sync/canonical.json), the
   # generator, the per-provider instruction files it injects facts into
