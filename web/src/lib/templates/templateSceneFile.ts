@@ -113,6 +113,45 @@ const ENGINE_ENVIRONMENT_DEFAULTS = {
 /** Defaults mirroring `AmbientLightData::default()` in `engine/src/core/scene_file.rs`. */
 const ENGINE_AMBIENT_DEFAULTS = { color: [1.0, 1.0, 1.0], brightness: 300.0 } as const;
 
+/** The `InputMap` shape the engine deserialises from a scene file. */
+interface EngineInputBindings {
+  actions: Record<string, unknown>;
+  preset: string | null;
+}
+
+/**
+ * A template's declared actions, or `undefined` to mean "no opinion".
+ *
+ * THE DISTINCTION BETWEEN "NONE" AND "NO OPINION" IS THE POINT. `load_scene`
+ * assigns the file's `input_bindings` straight onto the `InputMap` resource, so
+ * a scene that declares `{ actions: {}, preset: null }` is not neutral — it is
+ * a game in which no key does anything, and it silently overwrites the working
+ * default a new scene now starts with.
+ *
+ * So a template that says nothing (`{}`, which is what most of them ship) gets
+ * `undefined`, and the caller omits the field entirely rather than sending an
+ * empty map. `serde` then leaves the engine's own default in place. A template
+ * that DOES declare actions gets exactly what it wrote — including a
+ * deliberately empty set, which it can express by writing `actions: {}`.
+ */
+function buildInputBindings(declared: unknown): EngineInputBindings | undefined {
+  if (declared === null || typeof declared !== 'object') return undefined;
+  const source = declared as Record<string, unknown>;
+
+  // The legacy shape: a bare `Record<actionName, InputBinding>` with no
+  // `actions` wrapper, which is what `GameTemplate.sceneData.inputBindings` is
+  // typed as. An empty one is the "no opinion" case above.
+  const actions =
+    source.actions !== undefined && source.actions !== null && typeof source.actions === 'object'
+      ? (source.actions as Record<string, unknown>)
+      : source;
+
+  if (Object.keys(actions).length === 0) return undefined;
+
+  const preset = typeof source.preset === 'string' ? source.preset : null;
+  return { actions, preset };
+}
+
 export interface TemplateSceneFile {
   /** Serialized `SceneFile` ready for `load_scene`'s `json` field. */
   sceneJson: string;
@@ -180,10 +219,22 @@ export function buildTemplateSceneFile(template: GameTemplate): TemplateSceneFil
     },
     environment: { ...ENGINE_ENVIRONMENT_DEFAULTS, ...(source.environment ?? {}) },
     ambientLight: { ...ENGINE_AMBIENT_DEFAULTS, ...(source.ambientLight ?? {}) },
-    // `InputMap` requires both fields; the templates ship `{}`, which fails the
-    // whole file. The template's own preset is applied separately, through
-    // `setInputPreset`, so the engine and `scriptSlice.inputPreset` agree.
-    inputBindings: { actions: {}, preset: null },
+    // A TEMPLATE'S OWN ACTIONS, when it declares any.
+    //
+    // This used to be the literal `{ actions: {}, preset: null }` — every
+    // template's bindings thrown away on the way in, whatever it had written.
+    // The scene format has always carried a full `InputMap`, and the engine has
+    // always persisted one, so the only thing standing between a creator and
+    // their own control scheme was this line. It meant shipped content could
+    // speak nothing but the four genre presets, and it is why a two-player
+    // game had no way to give the second player a key.
+    //
+    // `{}` (which is what most templates still ship) is not an empty control
+    // scheme — it is "no opinion", and it must fall through to the engine's own
+    // default rather than blanking the map. That distinction is the whole fix:
+    // an empty `actions` here would hand the engine a scene where no key does
+    // anything, which is what a new project used to get.
+    inputBindings: buildInputBindings(source.inputBindings),
     assets: source.assets ?? {},
     entities,
   };

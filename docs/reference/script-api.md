@@ -67,6 +67,29 @@ namespace set).
 | `forge.input.isTouchDevice()` | `boolean` | Does the current device support touch? |
 | `forge.input.vibrate(pattern)` | `void` | Trigger haptic feedback (vibration pattern in ms) |
 
+**`action` is a name your project defines, never a key code.** Pass `move_left`,
+not `ArrowLeft`. Every scene starts with the actions below, and you can rename,
+rebind, delete or add to any of them in the Input Bindings panel — or with the
+`set_input_binding` command. A game that wants `grapple`, `rewind` or
+`p2_attack` simply defines it.
+
+| Action | Kind | Default keys |
+|--------|------|--------------|
+| `move_left` / `move_right` | digital | A / D, Left / Right |
+| `move_up` / `move_down` | digital | W / S, Up / Down |
+| `move_forward` / `move_backward` | digital | W / S, Up / Down — the same keys, for a 3D reading |
+| `move_horizontal` | axis | A/Left = -1, D/Right = +1 |
+| `move_vertical` | axis | S/Down = -1, W/Up = +1 |
+| `jump` | digital | Space |
+| `interact` | digital | E |
+| `pause` | digital | Escape |
+| `action_primary` | digital | Mouse left, J |
+| `action_secondary` | digital | Mouse right, K |
+
+Use the digital names to ask about one direction. An axis reports `isPressed`
+whenever it is non-zero — that is, for **both** of its directions — so
+`isPressed('move_horizontal')` is true when either left or right is held.
+
 ## forge.physics
 
 | Function | Returns | Description |

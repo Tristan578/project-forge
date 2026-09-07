@@ -70,7 +70,12 @@ describe('sceneSlice.loadTemplate', () => {
       expect(scene.entities[0].transform).toHaveProperty('position');
       expect(scene.entities[0]).toHaveProperty('name');
       expect(scene.entities[0].entityType).toBe('sprite');
-      expect(scene.inputBindings).toEqual({ actions: {}, preset: null });
+      // OMITTED, not emptied. `load_scene` assigns the file's map straight onto
+      // the `InputMap` resource, so `{ actions: {}, preset: null }` — what this
+      // used to assert — loaded every template into a scene where no key did
+      // anything. Omitting it leaves `InputMap::default()`, which binds a
+      // working keyboard (#9764).
+      expect('inputBindings' in scene).toBe(false);
     });
 
     it('attaches the templates scripts through the script slice', async () => {
