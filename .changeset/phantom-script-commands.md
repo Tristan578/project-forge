@@ -6,7 +6,7 @@
 engine never implemented are removed: `forge.physics.setVelocity`,
 `forge.physics2d.setVelocity`, `forge.physics2d.setAngularVelocity`,
 `forge.camera.setPosition`, `forge.camera.lookAt`,
-`forge.skeleton2d.stopAnimation` and `forge.skeleton2d.setIkTarget`. Each
+`forge.skeleton.stopAnimation` and `forge.skeleton.setIkTarget`. Each
 already did nothing — the command was accepted and discarded — so no behaviour
 changes, but a script that calls one now throws a `TypeError` where the author
 can see it instead of failing silently. There is no replacement: use

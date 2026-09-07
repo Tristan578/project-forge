@@ -27,6 +27,7 @@ namespace set).
 | `forge.getTransform(entityId)` | `{position, rotation, scale} \| null` | Get entity transform |
 | `forge.setPosition(entityId, x, y, z)` | `void` | Set absolute position |
 | `forge.setRotation(entityId, x, y, z)` | `void` | Set absolute rotation (euler degrees) |
+| `forge.setScale(entityId, x, y, z)` | `void` | Set absolute scale |
 | `forge.translate(entityId, dx, dy, dz)` | `void` | Move relative to current position |
 | `forge.rotate(entityId, dx, dy, dz)` | `void` | Rotate relative to current rotation |
 | `forge.spawn(type, options?)` | `string` | Spawn entity, returns its ID. Options: `{name?, position?}` |

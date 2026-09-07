@@ -173,6 +173,7 @@ Scripts run in a sandboxed TypeScript environment with these APIs:
 ### Transform & Spawning
 - \`forge.getTransform(entityId)\` → { position, rotation, scale }
 - \`forge.setPosition(entityId, x, y, z)\`
+- \`forge.setScale(entityId, x, y, z)\`
 - \`forge.translate(entityId, dx, dy, dz)\` — relative movement
 - \`forge.rotate(entityId, dx, dy, dz)\` — degrees
 - \`forge.spawn(type, { name, position })\` → entity ID

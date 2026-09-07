@@ -68,6 +68,7 @@ The global `entityId` variable contains the ID of the entity the script is attac
 forge.getTransform(entityId)  // Get position, rotation, scale
 forge.setPosition(entityId, x, y, z)
 forge.setRotation(entityId, x, y, z)
+forge.setScale(entityId, x, y, z)
 forge.translate(entityId, dx, dy, dz)
 forge.rotate(entityId, dx, dy, dz)
 forge.spawn(type, { name, position })  // Returns new entity ID

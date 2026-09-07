@@ -52,6 +52,7 @@ function makeStore(overrides: Partial<LocalCommandStore> = {}): LocalCommandStor
     allGameCameras: {},
     spriteAnimators: {},
     animationStateMachines: {},
+    setAdaptiveMusicIntensity: vi.fn(),
     setGameCamera: vi.fn(),
     setSpriteAnimator: vi.fn(),
     setAnimationStateMachine: vi.fn(),
@@ -401,6 +402,34 @@ describe('audio commands reach audioManager', () => {
   it('forwards set_music_intensity with the default track', () => {
     run('set_music_intensity', { intensity: 0.75, rampMs: 500 });
     expect(audioManagerMock.setMusicIntensity).toHaveBeenCalledWith(DEFAULT_TRACK, 0.75, 500);
+  });
+
+  /**
+   * The inspector reads the STORE, not audioManager, so a change made only to
+   * the latter leaves the slider showing the previous value and the next drag
+   * jumps from a stale position. The AI-agent path has always written both.
+   */
+  it('mirrors the intensity into the store so the inspector follows', () => {
+    const store = makeStore();
+    run('set_music_intensity', { intensity: 0.75 }, store);
+    expect(store.setAdaptiveMusicIntensity).toHaveBeenCalledWith(0.75);
+  });
+
+  it.each([
+    ['above 1', 5, 1],
+    ['below 0', -2, 0],
+    ['not a number', 'loud', 0],
+  ])('clamps an intensity %s before both the mixer and the store', (_label, given, expected) => {
+    const store = makeStore();
+    run('set_music_intensity', { intensity: given }, store);
+    expect(audioManagerMock.setMusicIntensity).toHaveBeenCalledWith(DEFAULT_TRACK, expected, undefined);
+    expect(store.setAdaptiveMusicIntensity).toHaveBeenCalledWith(expected);
+  });
+
+  it('records a freshly loaded stem set as silent, matching the AI path', () => {
+    const store = makeStore();
+    run('set_music_stems', { stems: { drums: 'a1' } }, store);
+    expect(store.setAdaptiveMusicIntensity).toHaveBeenCalledWith(0);
   });
 
   it('builds the full layer options object from the flat payload', () => {

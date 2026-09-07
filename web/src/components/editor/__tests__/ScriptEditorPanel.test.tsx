@@ -182,10 +182,13 @@ describe('ScriptEditorPanel', () => {
    * with no reader. Each of those is exactly the message an author needs when
    * their script silently does nothing.
    *
-   * This asserts the CONSUMER half. `useScriptRunner.test.ts` asserts the three
-   * producers use `'*'`; on its own that would pin my belief about this filter
-   * rather than the filter itself (lessons-learned #14), so the rendering is
-   * checked here against the real component.
+   * This asserts the CONSUMER half, and `useScriptRunner.test.ts` asserts the
+   * three producers emit `'*'` — both halves are needed, and for one round only
+   * this half existed while the docstring claimed the other did too. Reverting
+   * any producer to `'engine'` / `''` / `'unknown'` left every suite green,
+   * because this test supplies `'*'` itself. That is lessons-learned #16 (a pin
+   * guarding the one thing nothing else can) reached through #17 (a claim about
+   * coverage nobody checked). Both were verified by mutation this time.
    */
   it('shows a wildcard log whatever entity is selected', () => {
     setupStore({

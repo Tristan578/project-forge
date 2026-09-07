@@ -55,6 +55,7 @@ Transforms are top-level on forge. There is no separate per-entity namespace: ca
 - forge.getTransform(entityId) -> { position: [x, y, z], rotation: [x, y, z], scale: [x, y, z] } | null
 - forge.setPosition(entityId, x, y, z)
 - forge.setRotation(entityId, x, y, z)
+- forge.setScale(entityId, x, y, z)
 - forge.translate(entityId, dx, dy, dz)
 - forge.rotate(entityId, dx, dy, dz)
 - forge.spawn(type, options) -> entityId

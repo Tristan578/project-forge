@@ -51,6 +51,7 @@ export interface LocalCommandStore {
   allGameCameras: Record<string, GameCameraData>;
   spriteAnimators: Record<string, SpriteAnimatorData>;
   animationStateMachines: Record<string, AnimationStateMachineData>;
+  setAdaptiveMusicIntensity: (intensity: number) => void;
   setGameCamera: (entityId: string, data: GameCameraData) => void;
   setSpriteAnimator: (entityId: string, data: SpriteAnimatorData) => void;
   setAnimationStateMachine: (entityId: string, data: AnimationStateMachineData) => void;
@@ -163,13 +164,25 @@ export function handleLocalScriptCommand(
     // an engine arm. `audioManager.setMusicIntensity`'s own comment already named
     // `forge.audio.setMusicIntensity` as its caller — the wiring that would have
     // made that true had never been written.
-    case 'set_music_intensity':
+    // THE STORE MIRROR IS PART OF THE COMMAND, not decoration. `AdaptiveMusicInspector`
+    // reads `adaptiveMusicIntensity` from the store, so a script that changes
+    // the intensity without writing it leaves the slider showing the previous
+    // value — and the next drag jumps from that stale position. The AI-agent
+    // path (`chat/handlers/audioHandlers.ts`) has always written both; these
+    // two names were phantoms until now, so the divergence would have started
+    // here. Clamped for the same reason that path clamps: the inspector's
+    // slider has a range, and a script is not obliged to respect it.
+    case 'set_music_intensity': {
+      const intensity = Number(payload.intensity);
+      const clamped = Number.isFinite(intensity) ? Math.max(0, Math.min(1, intensity)) : 0;
       audioManager.setMusicIntensity(
         (payload.trackId as string | undefined) ?? DEFAULT_MUSIC_TRACK_ID,
-        payload.intensity as number,
+        clamped,
         payload.rampMs as number | undefined,
       );
+      getStore().setAdaptiveMusicIntensity(clamped);
       return true;
+    }
     case 'set_music_stems': {
       // `forge.audio.loadStems` takes `{ stemName: assetId }`; `setAdaptiveMusic`
       // takes the array form `chat/handlers/audioEntityHandlers.ts` builds.
@@ -185,6 +198,10 @@ export function handleLocalScriptCommand(
         (payload.trackId as string | undefined) ?? DEFAULT_MUSIC_TRACK_ID,
         stems,
       );
+      // Loading stems starts the track silent, which is what the AI path
+      // records too — without this the inspector keeps whatever the previous
+      // track was at.
+      getStore().setAdaptiveMusicIntensity(0);
       return true;
     }
 
