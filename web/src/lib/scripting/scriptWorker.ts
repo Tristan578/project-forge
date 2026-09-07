@@ -296,6 +296,17 @@ function buildForgeApi(scriptEntityId: string) {
     setRotation: (eid: string, x: number, y: number, z: number) => {
       pendingCommands.push({ cmd: 'update_transform', entityId: eid, rotation: [x, y, z] });
     },
+    // ADDED, not removed, unlike the seven above. `forge.setScale` is the one
+    // name in this file's sweep that was missing rather than imaginary: the
+    // shipped Arena Shooter template calls it to size the projectiles it
+    // spawns, `UpdateTransformPayload` has carried an optional `scale` since it
+    // was written (`engine/src/core/commands/transform.rs`), and the command is
+    // already on the script allowlist because `setPosition` uses it. The only
+    // thing absent was the method — so the template's projectiles have always
+    // spawned at full size, and the script died there rather than continuing.
+    setScale: (eid: string, x: number, y: number, z: number) => {
+      pendingCommands.push({ cmd: 'update_transform', entityId: eid, scale: [x, y, z] });
+    },
     translate: (eid: string, dx: number, dy: number, dz: number) => {
       const state = entityStates[eid];
       if (state) {

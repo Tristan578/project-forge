@@ -13,6 +13,8 @@ declare namespace forge {
   function setPosition(entityId: string, x: number, y: number, z: number): void;
   /** Set absolute rotation (euler degrees) */
   function setRotation(entityId: string, x: number, y: number, z: number): void;
+  /** Set absolute scale */
+  function setScale(entityId: string, x: number, y: number, z: number): void;
   /** Translate relative to current position */
   function translate(entityId: string, dx: number, dy: number, dz: number): void;
   /** Rotate relative to current rotation (euler degrees) */

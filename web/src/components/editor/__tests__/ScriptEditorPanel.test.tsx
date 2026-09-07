@@ -172,6 +172,36 @@ describe('ScriptEditorPanel', () => {
     expect(screen.getByText('Null reference').textContent).toBe('Null reference');
   });
 
+  /**
+   * THE WILDCARD CHANNEL, which had no producer until #9284.
+   *
+   * The console filters to `l.entityId === primaryId || l.entityId === '*'`,
+   * and nothing had ever emitted `'*'` — so the three runner messages that are
+   * not attributable to one entity (an engine refusal, the infinite-loop
+   * watchdog, and a command blocked by the allowlist) were written to a channel
+   * with no reader. Each of those is exactly the message an author needs when
+   * their script silently does nothing.
+   *
+   * This asserts the CONSUMER half. `useScriptRunner.test.ts` asserts the three
+   * producers use `'*'`; on its own that would pin my belief about this filter
+   * rather than the filter itself (lessons-learned #14), so the rendering is
+   * checked here against the real component.
+   */
+  it('shows a wildcard log whatever entity is selected', () => {
+    setupStore({
+      primaryId: 'ent-1',
+      allScripts: { 'ent-1': { source: 'code', enabled: true } },
+      scriptLogs: [
+        { entityId: '*', level: 'error', message: 'Blocked command "set_velocity2d"' },
+        { entityId: 'someone-else', level: 'info', message: 'Not for this entity' },
+      ],
+    });
+    render(<ScriptEditorPanel />);
+    expect(screen.getByText('Blocked command "set_velocity2d"')).toBeTruthy();
+    // The filter still filters: a log owned by another entity stays hidden.
+    expect(screen.queryByText('Not for this entity')).toBeNull();
+  });
+
   it('clears logs on Clear click', () => {
     setupStore({
       allScripts: { 'ent-1': { source: 'code', enabled: true } },

@@ -90,7 +90,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
     const message = `Engine refused command '${command}': ${reason}`;
     console.error(`[ScriptRunner] ${message}`);
     addScriptLog({
-      entityId: 'engine',
+      // '*' — the panel-wide channel, NOT a stand-in entity name.
+      // `ScriptEditorPanel` renders `l.entityId === primaryId || l.entityId === '*'`,
+      // so 'engine' matched nothing and this error has never been shown to
+      // anyone. The wildcard branch had no producer at all until now.
+      entityId: '*',
       level: 'error',
       message,
       timestamp: Date.now(),
@@ -195,7 +199,12 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
                 // ever emits an unarmed name again.
                 console.warn(`[ScriptRunner] Blocked unauthorized command: ${cmdName}`);
                 addScriptLog({
-                  entityId: msg.entityId ?? 'unknown',
+                  // '*', because the `commands` message is a per-FRAME flush of
+                  // every script's queue and carries no entityId — so this read
+                  // 'unknown' every time and the panel dropped it. A blocked
+                  // command that says nothing is the no-error-no-effect pair
+                  // this PR exists to remove, reintroduced one layer up.
+                  entityId: '*',
                   level: 'error',
                   message: `Blocked command "${cmdName}" — not in the script allowlist. If a forge.* method sent this, that method has no engine implementation.`,
                   timestamp: Date.now(),
@@ -461,7 +470,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             console.error('[ScriptRunner] Worker timeout — possible infinite loop. Terminating.');
             showError('Script timed out — possible infinite loop detected. Play mode stopped.');
             addScriptLog({
-              entityId: '',
+              // '*' for the same reason as above: '' matched no entity, so the
+              // one message explaining why Play stopped was never displayed.
+              entityId: '*',
               level: 'error',
               message: 'Script execution timed out (possible infinite loop). Play mode stopped.',
               timestamp: Date.now(),

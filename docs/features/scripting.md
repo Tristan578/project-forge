@@ -89,7 +89,6 @@ forge.input.getAxis(action)        // -1 to 1 value
 ```typescript
 forge.physics.applyForce(entityId, fx, fy, fz)
 forge.physics.applyImpulse(entityId, fx, fy, fz)
-forge.physics.setVelocity(entityId, vx, vy, vz)
 forge.physics.isGrounded(entityId)  // boolean, synchronous — gate jumps on it
 ```
 
