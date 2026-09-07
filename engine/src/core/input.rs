@@ -637,6 +637,50 @@ mod tests {
         );
     }
 
+
+    /// A SCENE FILE THAT DECLARES NO ACTIONS MUST NOT SILENCE THE KEYBOARD.
+    ///
+    /// `#[serde(default)]` on `SceneFile::input_bindings` covers a file that
+    /// OMITS the field, and that is not what exists in the wild: every scene the
+    /// product saved before this carries the literal `{ actions: {}, preset:
+    /// null }` that `templateSceneFile` wrote to satisfy a parser which then
+    /// required it. `load_scene` assigns the map verbatim, so those projects —
+    /// and every remix of a published one — would load into a session where no
+    /// key does anything.
+    #[test]
+    fn an_empty_declared_map_deserializes_and_is_recognisable_as_empty() {
+        let map: InputMap = serde_json::from_str(r#"{"actions":{},"preset":null}"#)
+            .expect("the shape every saved scene carries must still parse");
+        assert!(
+            map.actions.is_empty(),
+            "load_scene relies on this being detectably empty to fall back"
+        );
+    }
+
+    /// The other half: a file that says nothing gets the defaults from serde,
+    /// so the fallback in `load_scene` is not the only thing standing between a
+    /// creator and a working keyboard.
+    #[test]
+    fn an_absent_map_deserializes_to_the_defaults() {
+        #[derive(serde::Deserialize)]
+        struct Holder {
+            #[serde(default)]
+            input_bindings: InputMap,
+        }
+        let held: Holder = serde_json::from_str("{}").expect("absent is legal");
+        assert!(!held.input_bindings.actions.is_empty());
+    }
+
+    /// A declared map with actions in it is taken at its word — the fallback
+    /// must not swallow a creator's own vocabulary.
+    #[test]
+    fn a_declared_map_survives_the_round_trip() {
+        let json = r#"{"actions":{"grapple":{"name":"grapple","actionType":{"type":"Digital"},"sources":[{"type":"Key","value":"KeyG"}],"deadZone":0.1}},"preset":null}"#;
+        let map: InputMap = serde_json::from_str(json).expect("a declared map must parse");
+        assert_eq!(map.actions.len(), 1);
+        assert!(map.actions.contains_key("grapple"));
+    }
+
     /// The preset's definition wins where the names collide, or "apply a preset"
     /// would be a no-op for anything the default already names.
     #[test]

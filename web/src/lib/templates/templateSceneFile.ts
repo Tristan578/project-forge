@@ -130,9 +130,17 @@ interface EngineInputBindings {
  *
  * So a template that says nothing (`{}`, which is what most of them ship) gets
  * `undefined`, and the caller omits the field entirely rather than sending an
- * empty map. `serde` then leaves the engine's own default in place. A template
- * that DOES declare actions gets exactly what it wrote — including a
- * deliberately empty set, which it can express by writing `actions: {}`.
+ * empty map. `serde` then leaves the engine's own default in place.
+ *
+ * THERE IS NO WAY HERE TO SAY "BIND NOTHING", and that is deliberate rather
+ * than an oversight. An earlier version of this comment claimed a template
+ * could express it by writing `actions: {}`, which the code then treated
+ * identically to `{}` — a documented escape hatch that silently did the
+ * opposite. `load_scene` normalises an empty map to the defaults anyway, for
+ * the sake of every project already saved with the empty one, so a template
+ * asking for silence could not get it even if this function passed it on. A
+ * creator who wants nothing bound removes the bindings in the editor, on a
+ * scene they can see.
  */
 function buildInputBindings(declared: unknown): EngineInputBindings | undefined {
   if (declared === null || typeof declared !== 'object') return undefined;

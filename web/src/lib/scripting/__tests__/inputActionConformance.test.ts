@@ -24,11 +24,17 @@
  * left, and walking backwards read as walking forwards. Both AI prompts taught
  * those four names as "Default actions", so generated games were born with it.
  *
- * The names are checked against `DEFAULT_INPUT_ACTIONS`, which mirrors
- * `InputMap::default()` in `engine/src/core/input.rs` — the vocabulary every
- * scene now starts with, and the one a script may assume when its scene has
- * declared nothing of its own. A scene that declares its own actions may use
- * any names it likes; those are checked against what it declares.
+ * WHAT COUNTS AS EXISTING. A script may name an action its own scene declares in
+ * `sceneData.inputBindings`, or one from `DEFAULT_INPUT_ACTIONS` — the mirror of
+ * `InputMap::default()`, which every scene starts with and which a scene that
+ * declares nothing keeps. So a template that defines `grapple` and calls
+ * `isPressed('grapple')` passes, and one that calls it without defining it does
+ * not. The first version of this file checked only the defaults while its own
+ * docstring claimed otherwise, which would have forbidden the very capability
+ * shipped alongside it (#9764).
+ *
+ * A prompt has no scene, so the two system prompts are held to the defaults:
+ * a model cannot know what a particular project has declared.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -74,12 +80,24 @@ function actionsUsedIn(text: string): string[] {
   return found;
 }
 
+/**
+ * One body of text, and the actions its own scene declares on top of the
+ * defaults. A prompt has no scene, so `declared` is empty for those.
+ */
+interface Source {
+  label: string;
+  text: string;
+  declared: string[];
+}
+
 /** Source strings the product ships or teaches, labelled for the failure. */
-async function collectSources(): Promise<{ label: string; text: string }[]> {
-  const sources: { label: string; text: string }[] = [];
+async function collectSources(): Promise<Source[]> {
+  const sources: Source[] = [];
 
   for (const template of SCRIPT_TEMPLATES) {
-    sources.push({ label: `SCRIPT_TEMPLATES["${template.id}"]`, text: template.source });
+    // A Script Editor template is attached to whatever scene is open, so it
+    // may only assume the defaults.
+    sources.push({ label: `SCRIPT_TEMPLATES["${template.id}"]`, text: template.source, declared: [] });
   }
 
   for (const behavior of BEHAVIOR_VOCAB) {
@@ -89,22 +107,36 @@ async function collectSources(): Promise<{ label: string; text: string }[]> {
         projectType,
       });
       if (source === null) continue;
-      sources.push({ label: `buildBehaviorScript("${behavior}", ${projectType})`, text: source });
+      sources.push({ label: `buildBehaviorScript("${behavior}", ${projectType})`, text: source, declared: [] });
     }
   }
 
-  sources.push({ label: 'customScriptExecutor SCRIPT_SYSTEM_PROMPT', text: SCRIPT_SYSTEM_PROMPT });
+  sources.push({
+    label: 'customScriptExecutor SCRIPT_SYSTEM_PROMPT',
+    text: SCRIPT_SYSTEM_PROMPT,
+    declared: [],
+  });
   sources.push({
     label: 'api/chat/route.ts SYSTEM_PROMPT',
     text: readFileSync(path.join(process.cwd(), 'src', 'app', 'api', 'chat', 'route.ts'), 'utf8'),
+    declared: [],
   });
 
   for (const entry of TEMPLATE_REGISTRY) {
     const template = await entry.load();
+    // What this template declares for itself. `templateSceneFile` carries these
+    // through to the scene, so its scripts may name them.
+    const bindings = template.sceneData?.inputBindings as Record<string, unknown> | undefined;
+    const nested = bindings?.actions;
+    const declared = Object.keys(
+      (nested !== null && typeof nested === 'object' ? nested : bindings) ?? {},
+    );
+
     for (const [entityId, script] of Object.entries(template.scripts ?? {})) {
       sources.push({
         label: `TEMPLATE_REGISTRY["${entry.id}"].scripts["${entityId}"]`,
         text: script.source,
+        declared,
       });
     }
   }
@@ -152,9 +184,12 @@ describe('input action conformance', () => {
     for (const source of SOURCES) {
       for (const action of actionsUsedIn(source.text)) {
         checked += 1;
-        if (!DEFAULT_INPUT_ACTIONS.includes(action as typeof DEFAULT_INPUT_ACTIONS[number])) {
-          unknown.push(`${source.label}: '${action}' is not a default input action`);
-        }
+        const isDefault = DEFAULT_INPUT_ACTIONS
+          .includes(action as typeof DEFAULT_INPUT_ACTIONS[number]);
+        if (isDefault || source.declared.includes(action)) continue;
+        unknown.push(
+          `${source.label}: '${action}' is neither a default action nor declared by its scene`,
+        );
       }
     }
 
