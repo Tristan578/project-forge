@@ -167,20 +167,45 @@ describe('SCRIPT_ALLOWED_COMMANDS names can actually run', () => {
       },
     );
 
+    /**
+     * The 3D pair is still a near miss with nothing behind it.
+     *
+     * PF-1180 had to rule these out by NAME rather than by shape: each phantom
+     * sits beside a real-looking engine spelling, and renaming to it would have
+     * swapped one silent no-op for another because the near miss answered
+     * `Not yet implemented`.
+     */
     it.each([
-      // Near-miss spellings PF-1180 had to rule out by NAME, not by shape:
-      // each is a real arm that only LOOKS like the phantom next to it.
       ['set_velocity', 'set_linear_velocity'],
-      ['set_velocity2d', 'set_linear_velocity_2d'],
-      ['set_angular_velocity2d', 'set_angular_velocity_2d'],
     ])('does not treat the stub %s#1 / %s#2 pair as a working arm', (phantom, nearMiss) => {
       // The phantom is gone from the allowlist entirely…
       expect(SCRIPT_ALLOWED_COMMANDS.has(phantom)).toBe(false);
-      // …and renaming to the near miss would not have helped: the near miss is
-      // routed but answers `Not yet implemented`, so it is not an escape hatch
-      // for a future reviewer who spots the resemblance.
+      // …and renaming to the near miss would not have helped.
       expect(arms.stubbed.has(nearMiss)).toBe(true);
       expect(arms.implemented.has(nearMiss)).toBe(false);
+    });
+
+    /**
+     * THE 2D PAIR IS NO LONGER A NEAR MISS — the rename became the right fix.
+     *
+     * `set_linear_velocity_2d` and `set_angular_velocity_2d` were
+     * `Not yet implemented` stubs, which is why PF-1180 deleted the methods
+     * rather than repointing them. #9763 implemented the arms and attached a
+     * `Velocity` component to every 2D body, so the engine spelling now does
+     * what its name says and `forge.physics2d.setVelocity` / `setVelocityX` /
+     * `setVelocityY` / `setAngularVelocity` dispatch to it.
+     *
+     * The PHANTOM spellings stay off the allowlist: `set_velocity2d` and
+     * `set_angular_velocity2d` were never engine commands and still are not.
+     */
+    it.each([
+      ['set_velocity2d', 'set_linear_velocity_2d'],
+      ['set_angular_velocity2d', 'set_angular_velocity_2d'],
+    ])('routes %s#1 to the real arm %s#2 rather than the phantom', (phantom, real) => {
+      expect(SCRIPT_ALLOWED_COMMANDS.has(phantom)).toBe(false);
+      expect(SCRIPT_ALLOWED_COMMANDS.has(real)).toBe(true);
+      expect(arms.implemented.has(real)).toBe(true);
+      expect(arms.stubbed.has(real)).toBe(false);
     });
   });
 

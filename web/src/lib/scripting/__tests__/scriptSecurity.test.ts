@@ -737,10 +737,10 @@ describe('Script Sandbox Security: Command Whitelist', () => {
   // one got no error and no effect. Asserting they are ABSENT is what stops
   // a name being re-added without an arm — the tests below used to assert
   // the opposite, which pinned the defect in place (#9284).
-  it('whitelist has exactly 55 commands', () => {
+  it('whitelist has exactly 58 commands', () => {
     // Pins the SHIPPED set: the former local copy had silently drifted three
     // names behind it and still asserted 59.
-    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(55);
+    expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(58);
   });
 });
 

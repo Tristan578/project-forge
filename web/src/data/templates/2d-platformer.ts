@@ -19,7 +19,6 @@ export const PLATFORMER_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'platformer', 'side-scroller', 'retro'],
 
-  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,

@@ -19,7 +19,6 @@ export const TOPDOWN_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'rpg', 'exploration', 'dialogue'],
 
-  inputPreset: 'topdown',
 
   sceneData: {
     formatVersion: 3,

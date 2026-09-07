@@ -101,9 +101,21 @@ describe('game templates', () => {
         expect(template.sceneData.ambientLight.brightness).toBeGreaterThan(0);
       });
 
-      it('has an input preset', () => {
-        expect(template.inputPreset).not.toBe('');
-        expect(['fps', 'platformer', 'topdown', 'racing']).toContain(template.inputPreset);
+      /**
+       * A TEMPLATE MUST NOT NAME A GENRE.
+       *
+       * This asserted the opposite — that every template picked one of four
+       * presets. `loadTemplate` then applied it, replacing the scene's action
+       * map with that genre's handful of bindings. That is why shipped content
+       * could speak nothing else, and why a two-player game had no way to give
+       * its second player a key (#9764).
+       *
+       * A template declares whatever actions it wants in
+       * `sceneData.inputBindings`, and gets the full default vocabulary either
+       * way. `2d-fighter` is the one that currently declares any.
+       */
+      it('does not name a genre preset', () => {
+        expect('inputPreset' in template).toBe(false);
       });
     });
   }

@@ -19,7 +19,6 @@ export const SHMUP_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'shooter', 'shmup', 'arcade'],
 
-  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,

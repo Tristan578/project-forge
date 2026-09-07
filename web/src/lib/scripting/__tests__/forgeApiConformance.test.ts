@@ -249,7 +249,6 @@ const TEMPLATE_BASELINE: Record<string, readonly string[]> = {
     'forge.input.isKeyDown',
     'forge.onStart',
     'forge.onUpdate',
-    'forge.scene.findByType',
     'forge.scene.getComponent',
     'forge.transform.getPosition',
     'forge.transform.setPosition',
@@ -262,17 +261,8 @@ const TEMPLATE_BASELINE: Record<string, readonly string[]> = {
     'forge.material.setEmissive',
     'forge.onStart',
     'forge.onUpdate',
-    'forge.scene.findByType',
     'forge.scene.getComponent',
     'forge.transform.getPosition',
-  ],
-  '2d-fighter': [
-    'forge.input.isKeyDown',
-    'forge.input.isKeyPressed',
-    'forge.onStart',
-    'forge.onUpdate',
-    'forge.transform.getPosition',
-    'forge.transform.setPosition',
   ],
   '2d-metroidvania': [
     'forge.input.isKeyDown',
@@ -280,8 +270,6 @@ const TEMPLATE_BASELINE: Record<string, readonly string[]> = {
     'forge.onStart',
     'forge.onUpdate',
     'forge.physics.setEnabled',
-    'forge.physics2d.setVelocity',
-    'forge.physics2d.setVelocityX',
     'forge.scene.getComponent',
     'forge.transform.getPosition',
     'forge.transform.setPosition',
@@ -427,13 +415,12 @@ describe('forge API conformance', () => {
      */
     it('baselines exactly the six 2D templates and no more', () => {
       expect(Object.keys(TEMPLATE_BASELINE).sort()).toEqual([
-        '2d-fighter',
         '2d-metroidvania',
         '2d-puzzle',
         '2d-shmup',
       ]);
       const total = Object.values(TEMPLATE_BASELINE).reduce((n, list) => n + list.length, 0);
-      expect(total).toBe(33);
+      expect(total).toBe(23);
     });
 
     it('calls functions and reads values, never the other way round', () => {

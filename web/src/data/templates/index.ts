@@ -29,8 +29,14 @@ export interface GameTemplate {
   // Scripts keyed by entityId
   scripts: Record<string, { source: string; enabled: boolean }>;
 
-  // Input preset to apply (fps | platformer | topdown | racing)
-  inputPreset?: string;
+  // NO INPUT PRESET. A template used to name a genre here and `loadTemplate`
+  // applied it, replacing the scene's action map with that genre's handful of
+  // bindings — so shipped content could only speak one of four vocabularies,
+  // and a two-player game had no way to give its second player a key (#9764).
+  //
+  // Every scene starts with a complete set of actions, and a template that
+  // wants one of its own declares it in `sceneData.inputBindings`, which is
+  // carried through to the scene. See `2d-fighter` for a template that does.
 }
 
 export interface TemplateThumbnail {

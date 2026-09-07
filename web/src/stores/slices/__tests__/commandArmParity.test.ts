@@ -66,6 +66,11 @@ const UNDISPATCHED_AT_BASELINE = [
   'toggle_physics2d', 'remove_physics2d', 'set_2d_collider_shape',
   'set_2d_body_type', 'create_2d_joint', 'update_2d_joint', 'remove_2d_joint',
   'apply_force2d', 'apply_impulse2d', 'raycast2d', 'get_physics2d',
+  // Armed by #9763. Dispatched from the SCRIPT WORKER, which pushes a command
+  // name into a queue rather than calling dispatchCommand with a literal, so
+  // this scanner cannot see the caller — exactly as for apply_force2d and
+  // apply_impulse2d beside them.
+  'set_linear_velocity_2d', 'set_angular_velocity_2d',
   'enable_physics_debug', 'disable_physics_debug', 'apply_impulse', 'raycast',
   'get_joint', 'set_physics_2d_enabled', 'get_physics_2d', 'get_joint_2d',
   'list_joints_2d', 'apply_force_2d', 'apply_impulse_2d', 'get_terrain',

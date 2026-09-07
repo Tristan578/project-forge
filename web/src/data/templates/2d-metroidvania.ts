@@ -19,7 +19,6 @@ export const METROIDVANIA_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'metroidvania', 'exploration', 'abilities'],
 
-  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,
