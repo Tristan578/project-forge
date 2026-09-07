@@ -222,14 +222,276 @@ describe('vibrate', () => {
   });
 });
 
+/**
+ * SPRITE ANIMATION — the store is read before it is written.
+ *
+ * Each of these four reads the entity's existing component and spreads it, so
+ * the failure mode is not a throw but a component rebuilt without the fields it
+ * had. And each declines silently for an entity that has no such component,
+ * which is right (a script may address an entity before it is set up) and is
+ * also what makes a wrong lookup invisible — hence `ownEntry`.
+ */
+describe('play_sprite_animation', () => {
+  const animator = { spriteSheetId: 'sheet-1', currentClip: 'idle', frameIndex: 7, playing: false, speed: 2 };
+
+  it('starts the named clip from frame zero, keeping the rest of the component', () => {
+    const store = makeStore({ spriteAnimators: { hero: { ...animator } } });
+    run('play_sprite_animation', { entityId: 'hero', clipName: 'run' }, store);
+    expect(store.setSpriteAnimator).toHaveBeenCalledWith('hero', {
+      spriteSheetId: 'sheet-1',
+      currentClip: 'run',
+      frameIndex: 0,
+      playing: true,
+      // Speed is the entity's, NOT reset: a clip change is not a speed change.
+      speed: 2,
+    });
+  });
+
+  it('does nothing for an entity with no animator, but still claims the command', () => {
+    const store = makeStore({ spriteAnimators: {} });
+    const { handled } = run('play_sprite_animation', { entityId: 'hero', clipName: 'run' }, store);
+    expect(handled).toBe(true);
+    expect(store.setSpriteAnimator).not.toHaveBeenCalled();
+  });
+
+  it('ignores a non-string clip name rather than writing it', () => {
+    const store = makeStore({ spriteAnimators: { hero: { ...animator } } });
+    run('play_sprite_animation', { entityId: 'hero', clipName: 42 }, store);
+    expect(store.setSpriteAnimator).not.toHaveBeenCalled();
+  });
+
+  // `spriteAnimators['constructor']` on a bare index read returns an inherited
+  // function, which would then be spread into the store as an animator.
+  it('does not read an inherited key as an existing animator', () => {
+    const store = makeStore({ spriteAnimators: {} });
+    run('play_sprite_animation', { entityId: 'constructor', clipName: 'run' }, store);
+    expect(store.setSpriteAnimator).not.toHaveBeenCalled();
+  });
+});
+
+describe('stop_sprite_animation', () => {
+  it('stops without rewinding, so a resume continues where it stopped', () => {
+    const store = makeStore({
+      spriteAnimators: { hero: { spriteSheetId: 's', currentClip: 'run', frameIndex: 5, playing: true, speed: 1 } },
+    });
+    run('stop_sprite_animation', { entityId: 'hero' }, store);
+    expect(store.setSpriteAnimator).toHaveBeenCalledWith('hero', {
+      spriteSheetId: 's',
+      currentClip: 'run',
+      frameIndex: 5,
+      playing: false,
+      speed: 1,
+    });
+  });
+});
+
+describe('set_sprite_anim_speed', () => {
+  const store = () => makeStore({
+    spriteAnimators: { hero: { spriteSheetId: 's', currentClip: 'run', frameIndex: 3, playing: true, speed: 1 } },
+  });
+
+  it('writes a finite speed', () => {
+    const s = store();
+    run('set_sprite_anim_speed', { entityId: 'hero', speed: 2.5 }, s);
+    expect(s.setSpriteAnimator).toHaveBeenCalledWith('hero', expect.objectContaining({ speed: 2.5 }));
+  });
+
+  it('accepts zero, which is a legitimate speed and not a missing one', () => {
+    const s = store();
+    run('set_sprite_anim_speed', { entityId: 'hero', speed: 0 }, s);
+    expect(s.setSpriteAnimator).toHaveBeenCalledWith('hero', expect.objectContaining({ speed: 0 }));
+  });
+
+  it.each([
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['a numeric string', '2.5'],
+    ['undefined', undefined],
+  ])('refuses %s rather than writing it into the component', (_label, speed) => {
+    const s = store();
+    run('set_sprite_anim_speed', { entityId: 'hero', speed }, s);
+    expect(s.setSpriteAnimator).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `set_sprite_anim_param` — the coercion is the substance.
+ *
+ * A state machine parameter carries its own type and the script supplies a bare
+ * value, so the handler coerces to whatever the parameter already declares. A
+ * wrong coercion writes a `value` of the wrong JavaScript type into a
+ * discriminated union, and every later transition comparing it is silently
+ * false — the animation simply never fires.
+ */
+describe('set_sprite_anim_param', () => {
+  function machineStore(parameters: Record<string, { type: string; value: unknown }>) {
+    return makeStore({
+      animationStateMachines: {
+        hero: { states: {}, transitions: [], currentState: 'idle', parameters } as never,
+      },
+    });
+  }
+
+  it('coerces to a number for a float parameter', () => {
+    const s = machineStore({ speed: { type: 'float', value: 0 } });
+    run('set_sprite_anim_param', { entityId: 'hero', paramName: 'speed', value: '2.5' }, s);
+    expect(s.setAnimationStateMachine).toHaveBeenCalledWith(
+      'hero',
+      expect.objectContaining({ parameters: { speed: { type: 'float', value: 2.5 } } }),
+    );
+  });
+
+  it('refuses a float that does not parse, leaving the previous value in place', () => {
+    const s = machineStore({ speed: { type: 'float', value: 1 } });
+    run('set_sprite_anim_param', { entityId: 'hero', paramName: 'speed', value: 'fast' }, s);
+    expect(s.setAnimationStateMachine).not.toHaveBeenCalled();
+  });
+
+  it('coerces to a boolean for a bool parameter, keeping the declared type', () => {
+    const s = machineStore({ grounded: { type: 'bool', value: false } });
+    run('set_sprite_anim_param', { entityId: 'hero', paramName: 'grounded', value: 1 }, s);
+    expect(s.setAnimationStateMachine).toHaveBeenCalledWith(
+      'hero',
+      expect.objectContaining({ parameters: { grounded: { type: 'bool', value: true } } }),
+    );
+  });
+
+  it('keeps the trigger type rather than collapsing it to bool', () => {
+    const s = machineStore({ jump: { type: 'trigger', value: false } });
+    run('set_sprite_anim_param', { entityId: 'hero', paramName: 'jump', value: 'yes' }, s);
+    expect(s.setAnimationStateMachine).toHaveBeenCalledWith(
+      'hero',
+      expect.objectContaining({ parameters: { jump: { type: 'trigger', value: true } } }),
+    );
+  });
+
+  it('leaves the other parameters untouched', () => {
+    const s = machineStore({
+      speed: { type: 'float', value: 0 },
+      grounded: { type: 'bool', value: true },
+    });
+    run('set_sprite_anim_param', { entityId: 'hero', paramName: 'speed', value: 3 }, s);
+    const written = (s.setAnimationStateMachine as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(written.parameters).toEqual({
+      speed: { type: 'float', value: 3 },
+      grounded: { type: 'bool', value: true },
+    });
+  });
+
+  it('does not create a parameter the machine never declared', () => {
+    const s = machineStore({ speed: { type: 'float', value: 0 } });
+    run('set_sprite_anim_param', { entityId: 'hero', paramName: 'invented', value: 1 }, s);
+    expect(s.setAnimationStateMachine).not.toHaveBeenCalled();
+  });
+
+  // The parameter name comes off a user script and indexes a record.
+  it('does not resolve an inherited key as an existing parameter', () => {
+    const s = machineStore({ speed: { type: 'float', value: 0 } });
+    run('set_sprite_anim_param', { entityId: 'hero', paramName: '__proto__', value: 1 }, s);
+    expect(s.setAnimationStateMachine).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The audio commands are pass-throughs, so what is worth pinning is the
+ * ARGUMENT MAPPING — most of them build an options object out of loose payload
+ * keys, and a misspelled key there drops a setting with no error anywhere.
+ */
 describe('audio commands reach audioManager', () => {
   it('forwards set_music_intensity with the default track', () => {
     run('set_music_intensity', { intensity: 0.75, rampMs: 500 });
     expect(audioManagerMock.setMusicIntensity).toHaveBeenCalledWith(DEFAULT_TRACK, 0.75, 500);
   });
 
-  it('forwards a layer add', () => {
+  it('builds the full layer options object from the flat payload', () => {
+    run('audio_add_layer', {
+      entityId: 'e1',
+      slotName: 'drums',
+      assetId: 'a1',
+      volume: 0.5,
+      pitch: 1.2,
+      loop: true,
+      spatial: false,
+      bus: 'music',
+    });
+    expect(audioManagerMock.addLayer).toHaveBeenCalledWith('e1', 'drums', 'a1', {
+      volume: 0.5,
+      pitch: 1.2,
+      loop: true,
+      spatial: false,
+      bus: 'music',
+    });
+  });
+
+  it('passes the options through as undefined rather than inventing defaults', () => {
     run('audio_add_layer', { entityId: 'e1', slotName: 'drums', assetId: 'a1' });
-    expect(audioManagerMock.addLayer).toHaveBeenCalled();
+    expect(audioManagerMock.addLayer).toHaveBeenCalledWith('e1', 'drums', 'a1', {
+      volume: undefined,
+      pitch: undefined,
+      loop: undefined,
+      spatial: undefined,
+      bus: undefined,
+    });
+  });
+
+  it('forwards a layer removal by entity and slot', () => {
+    run('audio_remove_layer', { entityId: 'e1', slotName: 'drums' });
+    expect(audioManagerMock.removeLayer).toHaveBeenCalledWith('e1', 'drums');
+  });
+
+  it('forwards removing every layer on an entity', () => {
+    run('audio_remove_all_layers', { entityId: 'e1' });
+    expect(audioManagerMock.removeAllLayers).toHaveBeenCalledWith('e1');
+  });
+
+  // From and to, in that order — swapping them crossfades the wrong way and
+  // nothing reports it.
+  it('forwards a crossfade with from before to', () => {
+    run('audio_crossfade', { fromEntityId: 'a', toEntityId: 'b', durationMs: 750 });
+    expect(audioManagerMock.crossfade).toHaveBeenCalledWith('a', 'b', 750);
+  });
+
+  it('forwards a one-shot with its options object', () => {
+    run('audio_play_one_shot', {
+      assetId: 'a1',
+      position: [1, 2, 3],
+      bus: 'sfx',
+      volume: 0.8,
+      pitch: 0.9,
+    });
+    expect(audioManagerMock.playOneShot).toHaveBeenCalledWith('a1', {
+      position: [1, 2, 3],
+      bus: 'sfx',
+      volume: 0.8,
+      pitch: 0.9,
+    });
+  });
+
+  it('forwards a fade in', () => {
+    run('audio_fade_in', { entityId: 'e1', durationMs: 250 });
+    expect(audioManagerMock.fadeIn).toHaveBeenCalledWith('e1', 250);
+  });
+
+  it('forwards a fade out', () => {
+    run('audio_fade_out', { entityId: 'e1', durationMs: 250 });
+    expect(audioManagerMock.fadeOut).toHaveBeenCalledWith('e1', 250);
+  });
+
+  it('forwards a snapshot save with its crossfade duration', () => {
+    run('audio_save_snapshot', { name: 'combat', crossfadeDurationMs: 400 });
+    expect(audioManagerMock.saveSnapshot).toHaveBeenCalledWith('combat', 400);
+  });
+
+  it('forwards a snapshot load with its duration', () => {
+    run('audio_load_snapshot', { name: 'combat', durationMs: 400 });
+    expect(audioManagerMock.loadSnapshot).toHaveBeenCalledWith('combat', 400);
+  });
+
+  it('forwards loop-point detection with its options object', () => {
+    run('audio_detect_loop_points', { assetId: 'a1', maxResults: 3, minLoopDuration: 2 });
+    expect(audioManagerMock.detectLoopPoints).toHaveBeenCalledWith('a1', {
+      maxResults: 3,
+      minLoopDuration: 2,
+    });
   });
 });
