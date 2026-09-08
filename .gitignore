@@ -158,9 +158,21 @@ apps/docs/content/mcp/*.mdx
 # shell, which does not expand it. It contained copies of Windows cache
 # databases. Ignored so a recurrence cannot be swept in by `git add -A`, and
 # named here so the next person to see one knows what it is.
-%SystemDrive%/
-%USERPROFILE%/
-%LOCALAPPDATA%/
+# ANCHORED TO THE REPO ROOT. Unanchored, git matches these at EVERY depth —
+# verified with `git check-ignore -v`, which reported a nested
+# `web/src/%USERPROFILE%/deep/file.txt` as ignored by this rule (found in
+# review). Nobody creates such a directory on purpose, so the practical risk is
+# small, but the incident this guards against happened at the root: a tool run
+# from the repo root wrote an unexpanded environment variable as a path.
+#
+# The narrower rule also fails in the safer direction. A tool run from a
+# SUBDIRECTORY now creates its `%VAR%` directory somewhere these patterns do not
+# cover, where it shows up in `git status` as an untracked oddity rather than
+# being silently ignored — visible is better than hidden for something that
+# should not exist at all.
+/%SystemDrive%/
+/%USERPROFILE%/
+/%LOCALAPPDATA%/
 
 # Codex hook runtime state, mirroring the .claude/hooks rules above.
 #
