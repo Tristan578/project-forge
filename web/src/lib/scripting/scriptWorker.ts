@@ -1628,6 +1628,43 @@ self.onmessage = (e: MessageEvent) => {
           (self as unknown as Worker).postMessage({ type: 'error', entityId: entityB, line: 0, message: `Collision callback error: ${msg_}` });
         }
       }
+
+      // THE 2D CALLBACKS TOO. `forge.physics2d.onCollisionEnter` /
+      // `onCollisionExit` push into these global arrays, and nothing read them
+      // — registered, never invoked, so every 2D collision handler a creator
+      // wrote silently did nothing (found in review). That is the no-error,
+      // no-effect pair this repo keeps finding: the API exists, the callback
+      // is accepted, and the game just never responds to a collision.
+      //
+      // They are GLOBAL rather than per-entity, which is the shape the 2D API
+      // documents, so each collision fires them once per participant — the
+      // handler sees `entityId` as the entity it is reasoning about and
+      // `otherEntityId` as what it hit, in both directions, exactly as the
+      // per-entity 3D callbacks above behave.
+      const key2d = started ? '__collision2dEnterCallbacks' : '__collision2dExitCallbacks';
+      const cbs2d = ((self as unknown as Record<string, unknown>)[key2d] as
+        Array<(event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void>) || [];
+      if (cbs2d.length > 0) {
+        // A COPY, because a handler may unsubscribe itself: the unsubscribe
+        // splices the live array, which would skip the next callback mid-loop.
+        for (const [selfId, otherId] of [[entityA, entityB], [entityB, entityA]] as const) {
+          for (const cb2d of [...cbs2d]) {
+            try {
+              cb2d({
+                entityId: selfId,
+                otherEntityId: otherId,
+                // Resolved from the worker's own snapshot rather than invented.
+                // An entity the worker has not seen yet yields '', which is
+                // honest — the id is always right, the name is best effort.
+                otherEntityName: entityInfos[otherId]?.name ?? '',
+              });
+            } catch (err) {
+              const msg_ = err instanceof Error ? err.message : String(err);
+              (self as unknown as Worker).postMessage({ type: 'error', entityId: selfId, line: 0, message: `Collision callback error: ${msg_}` });
+            }
+          }
+        }
+      }
       break;
     }
 

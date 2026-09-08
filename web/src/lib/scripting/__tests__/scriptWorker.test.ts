@@ -1866,6 +1866,96 @@ describe('scriptWorker', () => {
     );
   });
 
+  // THE 2D CALLBACKS. `forge.physics2d.onCollisionEnter` pushed into a global
+  // array that nothing ever read, so every 2D collision handler a creator wrote
+  // was accepted and never invoked — no error, no effect. These cases fail on
+  // the pre-fix worker.
+  it('COLLISION_EVENT fires 2D enter callbacks for both participants', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionEnter(function(e) {
+        forge.log("2d:" + e.entityId + ">" + e.otherEntityId);
+      });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
+
+    // Global, not per-entity: one collision reaches the handler once per
+    // participant, so a script reasoning about either entity sees its own id
+    // in `entityId` and what it hit in `otherEntityId`.
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: '2d:e1>e2' })
+    );
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: '2d:e2>e1' })
+    );
+  });
+
+  it('COLLISION_EVENT fires 2D exit callbacks, and not the enter ones', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionEnter(function(e) { forge.log("enter:" + e.otherEntityId); });
+      forge.physics2d.onCollisionExit(function(e) { forge.log("exit:" + e.otherEntityId); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: false } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'exit:e2' })
+    );
+    expect(mockPostMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'enter:e2' })
+    );
+  });
+
+  it('a 2D collision handler that unsubscribes itself does not skip its siblings', async () => {
+    const handler = await setupWorker();
+    // The unsubscribe splices the live array. Iterating it directly would skip
+    // the next callback mid-loop, so the loop walks a copy.
+    const code = `function onStart() {
+      var off = forge.physics2d.onCollisionEnter(function(e) {
+        forge.log("first");
+        off();
+      });
+      forge.physics2d.onCollisionEnter(function(e) { forge.log("second"); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'second' })
+    );
+  });
+
+  it('a throwing 2D callback reports an error and does not stop the others', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionEnter(function(e) { throw new Error("boom"); });
+      forge.physics2d.onCollisionEnter(function(e) { forge.log("survived"); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: expect.stringContaining('boom') })
+    );
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'survived' })
+    );
+  });
+
   it('COLLISION_EVENT fires exit callbacks', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {
