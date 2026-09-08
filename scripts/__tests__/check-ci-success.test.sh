@@ -1206,10 +1206,24 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
         # unconditional job added later would silently have no such pin — the
         # reviewer who found the board-verdict-tests gap flagged exactly that.
         # Assert the pin exists, by name, for every job this script asserts.
-        if grep -q "ci.yml ${ujob} job steps:" "$REPO_ROOT/scripts/__tests__/check-npm-audit.test.sh"; then
-          pass "$ujob has a line-for-line step-block pin (partial neuter is caught)"
+        # AN EXECUTABLE CALL, NOT THE LABEL SOMEWHERE IN THE FILE. This was
+        # `grep -q "ci.yml ${ujob} job steps:"`, which matches the label inside
+        # a COMMENTED-OUT assert_steps_block call — so the cheapest way to
+        # green a failing step-block pin (put a `#` in front of it) also
+        # satisfied the assertion written to guarantee that pin exists. Three
+        # reviewers found it independently; one measured the full chain,
+        # deleting a step from board-verdict-tests with both suites still
+        # reporting All tests passed. Lesson #18, at the site added to close a
+        # lesson #18 finding.
+        #
+        # Count executable call lines instead, and require exactly one: two
+        # calls for the same job would mean two expected-step literals that can
+        # disagree.
+        pin_calls="$(grep -cE "^assert_steps_block .*\"ci\.yml ${ujob} job steps:\"" "$REPO_ROOT/scripts/__tests__/check-npm-audit.test.sh" || true)"
+        if [ "$pin_calls" -eq 1 ]; then
+          pass "$ujob has exactly one line-for-line step-block pin (partial neuter is caught)"
         else
-          fail "$ujob is asserted by check_unconditional but has no step-block pin in check-npm-audit.test.sh — removing ONE of its steps leaves every other assertion green, so the job concludes success with its work partly gone. Add an assert_steps_block call naming it."
+          fail "$ujob is asserted by check_unconditional but has $pin_calls executable assert_steps_block call(s) in check-npm-audit.test.sh, expected 1 — removing ONE of its steps leaves every other assertion green, so the job concludes success with its work partly gone. A commented-out call does not count."
         fi
       done <<<"$uncond_jobs"
     fi

@@ -31,6 +31,18 @@
 # filesystems disagree about case (see below) — and NOT a per-file loop: the
 # loop form took minutes on this repo's ~3,500 files, and a gate slow enough to
 # be annoying is a gate someone eventually stops running.
+# WHAT THIS GATE DOES NOT SEE, stated because a limit nobody wrote down reads as
+# coverage (lesson #17's habit applied to the gate's own scope):
+#
+#   * UNTRACKED files. Deliberate — the point is to catch a path at the moment it
+#     becomes everybody's problem, not to police a working copy.
+#   * Files grep treats as BINARY, because both passes use `-I`. A UTF-16
+#     encoded text file is skipped. `scripts/check-source-encoding.sh` rejects
+#     NUL bytes over a fixed extension list, which covers most of this in
+#     practice but not extensionless files or the extensions outside that list —
+#     and it runs in a path-gated job while this one runs unconditionally.
+#     Dropping `-I` would mean scanning every binary in the tree on every run.
+#   * `/root`, deliberately — see the note at the pattern.
 set -uo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -90,6 +102,31 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # an enumerated list, and the standard-system-path case in the suite pins that
 # `Program Files` and `Windows` keep passing.
 #
+# BOTH PATTERNS REQUIRE A LEFT BOUNDARY, and both needed one for the same
+# reason: a single letter followed by a colon is not only a drive letter, and a
+# slash-rooted path is not only a path.
+#
+#   * A bundler URL scheme ends in a letter and a colon, so its authority
+#     separator plus an enumerated root read as a drive-letter path — reported
+#     in review for two module-URL shapes that name no machine at all.
+#   * A URL whose PATH happens to contain a home root matched the POSIX arm for
+#     the same shape reason.
+#
+# Requiring the match to start at the beginning of a line or after a character
+# that cannot continue a name excludes both, while a real path keeps its
+# boundary: quote, space, equals sign, open paren. The suite pins both
+# directions, because a gate that reddens a PR over a sourcemap comment is one
+# somebody switches off.
+#
+# THE COLON-LESS SPELLINGS OF THE SAME PATH COUNT TOO. Git Bash, WSL and Cygwin
+# each render a Windows drive as a leading path segment instead of a letter and
+# a colon, and requiring the colon meant those escaped entirely — not the
+# documented "a root nobody has thought of" trade-off, because the ROOT is in
+# the list above; only the spelling was invisible (found in review). This repo
+# is developed under Git Bash on Windows, so that is the form a contributor's
+# own shell reports and therefore the form they paste into a doc. The left
+# boundary is what keeps the single-letter segment from matching a URL path.
+#
 # THE POSIX SIDE DOES NOT REQUIRE A TRAILING COMPONENT. Each alternative used to
 # end with a slash, so a `cd` into a home directory with nothing after it — the
 # exact form the two skills that motivated this gate used — matched nothing,
@@ -109,16 +146,34 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # adding it reported seven container `HOME` settings in the Playwright skills,
 # where that path is portable by construction, plus a URL whose path component
 # happened to spell it. This gate is for paths that name ONE machine.
-WIN_PATTERN='[A-Za-z]:[\\/]+(Users|repos|dev|src|code|work|workspace|projects|git)[\\/]+'
-POSIX_PATTERN='(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)([^A-Za-z0-9._-]|$)'
+#
+# A CONTAINER HOME UNDER `/home/` IS STILL REPORTED, and that is not the same
+# call. `/root` is one fixed string with no variable part, so excluding it costs
+# nothing and can never hide a person's home. A container's service account
+# under the Linux home root is the SAME SHAPE as a contributor's own home — no
+# pattern can tell them apart, and excluding the shape would blind the gate to
+# the case it exists for. (Named by shape, not by example: this gate reads its
+# own source, and spelling them out is what reddened this very comment.) So they are reported, and the allowlist takes them if one ever
+# lands, with a reason saying which image it belongs to. None is in the tree
+# today; the suite pins the behaviour so the choice stays deliberate rather than
+# becoming a surprise.
+WIN_PATTERN='(^|[^A-Za-z0-9])([A-Za-z]:[\\/]+|/(mnt/|cygdrive/)?[A-Za-z]/)(Users|repos|dev|src|code|work|workspace|projects|git)[\\/]+'
+POSIX_PATTERN='(^|[^A-Za-z0-9._-])(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)([^A-Za-z0-9._-]|$)'
 
 # Files where such a string is legitimate. Each entry states why, and each entry
 # EXEMPTS SOMETHING TODAY — an allowlist entry that covers no file is not
 # harmless, it is unreviewed breadth waiting for a file to wander into it. Six
-# entries were pruned for exempting nothing: `docs/audits/`, `.gitignore`, the
-# unanchored `check-vitest-exit`, `db-migration-guard` and `sentry-to-test-stub`
-# (whose only matches were `/home/runner/` lines the filter below already
-# strips), and THIS SCRIPT.
+# entries were pruned for exempting nothing: `.gitignore`, the unanchored
+# `check-vitest-exit`, `db-migration-guard` and `sentry-to-test-stub` (whose
+# only matches were runner-HOME lines the filter below already strips), and
+# THIS SCRIPT.
+#
+# `docs/audits/` was ALSO on that list and is back, as a live entry below. It
+# exempted nothing when the pattern required a trailing path component; once
+# that was fixed it exempted a real hit — a contributor's home directory quoted
+# in a dated audit transcript. The list said "pruned" for two commits after it
+# returned (found in review), which is the restated-subject drift this file's
+# own lesson #18 is about, in the paragraph explaining pruning.
 #
 # That last one is worth stating, because keeping it was the tempting choice.
 # The patterns are written so they do not match their own text, so the entry
@@ -227,6 +282,19 @@ compile_check "POSIX_PATTERN" "$POSIX_PATTERN"
 for entry in "${ALLOW_ENTRIES[@]}"; do
   compile_check "ALLOW_ENTRIES" "$entry"
 done
+
+# A TRACKED FILE NAMED EXACTLY `-` CANNOT BE SCANNED. `--` fixed the
+# filename-as-option class, but `-` is not an option: it is grep's stdin
+# operand, so grep reads standard input instead of that file and the file is
+# silently skipped — the comment below claimed the class was closed, and it was
+# not (found in review). It cannot be scanned, so it is reported rather than
+# passed over in silence. Renaming it is the fix; nothing legitimate in a
+# repository is named `-`.
+if git ls-files | grep -qx -- '-'; then
+  echo "::error file=-::a tracked file named '-' cannot be scanned: grep reads it as standard input rather than as a path. Rename it."
+  echo "::error::1 unscannable file name. A file called '-' is grep's stdin operand, so this gate cannot see its contents."
+  exit 1
+fi
 
 tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 
@@ -347,13 +415,15 @@ if [ -n "$hits" ]; then
   # case, not the edge one. Someone would then see ten markers, no total, and no
   # sign that more exist: they fix ten, push, and meet a second round with
   # nothing explaining why the first looked complete (found in review).
+  # THE REMEDIATION GOES IN THE ANNOTATION, not only in the log. A plain `echo`
+  # renders in the raw step output; the Checks tab and the PR inline markers show
+  # only the workflow commands. Someone opening the failed check from the PR page
+  # was getting a count and file markers with no next step (found in review) —
+  # the same argument that put the summary above the per-file loop.
   count="$(printf '%s\n' "$hits" | grep -c . || true)"
-  echo "::error::${count} machine-local absolute path(s) in tracked files."
-  echo "Use a repo-relative path, \$(git rev-parse --show-toplevel), or an environment"
-  echo "variable. A tool that genuinely needs a machine-local path belongs in a personal"
-  echo "config that is not checked in, not in a tracked one — see CONTRIBUTING.md"
-  echo "(\"Machine-local absolute paths\"), which also gives the command to run this"
-  echo "gate locally and how to request an allowlist entry."
+  echo "::error::${count} machine-local absolute path(s) in tracked files. Run \`bash scripts/check-portable-paths.sh\` locally to reproduce. Use a repo-relative path, \$(git rev-parse --show-toplevel), or an environment variable; a tool that genuinely needs a machine-local path belongs in an untracked personal config. If the literal is legitimate — a test ABOUT path handling — see CONTRIBUTING.md \"Machine-local absolute paths\" for the allowlist rules."
+  echo "See CONTRIBUTING.md (\"Machine-local absolute paths\") for the allowlist rules,"
+  echo "the local command, and what an entry's reason has to say."
 
   echo "$hits" | while IFS= read -r line; do
     [ -n "$line" ] || continue

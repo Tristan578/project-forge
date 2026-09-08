@@ -512,7 +512,12 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    # Raised from 30 after review measured 26:52 on this branch — ~3 minutes
+    # of headroom on a job that is in ci-success's needs:, so a tip-over blocks
+    # every PR rather than one. The delta against main's ~22 minutes is mostly
+    # runner variance rather than any single suite, which is the argument for
+    # headroom rather than for hunting a culprit.
+    timeout-minutes: 45
     permissions:
       contents: read
     defaults:

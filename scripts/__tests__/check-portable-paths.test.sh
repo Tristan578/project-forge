@@ -69,7 +69,11 @@ make_repo() {
 # add_file <repo> <relative path> <content>
 add_file() {
   local dir="$1" rel="$2" body="$3"
-  mkdir -p "$dir/$(dirname "$rel")"
+  # `--` on dirname for the same reason the gate passes it to grep: a fixture
+  # named for that very bug (`-dash.md`) otherwise reaches dirname as options,
+  # which printed `dirname: unknown option -- d` on every passing run (found in
+  # review). Harmless only because that fixture sits at the repo root.
+  mkdir -p "$dir/$(dirname -- "$rel")"
   printf '%s\n' "$body" > "$dir/$rel"
 }
 
@@ -155,6 +159,73 @@ done
 d="$(make_repo win_system)"
 add_file "$d" "docs/setup.md" "Install to C:\\Program Files\\MSVC and add C:\\Windows\\System32 to PATH."
 run_case "a standard Windows system path passes" 0 "$d"
+
+# --- the same checkout, spelled the way this repo's own shell spells it -------
+#
+# `WIN_PATTERN` required a drive letter and a colon, so the colon-less renderings
+# of the SAME path escaped entirely (found in review). This is not the
+# documented "a root nobody has thought of still escapes" trade-off — `repos` is
+# in the enumerated list; only the spelling was invisible. It matters here
+# because this repo is developed under Git Bash on Windows, where that is the
+# form a contributor's shell reports and therefore the form they paste.
+for spelling in "/d/repos" "/mnt/d/repos" "/cygdrive/d/repos"; do
+  d="$(make_repo "msys_$(printf '%s' "$spelling" | tr -d '/')")"
+  add_file "$d" "docs/setup.md" "Run it from ${spelling}/project-forge first."
+  run_case "a checkout spelled ${spelling}/... fails" 1 "$d"
+done
+
+# The boundary still holds: a URL path with a single-letter segment is not one
+# of those spellings.
+d="$(make_repo msys_boundary)"
+add_file "$d" "docs/links.md" "see https://example.com/a/src/index.html for the file"
+run_case "a URL path with a single-letter segment is not an MSYS checkout" 0 "$d"
+
+# --- a tracked file named exactly "-" cannot be scanned ----------------------
+#
+# `--` ends OPTION parsing, so it fixed the `-dash.md` class — but `-` is not an
+# option, it is grep's stdin operand, and no amount of `--` reaches it. The file
+# was silently skipped while the comment claimed the class was closed (found in
+# review). It cannot be scanned, so it is reported rather than passed over.
+d="$(make_repo dash_only)"
+add_file "$d" "-" "Run it from $LINUX_PATH first."
+run_case "a tracked file named '-' is reported rather than skipped" 1 "$d"
+
+# --- shapes that LOOK like machine-local paths and are not ---------------------
+#
+# Both patterns needed a left boundary, found in review, neither live in the
+# tree. A gate that reddens a PR over a sourcemap comment is one somebody
+# switches off, so both directions are pinned here.
+
+# A bundler URL scheme ends in a letter and a colon, so `<scheme>://<root>/`
+# read as a drive-letter path. The scheme names no machine.
+d="$(make_repo scheme_not_drive)"
+add_file "$d" "web/src/app.js" "import x from 'webpack://src/index.js'
+//# sourceMappingURL=vite:/src/main.ts"
+run_case "a bundler URL scheme is not a Windows drive letter" 0 "$d"
+
+# A URL whose PATH contains a home root is a route, not a home directory — the
+# same argument as the lowercase /users/ case above, one component along.
+d="$(make_repo url_path_home)"
+add_file "$d" "docs/links.md" "see https://example.com/home/dashboard for the panel"
+run_case "a URL path containing a home root is not a home directory" 0 "$d"
+
+# ...and the boundary did not cost the real thing: the same paths with an
+# ordinary delimiter in front are still reported.
+d="$(make_repo boundary_real)"
+add_file "$d" "docs/setup.md" "Run: cd $LINUX_HOME && npm ci"
+add_file "$d" "src/config.toml" "command = \"$WIN_PATH\""
+run_case "a real path after a quote or a space is still reported" 1 "$d"
+
+# A CONTAINER HOME IS STILL REPORTED, deliberately, and this differs from the
+# `/root` decision above: `/root` is one fixed string with no variable part, so
+# excluding it can never hide a person's home, while a container user under
+# `/home/` is the SAME SHAPE as a contributor's home and no pattern can tell
+# them apart. Excluding the shape would blind the gate to the case it exists
+# for. If one lands, it takes an allowlist entry naming its image.
+d="$(make_repo container_home)"
+add_file "$d" ".github/workflows/x.yml" "  env:
+    HOME: /home/node"
+run_case "a container HOME under /home/ is still reported (unlike /root)" 1 "$d"
 
 # --- the three ways a POSIX home path hid from this gate ----------------------
 #
@@ -481,6 +552,32 @@ else
   FAIL=$((FAIL + 1)); echo "  FAIL the report did not count the hits"
 fi
 
+# --- every allowlist entry is anchored ---
+#
+# The sibling cases above prove three specific entries stopped over-matching.
+# They cannot cover an entry nobody has written yet, and one of the four the
+# last round anchored — `provision-billing-meter` — had no case at all: reverting
+# it to a bare substring left the suite green (found in review). This closes the
+# class instead of adding a fourth case: an entry must start with `^` and end
+# with `$` or `/`, so it names a file or a directory rather than a substring any
+# future path can wander into.
+# THE CUT ACCEPTS ANY SPELLING BASH DOES. It used to require exactly two spaces
+# and single quotes, so a double-quoted entry — identical at runtime, and an
+# over-matching substring — was invisible to it and the suite stayed green
+# (found in review). Strip either quote style at any indent, and drop trailing
+# comments.
+allow_block="$(sed -n '/^ALLOW_ENTRIES=(/,/^)/p' "$SCRIPT")"
+anchor_entries="$(printf '%s\n' "$allow_block" | sed -e '1d' -e '$d' \
+  | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+  | grep -v '^$' \
+  | sed -e "s/^'\(.*\)'$/\1/" -e 's/^"\(.*\)"$/\1/')"
+
+# Hoisted above BOTH consumers — the anti-rot case below and the anchoring
+# checks further down — so there is one cut of this array rather than two
+# that can drift. They already had: one accepted either quote style, the
+# other only single, so a benign requote reddened the suite with a message
+# naming the wrong cause (found in review).
+
 # --- the allowlist reports its own rot ---
 #
 # An entry that exempts nothing is unreviewed breadth waiting for an unrelated
@@ -505,7 +602,13 @@ fi
 # assertion could not fail and reported green either way (found in review).
 # Third stale literal in this PR, so: ask the gate which of its entries covers
 # the fixture, and assert the note does not name THAT.
-rot_entries="$(grep -oE "^[[:space:]]*'[^']*'" "$SCRIPT" | sed -e "s/^[[:space:]]*'//" -e "s/'$//")"
+# SCOPED TO THE ARRAY, and to the same quoting rule the anchoring cut uses.
+# This harvested every single-quoted string in the whole script, ALLOW_REASONS
+# included, so the vacuity guard below could be satisfied by a REASON matching
+# the fixture path — the one thing it exists to rule out — and a benign requote
+# of an entry reddened the suite with a message naming the wrong cause (found in
+# review). `anchor_entries` above already derives this array correctly; reuse it.
+rot_entries="$anchor_entries"
 rot_covering=""
 while IFS= read -r e; do
   [ -n "$e" ] || continue
@@ -598,26 +701,6 @@ for pat_var in WIN_PATTERN POSIX_PATTERN; do
   fi
 done
 
-# --- every allowlist entry is anchored ---
-#
-# The sibling cases above prove three specific entries stopped over-matching.
-# They cannot cover an entry nobody has written yet, and one of the four the
-# last round anchored — `provision-billing-meter` — had no case at all: reverting
-# it to a bare substring left the suite green (found in review). This closes the
-# class instead of adding a fourth case: an entry must start with `^` and end
-# with `$` or `/`, so it names a file or a directory rather than a substring any
-# future path can wander into.
-# THE CUT ACCEPTS ANY SPELLING BASH DOES. It used to require exactly two spaces
-# and single quotes, so a double-quoted entry — identical at runtime, and an
-# over-matching substring — was invisible to it and the suite stayed green
-# (found in review). Strip either quote style at any indent, and drop trailing
-# comments.
-allow_block="$(sed -n '/^ALLOW_ENTRIES=(/,/^)/p' "$SCRIPT")"
-anchor_entries="$(printf '%s\n' "$allow_block" | sed -e '1d' -e '$d' \
-  | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-  | grep -v '^$' \
-  | sed -e "s/^'\(.*\)'$/\1/" -e 's/^"\(.*\)"$/\1/')"
-
 anchor_bad=""
 while IFS= read -r entry; do
   [ -n "$entry" ] || continue
@@ -626,26 +709,47 @@ while IFS= read -r entry; do
     *) anchor_bad="$anchor_bad $entry" ;;
   esac
 done <<<"$anchor_entries"
-# NO ALTERNATION AND NO OPTIONAL GROUP IN AN ENTRY. The anti-rot flag is per
-# ENTRY, so `^docs/(reviews|coverage|audits)/` stays "used" while one of its
-# three branches goes dead — the dead branch is then unreviewed breadth that
-# nothing can report, which is the exact argument the gate makes about whole
-# entries (found in review; latent rather than live, all branches matched at the
-# time). Splitting entries makes the note exact by construction, and this rule
-# is what keeps them split, since the alternative was parsing these regexes to
-# find their branches.
-group_bad=""
+# AN ENTRY MUST COVER ONE SUBJECT, AND THAT IS MEASURED, NOT PATTERN-MATCHED.
+# The first version of this rule tested for two byte sequences, `|` and `)?`.
+# Everything between the anchors was unconstrained, so `^web/.*\.ts$` passed it
+# — one plausible-looking line silencing the gate across the entire web
+# TypeScript tree, with the anti-rot note unable to report it because several
+# files there already produce exempted hits (found in review, measured
+# end-to-end). Widening the denylist to `*?+[]{}` is the treadmill
+# check-npm-audit.test.sh already measured its way off: "the guard was a
+# blacklist of one spelling".
+#
+# So ask git. A `$`-anchored entry must match exactly ONE tracked file; a `/`
+# terminated entry is a directory prefix and may match many, which is the shape
+# the gate's own rule sanctions. This is derived from the tree at run time, so
+# no regex construct can slip past it — `.*`, `[a-z]+`, `s?` and `(a|b)` are all
+# caught by what they MATCH rather than by how they are spelled.
+breadth_bad=""
+breadth_checked=0
+tracked_all="$(cd "$ROOT" && git ls-files)"
 while IFS= read -r entry; do
   [ -n "$entry" ] || continue
+  breadth_checked=$((breadth_checked + 1))
+  n="$(printf '%s\n' "$tracked_all" | grep -cE "$entry" || true)"
   case "$entry" in
-    *'|'*)  group_bad="$group_bad $entry" ;;
-    *')?'*) group_bad="$group_bad $entry" ;;
+    *'$')
+      [ "$n" -le 1 ] || breadth_bad="$breadth_bad ${entry}(matches ${n} files)"
+      ;;
+    *'/')
+      # A directory prefix legitimately covers many files; it must still cover
+      # a directory rather than a scatter, which the `/` terminator enforces.
+      ;;
+    *)
+      breadth_bad="$breadth_bad ${entry}(neither a file nor a directory)"
+      ;;
   esac
 done <<<"$anchor_entries"
-if [ -n "$group_bad" ]; then
-  FAIL=$((FAIL + 1)); echo "  FAIL allowlist entr(ies) cover several files through one pattern —$group_bad. The anti-rot note is per entry, so such an entry stays 'used' while one of its branches goes dead and that branch becomes breadth nothing can report. Split it into one entry per file or directory, each with its own reason."
+if [ "$breadth_checked" -eq 0 ]; then
+  FAIL=$((FAIL + 1)); echo "  FAIL the breadth check inspected no allowlist entries — the cut is broken, so it passed having measured nothing"
+elif [ -n "$breadth_bad" ]; then
+  FAIL=$((FAIL + 1)); echo "  FAIL allowlist entr(ies) cover more than one subject —$breadth_bad. The anti-rot note is per entry, so such an entry stays 'used' while part of what it covers goes dead, and that part becomes breadth nothing can report. A file entry must match exactly one tracked file; a directory entry must end in /."
 else
-  PASS=$((PASS + 1)); echo "  ok   no allowlist entry hides several files behind an alternation or optional group"
+  PASS=$((PASS + 1)); echo "  ok   each of the $breadth_checked allowlist entries covers exactly one file or one directory"
 fi
 
 if [ -n "$anchor_bad" ]; then

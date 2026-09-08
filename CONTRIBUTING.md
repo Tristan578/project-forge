@@ -374,21 +374,33 @@ you commit becomes everyone's path.
 
 Some files are *about* path handling — a test asserting that a Windows absolute
 path is accepted, a generator whose fixtures quote real paths. Those are
-exempted by an allowlist in the gate, and each entry carries a reason and is
-anchored to the exact file it covers. Add an entry in the same PR as the file
-that needs it, with a one-line reason saying why the literal is the subject
-rather than a path anyone follows.
+exempted by an allowlist in `scripts/check-portable-paths.sh`. Add the exemption
+in the same PR as the file that needs it.
 
-Two things to know about that allowlist, both of which will otherwise surprise
-you:
+The gate enforces four rules on that allowlist, and its suite fails the build on
+each. All four will otherwise surprise you, so they are written out here rather
+than left to be discovered one CI round at a time:
 
-- **Anchor the entry to the file.** A bare substring exempts every path
+- **The entry and its reason are two parallel arrays.** `ALLOW_ENTRIES` and
+  `ALLOW_REASONS`, edited at the **same index**. A reason is not an inline
+  comment on the entry — trailing comments are stripped — and a length mismatch
+  exits 2 with `ALLOW_ENTRIES and ALLOW_REASONS differ in length`.
+- **The entry must be anchored**: it starts with `^` and ends with either `$`
+  (one file) or `/` (one directory). A bare substring exempts every path
   containing it — an entry named for a test once exempted its production sibling
   too.
+- **One entry covers one subject.** A `$`-anchored entry must match exactly one
+  tracked file, measured against `git ls-files`; a `/` entry covers a directory.
+  No alternation, no optional group, and nothing like `.*` — because the
+  staleness notice below is per entry, so an entry covering two files stays
+  "used" while one of them goes dead.
 - **An entry that stops exempting anything fails the build.** The gate emits a
-  `::notice::`, and the gate's own suite asserts the real tree emits none. So if
-  you delete or rename the last file an entry covered, prune the entry in the
-  same change.
+  `::notice::`, and its suite asserts the real tree emits none. If you delete or
+  rename the last file an entry covered, prune the entry in the same change.
+
+Write the reason so the next reviewer can judge the exemption without opening
+the file: say why the literal is the *subject* of that file rather than a path
+anyone follows.
 
 ### Allowlisted homes for retired IDs
 
