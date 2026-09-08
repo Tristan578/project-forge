@@ -35,6 +35,10 @@ WIN_PATH="D:${SLASH:-/}repos${SLASH:-/}into-rust${SLASH:-/}tool.exe"
 MAC_PATH="/Users/somebody/project-forge"
 LINUX_PATH="/home/somebody/project-forge"
 RUNNER_PATH="/home/runner/work/project-forge"
+# The Git Bash / WSL / Cygwin rendering of a Windows drive, which only
+# MSYS_PATTERN matches — so the malformed-pattern case for that arm has a
+# fixture no other arm can catch.
+MSYS_PATH="/c/repos/into-rust/tool.exe"
 # The same two homes with NO trailing component — the shape that escaped the
 # pattern until review found it.
 MAC_HOME="/Users/somebody"
@@ -179,12 +183,23 @@ run_case "a home path behind a diff removed-line marker is reported" 1 "$d"
 # non-alphanumeric, which caught URL paths, relative imports and flag values
 # (found in review). Real drive letters are not `a` or `b`, and a real MSYS path
 # does not follow a slash or a dot.
+# A REAL DRIVE LETTER, because `a` and `b` are excluded by the drive class and
+# a fixture built from them exercises nothing (found in review: deleting the
+# boundary class left both these cases green). These shapes are excluded by the
+# BOUNDARY: a single-letter segment after a slash or a dot is a URL path or a
+# relative import, not a drive.
 d="$(make_repo msys_false_positives)"
-add_file "$d" "docs/links.md" "see https://example.com//a/src/index.html
-and https://gitlab.com/g/p/-/a/src/f
-import m from './a/src/mod'
-run (/a/code/x) or --prefix=/a/dev/x"
-run_case "URL paths and flag values are not MSYS checkouts" 0 "$d"
+add_file "$d" "docs/links.md" "see https://example.com//c/src/index.html
+import m from './c/src/mod'"
+run_case "a single-letter segment after a slash or dot is not an MSYS drive" 0 "$d"
+
+# ...and the shapes that ARE plausible MSYS paths are reported, deliberately.
+# A flag value or a parenthesised path is exactly where such a path gets pasted,
+# so these are matches rather than false positives — stated as a case so the
+# choice is visible.
+d="$(make_repo msys_flag_value)"
+add_file "$d" "docs/build.md" "run with --prefix=/c/dev/x, or (/c/code/x)"
+run_case "an MSYS path in a flag value or parentheses is reported" 1 "$d"
 
 # --- the same checkout, spelled the way this repo's own shell spells it -------
 #
@@ -203,8 +218,16 @@ done
 # The boundary still holds: a URL path with a single-letter segment is not one
 # of those spellings.
 d="$(make_repo msys_boundary)"
-add_file "$d" "docs/links.md" "see https://example.com/a/src/index.html for the file"
+add_file "$d" "docs/links.md" "see https://example.com/c/src/index.html for the file"
 run_case "a URL path with a single-letter segment is not an MSYS checkout" 0 "$d"
+
+# S1: a diff's removed-line marker must not hide an MSYS path either. The POSIX
+# arm was fixed for this; the MSYS arm kept the stricter class and still hid the
+# spelling this repo's own shell prints (found in review).
+d="$(make_repo msys_diff_marker)"
+add_file "$d" "docs/fix.patch" "-/c/repos/project-forge/hooks/sync.sh
++\$(git rev-parse --show-toplevel)/hooks/sync.sh"
+run_case "an MSYS path behind a diff removed-line marker is reported" 1 "$d"
 
 # --- a tracked file named exactly "-" cannot be scanned ----------------------
 #
@@ -592,6 +615,21 @@ fi
 # over-matching substring — was invisible to it and the suite stayed green
 # (found in review). Strip either quote style at any indent, and drop trailing
 # comments.
+# THE CUT IS ONLY COMPLETE IF THE ARRAY IS ASSIGNED ONCE. Every guard below
+# reads this one block, so `ALLOW_ENTRIES+=('^web/scripts/')` further down the
+# file — ordinary bash, no regex trick — was invisible to all of them, including
+# the vacuity cross-check, whose two counts both derive from this same block and
+# therefore miss identically (found in review). Assert the property that makes
+# the parse trustworthy rather than trying to parse every spelling.
+for arr in ALLOW_ENTRIES ALLOW_REASONS; do
+  assigns="$(grep -cE "^[[:space:]]*${arr}[+]?=" "$SCRIPT" || true)"
+  if [ "$assigns" -eq 1 ]; then
+    PASS=$((PASS + 1)); echo "  ok   $arr is assigned exactly once (so reading its literal is reading the array)"
+  else
+    FAIL=$((FAIL + 1)); echo "  FAIL $arr has $assigns assignment(s), expected exactly 1 — every check below reads the first literal block, so a second assignment (\`+=\` or a re-assignment) adds entries none of them inspect, while they report on the ones they can see"
+  fi
+done
+
 allow_block="$(sed -n '/^ALLOW_ENTRIES=(/,/^)/p' "$SCRIPT")"
 anchor_entries="$(printf '%s\n' "$allow_block" | sed -e '1d' -e '$d' \
   | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
@@ -704,13 +742,13 @@ fi
 # could not show the failure it exists for. Measured with the isolating
 # fixtures: broken pattern + no compile pass -> `no machine-local absolute
 # paths`, exit 0, on a tree that provably contains one.
-for pat_var in WIN_PATTERN POSIX_PATTERN; do
+for pat_var in WIN_PATTERN MSYS_PATTERN POSIX_PATTERN; do
   d="$(make_repo "bad_${pat_var}")"
-  if [ "$pat_var" = "WIN_PATTERN" ]; then
-    add_file "$d" "docs/setup.md" "Clone to $WIN_PATH first."
-  else
-    add_file "$d" "docs/setup.md" "Run it from $MAC_PATH first."
-  fi
+  case "$pat_var" in
+    WIN_PATTERN)   add_file "$d" "docs/setup.md" "Clone to $WIN_PATH first." ;;
+    MSYS_PATTERN)  add_file "$d" "docs/setup.md" "Run it from $MSYS_PATH first." ;;
+    *)             add_file "$d" "docs/setup.md" "Run it from $MAC_PATH first." ;;
+  esac
   broken_pat="$TMP/broken-${pat_var}.sh"
   awk -v v="$pat_var" 'BEGIN { q = sprintf("%c", 39) }
        $0 ~ "^" v "=" { print v "=" q "a[" q; next }

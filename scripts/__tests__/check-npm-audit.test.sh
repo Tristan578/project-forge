@@ -1596,6 +1596,14 @@ assert_block_lines_exact() {
 $delta"
     return
   fi
+  # THE LABEL IS RECORDED HERE, on the success path of the COMPARISON — not on
+  # entry to the assert_steps_block wrapper, where it proved only that the
+  # wrapper was called. Replacing the comparison with a no-op neutered all six
+  # step-block pins while the meta-assertion at the end of this suite still
+  # reported success (found in review), one frame deeper than the defect that
+  # assertion was added to close.
+  STEPS_BLOCK_RAN="$STEPS_BLOCK_RAN
+$2"
   pass "$2: the block is exactly the $(grep -c '' <<<"$actual") expected lines (nothing can be appended to it, inserted into it or rewritten inside it past the pins on it)"
 }
 readonly -f assert_block_lines_exact
@@ -1640,9 +1648,10 @@ readonly -f assert_block_lines_exact
 # invisible to the pin. That is a comment to YAML and to the shell of a `run:`
 # body alike; it would only matter for a line written verbatim into a file
 # where a leading `#` is load-bearing, which nothing here does.
-# Every call appends its label here, so a call that is commented out, wrapped in
-# `if false`, or never reached leaves a gap the assertion at the end of this
-# suite reports. Checking that a line LOOKS like a call cannot see any of those.
+# Each label is appended by assert_block_lines_exact when its comparison RUNS
+# and matches — not by the wrapper on entry. A call that is commented out,
+# wrapped in `if false`, never reached, or whose comparison was replaced by a
+# no-op all leave a gap the assertion at the end of this suite reports.
 STEPS_BLOCK_RAN=""
 
 assert_steps_block() {
@@ -1652,8 +1661,6 @@ assert_steps_block() {
   # Reading it one frame deeper (inside the helper) would name line "$LINENO"
   # below for all five pins, which is plumbing with nothing to edit.
   local site="${BASH_LINENO[0]}"
-  STEPS_BLOCK_RAN="$STEPS_BLOCK_RAN
-$2"
   blk="$(awk "/^    [\"']?steps[\"']?[[:space:]]*:/{f=1;print;next} f && \$0 != \"\" && !/^      /{exit} f{print}" <<<"$1")"
   assert_block_lines_exact "$blk" "$2" "$3" "the per-step pins cover only the steps they NAME, so a step added beside them -- or a one-line edit to an unpinned sibling such as \`npm ci\` -- runs arbitrary code before the first audit while every named step stays byte-identical" "$site"
 }

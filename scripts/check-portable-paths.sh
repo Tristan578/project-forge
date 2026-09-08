@@ -138,11 +138,20 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 #
 # It is a SEPARATE pattern because it needs a stricter left boundary than the
 # drive-letter form. "Any single-letter segment after a non-alphanumeric" also
-# describes a URL path, a relative import and a flag value — all reported in
-# review. So: not after a slash or a dot, and not `a` or `b`, which are floppy
-# drives nobody clones onto. The remaining overlap is a URL that spells a real
-# drive letter and an enumerated root, which is the cost of catching the
-# spelling this repo's own shell prints.
+# describes a URL path and a relative import — both reported in review. So: not
+# after a slash or a dot, and not `a` or `b`, which are floppy drives nobody
+# clones onto.
+#
+# `-` IS ALLOWED as a boundary, deliberately, and it is the one exclusion that
+# was wrong: excluding it hid this exact spelling behind a diff's removed-line
+# marker, which is the same hole the POSIX arm had and the same tracked-patch
+# case (found in review). The cost is a URL path shaped `/-/<drive>/<root>/`,
+# which needs a real drive letter and an enumerated root to collide; the diff
+# case is the likelier of the two by a wide margin, and it hides a path rather
+# than reporting a portable one.
+#
+# A flag value or a parenthesised path IS reported, deliberately — that is
+# exactly where such a path gets pasted — and the suite says so as a case.
 #
 # BOTH POSIX AND WINDOWS ARMS USE THE SAME LEFT-BOUNDARY CLASS. They did not:
 # the POSIX arm also excluded `.`, `_` and `-`, so a home path behind a diff's
@@ -180,7 +189,7 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # today; the suite pins the behaviour so the choice stays deliberate rather than
 # becoming a surprise.
 WIN_PATTERN='(^|[^A-Za-z0-9])[A-Za-z]:[\\/]+(Users|repos|dev|src|code|work|workspace|projects|git)[\\/]+'
-MSYS_PATTERN='(^|[^A-Za-z0-9./-])/(mnt/|cygdrive/)?[c-zC-Z]/(Users|repos|dev|src|code|work|workspace|projects|git)/'
+MSYS_PATTERN='(^|[^A-Za-z0-9./])/(mnt/|cygdrive/)?[c-zC-Z]/(Users|repos|dev|src|code|work|workspace|projects|git)/'
 POSIX_PATTERN='(^|[^A-Za-z0-9])(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)([^A-Za-z0-9._-]|$)'
 
 # Files where such a string is legitimate. Each entry states why, and each entry
