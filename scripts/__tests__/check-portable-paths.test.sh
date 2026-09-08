@@ -160,6 +160,32 @@ d="$(make_repo win_system)"
 add_file "$d" "docs/setup.md" "Install to C:\\Program Files\\MSVC and add C:\\Windows\\System32 to PATH."
 run_case "a standard Windows system path passes" 0 "$d"
 
+# --- a diff's removed-line marker is not a boundary that hides a path ---------
+#
+# The POSIX arm excluded `.`, `_` and `-` from its left boundary while the
+# Windows arm excluded only alphanumerics, so a `-` prefix hid a home path from
+# one arm and not the other. In a tracked patch or a doc quoting `git diff`, the
+# ADDED line was reported and the REMOVED line — the machine-local path being
+# taken out — was invisible (found in review). The two arms now use the same
+# boundary class.
+d="$(make_repo diff_marker)"
+add_file "$d" "docs/fix.patch" "-${MAC_HOME}/project-forge
++\$(git rev-parse --show-toplevel)"
+run_case "a home path behind a diff removed-line marker is reported" 1 "$d"
+
+# --- an MSYS spelling is a path, not any single-letter segment ----------------
+#
+# The colon-less arm matched whenever a single-letter segment followed any
+# non-alphanumeric, which caught URL paths, relative imports and flag values
+# (found in review). Real drive letters are not `a` or `b`, and a real MSYS path
+# does not follow a slash or a dot.
+d="$(make_repo msys_false_positives)"
+add_file "$d" "docs/links.md" "see https://example.com//a/src/index.html
+and https://gitlab.com/g/p/-/a/src/f
+import m from './a/src/mod'
+run (/a/code/x) or --prefix=/a/dev/x"
+run_case "URL paths and flag values are not MSYS checkouts" 0 "$d"
+
 # --- the same checkout, spelled the way this repo's own shell spells it -------
 #
 # `WIN_PATTERN` required a drive letter and a colon, so the colon-less renderings
@@ -727,17 +753,43 @@ done <<<"$anchor_entries"
 breadth_bad=""
 breadth_checked=0
 tracked_all="$(cd "$ROOT" && git ls-files)"
+# A directory entry covers a set someone has to be able to review. The three
+# real ones cover 3, 1 and 2 files; a subtree entry covering the CI self-defense
+# suites covered 47 and passed, because this arm used to be an EMPTY case branch
+# while the PASS line claimed it had been measured (found in review). Ten leaves
+# room for a directory to grow and still refuses a subtree; past it, name the
+# files.
+readonly BREADTH_DIR_MAX=10
 while IFS= read -r entry; do
   [ -n "$entry" ] || continue
   breadth_checked=$((breadth_checked + 1))
+
+  # LITERAL PATHS ONLY. Strip the anchors and the escaped dots; whatever is left
+  # must be ordinary path characters. This is what refuses `.*`, `[a-z]+`, `s?`
+  # and `(a|b)` — the no-alternation rule the breadth measurement replaced and
+  # then failed to cover, while this file and CONTRIBUTING.md both went on
+  # claiming those constructs were refused.
+  bare="${entry#^}"
+  bare="${bare%$}"
+  bare="$(printf '%s' "$bare" | sed 's/\\\./_/g')"
+  case "$bare" in
+    *[!A-Za-z0-9_/-]*)
+      breadth_bad="$breadth_bad ${entry}(not a literal path)"
+      continue
+      ;;
+  esac
+
   n="$(printf '%s\n' "$tracked_all" | grep -cE "$entry" || true)"
   case "$entry" in
     *'$')
-      [ "$n" -le 1 ] || breadth_bad="$breadth_bad ${entry}(matches ${n} files)"
+      [ "$n" -eq 1 ] || breadth_bad="$breadth_bad ${entry}(matches ${n} files, expected exactly 1)"
       ;;
     *'/')
-      # A directory prefix legitimately covers many files; it must still cover
-      # a directory rather than a scatter, which the `/` terminator enforces.
+      if [ "$n" -eq 0 ]; then
+        breadth_bad="$breadth_bad ${entry}(matches no tracked file)"
+      elif [ "$n" -gt "$BREADTH_DIR_MAX" ]; then
+        breadth_bad="$breadth_bad ${entry}(covers ${n} files, max ${BREADTH_DIR_MAX})"
+      fi
       ;;
     *)
       breadth_bad="$breadth_bad ${entry}(neither a file nor a directory)"
@@ -747,9 +799,9 @@ done <<<"$anchor_entries"
 if [ "$breadth_checked" -eq 0 ]; then
   FAIL=$((FAIL + 1)); echo "  FAIL the breadth check inspected no allowlist entries — the cut is broken, so it passed having measured nothing"
 elif [ -n "$breadth_bad" ]; then
-  FAIL=$((FAIL + 1)); echo "  FAIL allowlist entr(ies) cover more than one subject —$breadth_bad. The anti-rot note is per entry, so such an entry stays 'used' while part of what it covers goes dead, and that part becomes breadth nothing can report. A file entry must match exactly one tracked file; a directory entry must end in /."
+  FAIL=$((FAIL + 1)); echo "  FAIL allowlist entr(ies) cover more than one subject —$breadth_bad. The anti-rot note is per entry, so such an entry stays 'used' while part of what it covers goes dead, and that part becomes breadth nothing can report. A file entry must be a literal path matching exactly one tracked file; a directory entry must be a literal prefix covering at most $BREADTH_DIR_MAX."
 else
-  PASS=$((PASS + 1)); echo "  ok   each of the $breadth_checked allowlist entries covers exactly one file or one directory"
+  PASS=$((PASS + 1)); echo "  ok   all $breadth_checked allowlist entries are literal paths covering one file or a reviewable directory"
 fi
 
 if [ -n "$anchor_bad" ]; then

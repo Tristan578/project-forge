@@ -377,8 +377,8 @@ path is accepted, a generator whose fixtures quote real paths. Those are
 exempted by an allowlist in `scripts/check-portable-paths.sh`. Add the exemption
 in the same PR as the file that needs it.
 
-The gate enforces four rules on that allowlist, and its suite fails the build on
-each. All four will otherwise surprise you, so they are written out here rather
+The gate enforces five rules on that allowlist, and its suite fails the build on
+each. All five will otherwise surprise you, so they are written out here rather
 than left to be discovered one CI round at a time:
 
 - **The entry and its reason are two parallel arrays.** `ALLOW_ENTRIES` and
@@ -389,11 +389,16 @@ than left to be discovered one CI round at a time:
   (one file) or `/` (one directory). A bare substring exempts every path
   containing it — an entry named for a test once exempted its production sibling
   too.
-- **One entry covers one subject.** A `$`-anchored entry must match exactly one
-  tracked file, measured against `git ls-files`; a `/` entry covers a directory.
-  No alternation, no optional group, and nothing like `.*` — because the
-  staleness notice below is per entry, so an entry covering two files stays
-  "used" while one of them goes dead.
+- **One entry covers one subject, and this is measured.** The entry must be a
+  literal path — anchors, slashes and escaped dots only, so no alternation, no
+  optional group and nothing like `.*`. A `$`-anchored entry must then match
+  exactly one tracked file when run against `git ls-files`; a `/` entry must
+  cover a small directory. The staleness notice below is per entry, so an entry
+  covering two files stays "used" while one of them goes dead.
+- **The regex must compile.** Every entry is compiled before any is trusted, and
+  a malformed one exits 2 naming it. Without that check `grep` exits 2, the
+  caller reads it as "no match", and the entry silently stops exempting while
+  its files are reported instead.
 - **An entry that stops exempting anything fails the build.** The gate emits a
   `::notice::`, and its suite asserts the real tree emits none. If you delete or
   rename the last file an entry covered, prune the entry in the same change.

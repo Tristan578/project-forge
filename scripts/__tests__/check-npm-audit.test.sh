@@ -1640,6 +1640,11 @@ readonly -f assert_block_lines_exact
 # invisible to the pin. That is a comment to YAML and to the shell of a `run:`
 # body alike; it would only matter for a line written verbatim into a file
 # where a leading `#` is load-bearing, which nothing here does.
+# Every call appends its label here, so a call that is commented out, wrapped in
+# `if false`, or never reached leaves a gap the assertion at the end of this
+# suite reports. Checking that a line LOOKS like a call cannot see any of those.
+STEPS_BLOCK_RAN=""
+
 assert_steps_block() {
   local blk
   # Read in THIS frame, where it is the line that called the wrapper -- i.e. the
@@ -1647,6 +1652,8 @@ assert_steps_block() {
   # Reading it one frame deeper (inside the helper) would name line "$LINENO"
   # below for all five pins, which is plumbing with nothing to edit.
   local site="${BASH_LINENO[0]}"
+  STEPS_BLOCK_RAN="$STEPS_BLOCK_RAN
+$2"
   blk="$(awk "/^    [\"']?steps[\"']?[[:space:]]*:/{f=1;print;next} f && \$0 != \"\" && !/^      /{exit} f{print}" <<<"$1")"
   assert_block_lines_exact "$blk" "$2" "$3" "the per-step pins cover only the steps they NAME, so a step added beside them -- or a one-line edit to an unpinned sibling such as \`npm ci\` -- runs arbitrary code before the first audit while every named step stays byte-identical" "$site"
 }
@@ -3366,7 +3373,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=610
+readonly SELF_EXEC_EXPECTED_DROP=611
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -4252,6 +4259,32 @@ elif [[ "$fn_freeze_probe" == *"readonly function"* && "$fn_freeze_probe" == *"f
 else
   fail "the 'readonly -f' effect probe was inconclusive -- expected both the shell's readonly-function refusal and the real pass() output, got: ${fn_freeze_probe}"
 fi
+# --- every unconditional job's step-block pin actually RAN --------------------
+#
+# `check_unconditional` in check-ci-success.sh promotes a job into the required
+# CI Success aggregate on the strength of "did it succeed", which a job whose
+# steps were removed still satisfies. The line-for-line pins above are what
+# close that, and check-ci-success.test.sh asserts one exists per such job — by
+# grepping this file, which a call wrapped in `if false` satisfies while never
+# executing (found in review). This is the half that measures execution.
+uncond_expected="$(grep -v '^[[:space:]]*#' "$REPO_ROOT/scripts/check-ci-success.sh" \
+  | grep -Eo '^check_unconditional[[:space:]]+"[^"]+"' \
+  | sed -E 's/^check_unconditional[[:space:]]+"([^"]+)"$/\1/')"
+if [ -z "$uncond_expected" ]; then
+  fail "no check_unconditional calls found in check-ci-success.sh — either the form was removed (and the jobs it protected are unguarded) or this cut broke; the per-job assertion below would pass having checked nothing"
+else
+  uncond_missing=""
+  while IFS= read -r ujob; do
+    [ -n "$ujob" ] || continue
+    grep -qxF "ci.yml ${ujob} job steps:" <<<"$STEPS_BLOCK_RAN" || uncond_missing="$uncond_missing $ujob"
+  done <<<"$uncond_expected"
+  if [ -n "$uncond_missing" ]; then
+    fail "step-block pin(s) did not RUN for unconditional job(s) —$uncond_missing. The call is present in this file but never executed (commented out, wrapped in a false branch, or unreached), so removing one of that job's steps is caught by nothing."
+  else
+    pass "every check_unconditional job's step-block pin actually ran ($(printf '%s\n' "$uncond_expected" | grep -c .) job(s))"
+  fi
+fi
+
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
@@ -4261,3 +4294,4 @@ else
   echo "$FAILURES test(s) failed."
   exit 1
 fi
+

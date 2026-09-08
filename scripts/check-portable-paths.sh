@@ -43,6 +43,16 @@
 #     and it runs in a path-gated job while this one runs unconditionally.
 #     Dropping `-I` would mean scanning every binary in the tree on every run.
 #   * `/root`, deliberately — see the note at the pattern.
+#   * TRACKED SYMLINKS, of which this repo has several dozen under the skills
+#     directories. On a Linux runner grep follows them, so a link to a directory
+#     is skipped with its error swallowed; a Windows checkout materialises the
+#     same paths as small text files, which ARE scanned. The two platforms
+#     therefore see different trees here.
+#   * A macOS home spelled in lowercase. The POSIX arm is case-SENSITIVE on
+#     purpose — see the two-patterns note above — so `/users/<name>/` is treated
+#     as the URL route it usually is.
+#   * A Windows checkout under a root nobody enumerated. That one is stated at
+#     the pattern as the accepted cost of an allowlist of checkout habits.
 set -uo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -118,14 +128,26 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # directions, because a gate that reddens a PR over a sourcemap comment is one
 # somebody switches off.
 #
-# THE COLON-LESS SPELLINGS OF THE SAME PATH COUNT TOO. Git Bash, WSL and Cygwin
-# each render a Windows drive as a leading path segment instead of a letter and
-# a colon, and requiring the colon meant those escaped entirely — not the
-# documented "a root nobody has thought of" trade-off, because the ROOT is in
-# the list above; only the spelling was invisible (found in review). This repo
-# is developed under Git Bash on Windows, so that is the form a contributor's
-# own shell reports and therefore the form they paste into a doc. The left
-# boundary is what keeps the single-letter segment from matching a URL path.
+# THE COLON-LESS SPELLINGS OF THE SAME PATH COUNT TOO, in MSYS_PATTERN. Git
+# Bash, WSL and Cygwin each render a Windows drive as a leading path segment
+# instead of a letter and a colon, and requiring the colon meant those escaped
+# entirely — not the documented "a root nobody has thought of" trade-off,
+# because the ROOT is in the list above; only the spelling was invisible (found
+# in review). This repo is developed under Git Bash on Windows, so that is the
+# form a contributor's own shell reports and therefore the form they paste.
+#
+# It is a SEPARATE pattern because it needs a stricter left boundary than the
+# drive-letter form. "Any single-letter segment after a non-alphanumeric" also
+# describes a URL path, a relative import and a flag value — all reported in
+# review. So: not after a slash or a dot, and not `a` or `b`, which are floppy
+# drives nobody clones onto. The remaining overlap is a URL that spells a real
+# drive letter and an enumerated root, which is the cost of catching the
+# spelling this repo's own shell prints.
+#
+# BOTH POSIX AND WINDOWS ARMS USE THE SAME LEFT-BOUNDARY CLASS. They did not:
+# the POSIX arm also excluded `.`, `_` and `-`, so a home path behind a diff's
+# removed-line marker was invisible on one arm and caught on the other, and a
+# tracked patch hid exactly the path being removed (found in review).
 #
 # THE POSIX SIDE DOES NOT REQUIRE A TRAILING COMPONENT. Each alternative used to
 # end with a slash, so a `cd` into a home directory with nothing after it — the
@@ -157,8 +179,9 @@ cd "$ROOT" || { echo "::error::could not cd to repo root"; exit 1; }
 # lands, with a reason saying which image it belongs to. None is in the tree
 # today; the suite pins the behaviour so the choice stays deliberate rather than
 # becoming a surprise.
-WIN_PATTERN='(^|[^A-Za-z0-9])([A-Za-z]:[\\/]+|/(mnt/|cygdrive/)?[A-Za-z]/)(Users|repos|dev|src|code|work|workspace|projects|git)[\\/]+'
-POSIX_PATTERN='(^|[^A-Za-z0-9._-])(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)([^A-Za-z0-9._-]|$)'
+WIN_PATTERN='(^|[^A-Za-z0-9])[A-Za-z]:[\\/]+(Users|repos|dev|src|code|work|workspace|projects|git)[\\/]+'
+MSYS_PATTERN='(^|[^A-Za-z0-9./-])/(mnt/|cygdrive/)?[c-zC-Z]/(Users|repos|dev|src|code|work|workspace|projects|git)/'
+POSIX_PATTERN='(^|[^A-Za-z0-9])(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)([^A-Za-z0-9._-]|$)'
 
 # Files where such a string is legitimate. Each entry states why, and each entry
 # EXEMPTS SOMETHING TODAY — an allowlist entry that covers no file is not
@@ -196,14 +219,20 @@ POSIX_PATTERN='(^|[^A-Za-z0-9._-])(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)
 # leaked the other way and exempted any line whose CONTENT merely said
 # `mockOnceGuard`. Both directions are pinned by the suite.
 #
-# ONE ENTRY PER FILE OR DIRECTORY — NO ALTERNATION, NO OPTIONAL GROUP. The
-# anti-rot flag below is per ENTRY, so an entry covering several files through
-# `(a|b)` or `(...)?` stays "used" while one of its branches goes dead, and that
-# branch then sits here as unreviewed breadth that nothing can report (found in
-# review). Splitting them makes the anti-rot note exact by construction rather
-# than by parsing these regexes, and it forces each covered file to carry its
-# OWN reason — the grouped `mockOnceGuard` entry had one sentence explaining two
-# different files. The suite refuses an entry containing either construct.
+# ONE ENTRY PER FILE OR DIRECTORY, AND THE SUITE MEASURES IT. The anti-rot flag
+# below is per ENTRY, so an entry covering several files stays "used" while part
+# of what it covers goes dead, and that part then sits here as unreviewed
+# breadth nothing can report (found in review). One entry per subject makes the
+# note exact by construction, and forces each covered file to carry its OWN
+# reason — the grouped `mockOnceGuard` entry had one sentence explaining two
+# different files.
+#
+# The suite enforces this by MEASUREMENT, not by spelling: an entry must be a
+# literal path, a `$` entry must match exactly one tracked file, and a `/` entry
+# must cover a small reviewable directory. An earlier version tested for `|` and
+# `)?` — a denylist of two tokens, which `^web/.*\.ts$` walked straight past,
+# silencing the gate across an entire subtree while the check reported that
+# every entry covered one subject.
 #
 # EVERY ENTRY IS ANCHORED TO THE FILES ITS REASON NAMES. Entries are matched
 # with `grep -qE` against the path, so a bare substring exempts every path
@@ -278,6 +307,7 @@ compile_check() {
 }
 
 compile_check "WIN_PATTERN" "$WIN_PATTERN"
+compile_check "MSYS_PATTERN" "$MSYS_PATTERN"
 compile_check "POSIX_PATTERN" "$POSIX_PATTERN"
 for entry in "${ALLOW_ENTRIES[@]}"; do
   compile_check "ALLOW_ENTRIES" "$entry"
@@ -354,7 +384,7 @@ tracked_count="$(git ls-files | wc -l | tr -d ' ')"
 # `-H` fails that case and only that one. An earlier version of this sentence
 # said no fixture could reach it, in the same commit that added the case.
 win_hits="$(git ls-files -z \
-  | xargs -0 grep -HIinE -e "$WIN_PATTERN" -- 2>/dev/null || true)"
+  | xargs -0 grep -HIinE -e "$WIN_PATTERN" -e "$MSYS_PATTERN" -- 2>/dev/null || true)"
 posix_hits="$(git ls-files -z \
   | xargs -0 grep -HInE -e "$POSIX_PATTERN" -- 2>/dev/null \
   | sed -E 's#/home/runner([^A-Za-z0-9._-]|$)#{RUNNER_HOME}\1#g' \
