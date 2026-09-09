@@ -1,12 +1,33 @@
 import * as Sentry from '@sentry/nextjs';
 
-// Sentry is auto-initialized by sentry.server.config.ts (loaded by @sentry/nextjs).
-// This wrapper provides guarded access — no-ops when SENTRY_DSN is not set.
-const DSN = process.env.SENTRY_DSN;
+// Sentry is auto-initialized by sentry.server.config.ts (loaded by
+// @sentry/nextjs). This wrapper provides guarded access — no-ops when Sentry is
+// not configured.
+//
+// THE FALLBACK MATCHES THE INITIALISATION, and it did not used to. This guard
+// read `SENTRY_DSN` alone while `sentry.server.config.ts`,
+// `sentry.edge.config.ts` and `cronMonitors.ts` all accept
+// `NEXT_PUBLIC_SENTRY_DSN` as well. So a deployment carrying only the public
+// variable initialised Sentry, registered cron check-ins, and looked healthy —
+// while every `captureException` here returned early and dropped the error.
+// Monitoring that reports itself as working and delivers nothing is worse than
+// monitoring that is plainly off.
+//
+// It is the same DSN either way; the public spelling only means it is also
+// exposed to the browser. Guarding on it server-side is what makes this file
+// no-op exactly when Sentry is uninitialised, and never when it is not.
+//
+// `||`, NOT `??`, and the two Sentry configs were changed to match. An
+// environment variable set to the EMPTY STRING is not a DSN, but `??` falls
+// back only on null/undefined — so `SENTRY_DSN=''` with the public one set kept
+// the empty value, and the fallback this comment describes never fired. That is
+// the one shape a test can produce with `vi.stubEnv`, and it is how the defect
+// was caught. `cronMonitors.ts` already used `||`; now all four agree.
+const DSN = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
 
 /**
  * Report an exception to Sentry (server-side).
- * No-ops silently when SENTRY_DSN is not configured.
+ * No-ops silently when Sentry is not configured (see the DSN guard above).
  */
 export function captureException(
   error: unknown,
@@ -19,7 +40,7 @@ export function captureException(
 
 /**
  * Send a message to Sentry (server-side).
- * No-ops silently when SENTRY_DSN is not configured.
+ * No-ops silently when Sentry is not configured (see the DSN guard above).
  */
 export function captureMessage(
   message: string,
@@ -32,7 +53,7 @@ export function captureMessage(
 
 /**
  * Add a breadcrumb to the current Sentry scope (server-side).
- * No-ops silently when SENTRY_DSN is not configured.
+ * No-ops silently when Sentry is not configured (see the DSN guard above).
  */
 export function addBreadcrumb(breadcrumb: {
   category?: string;
@@ -67,7 +88,7 @@ export function startSpan<T>(
  * it requires `enableLogs: true` in the Sentry init (already set in all
  * three init files) and is scrubbed by its own `beforeSendLog` hook
  * (`scrubSentryLog` in sentryConfig.ts), NOT `beforeSend`/`scrubSentryEvent`.
- * No-ops when SENTRY_DSN is not configured, matching every other export here.
+ * No-ops when Sentry is not configured, matching every other export here.
  *
  * For general JSON/console log aggregation (Axiom, Datadog, etc.) use
  * `@/lib/logging/logger` instead — that module never reaches Sentry. Reach

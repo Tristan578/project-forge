@@ -192,7 +192,12 @@ Scripts run in a sandboxed TypeScript environment with these APIs:
 ### Input
 - \`forge.input.isPressed(action)\` / \`justPressed\` / \`justReleased\`
 - \`forge.input.getAxis(action)\`
-- Default actions: move_forward, move_backward, move_left, move_right, jump, fire, interact
+- **Actions are names the project defines, never key codes.** Pass \`move_left\`, not \`ArrowLeft\`.
+- Every scene starts with these, and the creator may rename, rebind, delete or add to them:
+  - digital: \`move_left\`, \`move_right\`, \`move_up\`, \`move_down\`, \`move_forward\`, \`move_backward\`, \`jump\`, \`interact\`, \`pause\`, \`action_primary\`, \`action_secondary\`
+  - axis (\`getAxis\`, returns -1..1): \`move_horizontal\`, \`move_vertical\`
+- \`move_up\`/\`move_down\` for a top-down or 2D game, \`move_forward\`/\`move_backward\` for a 3D one — both are bound to the same keys.
+- \`action_primary\` is the main verb (attack, shoot, grab). A game that needs its own action — \`grapple\`, \`rewind\`, \`p2_attack\` — gets one with \`set_input_binding\` FIRST; only then may a script name it.
 
 ### Physics
 - \`forge.physics.applyForce(entityId, fx, fy, fz)\`
