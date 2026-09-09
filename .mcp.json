@@ -2,41 +2,26 @@
   "mcpServers": {
     "context7": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp@latest"
-      ]
+      "args": ["-y", "@upstash/context7-mcp@latest"]
     },
     "neon": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@neondatabase/mcp-server-neon"
-      ],
+      "args": ["-y", "@neondatabase/mcp-server-neon"],
       "env": {
         "NEON_API_KEY": "${NEON_API_KEY}"
       }
     },
     "playwright": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp@latest"
-      ]
+      "args": ["-y", "@playwright/mcp@latest"]
     },
     "github": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-github"
-      ]
+      "args": ["-y", "@modelcontextprotocol/server-github"]
     },
     "sentry": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@sentry/mcp-server@latest"
-      ],
+      "args": ["-y", "@sentry/mcp-server@latest"],
       "env": {
         "SENTRY_AUTH_TOKEN": "${SENTRY_AUTH_TOKEN}",
         "SENTRY_ORG": "tristan-nolan",
@@ -45,20 +30,14 @@
     },
     "stripe": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@stripe/mcp@latest"
-      ],
+      "args": ["-y", "@stripe/mcp@latest"],
       "env": {
         "STRIPE_SECRET_KEY": "${STRIPE_SECRET_KEY}"
       }
     },
     "upstash": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/mcp-server@latest"
-      ],
+      "args": ["-y", "@upstash/mcp-server@latest"],
       "env": {
         "UPSTASH_REDIS_REST_URL": "${UPSTASH_REDIS_REST_URL}",
         "UPSTASH_REDIS_REST_TOKEN": "${UPSTASH_REDIS_REST_TOKEN}"
@@ -66,10 +45,7 @@
     },
     "taskboard": {
       "command": "node",
-      "args": [
-        ".claude/hooks/taskboard-launch.mjs",
-        "mcp"
-      ]
+      "args": [".claude/hooks/taskboard-launch.mjs", "mcp"]
     }
   }
 }
