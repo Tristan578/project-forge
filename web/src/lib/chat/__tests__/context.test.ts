@@ -560,15 +560,22 @@ describe('buildSceneContext', () => {
         ] as unknown as ContextState['inputBindings'],
         inputPreset: 'FPS' as ContextState['inputPreset'],
       }));
-      expect(ctx).toContain('Input Bindings (preset: FPS)');
+      // "includes", not "preset:". Presets merge rather than replace, so the
+      // map also holds the defaults and anything the creator authored — naming
+      // the preset as though it described the whole map was untrue.
+      expect(ctx).toContain('Input Bindings (includes the FPS starting set)');
       expect(ctx).toContain('2 actions: jump, fire');
     });
 
-    it('shows custom input bindings without preset', () => {
+    it('labels a map with no preset by its actions alone', () => {
       const ctx = buildSceneContext(baseState({
         inputBindings: [{ actionName: 'move' }] as unknown as ContextState['inputBindings'],
       }));
-      expect(ctx).toContain('(custom)');
+      // No `(custom)` any more: a map that came from no preset is the ORDINARY
+      // case, and calling it custom framed the creator's own vocabulary as a
+      // deviation from a genre.
+      expect(ctx).not.toContain('(custom)');
+      expect(ctx).toContain('1 actions: move');
     });
 
     it('shows undo/redo history', () => {

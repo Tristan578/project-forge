@@ -70,7 +70,12 @@ describe('sceneSlice.loadTemplate', () => {
       expect(scene.entities[0].transform).toHaveProperty('position');
       expect(scene.entities[0]).toHaveProperty('name');
       expect(scene.entities[0].entityType).toBe('sprite');
-      expect(scene.inputBindings).toEqual({ actions: {}, preset: null });
+      // OMITTED, not emptied. `load_scene` assigns the file's map straight onto
+      // the `InputMap` resource, so `{ actions: {}, preset: null }` — what this
+      // used to assert — loaded every template into a scene where no key did
+      // anything. Omitting it leaves `InputMap::default()`, which binds a
+      // working keyboard (#9764).
+      expect('inputBindings' in scene).toBe(false);
     });
 
     it('attaches the templates scripts through the script slice', async () => {
@@ -108,12 +113,28 @@ describe('sceneSlice.loadTemplate', () => {
       });
     });
 
-    it('applies the templates input preset', async () => {
+    /**
+     * LOADING A TEMPLATE MUST NOT PICK A GENRE FOR THE CREATOR.
+     *
+     * This used to assert the opposite. Applying the template's `inputPreset`
+     * replaced the scene's action map with one genre's handful of bindings, and
+     * once presets became additive it got worse rather than better: `fps`
+     * defines `move_forward` and `move_right` as AXES under the same names the
+     * defaults use for digital actions, so merging it left `move_forward`
+     * answering true for W *or* S while digital `move_backward` answered for S
+     * alone. The shooter's `dz -= SPEED` and `dz += SPEED` then cancelled, and
+     * backward movement was dead (#9764).
+     *
+     * A template needs nothing a preset provides: `inputActionConformance`
+     * enforces that every action its scripts name is in the defaults, and a
+     * template wanting one of its own declares it in `sceneData.inputBindings`.
+     */
+    it('does not apply a genre preset', async () => {
       setSceneDispatcher(createFakeEngineDispatcher(harness.store));
 
       await harness.store.getState().loadTemplate('2d-platformer');
 
-      expect(harness.setInputPreset).toHaveBeenCalledWith('platformer');
+      expect(harness.setInputPreset).not.toHaveBeenCalled();
     });
 
     it('reports the entities it had to drop and attaches nothing to them', async () => {
