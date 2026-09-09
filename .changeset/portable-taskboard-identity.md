@@ -1,5 +1,4 @@
 ---
-"spawnforge": patch
 ---
 
-Use a shared portable taskboard database, isolate repository issue identities, and prevent duplicate GitHub issues when synchronization is interrupted.
+Repair developer taskboard storage and repository issue identity. This changes repository tooling only; no versioned workspace package is affected.
