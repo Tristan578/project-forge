@@ -37,7 +37,7 @@ vi.mock('lucide-react', () => ({
 // Capability gate (#9117): default to "available" so the submit tests below
 // exercise the real path; the unavailable cases flip it explicitly.
 vi.mock('@/hooks/useGenerationGate', () => ({
-  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false })),
 }));
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 
@@ -50,7 +50,7 @@ describe('GenerateMusicDialog capability gate (#9117)', () => {
   });
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false });
+    vi.mocked(useGenerationGate).mockReturnValue({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false });
   });
 
   it('shows the unavailable notice and disables Generate when the capability is unavailable', () => {
@@ -59,6 +59,7 @@ describe('GenerateMusicDialog capability gate (#9117)', () => {
       reason: 'Music generation is unavailable (#9522).',
       loading: false,
       unprovisionable: true,
+      byokConfigurable: false,
     });
     render(<GenerateMusicDialog isOpen={true} onClose={vi.fn()} />);
     expect(useGenerationGate).toHaveBeenCalledWith('music-generation');

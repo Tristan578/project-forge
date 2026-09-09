@@ -512,7 +512,12 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    # Raised from 30 after review measured 26:52 on this branch — ~3 minutes
+    # of headroom on a job that is in ci-success's needs:, so a tip-over blocks
+    # every PR rather than one. The delta against main's ~22 minutes is mostly
+    # runner variance rather than any single suite, which is the argument for
+    # headroom rather than for hunting a culprit.
+    timeout-minutes: 45
     permissions:
       contents: read
     defaults:
@@ -650,6 +655,79 @@ jobs:
 
       - name: Check OpenAPI spec is valid and in sync with API routes
         run: bash scripts/check-openapi-route-sync.sh
+
+  # ---- Board Verdict Tests ----
+  # Decision-logic suite for scripts/board-verdict.sh, which publishes the
+  # latest review-board verdict as a commit status. That check is what stops a
+  # PR reading as ready while a board is red — #9725 merged in exactly that
+  # state and both blockers reached `main` — so its logic needs a gate of its
+  # own. Hermetic (test-only seams, no network), so it is cheap and always runs.
+  board-verdict-tests:
+    name: Board Verdict Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Board verdict decision logic
+        run: bash scripts/__tests__/board-verdict.test.sh
+
+      - name: Shellcheck the verdict scripts and the suite
+        run: shellcheck -x scripts/board-verdict.sh scripts/post-board-verdict.sh scripts/__tests__/board-verdict.test.sh
+
+  # ---- Portable Paths ----
+  # Fails when a tracked file hardcodes a machine-local absolute path — a
+  # Windows drive-letter path into a user or repo directory, or a POSIX home
+  # directory. This is an open source repository, so a path naming one
+  # contributor's layout resolves to nothing for everyone else, and it fails
+  # SILENTLY: lessons-learned #9605 is that exactly, where the lessons hook read
+  # such a path, took its `exit 0` branch on every other checkout, and left
+  # enforcement off for whole sessions with nothing saying so. Found live on
+  # 2026-09-06 in two tracked skills, and as an UNCOMMITTED EDIT to the tracked
+  # `.codex/config.toml` — that file is scanned on every run; the edit had simply
+  # not been committed yet, which is exactly what a gate over tracked files is
+  # for. (An earlier version of this sentence called the FILE untracked. It is
+  # not, and saying so inverted the distinction the gate is built on.)
+  #
+  # The forbidden shapes are NOT restated here. They live once, in the gate's
+  # own patterns, because a file that quotes an example is a file the gate then
+  # fails on — which is how this comment reddened its own PR. Read
+  # scripts/check-portable-paths.sh for the shapes and the allowlist rationale.
+  #
+  # Unconditional rather than path-gated: any file can introduce one, and the
+  # whole check is two grep passes over the tracked set (one per pattern, since
+  # Windows paths are case-insensitive and POSIX ones are not) — seconds on this
+  # runner. No runtime is pinned here: the same passes are an order of magnitude
+  # slower under Git Bash on Windows, so a single number would be wrong for
+  # whoever is not on the platform it was measured on (lessons 8 and 17).
+  # It IS in the required `CI Success` aggregate, asserted by that verifier's
+  # `check_unconditional` — there is no ci-gate trigger to map it to, and a gate
+  # outside the aggregate reports rather than gates.
+  portable-paths:
+    name: Portable Paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The gate's own decision logic runs first, in the same job: a gate whose
+      # allowlist silently stops matching reports a clean tree either way, so
+      # the suite is the only thing that can tell a passing gate from a dead
+      # one. It is hermetic — a throwaway git repo per case, no network — which
+      # also makes it dominated by process spawning: fast on this runner, minutes
+      # under Git Bash on Windows. Budget the job's timeout for the slower one.
+      - name: Test the portable-paths gate's decision logic
+        run: bash scripts/__tests__/check-portable-paths.test.sh
+
+      - name: Shellcheck the gate and its suite
+        run: shellcheck -x scripts/check-portable-paths.sh scripts/__tests__/check-portable-paths.test.sh
+
+      - name: Check for machine-local absolute paths in tracked files
+        run: bash scripts/check-portable-paths.sh
 
   # ---- Agentic Config Sync ----
   # Runs when the single source of truth (tools/agentic-sync/canonical.json), the
@@ -1955,6 +2033,12 @@ jobs:
       - ghaw-lock-sync
       - openapi-route-sync
       - actions-pin-check
+      # Unconditional jobs, asserted by `check_unconditional` rather than mapped
+      # to a ci-gate trigger — they have no `if:` to map to. Outside this list
+      # they run on every PR and their failure changes nothing, which is a gate
+      # that reports rather than one that gates.
+      - board-verdict-tests
+      - portable-paths
       - test-e2e-ui
       - test-e2e-api
       - test-e2e-journey

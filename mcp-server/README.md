@@ -1,6 +1,6 @@
 # SpawnForge MCP Server
 
-Exposes 351 SpawnForge editor commands as MCP tools over either **stdio** (local
+Exposes 354 SpawnForge editor commands as MCP tools over either **stdio** (local
 subprocess) or **Streamable HTTP** (remote / browser-based hosts).
 
 The server itself does not execute commands — every handler runs in the browser

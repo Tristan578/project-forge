@@ -14,11 +14,18 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
-// Capability gate (#9117): default "available"; the gate describe below flips it.
-vi.mock('@/hooks/useGenerationGate', () => ({
-  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false })),
+// Capability gate (#9117): default "available"; the gate describe below flips
+// it. Only `useGenerationGate` is stubbed — `combineGenerationGates` is pure
+// and comes through real, because stubbing it would make the Sound item's
+// sfx-OR-voice rule untestable.
+vi.mock('@/hooks/useGenerationGate', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useGenerationGate: vi.fn(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false })),
 }));
 import { useGenerationGate } from '@/hooks/useGenerationGate';
+
+/** The default "nothing is blocked" gate result. */
+const OPEN = { blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false } as const;
 
 vi.mock('@/stores/userStore', () => ({
   useUserStore: vi.fn((selector: (s: { tier: string }) => unknown) =>
@@ -84,15 +91,15 @@ function setupStore(overrides: {
 describe('AssetPanel generation gate (#9117)', () => {
   afterEach(() => {
     cleanup();
-    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false }));
+    vi.mocked(useGenerationGate).mockImplementation(() => OPEN);
   });
 
   it('disables only the Generate Music item, with an Unavailable badge and the reason in its accessible name', () => {
     // Every menu item asks the gate for its own capability; only music is blocked here.
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'music-generation'
-        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false, unprovisionable: true }
-        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+        ? { blocked: true, reason: 'Music generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
+        : OPEN,
     );
     render(<AssetPanel />);
     fireEvent.click(screen.getByLabelText('AI Generate'));
@@ -106,8 +113,8 @@ describe('AssetPanel generation gate (#9117)', () => {
   it('gates every item by its own capability — a texture gate disables Texture AND Skybox, nothing else', () => {
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'texture-generation'
-        ? { blocked: true, reason: 'Texture generation is not available yet.', loading: false, unprovisionable: true }
-        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+        ? { blocked: true, reason: 'Texture generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
+        : OPEN,
     );
     render(<AssetPanel />);
     fireEvent.click(screen.getByLabelText('AI Generate'));
@@ -116,7 +123,7 @@ describe('AssetPanel generation gate (#9117)', () => {
     for (const name of ['Generate 3D Model', 'Generate Sound', 'Generate Music']) {
       expect(screen.getByRole('menuitem', { name })).not.toHaveAttribute('aria-disabled');
     }
-    vi.mocked(useGenerationGate).mockImplementation(() => ({ blocked: false, reason: undefined, loading: false, unprovisionable: false }));
+    vi.mocked(useGenerationGate).mockImplementation(() => OPEN);
   });
 
   // A missing platform key is not a dead end: the user can add their own key.
@@ -131,8 +138,9 @@ describe('AssetPanel generation gate (#9117)', () => {
             reason: 'Configure Meshy API key in Settings to enable 3D Model Generation.',
             loading: false,
             unprovisionable: false,
+            byokConfigurable: true,
           }
-        : { blocked: false, reason: undefined, loading: false, unprovisionable: false },
+        : OPEN,
     );
     render(<AssetPanel />);
     fireEvent.click(screen.getByLabelText('AI Generate'));
@@ -141,6 +149,52 @@ describe('AssetPanel generation gate (#9117)', () => {
     expect(model).not.toHaveTextContent('Unavailable');
     fireEvent.click(model);
     expect(screen.getByTestId('gen-model-dialog')).toBeInTheDocument();
+  });
+
+  // The Sound dialog covers sfx AND voice, so this item closes only when
+  // NEITHER can run — otherwise declaring sfx unavailable would take voice
+  // generation off the UI with it (#9725 p8).
+  it('keeps Generate Sound clickable while voice is still available', () => {
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'sfx-generation'
+        ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
+        : OPEN,
+    );
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+    const sound = screen.getByRole('menuitem', { name: 'Generate Sound' });
+    expect(sound).not.toHaveAttribute('aria-disabled');
+    expect(sound).not.toHaveTextContent('Unavailable');
+    fireEvent.click(sound);
+    expect(screen.getByTestId('gen-sound-dialog')).toBeInTheDocument();
+  });
+
+  it('disables Generate Sound once neither sfx nor voice can run', () => {
+    vi.mocked(useGenerationGate).mockImplementation((featureId) =>
+      featureId === 'sfx-generation' || featureId === 'voice-generation'
+        ? { blocked: true, reason: 'Sound effect generation is not available yet.', loading: false, unprovisionable: true, byokConfigurable: false }
+        : OPEN,
+    );
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+    const sound = screen.getByRole('menuitem', { name: /Generate Sound — Sound effect generation is not available yet\./ });
+    expect(sound).toHaveAttribute('aria-disabled', 'true');
+    expect(sound).toHaveTextContent('Unavailable');
+  });
+
+  // First paint of a fresh session: `blocked` is false until the body lands, so
+  // the item used to look ready and then flip to a disabled amber badge.
+  it('does not present a ready menu item while the gate is still loading', () => {
+    vi.mocked(useGenerationGate).mockImplementation(() => ({
+      blocked: false, reason: undefined, loading: true, unprovisionable: false, byokConfigurable: false,
+    }));
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+    const music = screen.getByRole('menuitem', { name: 'Generate Music — checking availability' });
+    expect(music).toHaveAttribute('aria-disabled', 'true');
+    expect(music).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(music);
+    expect(screen.queryByTestId('gen-music-dialog')).toBeNull();
   });
 });
 
