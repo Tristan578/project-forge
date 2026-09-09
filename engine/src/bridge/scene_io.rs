@@ -408,8 +408,28 @@ pub(super) fn apply_scene_load(
     );
     ambient.brightness = scene_file.ambient_light.brightness;
 
-    // 6. Apply input bindings
-    *input_map = scene_file.input_bindings;
+    // 6. Apply input bindings.
+    //
+    // AN EMPTY MAP IS TREATED AS "NONE STATED", NOT AS "NOTHING IS BOUND".
+    // `#[serde(default)]` on the field only helps a file that OMITS it, and
+    // that is not what exists in the wild: every scene the product has saved so
+    // far carries the literal `{ actions: {}, preset: null }` that
+    // `templateSceneFile` used to write to satisfy a parser which then required
+    // the field. Assigning that verbatim loads the project into a session where
+    // no key does anything and every script's `isPressed` is false forever —
+    // and it would follow a published game into every remix of it.
+    //
+    // So an empty `actions` falls through to the defaults. A creator who
+    // genuinely wants nothing bound removes the bindings, which writes a map
+    // that is empty for a reason — and that case is indistinguishable here from
+    // the corrupted one, which is why this normalisation is the right trade:
+    // the recoverable outcome is a working keyboard, and the unrecoverable one
+    // is a project that silently ignores input.
+    *input_map = if scene_file.input_bindings.actions.is_empty() {
+        InputMap::default()
+    } else {
+        scene_file.input_bindings
+    };
 
     // 6b. Load asset registry
     *asset_registry = AssetRegistry { assets: scene_file.assets };
