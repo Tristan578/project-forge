@@ -112,8 +112,9 @@ def main():
         config = json.loads((repo_root() / '.claude/hooks/github-sync-config.json').read_text())
         with taskboard_sync.connect(default_db()) as conn:
             project = taskboard_sync.bind_project(conn, config)
-            team = conn.execute('SELECT id FROM teams ORDER BY name LIMIT 1').fetchone()
-        print(json.dumps({'projectId': project, 'teamId': team[0] if team else '', 'database': str(default_db())}))
+            with conn:
+                team = taskboard_sync.resolve_team(conn, config)
+        print(json.dumps({'projectId': project, 'teamId': team, 'database': str(default_db())}))
     elif command in ('doctor', 'start'):
         print(json.dumps({'database': str(default_db()), 'integrity': 'ok', 'apiIdentity': 'matched'}))
     else:

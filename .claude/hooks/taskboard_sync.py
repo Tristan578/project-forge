@@ -90,6 +90,16 @@ def bind_project(conn, config):
         return project
 
 
+def resolve_team(conn, config):
+    name = config.get('allowedTeamName') or 'Engineering'
+    row = conn.execute('SELECT id FROM teams WHERE name=?', (name,)).fetchone()
+    if row:
+        return row[0]
+    team = uid()
+    conn.execute('INSERT INTO teams(id,name) VALUES(?,?)', (team, name))
+    return team
+
+
 def scoped_rows(conn, config, project):
     return conn.execute('SELECT * FROM tickets WHERE project_id=? AND sync_repo=? AND sync_owner=?', (project, config['repo'], config['owner'].lower())).fetchall()
 
@@ -149,7 +159,7 @@ def import_issue(conn, config, project, issue):
                 # A local change must go through push's conflict check. Never
                 # destroy it merely because a session-start pull ran first.
                 return 'local-pending' if digest(remote_view(issue)) == base['remote_hash'] else 'conflict'
-            status = 'done' if issue['state'] == 'closed' else ('todo' if row['status'] == 'done' else row['status'])
+            status = 'done' if issue['state'] == 'closed' else (row['status'] if row['status'] in ('todo', 'in_progress') else 'todo')
             if base and digest(remote_view(issue)) == base['remote_hash']:
                 return 'unchanged'
             conn.execute('UPDATE tickets SET title=?,description=?,status=?,updated_at=? WHERE id=?', (issue['title'], issue.get('body') or '', status, stamp(), row['id']))
@@ -162,7 +172,7 @@ def import_issue(conn, config, project, issue):
             match = re.search(r'Priority[:*\s]+(urgent|high|medium|low)', issue.get('body') or '', re.I)
             if match:
                 priority = match[1].lower()
-            conn.execute('INSERT INTO tickets(id,project_id,number,title,description,status,priority,github_issue_number,sync_repo,sync_owner) VALUES(?,?,?,?,?,?,?,?,?,?)', (ticket_id, project, number_local, issue['title'], issue.get('body') or '', 'done' if issue['state'] == 'closed' else 'todo', priority, int(issue['number']), config['repo'], owner))
+            conn.execute('INSERT INTO tickets(id,project_id,number,title,description,status,priority,github_issue_number,sync_repo,sync_owner,team_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)', (ticket_id, project, number_local, issue['title'], issue.get('body') or '', 'done' if issue['state'] == 'closed' else 'todo', priority, int(issue['number']), config['repo'], owner, resolve_team(conn, config)))
             action = 'created'
         if fields:
             conn.execute('UPDATE tickets SET priority=? WHERE id=?', (fields['priority'], ticket_id))
@@ -244,27 +254,41 @@ def create_linked(conn, config, project, row, remote):
         conn.execute('UPDATE tickets SET github_issue_number=?,sync_repo=?,sync_owner=? WHERE id=?', (int(issue['number']), config['repo'], config['owner'].lower(), row['id']))
         current = conn.execute('SELECT * FROM tickets WHERE id=?', (row['id'],)).fetchone()
         save_baseline(conn, current, issue)
+        # A newly created issue is open. Force the next push to close a done
+        # ticket without risking another create if that update fails.
+        if current['status'] == 'done' and issue['state'] != 'closed':
+            conn.execute("UPDATE taskboard_sync_baselines SET local_hash='' WHERE ticket_id=?", (row['id'],))
         conn.execute('INSERT OR REPLACE INTO taskboard_project_pending VALUES(?,?)', (row['id'], int(issue['number'])))
     return int(issue['number'])
 
 
-def sync(conn, config, project, remote, direction, include_done=False):
+def sync(conn, config, project, remote, direction, include_done=False, deadline=None):
+    deadline = time.monotonic() + 120 if deadline is None else deadline
     counts = {}
     def count(key):
         counts[key] = counts.get(key, 0) + 1
     if direction == 'pull':
         seen = set()
         for issue in remote.issues():
+            if time.monotonic() >= deadline:
+                count('deferred')
+                return counts
             seen.add(issue['number'])
             count(import_issue(conn, config, project, issue))
         # Closed linked issues remain synchronized, without importing the
         # repository's entire historical archive on every developer machine.
         for row in scoped_rows(conn, config, project):
+            if time.monotonic() >= deadline:
+                count('deferred')
+                return counts
             if row['github_issue_number'] and row['github_issue_number'] not in seen:
                 count(import_issue(conn, config, project, remote.get(row['github_issue_number'])))
         return counts
     rows = conn.execute('SELECT * FROM tickets WHERE project_id=? AND (sync_repo IS NULL OR sync_repo=?) AND (sync_owner IS NULL OR sync_owner=?)', (project, config['repo'], config['owner'].lower())).fetchall()
     for row in rows:
+        if time.monotonic() >= deadline:
+            count('deferred')
+            break
         if row['github_issue_number'] is None:
             if row['status'] == 'done' and not include_done:
                 count('local-only')
@@ -289,6 +313,7 @@ def sync(conn, config, project, remote, direction, include_done=False):
         issue = remote.get(row['github_issue_number'])
         if digest(remote_view(issue)) != base['remote_hash']:
             count('conflict')
+            print('[SYNC] Conflict for issue #' + str(row['github_issue_number']) + '; both sides preserved')
             continue
         issue = remote.update(row['github_issue_number'], row['title'], published_body(conn, row), 'closed' if row['status'] == 'done' else 'open')
         with conn:
@@ -314,10 +339,14 @@ def run(module, direction, include_done=False):
         try:
             with connect(path) as conn:
                 project = bind_project(conn, config)
-                result = sync(conn, config, project, GitHub(config), direction, include_done)
+                deadline = time.monotonic() + module.PUSH_TIME_BUDGET_SECONDS
+                result = sync(conn, config, project, GitHub(config), direction, include_done, deadline)
                 if direction == 'push':
                     pending = conn.execute('SELECT p.ticket_id,p.issue_number,t.status FROM taskboard_project_pending p JOIN tickets t ON t.id=p.ticket_id WHERE t.project_id=? AND t.sync_repo=? AND t.sync_owner=? LIMIT 10', (project, config['repo'], config['owner'].lower())).fetchall()
                     for row in pending:
+                        if time.monotonic() >= deadline:
+                            result['project-pending'] = len(pending)
+                            break
                         entry = {'projectAttachmentPending': True}
                         try:
                             attached = module.retry_project_attachment(config, entry, row['issue_number'])

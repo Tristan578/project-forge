@@ -130,6 +130,21 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(self.remote.posts,1)
         self.assertEqual(self.row()['github_issue_number'],100)
 
+    def test_done_ticket_create_is_closed_without_recreation(self):
+        self.local()
+        with self.c: self.c.execute("UPDATE tickets SET status='done'")
+        for _ in range(3): sync.sync(self.c,self.cfg,self.project,self.remote,'push',include_done=True)
+        self.assertEqual(self.remote.posts,1)
+        self.assertEqual(self.remote.patches,1)
+        self.assertEqual(self.remote.rows[100]['state'],'closed')
+
+    def test_unlinked_legacy_ticket_cannot_create(self):
+        row=self.local()
+        with self.c: self.c.execute('INSERT INTO taskboard_unlinked_legacy VALUES(?)',(row['id'],))
+        with self.assertRaisesRegex(RuntimeError,'explicit repository/issue link'):
+            sync.create_linked(self.c,self.cfg,self.project,row,self.remote)
+        self.assertEqual(self.remote.posts,0)
+
     def test_uncertain_create_never_blindly_reposts(self):
         row=self.local()
         self.remote.failure='before'
@@ -205,6 +220,31 @@ class IdentityTests(unittest.TestCase):
     def test_corrupt_database_is_rejected(self):
         bad=Path(self.tmp.name)/'bad.db';bad.write_bytes(b'not sqlite')
         with self.assertRaises(sqlite3.DatabaseError): runtime.verify_database(bad,[])
+
+    def test_budget_stops_before_remote_work(self):
+        self.local()
+        result=sync.sync(self.c,self.cfg,self.project,self.remote,'push',deadline=0)
+        self.assertEqual(result,{'deferred':1})
+        self.assertEqual(self.remote.posts,0)
+
+    def test_project_failure_does_not_repeat_issue_update(self):
+        import contextlib,io,types
+        self.remote.rows[7]=self.issue()
+        sync.sync(self.c,self.cfg,self.project,self.remote,'pull')
+        with self.c: self.c.execute("UPDATE tickets SET description='Edited'")
+        attempts=[]
+        def attach(config,entry,number):
+            attempts.append(number)
+            if len(attempts)==1: raise RuntimeError('project unavailable')
+            entry['githubItemId']='PVTI_real'
+            return True
+        module=types.SimpleNamespace(load_config=lambda:self.cfg,_try_lock_exclusive=lambda fd:True,_release_lock=lambda fd:None,PUSH_TIME_BUDGET_SECONDS=120,retry_project_attachment=attach,gh_set_status=lambda *args:True)
+        with patch.object(sync,'default_db',return_value=self.path),patch.object(sync,'verify_database',return_value=self.path),patch.object(sync,'GitHub',return_value=self.remote),contextlib.redirect_stdout(io.StringIO()):
+            sync.run(module,'push')
+            sync.run(module,'push')
+        self.assertEqual(self.remote.patches,1)
+        self.assertEqual(attempts,[7,7])
+        self.assertEqual(self.c.execute('SELECT count(*) FROM taskboard_project_pending').fetchone()[0],0)
 
     def test_platform_paths(self):
         home=Path('/home/test')

@@ -2,13 +2,12 @@
 """
 github_project_sync.py - Bidirectional sync between local taskboard and GitHub Projects v2
 
-ARCHITECTURE (v3 — github_issue_number is source of truth):
-  - Local tickets have `github_issue_number` (INTEGER) and `sync_repo` (TEXT) columns.
-  - `sync_repo` MUST equal the configured repo name for a ticket to be synced.
-  - Push: only syncs tickets WHERE sync_repo = config.repo. Matches by github_issue_number.
-  - Pull: only imports issues whose SPAWNFORGE_METADATA.projectId matches, or are already linked.
-  - The JSON map file is a CACHE — the SQLite columns are the authoritative state.
-  - Title-based matching is NEVER used. Only github_issue_number links local <-> remote.
+ARCHITECTURE (repository-scoped durable identity):
+  - sync_owner + sync_repo + github_issue_number identify a remote issue.
+  - taskboard_sync owns transactional import, conflict detection and create intents.
+  - taskboard_runtime verifies the shared OS database and local repository binding.
+  - Open repository issues import independently of machine-local metadata IDs.
+  - JSON maps are legacy caches; titles never determine ticket identity.
 
 Usage:
   python3 github_project_sync.py push       # Push changed tickets to GitHub
@@ -994,6 +993,10 @@ def _try_lock_exclusive(lock_fd):
         if fcntl is not None:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         else:
+            lock_fd.seek(0, 2)
+            if lock_fd.tell() == 0:
+                lock_fd.write(b"0" if "b" in lock_fd.mode else "0")
+                lock_fd.flush()
             lock_fd.seek(0)
             msvcrt.locking(lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
         return True
@@ -1062,7 +1065,7 @@ def with_sync_lock(label, fn):
     fires often enough that the sweep could starve several turns' worth of them
     in a row.
     """
-    lock_fd = open(LOCK_PATH, "w")
+    lock_fd = open(LOCK_PATH, "a+b")
     if not _try_lock_exclusive(lock_fd):
         print(f"[SYNC] Another sync is already running — skipping {label}")
         request_sync_lock()
@@ -1091,48 +1094,17 @@ def pull():
 
 def show_status():
     config = load_config()
-    mapping = load_map()
-    tmap = mapping.get("tickets", {})
-    project_id = resolve_project_id(config)
-    if not project_id:
-        print("[FATAL] resolve_project_id() returned empty/None. Aborting status.", file=sys.stderr)
-        sys.exit(1)
-    target_repo = config["repo"]
-
-    print(f"Database: {DB_PATH} ({'exists' if DB_PATH.exists() else 'MISSING'})")
-    print(f"GitHub Project: {config['owner']}/{config['repo']} #{config['projectNumber']}")
-    print(f"Last sync: {mapping.get('lastSync') or 'never'}")
-    print(f"Tracked tickets (map): {len(tmap)}")
-
-    syncable = db_get_syncable_ticket_ids(target_repo)
-    print(f"Syncable tickets (DB sync_repo={target_repo}): {len(syncable)}")
-
-    conn = db_connect()
-    if conn:
-        cur = conn.execute("SELECT COUNT(*) FROM tickets WHERE github_issue_number IS NOT NULL")
-        linked = cur.fetchone()[0]
-        cur = conn.execute("SELECT COUNT(*) FROM tickets")
-        total = cur.fetchone()[0]
-        conn.close()
-        print(f"Linked to GitHub issues: {linked}/{total}")
-
-    tickets = tb_get(f"/tickets?project={project_id}")
-    if tickets:
-        pending = []
-        for t in tickets:
-            tid = t["id"]
-            if tid in tmap and tmap[tid].get("lastLocalStatus") != t.get("status"):
-                num = t.get("number", "?")
-                pending.append(
-                    f"  PF-{num}: {tmap[tid]['lastLocalStatus']} -> {t['status']}"
-                )
-
-        if pending:
-            print(f"\nPending outbound changes ({len(pending)}):")
-            for p in pending:
-                print(p)
-        else:
-            print("No pending outbound changes")
+    path = taskboard_runtime.verify_database(taskboard_runtime.default_db())
+    with taskboard_sync.connect(path) as conn:
+        project = taskboard_sync.bind_project(conn, config)
+        rows = taskboard_sync.scoped_rows(conn, config, project)
+        pending = 0
+        for row in rows:
+            baseline = conn.execute('SELECT local_hash FROM taskboard_sync_baselines WHERE ticket_id=?', (row['id'],)).fetchone()
+            if not baseline or taskboard_sync.local_hash(conn, row) != baseline['local_hash']:
+                pending += 1
+        local_only = conn.execute('SELECT count(*) FROM tickets WHERE project_id=? AND github_issue_number IS NULL', (project,)).fetchone()[0]
+        print(json.dumps({'database': str(path), 'repository': config['owner'] + '/' + config['repo'], 'projectId': project, 'linkedTickets': len(rows), 'unlinkedLocalTickets': local_only, 'pendingOutbound': pending}, sort_keys=True))
 
 
 # ---------------------------------------------------------------------------
@@ -1486,11 +1458,12 @@ COMMANDS = {
     "push-all": lambda: push(include_done=True),
     "pull": pull,
     "status": show_status,
-    "migrate-drafts": migrate_drafts,
+    "migrate-drafts": lambda: (_ for _ in ()).throw(RuntimeError("Legacy draft migration is disabled: explicitly link existing issues, then use duplicate-safe push")),
     "dedup": dedup_local,
     "close-orphans": close_orphan_issues,
     "reconcile": lambda: reconcile(apply_changes=False),
-    "reconcile-apply": lambda: reconcile(apply_changes=True),
+    "reconcile-apply": pull,  # startup reconciliation is remote-to-local, never blind close
+
 }
 
 if __name__ == "__main__":
