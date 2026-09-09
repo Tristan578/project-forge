@@ -1598,6 +1598,13 @@ self.onmessage = (e: MessageEvent) => {
       sharedState = {};
       collisionEnterCallbacks.clear();
       collisionExitCallbacks.clear();
+      // The 2D callbacks live on `self` as plain ARRAYS, not per-entity maps,
+      // so nothing overwrites a stale registration the way re-registering an
+      // entity's 3D callback does: they only grow. Left uncleared, one
+      // collision fired every 2D handler N+1 times after N restarts, silently
+      // multiplying whatever the game counts -- score, lives, pickups.
+      (self as unknown as Record<string, unknown>).__collision2dEnterCallbacks = [];
+      (self as unknown as Record<string, unknown>).__collision2dExitCallbacks = [];
       gameWinCallbacks.clear();
       gameScore = 0;
       // Send final UI clear

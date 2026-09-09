@@ -1914,6 +1914,54 @@ describe('scriptWorker', () => {
     );
   });
 
+  // RESTART LEAK (#9766, Sentry). `stop` clears the 3D callback MAPS and the
+  // win callbacks, and left the 2D callback ARRAYS untouched. The two are not
+  // equivalent failures: the 3D maps are keyed per entity, so re-registering
+  // overwrites, while the 2D arrays only ever grow. So after N restarts one
+  // collision fired every 2D handler N+1 times, which silently multiplies
+  // anything a creator counts -- score, lives, pickups.
+  it('stop clears 2D collision callbacks, so a restart does not double-fire them', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionEnter(function(e) { forge.log("hit:" + e.otherEntityId); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    await handler({ data: { type: 'stop' } });
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
+
+    // Two fires, not four: the callback is global, so one collision reaches it
+    // once per participant. A leaked registration doubles that.
+    const hits = mockPostMessage.mock.calls.filter(
+      ([m]) => (m as { type?: string; message?: string }).type === 'log' &&
+               String((m as { message?: string }).message).startsWith('hit:')
+    );
+    expect(hits).toHaveLength(2);
+  });
+
+  it('stop clears 2D EXIT callbacks too, not only the enter ones', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionExit(function(e) { forge.log("left:" + e.otherEntityId); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    await handler({ data: { type: 'stop' } });
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: false } });
+
+    const leaves = mockPostMessage.mock.calls.filter(
+      ([m]) => (m as { type?: string; message?: string }).type === 'log' &&
+               String((m as { message?: string }).message).startsWith('left:')
+    );
+    expect(leaves).toHaveLength(2);
+  });
+
   it('a 2D collision handler that unsubscribes itself does not skip its siblings', async () => {
     const handler = await setupWorker();
     // The unsubscribe splices the live array. Iterating it directly would skip
