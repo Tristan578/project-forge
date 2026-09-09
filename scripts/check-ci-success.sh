@@ -65,6 +65,7 @@ fi
 #    its `if:` — guarding only one arm would leave the other as a silent
 #    single-line `if: false` skip vector.
 tamper=""
+unconditional=""
 drift=""
 check_triggered() {
   local job="$1"; shift
@@ -108,6 +109,44 @@ check_triggered() {
 # `needs:` with no entry here, i.e. three silent `if: false` vectors). The suite
 # now asserts the map covers the real `needs:` list, so a newly added job that is
 # never mapped fails check-ci-success.test.sh instead of shipping as a hole.
+# An UNCONDITIONAL job has no trigger to consult, and the map above cannot model
+# it: `check_triggered` asks "did a trigger fire while the job skipped", and a
+# job with no `if:` has no trigger. That is not a reason to leave it out of the
+# aggregate — it is a reason it needs the SIMPLER assertion. A job that always
+# runs must always have succeeded, and a `skipped` or `absent` result means
+# somebody unwired it.
+#
+# Without this form the only options were "leave the job out of ci-success", so
+# its failure cannot block a merge, or "map it to a trigger it does not have",
+# which is a lie the drift branch would report every run.
+#
+# The first was taken for real. `board-verdict-tests` shipped in #9744
+# (d9a3ce89) OUTSIDE the aggregate, and that state is live on `main` until this
+# PR merges: the job exists there and `ci-success`'s needs: list does not name
+# it. `portable-paths` is created by this PR, was wired in, reverted once
+# (0307f27c) when the map-completeness assertion refused a job with no trigger,
+# and is wired in again here through this form (#9746).
+#
+# This comment has now been wrong twice — first claiming both jobs shipped that
+# way with deferral comments attached, then claiming neither did. Each sentence
+# above is checkable with one command against origin/main, which is what it
+# should have taken the first time.
+check_unconditional() {
+  local job="$1" result
+  result="$(jq -r --arg j "$job" '.[$j].result // "absent"' "$needs_file")"
+  if [ "$result" != "success" ]; then
+    # A SEPARATE accumulator, because the two forms fail for different
+    # reasons and the operator reading the error has to know which. These
+    # jobs have no trigger by construction, so reporting them under
+    # "skipped despite its trigger firing" sends the reader looking for a
+    # ci-gate output that does not exist (found in review).
+    unconditional="$unconditional"$'\n'"  - $job (result=$result)"
+  fi
+}
+
+check_unconditional "portable-paths"
+check_unconditional "board-verdict-tests"
+
 check_triggered "lockfile-sync"             "needs-deps"
 check_triggered "lockfile-sync-tests"       "needs-ci" "needs-agentic" "needs-onboarding" "needs-codex"
 check_triggered "agentic-sync"              "needs-agentic"
@@ -181,6 +220,13 @@ fi
 if [ -n "$tamper" ]; then
   echo "::error::Self-defending gate skipped despite its trigger firing (possible unwiring):"
   echo "$tamper"
+  exit 1
+fi
+if [ -n "$unconditional" ]; then
+  echo "::error::Unconditional gate(s) did not succeed. These jobs have no job-level if:,"
+  echo "::error::so they run on every PR and must always succeed - a skipped or absent"
+  echo "::error::result means the job was unwired or dropped from ci-success needs:"
+  echo "$unconditional"
   exit 1
 fi
 

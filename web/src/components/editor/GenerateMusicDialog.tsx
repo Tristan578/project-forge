@@ -38,6 +38,10 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
   // Capability gate (#9117): blocked only on a positive "unavailable" report.
   const gate = useGenerationGate('music-generation');
   const canSubmit =
+    // `blocked` is false until the first /api/capabilities body lands, so
+    // without this a permanently-unavailable capability presented a live
+    // Generate button with no notice beside it (#9725 p8).
+    !gate.loading &&
     !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&

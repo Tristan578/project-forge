@@ -46,7 +46,7 @@ import {
   PLATFORM_KEY_CONSOLE_URL,
   GATEWAY_KEY_ENV,
   GATEWAY_CAPABILITIES,
-  CAPABILITY_PROVIDER_OPTIONS,
+  CAPABILITY_REQUIRED_PROVIDERS,
   getCapabilityUnavailability,
   type ProviderCapability,
   type PlatformKeyProvider,
@@ -190,7 +190,7 @@ export function buildPlan(env: Readonly<Record<string, string | undefined>>): Pl
     // Each alternative stays visible in the report; one successful sprite
     // provider verifies the aggregate capability, not every operation.
     const providers: readonly PlatformKeyProvider[] =
-      CAPABILITY_PROVIDER_OPTIONS[capability] ?? [provider as PlatformKeyProvider];
+      CAPABILITY_REQUIRED_PROVIDERS[capability] ?? [provider as PlatformKeyProvider];
     return providers.map((platformProvider): PlanRow => {
       const envVar = PLATFORM_KEY_ENV[platformProvider];
       return {
@@ -318,7 +318,7 @@ export function summarize(results: ProbeResult[]): Summary {
   for (const r of results) byCapability.set(r.capability, [...(byCapability.get(r.capability) ?? []), r]);
   const groups = [...byCapability.values()];
   const offered = groups.filter((rows) => rows.every((r) => r.status !== 'unavailable'));
-  const verified = offered.filter((rows) => CAPABILITY_PROVIDER_OPTIONS[rows[0].capability]
+  const verified = offered.filter((rows) => CAPABILITY_REQUIRED_PROVIDERS[rows[0].capability]
     ? rows.some((r) => r.status === 'pass')
     : rows.every((r) => r.status === 'pass'));
   const failing = offered.filter((rows) => !verified.includes(rows));

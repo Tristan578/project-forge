@@ -17,6 +17,29 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. R
 | **UX/Frontend** | `ux-reviewer` | Accessibility (WCAG AA), component UX, Tailwind, responsive |
 | **Test** | `test-reviewer` | Coverage gaps, test weakening, CI gates, parameterization, visual regression (read-only — `test-writer` is the builder that WRITES tests and must never sit on the board) |
 
+## Publishing the verdict
+
+A verdict that lives only in a conversation is a verdict a PR does not show.
+#9725 merged with two majors open for exactly that reason: CI was green, no
+threads were unresolved, and nothing on the PR contradicted "ready". Both
+blockers reached `main`.
+
+So the board's result goes onto the PR, where it becomes the `review-board`
+commit status next to CI:
+
+```bash
+bash scripts/post-board-verdict.sh <pr> <PASS|FAIL> <the sha the board reviewed> "<one-line summary>"
+```
+
+`.claude/workflows/review-board.js` runs this itself in its Publish phase; run
+it by hand when the board was run by hand. Pass the sha the board **actually
+reviewed**, not the current head — if a push landed mid-review they differ, and
+`scripts/board-verdict.sh` then reports the verdict as stale rather than letting
+it grade code no reviewer saw.
+
+Until a verdict exists for the current head the status is `pending`, on purpose:
+"nobody looked" and "someone looked and it was clean" must not render the same.
+
 ## Rules
 
 - NEVER substitute a generic `code-reviewer` for the 5 specialized agents

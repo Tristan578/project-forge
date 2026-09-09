@@ -8,12 +8,12 @@ import {
   GATEWAY_KEY_ENV,
   CAPABILITY_ENV_VARS,
   CAPABILITY_LABELS,
-  CAPABILITY_PROVIDER_OPTIONS,
-  isByokProvider,
+  CAPABILITY_REQUIRED_PROVIDERS,
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
   getCapabilityUnavailability,
-  isCapabilityConfigured,
+  isByokProvider,
+  isVercelRuntime,
 } from '@/lib/config/providers';
 
 /**
@@ -47,8 +47,6 @@ export interface CapabilityStatus {
   requiredProviders?: string[];
   /** Per-user provider options for operation-specific generation gates. */
   providerAvailability?: Record<string, boolean>;
-  /** Whether a user can enable this capability through supported key setup. */
-  byokConfigurable?: boolean;
   /** Helpful setup hint */
   hint?: string;
   /**
@@ -58,6 +56,16 @@ export interface CapabilityStatus {
    * then carries the user-facing reason and `issue` the tracking issue.
    */
   unprovisionable?: boolean;
+  /**
+   * True when the caller could turn this capability on themselves: every
+   * provider it still needs is in `BYOK_PROVIDERS`, so `/api/keys/[provider]`
+   * accepts it and Settings renders a field for it. False for `sprite`
+   * (Replicate + OpenAI), `image` and `bg_removal` (OpenAI, remove.bg) — the
+   * key those need can only be set on the deployment, so the client must not
+   * send the user to Settings for them (#9725 p8). Never set on an available
+   * or unprovisionable capability.
+   */
+  byokConfigurable?: boolean;
   /** GitHub issue tracking an unprovisionable capability (machine-readable). */
   issue?: number;
 }
@@ -190,13 +198,52 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     }
 
     const envVars = CAPABILITY_KEY_MAP[cap];
-    const options = CAPABILITY_PROVIDER_OPTIONS[cap];
-    const providerAvailability = options ? Object.fromEntries(options.map((provider) => [
-      provider, Boolean(process.env[PLATFORM_KEY_ENV[provider]]) || byokProviders.has(provider),
-    ])) : undefined;
-    const isAvailable = providerAvailability
-      ? Object.values(providerAvailability).some(Boolean)
-      : isCapabilityConfigured(cap) || byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
+    const required = CAPABILITY_REQUIRED_PROVIDERS[cap];
+    // WHICH provider is missing, reported alongside the aggregate below. This
+    // is #9719's contribution and it is deliberately NOT the availability
+    // rule: a dialog uses it to name the failing path, while `isAvailable`
+    // stays all-or-nothing because the default request 500s when any required
+    // key is absent.
+    const providerAvailability = required
+      ? Object.fromEntries(
+          required.map((provider) => [
+            provider,
+            Boolean(process.env[PLATFORM_KEY_ENV[provider]]) || byokProviders.has(provider),
+          ]),
+        )
+      : undefined;
+    let isAvailable: boolean;
+    /** The env vars whose providers the user could still configure. */
+    let missingEnvVars: readonly string[];
+    /**
+     * Whether a key the user could add in Settings would actually flip this
+     * capability on. For a multi-key capability that means EVERY still-missing
+     * provider is a BYOK one; for a single-key one it is the provider the BYOK
+     * branch of `isAvailable` below actually consults.
+     */
+    let byokConfigurable: boolean;
+    if (required) {
+      // A capability that spends more than one key is available only when
+      // EVERY one of them is present, otherwise its default request 500s.
+      // `resolveApiKey` resolves each provider on its own, BYOK first, so the
+      // sources OR per provider: a user's own OpenAI key on a Replicate-only
+      // deployment can run both sprite paths. Naming only what is missing
+      // is what keeps the hint from telling a Replicate-only environment to
+      // "Configure Replicate" (the key it already has).
+      const missing = required.filter(
+        (provider) => !process.env[PLATFORM_KEY_ENV[provider]] && !byokProviders.has(provider),
+      );
+      isAvailable = missing.length === 0;
+      missingEnvVars = missing.map((provider) => PLATFORM_KEY_ENV[provider]);
+      byokConfigurable = missing.every((provider) => isByokProvider(provider));
+    } else {
+      // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
+      const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
+      const platformAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
+      isAvailable = platformAvailable || byokProviders.has(DIRECT_CAPABILITY_PROVIDER[cap]);
+      missingEnvVars = envVars;
+      byokConfigurable = isByokProvider(DIRECT_CAPABILITY_PROVIDER[cap]);
+    }
 
     const status: CapabilityStatus = {
       capability: cap,
@@ -206,18 +253,28 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     };
 
     if (!isAvailable) {
-      // Name alternative providers; operation-specific hints use the
-      // providerAvailability map in the dialog gate.
-      const providerNames = envVars.map(
+      // ONLY WHAT IS MISSING. Mapping every env var the capability can spend
+      // told a Replicate-only deployment to "Configure Replicate" — the key it
+      // already has. `missingEnvVars` is the subset neither the platform nor
+      // the user's own keys cover, which is what the hint should name. The
+      // per-provider breakdown above still reports the full picture for a
+      // dialog that wants it (#9719 + #9725 p8).
+      const providerNames = missingEnvVars.map(
         (envVar) => ENV_VAR_PROVIDER_NAMES[envVar] || 'Unknown Provider'
       );
       const uniqueProviders = [...new Set(providerNames)];
       status.requiredProviders = uniqueProviders;
-      const named = options ? uniqueProviders.join(' or ') : uniqueProviders[0];
-      status.byokConfigurable = options ? options.some(isByokProvider) : isByokProvider(DIRECT_CAPABILITY_PROVIDER[cap]);
-      status.hint = status.byokConfigurable
-        ? `Configure ${named} API key in Settings to enable ${CAPABILITY_LABELS[cap]}.`
-        : `${CAPABILITY_LABELS[cap]} needs ${named} API key, which only this deployment can configure.`;
+      status.byokConfigurable = byokConfigurable;
+      const named = required ? uniqueProviders.join(' and ') : uniqueProviders[0];
+      const plural = required && uniqueProviders.length > 1 ? 'keys' : 'key';
+      // Only say "in Settings" when Settings can actually take the key. It
+      // cannot for Replicate, OpenAI or remove.bg — `/api/keys/[provider]`
+      // rejects them and ApiKeyManager renders no field — so the old sentence
+      // sent sprite/image/bg_removal users to a page where the named key does
+      // not exist, the dead end this notice was added to remove (#9725 p8).
+      status.hint = byokConfigurable
+        ? `Configure ${named} API ${plural} in Settings to enable ${CAPABILITY_LABELS[cap]}.`
+        : `${CAPABILITY_LABELS[cap]} needs ${named} API ${plural}, which only this deployment can configure.`;
     }
 
     return status;

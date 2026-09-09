@@ -51,6 +51,13 @@ export const BYOK_PROVIDERS = [
 
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
 
+/**
+ * Whether a user could add this provider's key themselves — the single
+ * predicate behind "is /api/keys/[provider] going to accept it" and "does
+ * ApiKeyManager render a field for it". `/api/capabilities` uses it to decide
+ * whether a missing key is fixable in Settings before telling anyone to go
+ * there; Replicate, OpenAI and remove.bg are not (#9725 p8).
+ */
 export function isByokProvider(provider: string): provider is ByokProvider {
   return (BYOK_PROVIDERS as readonly string[]).includes(provider);
 }
@@ -341,11 +348,24 @@ export const ROUTE_CAPABILITY: Readonly<Record<string, ProviderCapability>> = {
   '/api/generate/voice': 'voice',
 };
 
-/** Alternative providers for operation-dependent capabilities. Each request
- * uses one provider; aggregate availability means at least one path works.
- * The capabilities response exposes each option so dialogs gate the chosen path.
+/**
+ * Capabilities whose platform path resolves MORE than one provider key, all of
+ * which must be present for the capability to be usable. `sprite`:
+ * `/api/generate/sprite` picks the provider per request — `provider: 'auto'`
+ * (the dialog's and the chat tool's default) resolves DALL-E 3 on OpenAI for
+ * every style except pixel-art and Replicate SDXL for pixel-art — so a
+ * Replicate-only environment still fails the default sprite path. Read by
+ * `/api/capabilities` and `web/scripts/verify-platform-generation.ts` so the
+ * two cannot disagree (#9725 review, lesson 1).
+ *
+ * THE RESPONSE ALSO REPORTS EACH PROVIDER SEPARATELY. Availability is
+ * all-or-nothing per the rule above, because the default request 500s when any
+ * required key is absent; the per-provider breakdown is what lets a dialog say
+ * WHICH path is missing rather than only that the capability is off (#9719).
+ * The two are not in tension: the aggregate answers "may I offer this", the
+ * breakdown answers "what is missing".
  */
-export const CAPABILITY_PROVIDER_OPTIONS: Partial<Record<ProviderCapability, readonly PlatformKeyProvider[]>> = {
+export const CAPABILITY_REQUIRED_PROVIDERS: Partial<Record<ProviderCapability, readonly PlatformKeyProvider[]>> = {
   sprite: ['replicate', 'openai'],
 };
 
@@ -496,7 +516,7 @@ export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> 
   voice: [PLATFORM_KEY_ENV.elevenlabs],
   music: [PLATFORM_KEY_ENV.suno],
   // Independent sprite paths: OpenAI or Replicate.
-  sprite: CAPABILITY_PROVIDER_OPTIONS.sprite!.map((p) => PLATFORM_KEY_ENV[p]),
+  sprite: CAPABILITY_REQUIRED_PROVIDERS.sprite!.map((p) => PLATFORM_KEY_ENV[p]),
   bg_removal: [PLATFORM_KEY_ENV.removebg],
 };
 
@@ -507,7 +527,7 @@ export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> 
  */
 export function isCapabilityConfigured(capability: ProviderCapability): boolean {
   // Operation-dependent capabilities need any one supported provider.
-  const required = CAPABILITY_PROVIDER_OPTIONS[capability];
+  const required = CAPABILITY_REQUIRED_PROVIDERS[capability];
   if (required) {
     return required.some((provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]));
   }
@@ -566,11 +586,46 @@ export type SpriteProvider = (typeof SPRITE_PROVIDERS)[number];
 export const SPRITE_SIZES = ['32x32', '64x64', '128x128', '256x256', '512x512', '1024x1024'] as const;
 export type SpriteSize = (typeof SPRITE_SIZES)[number];
 
+/** The sprite styles the dialog offers; `auto` routing keys off this. */
+export const SPRITE_STYLES = ['pixel-art', 'hand-drawn', 'vector', 'realistic'] as const;
+export type SpriteStyle = (typeof SPRITE_STYLES)[number];
+
+/**
+ * Which provider a sprite request will actually be served by.
+ *
+ * ONE definition, because the price depends on it and two copies drifted:
+ * `/api/generate/sprite` resolved `auto` by style and charged
+ * `SPRITE_TOKEN_COST` accordingly, while `GenerateSpriteDialog` hard-coded 15
+ * for its quote AND its balance check. 15 is neither provider's price, so the
+ * single-sprite tab was wrong for every generation — a 10-14 balance was
+ * refused on a pixel-art request the server would have charged 10 for, and a
+ * 15-19 balance submitted a request the server then rejected for 20 (#9741,
+ * reported by Devin on #9727).
+ *
+ * The route and the dialog now both call this, so a future routing change
+ * cannot move the charge without moving the quote.
+ */
+export function resolveSpriteProvider(
+  style: SpriteStyle | undefined,
+  provider: SpriteProvider = 'auto',
+): Exclude<SpriteProvider, 'auto'> {
+  if (provider !== 'auto') return provider;
+  return style === 'pixel-art' ? 'sdxl' : 'dalle3';
+}
+
 /** Token costs per sprite generation provider */
 export const SPRITE_TOKEN_COST: Record<Exclude<SpriteProvider, 'auto'>, number> = {
   dalle3: 20,
   sdxl: 10,
 };
+
+/** What a single sprite costs, for the provider the request will resolve to. */
+export function spriteTokenCost(
+  style: SpriteStyle | undefined,
+  provider: SpriteProvider = 'auto',
+): number {
+  return SPRITE_TOKEN_COST[resolveSpriteProvider(style, provider)];
+}
 
 /** Estimated generation time per provider (seconds) */
 export const SPRITE_ESTIMATED_SECONDS: Record<Exclude<SpriteProvider, 'auto'>, number> = {
@@ -602,16 +657,10 @@ export const CIRCUIT_BREAKER_DEFAULTS = {
 } as const;
 
 /** Shared by the sprite route and dialog so provider selection cannot drift. */
-export function resolveSpriteProvider(style: SpriteStyle | undefined, provider: SpriteProvider = 'auto'): Exclude<SpriteProvider, 'auto'> {
-  return provider === 'auto' ? (style === 'pixel-art' ? 'sdxl' : 'dalle3') : provider;
-}
-
+/**
+ * Which platform key each sprite provider spends, so a dialog can gate on the
+ * capability the request will actually resolve to rather than on `sprite` as a
+ * whole (#9719). The resolver, the cost helper and the styles live once,
+ * further up — this file carried a second copy of all three after the merge.
+ */
 export const SPRITE_PROVIDER_KEY = { dalle3: 'openai', sdxl: 'replicate' } as const;
-
-export const SPRITE_STYLES = ['pixel-art', 'hand-drawn', 'vector', 'realistic'] as const;
-export type SpriteStyle = (typeof SPRITE_STYLES)[number];
-
-/** Shared quote and charge for the selected sprite provider. */
-export function spriteTokenCost(style: SpriteStyle | undefined, provider: SpriteProvider = 'auto'): number {
-  return SPRITE_TOKEN_COST[resolveSpriteProvider(style, provider)];
-}

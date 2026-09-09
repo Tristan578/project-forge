@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   CAPABILITY_ENV_VARS,
   CAPABILITY_LABELS,
-  CAPABILITY_PROVIDER_OPTIONS,
+  CAPABILITY_REQUIRED_PROVIDERS,
   GATEWAY_CAPABILITIES,
   PROVIDER_CAPABILITIES,
   PLATFORM_KEY_ENV,
@@ -66,7 +66,7 @@ describe('CAPABILITY_ENV_VARS', () => {
 
   // The API, health probe, and verification script share these alternatives.
   it('an operation-dependent capability lists exactly its provider options', () => {
-    const entries = Object.entries(CAPABILITY_PROVIDER_OPTIONS) as [
+    const entries = Object.entries(CAPABILITY_REQUIRED_PROVIDERS) as [
       ProviderCapability,
       readonly (keyof typeof PLATFORM_KEY_ENV)[],
     ][];

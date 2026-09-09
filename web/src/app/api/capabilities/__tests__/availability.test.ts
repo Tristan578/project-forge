@@ -159,22 +159,53 @@ describe('GET /api/capabilities availability', () => {
     }
   });
 
-  it.each(['replicate', 'openai'])('allows a sprite path with only its platform key (%s)', async (provider) => {
+  // ONE KEY IS NOT ENOUGH, and the breakdown says which one is there. `sprite`
+  // resolves its provider per request — `provider: 'auto'` picks DALL-E 3 for
+  // every style but pixel-art — so a Replicate-only deployment still fails the
+  // default path, and offering the capability would be offering a 500. This
+  // case used to assert the opposite (available with either key alone), which
+  // was the any-provider rule this branch carried before main's landed.
+  it.each(['replicate', 'openai'])('reports sprite unavailable with only one platform key, naming which path is present (%s)', async (provider) => {
     vi.stubEnv(provider === 'replicate' ? 'PLATFORM_REPLICATE_KEY' : 'PLATFORM_OPENAI_KEY', 'key');
     const { body } = await call();
     const sprite = status(body, 'sprite');
-    expect(sprite.available).toBe(true);
+    expect(sprite.available).toBe(false);
+    // #9719's contribution, and the reason it survives main's stricter rule:
+    // the aggregate says "do not offer this", the breakdown says what is
+    // missing, and a dialog needs both to explain itself.
     expect(sprite.providerAvailability).toEqual({ replicate: provider === 'replicate', openai: provider === 'openai' });
-    expect(sprite.requiredProviders).toBeUndefined();
   });
 
-  it('names either provider when neither sprite path is available', async () => {
+  // Naming every env var the capability CAN spend told a Replicate-only
+  // deployment to "Configure Replicate" — the key it already had — and never
+  // named OpenAI (lesson 1 family). These two cases are the pair: one key
+  // present names only the other, no keys names both.
+  it('names only the missing provider for sprite in a Replicate-only environment', async () => {
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
+    const { body } = await call();
+    const sprite = status(body, 'sprite');
+    expect(sprite.available).toBe(false);
+    expect(sprite.providerAvailability).toEqual({ replicate: true, openai: false });
+    expect(sprite.requiredProviders).toEqual(['OpenAI']);
+    expect(sprite.hint).toContain('OpenAI');
+    expect(sprite.hint).not.toContain('Replicate');
+    // NOT "in Settings": OpenAI is not a BYOK provider, so /api/keys/openai
+    // rejects it and ApiKeyManager renders no field for it. Saying "Settings"
+    // sent the user to a page where the named key cannot be added — a dead end
+    // dressed as an instruction (#9725 p8).
+    expect(sprite.hint).not.toContain('Settings');
+    expect(sprite.byokConfigurable).toBe(false);
+  });
+
+  it('names every missing provider for sprite when neither key is present', async () => {
     const { body } = await call();
     const sprite = status(body, 'sprite');
     expect(sprite.available).toBe(false);
     expect(sprite.providerAvailability).toEqual({ replicate: false, openai: false });
-    expect(sprite.requiredProviders).toEqual(['Replicate', 'OpenAI']);
-    expect(sprite.hint).toContain('Replicate or OpenAI');
+    expect(sprite.requiredProviders).toEqual(expect.arrayContaining(['Replicate', 'OpenAI']));
+    expect(sprite.requiredProviders).toHaveLength(2);
+    expect(sprite.hint).toContain('Replicate');
+    expect(sprite.hint).toContain('OpenAI');
     expect(sprite.hint).not.toContain('Settings');
     expect(sprite.byokConfigurable).toBe(false);
   });
@@ -182,8 +213,39 @@ describe('GET /api/capabilities availability', () => {
   it.each(['replicate', 'openai'])('ignores unsupported sprite BYOK rows (%s)', async (provider) => {
     signedInWithByok([provider]);
     const { body } = await call();
-    expect(status(body, 'sprite').available).toBe(false);
-    expect(status(body, 'sprite').providerAvailability).toEqual({ replicate: false, openai: false });
+    const sprite = status(body, 'sprite');
+    expect(sprite.available).toBe(false);
+    expect(sprite.providerAvailability).toEqual({ replicate: false, openai: false });
+    expect(sprite.requiredProviders).toEqual(expect.arrayContaining(['Replicate', 'OpenAI']));
+    expect(sprite.requiredProviders).toHaveLength(2);
+    expect(sprite.hint).toContain('Replicate');
+    expect(sprite.hint).toContain('OpenAI');
+    expect(sprite.hint).not.toContain('Settings');
+    expect(sprite.byokConfigurable).toBe(false);
+  });
+
+  // The client renders its "Open Settings" affordance from this flag alone, so
+  // it must be true exactly when /api/keys/[provider] would accept the key the
+  // capability is missing (#9725 p8).
+  it.each([
+    ['sfx', true],
+    ['model3d', true],
+    ['music', undefined],
+    ['sprite', false],
+    ['image', false],
+    ['bg_removal', false],
+  ] as const)('marks %s byokConfigurable=%s on a key-less deployment', async (cap, expected) => {
+    const { body } = await call();
+    const row = status(body, cap);
+    expect(row.available).toBe(false);
+    expect(row.byokConfigurable).toBe(expected);
+  });
+
+  it('offers Settings in the hint only for a capability Settings can actually fix', async () => {
+    const { body } = await call();
+    expect(status(body, 'sfx').hint).toContain('Settings');
+    expect(status(body, 'bg_removal').hint).toContain('only this deployment can configure');
+    expect(status(body, 'bg_removal').hint).not.toContain('Settings');
   });
 
   it('does not advertise unsupported BYOK options beside a platform key', async () => {
