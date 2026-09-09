@@ -1596,6 +1596,14 @@ assert_block_lines_exact() {
 $delta"
     return
   fi
+  # THE LABEL IS RECORDED HERE, on the success path of the COMPARISON — not on
+  # entry to the assert_steps_block wrapper, where it proved only that the
+  # wrapper was called. Replacing the comparison with a no-op neutered all six
+  # step-block pins while the meta-assertion at the end of this suite still
+  # reported success (found in review), one frame deeper than the defect that
+  # assertion was added to close.
+  STEPS_BLOCK_RAN="$STEPS_BLOCK_RAN
+$2"
   pass "$2: the block is exactly the $(grep -c '' <<<"$actual") expected lines (nothing can be appended to it, inserted into it or rewritten inside it past the pins on it)"
 }
 readonly -f assert_block_lines_exact
@@ -1640,6 +1648,12 @@ readonly -f assert_block_lines_exact
 # invisible to the pin. That is a comment to YAML and to the shell of a `run:`
 # body alike; it would only matter for a line written verbatim into a file
 # where a leading `#` is load-bearing, which nothing here does.
+# Each label is appended by assert_block_lines_exact when its comparison RUNS
+# and matches — not by the wrapper on entry. A call that is commented out,
+# wrapped in `if false`, never reached, or whose comparison was replaced by a
+# no-op all leave a gap the assertion at the end of this suite reports.
+STEPS_BLOCK_RAN=""
+
 assert_steps_block() {
   local blk
   # Read in THIS frame, where it is the line that called the wrapper -- i.e. the
@@ -2613,6 +2627,8 @@ STEPS_EOF
   skills-lint:
   lockfile-sync:
   openapi-route-sync:
+  board-verdict-tests:
+  portable-paths:
   agentic-sync:
   taskboard-onboarding-guard:
   codex-config-guard:
@@ -3365,7 +3381,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=595
+readonly SELF_EXEC_EXPECTED_DROP=614
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3519,6 +3535,8 @@ IFS= read -r -d '' expected_steps_1 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_2 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_3 @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_4 @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_pp @@'STEPS_EOF' || true
+IFS= read -r -d '' expected_steps_bvt @@'STEPS_EOF' || true
 IFS= read -r -d '' expected_steps_5 @@'STEPS_EOF' || true
 STEPS_EOF
 readonly expected_openers
@@ -3811,6 +3829,52 @@ STEPS_EOF
 readonly expected_steps_4
 assert_steps_block "${ci_success_block:-}" "ci.yml ci-success job steps:" "${expected_steps_4%$'\n'}"
 
+# --- the two UNCONDITIONAL gate jobs (#9740) --------------------------------
+#
+# Both were promoted into the required `CI Success` aggregate through
+# `check_unconditional`, which asks only "did this job succeed". A job whose
+# gate step is removed, commented out or given `if: false` still concludes
+# SUCCESS, so that question is satisfied while the work never happens. The
+# per-job pins in check-portable-paths.test.sh and check-ci-success.test.sh
+# catch a full neuter, a duplicate `run:` key and a step-level `if:` — but a
+# PARTIAL neuter, removing ONE step of two and leaving the other, keeps every
+# one of them green. Measured: commenting out board-verdict-tests' suite step
+# left `check-ci-success.test.sh` reporting "All tests passed".
+#
+# This is the assertion that closes it, and it is the one this repo already
+# uses for five other gate-bearing jobs: pin the step block LINE FOR LINE, so
+# removing, renaming, reordering or adding a step is a diff to the literal
+# below and a reviewer sees it.
+ci_pp_block="$(awk -v re="$job_key_re" '/^  portable-paths:/{f=1} f{print} f && $0 ~ re && !/^  portable-paths:/{exit}' <<<"$ci_exec")"
+readonly ci_pp_block
+
+IFS= read -r -d '' expected_steps_pp <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test the portable-paths gate's decision logic
+        run: bash scripts/__tests__/check-portable-paths.test.sh
+      - name: Shellcheck the gate and its suite
+        run: shellcheck -x scripts/check-portable-paths.sh scripts/__tests__/check-portable-paths.test.sh
+      - name: Check for machine-local absolute paths in tracked files
+        run: bash scripts/check-portable-paths.sh
+STEPS_EOF
+readonly expected_steps_pp
+assert_steps_block "${ci_pp_block:-}" "ci.yml portable-paths job steps:" "${expected_steps_pp%$'\n'}"
+
+ci_bvt_block="$(awk -v re="$job_key_re" '/^  board-verdict-tests:/{f=1} f{print} f && $0 ~ re && !/^  board-verdict-tests:/{exit}' <<<"$ci_exec")"
+readonly ci_bvt_block
+
+IFS= read -r -d '' expected_steps_bvt <<'STEPS_EOF' || true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Board verdict decision logic
+        run: bash scripts/__tests__/board-verdict.test.sh
+      - name: Shellcheck the verdict scripts and the suite
+        run: shellcheck -x scripts/board-verdict.sh scripts/post-board-verdict.sh scripts/__tests__/board-verdict.test.sh
+STEPS_EOF
+readonly expected_steps_bvt
+assert_steps_block "${ci_bvt_block:-}" "ci.yml board-verdict-tests job steps:" "${expected_steps_bvt%$'\n'}"
+
 # ci-gate's detect step: the one block that decides whether the caller above
 # runs at all. `any_code=false` is a one-token edit that skips every npm audit
 # on the PR path with the suite green and the required check green (round 26).
@@ -3945,6 +4009,10 @@ expected_steps_1
 expected_steps_2
 expected_steps_3
 expected_steps_4
+ci_pp_block
+expected_steps_pp
+ci_bvt_block
+expected_steps_bvt
 expected_steps_5
 SELF_EXEC_FILTER
 SELF_EXEC
@@ -4202,6 +4270,32 @@ elif [[ "$fn_freeze_probe" == *"readonly function"* && "$fn_freeze_probe" == *"f
 else
   fail "the 'readonly -f' effect probe was inconclusive -- expected both the shell's readonly-function refusal and the real pass() output, got: ${fn_freeze_probe}"
 fi
+# --- every unconditional job's step-block pin actually RAN --------------------
+#
+# `check_unconditional` in check-ci-success.sh promotes a job into the required
+# CI Success aggregate on the strength of "did it succeed", which a job whose
+# steps were removed still satisfies. The line-for-line pins above are what
+# close that, and check-ci-success.test.sh asserts one exists per such job — by
+# grepping this file, which a call wrapped in `if false` satisfies while never
+# executing (found in review). This is the half that measures execution.
+uncond_expected="$(grep -v '^[[:space:]]*#' "$REPO_ROOT/scripts/check-ci-success.sh" \
+  | grep -Eo '^check_unconditional[[:space:]]+"[^"]+"' \
+  | sed -E 's/^check_unconditional[[:space:]]+"([^"]+)"$/\1/')"
+if [ -z "$uncond_expected" ]; then
+  fail "no check_unconditional calls found in check-ci-success.sh — either the form was removed (and the jobs it protected are unguarded) or this cut broke; the per-job assertion below would pass having checked nothing"
+else
+  uncond_missing=""
+  while IFS= read -r ujob; do
+    [ -n "$ujob" ] || continue
+    grep -qxF "ci.yml ${ujob} job steps:" <<<"$STEPS_BLOCK_RAN" || uncond_missing="$uncond_missing $ujob"
+  done <<<"$uncond_expected"
+  if [ -n "$uncond_missing" ]; then
+    fail "step-block pin(s) did not RUN for unconditional job(s) —$uncond_missing. The call is present in this file but never executed (commented out, wrapped in a false branch, or unreached), so removing one of that job's steps is caught by nothing."
+  else
+    pass "every check_unconditional job's step-block pin actually ran ($(printf '%s\n' "$uncond_expected" | grep -c .) job(s))"
+  fi
+fi
+
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
@@ -4211,3 +4305,4 @@ else
   echo "$FAILURES test(s) failed."
   exit 1
 fi
+

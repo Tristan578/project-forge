@@ -328,6 +328,85 @@ silently onboarding the next contributor against a broken board:
   always use `taskboard start --port 3010`, letting it use the OS-default DB
   path). Both gates are wired into the required **CI Success** aggregate.
 
+## Machine-local absolute paths
+
+A tracked file must not hardcode a path that only exists on one machine. Such a
+path resolves to nothing on every other checkout, and it fails **silently** —
+#9605 is exactly that: an enforcement hook read a path containing one
+contributor's username, so on every other machine it took its no-op branch and
+the hook was off for entire sessions with nothing saying so.
+
+The required **`Portable Paths`** gate
+(`scripts/check-portable-paths.sh`, wired into the **CI Success** aggregate)
+greps every tracked file for two shapes: a Windows drive-letter path into a
+common checkout root, and a POSIX home directory. Run it yourself before
+pushing:
+
+```bash
+bash scripts/check-portable-paths.sh
+```
+
+It prints the offending `file:line:content` for each hit and exits non-zero.
+`/home/runner/` is exempt — it is the GitHub Actions HOME and identical on every
+Linux runner — but only that occurrence, so a personal home path on the same
+line is still reported.
+
+**Use instead**, in rough order of preference:
+
+| Instead of a machine-local path | Use |
+|---|---|
+| `cd` into your own home directory | `cd "$(git rev-parse --show-toplevel)"` |
+| an absolute path in a script or doc | a repo-relative path, from the repo root |
+| a tool that genuinely needs your own layout | an environment variable, or a personal config that is **not** tracked |
+
+> The rows above describe the forbidden shapes rather than showing them. That is
+> not squeamishness: the gate greps every tracked file, so a document quoting a
+> real example is a document the gate then fails on — which is what happened
+> when this section was first written, and the annotation pointed right here.
+> The shapes live once, in the gate's own patterns.
+
+For the last case: a real machine-local path belongs in an untracked file. The
+repo ignores the usual per-machine config locations; if the tool insists on a
+tracked file, that is worth raising rather than working around, because whatever
+you commit becomes everyone's path.
+
+### If the gate flags something legitimate
+
+Some files are *about* path handling — a test asserting that a Windows absolute
+path is accepted, a generator whose fixtures quote real paths. Those are
+exempted by an allowlist in `scripts/check-portable-paths.sh`. Add the exemption
+in the same PR as the file that needs it.
+
+The gate enforces five rules on that allowlist, and its suite fails the build on
+each. All five will otherwise surprise you, so they are written out here rather
+than left to be discovered one CI round at a time:
+
+- **The entry and its reason are two parallel arrays.** `ALLOW_ENTRIES` and
+  `ALLOW_REASONS`, edited at the **same index**. A reason is not an inline
+  comment on the entry — trailing comments are stripped — and a length mismatch
+  exits 2 with `ALLOW_ENTRIES and ALLOW_REASONS differ in length`.
+- **The entry must be anchored**: it starts with `^` and ends with either `$`
+  (one file) or `/` (one directory). A bare substring exempts every path
+  containing it — an entry named for a test once exempted its production sibling
+  too.
+- **One entry covers one subject, and this is measured.** The entry must be a
+  literal path — anchors, slashes and escaped dots only, so no alternation, no
+  optional group and nothing like `.*`. A `$`-anchored entry must then match
+  exactly one tracked file when run against `git ls-files`; a `/` entry must
+  cover a small directory. The staleness notice below is per entry, so an entry
+  covering two files stays "used" while one of them goes dead.
+- **The regex must compile.** Every entry is compiled before any is trusted, and
+  a malformed one exits 2 naming it. Without that check `grep` exits 2, the
+  caller reads it as "no match", and the entry silently stops exempting while
+  its files are reported instead.
+- **An entry that stops exempting anything fails the build.** The gate emits a
+  `::notice::`, and its suite asserts the real tree emits none. If you delete or
+  rename the last file an entry covered, prune the entry in the same change.
+
+Write the reason so the next reviewer can judge the exemption without opening
+the file: say why the literal is the *subject* of that file rather than a path
+anyone follows.
+
 ### Allowlisted homes for retired IDs
 
 A retired ID may legitimately survive in exactly two places, and nowhere else:

@@ -1108,6 +1108,76 @@ const physics2dHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     return { success: false, error: '2D raycasts are a runtime-only query. Use forge.physics2d.raycast() in scripts during Play mode.' };
   },
+
+  // THE READS. `get_joint_2d`, `list_joints_2d` and `get_camera_2d` are armed in
+  // the engine (`core/commands/physics.rs` and `sprites.rs`, via
+  // `QueryRequest::Joint2dState`, `ListJoints2d` and `Camera2dState`) and had no
+  // TypeScript producer at all, so nothing could ask for them from chat or over
+  // MCP — the module was finished and never wired (#9351, agent-operations §7).
+  //
+  // They read the STORE, not the engine, which is what every other `get_*`
+  // handler beside them does (`get_tilemap`, `get_sprite`, `get_physics`). The
+  // store is the mirror the engine keeps current through `physicsEvents.ts`, so
+  // a read is synchronous and needs no round trip; the engine arms stay the path
+  // for a consumer that wants to ask the engine directly.
+  get_joint_2d: async (args, ctx): Promise<ExecutionResult> => {
+    try {
+      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      if (p.error) return p.error;
+      const { entityId } = p.data;
+      // `ownEntry`, not a bare index read: `zEntityId` is `z.string().min(1)`,
+      // so it accepts `'__proto__'`, and `joints2d['__proto__']` returns
+      // `Object.prototype` — truthy, so a missing-entity check on the bare read
+      // would report a joint that does not exist (PF-1167).
+      const data = ownEntry(ctx.store.joints2d, entityId);
+      if (!data) {
+        return { success: false, error: `No 2D joint for entity ${entityId}` };
+      }
+      return { success: true, result: data };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to get 2D joint' };
+    }
+  },
+
+  list_joints_2d: async (args, ctx): Promise<ExecutionResult> => {
+    try {
+      // An explicit EMPTY schema, not an absent one. `manifestSchemaParity`
+      // requires every command in a pinned category to resolve to a handler
+      // schema, and "takes no arguments" is a claim worth stating rather than
+      // a gap in the parse coverage. `z.object({})` is non-strict, so nothing
+      // that used to pass is now rejected.
+      const p = parseArgs(z.object({}), args);
+      if (p.error) return p.error;
+      // `Object.entries`, so an inherited key can never surface as a joint.
+      const joints = Object.entries(ctx.store.joints2d).map(([entityId, joint]) => ({
+        entityId,
+        ...joint,
+      }));
+      return { success: true, result: { joints, count: joints.length } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to list 2D joints' };
+    }
+  },
+
+  // The 2D camera is a SINGLETON in both the engine and the store —
+  // `QueryRequest::Camera2dState` takes no entity, and the slice holds
+  // `camera2dData: Camera2dData | null`. `null` means the scene has no 2D
+  // camera, reported as such rather than as an empty object: "no camera" and "a
+  // camera with no settings" are different answers.
+  get_camera_2d: async (args, ctx): Promise<ExecutionResult> => {
+    try {
+      // See `list_joints_2d`: an explicit empty schema, not an absent one.
+      const p = parseArgs(z.object({}), args);
+      if (p.error) return p.error;
+      const camera = ctx.store.camera2dData;
+      if (!camera) {
+        return { success: false, error: 'No 2D camera in this scene' };
+      }
+      return { success: true, result: camera };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to get 2D camera' };
+    }
+  },
 };
 
 // ---------------------------------------------------------------------------

@@ -36,7 +36,12 @@ function ToolButton({ icon, active, onClick, title }: ToolButtonProps) {
 }
 
 export function Sidebar() {
-  const [showSettings, setShowSettings] = useState(false);
+  // Store-held, not local: the generation dialogs' unavailable notice opens
+  // Settings on the `keys` tab from inside the editor, instead of navigating
+  // away and tearing down the WASM session (#9725 p8).
+  const settingsTab = useWorkspaceStore((s) => s.settingsTab);
+  const openSettings = useWorkspaceStore((s) => s.openSettings);
+  const closeSettings = useWorkspaceStore((s) => s.closeSettings);
   const [showComplexity, setShowComplexity] = useState(false);
   const gizmoMode = useEditorStore((s) => s.gizmoMode);
   const setGizmoMode = useEditorStore((s) => s.setGizmoMode);
@@ -318,10 +323,10 @@ export function Sidebar() {
       {/* Settings */}
       <ToolButton
         icon={<Settings size={20} />}
-        onClick={() => setShowSettings(true)}
+        onClick={() => openSettings('tokens')}
         title="Settings"
       />
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {settingsTab && <SettingsPanel initialTab={settingsTab} onClose={closeSettings} />}
     </aside>
   );
 }
