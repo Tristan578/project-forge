@@ -159,8 +159,6 @@ export type TemplateApplyDeps = {
   addGameComponent: (entityId: string, component: GameComponentData) => void;
 };
 
-const INPUT_PRESETS = ['fps', 'platformer', 'topdown', 'racing'] as const;
-
 /**
  * Resolve `true` once a scene load has visibly landed, `false` on timeout.
  *
@@ -438,11 +436,21 @@ export const createSceneSlice: StateCreator<
       if (skipped.has(entityId)) continue;
       state.setScript(entityId, script.source, script.enabled);
     }
-    const preset = template.inputPreset;
-    if (preset !== undefined && (INPUT_PRESETS as readonly string[]).includes(preset)) {
-      state.setInputPreset(preset as (typeof INPUT_PRESETS)[number]);
-    }
-
+    // NO GENRE PRESET IS APPLIED. Loading a template used to call
+    // `setInputPreset(template.inputPreset)`, which replaced the scene's whole
+    // action map with one genre's handful of bindings — and after presets became
+    // additive it was worse, not better: `fps` defines `move_forward` and
+    // `move_right` as AXES under the same names the defaults use for digital
+    // actions, so merging it left `move_forward` answering true for W *or* S
+    // while digital `move_backward` answered for S alone. The shooter's
+    // `dz -= SPEED` and `dz += SPEED` then cancelled, and backward movement was
+    // dead — the very failure this work exists to remove, reintroduced by the
+    // template's own genre label.
+    //
+    // A template needs nothing a preset provides: every action its scripts name
+    // is in `InputMap::default()`, which `inputActionConformance` enforces. A
+    // template that wants an action of its own declares it in
+    // `sceneData.inputBindings`, which `templateSceneFile` now carries through.
     return { success: true, entityCount, skippedEntityIds };
   },
   // PF-1097: these four used to dispatch `switch_scene` / `create_scene` /

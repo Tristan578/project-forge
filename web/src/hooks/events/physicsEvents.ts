@@ -4,6 +4,7 @@
 
 import { useEditorStore, type PhysicsData, type JointData } from '@/stores/editorStore';
 import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
+import { deliverRaycast2dAnswer } from '@/lib/scripting/raycast2dRegistry';
 import { audioManager } from '@/lib/audio/audioManager';
 import { parseJoint2dWire, parsePhysics2dWire } from '@/lib/physics/physics2dPayload';
 import { castPayload, type SetFn, type GetFn, type EventPayload } from './types';
@@ -406,20 +407,52 @@ export function handlePhysicsEvent(
       return true;
     }
 
-    /*
-     * Two 2D events the engine emits and nothing here handles yet. They are
-     * listed rather than stubbed because a `case` for an event name the engine
-     * never emits is indistinguishable from a working handler — that is exactly
-     * how `PHYSICS2D_UPDATED`, `JOINT2D_UPDATED`, `PHYSICS2D_REMOVED` and
-     * `RAYCAST2D_RESULT` sat here looking handled while the engine emitted
-     * `PHYSICS2D_CHANGED`, `JOINT2D_CHANGED` and `RAYCAST2D_HIT`/`RAYCAST2D_MISS`,
-     * and no removal event at all. Falling through to `default` at least returns
-     * `false`, which `useEngineEvents` reports as unhandled.
+    /**
+     * The 2D raycast answer, routed to the script that asked for it
+     * (PF-1169 / #9271).
      *
-     * - `RAYCAST2D_HIT` / `RAYCAST2D_MISS` have no consumer at all — the 3D
-     *   equivalent feeds audio occlusion and the script runtime; neither has a 2D
-     *   counterpart yet.
+     * The payload is `Raycast2dHitPayload` from
+     * `engine/src/bridge/events.rs` — a plain `#[serde(rename_all =
+     * "camelCase")]` struct, so every key really is camelCase here. It is NOT
+     * the flattened shape `PHYSICS2D_CHANGED` and `JOINT2D_CHANGED` carry,
+     * where `rename_all` does not propagate through `#[serde(flatten)]` and the
+     * data keys arrive snake_case inside a camelCase wrapper; those two need
+     * `parsePhysics2dWire` / `parseJoint2dWire` and this one does not.
+     *
+     * Nothing is written to the store on purpose. The answer has exactly one
+     * reader — the awaiting `forge.physics2d.raycast()` call — and broadcasting
+     * it into Zustand would re-render the editor once per ray while still
+     * leaving the script with no answer.
+     *
+     * A malformed hit is delivered as a MISS rather than skipped: the engine
+     * emits exactly one event per accepted request, so dropping one would shift
+     * every later answer onto the wrong request.
      */
+    case 'RAYCAST2D_HIT': {
+      const payload = castPayload<{
+        entityId?: unknown;
+        pointX?: unknown;
+        pointY?: unknown;
+        normalX?: unknown;
+        normalY?: unknown;
+        distance?: unknown;
+      }>(data);
+      const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+      const hit =
+        typeof payload.entityId === 'string' && payload.entityId.length > 0
+          ? {
+              entityId: payload.entityId,
+              point: { x: num(payload.pointX), y: num(payload.pointY) },
+              normal: { x: num(payload.normalX), y: num(payload.normalY) },
+              distance: num(payload.distance),
+            }
+          : null;
+      return deliverRaycast2dAnswer(hit);
+    }
+
+    /** `Raycast2dMissPayload` is an empty struct — there is nothing to read. */
+    case 'RAYCAST2D_MISS':
+      return deliverRaycast2dAnswer(null);
 
     default:
       return false;
