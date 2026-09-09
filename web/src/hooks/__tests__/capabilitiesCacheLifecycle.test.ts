@@ -78,4 +78,31 @@ describe('capabilities cache lifecycle (#9725)', () => {
     expect(result.current.error).toBeNull();
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  // The stale-while-revalidate rewrite could WEDGE the module at loading:true
+  // for the rest of the SPA session, which silently turns the whole #9117 gate
+  // off (loading never blocks, so useGenerationGate reports blocked:false and
+  // unprovisionable:false for every capability, music included). The sequence:
+  // a consumer mounts and starts the first fetch, unmounts before it settles
+  // (dialog closed, client navigation, stalled request), then an invalidation
+  // fires with no subscribers left -- it nulls `fetchPromise` and starts no
+  // replacement. Every later mount then found `cachedState` set and
+  // `isCacheStale()` false, so it never refetched (#9725 p8).
+  it('refetches after an invalidation that landed while nothing was mounted', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      // Never settles: the consumer that started it is gone before it would.
+      .mockReturnValueOnce(new Promise<Response>(() => {}))
+      .mockResolvedValueOnce(response(true));
+
+    const first = renderHook(() => useCapabilities());
+    expect(first.result.current.loading).toBe(true);
+    first.unmount();
+
+    act(() => invalidateCapabilitiesCache());
+
+    const second = renderHook(() => useCapabilities());
+    await waitFor(() => expect(second.result.current.loading).toBe(false));
+    expect(second.result.current.available.has('model3d')).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
 });

@@ -343,7 +343,69 @@ you could not verify and name where to look, rather than predicting the outcome.
 Never carry a subagent's framing into a claim of your own without checking the
 thing it was framing.
 **Ticket:** #9718
-### 18. A backtick in a comment ends the template literal the comment is inside
+### 18. A check that RESTATES its subject stops measuring it the moment the subject is edited
+**Applies:** grep -q|toContain|containment|source pin|literal|expected set|assert_|.test.sh|check-|allowlist|pin
+**What happens:** A named assertion keeps reporting green after the thing it
+names has been renamed, widened, split or deleted. It is counted as coverage by
+everyone reading the board, and it is worse than absent, because absence is
+visible. Five instances in ONE PR (#9740), all measured:
+- `grep -q 'scripts/check-portable-paths.sh' ci.yml` — "the workflow invokes the
+  gate". The string also occurs in the job's own doc comment and in the
+  shellcheck step's ARGUMENT, so it passed with every `run:` line in the job
+  commented out. Four reviewers found this independently; one of them watched
+  the suite print `PASS=42 FAIL=0` while the gate was in fact disarmed in the
+  working tree.
+- An allowlist assertion grepping for the literal `^docs/(reviews|coverage)/`.
+  That entry was widened to add `audits`, then split into three. The literal
+  matched neither shape, so the check survived TWO edits to its own subject and
+  reported green through both.
+- "the entry/reason arrays are length-checked" — a containment grep for the
+  comparison's text. Commenting out the entire length-check block left it green.
+- An anchoring rule that read only entries spelled with two spaces and single
+  quotes. A double-quoted entry — identical at runtime — was invisible to it.
+- A vacuity floor of `-lt 15` against a list of 23, so eight entries could fall
+  out of a parse with the guard still green.
+**Why:** Restating the subject creates a second copy that nothing keeps in sync.
+The check and the thing it checks then drift independently, and the drift is
+silent BY CONSTRUCTION: the check cannot report a mismatch it can no longer see.
+This is lesson #16's family — a containment grep that survives the
+commented-out line — generalised past source pins to every assertion that names
+its subject rather than deriving it.
+**Prevention:** DERIVE THE SUBJECT FROM THE SOURCE AT RUN TIME. Ask the file
+what it contains — parse the array, cut the job block, count the `run:` keys —
+and assert against that, so a rename changes both sides at once. Where the
+derivation can come back empty, add a VACUITY GUARD that fails loudly when it
+does: "no allowlist entry covers this case's fixture" is the right failure for a
+renamed entry, and it is the one thing a stale literal can never say. Then
+mutate the subject — rename it, split it, comment it out — and confirm the check
+goes red. A check you have not watched fail against an EDITED subject is a check
+you have only watched pass.
+**Ticket:** #9740
+
+### 19. A mutation that did not apply proves the suite is robust, and proves nothing
+**Applies:** mutation|mutate|sed -i|sed 's|revert|verify|regression|confirm red|assert
+**What happens:** You break the mechanism, run the suite, see it stay green, and
+draw a conclusion — when the edit never landed. Measured twice in one session:
+a `sed` whose pattern did not match reported a "robust" suite that had tested
+nothing; and a mutation that changed ONE of two coupled sites left the second
+site quietly compensating, so the code looked covered when neither site was
+pinned. The second is the dangerous one, because the mutation DID apply and the
+result was still meaningless.
+**Why:** A mutation test infers from a negative — "the suite did not go red" —
+and a negative has two causes: the assertion is weak, or the mutation is absent.
+Nothing in the output distinguishes them, and the flattering reading is the one
+that lets you stop.
+**Prevention:** ASSERT THE EDIT APPLIED BEFORE TRUSTING THE RESULT. Count
+occurrences before replacing and fail if the count is not what you expect; or
+diff the file and require a non-zero delta. When a mechanism has more than one
+site, mutate EACH ALONE — if only the combination goes red, the rule is pinned
+at neither site, which is a finding rather than a pass. And when a mutation
+produces the right exit code for a reason you did not predict, chase it: a
+fixture that trips the vacuity floor instead of the guard under test gives the
+correct code from the wrong guard, and reads as coverage.
+**Ticket:** #9740
+
+### 20. A backtick in a comment ends the template literal the comment is inside
 **Applies:** data/templates|scriptTemplates|forgeTypes|FORGE_TYPE_DEFINITIONS|source: `|SYSTEM_PROMPT|`
 **What happens:** A file that parsed a moment ago stops parsing, and the error
 points at prose rather than at the string it broke. Hit three times in one
