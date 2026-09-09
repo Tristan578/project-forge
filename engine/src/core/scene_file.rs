@@ -27,6 +27,16 @@ pub struct SceneFile {
     pub metadata: SceneMetadata,
     pub environment: EnvironmentSettings,
     pub ambient_light: AmbientLightData,
+    /// The scene's action vocabulary.
+    ///
+    /// OMITTING IT MEANS "USE THE DEFAULTS", NOT "NO INPUT". Without
+    /// `#[serde(default)]` a file had to state a complete `InputMap` or fail to
+    /// load at all, which pushed every producer into writing
+    /// `{ actions: {}, preset: null }` — a scene in which no key does anything —
+    /// purely to satisfy the parser. `InputMap::default()` is a working
+    /// keyboard, so a file that says nothing about input now gets one, and a
+    /// file that declares actions gets exactly those.
+    #[serde(default)]
     pub input_bindings: InputMap,
     #[serde(default)]
     pub assets: HashMap<String, AssetMetadata>,

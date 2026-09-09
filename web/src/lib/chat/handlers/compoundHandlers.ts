@@ -46,14 +46,14 @@ import {
  *
  * Counts are extracted via `<number> <noun>` matches (e.g. "5 coins", "3
  * enemies") and clamped to a small range so a pathological description can't
- * spawn thousands of entities. Genre is a soft hint that only nudges the input
- * preset; the scaffold shape is identical regardless.
+ * spawn thousands of entities. `genre` is read only for the 2D/3D hint; it no
+ * longer selects an input preset, because the scene's actions are the creator's
+ * and a regex over their description is not a decision this code gets to make.
  */
 type ProjectType = '2d' | '3d';
 
 interface GamePlan {
   projectType: ProjectType;
-  inputPreset: 'fps' | 'platformer' | 'topdown' | 'racing';
   enemyCount: number;
   coinCount: number;
   enemyBehavior: 'follower' | 'moving_platform';
@@ -93,13 +93,19 @@ function planGameFromDescription(
 ): GamePlan {
   const text = `${description} ${genre ?? ''}`.toLowerCase();
 
-  // Input preset from genre/keywords. Defaults to platformer (the most broadly
-  // playable WASD+jump layout for the scaffolded primitives).
-  let inputPreset: GamePlan['inputPreset'] = 'platformer';
-  if (/\b(fps|shooter|first[- ]person)\b/.test(text)) inputPreset = 'fps';
-  else if (/\b(top[- ]?down|twin[- ]?stick|rogue)/.test(text)) inputPreset = 'topdown';
-  else if (/\b(racing|racer|kart|driving)\b/.test(text)) inputPreset = 'racing';
-  else if (/\b(platformer|jump|side[- ]?scroll)/.test(text)) inputPreset = 'platformer';
+  // NO GENRE IS INFERRED FROM THE PROMPT, AND NO PRESET IS APPLIED.
+  //
+  // This used to read the description for "fps", "racing", "roguelike" and so
+  // on, fall back to `platformer` when it recognised nothing, and hand the
+  // winner to `setInputPreset` — so a creator describing a game the regexes did
+  // not know was told they were making a platformer, and their scene's action
+  // map was replaced with that genre's five bindings.
+  //
+  // `InputMap::default()` binds every action the scaffolded scripts name, in
+  // every direction, so there is nothing left for a guess to add. A game that
+  // needs an action of its own — `grapple`, `possess`, `p2_attack` — gets one
+  // from `set_input_binding`, which is a decision the creator makes rather than
+  // one a regex makes for them.
 
   const projectType: ProjectType = /\b2d\b|side[- ]?scroll|pixel/.test(text) ? '2d' : '3d';
 
@@ -111,7 +117,6 @@ function planGameFromDescription(
 
   return {
     projectType,
-    inputPreset,
     enemyCount: clampCount(extractCount(text, ['enemy', 'monster', 'foe'], 2), 0, 20),
     coinCount: clampCount(extractCount(text, ['coin', 'gem', 'collectible', 'pickup', 'star'], 5), 0, 50),
     enemyBehavior,
@@ -724,7 +729,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const material = args.material as Record<string, unknown> | undefined;
     const controller = (args.controller as Record<string, unknown>) ?? {};
     const health = args.health as Record<string, unknown> | undefined | null;
-    const inputPreset = (args.inputPreset as string) ?? 'platformer';
+    // No fallback. A caller that names a preset gets it; one that does not
+    // keeps the scene's own bindings, rather than being told it is a platformer.
+    const inputPreset = args.inputPreset as string | undefined;
     const cameraFollow = (args.cameraFollow as boolean) ?? true;
     const _cameraOffset = (args.cameraOffset as [number, number, number]) ?? [0, 5, -10];
 
@@ -757,7 +764,13 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         if (healthComp) ctx.store.addGameComponent(charId, healthComp);
       }
 
-      ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
+      // ONLY IF THE CALLER NAMED ONE. This ran unconditionally on a value that
+      // defaulted to 'platformer', so setting up a character quietly decided
+      // what kind of game it was in. With the default gone the call has to be
+      // guarded, or it reaches the store as `setInputPreset(undefined)`.
+      if (inputPreset) {
+        ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
+      }
 
       if (cameraFollow) {
         // Use forge.camera.setTarget with entity ID (not coordinates)
@@ -1142,9 +1155,14 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       if (trigger) ctx.store.addGameComponent(id, trigger);
     });
 
-    // (4) Input preset + camera-follow script targeting the player by id.
-    ctx.store.setInputPreset(plan.inputPreset);
-    operations.push({ action: `set input preset "${plan.inputPreset}"`, success: true });
+    // (4) Camera-follow script targeting the player by id.
+    //
+    // No input preset. This used to set one chosen by regexes over the player's
+    // own description — defaulting to `platformer` for anything they did not
+    // recognise — which replaced the scene's action map with one genre's
+    // bindings. The scene's defaults already bind every action the scaffolded
+    // scripts name, so scaffolding a game no longer decides what kind of game
+    // it is.
     if (playerId) {
       ctx.store.setScript(playerId, `forge.camera.setTarget("${playerId}");`, true);
       operations.push({ action: 'attach camera-follow script', success: true });

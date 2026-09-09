@@ -19,7 +19,7 @@ import { redactSecrets } from '@/lib/security/redactSecrets';
 // stays, every event still scrubs, and nothing fails.
 setSentryDeepRedactor((input: string) => redactSecrets(input) as string);
 
-const DSN = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
+const DSN = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 if (DSN) {
