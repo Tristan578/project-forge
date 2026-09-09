@@ -46,6 +46,10 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
   // still be able to switch back to the other.
   const gate = useGenerationGate(soundType === 'sfx' ? 'sfx-generation' : 'voice-generation');
   const canSubmit =
+    // `blocked` is false until the first /api/capabilities body lands, so
+    // without this a permanently-unavailable capability presented a live
+    // Generate button with no notice beside it (#9725 p8).
+    !gate.loading &&
     !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
@@ -147,7 +151,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-sound-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sound-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
           {/* Type selection */}
           <div>
             <label className="mb-2 block text-xs font-medium text-zinc-300">Type</label>

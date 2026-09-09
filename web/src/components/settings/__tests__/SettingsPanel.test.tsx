@@ -152,4 +152,35 @@ describe('SettingsPanel', () => {
     // After ArrowRight from 'tokens', active tab is 'keys'
     expect(screen.getByTestId('api-key-manager')).toBeDefined();
   });
+
+  // Sidebar renders this as `{settingsTab && <SettingsPanel initialTab=... />}`,
+  // so an already-open panel is UPDATED IN PLACE when the store's tab changes —
+  // same position, same type, no remount. `useState(initialTab)` reads the prop
+  // once at mount, so without a sync the panel keeps showing the old tab.
+  //
+  // This is the escape path #9741 restores: a user on `tokens` who hits a
+  // blocked capability and clicks the notice's Settings link calls
+  // `openSettings('keys')`, and must land on API Keys.
+  it('follows initialTab when it changes while the panel is already open', () => {
+    const { rerender } = render(<SettingsPanel onClose={mockOnClose} initialTab="tokens" />);
+    expect(screen.getByTestId('token-dashboard')).toBeDefined();
+
+    rerender(<SettingsPanel onClose={mockOnClose} initialTab="keys" />);
+
+    expect(screen.getByTestId('api-key-manager')).toBeDefined();
+    expect(screen.queryByTestId('token-dashboard')).toBeNull();
+  });
+
+  // The sync must be on CHANGE, not on every render, or it would fight the user:
+  // a manual tab switch does not move `initialTab`, so a re-render for any other
+  // reason must not drag them back to where they entered.
+  it('keeps a manually chosen tab across a re-render with the same initialTab', () => {
+    const { rerender } = render(<SettingsPanel onClose={mockOnClose} initialTab="tokens" />);
+    fireEvent.click(screen.getByRole('tab', { name: /API Keys/i }));
+    expect(screen.getByTestId('api-key-manager')).toBeDefined();
+
+    rerender(<SettingsPanel onClose={mockOnClose} initialTab="tokens" />);
+
+    expect(screen.getByTestId('api-key-manager')).toBeDefined();
+  });
 });
