@@ -120,6 +120,81 @@ describe('game templates', () => {
     });
   }
 
+  /**
+   * TEMPLATE BINDINGS ARE ENGINE JSON, AND NOTHING WAS CHECKING THEIR SHAPE.
+   *
+   * `sceneData.inputBindings` is passed through `buildInputBindings` into the
+   * scene JSON and deserialized by Rust as `ActionDef`. The TypeScript that was
+   * supposed to keep it honest is `Record<string, InputBinding | unknown>` — a
+   * union with `unknown` IS `unknown`, so the constraint was already gone and
+   * every shape typechecked.
+   *
+   * There are two live binding shapes in this codebase and they are easy to
+   * confuse, because `audioEvents.ts` converts between them:
+   *
+   *   engine wire (here)  { name, actionType: { type: 'Digital' },
+   *                         sources: [{ type: 'Key', value: 'ArrowLeft' }] }
+   *   editor store        { actionName, actionType: 'digital',
+   *                         sources: ['ArrowLeft'] }
+   *
+   * Writing the store shape into a template produces JSON serde cannot read,
+   * `load_scene` drops the bindings, and the template is dead in exactly the
+   * silent way this branch exists to fix — no type error, no test failure, no
+   * console message. Found as an uncommitted edit sitting in the worktree that
+   * did precisely that to `2d-fighter`.
+   *
+   * The type is now `Record<string, EngineActionDef>` and rejects that edit at
+   * compile time, so THIS test is not the primary guard. It covers the two
+   * things the type cannot: a single `as` cast walking straight past it, and
+   * `binding.name` disagreeing with the key it is filed under — which serde
+   * accepts happily and which binds the action under a name no script uses.
+   *
+   * The walk is asserted non-empty (lesson 11): with no template declaring
+   * bindings this would inspect nothing and read as "no problems found".
+   */
+  it('every declared input binding is in the engine wire shape, not the store shape', async () => {
+    const templates = await Promise.all(TEMPLATE_REGISTRY.map((e) => e.load()));
+
+    let bindingsInspected = 0;
+    for (const template of templates) {
+      const bindings = template.sceneData.inputBindings ?? {};
+      for (const [actionKey, raw] of Object.entries(bindings)) {
+        bindingsInspected += 1;
+        const where = `${template.id}.${actionKey}`;
+        // Deliberately re-widened: the point is to check the VALUE, not to ask
+        // the type what it already promised. `EngineActionDef` is bypassable
+        // with one `as`, and it cannot express `binding.name === actionKey`.
+        const binding = raw as unknown as Record<string, unknown>;
+
+        // `ActionDef` is `#[serde(rename_all = "camelCase")]` over
+        // `name` / `action_type` / `sources` / `dead_zone`. `actionName` is the
+        // store's spelling and serde will reject it outright.
+        expect(binding, where).toHaveProperty('name');
+        expect(binding, where).not.toHaveProperty('actionName');
+        expect(binding.name, where).toBe(actionKey);
+
+        // `ActionType` is `#[serde(tag = "type")]`, so it is an OBJECT with a
+        // `type` discriminator — never the bare string `'digital'`.
+        const actionType = binding.actionType as Record<string, unknown> | undefined;
+        expect(typeof actionType, where).toBe('object');
+        expect(['Digital', 'Axis'], where).toContain(actionType?.type);
+
+        // `InputSource` is `#[serde(tag = "type", content = "value")]`, so each
+        // source is `{ type, value }` — never a bare key-code string.
+        const sources = (binding.sources ?? []) as unknown[];
+        expect(Array.isArray(sources), where).toBe(true);
+        for (const source of sources) {
+          const s = source as Record<string, unknown>;
+          expect(typeof s, where).toBe('object');
+          expect(['Key', 'MouseButton'], where).toContain(s.type);
+          expect(typeof s.value, where).toBe('string');
+        }
+      }
+    }
+
+    expect(bindingsInspected).toBeGreaterThan(0);
+  });
+
   it('loadTemplate works for valid ID', async () => {
     const template = await loadTemplate('platformer');
     expect(template).toBeDefined();
