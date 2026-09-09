@@ -247,7 +247,7 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(self.c.execute('SELECT count(*) FROM taskboard_project_pending').fetchone()[0],0)
 
     def test_platform_paths(self):
-        home=Path('/home/test')
+        home=Path(self.tmp.name)/'home'
         self.assertEqual(runtime.default_db('linux',{},home),home/'.config/taskboard/taskboard.db')
         self.assertEqual(runtime.default_db('linux',{'XDG_CONFIG_HOME':'/xdg'},home),Path('/xdg/taskboard/taskboard.db'))
         self.assertEqual(runtime.default_db('darwin',{},home),home/'Library/Application Support/taskboard/taskboard.db')
