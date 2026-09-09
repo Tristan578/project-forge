@@ -151,3 +151,121 @@ apps/docs/content/mcp/*.mdx
 .vercel
 .claude/.env-health-last-check
 .worktrees/
+
+# --- Machine artefacts that must never be committed (#9736 follow-up) ---
+# A literal `%SystemDrive%` directory appeared at the repo root: a Windows
+# environment variable written into a path by a tool running under a POSIX
+# shell, which does not expand it. It contained copies of Windows cache
+# databases. Ignored so a recurrence cannot be swept in by `git add -A`, and
+# named here so the next person to see one knows what it is.
+# ANCHORED TO THE REPO ROOT. Unanchored, git matches these at EVERY depth —
+# verified with `git check-ignore -v`, which reported a nested
+# `web/src/%USERPROFILE%/deep/file.txt` as ignored by this rule (found in
+# review). Nobody creates such a directory on purpose, so the practical risk is
+# small, but the incident this guards against happened at the root: a tool run
+# from the repo root wrote an unexpanded environment variable as a path.
+#
+# The narrower rule also fails in the safer direction. A tool run from a
+# SUBDIRECTORY now creates its `%VAR%` directory somewhere these patterns do not
+# cover, where it shows up in `git status` as an untracked oddity rather than
+# being silently ignored — visible is better than hidden for something that
+# should not exist at all.
+/%SystemDrive%/
+/%USERPROFILE%/
+/%LOCALAPPDATA%/
+
+# Codex hook runtime state, mirroring the .claude/hooks rules above.
+#
+# THESE ARE UNREACHABLE TODAY AND KEPT DELIBERATELY. `.codex/hooks/` is excluded
+# wholesale further down, and git does not descend into an excluded directory,
+# so none of these five can match anything while that stands (found in review).
+# They are here because the wholesale exclusion is TEMPORARY — it exists only
+# until the port in the block below lands — and on the day it is lifted these
+# become load-bearing again. Deleting them now would silently un-ignore a
+# __pycache__ directory, two lock files and a log along with the port.
+#
+# The alternative was to delete them and trust whoever finishes the port to
+# remember. That is the same bet the rest of this file argues against.
+#
+# Scoped to the hook directory that writes them. A repo-wide `*.bak` sat here
+# under this Codex-scoped heading, which is far broader than the heading claims
+# — in a PR whose own review finding was scope creep. One tracked file already
+# matches it (.claude/hooks/github-project-map.json.bak); ignoring a pattern
+# does not untrack such a file, so nothing broke, but the next .bak someone
+# means to commit would have vanished from `git status` with no explanation.
+.codex/hooks/__pycache__/
+.codex/hooks/.sync-push.lock
+.codex/hooks/.sync-lock-wanted
+.codex/hooks/.sync.log
+.codex/hooks/*.bak
+
+# --- Half-finished cross-tool port: untracked on purpose (see #9745) ---
+# `.codex/agents`, `.codex/hooks`, `.codex/hooks.json` and the project-specific
+# skills copied into `.agents/skills/` are a port of the `.claude/` tree that is
+# not finished, and committing it would ship instructions that do not work:
+#
+#   * 143 references to `.Codex/tools`, `.Codex/rules` and `.Codex/skills` —
+#     directories that do not exist. Zero TRACKED files contain such a
+#     reference; all 19 that do are in this untracked set, so this is damage
+#     from a find-and-replace, not an existing convention.
+#   * `.codex/hooks.json` wires 26 hooks where `.claude/settings.json` wires 39.
+#     Missing are `block-main-commits.sh`, `check-pr-metadata.sh`,
+#     `pre-push-quality-gate.sh` and `block-deferred-fixes.sh` — and the Codex
+#     profile runs with `approval_policy = "never"`, so those controls would
+#     simply be absent rather than merely weaker.
+#   * The skills duplicate `.claude/skills/` by hand and have ALREADY drifted
+#     (arch-validator and kanban differ from their originals). This repo's
+#     answer to that problem is a generator plus a drift gate
+#     (`tools/agentic-sync/`, `scripts/check-agentic-sync.sh`), which is how the
+#     port should be done rather than by copying.
+#
+# Ignored rather than left merely untracked so a `git add -A` cannot sweep the
+# broken state into the repository while the port is finished.
+#
+# NOTE FOR ANYONE ACTING ON THE PARITY REVIEW: `docs/reviews/`
+# `2026-06-02-agentic-toolkit-parity-review.md` recommends creating
+# `.codex/hooks.json` mapping the shared scripts to native Codex events. That
+# file is ignored here, so creating it shows nothing in `git status` and a
+# `git add` appears to do nothing — which reads as a failed write rather than a
+# deliberate policy. Finish the port behind #9745 and lift these entries in the
+# same change; do not `git add -f` a partial one.
+.codex/agents/
+.codex/hooks/
+.codex/hooks.json
+
+# The 35 project-specific skills copied from `.claude/skills/`; see the note above.
+.agents/skills/api-middleware-migrate/
+.agents/skills/arch-validator/
+.agents/skills/architect-flow/
+.agents/skills/autonomous-sprint/
+.agents/skills/babysit-prs/
+.agents/skills/build/
+.agents/skills/builder/
+.agents/skills/capability-review/
+.agents/skills/changelog-review/
+.agents/skills/claude-platform-reference/
+.agents/skills/component-checklist/
+.agents/skills/cycle/
+.agents/skills/db-migrate/
+.agents/skills/deploy-engine/
+.agents/skills/design/
+.agents/skills/developer-experience/
+.agents/skills/dispatch-builder/
+.agents/skills/docs/
+.agents/skills/env-health-check/
+.agents/skills/frontend/
+.agents/skills/generate-route/
+.agents/skills/infra-services/
+.agents/skills/mcp-commands/
+.agents/skills/multiplayer-readiness/
+.agents/skills/planner/
+.agents/skills/pr-code-review/
+.agents/skills/pr-green-machine/
+.agents/skills/resolve-all-pr-comments/
+.agents/skills/resolve-pr-comments/
+.agents/skills/review-protocol/
+.agents/skills/rust-engine/
+.agents/skills/stripe-webhooks/
+.agents/skills/testing/
+.agents/skills/troubleshoot/
+.agents/skills/viewport/
