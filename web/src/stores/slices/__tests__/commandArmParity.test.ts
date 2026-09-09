@@ -64,7 +64,10 @@ const UNDISPATCHED_AT_BASELINE = [
   'apply_force', 'list_joints', 'set_physics2d', 'update_physics2d',
   'toggle_physics2d', 'remove_physics2d', 'set_2d_collider_shape',
   'set_2d_body_type', 'create_2d_joint', 'update_2d_joint', 'remove_2d_joint',
-  'apply_force2d', 'apply_impulse2d', 'raycast2d', 'get_physics2d',
+  // 'raycast2d' left this list in #9271: the physics channel dispatches it
+  // now, correlating the answer through raycast2dRegistry. The gate noticing
+  // that is the gate working — a waiver outlives the gap it waived.
+  'apply_force2d', 'apply_impulse2d', 'get_physics2d',
   'enable_physics_debug', 'disable_physics_debug', 'apply_impulse', 'raycast',
   'get_joint', 'set_physics_2d_enabled', 'get_physics_2d', 'get_joint_2d',
   'list_joints_2d', 'apply_force_2d', 'apply_impulse_2d', 'get_terrain',

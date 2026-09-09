@@ -484,7 +484,14 @@ export function buildSceneContext(state: EditorSnapshot): string {
 
   // Input bindings
   if (state.inputBindings && state.inputBindings.length > 0) {
-    const presetLabel = state.inputPreset ? ` (preset: ${state.inputPreset})` : ' (custom)';
+    // THE ACTION LIST IS THE FACT; the preset is only where some of it came
+    // from. This read `(preset: fps)`, which presents the label as a
+    // description of the whole map — and since presets merge rather than
+    // replace, the map also holds the defaults and anything the creator
+    // authored. "includes" keeps it true. The `(custom)` alternative is gone
+    // too: it implied that a map with no preset is a deviation, when it is the
+    // ordinary case.
+    const presetLabel = state.inputPreset ? ` (includes the ${state.inputPreset} starting set)` : '';
     const actionNames = state.inputBindings.map((b) => b.actionName).join(', ');
     sections.push(`\n## Input Bindings${presetLabel}\n${state.inputBindings.length} actions: ${actionNames}`);
   }

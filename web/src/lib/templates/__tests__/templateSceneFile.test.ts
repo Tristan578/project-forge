@@ -120,11 +120,50 @@ describe('buildTemplateSceneFile', () => {
     expect(JSON.parse(sceneJson).entities[0].name).toBe('Entity One');
   });
 
-  it('emits inputBindings as an InputMap, not the template empty object', () => {
-    // `InputMap` declares `actions` and `preset` with no serde default, so the
-    // template's `inputBindings: {}` fails the ENTIRE file, not just this key.
+  /**
+   * A TEMPLATE THAT SAYS NOTHING ABOUT INPUT MUST NOT SILENCE THE KEYBOARD.
+   *
+   * This used to assert `{ actions: {}, preset: null }`, because `InputMap` had
+   * no serde default and a template's `inputBindings: {}` failed the whole
+   * file. That workaround had a cost nobody priced: `load_scene` assigns the
+   * file's map straight onto the `InputMap` resource, so every template was
+   * loaded into a scene where NO KEY DID ANYTHING — and a genre preset was then
+   * applied on top, which is how "pick a genre" became the only route to having
+   * input at all.
+   *
+   * `SceneFile.input_bindings` takes `#[serde(default)]` now and
+   * `InputMap::default()` is a working keyboard, so the right emission for a
+   * template with no opinion is to OMIT the key. An empty map is not neutral —
+   * it is a deliberate statement that nothing is bound (#9764).
+   */
+  it('omits inputBindings when the template declares none, so the defaults apply', () => {
     const { sceneJson } = buildTemplateSceneFile(makeTemplate([makeEntity()]));
-    expect(JSON.parse(sceneJson).inputBindings).toEqual({ actions: {}, preset: null });
+    expect('inputBindings' in JSON.parse(sceneJson)).toBe(false);
+  });
+
+  it('passes through the actions a template declares', () => {
+    const template = makeTemplate([makeEntity()]);
+    template.sceneData.inputBindings = {
+      grapple: { actionName: 'grapple', actionType: 'digital', sources: ['KeyG'] },
+    };
+
+    const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
+    expect(parsed.inputBindings.actions.grapple).toEqual({
+      actionName: 'grapple',
+      actionType: 'digital',
+      sources: ['KeyG'],
+    });
+  });
+
+  it('accepts a template that already writes the full InputMap shape', () => {
+    const template = makeTemplate([makeEntity()]);
+    template.sceneData.inputBindings = {
+      actions: { p2_attack: { actionName: 'p2_attack', actionType: 'digital', sources: ['Enter'] } },
+      preset: null,
+    } as unknown as Record<string, unknown>;
+
+    const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
+    expect(Object.keys(parsed.inputBindings.actions)).toEqual(['p2_attack']);
   });
 
   it('splits physics into physicsData and physicsEnabled and fills every field', () => {
