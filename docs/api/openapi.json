@@ -1904,7 +1904,7 @@
       "post": {
         "tags": ["Asset Generation"],
         "summary": "Generate background music",
-        "description": "Starts an async music generation job via Suno. Returns a `jobId` to poll at `/api/generate/music/status`.",
+        "description": "Starts an async music generation job. Returns a `jobId` to poll at `/api/generate/music/status`. Currently declared unavailable (#9522: the Suno provider has no public API and music is moving to ElevenLabs): every authenticated request is refused with 503 `SERVICE_UNAVAILABLE` immediately after authentication — before rate limits, validation, key resolution or any token deduction. `details` carries `{ capability, issue }`.",
         "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
@@ -1926,7 +1926,15 @@
           "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "402": { "$ref": "#/components/responses/PaymentRequired" },
-          "422": { "description": "Validation error" }
+          "422": { "description": "Validation error" },
+          "503": {
+            "description": "Capability declared unavailable (no provisionable provider). `code` is `SERVICE_UNAVAILABLE`, `error` is the user-facing reason, and `details.issue` is the tracking issue. Nothing is charged.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
         }
       }
     },

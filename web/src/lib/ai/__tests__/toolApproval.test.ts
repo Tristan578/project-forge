@@ -38,6 +38,7 @@ import {
   createSpawnforgeAgent,
 } from '@/lib/ai/spawnforgeAgent';
 import manifestJson from '@/data/commands.json';
+import { isCommandAvailable } from '@/lib/config/providers';
 
 const manifest = manifestJson as {
   commands: Array<{
@@ -48,8 +49,11 @@ const manifest = manifestJson as {
   }>;
 };
 
+// Mirrors `isAgentAdvertised`: scope/category predicate AND the #9117
+// availability filter, so a withheld command (generate_music today) is not
+// expected in the approval map either.
 const advertised = manifest.commands.filter(
-  (c) => c.requiredScope.endsWith(':write') || c.category === 'query',
+  (c) => (c.requiredScope.endsWith(':write') || c.category === 'query') && isCommandAvailable(c.name),
 );
 
 describe('AGENT_TOOL_APPROVAL', () => {

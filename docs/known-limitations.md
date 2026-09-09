@@ -2,7 +2,7 @@
 
 This document provides an honest accounting of features that are partially implemented or have genuine technical constraints. For unbuilt roadmap features, see the taskboard and the GitHub milestones. Note: Editor Collaboration (Phase 24) and Multiplayer Networking (Phase 25) stubs were removed in PF-141/PF-142 — these will be rebuilt from scratch when prioritized.
 
-> **Last updated:** 2026-03-30
+> **Last updated:** 2026-09-05
 
 ## 2D Subsystem
 
@@ -55,6 +55,10 @@ Working:
 
 Remaining limitation:
 - **Occlusion raycasting is physics-based only** — graduated distance-based attenuation is implemented (`handlePhysicsEvent` computes occlusion amount 0–1 and calls `audioManager.updateOcclusionAmount`), but occlusion requires physics colliders between source and listener. Scenes without collision geometry get no occlusion effect.
+
+### Music generation — not available (#9522)
+
+Music generation shipped against Suno, which has no public API, so no platform or BYOK key can ever be issued for it. `music` is declared unavailable in code (`UNAVAILABLE_CAPABILITIES` in `web/src/lib/config/providers.ts`): the Generate Music dialog, the Asset panel item and the Audio inspector button show an explicit unavailable state, the `generate_music` command is withheld from AI tool sets, `forge.ai.generateMusic` rejects before any request, and `POST /api/generate/music` answers 503 `SERVICE_UNAVAILABLE` immediately after authentication — nothing is charged. Sound effects and voice are unaffected. Tracked in #9522 (move to ElevenLabs); platform provisioning status for every capability is in `docs/guides/platform-keys.md`.
 
 ## Shader Application (Phase 23 + PF-331)
 

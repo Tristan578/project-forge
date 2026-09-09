@@ -17,6 +17,7 @@ import type { ToolHandler, ExecutionResult } from './types';
 import type { EntityType, InputBinding } from './types';
 import { parseArgs, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
+import { getCapabilityUnavailability } from '@/lib/config/providers';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
 import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
 import type { GameplayAnalysis } from './helpers';
@@ -1188,8 +1189,15 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         });
         generationJobs++;
       }
-      ctx.dispatchCommand('generate_music', { prompt: `${description} background music` });
-      generationJobs++;
+      // #9117: skip a capability declared unavailable rather than dispatching
+      // a job the route refuses; the skip is recorded so the summary is honest.
+      const musicUnavailable = getCapabilityUnavailability('music');
+      if (musicUnavailable) {
+        operations.push({ action: 'skip background music (not available yet)', success: true });
+      } else {
+        ctx.dispatchCommand('generate_music', { prompt: `${description} background music` });
+        generationJobs++;
+      }
       operations.push({ action: `dispatch ${generationJobs} generation job(s)`, success: true });
     }
 

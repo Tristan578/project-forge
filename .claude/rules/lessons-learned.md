@@ -272,3 +272,136 @@ of a `*.failOpen` Sentry action as a contract break to diagnose, not noise, and
 carry the provider's error body into the captured exception so the next break
 is readable.
 **Ticket:** #9623
+
+### 15. A gate with no producer has unreachable states, and reads as one constant signal
+**Applies:** gate|status|verdict|marker|check-|board-verdict|producer|callers
+**What happens:** A check ships, runs on every PR, and can only ever report one
+value. `board-verdict.sh` turned a review-board marker in a PR comment into a
+`review-board` commit status — and nothing in the repository emitted that
+marker. The board workflow computed PASS/FAIL and returned it into a
+conversation. So `success` and `failure` were states no code path could produce,
+and every PR read `pending` forever. That is lesson #13's tell (the same result
+on unrelated commits) arriving through a different door, and it is worse than
+inert: a status that never changes trains everyone to ignore it, which is the
+habit the check was written to break.
+**Why:** Writing the consumer feels like writing the feature. The producer is a
+one-line call somewhere else, so it reads as wiring rather than as the other
+half of the mechanism. `agent-operations.md` §7 already says it — "grep for the
+call sites that SHOULD use it; the module is not done until callers are wired" —
+and the grep was not run.
+**Prevention:** Before claiming a gate exists, name the code path that produces
+EVERY state it can report, and run it once. If a state is only reachable by a
+human remembering a command, say so at the definition. For a marker-based
+check, assert the round trip in the suite: what the producer writes must be what
+the consumer recognises, in one test, or the two regexes drift apart silently.
+**Ticket:** #9743
+
+### 16. A source pin written as a containment check passes on the commented-out line
+**Applies:** toContain|grep -q|source pin|regression|sentry-regressions|nodeVersionConsistency|literal member
+**What happens:** A test asserts a source file contains a call that must happen,
+the call is commented out, and the test stays green — the name is still
+byte-present. Measured three ways in one session: `expect(content).toContain(
+'setSentryDeepRedactor')` passed with `// setSentryDeepRedactor(...)`; a suite
+asserted a workflow "invokes the gate" with a containment grep that survives a
+second `run:` key appended under it; and an allowlist entry anchored with `$`
+was matched against `path:line:content`, where the anchor can never hold.
+**Why:** A source pin exists precisely for properties no runtime test can see —
+a bundle edge, a build-time substitution, a wiring call whose absence changes
+nothing observable. That is exactly the situation where the pin is the only
+guard, so its strength is the whole guarantee, and "the string appears
+somewhere" is much weaker than it reads.
+**Prevention:** Assert an EXECUTABLE occurrence: anchor to line start, exclude a
+leading comment marker, or count occurrences rather than testing membership.
+Then MUTATE — comment the line out, append a duplicate key, delete the call —
+and confirm the pin goes red. A source pin you have not mutated is a source pin
+you have not tested, and it is guarding the one thing nothing else can.
+**Ticket:** #9743, #9739
+
+### 17. Do not assert facts about the OPERATING environment you did not check
+**Applies:** runbook|docs/guides|on-call|alert|escalat|rotation|notify|SLA|incident|postmortem|process
+**What happens:** A document states, as fact, something about how this project
+is run that nobody verified, and it reads with the same authority as the parts
+that were measured. Written into `health-monitor-cron.md`: a rehearsal step
+warned that a synthetic failure "can page on-call" and told the reader to "tell
+someone before you run this". **There is no on-call — this is a
+single-developer project.** The phrasing came from a review agent's report and
+was repeated as fact.
+**Why:** Environment facts feel like background rather than claims, so they skip
+the check that any code claim would get. They are also the easiest thing to
+import from a generic template, from another project's habits, or from an
+agent's summary — and an agent's report is a SOURCE, not a verification. Worse,
+`docs/sentry-alert-rules.md` looks like evidence that alert rules exist; its own
+first paragraph says the opposite ("recommended … actual rules must be created
+in the Sentry dashboard"). A document describing a system is not proof the
+system is configured.
+**Prevention:** Write the property you can point at in the repository, and stop
+there. "The Sentry `environment` tag comes from `NODE_ENV`, so preview issues
+are tagged `production`" is checkable and useful; "so this will page someone" is
+neither. When the next step depends on infrastructure outside the repo — an
+alert rule, a rotation, a dashboard setting, a notification channel — say what
+you could not verify and name where to look, rather than predicting the outcome.
+Never carry a subagent's framing into a claim of your own without checking the
+thing it was framing.
+**Ticket:** #9718
+
+### 18. A check that RESTATES its subject stops measuring it the moment the subject is edited
+**Applies:** grep -q|toContain|containment|source pin|literal|expected set|assert_|.test.sh|check-|allowlist|pin
+**What happens:** A named assertion keeps reporting green after the thing it
+names has been renamed, widened, split or deleted. It is counted as coverage by
+everyone reading the board, and it is worse than absent, because absence is
+visible. Five instances in ONE PR (#9740), all measured:
+- `grep -q 'scripts/check-portable-paths.sh' ci.yml` — "the workflow invokes the
+  gate". The string also occurs in the job's own doc comment and in the
+  shellcheck step's ARGUMENT, so it passed with every `run:` line in the job
+  commented out. Four reviewers found this independently; one of them watched
+  the suite print `PASS=42 FAIL=0` while the gate was in fact disarmed in the
+  working tree.
+- An allowlist assertion grepping for the literal `^docs/(reviews|coverage)/`.
+  That entry was widened to add `audits`, then split into three. The literal
+  matched neither shape, so the check survived TWO edits to its own subject and
+  reported green through both.
+- "the entry/reason arrays are length-checked" — a containment grep for the
+  comparison's text. Commenting out the entire length-check block left it green.
+- An anchoring rule that read only entries spelled with two spaces and single
+  quotes. A double-quoted entry — identical at runtime — was invisible to it.
+- A vacuity floor of `-lt 15` against a list of 23, so eight entries could fall
+  out of a parse with the guard still green.
+**Why:** Restating the subject creates a second copy that nothing keeps in sync.
+The check and the thing it checks then drift independently, and the drift is
+silent BY CONSTRUCTION: the check cannot report a mismatch it can no longer see.
+This is lesson #16's family — a containment grep that survives the
+commented-out line — generalised past source pins to every assertion that names
+its subject rather than deriving it.
+**Prevention:** DERIVE THE SUBJECT FROM THE SOURCE AT RUN TIME. Ask the file
+what it contains — parse the array, cut the job block, count the `run:` keys —
+and assert against that, so a rename changes both sides at once. Where the
+derivation can come back empty, add a VACUITY GUARD that fails loudly when it
+does: "no allowlist entry covers this case's fixture" is the right failure for a
+renamed entry, and it is the one thing a stale literal can never say. Then
+mutate the subject — rename it, split it, comment it out — and confirm the check
+goes red. A check you have not watched fail against an EDITED subject is a check
+you have only watched pass.
+**Ticket:** #9740
+
+### 19. A mutation that did not apply proves the suite is robust, and proves nothing
+**Applies:** mutation|mutate|sed -i|sed 's|revert|verify|regression|confirm red|assert
+**What happens:** You break the mechanism, run the suite, see it stay green, and
+draw a conclusion — when the edit never landed. Measured twice in one session:
+a `sed` whose pattern did not match reported a "robust" suite that had tested
+nothing; and a mutation that changed ONE of two coupled sites left the second
+site quietly compensating, so the code looked covered when neither site was
+pinned. The second is the dangerous one, because the mutation DID apply and the
+result was still meaningless.
+**Why:** A mutation test infers from a negative — "the suite did not go red" —
+and a negative has two causes: the assertion is weak, or the mutation is absent.
+Nothing in the output distinguishes them, and the flattering reading is the one
+that lets you stop.
+**Prevention:** ASSERT THE EDIT APPLIED BEFORE TRUSTING THE RESULT. Count
+occurrences before replacing and fail if the count is not what you expect; or
+diff the file and require a non-zero delta. When a mechanism has more than one
+site, mutate EACH ALONE — if only the combination goes red, the rule is pinned
+at neither site, which is a finding rather than a pass. And when a mutation
+produces the right exit code for a reason you did not predict, chase it: a
+fixture that trips the vacuity floor instead of the guard under test gives the
+correct code from the wrong guard, and reads as coverage.
+**Ticket:** #9740

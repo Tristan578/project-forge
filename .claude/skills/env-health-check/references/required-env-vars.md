@@ -35,7 +35,7 @@ Three consequences, all of which have bitten this project:
    working install (PF-1054, recorded in the comment at `providers.ts:169`).
 
 The live consequence today is **#9117**: zero `PLATFORM_*` keys are set in Vercel
-production, so every non-BYOK generation 500s. That state was easy to reach and hard to
+production, so every platform-path generation fails before charging (500 for a missing key; `music` is declared unavailable in code and refused 503 at every entry point, see `docs/guides/platform-keys.md`). That state was easy to reach and hard to
 notice partly because this checklist did not name the keys that matter. It does now.
 
 To check the platform keys as the app sees them rather than as you hope they are, hit
@@ -76,7 +76,7 @@ the app.
 | `PLATFORM_MESHY_KEY` | Meshy | 3D model and texture generation (`model3d`, `texture` capabilities). |
 | `PLATFORM_HYPER3D_KEY` | Hyper3D | Alternative 3D model generation backend. |
 | `PLATFORM_ELEVENLABS_KEY` | ElevenLabs | SFX and voice generation (`sfx`, `voice` capabilities). |
-| `PLATFORM_SUNO_KEY` | Suno | Music generation (`music` capability). |
+| `PLATFORM_SUNO_KEY` | Suno | Unobtainable — Suno has no public API. `music` is declared unavailable in `UNAVAILABLE_CAPABILITIES` regardless of this key and refused before any charge (#9117 / #9522); see `docs/guides/platform-keys.md`. |
 | `PLATFORM_REPLICATE_KEY` | Replicate | Sprite generation (`sprite` capability). |
 | `PLATFORM_REMOVEBG_KEY` | remove.bg | Background removal (`bg_removal` capability). |
 

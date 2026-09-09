@@ -1,7 +1,7 @@
 /**
  * Tests for compoundHandlers — 8 multi-step AI compound tools.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import { compoundHandlers } from '../compoundHandlers';
 import { generationHandlers } from '../generationHandlers';
@@ -22,6 +22,15 @@ vi.mock('@/stores/generationStore', () => ({
 const mockGetPresetById = vi.fn();
 const mockBuildEntityIndex = vi.fn();
 const mockFindEntityByName = vi.fn();
+
+// #9117: real providers module with `getCapabilityUnavailability` wrapped so
+// one describe can bypass the static music gate and keep the dispatch branch
+// pinned while music is declared unavailable.
+vi.mock('@/lib/config/providers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/config/providers')>();
+  return { ...actual, getCapabilityUnavailability: vi.fn(actual.getCapabilityUnavailability) };
+});
+import { getCapabilityUnavailability } from '@/lib/config/providers';
 
 vi.mock('@/lib/materialPresets', () => ({
   getPresetById: (...args: unknown[]) => mockGetPresetById(...args),
@@ -1127,6 +1136,32 @@ describe('compoundHandlers', () => {
       expect(data.generationJobs).toBe(0);
     });
 
+    describe('setup_game_from_description with the #9117 music gate bypassed', () => {
+      beforeEach(() => {
+        vi.mocked(getCapabilityUnavailability).mockReturnValue(null);
+      });
+      afterEach(() => {
+        vi.mocked(getCapabilityUnavailability).mockRestore();
+      });
+
+      it('dispatches generate_music as the third generation job when music is offered', async () => {
+        const { dispatchCommand, result } = await invoke(
+          'setup_game_from_description',
+          { description: 'a shooter game', targetTier: 'high' },
+          gameOverrides(),
+        );
+        expect(dispatchCommand).toHaveBeenCalledWith(
+          'generate_music',
+          expect.objectContaining({ prompt: expect.stringContaining('background music') }),
+        );
+        const data = result.result as Record<string, unknown>;
+        expect(data.generationJobs).toBe(3);
+        expect(data.operations as Array<{ action: string }>).not.toContainEqual(
+          expect.objectContaining({ action: 'skip background music (not available yet)' }),
+        );
+      });
+    });
+
     it('dispatches parallel generation jobs keyed to the param each handler consumes', async () => {
       const { dispatchCommand, store, result } = await invoke(
         'setup_game_from_description',
@@ -1150,10 +1185,16 @@ describe('compoundHandlers', () => {
       // Guard against regressing to the wrong key (the pre-fix contract).
       expect(texturePayload).not.toHaveProperty('targetEntityId');
 
-      expect(dispatchCommand).toHaveBeenCalledWith('generate_music', expect.any(Object));
+      // #9117: music is declared unavailable, so the compound action skips it
+      // (recorded in the operations list) instead of dispatching a job the
+      // route refuses.
+      expect(dispatchCommand).not.toHaveBeenCalledWith('generate_music', expect.any(Object));
 
       const data = result.result as Record<string, unknown>;
-      expect(data.generationJobs).toBe(3);
+      expect(data.generationJobs).toBe(2);
+      expect(data.operations as Array<{ action: string; success: boolean }>).toContainEqual(
+        expect.objectContaining({ action: 'skip background music (not available yet)', success: true }),
+      );
 
       // End-to-end: feed the EXACT dispatched payload into the REAL
       // generate_texture handler and assert the goal id survives the handler's

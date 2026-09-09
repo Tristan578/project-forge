@@ -7,13 +7,17 @@ import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { useGenerationGate } from '@/hooks/useGenerationGate';
+import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
+import { spriteTokenCost } from '@/lib/config/providers';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 interface GenerateSpriteDialogProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type SpriteStyle = 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
+import type { SpriteStyle } from '@/lib/config/providers';
 type SpriteSize = '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
 type TabType = 'single' | 'sheet' | 'tileset';
 
@@ -33,8 +37,26 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
   const addJob = useGenerationStore((s) => s.addJob);
   const dialogRef = useDialogA11y(onClose);
 
-  const tokenCost = activeTab === 'single' ? 15 : activeTab === 'sheet' ? frameCount * 15 : 50;
+  // Single-sprite price follows the provider the request will resolve to, via
+  // the same helper the route charges from (#9741). It was a flat 15, which is
+  // neither provider's price: a 10-14 balance was refused on a pixel-art
+  // request the server charges 10 for, and a 15-19 balance submitted a DALL-E
+  // request the server then rejected for 20. Sheet and tileset already match
+  // TOKEN_COSTS (15/frame, 50) and are unchanged.
+  const tokenCost =
+    activeTab === 'single'
+      ? spriteTokenCost(style)
+      : activeTab === 'sheet'
+        ? frameCount * TOKEN_COSTS.sprite_sheet_cost_per_frame
+        : TOKEN_COSTS.tileset_generation;
+  // Capability gate (#9117): blocked only on a positive "unavailable" report.
+  const gate = useGenerationGate('sprite-generation');
   const canSubmit =
+    // `blocked` is false until the first /api/capabilities body lands, so
+    // without this a permanently-unavailable capability presented a live
+    // Generate button with no notice beside it (#9725 p8).
+    !gate.loading &&
+    !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
     !isSubmitting &&
@@ -126,7 +148,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="generate-sprite-dialog-title"
+        aria-labelledby="generate-sprite-dialog-title" aria-describedby={gate.blocked ? 'generate-sprite-unavailable' : undefined}
         className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl"
       >
         {/* Header */}
@@ -179,6 +201,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sprite-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
           {/* Prompt (all tabs) */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
@@ -187,7 +210,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || gate.blocked}
               placeholder={
                 activeTab === 'single'
                   ? 'Pixel art wizard character, 64x64'
@@ -205,11 +228,16 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Style (single and sheet) */}
           {(activeTab === 'single' || activeTab === 'sheet') && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
+              {/* `htmlFor`/`id`: the label was not associated with the select, so
+                  a screen reader announced an unlabelled combobox and
+                  `getByLabelText` could not find it either (#9741, while
+                  correcting the style-dependent price below). */}
+              <label htmlFor="generate-sprite-style" className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
               <select
+                id="generate-sprite-style"
                 value={style}
                 onChange={(e) => setStyle(e.target.value as SpriteStyle)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="pixel-art">Pixel Art</option>
@@ -227,7 +255,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
               <select
                 value={size}
                 onChange={(e) => setSize(e.target.value as SpriteSize)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="32x32">32x32</option>
@@ -252,7 +280,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
                 max="8"
                 value={frameCount}
                 onChange={(e) => setFrameCount(Number(e.target.value))}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full"
               />
             </div>
@@ -265,7 +293,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
               <select
                 value={tileSize}
                 onChange={(e) => setTileSize(Number(e.target.value) as 16 | 32 | 48 | 64)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="16">16x16</option>
@@ -283,7 +311,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
               <select
                 value={gridSize}
                 onChange={(e) => setGridSize(e.target.value as '4x4' | '8x8' | '16x16')}
-                disabled={isSubmitting}
+                disabled={isSubmitting || gate.blocked}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="4x4">4x4 (16 tiles)</option>
@@ -316,7 +344,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit} aria-describedby={gate.blocked ? 'generate-sprite-unavailable' : undefined}
             aria-busy={isSubmitting}
             className="flex flex-1 items-center justify-center gap-2 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >

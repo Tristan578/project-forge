@@ -55,6 +55,15 @@ export const GENERATION_OUTCOMES = [
    * junk", which are different pages for different people.
    */
   'empty_artifact',
+  /**
+   * The route's capability is declared unavailable in code
+   * (`UNAVAILABLE_CAPABILITIES`, #9117) and the request was refused before
+   * any budget was spent. Its own bucket for the same reason as
+   * `empty_artifact`: it is a 503, but a permanent, operator-declared one —
+   * counting it under `provider_unavailable` would page on-call for an
+   * upstream incident that is not happening.
+   */
+  'capability_unavailable',
   'degraded',
   'error',
 ] as const;

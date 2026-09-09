@@ -28,6 +28,7 @@ import {
   type AnthropicThinkingOption,
 } from '@/lib/ai/models';
 import { buildAnthropicCacheControl, type CacheTtlTier } from '@/lib/ai/cachedContext';
+import { isCommandAvailable } from '@/lib/config/providers';
 import manifestJson from '@/data/commands.json';
 
 // ---------------------------------------------------------------------------
@@ -76,7 +77,13 @@ const manifest = manifestJson as { version: string; commands: ManifestEntry[] };
  * and a tool the map does not cover falls through the gate silently.
  */
 function isAgentAdvertised(cmd: ManifestEntry): boolean {
-  return cmd.requiredScope.endsWith(':write') || cmd.category === 'query';
+  // #9117: a command whose capability is declared unavailable is withheld from
+  // the model entirely (static config, so it belongs in this static filter).
+  // `lib/chat/tools.getChatTools()` applies the same predicate.
+  return (
+    (cmd.requiredScope.endsWith(':write') || cmd.category === 'query') &&
+    isCommandAvailable(cmd.name)
+  );
 }
 
 /**

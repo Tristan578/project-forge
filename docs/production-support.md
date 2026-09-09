@@ -24,7 +24,7 @@
 | AI (Anthropic) | Anthropic API | Chat, scene generation | HEAD `api.anthropic.com` | No |
 | AI (Meshy) | Meshy API | 3D model generation | Config check | No |
 | AI (ElevenLabs) | ElevenLabs API | SFX/voice generation | Config check | No |
-| AI (Suno) | Suno API | Music generation | Config check | No |
+| AI (music) | none — Suno has no public API; `music` is declared unavailable until #9522 moves it to ElevenLabs | Music generation | Declared unavailable in code | No |
 
 ### Critical vs Non-Critical
 
@@ -72,7 +72,7 @@ Vercel Edge (CDN, routing, headers)
   |       +---> Anthropic API          -- AI chat, scene generation
   |       |       (ANTHROPIC_API_KEY)
   |       |
-  |       +---> Meshy / ElevenLabs / Suno  -- AI asset generation
+  |       +---> Meshy / ElevenLabs         -- AI asset generation (music: unavailable, #9522)
   |       |
   |       +---> Cloudflare R2          -- asset upload/download (S3 API)
   |       |       (ASSET_R2_ACCESS_KEY_ID, ASSET_R2_SECRET_ACCESS_KEY, ASSET_BUCKET_NAME)
@@ -557,7 +557,7 @@ gh workflow run cd.yml
 # 1. Rotate the exposed key in the provider's dashboard:
 #    - Anthropic: console.anthropic.com > API Keys
 #    - Stripe: dashboard.stripe.com > Developers > API Keys
-#    - Meshy/ElevenLabs/Suno: respective dashboards
+#    - Meshy/ElevenLabs: respective dashboards (Suno has none; see docs/guides/platform-keys.md)
 
 # 2. Update in Vercel env vars
 
@@ -626,7 +626,7 @@ Source of truth: `web/src/lib/config/validateEnv.ts` (`REQUIRED_VARS`). App will
 
 ### Optional Environment Variables
 
-Source of truth: `web/src/lib/config/validateEnv.ts` (`OPTIONAL_VARS`). App degrades gracefully without these.
+Source of truth: `web/src/lib/config/validateEnv.ts` (`OPTIONAL_VARS`). App degrades gracefully without these. Rows marked † are provider keys that `OPTIONAL_VARS` does not list; their source of truth is `PLATFORM_KEY_ENV` in `web/src/lib/config/providers.ts`.
 
 | Variable | Service | Default |
 |----------|---------|---------|
@@ -636,9 +636,9 @@ Source of truth: `web/src/lib/config/validateEnv.ts` (`OPTIONAL_VARS`). App degr
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Sentry | (empty, errors untracked) |
 | `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics | (empty) |
 | `ASSET_R2_ACCOUNT_ID` | R2 asset storage | (empty) |
-| `PLATFORM_MESHY_KEY` | Meshy 3D gen | (empty) |
-| `PLATFORM_ELEVENLABS_KEY` | ElevenLabs audio | (empty) |
-| `PLATFORM_SUNO_KEY` | Suno music | (empty) |
+| `PLATFORM_MESHY_KEY` † | Meshy 3D gen | (empty — see `docs/guides/platform-keys.md`) |
+| `PLATFORM_ELEVENLABS_KEY` † | ElevenLabs audio | (empty — see `docs/guides/platform-keys.md`) |
+| `PLATFORM_SUNO_KEY` † | Suno music — unobtainable; `music` is declared unavailable (#9522) | (empty) |
 | `ASSET_R2_ACCESS_KEY_ID` | R2 auth | (empty) |
 | `ASSET_R2_SECRET_ACCESS_KEY` | R2 auth | (empty) |
 | `ASSET_BUCKET_NAME` | R2 bucket | (empty) |

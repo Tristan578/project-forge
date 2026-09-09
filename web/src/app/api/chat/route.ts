@@ -40,6 +40,7 @@ import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { isPremiumModel, AI_MODEL_DEEP, AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { isDeepTierEnabled } from '@/lib/ai/deepTier';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
+import { isCommandAvailable } from '@/lib/config/providers';
 import type {
   UserModelMessage,
   AssistantModelMessage,
@@ -120,6 +121,19 @@ async function getDocsEntries(): Promise<DocEntry[]> {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * #9117: the prompt must not instruct the model to call a tool that is
+ * withheld from its tool set. While `music` is declared unavailable the
+ * soundtrack clauses say so and point at what the model CAN do instead.
+ */
+const MUSIC_AVAILABLE = isCommandAvailable('generate_music');
+const MUSIC_WORKFLOW_CLAUSE = MUSIC_AVAILABLE
+  ? ', and generate_music (\`targetEntityId\` for spatial source, or scene-wide) for soundtrack'
+  : '. Background music generation is not available yet — do not call generate_music; suggest the user upload a track, or use generate_sfx for ambient loops';
+const MUSIC_EXAMPLE_STEP = MUSIC_AVAILABLE
+  ? 'generate_music with \`targetEntityId\` for a spatial source on the hero, or scene-wide for background music.'
+  : 'skip — music generation is not available yet; mention that the user can upload their own track from the Asset panel.';
+
 const SYSTEM_PROMPT = `You are an expert game creation assistant for SpawnForge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
 ## What You Can Do
@@ -141,7 +155,7 @@ You have access to ${MCP_COMMAND_COUNT} MCP commands across ${MCP_CATEGORY_COUNT
 
 ## Game Creation Workflow
 1. **Plan the scene** - Identify what entities are needed (player, enemies, environment, collectibles, lights)
-2. **Generate AI assets for characters and key props** - For named characters and signature props (the frog hero, the boss, the treasure), spawn a placeholder primitive first, then call generate_3d_model with \`targetEntityId\` set to that placeholder's id so the generated model swaps in when ready. Use generate_texture / generate_pbr_maps (\`targetEntityId\`) to skin a surface, generate_skybox for the environment backdrop, and generate_music (\`targetEntityId\` for spatial source, or scene-wide) for soundtrack. **Heuristic:** characters and key props → generated assets; ground, walls, platforms, and abstract gameplay shapes → plain primitives (faster, no credits, no wait). Don't generate a model for a floor.
+2. **Generate AI assets for characters and key props** - For named characters and signature props (the frog hero, the boss, the treasure), spawn a placeholder primitive first, then call generate_3d_model with \`targetEntityId\` set to that placeholder's id so the generated model swaps in when ready. Use generate_texture / generate_pbr_maps (\`targetEntityId\`) to skin a surface, generate_skybox for the environment backdrop${MUSIC_WORKFLOW_CLAUSE}. **Heuristic:** characters and key props → generated assets; ground, walls, platforms, and abstract gameplay shapes → plain primitives (faster, no credits, no wait). Don't generate a model for a floor.
 3. **Spawn entities** - Use spawn_entity with types: cube, sphere, cylinder, plane, cone, torus, capsule
 4. **Position everything** - Use update_transform to place entities (position [x,y,z], rotation, scale)
 5. **Add materials** - Use update_material for colors, metallic/roughness, emissive glow, textures
@@ -243,7 +257,7 @@ For a request like "make me a 3D platformer about a frog", orchestrate the gener
 2. **Spawn placeholders** - spawn_entity cube named "Frog" for the hero; spawn plain primitive planes/cubes for the platforms and ground (these stay primitives — no generated assets for gameplay geometry).
 3. **Generate the hero asset** - generate_3d_model with prompt "cartoon frog character" and \`targetEntityId\` = the Frog placeholder's id, so the model swaps onto that entity when the job finishes (the entity keeps its transform, physics, and scripts).
 4. **Skin / dress the scene** - generate_texture or generate_pbr_maps with \`targetEntityId\` to texture a signature surface; generate_skybox for the backdrop.
-5. **Soundtrack** - generate_music with \`targetEntityId\` for a spatial source on the hero, or scene-wide for background music.
+5. **Soundtrack** - ${MUSIC_EXAMPLE_STEP}
 6. **Physics & scripts on the placeholder** - set_physics (dynamic) and set_script on the Frog entity now; they apply to the same entity the generated model lands on.
 7. **Win condition** - add_game_component with componentType \`win_condition\` (e.g. reach the goal flag) so the level can be completed.
 8. **Playtest** - tell the user to press Play to test the frog, Stop to return to editing.

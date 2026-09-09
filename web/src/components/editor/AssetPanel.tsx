@@ -5,6 +5,7 @@ import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sp
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
@@ -85,6 +86,23 @@ export const AssetPanel = memo(function AssetPanel() {
   const dragCounterRef = useRef(0);
 
   const tier = useUserStore((s) => s.tier);
+  // #9117: every AI-menu item is gated by its own capability (a fixed set, so
+  // one hook call each), never just music — the next UNAVAILABLE_CAPABILITIES
+  // entry must disable its item here, not drop the user into a dead dialog.
+  const gates = {
+    'generate-model': useGenerationGate('model-generation'),
+    'generate-texture': useGenerationGate('texture-generation'),
+    // The Sound dialog runs sfx OR voice and keeps its type radios enabled so
+    // the user can switch: gating this item on sfx alone would make voice
+    // generation unreachable from the UI the moment sfx were declared
+    // unavailable, and the dialog's own escape hatch unexercisable (#9725 p8).
+    'generate-sound': combineGenerationGates([
+      useGenerationGate('sfx-generation'),
+      useGenerationGate('voice-generation'),
+    ]),
+    'generate-music': useGenerationGate('music-generation'),
+    'generate-skybox': useGenerationGate('texture-generation'),
+  } as const;
 
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const importGltf = useEditorStore((s) => s.importGltf);
@@ -283,7 +301,22 @@ export const AssetPanel = memo(function AssetPanel() {
                     { id: 'generate-music', label: 'Generate Music', open: setGenerateMusicOpen },
                     { id: 'generate-skybox', label: 'Generate Skybox', open: setGenerateSkyboxOpen },
                   ] as const).map(({ id, label, open }) => {
-                    const allowed = canAccessPanel(id, tier);
+                    // #9117: a capability NO key can enable (`unprovisionable`,
+                    // e.g. music pending #9522) is disabled here at the entry
+                    // point, like the tier lock below. A capability that is
+                    // merely unconfigured stays clickable on purpose: its
+                    // reason is actionable, and the dialog's notice — which
+                    // names the provider and links to Settings — is the only
+                    // place that reason is readable by a touch user at all
+                    // (#9725 p7). Disabling both made "not offered" and "add
+                    // your own key" read identically.
+                    const gate = gates[id];
+                    const gated = gate.unprovisionable;
+                    // Until the first /api/capabilities body lands nothing is
+                    // known, so the item must not paint as ready and then flip
+                    // to a disabled amber badge when the answer arrives
+                    // (#9725 p8).
+                    const allowed = canAccessPanel(id, tier) && !gated && !gate.loading;
                     const required = getRequiredTier(id);
                     return (
                       <button
@@ -291,13 +324,35 @@ export const AssetPanel = memo(function AssetPanel() {
                         role="menuitem"
                         onClick={() => { if (allowed) { open(true); setShowAiDropdown(false); } }}
                         aria-disabled={!allowed || undefined}
+                        aria-busy={gate.loading || undefined}
+                        aria-label={
+                          gated
+                            ? `${label} — ${gate.reason ?? 'not available yet'}`
+                            : gate.loading
+                              ? `${label} — checking availability`
+                              : undefined
+                        }
                         className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs ${
                           allowed ? 'text-zinc-300 hover:bg-zinc-800' : 'cursor-not-allowed text-zinc-500'
                         }`}
-                        title={allowed ? label : `Requires ${required ? TIER_LABELS[required] : ''} tier`}
+                        title={
+                          allowed
+                            ? label
+                            : gated
+                              ? (gate.reason ?? 'Not available yet')
+                              : gate.loading
+                                ? 'Checking availability'
+                                : `Requires ${required ? TIER_LABELS[required] : ''} tier`
+                        }
                       >
                         <span>{label}</span>
-                        {!allowed && (
+                        {gated ? (
+                          // Not a tier lock: a distinct badge so "not available
+                          // yet" and "upgrade your plan" never read the same.
+                          <span className="rounded border border-amber-700/40 px-1 text-[10px] text-amber-400">
+                            Unavailable
+                          </span>
+                        ) : !allowed && (
                           <span className="flex items-center gap-1 text-[10px] text-zinc-500">
                             <Lock size={10} />
                             {required ? TIER_LABELS[required] : ''}
