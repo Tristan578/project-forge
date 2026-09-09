@@ -126,7 +126,6 @@ declare namespace forge {
     /** Perform a raycast and return the first hit */
     function raycast(originX: number, originY: number, dirX: number, dirY: number, maxDistance?: number): Promise<{
       entityId: string;
-      entityName: string;
       point: { x: number; y: number };
       normal: { x: number; y: number };
       distance: number;

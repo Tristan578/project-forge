@@ -51,7 +51,9 @@ const PINNED_CATEGORY_COUNTS: Record<(typeof PINNED_CATEGORIES)[number], number>
   tilemap: 10,
   sprite: 8,
   sprite_animation: 6,
-  physics2d: 8,
+  // 8 -> 10: get_joint_2d and list_joints_2d, the engine reads that had
+  // no TypeScript producer at all until #9351.
+  physics2d: 10,
   scripting: 15,
 };
 
@@ -381,8 +383,24 @@ describe('parse coverage', () => {
     const inCategory = commands.filter((c) => c.category === category);
     expect(inCategory.length).toBeGreaterThan(0);
     // Every pinned command must resolve to a handler, or the pin below skips it.
+    //
+    // A command the manifest declares with NO parameters is checked for a
+    // REGISTRATION rather than a schema. Requiring a Zod schema there asks for
+    // a schema of nothing: `z.object({})` produces an empty body, which the
+    // extractor reads as "no schema found", so a zero-argument command could
+    // never satisfy this however it was written. Registration is the property
+    // that actually matters for those — the command must reach a handler — and
+    // it is still an assertion, not a skip.
     for (const cmd of inCategory) {
-      expect(schemas.has(cmd.name), `no handler schema found for ${cmd.name}`).toBe(true);
+      const takesArgs = Object.keys(cmd.parameters?.properties ?? {}).length > 0;
+      if (takesArgs) {
+        expect(schemas.has(cmd.name), `no handler schema found for ${cmd.name}`).toBe(true);
+      } else {
+        expect(
+          registrations.has(cmd.name),
+          `${cmd.name} declares no parameters and is registered by no handler`,
+        ).toBe(true);
+      }
     }
   });
 

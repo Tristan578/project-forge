@@ -1,0 +1,53 @@
+name: Board Verdict
+
+# Publishes the latest review-board verdict as a commit status on the PR, so a
+# red board is visible next to CI instead of living only in a conversation.
+#
+# #9725 merged with two board majors open: CI was green, no threads were
+# unresolved, and the board's FAIL existed only in chat. Both blockers reached
+# `main`. The check is PENDING until a board has run against the current head,
+# so "nobody looked" and "someone looked and it was clean" cannot look the same.
+#
+# Re-evaluated when a PR head moves (a new push invalidates an older verdict)
+# and when a comment is posted or edited (that is how a verdict arrives).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  # Per PR, cancelling stale evaluations: only the newest verdict matters.
+  group: board-verdict-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  verdict:
+    name: Board Verdict
+    # `issue_comment` fires for plain issues too; those have no head to status.
+    if: ${{ github.event_name == 'pull_request' || github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Publish the latest board verdict as a commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        # Exit 1 is the FAIL verdict, and it is swallowed on purpose: the
+        # failing STATUS is the signal here, so reddening the job as well would
+        # duplicate it and make a real tooling failure indistinguishable from a
+        # board FAIL.
+        #
+        # Exit 2 is NOT swallowed. `|| true` used to cover it, and that was the
+        # worse bug: on exit 2 the script posts no status at all, and an absent
+        # status renders as nothing rather than as pending — silence in exactly
+        # the place this whole design exists to remove.
+        run: bash scripts/board-verdict.sh "$PR" || [ $? -eq 1 ]
