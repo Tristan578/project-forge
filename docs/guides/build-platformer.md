@@ -62,11 +62,7 @@ let canJump = true;
 function onUpdate(dt: number) {
   // Horizontal movement
   if (forge.input.isPressed("move_left")) {
-    forge.physics.setVelocity(entityId,
-      -SPEED,
-      forge.getTransform(entityId)?.position[1] ?? 0,
-      0
-    );
+    forge.physics.applyForce(entityId, -SPEED, 0, 0);
   }
   if (forge.input.isPressed("move_right")) {
     forge.physics.applyForce(entityId, SPEED, 0, 0);

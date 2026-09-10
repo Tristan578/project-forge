@@ -5,13 +5,15 @@ import { assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { z } from 'zod';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
   content: z.string().max(2000).optional(),
 });
 
-export async function POST(
+async function POST_impl(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
@@ -84,6 +86,10 @@ export async function POST(
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets/[id]/review' });
     console.error('Error submitting review:', error);
-    return NextResponse.json({ error: 'Failed to submit review' }, { status: 500 });
+    return redactedJson({ error: 'Failed to submit review' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

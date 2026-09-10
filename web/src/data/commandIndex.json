@@ -1,0 +1,1774 @@
+{
+  "commands": [
+    {
+      "name": "add_bone2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_clip_keyframe",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_dialogue_node",
+      "category": "dialogue",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_game_component",
+      "category": "game_components",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_keyframe2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_shader_node",
+      "category": "shaders",
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "add_skeleton2d_mesh_attachment",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_tilemap_layer",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_ui_widget",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "add_visual_script_node",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "analyze_gameplay",
+      "category": "compound",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "apply_audio_snapshot",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_custom_shader",
+      "category": "shaders",
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "apply_force",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_force2d",
+      "category": "physics2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_impulse2d",
+      "category": "physics2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_material_preset",
+      "category": "materials",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_script_template",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_shader_to_entity",
+      "category": "shaders",
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "apply_style",
+      "category": "compound",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_style_transfer",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "arrange_entities",
+      "category": "compound",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "array_entity",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "attach_script_to_entity",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_add_layer",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_crossfade",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_fade_in",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_fade_out",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_play_one_shot",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_remove_layer",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "auto_weight_skeleton2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "build_world",
+      "category": "world_building",
+      "requiredScope": "ai:generate"
+    },
+    {
+      "name": "burst_particle",
+      "category": "particles",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "camera_shake",
+      "category": "game_cameras",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "clear_selection",
+      "category": "scene",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "clear_tiles",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "clear_world",
+      "category": "world_building",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "combine_meshes",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "compile_shader",
+      "category": "shaders",
+      "requiredScope": "shaders:read"
+    },
+    {
+      "name": "compile_visual_script",
+      "category": "scripting",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "configure_game_mechanics",
+      "category": "compound",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "configure_leaderboard",
+      "category": "publishing",
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "connect_shader_nodes",
+      "category": "shaders",
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "connect_visual_script_nodes",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_animation_clip",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_audio_bus",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_audio_snapshot",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_dialogue_tree",
+      "category": "dialogue",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_ik_chain2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_joint",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_leaderboard",
+      "category": "publishing",
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "create_level_layout",
+      "category": "compound",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_library_script",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_scene",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_scene_from_description",
+      "category": "compound",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_script",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_shader_graph",
+      "category": "shaders",
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "create_skeletal_animation2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_skeleton2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_sprite",
+      "category": "sprite",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_sprite_anim_clip",
+      "category": "sprite_animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_tilemap",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_ui_screen",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "csg_intersect",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "csg_subtract",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "csg_union",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_asset",
+      "category": "asset",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_audio_bus",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_cutscene",
+      "category": "cutscene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_entities",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_leaderboard",
+      "category": "publishing",
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "delete_library_material",
+      "category": "materials",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_library_script",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_prefab",
+      "category": "prefab",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_scene",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_ui_screen",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "describe_scene",
+      "category": "compound",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "design_economy",
+      "category": "economy",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "despawn_entity",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "detach_script_from_entity",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "duplicate_entity",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "duplicate_scene",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "duplicate_ui_screen",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "duplicate_ui_widget",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "enter_edit_mode",
+      "category": "modeling",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "exit_edit_mode",
+      "category": "modeling",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "export_dialogue_tree",
+      "category": "dialogue",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "export_game",
+      "category": "export",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "export_project_pwa",
+      "category": "export",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "export_project_zip",
+      "category": "export",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "export_scene",
+      "category": "scene",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "extract_translatable_strings",
+      "category": "localization",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "extrude_shape",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "fill_tiles",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "focus_camera",
+      "category": "camera",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "generate_3d_from_image",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_3d_model",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_character",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_cutscene",
+      "category": "cutscene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "generate_game_ideas",
+      "category": "generation",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "generate_lods",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "generate_music",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_pbr_maps",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_pixel_art",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_sfx",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_skybox",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_sprite",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_sprite_sheet",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_texture",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_tileset",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_voice",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "get_animation_clip",
+      "category": "animation",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_animation_graph",
+      "category": "animation",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_animation_state",
+      "category": "animation",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_audio",
+      "category": "audio",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_audio_buses",
+      "category": "audio",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_camera_2d",
+      "category": "camera",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_camera_state",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_current_world",
+      "category": "world_building",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_dialogue_tree",
+      "category": "dialogue",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_doc",
+      "category": "docs",
+      "requiredScope": "docs:read"
+    },
+    {
+      "name": "get_entity_details",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_export_status",
+      "category": "export",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_game_camera",
+      "category": "game_cameras",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_game_components",
+      "category": "game_components",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_generation_status",
+      "category": "generation",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_idea_details",
+      "category": "generation",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_input_bindings",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_input_state",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_joint",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_joint_2d",
+      "category": "physics2d",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_mode",
+      "category": "runtime",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_particle",
+      "category": "particles",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_performance_stats",
+      "category": "performance",
+      "requiredScope": "performance:read"
+    },
+    {
+      "name": "get_physics",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_physics2d",
+      "category": "physics2d",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_post_processing",
+      "category": "rendering",
+      "requiredScope": "rendering:read"
+    },
+    {
+      "name": "get_prefab",
+      "category": "prefab",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_publish_url",
+      "category": "publishing",
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "get_quality_settings",
+      "category": "rendering",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_scene_graph",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_scene_name",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_script",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_security_status",
+      "category": "security",
+      "requiredScope": "security:read"
+    },
+    {
+      "name": "get_selection",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_skeleton2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_sprite",
+      "category": "sprite",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_sprite_generation_status",
+      "category": "generation",
+      "requiredScope": "generation:read"
+    },
+    {
+      "name": "get_template_info",
+      "category": "templates",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_terrain",
+      "category": "terrain",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_tilemap",
+      "category": "tilemap",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_token_balance",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_token_pricing",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_ui_screen",
+      "category": "ui",
+      "requiredScope": "ui:read"
+    },
+    {
+      "name": "get_ui_widget",
+      "category": "ui",
+      "requiredScope": "ui:read"
+    },
+    {
+      "name": "get_visual_script",
+      "category": "scripting",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "import_audio",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "import_dialogue_tree",
+      "category": "dialogue",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "import_gltf",
+      "category": "asset",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "import_skeleton_json",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "import_tileset",
+      "category": "tilemap",
+      "requiredScope": "asset:write"
+    },
+    {
+      "name": "instantiate_prefab",
+      "category": "prefab",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "lathe_shape",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_animations",
+      "category": "animation",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_assets",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_custom_materials",
+      "category": "materials",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_cutscenes",
+      "category": "cutscene",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_doc_topics",
+      "category": "docs",
+      "requiredScope": "docs:read"
+    },
+    {
+      "name": "list_game_component_types",
+      "category": "game_components",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_joints_2d",
+      "category": "physics2d",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_leaderboards",
+      "category": "publishing",
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "list_library_scripts",
+      "category": "scripting",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_locales",
+      "category": "localization",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_material_presets",
+      "category": "materials",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_prefabs",
+      "category": "prefab",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_publications",
+      "category": "publishing",
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "list_scenes",
+      "category": "scene",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_script_templates",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_shader_presets",
+      "category": "shaders",
+      "requiredScope": "shaders:read"
+    },
+    {
+      "name": "list_shaders",
+      "category": "materials",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_templates",
+      "category": "templates",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_ui_screens",
+      "category": "ui",
+      "requiredScope": "ui:read"
+    },
+    {
+      "name": "load_scene",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "load_scene_with_transition",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "load_template",
+      "category": "templates",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "load_texture",
+      "category": "asset",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_bevel",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_delete",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_extrude",
+      "category": "modeling",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_inset",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_loop_cut",
+      "category": "mesh",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_subdivide",
+      "category": "modeling",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "new_scene",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "optimize_scene",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "pause",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "pause_animation",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "pause_audio",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "place_asset",
+      "category": "asset",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_animation",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_audio",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_cutscene",
+      "category": "cutscene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_particle",
+      "category": "particles",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_skeletal_animation2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_sprite_animation",
+      "category": "sprite_animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "preview_clip",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "publish_game",
+      "category": "publishing",
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "quantize_sprite_colors",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "query_play_state",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "raycast2d",
+      "category": "physics2d",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "raycast_query",
+      "category": "runtime",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "recalc_normals",
+      "category": "modeling",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "redo",
+      "category": "history",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "register_custom_shader",
+      "category": "shaders",
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "remix_idea",
+      "category": "generation",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "remove_animation_clip",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_audio",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_background",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "remove_bone2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_clip_keyframe",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_custom_shader",
+      "category": "materials",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_custom_shader_slot",
+      "category": "shaders",
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "remove_dialogue_tree",
+      "category": "dialogue",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_game_component",
+      "category": "game_components",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_input_binding",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_joint",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_particle",
+      "category": "particles",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_physics2d",
+      "category": "physics2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_reverb_zone",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_script",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_shader_from_entity",
+      "category": "shaders",
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "remove_skybox",
+      "category": "environment",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_texture",
+      "category": "asset",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_tilemap_layer",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_ui_binding",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "remove_ui_widget",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "rename_entity",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "rename_scene",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "reorder_ui_widget",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "reparent_entity",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "resize_tilemap",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "resume",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "resume_animation",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "save_as_prefab",
+      "category": "prefab",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "save_material_to_library",
+      "category": "materials",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "sculpt_terrain",
+      "category": "terrain",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "search_docs",
+      "category": "docs",
+      "requiredScope": "docs:read"
+    },
+    {
+      "name": "seek_animation",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "select_entities",
+      "category": "scene",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "select_entity",
+      "category": "scene",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "set_active_game_camera",
+      "category": "game_cameras",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_adaptive_music",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_anim_param",
+      "category": "sprite_animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_anim_state_machine",
+      "category": "sprite_animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_animation_blend_weight",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_animation_loop",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_animation_speed",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_audio",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_audio_occlusion",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_bus_effects",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_camera_2d",
+      "category": "camera",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_camera_preset",
+      "category": "camera",
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "set_clip_property",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_clip_speed",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_coordinate_mode",
+      "category": "editor",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_custom_shader",
+      "category": "materials",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_custom_skybox",
+      "category": "environment",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_custom_wgsl_source",
+      "category": "materials",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_debug_physics2d",
+      "category": "physics2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_default_transition",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_dialogue_choice",
+      "category": "dialogue",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_dialogue_node_voice",
+      "category": "dialogue",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_ducking_rule",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_entity_lod",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "set_export_preset",
+      "category": "export",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_game_camera",
+      "category": "game_cameras",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_gizmo_mode",
+      "category": "editor",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_gravity2d",
+      "category": "physics2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_grid_2d",
+      "category": "editor",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_input_binding",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_input_preset",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_loading_screen",
+      "category": "export",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_lod_distances",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "set_music_intensity",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_music_stems",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_particle",
+      "category": "particles",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_particle_preset",
+      "category": "particles",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_performance_budget",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "set_physics2d",
+      "category": "physics2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_pixel_art_palette",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "set_preview_locale",
+      "category": "localization",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_project_style",
+      "category": "generation",
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "set_project_type",
+      "category": "editor",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_quality_preset",
+      "category": "rendering",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_reverb_zone",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_script",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_selection_mode",
+      "category": "modeling",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_simplification_backend",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "set_skeleton2d_skin",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_skybox",
+      "category": "environment",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_snap_settings",
+      "category": "editor",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_sorting_layers",
+      "category": "sprite",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_sprite_anchor",
+      "category": "sprite",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_sprite_animator",
+      "category": "sprite_animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_sprite_flip",
+      "category": "sprite",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_sprite_sorting",
+      "category": "sprite",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_sprite_texture",
+      "category": "sprite",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_sprite_tint",
+      "category": "sprite",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_start_scene",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_tile",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_tilemap_layer",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_ui_binding",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "set_ui_theme",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "set_visibility",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_visual_script",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "setup_character",
+      "category": "compound",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "setup_game_from_description",
+      "category": "compound",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "slice_sprite_sheet",
+      "category": "sprite_animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "spawn_entity",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "spawn_terrain",
+      "category": "terrain",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "start_from_idea",
+      "category": "generation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop_animation",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop_audio",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop_cutscene",
+      "category": "cutscene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop_particle",
+      "category": "particles",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "switch_scene",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "toggle_debug_physics",
+      "category": "editor",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "toggle_grid",
+      "category": "editor",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "toggle_particle",
+      "category": "particles",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "toggle_physics",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "transition_music_segment",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "translate_scene",
+      "category": "localization",
+      "requiredScope": "ai:generate"
+    },
+    {
+      "name": "undo",
+      "category": "history",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "unpublish_game",
+      "category": "publishing",
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "update_ambient_light",
+      "category": "lighting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_audio_bus",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_bone2d",
+      "category": "skeleton2d",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_clip_keyframe",
+      "category": "animation",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_environment",
+      "category": "environment",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_game_component",
+      "category": "game_components",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_joint",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_library_script",
+      "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_light",
+      "category": "lighting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_material",
+      "category": "materials",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_physics",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_post_processing",
+      "category": "rendering",
+      "requiredScope": "rendering:write"
+    },
+    {
+      "name": "update_skybox",
+      "category": "environment",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_terrain",
+      "category": "terrain",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_transform",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_ui_screen",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "update_ui_widget",
+      "category": "ui",
+      "requiredScope": "ui:write"
+    },
+    {
+      "name": "validate_project_security",
+      "category": "security",
+      "requiredScope": "security:read"
+    },
+    {
+      "name": "validate_wgsl",
+      "category": "materials",
+      "requiredScope": "scene:read"
+    }
+  ]
+}
