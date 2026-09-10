@@ -99,8 +99,12 @@ test.describe('Editor Layout @engine', () => {
   test('sidebar is docked on the left', async ({ page, editor: _editor }) => {
 
 
-    // Find sidebar element
-    const sidebar = page.locator('[class*="sidebar"]').first();
+    // By test id, not by class substring: `[class*="sidebar"]` matches any
+    // element whose class merely contains the word, and `lucide-react` >= 1.43
+    // puts `lucide-sidebar` on every `PanelLeft` icon. An icon sitting at
+    // x < 100 would satisfy the assertion below while telling us nothing about
+    // where the sidebar is docked.
+    const sidebar = page.getByTestId('editor-sidebar');
     await expect(sidebar).toBeVisible();
 
     // Get sidebar position
@@ -207,8 +211,27 @@ test.describe('Responsive Layout @ui @dev', () => {
     await page.setViewportSize({ width: 800, height: 600 });
     await editor.loadPage();
 
-    // In compact mode (<1024px), sidebar and dockview panels should be hidden or collapsed
-    const sidebar = page.locator('[class*="sidebar"]').first();
+    // NON-VACUITY GUARD, and it is not decoration. Every assertion below is
+    // conditional on finding the sidebar, so a page that rendered nothing at all
+    // would pass this test while proving nothing (lesson 11). Anchor on a control
+    // that is present in compact mode before asserting anything about layout.
+    await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
+
+    // TARGET THE SIDEBAR BY TEST ID, NOT BY CLASS SUBSTRING.
+    //
+    // This read `page.locator('[class*="sidebar"]').first()` — the first element
+    // in the DOM whose class merely CONTAINS "sidebar". That is not a selector
+    // for the sidebar, it is a selector for the word, and it broke the moment a
+    // dependency used the word elsewhere: `lucide-react` 1.37 -> 1.43 (resolved
+    // inside its unchanged `^1.33.0` range) renames `Sidebar` to `PanelLeft` and
+    // emits BOTH names as classes, so every `PanelLeft` icon now carries
+    // `lucide-sidebar`. The first match became a 24px icon inside a button —
+    // visible, wider than 10px — and the test failed on three E2E jobs while the
+    // editor's sidebar behaved exactly as before.
+    //
+    // `data-testid="editor-sidebar"` is on the real `<aside>` and cannot be
+    // collected by an icon.
+    const sidebar = page.getByTestId('editor-sidebar');
     const sidebarVisible = await sidebar.isVisible().catch(() => false);
 
     // Sidebar should not be visible in compact mode
