@@ -276,6 +276,103 @@ else
   fail "ci.yml not found at $CI_YML"
 fi
 
+# ── @rolldown: the second native binding, and the reason this gate is a list ──
+#
+# `@next/swc` was the only package this gate knew about. `@rolldown/binding-*`
+# arrived with vitest 5 and is now equally load-bearing: it is what makes
+# `npx vitest run` work at all, and npm drops it through exactly the same
+# npm/cli#4828 path.
+#
+# OBSERVED, not hypothesised (#9966): during #9962 an `npm ci` exited 0 with the
+# binding absent, and all four workspace suites produced NO TEST OUTPUT AT ALL —
+# not a failure summary, silence. A downstream check asking "did the suite report
+# failures?" sees nothing and concludes nothing, which is the whole reason the
+# swc guard exists for the other package.
+#
+# `mkrolldown` mirrors `mktree` but seeds node_modules/rolldown (the sentinel
+# that makes the rolldown entry applicable) and packages under @rolldown/.
+# Usage: mkrolldown <name> <platform> <arch> [rolldown-pkg-dir ...]
+#
+# The swc side is seeded FOR THE PLATFORM UNDER TEST. A fixture that hardcodes
+# one swc package makes every other-platform case fail for an swc reason, and
+# every same-platform case pass for one — the assertion would then be about the
+# wrong package entirely.
+mkrolldown() {
+  local name="$1" plat="$2" arch="$3"; shift 3
+  local nm="$TMPDIR_T/$name/node_modules"
+  mkdir -p "$nm/next" "$nm/@next" "$nm/rolldown" "$nm/@rolldown"
+  mkdir -p "$nm/@next/swc-${plat}-${arch}"
+  touch "$nm/@next/swc-${plat}-${arch}/next-swc.${plat}-${arch}.node"
+  local pkg
+  for pkg in "$@"; do
+    mkdir -p "$nm/@rolldown/$pkg"
+  done
+  echo "$nm"
+}
+
+# R1. Happy path: the host's rolldown binding present with a .node binary → 0.
+nm="$(mkrolldown r-ok linux x64 binding-linux-x64-gnu)"
+touch "$nm/@rolldown/binding-linux-x64-gnu/rolldown-binding.linux-x64-gnu.node"
+rc="$(run_gate "$nm" linux x64)"
+if [ "$rc" = "0" ]; then pass "rolldown binding present with .node → 0"; else fail "rolldown binding present → expected 0, got $rc"; fi
+
+# R2. THE BUG. rolldown installed, every @rolldown/binding-* dropped by npm → 1.
+#     This is the state that produced the silent suites in #9962.
+nm="$(mkrolldown r-dropped linux x64)"
+rc="$(run_gate "$nm" linux x64)"
+if [ "$rc" = "1" ]; then pass "rolldown installed but binding dropped → 1 (npm/cli#4828 caught)"; else fail "rolldown binding dropped → expected 1, got $rc"; fi
+
+# R3. Package dir present but EMPTY — an incomplete install is not a pass.
+nm="$(mkrolldown r-empty linux x64 binding-linux-x64-gnu)"
+rc="$(run_gate "$nm" linux x64)"
+if [ "$rc" = "1" ]; then pass "rolldown binding dir without a .node → 1"; else fail "rolldown binding dir without .node → expected 1, got $rc"; fi
+
+# R4. Suffix variants. rolldown ships -gnu/-musl/-msvc alongside bare names, so
+#     the same exact-or-hyphen-suffix rule the swc side uses must apply here.
+nm="$(mkrolldown r-musl linux x64 binding-linux-x64-musl)"
+touch "$nm/@rolldown/binding-linux-x64-musl/rolldown-binding.linux-x64-musl.node"
+rc="$(run_gate "$nm" linux x64)"
+if [ "$rc" = "0" ]; then pass "rolldown -musl suffix accepted for linux-x64"; else fail "rolldown -musl → expected 0, got $rc"; fi
+
+nm="$(mkrolldown r-msvc win32 x64 binding-win32-x64-msvc)"
+touch "$nm/@rolldown/binding-win32-x64-msvc/rolldown-binding.win32-x64-msvc.node"
+rc="$(run_gate "$nm" win32 x64)"
+if [ "$rc" = "0" ]; then pass "rolldown -msvc suffix accepted for win32-x64"; else fail "rolldown -msvc → expected 0, got $rc"; fi
+
+# R5. ARCH PRECISION. rolldown really ships `binding-linux-arm-gnueabihf` AND
+#     `binding-linux-arm64-gnu`, so a prefix glob would let arch 'arm' match the
+#     'arm64' package and report a binding the runtime cannot load.
+nm="$(mkrolldown r-arm linux arm binding-linux-arm64-gnu)"
+touch "$nm/@rolldown/binding-linux-arm64-gnu/rolldown-binding.linux-arm64-gnu.node"
+rc="$(run_gate "$nm" linux arm)"
+if [ "$rc" = "1" ]; then pass "arch arm does not match the arm64 rolldown package"; else fail "arch arm matched arm64 → expected 1, got $rc"; fi
+
+# R6. NOT APPLICABLE is not the same as PASSING. A tree that installs next but
+#     not rolldown must still be graded on swc alone — the docs app and the
+#     engine build are trees like this.
+nm="$(mktree r-no-rolldown swc-linux-x64-gnu)"
+touch "$nm/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node"
+rc="$(run_gate "$nm" linux x64)"
+if [ "$rc" = "0" ]; then pass "tree without rolldown is graded on swc alone → 0"; else fail "tree without rolldown → expected 0, got $rc"; fi
+
+# R7. And the vacuity guard: a tree that installs NEITHER sentinel has nothing to
+#     assert, so the gate must refuse rather than report success over zero
+#     checks (lesson 9 — a check that scans nothing is not a passing check).
+nm_dir="$TMPDIR_T/r-neither/node_modules"
+mkdir -p "$nm_dir/@next" "$nm_dir/@rolldown"
+rc="$(run_gate "$nm_dir" linux x64)"
+if [ "$rc" = "2" ]; then pass "neither next nor rolldown present → exit 2 (nothing to assert, refuse)"; else fail "neither sentinel present → expected 2, got $rc"; fi
+
+# R8. The declared list itself must be non-empty and must contain both entries.
+#     Deleting an entry is how this gate would silently stop covering a package.
+if grep -qE '^\s*NATIVE_BINDINGS=\(' "$GATE" \
+   && grep -q '@next/swc' "$GATE" \
+   && grep -q '@rolldown/binding' "$GATE"; then
+  pass "the gate declares a NATIVE_BINDINGS list covering both @next/swc and @rolldown/binding"
+else
+  fail "the gate must declare a NATIVE_BINDINGS list covering @next/swc and @rolldown/binding"
+fi
+
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
   echo "All check-native-bindings.sh tests passed."
