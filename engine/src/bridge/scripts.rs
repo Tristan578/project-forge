@@ -44,11 +44,29 @@ pub(super) fn apply_input_binding_updates(
 ) {
     let mut changed = false;
 
-    // Process preset requests first (replaces entire map)
+    // A PRESET ADDS BINDINGS. IT DOES NOT REPLACE A CREATOR'S VOCABULARY.
+    //
+    // This was `*input_map = request.preset.default_bindings()` — choosing a
+    // starting point destroyed every action the project had, including the
+    // working defaults a new scene now begins with and any action the creator
+    // had authored themselves. That is what made "pick a genre" the whole
+    // input model rather than a convenience: a template declaring
+    // `inputPreset: 'platformer'` ended up with exactly five actions and no
+    // `move_left` at all, which is why nothing responded to the left key.
+    //
+    // Merged, with the preset's own definitions winning where the names
+    // collide, so applying one is additive and never silently discards work.
+    // Clearing bindings is `remove_input_binding` — an explicit act, on a named
+    // action, rather than a side effect of picking a starting point.
     for request in pending.input_preset_requests.drain(..) {
-        *input_map = request.preset.default_bindings();
+        for (name, action) in request.preset.default_bindings().actions {
+            input_map.actions.insert(name, action);
+        }
+        // Provenance: which starting set was last applied. Any individual edit
+        // below clears it, because the map is then the creator's own.
+        input_map.preset = Some(request.preset.as_str().to_string());
         changed = true;
-        tracing::info!("Applied input preset: {:?}", request.preset);
+        tracing::info!("Merged input preset: {:?}", request.preset);
     }
 
     // Process individual binding updates

@@ -9,13 +9,15 @@ import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
+import { spriteTokenCost } from '@/lib/config/providers';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 interface GenerateSpriteDialogProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type SpriteStyle = 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
+import type { SpriteStyle } from '@/lib/config/providers';
 type SpriteSize = '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
 type TabType = 'single' | 'sheet' | 'tileset';
 
@@ -35,10 +37,25 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
   const addJob = useGenerationStore((s) => s.addJob);
   const dialogRef = useDialogA11y(onClose);
 
-  const tokenCost = activeTab === 'single' ? 15 : activeTab === 'sheet' ? frameCount * 15 : 50;
+  // Single-sprite price follows the provider the request will resolve to, via
+  // the same helper the route charges from (#9741). It was a flat 15, which is
+  // neither provider's price: a 10-14 balance was refused on a pixel-art
+  // request the server charges 10 for, and a 15-19 balance submitted a DALL-E
+  // request the server then rejected for 20. Sheet and tileset already match
+  // TOKEN_COSTS (15/frame, 50) and are unchanged.
+  const tokenCost =
+    activeTab === 'single'
+      ? spriteTokenCost(style)
+      : activeTab === 'sheet'
+        ? frameCount * TOKEN_COSTS.sprite_sheet_cost_per_frame
+        : TOKEN_COSTS.tileset_generation;
   // Capability gate (#9117): blocked only on a positive "unavailable" report.
   const gate = useGenerationGate('sprite-generation');
   const canSubmit =
+    // `blocked` is false until the first /api/capabilities body lands, so
+    // without this a permanently-unavailable capability presented a live
+    // Generate button with no notice beside it (#9725 p8).
+    !gate.loading &&
     !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
@@ -184,7 +201,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
         {/* Body */}
         <div className="space-y-4 p-4">
-          {gate.blocked && <GenerationUnavailableNotice id="generate-sprite-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} />}
+          {gate.blocked && <GenerationUnavailableNotice id="generate-sprite-unavailable" reason={gate.reason} unprovisionable={gate.unprovisionable} byokConfigurable={gate.byokConfigurable} />}
           {/* Prompt (all tabs) */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
@@ -211,8 +228,13 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Style (single and sheet) */}
           {(activeTab === 'single' || activeTab === 'sheet') && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
+              {/* `htmlFor`/`id`: the label was not associated with the select, so
+                  a screen reader announced an unlabelled combobox and
+                  `getByLabelText` could not find it either (#9741, while
+                  correcting the style-dependent price below). */}
+              <label htmlFor="generate-sprite-style" className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
               <select
+                id="generate-sprite-style"
                 value={style}
                 onChange={(e) => setStyle(e.target.value as SpriteStyle)}
                 disabled={isSubmitting || gate.blocked}

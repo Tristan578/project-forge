@@ -1,5 +1,7 @@
 'use client';
 
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+
 interface GenerationUnavailableNoticeProps {
   /**
    * DOM id so the dialog container and its submit button can point at this
@@ -12,11 +14,20 @@ interface GenerationUnavailableNoticeProps {
   reason: string | undefined;
   /**
    * True when NO key can enable this capability (`UNAVAILABLE_CAPABILITIES`).
-   * When false, the reason is actionable — the user can add their own key —
-   * so the notice also links to Settings. Sending them there for something
-   * Settings cannot fix would be a dead end of its own (#9725 p7).
+   * Sending the user to Settings for something Settings cannot fix would be a
+   * dead end of its own (#9725 p7).
    */
   unprovisionable?: boolean;
+  /**
+   * True when the key this capability is missing is one Settings can actually
+   * store — a `BYOK_PROVIDERS` member, which is what `/api/keys/[provider]`
+   * accepts and ApiKeyManager renders a field for. Only then does the Settings
+   * affordance appear. `sprite` (Replicate + OpenAI), `image` and
+   * `bg_removal` (OpenAI, remove.bg) name providers Settings has no field for,
+   * so offering it there was the same dead end in a different disguise
+   * (#9725 p8). Absent is treated as false: a missing click beats a wrong one.
+   */
+  byokConfigurable?: boolean;
 }
 
 /**
@@ -27,8 +38,10 @@ interface GenerationUnavailableNoticeProps {
  * request the server will refuse.
  *
  * For the provisionable case this notice is the whole point of leaving the
- * entry point clickable: it is where the provider is named and where the link
- * to Settings lives.
+ * entry point clickable: it is where the provider is named and where the route
+ * to Settings lives. That route opens the editor's own Settings modal on the
+ * keys tab; it must never be an `<a href>`, which would unload the WASM
+ * session and the scene along with it (#9725 p8).
  *
  * Icon-free because the dialog tests stub `lucide-react` to the icons each
  * dialog imports. The inline amber styling mirrors the editor's existing
@@ -39,7 +52,10 @@ export function GenerationUnavailableNotice({
   id,
   reason,
   unprovisionable,
+  byokConfigurable,
 }: GenerationUnavailableNoticeProps) {
+  const openSettings = useWorkspaceStore((s) => s.openSettings);
+  const canFixInSettings = unprovisionable === false && byokConfigurable === true;
   return (
     <div
       id={id}
@@ -48,15 +64,16 @@ export function GenerationUnavailableNotice({
     >
       <span className="font-semibold">Unavailable. </span>
       <span>{reason ?? 'This generation feature is not available yet.'}</span>
-      {unprovisionable === false && (
+      {canFixInSettings && (
         <>
           {' '}
-          <a
-            href="/settings"
+          <button
+            type="button"
+            onClick={() => openSettings('keys')}
             className="font-semibold underline underline-offset-2 hover:text-amber-200"
           >
             Open Settings
-          </a>
+          </button>
         </>
       )}
     </div>

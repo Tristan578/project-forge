@@ -181,7 +181,12 @@ describe('GET /api/capabilities availability', () => {
     expect(sprite.requiredProviders).toEqual(['OpenAI']);
     expect(sprite.hint).toContain('OpenAI');
     expect(sprite.hint).not.toContain('Replicate');
-    expect(sprite.hint).toContain('Settings');
+    // NOT "in Settings": OpenAI is not a BYOK provider, so /api/keys/openai
+    // rejects it and ApiKeyManager renders no field for it. Saying "Settings"
+    // sent the user to a page where the named key cannot be added — a dead end
+    // dressed as an instruction (#9725 p8).
+    expect(sprite.hint).not.toContain('Settings');
+    expect(sprite.byokConfigurable).toBe(false);
   });
 
   it('names every missing provider for sprite when neither key is present', async () => {
@@ -192,6 +197,32 @@ describe('GET /api/capabilities availability', () => {
     expect(sprite.requiredProviders).toHaveLength(2);
     expect(sprite.hint).toContain('Replicate');
     expect(sprite.hint).toContain('OpenAI');
+    expect(sprite.hint).not.toContain('Settings');
+    expect(sprite.byokConfigurable).toBe(false);
+  });
+
+  // The client renders its "Open Settings" affordance from this flag alone, so
+  // it must be true exactly when /api/keys/[provider] would accept the key the
+  // capability is missing (#9725 p8).
+  it.each([
+    ['sfx', true],
+    ['model3d', true],
+    ['music', undefined],
+    ['sprite', false],
+    ['image', false],
+    ['bg_removal', false],
+  ] as const)('marks %s byokConfigurable=%s on a key-less deployment', async (cap, expected) => {
+    const { body } = await call();
+    const row = status(body, cap);
+    expect(row.available).toBe(false);
+    expect(row.byokConfigurable).toBe(expected);
+  });
+
+  it('offers Settings in the hint only for a capability Settings can actually fix', async () => {
+    const { body } = await call();
+    expect(status(body, 'sfx').hint).toContain('Settings');
+    expect(status(body, 'bg_removal').hint).toContain('only this deployment can configure');
+    expect(status(body, 'bg_removal').hint).not.toContain('Settings');
   });
 
   // `resolveApiKey` resolves each provider independently, BYOK first — so a

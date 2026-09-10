@@ -125,6 +125,13 @@ pub struct Raycast2dRequest {
     pub dir_x: f32,
     pub dir_y: f32,
     pub max_distance: f32,
+    /// Entity whose collider the ray must ignore, by `EntityId`.
+    ///
+    /// `cast_ray` is called with `solid: true` and no filter, so a ray starting
+    /// INSIDE a collider reports that collider at `toi = 0`. A ground check
+    /// starts at the caster's own centre, so without this it can only ever
+    /// answer "you are standing on yourself" and never sees the ground.
+    pub exclude_entity_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
