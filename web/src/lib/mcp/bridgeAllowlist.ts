@@ -15,7 +15,20 @@
  * refused, and `bridgeCategoryPartition()` makes the omission visible in the
  * suite instead of shipping silently.
  */
-import manifestJson from '@/data/commands.json';
+/**
+ * The SLIM index, not the manifest. `web/src/data/commands.json` is 344 KB of
+ * descriptions and JSON parameter schemas; this module runs in the editor tab
+ * and needs three short strings per command, so importing the manifest shipped
+ * ~205 KB of minified JSON to the browser to answer a question about `name`,
+ * `category` and `requiredScope` (#9954).
+ *
+ * `commandIndex.json` is generated from the same canonical manifest by
+ * `npm run generate:command-index`, and the Docs Internal Gate fails if the
+ * committed index is not its exact projection -- so this cannot go stale
+ * silently, which for an ALLOWLIST would mean admitting a command nobody
+ * classified.
+ */
+import commandIndex from '@/data/commandIndex.json';
 
 interface ManifestCommand {
   name: string;
@@ -84,7 +97,7 @@ export const BRIDGE_DENIED_CATEGORIES: ReadonlyMap<string, string> = new Map([
 const DENIED_SCOPES = new Set(['ai:generate', 'project:manage']);
 
 const commands = new Map<string, ManifestCommand>(
-  (manifestJson as { commands: ManifestCommand[] }).commands.map((c) => [c.name, c]),
+  (commandIndex as { commands: ManifestCommand[] }).commands.map((c) => [c.name, c]),
 );
 
 export interface BridgeVerdict {
