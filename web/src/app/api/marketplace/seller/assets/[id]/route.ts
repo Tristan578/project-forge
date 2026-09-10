@@ -5,6 +5,8 @@ import { getDb, queryWithResilience } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const patchAssetSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
@@ -18,7 +20,7 @@ const patchAssetSchema = z.object({
   status: z.enum(['draft', 'pending_review']).optional(),
 });
 
-export async function PATCH(
+async function PATCH_impl(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
@@ -82,6 +84,10 @@ export async function PATCH(
   } catch (error) {
     console.error('Error updating asset:', error);
     captureException(error, { route: '/api/marketplace/seller/assets/[id]', method: 'PATCH' });
-    return NextResponse.json({ error: 'Failed to update asset' }, { status: 500 });
+    return redactedJson({ error: 'Failed to update asset' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const PATCH = withEgressGuard(PATCH_impl);

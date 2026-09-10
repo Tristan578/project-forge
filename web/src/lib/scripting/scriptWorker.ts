@@ -432,6 +432,22 @@ function buildForgeApi(scriptEntityId: string) {
       },
       getEntityName: (eid: string) => entityInfos[eid]?.name ?? null,
       getEntityType: (eid: string) => entityInfos[eid]?.type ?? null,
+      /**
+       * Every entity whose type matches, case-insensitively.
+       *
+       * The type string the engine reports is a component name such as
+       * `EntityType::Sprite`, so a caller asking for `'Sprite'` is asking about
+       * a substring rather than an equality — matching exactly would answer
+       * with an empty list for every type in the scene, which reads as "none of
+       * those exist" rather than "you spelled it differently".
+       */
+      findByType: (type: string) => {
+        if (typeof type !== 'string' || type === '') return [];
+        const wanted = type.toLowerCase();
+        return Object.entries(entityInfos)
+          .filter(([, info]) => (info?.type ?? '').toLowerCase().includes(wanted))
+          .map(([eid]) => eid);
+      },
       getEntitiesInRadius: (position: [number, number, number], radius: number) => {
         const results: string[] = [];
         for (const [id, state] of Object.entries(entityStates)) {
@@ -537,6 +553,59 @@ function buildForgeApi(scriptEntityId: string) {
       applyImpulse: (eid: string, impulseX: number, impulseY: number) => {
         pendingCommands.push({ cmd: 'apply_impulse2d', entityId: eid, impulseX, impulseY });
       },
+      /**
+       * Set both components of a body's linear velocity.
+       *
+       * RESTORED, POINTING AT THE ENGINE'S OWN NAME. PF-1180 deleted this
+       * method because it dispatched `set_velocity2d`, which the engine has
+       * never had; the engine's spelling is `set_linear_velocity_2d`, and at
+       * the time that was a `Not yet implemented` stub, so the rename would
+       * have swapped one silent no-op for another. #9763 implemented the arm.
+       */
+      setVelocity: (eid: string, vx: number, vy: number) => {
+        pendingCommands.push({ cmd: 'set_linear_velocity_2d', entityId: eid, x: vx, y: vy });
+      },
+      /**
+       * Set the horizontal velocity and LEAVE THE VERTICAL ONE ALONE.
+       *
+       * This is the platformer primitive, and the omission is the whole point:
+       * a controller writes horizontal speed every frame, and writing `y` too
+       * would cancel gravity and erase the jump impulse applied a frame
+       * earlier — the entity would hover instead of falling. The engine applies
+       * the partial update against the live component, so this needs no read
+       * back and cannot act on a stale value.
+       */
+      setVelocityX: (eid: string, vx: number) => {
+        pendingCommands.push({ cmd: 'set_linear_velocity_2d', entityId: eid, x: vx });
+      },
+      /** Set the vertical velocity, leaving the horizontal one alone. */
+      setVelocityY: (eid: string, vy: number) => {
+        pendingCommands.push({ cmd: 'set_linear_velocity_2d', entityId: eid, y: vy });
+      },
+      /** Set angular velocity, in radians per second. */
+      setAngularVelocity: (eid: string, omega: number) => {
+        pendingCommands.push({ cmd: 'set_angular_velocity_2d', entityId: eid, omega });
+      },
+      /**
+       * Turn an entity's 2D physics on or off.
+       *
+       * `toggle_physics2d` is the engine's arm and has always been real —
+       * `set_physics_2d_enabled` routes to the same handler. There was simply
+       * no method reaching it.
+       */
+      setEnabled: (eid: string, enabled: boolean) => {
+        pendingCommands.push({ cmd: 'toggle_physics2d', entityId: eid, enabled });
+      },
+      /**
+       * Current linear velocity, or `null` if it is not known.
+       *
+       * READ THE CAVEAT. `physics2dVelocities` is populated from the engine's
+       * per-tick sync, and `useScriptRunner` currently sends an empty map, so
+       * this answers `null` for every entity. The mirror, not this method, is
+       * the missing half; it is tracked separately rather than left looking
+       * like a working read. Prefer `setVelocityX` / `setVelocityY`, which
+       * express a partial change without needing to read first.
+       */
       getVelocity: (eid: string): { x: number; y: number } | null => {
         const state = physics2dVelocities[eid];
         if (!state) return null;
@@ -1576,6 +1645,13 @@ self.onmessage = (e: MessageEvent) => {
       sharedState = {};
       collisionEnterCallbacks.clear();
       collisionExitCallbacks.clear();
+      // The 2D callbacks live on `self` as plain ARRAYS, not per-entity maps,
+      // so nothing overwrites a stale registration the way re-registering an
+      // entity's 3D callback does: they only grow. Left uncleared, one
+      // collision fired every 2D handler N+1 times after N restarts, silently
+      // multiplying whatever the game counts -- score, lives, pickups.
+      (self as unknown as Record<string, unknown>).__collision2dEnterCallbacks = [];
+      (self as unknown as Record<string, unknown>).__collision2dExitCallbacks = [];
       gameWinCallbacks.clear();
       gameScore = 0;
       // Send final UI clear
@@ -1604,6 +1680,43 @@ self.onmessage = (e: MessageEvent) => {
         } catch (err) {
           const msg_ = err instanceof Error ? err.message : String(err);
           (self as unknown as Worker).postMessage({ type: 'error', entityId: entityB, line: 0, message: `Collision callback error: ${msg_}` });
+        }
+      }
+
+      // THE 2D CALLBACKS TOO. `forge.physics2d.onCollisionEnter` /
+      // `onCollisionExit` push into these global arrays, and nothing read them
+      // — registered, never invoked, so every 2D collision handler a creator
+      // wrote silently did nothing (found in review). That is the no-error,
+      // no-effect pair this repo keeps finding: the API exists, the callback
+      // is accepted, and the game just never responds to a collision.
+      //
+      // They are GLOBAL rather than per-entity, which is the shape the 2D API
+      // documents, so each collision fires them once per participant — the
+      // handler sees `entityId` as the entity it is reasoning about and
+      // `otherEntityId` as what it hit, in both directions, exactly as the
+      // per-entity 3D callbacks above behave.
+      const key2d = started ? '__collision2dEnterCallbacks' : '__collision2dExitCallbacks';
+      const cbs2d = ((self as unknown as Record<string, unknown>)[key2d] as
+        Array<(event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void>) || [];
+      if (cbs2d.length > 0) {
+        // A COPY, because a handler may unsubscribe itself: the unsubscribe
+        // splices the live array, which would skip the next callback mid-loop.
+        for (const [selfId, otherId] of [[entityA, entityB], [entityB, entityA]] as const) {
+          for (const cb2d of [...cbs2d]) {
+            try {
+              cb2d({
+                entityId: selfId,
+                otherEntityId: otherId,
+                // Resolved from the worker's own snapshot rather than invented.
+                // An entity the worker has not seen yet yields '', which is
+                // honest — the id is always right, the name is best effort.
+                otherEntityName: entityInfos[otherId]?.name ?? '',
+              });
+            } catch (err) {
+              const msg_ = err instanceof Error ? err.message : String(err);
+              (self as unknown as Worker).postMessage({ type: 'error', entityId: selfId, line: 0, message: `Collision callback error: ${msg_}` });
+            }
+          }
         }
       }
       break;

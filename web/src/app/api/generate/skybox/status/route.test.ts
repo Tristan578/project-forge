@@ -7,6 +7,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import type { User } from '@/lib/db/schema';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -105,7 +106,7 @@ describe('GET /api/generate/skybox/status', () => {
     const data = await res.json();
     expect(data.status).toBe('failed');
     expect(data.resultUrl).toBeUndefined();
-    expect(data.error).toBe('Skybox generation produced no image');
+    expect(data.error).toBe(withRetryGuidance('Skybox generation produced no image'));
   });
 
   it('maps SUCCEEDED-with-empty-maps-object to failed', async () => {
@@ -125,7 +126,7 @@ describe('GET /api/generate/skybox/status', () => {
     const data = await res.json();
     expect(data.status).toBe('failed');
     expect(data.resultUrl).toBeUndefined();
-    expect(data.error).toBe('Skybox generation produced no image');
+    expect(data.error).toBe(withRetryGuidance('Skybox generation produced no image'));
   });
 
   it('does not leak a resultUrl while still processing', async () => {
@@ -161,7 +162,7 @@ describe('GET /api/generate/skybox/status', () => {
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Skybox generation failed');
+    expect(data.error).toBe(withRetryGuidance('Skybox generation failed'));
   });
 
   it('returns 500 when provider throws', async () => {
@@ -174,6 +175,10 @@ describe('GET /api/generate/skybox/status', () => {
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(500);
     const data = await res.json();
-    expect(data.error).toBe('Network error');
+    // The provider's own text must NOT come back: the generate clients fold
+    // the upstream RESPONSE BODY into the thrown error, and on the platform
+    // path the credential in play is the platform's (#9736).
+    expect(data.error).not.toContain('Network error');
+    expect(data.error).toBe('Could not read the Skybox generation status. Please try again.');
   });
 });

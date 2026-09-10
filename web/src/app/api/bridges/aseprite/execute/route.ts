@@ -7,6 +7,8 @@ import type { BridgeToolConfig } from '@/lib/bridges/types';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const asepriteExecuteSchema = z.object({
   operation: z.string().min(1).max(100),
@@ -26,7 +28,7 @@ async function getCachedTool(): Promise<BridgeToolConfig> {
   return config;
 }
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -68,14 +70,61 @@ export async function POST(req: NextRequest) {
       params: params ?? {},
     });
 
-    return NextResponse.json(result);
+    // Forwarding `result` verbatim is a leak on the SUCCESS path (#9736): a
+    // BridgeResult carries `stdout`, `stderr` and `error: stderr || ...`, which
+    // hold the child_process message — the full command line and the temp Lua
+    // script path under the server's tmpdir. The catch below already says the
+    // intent ("avoid leaking internal paths or system details"); this is the
+    // half that was not doing it. The rule cannot see this shape: no catch, no
+    // construction it can follow, so only a test can hold the line.
+    if (!result.success) {
+      captureException(
+        new Error(`Aseprite operation failed: ${operation}`),
+        {
+          route: '/api/bridges/aseprite/execute',
+          operation,
+          exitCode: result.exitCode,
+          stderr: result.stderr,
+        },
+      );
+      // Fixed text rather than `stderr`, which names the child_process command
+      // line and the temp Lua script path — AND actionable, for the same reason
+      // the sibling `status` route is: this bridge runs on the USER's machine
+      // and they are the only person who can fix it. "Check Sentry for details"
+      // named a next step the person on the other end cannot take; Sentry is an
+      // internal developer tool they have no access to.
+      return redactedJson(
+        {
+          success: false,
+          error:
+            'The Aseprite operation did not complete. Check that Aseprite is installed and the '
+            + 'local bridge is running, then try again.',
+        },
+        { status: 502 },
+      );
+    }
+
+    return redactedJson({
+      success: true,
+      outputFiles: result.outputFiles,
+      metadata: result.metadata,
+    });
   } catch (err) {
     captureException(err, { route: '/api/bridges/aseprite/execute' });
-    // Return a generic error message to avoid leaking internal paths or system details.
-    // The full error is captured by Sentry above for debugging.
-    return NextResponse.json(
-      { error: 'Aseprite operation failed. Check Sentry for details.' },
+    // Fixed text to avoid leaking internal paths or system details; the full
+    // error is captured by Sentry above. Same wording as the `!result.success`
+    // branch — the user cannot tell the two apart and the remedy is identical.
+    return redactedJson(
+      {
+        error:
+          'The Aseprite operation did not complete. Check that Aseprite is installed and the '
+          + 'local bridge is running, then try again.',
+      },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

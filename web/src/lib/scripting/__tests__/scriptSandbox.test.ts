@@ -787,11 +787,11 @@ describe('Script Sandbox Security', () => {
       expect(typeof badCommand.cmd).not.toBe('string');
     });
 
-    it('should have exactly 55 commands in the whitelist', () => {
+    it('should have exactly 58 commands in the whitelist', () => {
       // Keeps whitelist size visible — any additions should update this count.
       // This now pins the SHIPPED set: the former local copy had silently
       // drifted three names behind it and still asserted 59.
-      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(55);
+      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(58);
     });
   });
 

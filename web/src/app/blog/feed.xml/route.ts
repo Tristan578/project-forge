@@ -1,4 +1,5 @@
 import { blogPosts } from '@/lib/blog';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
@@ -11,7 +12,7 @@ function escapeXml(str: string): string {
     .replace(/'/g, '&apos;');
 }
 
-export async function GET() {
+async function GET_impl() {
   const items = blogPosts
     .map(
       (post) => `    <item>
@@ -43,3 +44,7 @@ ${items}
     },
   });
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
@@ -7,6 +7,8 @@ import { assertAdmin } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +25,7 @@ const bulkModerationSchema = z.object({
  * FIX (PF-457): Uses .returning() to report actual DB rows affected,
  * not ids.length which was wrong when IDs didn't exist.
  */
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
       requireAuth: true,
@@ -61,17 +63,27 @@ export async function POST(req: NextRequest) {
         processed = result.length;
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      errors.push('Bulk operation failed: ' + message);
+      // Found by `spawnforge/no-raw-response-in-catch` (#9736): this pushed the
+      // caught message into `errors`, which is declared OUTSIDE the catch and
+      // returned in the 200 body below — so a database error's text, and any
+      // connection detail it carries, reached the client through a response the
+      // rule's construction check could never see. The real message goes to
+      // Sentry instead.
+      captureException(err, { route: '/api/admin/moderation/bulk', action });
+      errors.push('Bulk operation failed. The comments were not changed.');
     }
 
-    return NextResponse.json({ processed, errors });
+    return redactedJson({ processed, errors });
   } catch (error) {
     console.error('Failed to perform bulk moderation:', error);
     captureException(error, { route: '/api/admin/moderation/bulk' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to perform bulk moderation' },
       { status: 500 }
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

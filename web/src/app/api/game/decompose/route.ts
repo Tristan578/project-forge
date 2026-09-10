@@ -23,13 +23,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { assertTier } from '@/lib/auth/api-auth';
-import { decomposeIntoSystems } from '@/lib/game-creation/decomposer';
+import { decomposeIntoSystems, PromptRejectedError } from '@/lib/game-creation/decomposer';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { refundTokens } from '@/lib/tokens/service';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // One substantial single-shot LLM call producing a full GDD — priced at
 // parity with what this route billed under before #9339, when
@@ -47,7 +49,7 @@ const requestSchema = z.object({
   projectType: z.enum(['2d', '3d']),
 });
 
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   // BotID gate (PF-975 / #8948 pattern) — before any rate-limit consumption
   // or token deduction, so a blocked bot never spends either budget.
   const botIdResponse = await checkBotIdGate();
@@ -80,7 +82,7 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
+    return redactedJson(
       { error: 'validation_error', details: ['Invalid JSON body'] },
       { status: 400 },
     );
@@ -116,7 +118,7 @@ export async function POST(req: NextRequest) {
     usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
     }
     throw err;
   }
@@ -132,16 +134,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const message = err instanceof Error ? err.message : String(err);
-
-    // Prompt rejection is a 400, not a 500. This message is safety-filter
-    // guidance, not an internal error, so it's fine to return verbatim.
-    if (message.startsWith('Prompt rejected:')) {
-      return NextResponse.json(
-        { error: 'prompt_rejected', message },
+    // Prompt rejection is a 400, not a 500, and its text is OURS — written by
+    // `sanitizePrompt` for the user — so it is returned verbatim. Narrowed by
+    // type rather than by a message prefix: an upstream error could produce
+    // that prefix too, and every other caught error must not reach the client
+    // (#9736).
+    if (err instanceof PromptRejectedError) {
+      return redactedJson(
+        { error: 'prompt_rejected', message: err.message },
         { status: 400 },
       );
     }
+
+    const message = err instanceof Error ? err.message : String(err);
 
     captureException(err instanceof Error ? err : new Error(message), {
       extra: { endpoint: 'POST /api/game/decompose', projectType },
@@ -150,9 +155,13 @@ export async function POST(req: NextRequest) {
     // Everything else is an internal/provider failure — the real message is
     // already on the Sentry event above; don't forward it to the client,
     // where it could carry backend identifiers or stack fragments.
-    return NextResponse.json(
+    return redactedJson(
       { error: 'decomposition_failed', message: 'Failed to generate game design. Please try again.' },
       { status: 500 },
     );
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

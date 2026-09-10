@@ -36,9 +36,17 @@
  * - `set_velocity`, `set_velocity2d`, `set_angular_velocity2d` — the engine's
  *   own spellings (`set_linear_velocity`, `set_linear_velocity_2d`,
  *   `set_angular_velocity_2d`) DO exist, so this looks like the near-miss rename
- *   `paint_tile`/`set_tile` was. It is not: all three are `Not yet implemented`
- *   stubs, so the rename would have swapped one silent no-op for another. There
- *   is no velocity write path in this engine yet (PF-1216 / #9748).
+ *   `paint_tile`/`set_tile` was. At the time it was not: all three were
+ *   `Not yet implemented` stubs, so the rename would have swapped one silent
+ *   no-op for another.
+ *
+ *   THE TWO 2D ONES ARE REAL NOW (#9763). `set_linear_velocity_2d` and
+ *   `set_angular_velocity_2d` have arms, a `Velocity` component is attached to
+ *   every 2D body on entering Play, and `forge.physics2d.setVelocity` /
+ *   `setVelocityX` / `setVelocityY` / `setAngularVelocity` dispatch to them. The
+ *   3D `set_linear_velocity` is still a stub and still has no method.
+ *   `set_velocity2d` and `set_angular_velocity2d` — the names the phantom
+ *   methods used — remain off this list: they were never engine commands.
  * - `camera_set_position`, `camera_look_at` — the play-mode camera is derived
  *   from `mode` + `targetEntity` every frame, so a free position is meaningful
  *   only in `fixed` mode and would be silently overwritten in the other five.
@@ -56,8 +64,11 @@ export const SCRIPT_ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
   'set_visibility', 'update_material',
   // 3D physics
   'apply_force', 'apply_impulse',
-  // 2D physics
+  // 2D physics. `set_linear_velocity_2d` / `set_angular_velocity_2d` are the
+  // ENGINE'S spellings, and they are armed as of #9763 — see the note above
+  // about the three names PF-1180 deleted for pointing at stubs.
   'apply_force2d', 'apply_impulse2d', 'set_gravity2d',
+  'set_linear_velocity_2d', 'set_angular_velocity_2d', 'toggle_physics2d',
   // Audio (routed to WASM)
   'play_audio', 'stop_audio', 'pause_audio', 'set_audio', 'update_audio_bus',
   // Audio layering — JS-SIDE: `localScriptCommands` routes these to

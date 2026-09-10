@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildTemplateSceneFile, toEngineEntityType } from '../templateSceneFile';
 import { TEMPLATE_REGISTRY } from '@/data/templates';
-import type { GameTemplate, EntitySnapshotData } from '@/data/templates';
+import type { GameTemplate, EntitySnapshotData, EngineActionDef } from '@/data/templates';
 
 /** Fields `EntitySnapshot` declares WITHOUT `#[serde(default)]` — all mandatory. */
 const REQUIRED_SNAPSHOT_FIELDS = [
@@ -141,26 +141,42 @@ describe('buildTemplateSceneFile', () => {
     expect('inputBindings' in JSON.parse(sceneJson)).toBe(false);
   });
 
+  // These two fixtures used the EDITOR STORE's spelling (`actionName`,
+  // `actionType: 'digital'`, `sources: ['KeyG']`). `buildInputBindings` takes
+  // `unknown` and passes anything through, so they passed — while pinning a
+  // shape `load_scene` cannot deserialise, which is the wrong contract stated
+  // with the same confidence as the right one. Rewritten in the engine's
+  // `ActionDef` shape, which is what a template actually has to emit.
   it('passes through the actions a template declares', () => {
     const template = makeTemplate([makeEntity()]);
     template.sceneData.inputBindings = {
-      grapple: { actionName: 'grapple', actionType: 'digital', sources: ['KeyG'] },
+      grapple: {
+        name: 'grapple',
+        actionType: { type: 'Digital' },
+        sources: [{ type: 'Key', value: 'KeyG' }],
+      },
     };
 
     const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
     expect(parsed.inputBindings.actions.grapple).toEqual({
-      actionName: 'grapple',
-      actionType: 'digital',
-      sources: ['KeyG'],
+      name: 'grapple',
+      actionType: { type: 'Digital' },
+      sources: [{ type: 'Key', value: 'KeyG' }],
     });
   });
 
   it('accepts a template that already writes the full InputMap shape', () => {
     const template = makeTemplate([makeEntity()]);
     template.sceneData.inputBindings = {
-      actions: { p2_attack: { actionName: 'p2_attack', actionType: 'digital', sources: ['Enter'] } },
+      actions: {
+        p2_attack: {
+          name: 'p2_attack',
+          actionType: { type: 'Digital' },
+          sources: [{ type: 'Key', value: 'Enter' }],
+        },
+      },
       preset: null,
-    } as unknown as Record<string, unknown>;
+    } as unknown as Record<string, EngineActionDef>;
 
     const parsed = JSON.parse(buildTemplateSceneFile(template).sceneJson);
     expect(Object.keys(parsed.inputBindings.actions)).toEqual(['p2_attack']);
