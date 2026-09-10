@@ -180,7 +180,7 @@ Fumadocs-based docs site for the SpawnForge platform API and MCP command referen
 
 ### `apps/docs/` — Root files
 - `proxy.ts` — Clerk auth gate. Wraps `clerkMiddleware` defensively — if Clerk throws, requests pass through. Without `CLERK_SECRET_KEY`, all access is allowed (dev/CI).
-- `app/layout.tsx` — Root layout with `ClerkProvider`, `force-dynamic` export
+- `app/layout.tsx` — Root layout with `ClerkProvider`, `force-dynamic` export. Stamps the deployed commit into every page as `<meta name="spawnforge-docs-commit">` via `metadata.other` (from `lib/commit.ts`) so the post-deploy gate can prove the alias serves THIS build
 - `app/sign-in/[[...sign-in]]/page.tsx` — Clerk `<SignIn>` component. MUST have `'use client'` directive.
 
 ### `apps/docs/components/` — Docs-site React components
@@ -188,7 +188,8 @@ Fumadocs-based docs site for the SpawnForge platform API and MCP command referen
 - `CapabilityMatrixDocument.tsx` — Server-renderable renderer for the capability matrix (#9720): the document's `#` is the page h1, `##` sections are h2 (no skipped level), status cells become `data-status` badges, `<th scope="col">` on every data table. Styled inline like `app/mcp/[category]/page.tsx`; no markdown dependency.
 
 ### `apps/docs/lib/` — Shared docs-site utilities
-- `commands.ts` — `readCommandsManifest()`: reads `apps/docs/data/commands.json` (override with `MANIFEST_PATH`), returns `{ categories, scopes, publicCount }` for public commands only. Scope prefixes extracted via `/^([a-z_]+)_/` regex. **The path must stay inside the deploy root** — `rootDirectory: apps/docs`, so anything above `apps/docs/` resolves locally and is absent on Vercel (PF-1019). An unreadable manifest THROWS; it must never degrade to a zero-command build.
+- `commands.ts` — The MCP manifest loader. **Imports `../data/commands.json` statically** (`import manifest from '../data/commands.json'`) so Next.js output file tracing ships the file into the serverless function (#9718). There is no `MANIFEST_PATH` here and no runtime `fs` read: two earlier loaders built a path at runtime — one above the deploy root (PF-1019), one at the in-root copy (#9065) — and both 500'd on Vercel because tracing only follows module edges, while every local test passed. **Never replace the import with a path built at runtime.** A missing file is a `next build` failure, not a request-time throw. Exports the pure `summarizeManifest(manifest)` → `{ categories, scopes, publicCount }` (public commands only; scope prefixes via `/^([a-z_]+)_/`) and `commandsInCategory(manifest, category)` (sorted by name), the page-facing wrappers `readCommandsManifest()` / `readCommandsByCategory(category)` over the shipped file, and `toParameterList(cmd)` (JSON Schema `parameters` → display rows, required first). Pinned by `lib/__tests__/commandsManifestArtifact.test.ts` (real file, no mocked `fs`, asserts the import shape and that the wrappers equal the pure functions on it); logic on fixtures in `lib/__tests__/commands.test.ts`. The deployed page is verified by `scripts/post-deploy-docs-check.sh` in `cd.yml` (`deploy-docs`), which also asserts the page's commit stamp.
+- `commit.ts` — `DOCS_COMMIT_META_NAME` (`spawnforge-docs-commit`) and `commitStampOf(env)`: `VERCEL_GIT_COMMIT_SHA` when it is a git SHA, `'unknown'` otherwise (never echoes a non-SHA into the page). `scripts/__tests__/post-deploy-docs-check.test.sh` parses the `export const` line and fails if the gate script greps a different name.
 - `capabilityMatrix.ts` — Parser for the markdown subset `docs/capability-matrix.md` is written in (headings, quotes, lists, pipe tables; inline code/bold/links/`#1234`) plus `readCapabilityMatrix()`, which parses the **statically imported** `data/capability-matrix.json`. A static import is the ONLY loader shape that survives Next.js output file tracing under the `force-dynamic` layout — a runtime `readFileSync` of an in-root file is what 500'd `/mcp` (#9718). `lib/__tests__/capabilityMatrixArtifact.test.ts` pins the import shape and exercises the real copy.
 
 ### `apps/docs/data/` — In-root copies of repo-root artifacts (the deploy root cannot see above `apps/docs/`)
@@ -199,10 +200,13 @@ Fumadocs-based docs site for the SpawnForge platform API and MCP command referen
 - `check-manifest-sync.ts` — Asserts the canonical `mcp-server/manifest/commands.json` matches BOTH copies: `web/src/data/commands.json` and `apps/docs/data/commands.json`. THREE manifest copies exist; adding a fourth without registering it here is how the docs copy silently drifted (PF-1019). Its CLI also runs `checkMatrixCopyOnDisk()` so a stale `data/capability-matrix.json` is red in the docs gate.
 - `sync-capability-matrix.ts` — Writes (or with `--check`, verifies) `data/capability-matrix.json` from `docs/capability-matrix.md`; pure `toMatrixCopy` / `checkMatrixCopy` are what the gate and the test share
 - `ci-gate-check.ts` — CI gate: fails if public command count drops below threshold
-- `generate-mcp-docs.ts` — Generates MDX pages from the MCP command manifest
+- `generate-mcp-docs.ts` — Generates MDX pages from the MCP command manifest, read by PATH (`MANIFEST_PATH`, set to `./data/commands.json` in `apps/docs/vercel.json`'s `buildCommand`). A script, not traced code, so a path read is correct HERE and wrong in `lib/commands.ts`. An unreadable manifest is `fatal` and exits 1 so the build cannot go green with zero pages
 - `__tests__/` — Vitest unit tests for each script (environment: node)
 
-**vitest config:** `apps/docs/vitest.config.ts` — includes `scripts/__tests__/**/*.test.ts` and `components/__tests__/**/*.test.tsx` and `lib/__tests__/**/*.test.ts` (environment: node for scripts, jsdom for components).
+### `apps/docs/app/__tests__/` — Root-layout tests
+- `layout-commit-stamp.test.ts` — Pins that `app/layout.tsx` renders `VERCEL_GIT_COMMIT_SHA` under `DOCS_COMMIT_META_NAME` (and `'unknown'` when it is absent), by re-importing the layout under a stubbed env. The deploy gate greps that tag on the live site, so a layout that stopped reading the variable would fail only at CD.
+
+**vitest config:** `apps/docs/vitest.config.ts` — ONE broad include glob, `**/*.{test,spec}.{ts,tsx}` (excluding `.next/` and Playwright's `e2e/`), not a per-directory enumeration: a directory-scoped list silently never collects a test at a path it does not name, and the author gets a green run for a test that never executed (PF-9453). `lib/__tests__/testCollection.test.ts` fails if the glob stops matching every test file in the tree. Default `environment: 'node'`; `environmentMatchGlobs` was removed in vitest 4, so DOM tests declare `// @vitest-environment jsdom` inline. `coverage.enabled: true` is set in the config because ci.yml's Docs Internal Gate runs a bare `npx vitest run` — a threshold only checked behind a `--coverage` flag nobody passes is not a gate.
 
 ## Design Workbench (`apps/design/`)
 

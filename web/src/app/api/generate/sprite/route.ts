@@ -7,8 +7,7 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { SpriteClient } from '@/lib/generate/spriteClient';
-import { TOKEN_COSTS } from '@/lib/tokens/pricing';
-import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS, resolveSpriteProvider } from '@/lib/config/providers';
+import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS, resolveSpriteProvider, spriteTokenCost } from '@/lib/config/providers';
 import type { SpriteStyle } from '@/lib/config/providers';
 import type { SpriteSize } from '@/lib/config/providers';
 import { withEgressGuard } from '@/lib/security/egressGuard';
@@ -37,10 +36,7 @@ const POST_impl = createGenerationHandler<
   operation: 'sprite_generation',
   rateLimitKey: 'gen-sprite',
   successStatus: 201,
-  tokenCost: (params) =>
-    params.provider === 'dalle3'
-      ? TOKEN_COSTS.sprite_generation_dalle3
-      : TOKEN_COSTS.sprite_generation_replicate,
+  tokenCost: (params) => spriteTokenCost(params.style, params.provider),
   validate: (body) => {
     const {
       prompt,

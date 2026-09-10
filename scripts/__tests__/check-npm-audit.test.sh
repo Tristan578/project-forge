@@ -3190,6 +3190,7 @@ OUTPUTS_EOF
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
             scripts/post-deploy-capability-matrix-check.sh scripts/__tests__/post-deploy-capability-matrix-check.test.sh \
+            scripts/post-deploy-docs-check.sh scripts/__tests__/post-deploy-docs-check.test.sh \
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
@@ -3381,7 +3382,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=614
+readonly SELF_EXEC_EXPECTED_DROP=617
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3709,6 +3710,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/alias-wasm-cdn-version.sh scripts/__tests__/alias-wasm-cdn-version.test.sh \
             scripts/post-deploy-health-check.sh scripts/__tests__/post-deploy-health-check.test.sh \
             scripts/post-deploy-capability-matrix-check.sh scripts/__tests__/post-deploy-capability-matrix-check.test.sh \
+            scripts/post-deploy-docs-check.sh scripts/__tests__/post-deploy-docs-check.test.sh \
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
@@ -3792,6 +3794,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/post-deploy-health-check.test.sh
       - name: Run post-deploy capability matrix probe test suite
         run: bash scripts/__tests__/post-deploy-capability-matrix-check.test.sh
+      - name: Run post-deploy docs MCP gate test suite
+        run: bash scripts/__tests__/post-deploy-docs-check.test.sh
       - name: Run CD rolling-release helper test suite
         run: bash scripts/__tests__/cd-rolling-release.test.sh
       - name: Run CD tree-validation gate test suite

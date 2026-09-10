@@ -76,3 +76,8 @@ describe('GenerationUnavailableNotice', () => {
     expect(screen.queryByRole('link')).toBeNull();
   });
 });
+
+it('does not link to Settings for an unsupported provider', () => {
+  render(<GenerationUnavailableNotice id="sprite" reason="Needs platform configuration." unprovisionable={false} byokConfigurable={false} />);
+  expect(screen.queryByRole('link')).not.toBeInTheDocument();
+});
