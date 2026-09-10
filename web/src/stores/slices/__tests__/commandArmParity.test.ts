@@ -65,7 +65,10 @@ const UNDISPATCHED_AT_BASELINE = [
   'apply_force', 'list_joints', 'set_physics2d', 'update_physics2d',
   'toggle_physics2d', 'remove_physics2d', 'set_2d_collider_shape',
   'set_2d_body_type', 'create_2d_joint', 'update_2d_joint', 'remove_2d_joint',
-  'apply_force2d', 'apply_impulse2d', 'raycast2d', 'get_physics2d',
+  // 'raycast2d' left this list in #9271: the physics channel dispatches it
+  // now, correlating the answer through raycast2dRegistry. The gate noticing
+  // that is the gate working — a waiver outlives the gap it waived.
+  'apply_force2d', 'apply_impulse2d', 'get_physics2d',
   // Armed by #9763. Dispatched from the SCRIPT WORKER, which pushes a command
   // name into a queue rather than calling dispatchCommand with a literal, so
   // this scanner cannot see the caller — exactly as for apply_force2d and

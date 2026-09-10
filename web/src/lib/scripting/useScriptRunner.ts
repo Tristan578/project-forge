@@ -16,8 +16,29 @@ import { showError } from '@/lib/toast';
 import { DeltaSerializer, type SceneSnapshot } from '@/lib/engine/deltaSerializer';
 import { checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
 import { getGroundedStates, clearGroundedStates } from '@/lib/scripting/groundedRegistry';
+import { resetRaycast2dQueue } from '@/lib/scripting/raycast2dRegistry';
+import { collider2dHalfHeight } from '@/lib/scripting/collider2dExtent';
 import { isScriptAllowedCommand } from '@/lib/scripting/scriptAllowlist';
 import { handleLocalScriptCommand } from '@/lib/scripting/localScriptCommands';
+
+/**
+ * The Y scale the engine reported for one entity this tick, or 1.
+ *
+ * `1`, not `0`: rapier multiplies the collider by this, so an absent or
+ * unreadable value must leave the collider at its authored size. A `0` would
+ * claim every collider is flat and put every ground ray at the entity's centre.
+ */
+function tickScaleY(entities: unknown, entityId: string): number {
+  if (typeof entities !== 'object' || entities === null) return 1;
+  if (!Object.hasOwn(entities, entityId)) return 1;
+  const entry = (entities as Record<string, unknown>)[entityId];
+  if (typeof entry !== 'object' || entry === null) return 1;
+  const scale = (entry as { scale?: unknown }).scale;
+  if (!Array.isArray(scale) || typeof scale[1] !== 'number' || !Number.isFinite(scale[1])) {
+    return 1;
+  }
+  return scale[1];
+}
 
 const WATCHDOG_TIMEOUT_MS = 5000;
 const OCCLUSION_RAYCAST_INTERVAL_MS = 250; // Check occlusion 4x per second
@@ -380,12 +401,30 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       }
 
       // Build initial entityInfos from scene graph
-      const entityInfos: Record<string, { name: string; type: string; colliderRadius: number }> = {};
+      const entityInfos: Record<
+        string,
+        { name: string; type: string; colliderRadius: number; collider2dHalfHeight: number }
+      > = {};
       for (const [eid, node] of Object.entries(store.sceneGraph.nodes)) {
+        // `collider2dHalfHeight` is REAL, unlike `colliderRadius` beside it,
+        // which has always been the literal 0.5 for every entity in the scene.
+        // `forge.physics2d.isGrounded` casts from the entity's feet, and its
+        // feet are wherever its collider ends — so a constant here would put
+        // the ray origin inside the collider of anything taller than 1 unit and
+        // above the collider of anything shorter.
         entityInfos[eid] = {
           name: node.name,
           type: node.components.find(c => c.startsWith('EntityType')) || 'unknown',
           colliderRadius: 0.5,
+          // 0 UNTIL THE ENGINE REPORTS A TRANSFORM, and deliberately not a
+          // guess. Rapier scales every collider by the entity's transform
+          // scale, `SceneNode` carries no transform, and the store keeps no
+          // per-entity transform map — so the half-height is genuinely unknown
+          // here. The per-tick enrichment below computes it from the scale the
+          // engine reports and overwrites this on the first frame; a ground
+          // check before then casts from the entity's origin, which is the
+          // behaviour that predates all of this rather than a new wrong answer.
+          collider2dHalfHeight: 0,
         };
       }
 
@@ -505,7 +544,37 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         // Instead of sending the full scene every frame, only changed components are sent.
         // The worker receives deltas and reconstructs full state locally.
         const entitiesSnapshot = tickData.entities as SceneSnapshot;
-        const entityInfosSnapshot = tickData.entityInfos as SceneSnapshot;
+        // THE ENGINE'S entityInfos DO NOT CARRY THE 2D COLLIDER EXTENT, and the
+        // worker REPLACES its map with what arrives here. So the half-height
+        // seeded at play start would be erased on the very first tick, and
+        // `isGrounded` would quietly go back to casting from the entity's
+        // centre — the defect this is here to fix, undone one frame in. The
+        // extent is re-derived from the store per tick so a collider resized
+        // mid-play is reflected too; it is a lookup and an arithmetic op per
+        // entity, on a map that changes rarely enough to warrant a 300-frame
+        // delta window.
+        const liveStore = useEditorStore.getState();
+        const engineInfos = tickData.entityInfos as Record<string, Record<string, unknown>>;
+        const entityInfosSnapshot = Object.fromEntries(
+          Object.entries(engineInfos ?? {}).map(([eid, info]) => [
+            eid,
+            {
+              ...info,
+              collider2dHalfHeight: Object.hasOwn(liveStore.physics2d, eid)
+                ? collider2dHalfHeight(
+                    liveStore.physics2d[eid],
+                    // The scale the ENGINE just reported, not the store's: an
+                    // entity scaled by a script mid-play has moved on from what
+                    // the scene graph says, and rapier scales the collider by
+                    // whatever the transform currently holds. Defaulting to 1
+                    // when the engine reports no scale keeps the collider at
+                    // its authored size rather than collapsing it to nothing.
+                    tickScaleY(tickData.entities, eid),
+                  )
+                : 0,
+            },
+          ]),
+        ) as SceneSnapshot;
 
         const entitiesDelta = entityDeltaRef.current
           ? entityDeltaRef.current.computeDelta(entitiesSnapshot)
@@ -521,7 +590,10 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           // Send deltas when available, fall back to full state
           entities: entitiesDelta ? undefined : tickData.entities,
           entitiesDelta: entitiesDelta ?? undefined,
-          entityInfos: entityInfosDelta ? undefined : tickData.entityInfos,
+          // The ENRICHED map on the fallback path too — `tickData.entityInfos`
+          // is the engine's, without the extent the delta above was computed
+          // against, so sending it would desynchronise the two paths.
+          entityInfos: entityInfosDelta ? undefined : entityInfosSnapshot,
           entityInfosDelta: entityInfosDelta ?? undefined,
           inputState: tickData.inputState,
           audioPlayingStates: audioManager.getPlayingStates(),
@@ -610,6 +682,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         routerRef.current = null;
       }
       clearGroundedStates();
+      // Any 2D raycast still awaiting an engine answer will never get one:
+      // the worker is being terminated. Dropping the slots rejects those
+      // promises now instead of leaving a restarted session inheriting the
+      // previous one's queue alignment (#9271).
+      resetRaycast2dQueue();
       workerRef.current.postMessage({ type: 'stop' });
       workerRef.current.terminate();
       workerRef.current = null;
@@ -645,6 +722,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         workerRef.current = null;
       }
       clearGroundedStates();
+      // Any 2D raycast still awaiting an engine answer will never get one:
+      // the worker is being terminated. Dropping the slots rejects those
+      // promises now instead of leaving a restarted session inheriting the
+      // previous one's queue alignment (#9271).
+      resetRaycast2dQueue();
       // Reset async channel router to abort in-flight operations and prevent leaks
       if (routerRef.current) {
         routerRef.current.reset();

@@ -112,7 +112,7 @@ whenever it is non-zero — that is, for **both** of its directions — so
 | `forge.physics2d.applyImpulse(entityId, impulseX, impulseY)` | `void` | Apply instant impulse (2D) |
 | `forge.physics2d.getVelocity(entityId)` | `{x, y} \| null` | Current velocity (2D) |
 | `forge.physics2d.getAngularVelocity(entityId)` | `number \| null` | Current angular velocity (rad/s) |
-| `forge.physics2d.raycast(ox, oy, dx, dy, maxDistance?)` | `Promise<hit \| null>` | First hit `{entityId, entityName, point, normal, distance}` |
+| `forge.physics2d.raycast(ox, oy, dx, dy, maxDistance?)` | `Promise<hit \| null>` | First hit `{entityId, point, normal, distance}` |
 | `forge.physics2d.isGrounded(entityId, distance?)` | `Promise<boolean>` | Downward-raycast ground check. **Returns a Promise** — `await` it. The 3D `forge.physics.isGrounded(entityId)` of the same name is synchronous; see the note below |
 | `forge.physics2d.setGravity(x, y)` | `void` | Set global gravity (default `[0, −9.81]`) |
 | `forge.physics2d.onCollisionEnter(cb)` | `() => void` | Collision-start callback; returns an unsubscribe fn |
