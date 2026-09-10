@@ -7,7 +7,7 @@ import {
   scrubSentryMetric,
 } from '@/lib/monitoring/sentryConfig';
 
-const DSN = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN;
+const DSN = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 if (DSN) {
