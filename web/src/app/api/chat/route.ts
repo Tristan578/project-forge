@@ -175,6 +175,7 @@ Scripts run in a sandboxed TypeScript environment with these APIs:
 ### Transform & Spawning
 - \`forge.getTransform(entityId)\` → { position, rotation, scale }
 - \`forge.setPosition(entityId, x, y, z)\`
+- \`forge.setScale(entityId, x, y, z)\`
 - \`forge.translate(entityId, dx, dy, dz)\` — relative movement
 - \`forge.rotate(entityId, dx, dy, dz)\` — degrees
 - \`forge.spawn(type, { name, position })\` → entity ID
@@ -204,7 +205,6 @@ Scripts run in a sandboxed TypeScript environment with these APIs:
 ### Physics
 - \`forge.physics.applyForce(entityId, fx, fy, fz)\`
 - \`forge.physics.applyImpulse(entityId, fx, fy, fz)\`
-- \`forge.physics.setVelocity(entityId, vx, vy, vz)\`
 - \`forge.physics.getContacts(entityId, radius?)\` → overlapping entity IDs
 - \`forge.physics.distanceTo(entityIdA, entityIdB)\`
 - \`forge.physics.isGrounded(entityId)\` → boolean, synchronous. True while a kinematic character controller is touching the ground. Gate every jump on it — an ungated jump lets the player climb the sky by holding the key. (2D projects use \`forge.physics2d.isGrounded(entityId, distance?)\`, which returns a Promise and must be awaited.)

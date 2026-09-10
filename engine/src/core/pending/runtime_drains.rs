@@ -484,7 +484,7 @@ mod tests {
         ("remove_skeleton2d_requests", "editor-authoring: remove_skeleton2d"),
         ("create_skeletal_animation2d_requests", "editor-authoring: create_skeletal_animation2d"),
         ("add_keyframe2d_requests", "editor-authoring: add_keyframe2d"),
-        ("create_ik_chain2d_requests", "editor-authoring: create_ik_chain2d (set_ik_target2d is allowlisted but targets an existing chain)"),
+        ("create_ik_chain2d_requests", "editor-authoring: create_ik_chain2d (no script path at all since set_ik_target2d left the allowlist)"),
         ("auto_weight_skeleton2d_requests", "editor-authoring: auto_weight_skeleton2d"),
         ("skeleton2d_resyncs", "editor-authoring: undo/redo mirror resync, editor-only by construction"),
         ("csg_requests", "editor-authoring: csg_boolean"),

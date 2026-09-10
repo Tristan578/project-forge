@@ -343,7 +343,6 @@ you could not verify and name where to look, rather than predicting the outcome.
 Never carry a subagent's framing into a claim of your own without checking the
 thing it was framing.
 **Ticket:** #9718
-
 ### 18. A check that RESTATES its subject stops measuring it the moment the subject is edited
 **Applies:** grep -q|toContain|containment|source pin|literal|expected set|assert_|.test.sh|check-|allowlist|pin
 **What happens:** A named assertion keeps reporting green after the thing it
@@ -406,7 +405,29 @@ fixture that trips the vacuity floor instead of the guard under test gives the
 correct code from the wrong guard, and reads as coverage.
 **Ticket:** #9740
 
-### 20. Upstream error text is not yours to forward
+### 20. A backtick in a comment ends the template literal the comment is inside
+**Applies:** data/templates|scriptTemplates|forgeTypes|FORGE_TYPE_DEFINITIONS|source: `|SYSTEM_PROMPT|`
+**What happens:** A file that parsed a moment ago stops parsing, and the error
+points at prose rather than at the string it broke. Hit three times in one
+session — twice while rewriting game-template scripts, once in `forgeTypes.ts`,
+which already carries a warning about it at the top of the file.
+**Why:** These files hold CODE INSIDE A STRING: a game script lives in
+`source: \`…\``, and the whole `.d.ts` surface lives in one template literal.
+Ordinary comment style — naming an identifier in backticks, the way every other
+comment in the repo does — terminates that string. The habit is right
+everywhere else, which is exactly why it keeps happening here, and the tooling
+does not help: `oxc` reports "Expected `,` or `}`" at the line where the
+literal was OPENED, several hundred lines above the backtick that closed it.
+A `${` in prose is the same failure with a different message.
+**Prevention:** Inside a template literal, write identifiers bare — `opened`,
+not `` `opened` ``. Before trusting an edit to one of these files, `npx tsc
+--noEmit` or run any suite that imports it; the parse error is immediate and
+unmistakable, and it is much cheaper than reading a diff for a stray character.
+When sweeping a whole directory, strip backticks from comment lines inside every
+`source:` block rather than trusting a visual scan.
+**Ticket:** #9763
+
+### 21. Upstream error text is not yours to forward
 **Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeWithMap|redactJsonEscaped|reportGuardFailure|generate-route|nextjs-conventions|api-middleware-migrate|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
 **What happens:** A route answers a failure with the upstream provider's own
 words. It reads like good diagnostics and it is an egress channel: on the

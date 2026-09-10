@@ -124,7 +124,10 @@ jobs:
           # while web/src/lib/chat/tools.ts imports that very copy to build the
           # tool definitions served to the chat API (#8620). command-parity does
           # not cover it: it reads only the canonical manifest.
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$' && docs=true
+          # commandIndex.json is DERIVED from the canonical manifest and is the
+          # copy client code imports, so the sync check has to run on a PR that
+          # edits it — same reasoning as the web copy above, one artifact later.
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$|^web/src/data/commandIndex\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           # Claude Code hook scripts + their self-contained bash test suites,
           # plus .claude/settings.json (the committed permissions posture, which

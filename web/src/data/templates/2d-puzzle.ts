@@ -19,7 +19,6 @@ export const PUZZLE_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'puzzle', 'match-3', 'logic'],
 
-  inputPreset: 'topdown',
 
   sceneData: {
     formatVersion: 3,

@@ -136,6 +136,9 @@ assert_output "web copy alone still fires web" "web/src/data/commands.json" web 
 assert_output "canonical manifest fires docs" "mcp-server/manifest/commands.json" docs true
 assert_output "docs copy fires docs" "apps/docs/data/commands.json" docs true
 assert_output "the sync gate script fires docs" "apps/docs/scripts/check-manifest-sync.ts" docs true
+assert_output "the command index fires docs" "web/src/data/commandIndex.json" docs true
+assert_output "the command index still fires web" "web/src/data/commandIndex.json" web true
+assert_output "the index generator fires docs" "apps/docs/scripts/generate-command-index.ts" docs true
 
 # Controls. Without these the docs filter could be `docs=true` unconditionally
 # and every assertion above would still pass.
@@ -145,6 +148,8 @@ assert_output "engine file does NOT fire docs" "engine/src/lib.rs" docs false
 # near-miss path must not match.
 assert_output "near-miss path does NOT fire docs" "web/src/data/commands.jsonx" docs false
 assert_output "commands.json elsewhere does NOT fire docs" "web/src/other/commands.json" docs false
+assert_output "near-miss index path does NOT fire docs" "web/src/data/commandIndex.jsonx" docs false
+assert_output "commandIndex.json elsewhere does NOT fire docs" "web/src/other/commandIndex.json" docs false
 
 # ---- The other thirteen outputs ---------------------------------------------
 echo "--- other filters ---"

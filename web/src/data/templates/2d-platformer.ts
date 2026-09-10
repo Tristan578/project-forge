@@ -19,7 +19,6 @@ export const PLATFORMER_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'platformer', 'side-scroller', 'retro'],
 
-  inputPreset: 'platformer',
 
   sceneData: {
     formatVersion: 3,
@@ -427,10 +426,12 @@ const JUMP_FORCE = 12;
 let grounded = false;
 let groundCheckTimer = 0;
 
-forge.physics2d.onCollisionEnter((other) => {
-  const otherPos = forge.transform.getPosition(other);
-  const myPos = forge.transform.getPosition();
-  if (otherPos && myPos && otherPos.y < myPos.y - 0.3) {
+forge.physics2d.onCollisionEnter((event) => {
+  const otherState = forge.getTransform(event.otherEntityId);
+  const myState = forge.getTransform(entityId);
+  // position is [x, y, z]. Anything whose centre is below ours is something we
+  // landed on rather than walked into.
+  if (otherState && myState && otherState.position[1] < myState.position[1] - 0.3) {
     grounded = true;
   }
 });
@@ -439,53 +440,55 @@ forge.physics2d.onCollisionExit(() => {
   groundCheckTimer = 0.1;
 });
 
-forge.onUpdate((dt) => {
+function onUpdate(dt) {
   if (groundCheckTimer > 0) {
     groundCheckTimer -= dt;
     if (groundCheckTimer <= 0) grounded = false;
   }
 
   let vx = 0;
-  if (forge.input.isKeyDown('ArrowLeft') || forge.input.isKeyDown('a')) vx = -SPEED;
-  if (forge.input.isKeyDown('ArrowRight') || forge.input.isKeyDown('d')) vx = SPEED;
+  if (forge.input.isPressed('move_left')) vx = -SPEED;
+  if (forge.input.isPressed('move_right')) vx = SPEED;
 
-  forge.physics2d.setVelocityX(vx);
+  // setVelocityX, not setVelocity: writing the vertical component every frame
+  // would cancel gravity and erase the jump impulse from the frame before.
+  forge.physics2d.setVelocityX(entityId, vx);
 
-  if (grounded && (forge.input.isKeyPressed('Space') || forge.input.isKeyPressed('w'))) {
-    forge.physics2d.applyImpulse(0, JUMP_FORCE);
+  if (grounded && forge.input.justPressed('jump')) {
+    forge.physics2d.applyImpulse(entityId, 0, JUMP_FORCE);
     grounded = false;
   }
 
   // Fall reset
-  const pos = forge.transform.getPosition();
-  if (pos && pos.y < -5) {
-    forge.transform.setPosition(0, 1, 0);
-    forge.physics2d.setVelocity(0, 0);
+  const state = forge.getTransform(entityId);
+  if (state && state.position[1] < -5) {
+    forge.setPosition(entityId, 0, 1, 0);
+    forge.physics2d.setVelocity(entityId, 0, 0);
     grounded = false;
   }
-});`,
+}`,
       enabled: true,
     },
     camera: {
       source: `// 2D Camera Follow
 const SMOOTH = 0.1;
 
-forge.onUpdate((dt) => {
+function onUpdate(dt) {
   const players = forge.scene.findByName('Player');
   if (players.length === 0) return;
 
-  const playerPos = forge.transform.getPosition(players[0]);
-  const camPos = forge.transform.getPosition();
-  if (!playerPos || !camPos) return;
+  const playerState = forge.getTransform(players[0]);
+  const camState = forge.getTransform(entityId);
+  if (!playerState || !camState) return;
 
-  const targetX = playerPos.x;
-  const targetY = Math.max(2, playerPos.y + 1);
+  const targetX = playerState.position[0];
+  const targetY = Math.max(2, playerState.position[1] + 1);
 
-  const newX = camPos.x + (targetX - camPos.x) * SMOOTH;
-  const newY = camPos.y + (targetY - camPos.y) * SMOOTH;
+  const newX = camState.position[0] + (targetX - camState.position[0]) * SMOOTH;
+  const newY = camState.position[1] + (targetY - camState.position[1]) * SMOOTH;
 
-  forge.transform.setPosition(newX, newY, 10);
-});`,
+  forge.setPosition(entityId, newX, newY, 10);
+}`,
       enabled: true,
     },
     enemy_1: {
@@ -495,20 +498,19 @@ const START_X = 6;
 const RANGE = 4;
 let dir = -1;
 
-forge.onUpdate((dt) => {
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
+function onUpdate(dt) {
+  const state = forge.getTransform(entityId);
+  if (!state) return;
 
-  const newX = pos.x + SPEED * dir * dt;
+  const newX = state.position[0] + SPEED * dir * dt;
   if (newX < START_X - RANGE) dir = 1;
   if (newX > START_X + RANGE) dir = -1;
 
-  forge.transform.setPosition(newX, pos.y, pos.z);
-});
+  forge.setPosition(entityId, newX, state.position[1], state.position[2]);
+}
 
-forge.physics2d.onCollisionEnter((other) => {
-  const name = forge.scene.getEntityName(other);
-  if (name === 'Player') {
+forge.physics2d.onCollisionEnter((event) => {
+  if (forge.scene.getEntityName(event.otherEntityId) === 'Player') {
     forge.state.set('playerHit', true);
   }
 });`,
@@ -521,20 +523,19 @@ const START_X = -8;
 const RANGE = 3;
 let dir = 1;
 
-forge.onUpdate((dt) => {
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
+function onUpdate(dt) {
+  const state = forge.getTransform(entityId);
+  if (!state) return;
 
-  const newX = pos.x + SPEED * dir * dt;
+  const newX = state.position[0] + SPEED * dir * dt;
   if (newX < START_X - RANGE) dir = 1;
   if (newX > START_X + RANGE) dir = -1;
 
-  forge.transform.setPosition(newX, pos.y, pos.z);
-});
+  forge.setPosition(entityId, newX, state.position[1], state.position[2]);
+}
 
-forge.physics2d.onCollisionEnter((other) => {
-  const name = forge.scene.getEntityName(other);
-  if (name === 'Player') {
+forge.physics2d.onCollisionEnter((event) => {
+  if (forge.scene.getEntityName(event.otherEntityId) === 'Player') {
     forge.state.set('playerHit', true);
   }
 });`,
@@ -546,7 +547,7 @@ let score = 0;
 let totalCoins = 6;
 let won = false;
 
-forge.onStart(() => {
+function onStart() {
   forge.ui.showText('score', 'Coins: 0 / ' + totalCoins, 5, 5, {
     fontSize: 20, color: '#ffd700'
   });
@@ -554,14 +555,15 @@ forge.onStart(() => {
     fontSize: 14, color: '#aaa'
   });
 
-  const players = forge.scene.findByName('Player');
-  if (players.length === 0) return;
-
-  forge.physics2d.onCollisionEnter(players[0], (other) => {
-    const name = forge.scene.getEntityName(other);
+  // The 2D collision callback takes ONE argument and reports every collision
+  // this script's own entity is not party to as well, so the player is
+  // identified from the event rather than subscribed to by id.
+  forge.physics2d.onCollisionEnter((event) => {
+    if (forge.scene.getEntityName(event.entityId) !== 'Player') return;
+    const name = event.otherEntityName;
     if (name && name.startsWith('Coin_')) {
       score++;
-      forge.setVisibility(other, false);
+      forge.setVisibility(event.otherEntityId, false);
       forge.ui.updateText('score', 'Coins: ' + score + ' / ' + totalCoins);
     }
     if (name === 'Goal' && !won) {
@@ -571,19 +573,28 @@ forge.onStart(() => {
       });
     }
   });
-});
+}
 
-forge.onUpdate(() => {
+let restartTimer = -1;
+
+function onUpdate(dt) {
   if (forge.state.get('playerHit')) {
     forge.state.set('playerHit', false);
     forge.ui.showText('hit', 'Hit! Restarting...', 30, 50, {
       fontSize: 24, color: '#ff0000'
     });
-    setTimeout(() => {
-      forge.scene.restart();
-    }, 1500);
+    restartTimer = 1.5;
   }
-});`,
+  // A countdown, not setTimeout: the sandbox shadows the timer globals, so a
+  // scheduled restart would never fire.
+  if (restartTimer > 0) {
+    restartTimer -= dt;
+    if (restartTimer <= 0) {
+      restartTimer = -1;
+      forge.scene.restart();
+    }
+  }
+}`,
       enabled: true,
     },
   },
