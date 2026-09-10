@@ -48,6 +48,6 @@
     "jest-axe": "^11.0.0",
     "jsdom": "^30.0.1",
     "typescript": "^6",
-    "vitest": "^4"
+    "vitest": "^5"
   }
 }

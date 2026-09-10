@@ -61,6 +61,22 @@ describe('POST /api/generate/sprite', () => {
     );
   });
 
+  it.each([
+    ['pixel-art', 'auto', 'replicate'],
+    ['hand-drawn', 'auto', 'openai'],
+    ['pixel-art', 'dalle3', 'openai'],
+    ['realistic', 'sdxl', 'replicate'],
+  ])('resolves only the selected provider for %s / %s', async (style, provider, expected) => {
+    vi.mocked(resolveApiKey).mockImplementation(async (_user, requested) => {
+      if (requested !== expected) throw new Error('Other provider is not configured');
+      return { type: 'platform', key: 'only-selected-key', metered: true, usageId: 'usage-1' };
+    });
+    const res = await POST(makeRequest({ prompt: 'A wizard', style, provider }));
+    expect(res.status).toBe(201);
+    expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(resolveApiKey).mock.calls[0][1]).toBe(expected);
+  });
+
   it('returns 401 when unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: false as const,
