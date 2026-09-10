@@ -438,6 +438,70 @@ pin_coverage_wiring() {
   fi
 }
 
+# -- SIGPIPE under `pipefail`: the gate reported a GREEN run as red (#9964) ----
+#
+# Every fixture above is a handful of lines, and that is exactly why this got
+# through. The gate reads its evidence with
+#     printf '%s\n' "$CLEAN" | grep -q ...
+# and under `set -o pipefail` a MATCH is what breaks it: `grep -q` exits the
+# instant it matches, and if `printf` still has bytes to write it takes SIGPIPE
+# (141), which `pipefail` promotes to a failed pipeline. The `if` then reads
+# "no match" on the very input that matched. With a small fixture printf
+# finishes writing before grep exits, so nothing is ever observed.
+#
+# Live consequence: a run of 959 passing test files, whose summary is followed
+# by roughly a thousand lines of coverage table, was reported red with
+# "shows no completed passing run - failing closed (likely killed mid-run)".
+# Nothing was killed; the summary was sitting in the file the gate was reading.
+#
+# The fixture therefore has to be LARGE, and the bulk has to come AFTER the
+# summary line - that placement is the whole mechanism.
+
+big_tail() {
+  local i=0
+  while [ "$i" -lt 1200 ]; do
+    echo " src/some/path/file$i.ts       |   88.42 |    67.39 |   88.88 |   84.72 | 1-14,128"
+    i=$((i + 1))
+  done
+}
+
+BIG_PASS_FILE="$TMPDIR_T/big-pass.txt"
+{
+  echo " RUN  v5.0.0 /repo/web"
+  big_tail
+  echo " Test Files  959 passed | 1 skipped (960)"
+  echo "      Tests  21617 passed | 6 skipped (21669)"
+  echo " Coverage report from v8"
+  big_tail
+} > "$BIG_PASS_FILE"
+
+if [ "$(run_gate 1 "$BIG_PASS_FILE" --coverage)" -eq 0 ]; then
+  pass "a green summary buried in a large output is still found (SIGPIPE-safe under pipefail)"
+else
+  fail "a green run was reported red: grep -q matched but printf took SIGPIPE and pipefail failed the pipeline - feed CLEAN via a here-string, not a pipe (#9964)"
+fi
+
+# The same mechanism must not flip the dangerous way either. A run WITH failures
+# has a summary matching both "Test Files.*failed" and "Test Files.*passed", so
+# if the failure grep SIGPIPEs while the passed grep does not, real failures get
+# swallowed green. Pin the direction that actually costs something.
+BIG_FAIL_FILE="$TMPDIR_T/big-fail.txt"
+{
+  echo " RUN  v5.0.0 /repo/web"
+  big_tail
+  echo " Test Files  41 failed | 914 passed | 1 skipped (956)"
+  echo "      Tests  46 failed | 21617 passed (21669)"
+  echo " Coverage report from v8"
+  big_tail
+} > "$BIG_FAIL_FILE"
+
+if [ "$(run_gate 1 "$BIG_FAIL_FILE" --coverage)" -ne 0 ]; then
+  pass "real failures in a large output still propagate (never swallowed green)"
+else
+  fail "FAIL-OPEN: a run with 41 failed test files was reported green"
+fi
+
+
 pin_coverage_wiring "$HERE/../../.github/workflows/quality-gates.yml" "quality-gates.yml"
 pin_coverage_wiring "$HERE/../../.github/workflows/cd.yml" "cd.yml"
 
