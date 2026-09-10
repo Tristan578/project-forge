@@ -279,7 +279,14 @@ export interface TilemapData {
   origin: 'TopLeft' | 'Center';
 }
 
-// Input binding data matching Rust's ActionDef
+// The EDITOR STORE's flattened binding shape. It does NOT match Rust's
+// `ActionDef` — this comment said it did, and that is the confusion that lets a
+// template be authored in this spelling and then silently dropped by
+// `load_scene`. `ActionDef` is `{ name, actionType: { type: 'Digital' },
+// sources: [{ type: 'Key', value }] }`, modelled as `EngineActionDef` in
+// `data/templates/index.ts`. `hooks/events/audioEvents.ts` converts engine ->
+// store when the engine reports bindings back; nothing converts the other way,
+// so anything written FOR the engine must be authored in the engine shape.
 export interface InputBinding {
   actionName: string;
   actionType: 'digital' | 'axis';

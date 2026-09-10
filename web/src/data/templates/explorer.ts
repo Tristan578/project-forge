@@ -19,7 +19,6 @@ export const EXPLORER_TEMPLATE: GameTemplate = {
   },
   tags: ['3d', 'exploration', 'narrative', 'ambient'],
 
-  inputPreset: 'fps',
 
   sceneData: {
     formatVersion: 3,

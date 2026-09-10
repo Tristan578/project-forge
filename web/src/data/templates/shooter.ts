@@ -19,7 +19,6 @@ export const SHOOTER_TEMPLATE: GameTemplate = {
   },
   tags: ['3d', 'fps', 'shooter', 'projectile'],
 
-  inputPreset: 'fps',
 
   sceneData: {
     formatVersion: 3,

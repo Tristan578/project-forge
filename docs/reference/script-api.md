@@ -27,6 +27,7 @@ namespace set).
 | `forge.getTransform(entityId)` | `{position, rotation, scale} \| null` | Get entity transform |
 | `forge.setPosition(entityId, x, y, z)` | `void` | Set absolute position |
 | `forge.setRotation(entityId, x, y, z)` | `void` | Set absolute rotation (euler degrees) |
+| `forge.setScale(entityId, x, y, z)` | `void` | Set absolute scale |
 | `forge.translate(entityId, dx, dy, dz)` | `void` | Move relative to current position |
 | `forge.rotate(entityId, dx, dy, dz)` | `void` | Rotate relative to current rotation |
 | `forge.spawn(type, options?)` | `string` | Spawn entity, returns its ID. Options: `{name?, position?}` |
@@ -96,7 +97,6 @@ whenever it is non-zero — that is, for **both** of its directions — so
 |----------|---------|-------------|
 | `forge.physics.applyForce(entityId, fx, fy, fz)` | `void` | Apply continuous force |
 | `forge.physics.applyImpulse(entityId, fx, fy, fz)` | `void` | Apply instant impulse |
-| `forge.physics.setVelocity(entityId, vx, vy, vz)` | `void` | Set linear velocity directly |
 | `forge.physics.isGrounded(entityId)` | `boolean` | Whether the kinematic character controller last reported ground contact. Synchronous — 3D ground contact falls out of the character sweep the engine already ran, so unlike the 2D version it needs no raycast. `false` for an entity with no character controller |
 | `forge.physics.getContacts(entityId, radius?)` | `string[]` | IDs currently in contact (radius overrides collider size) |
 | `forge.physics.distanceTo(a, b)` | `number` | Distance between two entities |
@@ -110,9 +110,7 @@ whenever it is non-zero — that is, for **both** of its directions — so
 |----------|---------|-------------|
 | `forge.physics2d.applyForce(entityId, forceX, forceY)` | `void` | Apply continuous force (2D) |
 | `forge.physics2d.applyImpulse(entityId, impulseX, impulseY)` | `void` | Apply instant impulse (2D) |
-| `forge.physics2d.setVelocity(entityId, vx, vy)` | `void` | Set linear velocity (2D) |
 | `forge.physics2d.getVelocity(entityId)` | `{x, y} \| null` | Current velocity (2D) |
-| `forge.physics2d.setAngularVelocity(entityId, omega)` | `void` | Set angular velocity (rad/s) |
 | `forge.physics2d.getAngularVelocity(entityId)` | `number \| null` | Current angular velocity (rad/s) |
 | `forge.physics2d.raycast(ox, oy, dx, dy, maxDistance?)` | `Promise<hit \| null>` | First hit `{entityId, point, normal, distance}` |
 | `forge.physics2d.isGrounded(entityId, distance?)` | `Promise<boolean>` | Downward-raycast ground check. **Returns a Promise** — `await` it. The 3D `forge.physics.isGrounded(entityId)` of the same name is synchronous; see the note below |
@@ -320,10 +318,8 @@ or zero-height region is a no-op.
 | `forge.skeleton.updateBone(entityId, boneName, updates)` | `void` | Update bone properties |
 | `forge.skeleton.getBones(entityId)` | `Array<bone> \| null` | All bones in the skeleton |
 | `forge.skeleton.playAnimation(entityId, anim, opts?)` | `void` | Play a skeletal animation (`opts: {loop?, speed?, crossfade?}`) |
-| `forge.skeleton.stopAnimation(entityId)` | `void` | Stop the current skeletal animation |
 | `forge.skeleton.setSkin(entityId, skinName)` | `void` | Set the active skin |
 | `forge.skeleton.getSkin(entityId)` | `string \| null` | Current active skin name |
-| `forge.skeleton.setIkTarget(entityId, constraint, x, y)` | `void` | Set an IK constraint target position |
 
 ## forge.skeleton2d
 

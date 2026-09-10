@@ -61,7 +61,8 @@
     "changeset:version": "bash scripts/changeset-version.sh",
     "changeset:publish": "changeset publish",
     "check:manifest-sync": "npx tsx apps/docs/scripts/check-manifest-sync.ts",
-    "sync:capability-matrix": "npx tsx apps/docs/scripts/sync-capability-matrix.ts"
+    "sync:capability-matrix": "npx tsx apps/docs/scripts/sync-capability-matrix.ts",
+    "generate:command-index": "npx tsx apps/docs/scripts/generate-command-index.ts"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.0",

@@ -303,6 +303,75 @@ describe('useScriptRunner', () => {
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('Blocked unauthorized command'),
     );
+    // AND IT REACHES THE SCRIPT CONSOLE, which is the half that matters to the
+    // author. `'*'` is not decoration: `ScriptEditorPanel` renders only
+    // `l.entityId === primaryId || l.entityId === '*'`, and the `commands`
+    // message is a per-frame flush carrying no entityId — so any other value
+    // here is a log nobody can see, which is the silence this exists to end.
+    expect(mockAddScriptLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityId: '*',
+        level: 'error',
+        message: expect.stringContaining('malicious_delete_all'),
+      }),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it('reports an engine command refusal to the script console', () => {
+    mockEngineMode = 'play';
+    // `handle_command` answering `{success: false}` is what the engine returns
+    // for a command it refused — the envelope `json_compatible()` builds in
+    // `engine/src/bridge/mod.rs`. It used to be discarded here.
+    mockWasmModule.handle_command.mockReturnValue({
+      success: false,
+      error: 'Unknown command: set_velocity2d',
+    });
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const worker = latestWorker!;
+
+    act(() => {
+      worker.simulateMessage({
+        type: 'commands',
+        commands: [{ cmd: 'apply_force2d', entityId: 'e1', forceX: 1, forceY: 0 }],
+      });
+    });
+
+    expect(mockAddScriptLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityId: '*',
+        level: 'error',
+        message: expect.stringContaining('apply_force2d'),
+      }),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it('reports each refused command once, not once per frame', () => {
+    mockEngineMode = 'play';
+    mockWasmModule.handle_command.mockReturnValue({ success: false, error: 'nope' });
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const worker = latestWorker!;
+
+    // A script emitting a refused command in `onUpdate` emits it every frame;
+    // logging each one would bury the console it is trying to reach.
+    act(() => {
+      for (let i = 0; i < 5; i++) {
+        worker.simulateMessage({
+          type: 'commands',
+          commands: [{ cmd: 'apply_force2d', entityId: 'e1', forceX: 1, forceY: 0 }],
+        });
+      }
+    });
+
+    const refusals = mockAddScriptLog.mock.calls.filter(
+      ([entry]) => typeof entry?.message === 'string' && entry.message.includes('apply_force2d'),
+    );
+    expect(refusals).toHaveLength(1);
     consoleSpy.mockRestore();
   });
 
@@ -815,6 +884,9 @@ describe('useScriptRunner', () => {
 
     expect(mockAddScriptLog).toHaveBeenCalledWith(
       expect.objectContaining({
+        // '*' for the same reason as the blocked-command log: this message
+        // explains why Play just stopped, and it belongs to no single entity.
+        entityId: '*',
         level: 'error',
         message: expect.stringContaining('timed out'),
       }),

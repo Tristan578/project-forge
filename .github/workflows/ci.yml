@@ -135,7 +135,10 @@ jobs:
           # docs/capability-matrix.md has the same two-copies shape: the docs
           # gate's check-manifest-sync.ts also verifies apps/docs/data/
           # capability-matrix.json against it (#9720).
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$|^docs/capability-matrix\.md$' && docs=true
+          # commandIndex.json is DERIVED from the canonical manifest and is the
+          # copy client code imports, so the sync check has to run on a PR that
+          # edits it — same reasoning as the web copy above, one artifact later.
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$|^docs/capability-matrix\.md$|^web/src/data/commandIndex\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           # Claude Code hook scripts + their self-contained bash test suites,
           # plus .claude/settings.json (the committed permissions posture, which

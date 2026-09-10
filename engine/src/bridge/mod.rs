@@ -574,6 +574,8 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, physics::apply_force_applications2d)
             .add_systems(Update, (
                 physics::apply_impulse_applications2d,
+                physics::apply_linear_velocity2d_sets,
+                physics::apply_angular_velocity2d_sets,
                 physics::apply_raycast2d_requests,
             ))
             // Collision/raycast systems (always-active, split to stay under tuple limit)
