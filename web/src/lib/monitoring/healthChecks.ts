@@ -1,18 +1,21 @@
 /**
  * Health check library for SpawnForge service monitoring.
  *
- * Each check runs with a 5-second timeout. For external services that
- * charge per call (Stripe, etc.) we only validate config presence. For
- * services that are safe to ping (DB, CDN) we perform real checks. Upstash is
- * the deliberate exception to the per-call rule: its check executes one
- * read-only EVAL, because a presence check reported the rate limiter healthy
- * for four months while every real command was being refused (#9623) — the
- * shared fan-out budget bounds what that probe can cost.
+ * Each check runs with a 5-second timeout. Services that are safe to ping
+ * (DB, CDN) get real checks. Two probes that used to be config-presence checks
+ * now make one authenticated, credit-free call each, because presence checks
+ * reported them healthy while the service could not serve a request:
+ * Upstash executes one read-only EVAL (#9623, four months of refused commands
+ * behind a green probe) and Stripe retrieves the account balance (#9719, a
+ * revoked key would have stayed green forever). The shared fan-out budget
+ * bounds what those probes can cost.
  *
- * Individual service checks for Clerk, the chat backend and the generation
- * factory use a 3-second timeout (SERVICE_TIMEOUT_MS) to keep the health
- * endpoint responsive; the Upstash probe is bounded by UPSTASH_REST_TIMEOUT_MS.
- * Sentry and Cloudflare R2 are config-presence checks and make no call.
+ * Individual service checks for Clerk, Stripe, the chat backend and the
+ * generation factory use a 3-second timeout (SERVICE_TIMEOUT_MS) to keep the
+ * health endpoint responsive; the Upstash probe is bounded by
+ * UPSTASH_REST_TIMEOUT_MS. Sentry and Cloudflare R2 are config-presence checks
+ * and make no call. AI Providers makes no call either, but its status is
+ * decided per capability (#9719), not by the presence of any one key.
  *
  * Every environment variable a check reads comes from a shared constants module
  * (`@/lib/config/providers`, `@/lib/config/assetStorage`) rather than a literal
@@ -28,8 +31,12 @@ import 'server-only';
 import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
 import { dbCircuitBreaker } from '@/lib/db/circuitBreaker';
 import {
+  CAPABILITY_LABELS,
+  DIRECT_CAPABILITY_PROVIDER,
+  isByokProvider,
   DB_PROVIDER,
   PLATFORM_KEY_ENV,
+  listUnconfiguredCapabilities,
   resolveConfiguredChatBackend,
   type PlatformKeyProvider,
 } from '@/lib/config/providers';
@@ -46,6 +53,32 @@ export interface ServiceHealth {
   latencyMs: number;
   lastChecked: string; // ISO timestamp
   error?: string;
+  /**
+   * Public-safe one-liner saying WHAT is wrong (#9719). Unlike `error`, which
+   * `sanitizeForPublic` replaces because it may carry env-var names or
+   * provider text, `summary` survives into the public body — so a probe must
+   * put only vocabulary a user already sees in it (capability names, counts).
+   */
+  summary?: string;
+  /**
+   * "Degraded by a deliberate configuration state, not by a fault" (#9727
+   * review). The per-service entry still reports `degraded` with its summary —
+   * that is #9719's acceptance criterion and it stands — but the marker keeps a
+   * permanent, chosen state out of the two consumers that read any non-healthy
+   * status as an incident:
+   *
+   *   - `computeOverallStatus` / `deriveOverallStatus` skip it, so the public
+   *     banner and `/api/status`'s `overall` are not pinned amber forever, and
+   *   - `/api/cron/health-monitor` logs it at warn instead of paging Sentry
+   *     every 15 minutes (~96 synthetic-monitor exceptions a day) for a state
+   *     the owner deliberately chose.
+   *
+   * Lesson 13: a signal that reports the same value on every run is read as
+   * noise, and the genuine outage then looks identical to the baseline. Set it
+   * only where the cause is a documented, deliberate configuration decision —
+   * never for an unreachable dependency, a rejected credential, or any `down`.
+   */
+  configurationOnly?: boolean;
   details?: Record<string, unknown>;
 }
 
@@ -179,13 +212,49 @@ export async function checkDatabase(): Promise<ServiceHealth> {
   }
 }
 
+/**
+ * Stripe's documented, credit-free authenticated read: Retrieve balance.
+ * `GET https://api.stripe.com/v1/balance` with `Authorization: Bearer <secret>`
+ * — https://docs.stripe.com/api/balance/balance_retrieve and
+ * https://docs.stripe.com/api/authentication. It exercises exactly the
+ * property checkout depends on (this key is accepted by this account) and
+ * moves no money.
+ */
+const STRIPE_BALANCE_URL = 'https://api.stripe.com/v1/balance';
+
+/**
+ * Payments probe (#9719). A present `STRIPE_SECRET_KEY` is not evidence that
+ * Stripe will accept it — a revoked or wrong-mode key sat behind a green
+ * probe with `latencyMs: 0`. One authenticated, credit-free GET grades the
+ * key for real, per Stripe's documented status meanings
+ * (https://docs.stripe.com/api/errors):
+ *
+ *  - 2xx or 403 → the key was ACCEPTED, so both take the same MODE rule first:
+ *           a test-mode key running in production is `degraded` (Stripe accepts
+ *           it and it charges nobody — https://docs.stripe.com/keys#test-live-modes).
+ *           Past that rule they part ways. 2xx is `healthy`. 403 is "The API
+ *           key doesn't have permissions to perform the request" — a restricted
+ *           key without `balance:read`, so the probe COULD NOT RUN: `degraded`,
+ *           with the missing scope in `error` and `details.probeResult`, never
+ *           `healthy` (a check that could not run must not report success —
+ *           lesson 9) and never an outage.
+ *  - 401  → down. "No valid API key provided" — every checkout will fail.
+ *  - 5xx, timeout, network → degraded, never thrown, so a Stripe blip does
+ *           not page as a SpawnForge outage.
+ *
+ * `down` without a request is reserved for "no key at all". The request is
+ * bounded by `AbortSignal.timeout` so a hung Stripe releases the socket at the
+ * deadline rather than only abandoning the promise, and latency is measured
+ * around the whole attempt — a timeout reports the seconds it cost, not 0.
+ */
 export async function checkPayments(): Promise<ServiceHealth> {
   const key = process.env.STRIPE_SECRET_KEY;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const name = 'Payments (Stripe)';
 
   if (!key) {
     return {
-      name: 'Payments (Stripe)',
+      name,
       status: 'down',
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
@@ -193,15 +262,110 @@ export async function checkPayments(): Promise<ServiceHealth> {
     };
   }
 
+  const mode = key.startsWith('sk_live_') || key.startsWith('rk_live_') ? 'live' : 'test';
+  const details: Record<string, unknown> = {
+    secretKeyConfigured: true,
+    webhookSecretConfigured: !!webhookSecret,
+    probe: 'GET /v1/balance',
+    mode,
+  };
+
+  const start = Date.now();
+  let status: number;
+  try {
+    const res = await fetch(STRIPE_BALANCE_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(SERVICE_TIMEOUT_MS),
+    });
+    status = res.status;
+    // `GET /v1/balance` always answers with a JSON body and nothing here reads
+    // it. Under undici an unconsumed body holds the socket out of the
+    // connection pool until GC, and this probe is driven by unauthenticated
+    // /health, /api/health and /api/status plus a 15-minute cron — the
+    // highest-volume body-discarding fetch in the tree (#9727 review).
+    // Best-effort: a body that refuses to cancel must not change the verdict.
+    await res.body?.cancel().catch(() => undefined);
+  } catch (err) {
+    const timedOut = (err as { name?: unknown } | null)?.name === 'TimeoutError';
+    return {
+      name,
+      status: 'degraded',
+      latencyMs: Date.now() - start,
+      lastChecked: new Date().toISOString(),
+      error: timedOut
+        ? `Stripe probe timed out after ${SERVICE_TIMEOUT_MS}ms`
+        : err instanceof Error
+          ? err.message
+          : String(err),
+      details,
+    };
+  }
+  const latencyMs = Date.now() - start;
+  const lastChecked = new Date().toISOString();
+
+  // 403 says the key authenticated and merely lacks `balance:read`, so it is an
+  // ACCEPTED response like a 2xx for the MODE rule — grading it healthy on its
+  // own let a restricted test-mode key pass in production. It is NOT accepted
+  // as evidence for the health verdict: see the 403 branch below.
+  const accepted = (status >= 200 && status < 300) || status === 403;
+  if (accepted) {
+    const acceptedDetails =
+      status === 403
+        ? { ...details, probeResult: 'key accepted; balance not readable by this key (403)' }
+        : details;
+    if (mode === 'test' && process.env.VERCEL_ENV === 'production') {
+      // No `summary`: it reaches the unauthenticated body, and announcing that
+      // production checkout is in test mode is an invitation. The degraded
+      // badge is the public signal; the reason stays operator-side.
+      return {
+        name,
+        status: 'degraded',
+        latencyMs,
+        lastChecked,
+        error: 'STRIPE_SECRET_KEY is a test-mode key in the production environment',
+        details: acceptedDetails,
+      };
+    }
+    if (status === 403) {
+      // The key authenticated and this probe could not run — that is not
+      // "payments work". A restricted `rk_live_` key provisioned with
+      // `checkout_sessions:write` only answers 403 forever, so grading it
+      // healthy would keep reporting green after that checkout scope was
+      // revoked: authentication would be the only property ever graded
+      // (lesson 9, lesson 1). No `summary` — a visitor cannot act on a key's
+      // scopes and this is not a payment outage; the fix is operator-side.
+      return {
+        name,
+        status: 'degraded',
+        latencyMs,
+        lastChecked,
+        error:
+          'Stripe returned 403 on GET /v1/balance — STRIPE_SECRET_KEY lacks the `balance:read` scope, so payments cannot be graded. Grant it to this restricted key, or use a key that has it.',
+        details: acceptedDetails,
+      };
+    }
+    return { name, status: 'healthy', latencyMs, lastChecked, details: acceptedDetails };
+  }
+  if (status === 401) {
+    return {
+      name,
+      status: 'down',
+      latencyMs,
+      lastChecked,
+      error: 'Stripe rejected STRIPE_SECRET_KEY (auth 401) on GET /v1/balance',
+      // Public copy: what a visitor can act on, not which credential is wrong.
+      summary: 'Payments are unavailable',
+      details,
+    };
+  }
   return {
-    name: 'Payments (Stripe)',
-    status: 'healthy',
-    latencyMs: 0,
-    lastChecked: new Date().toISOString(),
-    details: {
-      secretKeyConfigured: true,
-      webhookSecretConfigured: !!webhookSecret,
-    },
+    name,
+    status: 'degraded',
+    latencyMs,
+    lastChecked,
+    error: `Stripe returned ${status} on GET /v1/balance`,
+    details,
   };
 }
 
@@ -364,18 +528,39 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
 }
 
 /**
- * Configuration check behind the public "AI Assistant" service.
+ * Configuration check behind the public "AI Providers" service (#9719).
  *
- * Status is decided by the CHAT backend alone, because that is what the public
- * name describes and what every user of the assistant depends on. A chat
- * backend resolving (including via Vercel OIDC, which needs no explicit key) is
- * healthy; none resolving is down.
+ *   down      — no chat backend resolves (nothing AI-shaped can be served)
+ *   degraded  — a chat backend resolves but at least one offered generation
+ *               capability has neither a platform key nor a gateway route; the
+ *               unconfigured capabilities are named in `error`, in
+ *               `details.unconfiguredCapabilities`, and — because the public
+ *               body strips both of those — in `summary`. Marked
+ *               `configurationOnly` only when an explicit deployment baseline
+ *               declares all the missing capabilities. Otherwise it affects
+ *               overall health and synthetic-monitor paging
+ *   healthy   — chat resolves and every capability in CAPABILITY_ENV_VARS is
+ *               configured
  *
- * Platform generation keys are reported as an informational facet only and
- * never move the status: they are per-capability, users can supply their own
- * (BYOK), and `/api/capabilities` already reports availability per feature. An
- * unset PLATFORM_MESHY_KEY does not mean the AI assistant is unavailable.
+ * Before #9719 this reported healthy on the chat backend alone and filed the
+ * generation keys under `details`, which the public body strips: production
+ * showed "up" with zero PLATFORM_* keys, i.e. while every platform-path
+ * generation request failed. That is lesson 1 — a check asserting a property
+ * adjacent to the one users depend on. Capability configuration is decided by
+ * `isCapabilityConfigured` (the same table `/api/capabilities` reads), so the
+ * probe cannot disagree with the feature-gating endpoint. BYOK users are
+ * unaffected by any of this and are not what a platform health probe grades.
  */
+function isExpectedConfigurationGap(missing: readonly string[]): boolean {
+  // No declaration means missing keys are faults. Invalid entries fail closed
+  // instead of silently suppressing an outage after an operator typo.
+  const expected = (process.env.HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES ?? '')
+    .split(',').map((cap) => cap.trim()).filter(Boolean);
+  return expected.length > 0 &&
+    expected.every((cap) => Object.prototype.hasOwnProperty.call(CAPABILITY_LABELS, cap)) &&
+    missing.every((cap) => expected.includes(cap));
+}
+
 export async function checkAiProviders(): Promise<ServiceHealth> {
   const backend = resolveConfiguredChatBackend();
 
@@ -386,20 +571,66 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
     ]),
   );
   const generationConfiguredCount = Object.values(generationProviders).filter(Boolean).length;
+  // `chat` is graded by the backend resolution above; listing it twice would
+  // double-report the same fact.
+  const unconfiguredCapabilities = listUnconfiguredCapabilities().filter((c) => c !== 'chat');
+
+  const details = {
+    chatBackend: backend?.id ?? null,
+    chatBackendConfigured: Boolean(backend),
+    generationProviders,
+    generationConfiguredCount,
+    generationTotalCount: Object.keys(generationProviders).length,
+    unconfiguredCapabilities,
+  };
+  const lastChecked = new Date().toISOString();
+
+  if (!backend) {
+    return {
+      name: 'AI Providers',
+      status: 'down',
+      latencyMs: 0,
+      lastChecked,
+      error: 'No chat backend is configured',
+      // Public copy: the feature label a visitor already sees in Settings, and
+      // the BYOK caveat — a user with their own Anthropic key is unaffected.
+      summary: `${CAPABILITY_LABELS.chat} is unavailable without your own API key`,
+      details,
+    };
+  }
+
+  if (unconfiguredCapabilities.length > 0) {
+    const ids = unconfiguredCapabilities.join(', ');
+    // The summary reaches the public body, so it uses feature labels — the
+    // vocabulary a status-page visitor already sees in Settings, never ids or
+    // env vars — and states the BYOK caveat: this probe grades the PLATFORM
+    // path only, and a creator using their own keys is unaffected.
+    const userConfigurable = unconfiguredCapabilities.filter((cap) => isByokProvider(DIRECT_CAPABILITY_PROVIDER[cap]));
+    const platformOnly = unconfiguredCapabilities.filter((cap) => !isByokProvider(DIRECT_CAPABILITY_PROVIDER[cap]));
+    const summary = [
+      userConfigurable.length ? `Available only with your own API key: ${userConfigurable.map((cap) => CAPABILITY_LABELS[cap]).join(', ')}` : '',
+      platformOnly.length ? `Unavailable on this platform: ${platformOnly.map((cap) => CAPABILITY_LABELS[cap]).join(', ')}` : '',
+    ].filter(Boolean).join('. ');
+    return {
+      name: 'AI Providers',
+      status: 'degraded',
+      latencyMs: 0,
+      lastChecked,
+      error: `Generation unavailable on the platform path for ${ids} — no platform key or gateway route configured`,
+      summary,
+      // Suppress only an explicit deployment baseline, never infer intent
+      // from the absence of a key. Remove entries when provisioning them.
+      ...(isExpectedConfigurationGap(unconfiguredCapabilities) ? { configurationOnly: true } : {}),
+      details,
+    };
+  }
 
   return {
     name: 'AI Providers',
-    status: backend ? 'healthy' : 'down',
+    status: 'healthy',
     latencyMs: 0,
-    lastChecked: new Date().toISOString(),
-    details: {
-      chatBackend: backend?.id ?? null,
-      chatBackendConfigured: Boolean(backend),
-      generationProviders,
-      generationConfiguredCount,
-      generationTotalCount: Object.keys(generationProviders).length,
-    },
-    error: backend ? undefined : 'No chat backend is configured',
+    lastChecked,
+    details,
   };
 }
 
@@ -644,7 +875,12 @@ const CRITICAL_SERVICES = new Set(['Database (Neon)', 'Clerk']);
  */
 export function computeOverallStatus(services: ServiceHealth[]): ServiceStatus {
   if (services.some((s) => s.status === 'down')) return 'down';
-  if (services.some((s) => s.status === 'degraded')) return 'degraded';
+  // A `configurationOnly` degradation is a deliberate, documented state (no
+  // PLATFORM_* key — see `ServiceHealth.configurationOnly`), so it must not pin
+  // the top-level signal amber forever; the service's own entry still says
+  // `degraded`. The exemption covers degradation ONLY — a `down` service is an
+  // incident whatever set the flag, which is why the check above runs first.
+  if (services.some((s) => s.status === 'degraded' && !s.configurationOnly)) return 'degraded';
   return 'healthy';
 }
 
@@ -661,7 +897,9 @@ export function computeCriticalStatus(services: ServiceHealth[]): ServiceStatus 
 
 /**
  * Strip sensitive error details for public consumption.
- * Returns service list with errors replaced by generic messages.
+ * Returns service list with errors replaced by generic messages. `summary`
+ * is kept by design — it is the public-safe "what is wrong" a probe opts
+ * into (see `ServiceHealth.summary`).
  */
 export function sanitizeForPublic(services: ServiceHealth[]): ServiceHealth[] {
   return services.map((s) => ({
@@ -793,14 +1031,14 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
 /**
  * Module-level cache for `runAllHealthChecks()`.
  *
- * Of the ten checks it runs, **five make outbound network calls**: the database
+ * Of the ten checks it runs, **six make outbound network calls**: the database
  * (`SELECT 1` against Neon), the engine CDN (HEAD), Clerk (`HEAD
  * api.clerk.com/v1/jwks`), the chat backend (HEAD to its probe URL — the AI
- * Gateway in production) and Upstash (a read-only `EVAL`,
- * billed per command — #9623). `checkGenerationFactory` drives the handler
- * in-process, and the remaining four are `process.env` presence checks that
- * return `latencyMs: 0` without touching the network. So one inbound request
- * costs five outbound ones — smaller than a naive read of
+ * Gateway in production), Upstash (a read-only `EVAL`, billed per command —
+ * #9623) and Stripe (`GET /v1/balance`, credit-free — #9719).
+ * `checkGenerationFactory` drives the handler in-process, and the remaining
+ * three are `process.env` checks that return `latencyMs: 0` without touching
+ * the network. So one inbound request costs six outbound ones — smaller than a naive read of
  * `runAllHealthChecks()` suggests, but still an amplification vector, and the
  * Clerk probe in particular sends `CLERK_SECRET_KEY` to Clerk's API on behalf
  * of whoever triggered it.
