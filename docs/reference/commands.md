@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 351 MCP commands available in SpawnForge.
+Complete reference for all 354 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.

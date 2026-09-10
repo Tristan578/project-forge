@@ -45,7 +45,7 @@
 - `db/` — Drizzle + Neon client
 
 ### MCP Server (`mcp-server/`)
-- `manifest/commands.json` — 351 commands across 41 categories (measured: `bash .claude/tools/validate-mcp.sh sync`; pinned by `web/src/lib/config/__tests__/capabilityMatrix.test.ts`)
+- `manifest/commands.json` — 354 commands across 41 categories (measured: `bash .claude/tools/validate-mcp.sh sync`; pinned by `web/src/lib/config/__tests__/capabilityMatrix.test.ts`)
 - `src/docs/` — Doc loader, BM25 search
 
 ### Docs Site (`apps/docs/`)

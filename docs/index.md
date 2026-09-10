@@ -85,7 +85,7 @@ End-to-end game building guides:
 
 ## Reference
 
-- [Command Reference](./reference/commands.md) — MCP commands with parameters (the manifest holds 351, 282 public, measured 2026-09-05)
+- [Command Reference](./reference/commands.md) — MCP commands with parameters (the manifest holds 354, 285 public, measured 2026-09-05)
 - [Script API](./reference/script-api.md) — complete forge.* TypeScript API
 - [Entity Types](./reference/entity-types.md) — all entity types and components
 - [Capability Matrix](./capability-matrix.md) — which capability is proven, implemented but unverified, partial, unavailable or excluded through the editor UI, the in-app AI, game scripts and external MCP

@@ -148,7 +148,7 @@ One file per panel/inspector — `ls web/src/components/editor/` for the current
 - `monitoring/` — Sentry wiring shared by all three runtime configs. `sentryConfig.ts` owns the scrubbers (`scrubSentryEvent` / `scrubSentryLog` / `scrubSentryMetric` — three independent pipelines, all three must stay wired) plus fingerprinting; `sentry-server.ts` owns `sentryLogger`; `generationMetrics.ts` owns the `/api/generate/*` business metrics and the `GENERATION_OUTCOMES` vocabulary (PF-1053 — values must dodge Sentry's server-side value scrubber)
 
 ### MCP Server (`mcp-server/`)
-- `manifest/commands.json` — 351 commands across 41 categories (measured: `bash .claude/tools/validate-mcp.sh sync`)
+- `manifest/commands.json` — 354 commands across 41 categories (measured: `bash .claude/tools/validate-mcp.sh sync`)
 - `src/manifest.test.ts` — Schema validation (update `EXPECTED_CATEGORIES` in this file when adding/removing a category)
 - `src/docs/` — Doc loader, BM25 search, MCP resource/tool registration
 
