@@ -10,6 +10,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { getCronMonitor, withCronMonitor } from '@/lib/monitoring/cronMonitors';
 import { logger } from '@/lib/logging/logger';
 import { cleanupExpired } from '@/lib/billing/webhookIdempotency';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // Sentry cron check-in monitor for this Vercel-scheduled route (#8818). The
 // non-null assertion is guarded by `cronMonitors.test.ts`, which asserts every
@@ -170,7 +171,7 @@ async function runHealthMonitor(): Promise<NextResponse> {
   return NextResponse.json(summary, { status: 200 });
 }
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
+async function GET_impl(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorizedCron(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -184,3 +185,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 export const dynamic = 'force-dynamic';
 // Allow up to 30s for all 9 health checks to complete
 export const maxDuration = 30;
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

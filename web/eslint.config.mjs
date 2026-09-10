@@ -2,6 +2,12 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+// Rules with enough logic to deserve their own tests live in ./eslint-rules and
+// are exercised through ESLint's RuleTester from a vitest suite. The inline
+// rules below predate that split; new ones belong in a file.
+import noRawResponseInCatch from "./eslint-rules/no-raw-response-in-catch.mjs";
+import { RULE_OPTIONS } from "./eslint-rules/no-raw-response-in-catch.options.mjs";
+
 // Local plugin: detect hardcoded Tailwind color classes that should use design tokens.
 // Pattern: bg-zinc-800, text-gray-300, border-slate-500, etc.
 // These should be replaced with CSS custom property references (e.g., bg-[var(--sf-bg-surface)]).
@@ -230,8 +236,15 @@ const localPlugin = {
     'no-hardcoded-primitives': noHardcodedPrimitives,
     'no-empty-test-assertion': noEmptyTestAssertion,
     'no-bare-dialogue-tree-index': noBareDialogueTreeIndex,
+    'no-raw-response-in-catch': noRawResponseInCatch,
   },
 };
+
+// The rule's option lists live in `eslint-rules/no-raw-response-in-catch.options.mjs`
+// so the RuleTester suite (`src/app/api/__tests__/noRawResponseInCatch.test.ts`)
+// runs against the SHIPPED options rather than a retyped copy of them. The suite
+// used to declare three `responseHelpers` where this config passed thirteen, with a
+// comment claiming they matched.
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -309,6 +322,51 @@ const eslintConfig = defineConfig([
     plugins: { 'spawnforge': localPlugin },
     rules: {
       'spawnforge/no-hardcoded-primitives': 'off',
+    },
+  },
+  {
+    /**
+     * Catch-path secret egress (#9736). Scoped to every file that BUILDS a
+     * response returned to a client — which is deliberately wider than
+     * `route.ts`.
+     *
+     * A glob restricted to route.ts files asserts "no route FILE leaks", not
+     * "no API response leaks" (lessons-learned #1). The files ADDED to the glob
+     * below each construct a NextResponse returned straight to a client:
+     * `lib/api` (createGenerationHandler is the single response constructor
+     * for all twelve /api/generate/* routes), `lib/auth/api-auth.ts`,
+     * `lib/rateLimit.ts`, `lib/apiValidation.ts`, `proxy.ts`, and every route
+     * handler under `src/app` that is not below `src/app/api` (the blog feed).
+     * None of them leaked when this was widened — the point is that nothing
+     * failed when the next one landed outside the glob.
+     *
+     * The `src/app/api` entry is a directory-wide glob rather than a filename
+     * one, so a non-`route.ts` module colocated under it — a co-located handler
+     * or body builder — is covered from the day it is created rather than
+     * silently unlinted. `noRawResponseInCatch.coverage.test.ts` fails if any
+     * response-building file stops being covered.
+     */
+    files: [
+      'src/app/**/route.ts',
+      'src/app/api/**/*.ts',
+      'src/lib/api/**/*.ts',
+      'src/lib/auth/api-auth.ts',
+      'src/lib/auth/step-up.ts',
+      'src/lib/rateLimit.ts',
+      'src/lib/apiValidation.ts',
+      'src/lib/security/botId.ts',
+      'src/lib/security/egressGuard.ts',
+      'src/proxy.ts',
+    ],
+    ignores: [
+      'src/lib/api/**/__tests__/**',
+      'src/lib/api/**/*.test.ts',
+      'src/app/api/**/__tests__/**',
+      'src/app/api/**/*.test.ts',
+    ],
+    plugins: { spawnforge: localPlugin },
+    rules: {
+      'spawnforge/no-raw-response-in-catch': ['error', RULE_OPTIONS],
     },
   },
   {

@@ -10,6 +10,8 @@ import {
 } from '@/lib/providers/circuitBreaker';
 import { PROVIDER_NAMES, type ProviderName } from '@/lib/config/providers';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const circuitBreakerActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('reset_all') }),
@@ -25,7 +27,7 @@ const circuitBreakerActionSchema = z.discriminatedUnion('action', [
  * Returns the current state of all AI provider circuit breakers.
  * Admin-only endpoint.
  */
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, { requireAuth: true });
   if (mid.error) return mid.error;
   const { clerkId } = mid.authContext!;
@@ -54,7 +56,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/circuit-breaker', method: 'GET' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -65,7 +67,7 @@ export async function GET(req: NextRequest) {
  *
  * Body: { action: 'reset_all' } | { action: 'reset_provider', provider: string }
  */
-export async function POST(request: NextRequest) {
+async function POST_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     validate: circuitBreakerActionSchema,
@@ -97,6 +99,11 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/circuit-breaker', method: 'POST' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const POST = withEgressGuard(POST_impl);

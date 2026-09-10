@@ -5,12 +5,14 @@ import { deleteUserAccount } from '@/lib/auth/user-service';
 import { requireStepUp } from '@/lib/auth/step-up';
 import { STEP_UP_ROUTES } from '@/lib/auth/security-policy';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
  * POST /api/user/delete
  * Permanently delete the authenticated user's account and all associated data.
  */
-export async function POST(req: NextRequest) {
+async function POST_impl(req: NextRequest) {
   const mid = await withApiMiddleware(req, {
     requireAuth: true,
     rateLimit: true,
@@ -32,7 +34,7 @@ export async function POST(req: NextRequest) {
     await deleteUserAccount(mid.userId!);
   } catch (err) {
     captureException(err, { route: '/api/user/delete' });
-    return NextResponse.json(
+    return redactedJson(
       { error: 'Failed to delete account' },
       { status: 500 }
     );
@@ -58,3 +60,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ deleted: true });
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

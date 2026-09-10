@@ -1,4 +1,32 @@
 import { NextResponse } from 'next/server';
+import { redactSecrets } from '@/lib/security/redactSecrets';
+
+// ---------------------------------------------------------------------------
+// Redacting drop-in for NextResponse.json
+// ---------------------------------------------------------------------------
+
+/**
+ * `NextResponse.json` with the body run through `redactSecrets` (#9736).
+ *
+ * WHY THIS EXISTS rather than "just use createErrorResponse everywhere". The
+ * lint rule `spawnforge/no-raw-response-in-catch` bans raw response
+ * construction on the catch path, and the API has many bespoke error envelopes
+ * that clients already read — `{ error: 'prompt_rejected', message }`,
+ * `{ error, code }`, `{ status, reason }`. Forcing all of them into this
+ * module's `{ error, code?, details? }` shape would be a client-visible
+ * refactor riding along with a security fix, and the friction of that refactor
+ * is precisely what would push the next author back to `NextResponse.json`.
+ *
+ * So: keep your envelope, get redaction. Prefer `createErrorResponse` when you
+ * do not need a bespoke shape — it also carries the status-code convention
+ * documented below.
+ *
+ * Redaction is a net, not a licence. A fixed message is still the requirement,
+ * and the same lint rule reports a caught error's value reaching this call.
+ */
+export function redactedJson<T>(body: T, init?: ResponseInit): NextResponse {
+  return NextResponse.json(redactSecrets(body), init);
+}
 
 // ---------------------------------------------------------------------------
 // Plan E: ApiErrorResponse + apiError() helper
@@ -23,11 +51,16 @@ export function apiError(
   code?: string,
   details?: unknown,
 ): NextResponse<ApiErrorResponse> {
+  // Redacted like `createErrorResponse` (#9736). This is a SECOND response
+  // constructor that does not delegate to that one, so a net applied only
+  // there would leave every `apiError` caller uncovered — exactly the gap that
+  // appears when one of two parallel paths is hardened and the other is
+  // assumed to match.
   return NextResponse.json(
     {
-      error,
+      error: redactSecrets(error),
       ...(code && { code }),
-      ...(details !== undefined && { details }),
+      ...(details !== undefined && { details: redactSecrets(details) }),
     },
     { status },
   );
@@ -97,9 +130,15 @@ export function createErrorResponse(
   message: string,
   options?: ApiErrorOptions,
 ): NextResponse {
-  const body: Record<string, unknown> = { error: message };
+  // Redact on the way out (#9736). Routes must not put upstream text in a
+  // response at all - `spawnforge/no-raw-response-in-catch`
+  // (`web/eslint-rules/no-raw-response-in-catch.mjs`) is what enforces that -
+  // but a static gate cannot see a string assembled at runtime, and it does not
+  // see the non-throwing path at all, so this is the net under it. `details` is
+  // included because it is the field most likely to carry a raw object.
+  const body: Record<string, unknown> = { error: redactSecrets(message) };
   if (options?.code) body.code = options.code;
-  if (options?.details) body.details = options.details;
+  if (options?.details) body.details = redactSecrets(options.details);
 
   return NextResponse.json(body, {
     status,
