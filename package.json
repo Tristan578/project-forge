@@ -1,7 +1,7 @@
 {
   "name": "spawnforge",
   "private": true,
-  "description": "AI-native 2D/3D game engine for the browser — Bevy/WASM engine, 350 MCP commands, visual scripting, WebGPU rendering",
+  "description": "AI-native 2D/3D game engine for the browser — Bevy/WASM engine, 354 MCP commands, visual scripting, WebGPU rendering",
   "keywords": [
     "game engine",
     "browser game",
@@ -61,6 +61,7 @@
     "changeset:version": "bash scripts/changeset-version.sh",
     "changeset:publish": "changeset publish",
     "check:manifest-sync": "npx tsx apps/docs/scripts/check-manifest-sync.ts",
+    "sync:capability-matrix": "npx tsx apps/docs/scripts/sync-capability-matrix.ts",
     "generate:command-index": "npx tsx apps/docs/scripts/generate-command-index.ts"
   },
   "devDependencies": {

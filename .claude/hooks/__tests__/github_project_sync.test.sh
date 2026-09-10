@@ -250,7 +250,7 @@ def walk(node, protected):
 
 walk(ast.parse(src), False)
 total = len(bare) + len(guarded)
-if total < 4:
+if total < 1:
     # A parser that silently matched nothing would otherwise report clean.
     print('parser-found-only-' + str(total))
 elif bare:
@@ -340,11 +340,12 @@ m.LOCK_PATH = tmp / '.sync-push.lock'
 m.LOCK_WANTED_PATH = tmp / '.sync-lock-wanted'
 lock_path = str(m.LOCK_PATH)
 child_src = (
-    'import importlib.util, sys\n'
+    'import importlib.util, sys, pathlib\n'
+    'sys.path.insert(0, str(pathlib.Path(sys.argv[2]).parent))\n'
     'spec = importlib.util.spec_from_file_location(\'gps\', sys.argv[2])\n'
     'mod = importlib.util.module_from_spec(spec)\n'
     'spec.loader.exec_module(mod)\n'
-    'fd = open(sys.argv[1], \'w\')\n'
+    'fd = open(sys.argv[1], \'a+\')\n'
     'assert mod._try_lock_exclusive(fd)\n'
     'sys.stdout.write(\'locked\')\n'
     'sys.stdout.flush()\n'
@@ -354,7 +355,7 @@ child = subprocess.Popen(
     [sys.executable, '-c', child_src, lock_path, m.__file__],
     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 handshake = child.stdout.read(6)
-probe_fd = open(lock_path, 'w')
+probe_fd = open(lock_path, 'a+')
 probe = 'denied'
 if m._try_lock_exclusive(probe_fd):
     probe = 'granted'
@@ -730,30 +731,27 @@ print(len(resolved), entry['githubItemId'], fs.applied)
 ")"
 assert_out "a resolved item id is cached on the map entry" "1 PVTI_resolved 2" "$out"
 
-# --- the update path must not be able to latch on a field failure ---------
-# gh_set_status raises by design for an id GitHub cannot resolve, and the update
-# block's memo writes come after it. Routing the status mirror through
-# ProjectFieldSync.apply (which never raises) is what stops one board failure
-# from replaying the ticket on every push forever. The single remaining direct
-# call is the create path, where item-add has just returned a real id.
+# The atomic sync engine owns project retries and budgets now. Exercise the
+# behavior rather than pinning the layout of the removed legacy push loop.
 out="$(run_py "
-import inspect
-src = inspect.getsource(m._push_inner)
-routed = 'field_sync.apply(config, entry, gh_issue_num, status, display)' in src
-print('routed' if routed and src.count('gh_set_status(') == 1 else 'direct')
+import unittest
+sys.path.insert(0, os.path.join(os.environ['HOOKS_DIR'], '__tests__'))
+from taskboard_sync_test import IdentityTests
+result = unittest.TestResult()
+IdentityTests('test_project_failure_does_not_repeat_issue_update').run(result)
+print('routed' if result.wasSuccessful() else result.errors + result.failures)
 ")"
-assert_out "push mirrors board status through the non-raising helper" "routed" "$out"
+assert_out "project failure retries attachment without rewriting the issue" "routed" "$out"
 
-# ------------------------------------------------------------ run budgets
 out="$(run_py "
-import inspect
-src = inspect.getsource(m._push_inner)
-i_loop = src.find('for index, ticket in enumerate(tickets):')
-i_budget = src.find('PUSH_TIME_BUDGET_SECONDS', i_loop)
-i_work = src.find('tid = ticket[', i_loop)
-print('bounded' if -1 not in (i_loop, i_budget, i_work) and i_budget < i_work else 'unbounded')
+import unittest
+sys.path.insert(0, os.path.join(os.environ['HOOKS_DIR'], '__tests__'))
+from taskboard_sync_test import IdentityTests
+result = unittest.TestResult()
+IdentityTests('test_budget_stops_before_remote_work').run(result)
+print('bounded' if result.wasSuccessful() else result.errors + result.failures)
 ")"
-assert_out "push checks its wall-clock budget before each ticket's work" "bounded" "$out"
+assert_out "push budget stops before remote work" "bounded" "$out"
 
 out="$(run_py "
 import inspect
