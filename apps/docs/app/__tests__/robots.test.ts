@@ -11,13 +11,13 @@ describe('docs robots', () => {
     expect(asArray[0].userAgent).toBe('*');
   });
 
-  it('allows the two surfaces that are reachable without a session', () => {
+  it('allows the three surfaces that are reachable without a session', () => {
     const rules = robots().rules;
     const rule = Array.isArray(rules) ? rules[0] : rules;
 
     // Mirrors `isPublicRoute` in proxy.ts — everything else answers a crawler
     // with a sign-in redirect, so advertising it would waste crawl budget.
-    expect(rule.allow).toEqual(['/', '/mcp']);
+    expect(rule.allow).toEqual(['/', '/mcp', '/capability-matrix']);
   });
 
   it('disallows the auth-gated paths without a trailing slash', () => {

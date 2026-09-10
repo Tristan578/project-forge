@@ -29,6 +29,9 @@ export const PUBLIC_ROUTES = [
   '/api/webhooks/(.*)',
   '/mcp',
   '/mcp/(.*)',
+  // The capability matrix (#9720) exists so a prospective creator can read what
+  // works before signing up; gating it behind a session would defeat it.
+  '/capability-matrix',
 ];
 
 const isPublicRoute = createRouteMatcher(PUBLIC_ROUTES);
