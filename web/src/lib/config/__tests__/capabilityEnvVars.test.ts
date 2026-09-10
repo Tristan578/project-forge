@@ -99,11 +99,55 @@ describe('isCapabilityConfigured', () => {
     expect(isCapabilityConfigured('sfx')).toBe(false);
   });
 
-  it('allows either sprite provider without requiring the other key', () => {
+  /**
+   * ONE KEY IS NOT ENOUGH, AND THIS TEST USED TO SAY THE OPPOSITE.
+   *
+   * It asserted that either sprite provider alone configures the capability --
+   * the any-provider rule #9742 replaced. `/api/capabilities` decides with
+   * `missing.length === 0` over the SAME `CAPABILITY_REQUIRED_PROVIDERS`
+   * entry, so leaving `.some()` here made the two readers of one constant
+   * disagree: on a Replicate-only deployment the route reported `sprite`
+   * unavailable while `isCapabilityConfigured` reported it configured, and the
+   * AI Providers health probe -- whose own comment claims it "cannot disagree
+   * with the feature-gating endpoint" -- graded that environment healthy while
+   * every default sprite request 500'd. Lesson 1, inside the fix for lesson 1.
+   *
+   * `provider: 'auto'` resolves DALL-E 3 for every style but pixel-art, so a
+   * Replicate-only environment genuinely cannot serve the default path.
+   */
+  it('requires EVERY sprite provider, matching what /api/capabilities decides', () => {
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
+    expect(isCapabilityConfigured('sprite')).toBe(false);
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', '');
+    vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk');
+    expect(isCapabilityConfigured('sprite')).toBe(false);
     vi.stubEnv('PLATFORM_REPLICATE_KEY', 'r8');
     expect(isCapabilityConfigured('sprite')).toBe(true);
-    vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk');
-    expect(isCapabilityConfigured('sprite')).toBe(true);
+  });
+
+  /**
+   * The agreement itself, rather than two numbers that happen to match today.
+   * Recomputes the route's rule from the constant and compares, so a future
+   * edit to either reader shows up here instead of in production.
+   */
+  it('agrees with the route rule for every multi-provider capability', () => {
+    let checked = 0;
+    for (const [cap, required] of Object.entries(CAPABILITY_REQUIRED_PROVIDERS)) {
+      if (!required) continue;
+      for (const held of required) {
+        for (const provider of required) {
+          vi.stubEnv(PLATFORM_KEY_ENV[provider], provider === held ? 'set' : '');
+        }
+        const routeSaysAvailable = required.every(
+          (provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]),
+        );
+        expect(isCapabilityConfigured(cap as ProviderCapability), `${cap} with only ${held}`)
+          .toBe(routeSaysAvailable);
+        checked += 1;
+      }
+    }
+    // A capability table with no multi-provider entry would make this vacuous.
+    expect(checked).toBeGreaterThan(0);
   });
 
   it('treats the Vercel runtime as configured only for gateway-served capabilities', () => {

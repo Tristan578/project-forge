@@ -526,10 +526,17 @@ export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> 
  * Vercel (OIDC auto-auth needs no explicit key).
  */
 export function isCapabilityConfigured(capability: ProviderCapability): boolean {
-  // Operation-dependent capabilities need any one supported provider.
+  // A capability that spends more than one key needs EVERY one of them, which
+  // is the rule `/api/capabilities` applies to this same constant
+  // (`missing.length === 0`). It read `.some()` here, so the two readers of one
+  // table disagreed: a Replicate-only deployment had the route reporting
+  // `sprite` unavailable while this said configured, and the AI Providers probe
+  // graded it healthy while every default sprite request 500'd. `sprite`
+  // resolves DALL-E 3 for every style but pixel-art, so one key genuinely
+  // cannot serve the default path.
   const required = CAPABILITY_REQUIRED_PROVIDERS[capability];
   if (required) {
-    return required.some((provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]));
+    return required.every((provider) => Boolean(process.env[PLATFORM_KEY_ENV[provider]]));
   }
   const envVars = CAPABILITY_ENV_VARS[capability];
   const vercelOidc = isVercelRuntime() && envVars.includes(GATEWAY_KEY_ENV.vercelGateway);
