@@ -114,7 +114,7 @@ fi
 CLEAN="$(sed 's/\x1b\[[0-9;]*m//g' "$OUTPUT_FILE")"
 
 # (1) A test actually failed → propagate.
-if printf '%s\n' "$CLEAN" | grep -qE "Test Files.*failed"; then
+if grep -qE "Test Files.*failed" <<< "$CLEAN"; then
   exit "$EXIT_CODE"
 fi
 
@@ -137,7 +137,7 @@ fi
 #     "Test Files ... passed" summary. Any "Test Files ... failed" line was
 #     already propagated above, so a match here can only be a fully green
 #     summary. Without it, fail closed.
-if ! printf '%s\n' "$CLEAN" | grep -qE "Test Files.*passed"; then
+if ! grep -qE "Test Files.*passed" <<< "$CLEAN"; then
   echo "::error::vitest exited with code $EXIT_CODE and the captured output shows no completed passing run — failing closed (likely killed mid-run; cannot prove the vitest#3077 false positive)"
   exit "$EXIT_CODE"
 fi
@@ -156,7 +156,7 @@ fi
 # swallowed (accepted residual — no in-band output exists after a passing
 # adjudication that could anchor a stronger check).
 if [ "$COVERAGE_MODE" -eq 1 ] \
-  && ! printf '%s\n' "$CLEAN" | grep -qiE "coverage report from"; then
+  && ! grep -qiE "coverage report from" <<< "$CLEAN"; then
   echo "::error::vitest exited with code $EXIT_CODE after a passing test run but BEFORE the coverage report was produced — coverage thresholds were never adjudicated; failing closed"
   exit "$EXIT_CODE"
 fi
