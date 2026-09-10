@@ -5,8 +5,10 @@ import { desc, asc, eq, ilike, and, or, sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { parsePaginationParams } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
-export async function GET(req: NextRequest) {
+async function GET_impl(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'marketplace-assets', 30, 5 * 60 * 1000);
   if (limited) return limited;
 
@@ -122,6 +124,10 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets' });
     console.error('Error fetching marketplace assets:', error);
-    return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
+    return redactedJson({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);

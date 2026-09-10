@@ -6,6 +6,7 @@ import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 const mockGetTextureStatus = vi.hoisted(() => vi.fn());
 
@@ -94,7 +95,7 @@ describe('GET /api/generate/texture/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Texture generation failed');
+    expect(data.error).toBe(withRetryGuidance('Texture generation failed'));
   });
 
   it('returns failed status when Meshy reports EXPIRED', async () => {
@@ -128,7 +129,7 @@ describe('GET /api/generate/texture/status', () => {
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
     expect(data.maps).toBeUndefined();
-    expect(data.error).toBe('Texture generation produced no maps');
+    expect(data.error).toBe(withRetryGuidance('Texture generation produced no maps'));
   });
 
   it('maps SUCCEEDED-with-empty-maps-object to failed', async () => {
@@ -143,7 +144,7 @@ describe('GET /api/generate/texture/status', () => {
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
     expect(data.maps).toBeUndefined();
-    expect(data.error).toBe('Texture generation produced no maps');
+    expect(data.error).toBe(withRetryGuidance('Texture generation produced no maps'));
   });
 
   it('does not leak maps while still processing', async () => {
@@ -204,6 +205,10 @@ describe('GET /api/generate/texture/status', () => {
     const data = await res.json();
 
     expect(res.status).toBe(500);
-    expect(data.error).toBe('Provider error');
+    // The provider's own text must NOT come back: the generate clients fold
+    // the upstream RESPONSE BODY into the thrown error, and on the platform
+    // path the credential in play is the platform's (#9736).
+    expect(data.error).not.toContain('Provider error');
+    expect(data.error).toBe('Could not read the Texture generation status. Please try again.');
   });
 });

@@ -4,6 +4,9 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { PixelArtClient } from '@/lib/generate/pixelArtClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
+import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 // Async status endpoint for pixel-art generation. The POST /generate/pixel-art
 // route returns status:'pending' + jobId=predictionId for the DEFAULT Replicate
@@ -15,7 +18,7 @@ import { DB_PROVIDER } from '@/lib/config/providers';
 // branch here. The OpenAI pixel-art path returns inline base64 and is marked
 // 'completed' by the dialog, so the poll loop (which only polls pending/
 // processing jobs) never reaches this route for OpenAI.
-export async function GET(request: NextRequest) {
+async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
     requireAuth: true,
     rateLimit: true,
@@ -42,7 +45,7 @@ export async function GET(request: NextRequest) {
     apiKey = resolved.key;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+      return redactedJson({ error: err.message, code: err.code }, { status: 402 });
     }
     throw err;
   }
@@ -78,14 +81,20 @@ export async function GET(request: NextRequest) {
       progress: mappedStatus === 'completed' ? 100 : mappedStatus === 'processing' ? 50 : 10,
       resultUrl,
       error: mappedStatus === 'failed'
-        ? (result.status === 'succeeded'
+        ? withRetryGuidance(result.status === 'succeeded'
             ? 'Pixel art generation produced no image'
             : 'Pixel art generation failed')
         : undefined,
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/pixel-art/status', jobId });
-    const message = err instanceof Error ? err.message : 'Status check failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    // The provider's own text stays server-side: `lib/generate/*Client.ts`
+    // folds the upstream RESPONSE BODY into the thrown error, and on the
+    // platform path the credential in play is the platform's (#9736).
+    return redactedJson({ error: 'Could not read the Pixel Art generation status. Please try again.' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
