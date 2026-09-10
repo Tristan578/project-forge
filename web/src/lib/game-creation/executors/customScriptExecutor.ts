@@ -55,6 +55,7 @@ Transforms are top-level on forge. There is no separate per-entity namespace: ca
 - forge.getTransform(entityId) -> { position: [x, y, z], rotation: [x, y, z], scale: [x, y, z] } | null
 - forge.setPosition(entityId, x, y, z)
 - forge.setRotation(entityId, x, y, z)
+- forge.setScale(entityId, x, y, z)
 - forge.translate(entityId, dx, dy, dz)
 - forge.rotate(entityId, dx, dy, dz)
 - forge.spawn(type, options) -> entityId
@@ -80,7 +81,6 @@ command first, and only then may a script use that name.
 
 - forge.physics.applyForce(entityId, fx, fy, fz)
 - forge.physics.applyImpulse(entityId, fx, fy, fz)
-- forge.physics.setVelocity(entityId, vx, vy, vz)
 - forge.physics.isGrounded(entityId) -> boolean (synchronous; true while a character controller touches the ground -- gate jumps on it)
 - forge.physics.distanceTo(entityIdA, entityIdB) -> number
 - forge.physics.onCollisionEnter(entityId, callback)
@@ -108,7 +108,7 @@ function onDestroy() { /* Called when the entity is removed */ }
 4. Use ONLY the forge.* API for engine interaction
 5. Keep scripts simple and focused on one behavior
 6. Use onUpdate(dt) for frame-by-frame logic, multiply movement by dt
-7. MOVING AN ENEMY OR AN NPC: use forge.translate or forge.setPosition. Those entities are spawned as FIXED sensor bodies, so forge.physics.applyForce, applyImpulse and setVelocity do nothing to them and report no error. Physics forces are for the player and for projectiles.
+7. MOVING AN ENEMY OR AN NPC: use forge.translate or forge.setPosition. Those entities are spawned as FIXED sensor bodies, so forge.physics.applyForce and applyImpulse do nothing to them and report no error. Physics forces are for the player and for projectiles.
 8. Return ONLY the script code. No markdown, no explanation, no code fences.`;
 
 // [B6] Output validation: check for sandbox escape attempts

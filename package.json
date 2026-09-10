@@ -30,8 +30,8 @@
     "node": ">=24.15 <25"
   },
   "overrides": {
-    "@clerk/nextjs": "^7.8.4",
-    "@clerk/shared": "^4.30.2",
+    "@clerk/nextjs": "^7.9.1",
+    "@clerk/shared": "^4.31.0",
     "@hono/node-server": "^2.0.5",
     "dompurify": ">=3.4.13",
     "esbuild": ">=0.28.2",
@@ -60,18 +60,19 @@
     "changeset": "changeset",
     "changeset:version": "bash scripts/changeset-version.sh",
     "changeset:publish": "changeset publish",
-    "check:manifest-sync": "npx tsx apps/docs/scripts/check-manifest-sync.ts"
+    "check:manifest-sync": "npx tsx apps/docs/scripts/check-manifest-sync.ts",
+    "generate:command-index": "npx tsx apps/docs/scripts/generate-command-index.ts"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.2",
     "@storybook/react": "^10.6.0",
     "@storybook/react-vite": "^10.6.0",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.0",
     "jsdom": "^30.0.1",
     "storybook": "^10.4.6",
     "turbo": "^2.10.12",
-    "vitest": "^4.1.8",
+    "vitest": "^5.0.0",
     "sharp": "^0.35.4"
   }
 }

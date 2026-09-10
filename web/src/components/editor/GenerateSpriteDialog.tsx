@@ -7,9 +7,9 @@ import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useAIGeneration } from '@/hooks/useAIGeneration';
+import { resolveSpriteProvider, SPRITE_PROVIDER_KEY, spriteTokenCost } from '@/lib/config/providers';
 import { useGenerationGate } from '@/hooks/useGenerationGate';
 import { GenerationUnavailableNotice } from './GenerationUnavailableNotice';
-import { spriteTokenCost } from '@/lib/config/providers';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 interface GenerateSpriteDialogProps {
@@ -50,7 +50,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         ? frameCount * TOKEN_COSTS.sprite_sheet_cost_per_frame
         : TOKEN_COSTS.tileset_generation;
   // Capability gate (#9117): blocked only on a positive "unavailable" report.
-  const gate = useGenerationGate('sprite-generation');
+  const gate = useGenerationGate('sprite-generation', activeTab === 'single' ? SPRITE_PROVIDER_KEY[resolveSpriteProvider(style)] : 'replicate');
   const canSubmit =
     // `blocked` is false until the first /api/capabilities body lands, so
     // without this a permanently-unavailable capability presented a live
@@ -237,7 +237,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
                 id="generate-sprite-style"
                 value={style}
                 onChange={(e) => setStyle(e.target.value as SpriteStyle)}
-                disabled={isSubmitting || gate.blocked}
+                disabled={isSubmitting}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
               >
                 <option value="pixel-art">Pixel Art</option>

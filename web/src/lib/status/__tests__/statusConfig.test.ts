@@ -125,4 +125,15 @@ describe('findServiceById', () => {
     expect(result).toBeDefined();
     expect(result?.critical).toBe(false);
   });
+
+  // #9727 review: this entry degrades when asset generation has no platform
+  // key while chat is fine, so the published name and description must cover
+  // asset generation — otherwise the status page grades one thing and names
+  // another, and the summary lists features the description never mentions.
+  it('publishes the ai entry under the name of what the probe grades', () => {
+    const result = findServiceById('ai');
+    expect(result?.displayName).toBe('AI Providers');
+    expect(result?.displayName).toBe(result?.healthCheckName);
+    expect(result?.description).toContain('asset generation');
+  });
 });

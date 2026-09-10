@@ -29,13 +29,32 @@ three more layers keep it from reaching that point:
 | Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; the `generate_music` chat tool; `forge.ai.generateMusic` | Each shows the reason and refuses to submit. The dialog gate blocks on a successful per-user `available:false` response; loading and failed fetches stay enabled. Auth changes and successful BYOK saves/removals immediately refresh mounted consumers, bypassing the browser cache and discarding older in-flight responses. |
 | Route gate | `capability:` option on `createGenerationHandler` (step 1a) | 503 `SERVICE_UNAVAILABLE` right after authentication — before rate limits, validation, key resolution or any deduction. |
 
-The health probe (`/api/health` → AI Providers) is the subject of #9719 and
-is not evidence for anything in this document.
+The health probe (`/api/health` → AI Providers) grades the same table this
+document decides from: since #9719 it and `/api/capabilities` both read
+`isCapabilityConfigured` in `web/src/lib/config/providers.ts`, so the two
+cannot disagree about what "configured" means. It grades the PLATFORM path
+only — a user's own key never makes it green, and its public `summary` says
+so.
+
+Deliberately unprovisioned capabilities can be listed explicitly in the server-only
+`HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES` deployment setting (comma-separated
+capability IDs). With no setting, missing keys are incident signals. Invalid IDs
+also disable suppression. Only when every missing capability appears in this
+list does the degraded entry carry `configurationOnly: true`, keeping that
+expected state out of overall health and synthetic-monitor paging.
+
+For the currently deferred asset providers, an operator may declare
+`model3d,texture,sfx,voice,sprite,bg_removal`. This repository does not set the
+deployment value automatically. When provisioning a capability, remove its ID
+from the declaration in the same deployment. For example, provisioning Meshy
+requires removing both `model3d` and `texture`. A later missing Meshy key then
+changes overall health and pages instead of being silently treated as intentional.
+An actual `down` verdict is never suppressed.
 
 ## Decision per capability
 
 Decided from `DIRECT_CAPABILITY_PROVIDER`, `PLATFORM_KEY_ENV`,
-`GATEWAY_CAPABILITIES` and `CAPABILITY_REQUIRED_PROVIDERS` in
+`GATEWAY_CAPABILITIES` and `CAPABILITY_PROVIDER_OPTIONS` in
 `web/src/lib/config/providers.ts` — the same tables
 `web/scripts/verify-platform-generation.ts` reads, so its `provider` and
 `route` columns match the "Provider" and "Route" columns here (the env var is
@@ -48,7 +67,7 @@ to mint" columns are this runbook's; keep them in step when the tables change.
 | `model3d`, `texture` (also skybox) | Meshy | platform-key | `PLATFORM_MESHY_KEY` | **Platform key** (owner) | https://www.meshy.ai/settings/api — shown once, prefix `msy_` |
 | `sfx`, `voice` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key | https://elevenlabs.io/app/settings/api-keys |
 | `music` | (Suno → ElevenLabs) | unavailable | — | **Unavailable** until #9522 lands; then covered by `PLATFORM_ELEVENLABS_KEY` | n/a — Suno has no public API |
-| `sprite` (and pixel art) | Replicate **and** OpenAI | platform-key x2 | `PLATFORM_REPLICATE_KEY` + `PLATFORM_OPENAI_KEY` | **Two platform keys** (owner): `/api/generate/sprite` resolves DALL-E 3 on OpenAI for every style except pixel-art (the dialog's and the chat tool's default) and Replicate SDXL for pixel-art. A Replicate-only environment still fails the default path. #9523 may later fold the OpenAI half into the gateway | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
+| `sprite` (and pixel art) | Replicate or OpenAI, per operation | platform-key | `PLATFORM_REPLICATE_KEY` or `PLATFORM_OPENAI_KEY` | Pixel-art sprites, sprite sheets and tilesets use Replicate. Other single-sprite styles use OpenAI. Either enables the aggregate capability; the dialog gates each selected operation independently. Provision both to support every operation. OpenAI and Replicate are not currently supported by user key setup; unavailable operations do not offer a Settings link. | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
 | `bg_removal` | remove.bg | platform-key | `PLATFORM_REMOVEBG_KEY` | **Platform key** (owner) | https://www.remove.bg/dashboard#api-key |
 
 Not in the table: `ANTHROPIC_API_KEY` is only a chat fallback when the gateway
@@ -127,7 +146,7 @@ The script prints one row per provider key a capability needs (`sprite` therefor
 | `missing` | the env var is not set; `detail` names where to mint it |
 | `unavailable` | declared in `UNAVAILABLE_CAPABILITIES`; never probed |
 
-Exit code is 1 when any row is `missing` or `fail`; the summary line counts capabilities, and a multi-key capability is verified only when every one of its rows passed. The probes
+Exit code is 1 when an offered capability has no verified path. Sprite is verified when either provider passes; both provider rows remain visible so a missing or failed alternative is not mistaken for a verified operation. The probes
 are `GET` calls to each vendor's account/balance endpoint (URLs and doc links
 in `PROVIDER_PROBES`); they cost nothing and prove authentication, not output.
 

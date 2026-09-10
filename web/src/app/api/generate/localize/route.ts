@@ -16,6 +16,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const CHUNK_SIZE = 200;
 
@@ -25,7 +26,7 @@ interface LocalizeParams {
   targetLocales: string[];
 }
 
-export const POST = createGenerationHandler<
+const POST_impl = createGenerationHandler<
   LocalizeParams,
   { locales: Record<string, LocaleBundle> }
 >({
@@ -171,3 +172,7 @@ export const POST = createGenerationHandler<
     return { locales: result };
   },
 });
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);

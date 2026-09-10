@@ -3,9 +3,10 @@ import { and, eq } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { apiKeys } from '@/lib/db/schema';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /** DELETE /api/keys/api-key/:id — revoke an API key */
-export async function DELETE(
+async function DELETE_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -31,3 +32,7 @@ export async function DELETE(
 
   return NextResponse.json({ success: true, revoked: id });
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const DELETE = withEgressGuard(DELETE_impl);

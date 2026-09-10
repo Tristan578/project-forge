@@ -9,6 +9,8 @@ import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { applyAdminTierChange } from '@/lib/billing/admin-tier-grant';
+import { redactedJson } from '@/lib/api/errors';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 const patchUserSchema = z
   .object({
@@ -27,7 +29,7 @@ const patchUserSchema = z
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function GET(
+async function GET_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -58,11 +60,11 @@ export async function GET(
     return NextResponse.json({ user });
   } catch (error) {
     captureException(error, { route: '/api/admin/users/[id]', method: 'GET' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function PATCH(
+async function PATCH_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -160,6 +162,11 @@ export async function PATCH(
     return NextResponse.json({ user: updated });
   } catch (error) {
     captureException(error, { route: '/api/admin/users/[id]', method: 'PATCH' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return redactedJson({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
+export const PATCH = withEgressGuard(PATCH_impl);

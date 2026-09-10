@@ -19,7 +19,6 @@ export const TOPDOWN_2D_TEMPLATE: GameTemplate = {
   },
   tags: ['2d', 'rpg', 'exploration', 'dialogue'],
 
-  inputPreset: 'topdown',
 
   sceneData: {
     formatVersion: 3,
@@ -351,123 +350,146 @@ export const TOPDOWN_2D_TEMPLATE: GameTemplate = {
       source: `// Top-Down Controller
 const SPEED = 4;
 
-forge.onUpdate((dt) => {
+function onUpdate(dt) {
   let dx = 0, dy = 0;
-  if (forge.input.isKeyDown('w') || forge.input.isKeyDown('ArrowUp')) dy += SPEED * dt;
-  if (forge.input.isKeyDown('s') || forge.input.isKeyDown('ArrowDown')) dy -= SPEED * dt;
-  if (forge.input.isKeyDown('a') || forge.input.isKeyDown('ArrowLeft')) dx -= SPEED * dt;
-  if (forge.input.isKeyDown('d') || forge.input.isKeyDown('ArrowRight')) dx += SPEED * dt;
+  if (forge.input.isPressed('move_forward')) dy += SPEED * dt;
+  if (forge.input.isPressed('move_backward')) dy -= SPEED * dt;
+  if (forge.input.isPressed('move_left')) dx -= SPEED * dt;
+  if (forge.input.isPressed('move_right')) dx += SPEED * dt;
 
-  const pos = forge.transform.getPosition();
-  if (!pos) return;
-  forge.transform.setPosition(pos.x + dx, pos.y + dy, pos.z);
+  const state = forge.getTransform(entityId);
+  if (!state) return;
+  forge.setPosition(entityId, state.position[0] + dx, state.position[1] + dy, state.position[2]);
 
-  if (forge.input.isKeyPressed('e')) {
+  if (forge.input.justPressed('interact')) {
     forge.state.set('interactPressed', true);
   }
-});`,
+}`,
       enabled: true,
     },
     camera: {
       source: `// Top-Down Camera Follow
 const SMOOTH = 0.08;
 
-forge.onUpdate((dt) => {
+function onUpdate(dt) {
   const players = forge.scene.findByName('Player');
   if (players.length === 0) return;
 
-  const playerPos = forge.transform.getPosition(players[0]);
-  const camPos = forge.transform.getPosition();
-  if (!playerPos || !camPos) return;
+  const playerState = forge.getTransform(players[0]);
+  const camState = forge.getTransform(entityId);
+  if (!playerState || !camState) return;
 
-  const newX = camPos.x + (playerPos.x - camPos.x) * SMOOTH;
-  const newY = camPos.y + (playerPos.y - camPos.y) * SMOOTH;
+  const newX = camState.position[0] + (playerState.position[0] - camState.position[0]) * SMOOTH;
+  const newY = camState.position[1] + (playerState.position[1] - camState.position[1]) * SMOOTH;
 
-  forge.transform.setPosition(newX, newY, 10);
-});`,
+  forge.setPosition(entityId, newX, newY, 10);
+}`,
       enabled: true,
     },
     npc_1: {
       source: `// NPC Dialogue Trigger
 const INTERACT_DIST = 1.5;
 
-forge.onUpdate(() => {
+let dialogueTimer = -1;
+
+function onUpdate(dt) {
+  // A countdown rather than setTimeout: the sandbox shadows the timer globals,
+  // so a scheduled hide would never run and the line would stay on screen.
+  if (dialogueTimer > 0) {
+    dialogueTimer -= dt;
+    if (dialogueTimer <= 0) {
+      dialogueTimer = -1;
+      forge.ui.removeText('npc1_dialogue');
+    }
+  }
+
   if (!forge.state.get('interactPressed')) return;
   forge.state.set('interactPressed', false);
 
   const players = forge.scene.findByName('Player');
   if (players.length === 0) return;
 
-  const playerPos = forge.transform.getPosition(players[0]);
-  const myPos = forge.transform.getPosition();
-  if (!playerPos || !myPos) return;
+  const playerState = forge.getTransform(players[0]);
+  const myState = forge.getTransform(entityId);
+  if (!playerState || !myState) return;
 
-  const dx = playerPos.x - myPos.x;
-  const dy = playerPos.y - myPos.y;
+  const dx = playerState.position[0] - myState.position[0];
+  const dy = playerState.position[1] - myState.position[1];
   const dist = Math.sqrt(dx * dx + dy * dy);
 
   if (dist < INTERACT_DIST) {
     forge.ui.showText('npc1_dialogue', 'NPC: Welcome, traveler! Explore the world.', 10, 80, {
       fontSize: 16, color: '#ffcc00'
     });
-    setTimeout(() => forge.ui.removeText('npc1_dialogue'), 3000);
+    dialogueTimer = 3;
   }
-});`,
+}`,
       enabled: true,
     },
     npc_2: {
       source: `// NPC Dialogue Trigger
 const INTERACT_DIST = 1.5;
 
-forge.onUpdate(() => {
+let dialogueTimer = -1;
+
+function onUpdate(dt) {
+  // A countdown rather than setTimeout: the sandbox shadows the timer globals,
+  // so a scheduled hide would never run and the line would stay on screen.
+  if (dialogueTimer > 0) {
+    dialogueTimer -= dt;
+    if (dialogueTimer <= 0) {
+      dialogueTimer = -1;
+      forge.ui.removeText('npc2_dialogue');
+    }
+  }
+
   if (!forge.state.get('interactPressed')) return;
   forge.state.set('interactPressed', false);
 
   const players = forge.scene.findByName('Player');
   if (players.length === 0) return;
 
-  const playerPos = forge.transform.getPosition(players[0]);
-  const myPos = forge.transform.getPosition();
-  if (!playerPos || !myPos) return;
+  const playerState = forge.getTransform(players[0]);
+  const myState = forge.getTransform(entityId);
+  if (!playerState || !myState) return;
 
-  const dx = playerPos.x - myPos.x;
-  const dy = playerPos.y - myPos.y;
+  const dx = playerState.position[0] - myState.position[0];
+  const dy = playerState.position[1] - myState.position[1];
   const dist = Math.sqrt(dx * dx + dy * dy);
 
   if (dist < INTERACT_DIST) {
     forge.ui.showText('npc2_dialogue', 'NPC: I heard treasures lie beyond the walls!', 10, 80, {
       fontSize: 16, color: '#cc99ff'
     });
-    setTimeout(() => forge.ui.removeText('npc2_dialogue'), 3000);
+    dialogueTimer = 3;
   }
-});`,
+}`,
       enabled: true,
     },
     game_manager: {
       source: `// Game Manager
 let score = 0;
 
-forge.onStart(() => {
+function onStart() {
   forge.ui.showText('score', 'Score: 0', 5, 5, { fontSize: 18, color: '#00ff00' });
   forge.ui.showText('hint', 'Use WASD to move, E to interact', 5, 92, {
     fontSize: 14, color: '#aaa'
   });
 
-  const players = forge.scene.findByName('Player');
-  if (players.length === 0) return;
-
-  forge.physics2d.onCollisionEnter(players[0], (other) => {
-    const name = forge.scene.getEntityName(other);
-    if (name && name.startsWith('Item_')) {
-      const collectible = forge.scene.getComponent(other, 'collectible');
-      if (collectible) {
-        score += collectible.value || 1;
-        forge.setVisibility(other, false);
-        forge.ui.updateText('score', 'Score: ' + score);
-      }
-    }
+  // ONE argument, and it reports every 2D collision — so the player is
+  // identified from the event rather than subscribed to by id.
+  forge.physics2d.onCollisionEnter((event) => {
+    if (forge.scene.getEntityName(event.entityId) !== 'Player') return;
+    const name = event.otherEntityName;
+    if (!name || !name.startsWith('Item_')) return;
+    // The name IS the contract here. There is no way to read an entity's
+    // game components from a script, so the scene names its pickups Item_NN
+    // and this matches on that rather than on a component that cannot be read.
+    score += 1;
+    forge.setVisibility(event.otherEntityId, false);
+    forge.ui.updateText('score', 'Score: ' + score);
   });
-});`,
+}`,
       enabled: true,
     },
   },

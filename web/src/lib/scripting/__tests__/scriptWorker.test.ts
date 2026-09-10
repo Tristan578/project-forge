@@ -562,16 +562,21 @@ describe('scriptWorker', () => {
     );
   });
 
-  it('forge.physics.setVelocity pushes set_velocity command', async () => {
+  // `forge.physics.setVelocity` is GONE, along with six other methods whose
+  // command the engine never armed (#9284). This asserts the removal rather
+  // than deleting the case: while the method existed it pushed a command the
+  // engine discarded, so a script calling it got no error and no effect, and
+  // this test reported that as working. Calling it now throws a TypeError the
+  // author can actually see.
+  it('forge.physics.setVelocity no longer exists — it had no engine arm', async () => {
     const handler = await setupWorker();
     const code = 'function onStart() { forge.physics.setVelocity("e1", 10, 0, 0); }';
 
     await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
 
     const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
-    expect(cmdMsg![0].commands).toContainEqual(
-      expect.objectContaining({ cmd: 'set_velocity', entityId: 'e1', velocity: [10, 0, 0] })
-    );
+    const commands = (cmdMsg?.[0]?.commands ?? []) as Array<{ cmd: string }>;
+    expect(commands.some((c) => c.cmd === 'set_velocity')).toBe(false);
   });
 
   it('forge.physics.getContacts finds nearby entities', async () => {
@@ -634,8 +639,6 @@ describe('scriptWorker', () => {
     const code = `function onStart() {
       forge.physics2d.applyForce("e1", 10, 20);
       forge.physics2d.applyImpulse("e1", 5, 10);
-      forge.physics2d.setVelocity("e1", 1, 2);
-      forge.physics2d.setAngularVelocity("e1", 3.14);
       forge.physics2d.setGravity(0, -20);
     }`;
 
@@ -645,9 +648,12 @@ describe('scriptWorker', () => {
     const cmds = cmdMsg![0].commands;
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'apply_force2d', entityId: 'e1', forceX: 10, forceY: 20 }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'apply_impulse2d', entityId: 'e1', impulseX: 5, impulseY: 10 }));
-    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_velocity2d', entityId: 'e1', velocityX: 1, velocityY: 2 }));
-    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_angular_velocity2d', entityId: 'e1', omega: 3.14 }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_gravity2d', gravityX: 0, gravityY: -20 }));
+    // `setVelocity` and `setAngularVelocity` are gone: their commands had no
+    // engine arm, so both pushed something the engine discarded (#9284).
+    const names = (cmds as Array<{ cmd: string }>).map((c) => c.cmd);
+    expect(names).not.toContain('set_velocity2d');
+    expect(names).not.toContain('set_angular_velocity2d');
   });
 
   it('forge.physics2d.getVelocity reads from synced state', async () => {
@@ -814,8 +820,6 @@ describe('scriptWorker', () => {
     const handler = await setupWorker();
     const code = `function onStart() {
       forge.camera.follow("e1", [0, 5, -10]);
-      forge.camera.setPosition(1, 2, 3);
-      forge.camera.lookAt(0, 0, 0);
       forge.camera.stopFollow();
     }`;
 
@@ -824,9 +828,13 @@ describe('scriptWorker', () => {
     const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
     const cmds = cmdMsg![0].commands;
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_follow', entityId: 'e1', offset: [0, 5, -10] }));
-    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_set_position', position: [1, 2, 3] }));
-    expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_look_at', target: [0, 0, 0] }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'camera_stop_follow' }));
+    // `setPosition` and `lookAt` are gone: `camera_set_position` and
+    // `camera_look_at` have no engine arm, so both pushed a command the engine
+    // discarded and the camera never moved (#9284).
+    const names = (cmds as Array<{ cmd: string }>).map((c) => c.cmd);
+    expect(names).not.toContain('camera_set_position');
+    expect(names).not.toContain('camera_look_at');
   });
 
   it('forge.camera.setMode and shake post messages', async () => {
@@ -1855,6 +1863,144 @@ describe('scriptWorker', () => {
 
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'log', message: 'hit:e2' })
+    );
+  });
+
+  // THE 2D CALLBACKS. `forge.physics2d.onCollisionEnter` pushed into a global
+  // array that nothing ever read, so every 2D collision handler a creator wrote
+  // was accepted and never invoked — no error, no effect. These cases fail on
+  // the pre-fix worker.
+  it('COLLISION_EVENT fires 2D enter callbacks for both participants', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionEnter(function(e) {
+        forge.log("2d:" + e.entityId + ">" + e.otherEntityId);
+      });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
+
+    // Global, not per-entity: one collision reaches the handler once per
+    // participant, so a script reasoning about either entity sees its own id
+    // in `entityId` and what it hit in `otherEntityId`.
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: '2d:e1>e2' })
+    );
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: '2d:e2>e1' })
+    );
+  });
+
+  it('COLLISION_EVENT fires 2D exit callbacks, and not the enter ones', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionEnter(function(e) { forge.log("enter:" + e.otherEntityId); });
+      forge.physics2d.onCollisionExit(function(e) { forge.log("exit:" + e.otherEntityId); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: false } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'exit:e2' })
+    );
+    expect(mockPostMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'enter:e2' })
+    );
+  });
+
+  // RESTART LEAK (#9766, Sentry). `stop` clears the 3D callback MAPS and the
+  // win callbacks, and left the 2D callback ARRAYS untouched. The two are not
+  // equivalent failures: the 3D maps are keyed per entity, so re-registering
+  // overwrites, while the 2D arrays only ever grow. So after N restarts one
+  // collision fired every 2D handler N+1 times, which silently multiplies
+  // anything a creator counts -- score, lives, pickups.
+  it('stop clears 2D collision callbacks, so a restart does not double-fire them', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionEnter(function(e) { forge.log("hit:" + e.otherEntityId); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    await handler({ data: { type: 'stop' } });
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
+
+    // Two fires, not four: the callback is global, so one collision reaches it
+    // once per participant. A leaked registration doubles that.
+    const hits = mockPostMessage.mock.calls.filter(
+      ([m]) => (m as { type?: string; message?: string }).type === 'log' &&
+               String((m as { message?: string }).message).startsWith('hit:')
+    );
+    expect(hits).toHaveLength(2);
+  });
+
+  it('stop clears 2D EXIT callbacks too, not only the enter ones', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionExit(function(e) { forge.log("left:" + e.otherEntityId); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    await handler({ data: { type: 'stop' } });
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: false } });
+
+    const leaves = mockPostMessage.mock.calls.filter(
+      ([m]) => (m as { type?: string; message?: string }).type === 'log' &&
+               String((m as { message?: string }).message).startsWith('left:')
+    );
+    expect(leaves).toHaveLength(2);
+  });
+
+  it('a 2D collision handler that unsubscribes itself does not skip its siblings', async () => {
+    const handler = await setupWorker();
+    // The unsubscribe splices the live array. Iterating it directly would skip
+    // the next callback mid-loop, so the loop walks a copy.
+    const code = `function onStart() {
+      var off = forge.physics2d.onCollisionEnter(function(e) {
+        forge.log("first");
+        off();
+      });
+      forge.physics2d.onCollisionEnter(function(e) { forge.log("second"); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'second' })
+    );
+  });
+
+  it('a throwing 2D callback reports an error and does not stop the others', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.physics2d.onCollisionEnter(function(e) { throw new Error("boom"); });
+      forge.physics2d.onCollisionEnter(function(e) { forge.log("survived"); });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'COLLISION_EVENT', entityA: 'e1', entityB: 'e2', started: true } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: expect.stringContaining('boom') })
+    );
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'survived' })
     );
   });
 

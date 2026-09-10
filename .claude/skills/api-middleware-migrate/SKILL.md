@@ -35,13 +35,14 @@ export async function POST(req: NextRequest) {
 
 ```typescript
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 import { z } from 'zod';
 
 const bodySchema = z.object({
   name: z.string().min(1),
 });
 
-export const POST = withApiMiddleware(
+const POST_impl = withApiMiddleware(
   async (req, { userId, body }) => {
     // ... business logic using validated body ...
     return NextResponse.json({ ok: true });
@@ -53,7 +54,18 @@ export const POST = withApiMiddleware(
     validate: bodySchema,
   },
 );
+
+// Egress guard (#9736): the EXPORTED binding must be this call, with
+// withApiMiddleware inside it. See `src/lib/security/egressGuard.ts`.
+export const POST = withEgressGuard(POST_impl);
 ```
+
+**`withApiMiddleware` is not the outermost wrapper any more.** Since #9736 the
+exported binding has to be a `withEgressGuard(...)` call whose name resolves to an
+import from `@/lib/security/egressGuard`; `export const POST = withApiMiddleware(...)`
+leaves the route outside the redaction chokepoint, ships unredacted responses, and is
+named as a failure by `src/app/api/__tests__/egressGuardCoverage.test.ts`. Run that
+suite as part of the migration — nothing else detects it.
 
 ## Process
 
@@ -116,7 +128,9 @@ cd web && npx vitest run <test-file-for-this-route>
 
 - `withApiMiddleware` already exists at `web/src/lib/api/middleware.ts` with two overloads:
   - **Result-object** (legacy): `const mid = await withApiMiddleware(req, opts); if (mid.error) return mid.error;`
-  - **Handler-wrapper** (preferred): `export const POST = withApiMiddleware(handler, opts);`
+  - **Handler-wrapper** (preferred): `const POST_impl = withApiMiddleware(handler, opts);`
+    then `export const POST = withEgressGuard(POST_impl);` — the egress guard is the
+    outermost wrapper on every route (#9736)
 - Options: `{ requireAuth, rateLimit, rateLimitConfig: { key, max, windowSeconds, useIp?, distributed? }, validate }`
 - Handler receives `(req, { userId, authContext, body })` context object
 - Tests at `web/src/lib/api/__tests__/middleware.test.ts`

@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ProviderCapability } from '@/lib/providers/types';
+import { CAPABILITY_LABELS } from '@/lib/config/providers';
 import type { CapabilitiesResponse, CapabilityStatus } from '@/app/api/capabilities/route';
 import { ERROR_TTL_MS, CAPABILITIES_TTL_MS } from '@/lib/config/timeouts';
 
@@ -38,19 +39,18 @@ export const FEATURE_CAPABILITY_MAP: Record<FeatureId, ProviderCapability[]> = {
   'semantic-search': ['embedding'],
 };
 
-/** Human-readable feature labels for tooltips */
-const FEATURE_LABELS: Record<FeatureId, string> = {
-  'ai-chat': 'AI Chat',
-  'image-generation': 'Image Generation',
-  'model-generation': '3D Model Generation',
-  'texture-generation': 'Texture Generation',
-  'sfx-generation': 'Sound Effect Generation',
-  'voice-generation': 'Voice Generation',
-  'music-generation': 'Music Generation',
-  'sprite-generation': 'Sprite Generation',
-  'bg-removal': 'Background Removal',
-  'semantic-search': 'Semantic Search',
-};
+/**
+ * Human-readable feature labels for tooltips, DERIVED from the one shared
+ * table (`CAPABILITY_LABELS`) rather than restated here. A second copy is the
+ * drift `CAPABILITY_LABELS` exists to prevent: it read identically until
+ * someone renamed a capability on one side (#9727 review). Exported so a test
+ * can pin the derivation.
+ */
+export const FEATURE_LABELS: Record<FeatureId, string> = Object.fromEntries(
+  (Object.entries(FEATURE_CAPABILITY_MAP) as [FeatureId, ProviderCapability[]][]).map(
+    ([featureId, caps]) => [featureId, caps.map((cap) => CAPABILITY_LABELS[cap]).join(' + ')],
+  ),
+) as Record<FeatureId, string>;
 
 export interface FeatureGateResult {
   /** Whether the feature is available (all required capabilities configured) */

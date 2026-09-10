@@ -638,6 +638,65 @@ pub(super) fn apply_impulse_applications2d(
     }
 }
 
+/// System that writes 2D linear velocity (only during Play mode).
+///
+/// `Velocity` IS QUERIED MUTABLY, NOT INSERTED. `manage_physics2d_lifecycle`
+/// attaches one to every 2D body on entering Play, so it is already there and
+/// already carrying whatever the simulation last wrote. Inserting a fresh one
+/// here would replace the whole component - including `angular`, which this
+/// command has no business touching - and would discard the current `linear`
+/// on the axis the caller deliberately left out.
+///
+/// An entity with no `Velocity` is one with no 2D rigid body, so there is no
+/// velocity to set; it is skipped rather than given a body it never had.
+pub(super) fn apply_linear_velocity2d_sets(
+    mut pending: ResMut<PendingCommands>,
+    engine_mode: Res<EngineMode>,
+    mut query: Query<(&EntityId, &mut bevy_rapier2d::prelude::Velocity)>,
+) {
+    if !engine_mode.is_playing() {
+        pending.linear_velocity2d_sets.clear();
+        return;
+    }
+
+    for request in pending.linear_velocity2d_sets.drain(..) {
+        for (entity_id, mut velocity) in query.iter_mut() {
+            if entity_id.0 == request.entity_id {
+                // Per axis, so an omitted one keeps the value the simulation
+                // computed. This is the whole reason the payload is optional.
+                if let Some(x) = request.x {
+                    velocity.linear.x = x;
+                }
+                if let Some(y) = request.y {
+                    velocity.linear.y = y;
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// System that writes 2D angular velocity (only during Play mode).
+pub(super) fn apply_angular_velocity2d_sets(
+    mut pending: ResMut<PendingCommands>,
+    engine_mode: Res<EngineMode>,
+    mut query: Query<(&EntityId, &mut bevy_rapier2d::prelude::Velocity)>,
+) {
+    if !engine_mode.is_playing() {
+        pending.angular_velocity2d_sets.clear();
+        return;
+    }
+
+    for request in pending.angular_velocity2d_sets.drain(..) {
+        for (entity_id, mut velocity) in query.iter_mut() {
+            if entity_id.0 == request.entity_id {
+                velocity.angular = request.omega;
+                break;
+            }
+        }
+    }
+}
+
 /// System that processes 2D raycast requests using Rapier 2D context.
 ///
 /// EVERY BRANCH OF THIS LOOP MUST EMIT EXACTLY ONE EVENT PER DRAINED REQUEST.

@@ -6,7 +6,8 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import {
   PLATFORM_KEY_ENV,
   GATEWAY_KEY_ENV,
-  CHAT_BACKEND_ENV_VARS,
+  CAPABILITY_ENV_VARS,
+  CAPABILITY_LABELS,
   CAPABILITY_REQUIRED_PROVIDERS,
   DIRECT_CAPABILITY_PROVIDER,
   PROVIDER_CAPABILITIES,
@@ -14,42 +15,15 @@ import {
   isByokProvider,
   isVercelRuntime,
 } from '@/lib/config/providers';
+import { withEgressGuard } from '@/lib/security/egressGuard';
 
 /**
- * Maps each provider capability to the environment variable(s) that must be set.
- * Mirrors the direct backend's CAPABILITY_PROVIDER_MAP but also includes the
- * gateway/router env vars that can serve certain capabilities.
- *
- * Every name comes from `lib/config/providers` — this table held its own
- * hardcoded copy until PF-1054, which is exactly the drift that put two
- * permanent false outages on the status page.
+ * Capability -> env vars lives in `lib/config/providers` (`CAPABILITY_ENV_VARS`)
+ * since #9719, shared with the AI Providers health probe so the two cannot
+ * disagree. This route held its own copy until then — the same drift class
+ * PF-1054 removed once already.
  */
-const CAPABILITY_KEY_MAP: Record<ProviderCapability, string[]> = {
-  // Any chat backend serves chat, so this is precisely the backend table.
-  chat: [...CHAT_BACKEND_ENV_VARS],
-  embedding: [
-    PLATFORM_KEY_ENV.openai,
-    GATEWAY_KEY_ENV.vercelGateway,
-    GATEWAY_KEY_ENV.openrouter,
-    GATEWAY_KEY_ENV.githubModels,
-  ],
-  image: [
-    PLATFORM_KEY_ENV.openai,
-    GATEWAY_KEY_ENV.vercelGateway,
-    GATEWAY_KEY_ENV.openrouter,
-  ],
-  model3d: [PLATFORM_KEY_ENV.meshy],
-  texture: [PLATFORM_KEY_ENV.meshy],
-  sfx: [PLATFORM_KEY_ENV.elevenlabs],
-  voice: [PLATFORM_KEY_ENV.elevenlabs],
-  music: [PLATFORM_KEY_ENV.suno],
-  // Derived from CAPABILITY_REQUIRED_PROVIDERS: sprite spends BOTH keys (the
-  // default path is DALL-E 3, pixel-art is Replicate SDXL), and this entry
-  // once listed Replicate alone — so a Replicate-only environment was told to
-  // configure the key it already had and never heard of OpenAI.
-  sprite: CAPABILITY_REQUIRED_PROVIDERS.sprite?.map((p) => PLATFORM_KEY_ENV[p]) ?? [PLATFORM_KEY_ENV.replicate],
-  bg_removal: [PLATFORM_KEY_ENV.removebg],
-};
+const CAPABILITY_KEY_MAP = CAPABILITY_ENV_VARS;
 
 /** Human-readable provider names for each env var */
 const ENV_VAR_PROVIDER_NAMES: Record<string, string> = {
@@ -66,26 +40,14 @@ const ENV_VAR_PROVIDER_NAMES: Record<string, string> = {
   [GATEWAY_KEY_ENV.githubModels]: 'GitHub Models',
 };
 
-/** User-facing feature names mapped to capabilities */
-const FEATURE_LABELS: Record<ProviderCapability, string> = {
-  chat: 'AI Chat',
-  embedding: 'Semantic Search',
-  image: 'Image Generation',
-  model3d: '3D Model Generation',
-  texture: 'Texture Generation',
-  sfx: 'Sound Effect Generation',
-  voice: 'Voice Generation',
-  music: 'Music Generation',
-  sprite: 'Sprite Generation',
-  bg_removal: 'Background Removal',
-};
-
 export interface CapabilityStatus {
   capability: ProviderCapability;
   available: boolean;
   label: string;
   /** Which providers could enable this capability (only shown if unavailable) */
   requiredProviders?: string[];
+  /** Per-user provider options for operation-specific generation gates. */
+  providerAvailability?: Record<string, boolean>;
   /** Helpful setup hint */
   hint?: string;
   /**
@@ -165,7 +127,7 @@ async function resolveByokProviders(clerkId: string | null): Promise<ByokLookup>
     // No local row is a real answer, not a failure: the user holds no keys.
     if (!user) return { providers: new Set(), degraded: false };
     const rows = await listConfiguredProviders(user.id);
-    return { providers: new Set(rows.map((r) => r.provider)), degraded: false };
+    return { providers: new Set(rows.map((r) => r.provider).filter(isByokProvider)), degraded: false };
   } catch (err) {
     captureException(err, { route: '/api/capabilities', action: 'byok_lookup' });
     return { providers: new Set(), degraded: true };
@@ -199,7 +161,7 @@ async function resolveCallerId(): Promise<{ userId: string | null; degraded: boo
  * `resolveApiKey` applies. Capabilities in `UNAVAILABLE_CAPABILITIES` are
  * never available. Secrets are checked server-side and never exposed.
  */
-export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
+async function GET_impl(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
   // 120/min per IP, up from 30 (#9725): the generation dialogs and the Asset
   // panel / Audio inspector entry points read this route, so every editor page
   // load costs one request and a shared-egress classroom would 429 on the old
@@ -229,7 +191,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
       return {
         capability: cap,
         available: false,
-        label: FEATURE_LABELS[cap],
+        label: CAPABILITY_LABELS[cap],
         unprovisionable: true,
         hint: unavailability.reason,
         issue: unavailability.issue,
@@ -238,9 +200,22 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
 
     const envVars = CAPABILITY_KEY_MAP[cap];
     const required = CAPABILITY_REQUIRED_PROVIDERS[cap];
+    // WHICH provider is missing, reported alongside the aggregate below. This
+    // is #9719's contribution and it is deliberately NOT the availability
+    // rule: a dialog uses it to name the failing path, while `isAvailable`
+    // stays all-or-nothing because the default request 500s when any required
+    // key is absent.
+    const providerAvailability = required
+      ? Object.fromEntries(
+          required.map((provider) => [
+            provider,
+            Boolean(process.env[PLATFORM_KEY_ENV[provider]]) || byokProviders.has(provider),
+          ]),
+        )
+      : undefined;
     let isAvailable: boolean;
     /** The env vars whose providers the user could still configure. */
-    let missingEnvVars: string[];
+    let missingEnvVars: readonly string[];
     /**
      * Whether a key the user could add in Settings would actually flip this
      * capability on. For a multi-key capability that means EVERY still-missing
@@ -274,13 +249,17 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     const status: CapabilityStatus = {
       capability: cap,
       available: isAvailable,
-      label: FEATURE_LABELS[cap],
+      ...(providerAvailability ? { providerAvailability } : {}),
+      label: CAPABILITY_LABELS[cap],
     };
 
     if (!isAvailable) {
-      // Tell the user which providers they could configure. For a single-key
-      // capability every listed provider is an alternative (name the first);
-      // for a multi-key one every listed provider is still missing (name all).
+      // ONLY WHAT IS MISSING. Mapping every env var the capability can spend
+      // told a Replicate-only deployment to "Configure Replicate" — the key it
+      // already has. `missingEnvVars` is the subset neither the platform nor
+      // the user's own keys cover, which is what the hint should name. The
+      // per-provider breakdown above still reports the full picture for a
+      // dialog that wants it (#9719 + #9725 p8).
       const providerNames = missingEnvVars.map(
         (envVar) => ENV_VAR_PROVIDER_NAMES[envVar] || 'Unknown Provider'
       );
@@ -295,8 +274,8 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
       // sent sprite/image/bg_removal users to a page where the named key does
       // not exist, the dead end this notice was added to remove (#9725 p8).
       status.hint = byokConfigurable
-        ? `Configure ${named} API ${plural} in Settings to enable ${FEATURE_LABELS[cap]}.`
-        : `${FEATURE_LABELS[cap]} needs ${named} API ${plural}, which only this deployment can configure.`;
+        ? `Configure ${named} API ${plural} in Settings to enable ${CAPABILITY_LABELS[cap]}.`
+        : `${CAPABILITY_LABELS[cap]} needs ${named} API ${plural}, which only this deployment can configure.`;
     }
 
     return status;
@@ -319,3 +298,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
 }
 
 export const dynamic = 'force-dynamic';
+
+// Egress guard (#9736): every response this route returns leaves through the
+// one redaction chokepoint. See `src/lib/security/egressGuard.ts`.
+export const GET = withEgressGuard(GET_impl);
