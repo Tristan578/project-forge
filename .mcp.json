@@ -42,6 +42,10 @@
         "UPSTASH_REDIS_REST_URL": "${UPSTASH_REDIS_REST_URL}",
         "UPSTASH_REDIS_REST_TOKEN": "${UPSTASH_REDIS_REST_TOKEN}"
       }
+    },
+    "taskboard": {
+      "command": "node",
+      "args": [".claude/hooks/taskboard-launch.mjs", "mcp"]
     }
   }
 }
