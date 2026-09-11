@@ -86,6 +86,24 @@ See `.claude/rules/gotchas-build-ci.md` for the canonical statement of this rule
 
 ---
 
+### TypeScript — Currently `^6.0.3`. Do NOT bump to 7 casually.
+
+**TypeScript 7.0.2 shipped 2026-08-20** — the native Go port, 8–12× faster compiles. It is not a drop-in upgrade, and the reason is easy to miss because it is not a language change:
+
+**7.0 ships with no stable programmatic API.** Anything embedding the compiler — `typescript-eslint` (reaching us through `eslint-config-next`), Volar, and the Vue/MDX/Astro/Svelte/Angular template checkers — can only use 6.0. The API lands in **7.1**. The vendor's workaround is running both compilers side by side: `"@typescript/native": "npm:typescript@^7.0.2"` for `tsc`, `"typescript": "npm:@typescript/typescript6@^6.0.2"` for the lint toolchain.
+
+**What actually bites us** (audited 2026-09-10 — most 7.0 removals do not apply, since every config is already `moduleResolution: bundler`, `strict: true`, `esModuleInterop: true`, and no config targets ES5 or sets `downlevelIteration`):
+
+- **`baseUrl` is removed.** The root `tsconfig.json` sets `baseUrl: "."`.
+- **`types` now defaults to `[]`, not `["*"]`.** Only `autoforge/tsconfig.json` sets it explicitly, so the other five configs lose `@types` auto-discovery. This is the same failure class as #9968 — a type shim that resolves from the workspace root and vanishes in a deploy root — so it will surface at `next build` in the deploy root, the most expensive place to find it.
+- **`rootDir` now defaults to `./`** instead of being auto-detected; `web` and `apps/docs` do not set it.
+
+Land the `types` and `baseUrl` config changes **under TypeScript 6 first**, prove them green, and only then swap compilers — never move both variables at once.
+
+Audit ticket: #9975.
+
+---
+
 ## Upgrade Decision Matrix
 
 | Dependency | Current | Upgrade Risk | Recommended Action |
@@ -94,10 +112,14 @@ See `.claude/rules/gotchas-build-ci.md` for the canonical statement of this rule
 | `wasm-bindgen` | =0.2.127 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
 | `next` | 16.x | MEDIUM | Check migration guide, test E2E |
 | `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |
-| `@clerk/nextjs` | ^7.7.5 | LOW-MEDIUM | Check for auth() API changes (7.5 dropped `baseTheme` — appearance API migrated in f55ec99d) |
+| `@clerk/nextjs` | ^7.9.1 | LOW-MEDIUM | Check for auth() API changes (7.5 dropped `baseTheme` — appearance API migrated in f55ec99d) |
 | `drizzle-orm` | 0.45.2 | LOW | Check migration query syntax |
-| `vitest` | ^4.1.9 | LOW | Check for workspace config changes |
-| `zod` | ^4.4.3 | LOW | Already on v4 |
+| `vitest` | ^5.0.0 | LOW | Check for workspace config changes; 5.x brought `@rolldown/binding` in as a native dep — see `scripts/check-native-bindings.sh` |
+| `zod` | ^4.5.4 | LOW | Already on v4 |
+| `typescript` | ^6.0.3 | **HIGH (no programmatic API in 7.0)** | Do not bump to 7 without the audit — see the TypeScript section above and #9975 |
+| `@sentry/nextjs` + `@sentry/profiling-node` | ^10.74.0 (both) | MEDIUM | The two ranges must stay **byte-identical**; a skew fails silently at load. Pinned by `sentry-regressions.test.ts:863` |
+
+> Versions in this table were last verified against `origin/main` on **2026-09-10**. Read `web/package.json` and `package-lock.json` for live values rather than trusting this snapshot.
 
 ---
 
