@@ -169,7 +169,7 @@ work as ready until that prediction is tested.
 **Ticket:** #9604
 
 ### 11. An assertion that cannot fail is worse than no test at all
-**Applies:** expect(|toBeDefined|assert|.spec.ts|.test.ts|a11y|accessibility
+**Applies:** expect(|toBeDefined|assert|.spec.ts|.test.ts|.test.sh|__tests__|scripts/check-|a11y|accessibility
 **What happens:** A named check sits in the suite, runs on every PR, reports
 green, and is incapable of reporting anything else. It is counted as coverage by
 everyone reading the board.
@@ -297,7 +297,7 @@ the consumer recognises, in one test, or the two regexes drift apart silently.
 **Ticket:** #9743
 
 ### 16. A source pin written as a containment check passes on the commented-out line
-**Applies:** toContain|grep -q|source pin|regression|sentry-regressions|nodeVersionConsistency|literal member
+**Applies:** toContain|grep -q|grep -F|source pin|regression|sentry-regressions|nodeVersionConsistency|literal member|.test.sh|__tests__|scripts/check-|.github/workflows
 **What happens:** A test asserts a source file contains a call that must happen,
 the call is commented out, and the test stays green — the name is still
 byte-present. Measured three ways in one session: `expect(content).toContain(

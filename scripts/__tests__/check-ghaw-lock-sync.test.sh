@@ -662,7 +662,9 @@ fi
 # '$BASE_COMPILE' appears in the script source (i.e. the echo references the
 # variable rather than hardcoding the command), so it must NOT be expanded here.
 # shellcheck disable=SC2016
-if grep -A2 'Fix: from the repo root' "$SCRIPT" | grep -qF '$BASE_COMPILE'; then
+# Strip comments FIRST. Reading the raw file means a commented-out
+# `echo` still satisfies this pin, which is lesson 16 exactly.
+if grep -v '^[[:space:]]*#' "$SCRIPT" | grep -A2 'Fix: from the repo root' | grep -qF '$BASE_COMPILE'; then
   pass "remediation hint echoes \$BASE_COMPILE (single-sourced, cannot drift)"
 else
   fail "remediation hint hardcodes the command instead of \$BASE_COMPILE"

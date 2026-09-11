@@ -1096,6 +1096,7 @@ jobs:
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
+            scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -1235,6 +1236,15 @@ jobs:
 
       - name: Run suite-wiring gate
         run: bash scripts/check-suite-wiring.sh
+
+      - name: Run pin-strength gate test suite
+        run: bash scripts/__tests__/check-pin-strength.test.sh
+
+      - name: Run pin-strength gate
+        # Catches a structural pin that a COMMENT can satisfy. Mirrors the
+        # suite-wiring pair above: the gate's own suite runs first so a broken
+        # gate is distinguishable from a genuine finding.
+        run: bash scripts/check-pin-strength.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without

@@ -478,7 +478,11 @@ if [ -f "$CD_YML" ]; then
   # comment explaining why, the grep matched the COMMENT and the ordering check
   # passed having compared the snapshot against a sentence. A pin that matches
   # prose is not a pin (lesson 16).
-  snap_line="$(grep -nF 'db-snapshot' "$CD_YML" | head -1 | cut -d: -f1)"
+  # Anchor to the step `id:`, not a bare substring. cd.yml mentions `db-snapshot`
+  # in a COMMENT two lines above the real id, so `grep -F | head -1` was returning
+  # the comment's line number and this ordering check was comparing the snapshot
+  # against a sentence. Caught by scripts/check-pin-strength.sh.
+  snap_line="$(grep -nE '^[[:space:]]*id:[[:space:]]*db-snapshot[[:space:]]*$' "$CD_YML" | head -1 | cut -d: -f1)"
   apply_line="$(grep -nE '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Apply schema migrations to production' "$CD_YML" | head -1 | cut -d: -f1)"
   drift_line="$(grep -nE '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Verify the production schema matches the migration set' "$CD_YML" | head -1 | cut -d: -f1)"
 
