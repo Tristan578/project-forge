@@ -108,7 +108,7 @@ Audit ticket: #9975.
 
 | Dependency | Current | Upgrade Risk | Recommended Action |
 |-----------|---------|-------------|-------------------|
-| `stripe` | 22.6.0 | LOW | Centralized in `stripe-client.ts`, check apiVersion string |
+| `stripe` | `^22.6.1` | LOW | Centralized in `stripe-client.ts`, check apiVersion string (currently `2026-08-26.dahlia` — verified 2026-09-11) |
 | `wasm-bindgen` | =0.2.127 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
 | `next` | 16.x | MEDIUM | Check migration guide, test E2E |
 | `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |
@@ -117,9 +117,11 @@ Audit ticket: #9975.
 | `vitest` | ^5.0.0 | LOW | Check for workspace config changes; 5.x brought `@rolldown/binding` in as a native dep — see `scripts/check-native-bindings.sh` |
 | `zod` | ^4.5.4 | LOW | Already on v4 |
 | `typescript` | ^6.0.3 | **HIGH (no programmatic API in 7.0)** | Do not bump to 7 without the audit — see the TypeScript section above and #9975 |
-| `@sentry/nextjs` + `@sentry/profiling-node` | ^10.74.0 (both) | MEDIUM | The two ranges must stay **byte-identical**; a skew fails silently at load. Pinned by `sentry-regressions.test.ts:863` |
+| `@sentry/nextjs` + `@sentry/profiling-node` | `^10.73.0` (both) | MEDIUM | The two **declared ranges** must stay byte-identical; a skew fails silently at load. Pinned by `sentry-regressions.test.ts:863` |
 
-> Versions in this table were last verified against `origin/main` on **2026-09-10**. Read `web/package.json` and `package-lock.json` for live values rather than trusting this snapshot.
+> **This column is the declared range, not the locked version.** The range in `web/package.json` is usually behind what `package-lock.json` resolves: `@sentry/*` declares `^10.73.0` and locks `10.74.0`; `@clerk/nextjs` declares `^7.9.1` and locks `7.9.2`. Compare like with like before concluding something is out of date — reading a range against a registry `latest` is how a routine bump gets mistaken for a major one.
+>
+> Last verified against `origin/main` on **2026-09-11**. Read `web/package.json` and `package-lock.json` for live values rather than trusting this snapshot.
 
 ---
 
