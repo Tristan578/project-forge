@@ -65,7 +65,48 @@ export function getCronMonitor(path: string): CronMonitor | undefined {
  * The handler's resolved value is forwarded unchanged; thrown errors propagate
  * after the failed check-in is recorded (so existing error handling is intact).
  */
-export function withCronMonitor<T>(
+/**
+ * Milliseconds to wait for Sentry's transport to drain before returning.
+ *
+ * The route's own budget is `maxDuration = 30` and every probe inside it is
+ * individually bounded well under that, so 2s of headroom cannot push a run
+ * into Vercel's kill window.
+ */
+const SENTRY_FLUSH_TIMEOUT_MS = 2_000;
+
+/**
+ * Drain Sentry's transport before the serverless function is frozen.
+ *
+ * THIS IS THE WHOLE POINT OF #9981. `Sentry.withMonitor` records the terminal
+ * check-in correctly, but the transport is asynchronous and Vercel freezes the
+ * function the instant the response returns — so the check-in was recorded and
+ * never sent. Sentry saw an `in_progress` with no terminal check-in and reported
+ * "A timeout check-in was detected" 645 times over 7 days (SPAWNFORGE-AI-Z),
+ * during which the health monitor read as quiet rather than unhealthy.
+ *
+ * NEVER let this throw. It runs in a `finally`, where a rejection would replace
+ * the handler's own result or error — turning an observability failure into a
+ * functional one. A failed drain is reported to the runtime log instead: not to
+ * Sentry, because Sentry is precisely what is not working at that moment.
+ */
+async function flushSentry(): Promise<void> {
+  try {
+    const drained = await Sentry.flush(SENTRY_FLUSH_TIMEOUT_MS);
+    if (!drained) {
+      console.warn(
+        `[cronMonitor] Sentry.flush timed out after ${SENTRY_FLUSH_TIMEOUT_MS}ms; ` +
+          'a check-in may be missing.',
+      );
+    }
+  } catch (error) {
+    console.warn(
+      '[cronMonitor] Sentry.flush failed; a check-in may be missing.',
+      error,
+    );
+  }
+}
+
+export async function withCronMonitor<T>(
   monitor: CronMonitor,
   handler: () => Promise<T>,
 ): Promise<T> {
@@ -75,12 +116,16 @@ export function withCronMonitor<T>(
   const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
   if (!dsn) return handler();
 
-  return Sentry.withMonitor(monitor.slug, handler, {
-    schedule: { type: 'crontab', value: monitor.schedule },
-    // Allow a run up to 5 min to complete and tolerate a 1-min late start
-    // before flagging a missed/long check-in. Conservative defaults that suit
-    // the 5-minute health cadence; tune per-monitor if cadences diverge.
-    maxRuntime: 5,
-    checkinMargin: 1,
-  });
+  try {
+    return await Sentry.withMonitor(monitor.slug, handler, {
+      schedule: { type: 'crontab', value: monitor.schedule },
+      // Allow a run up to 5 min to complete and tolerate a 1-min late start
+      // before flagging a missed/long check-in. Conservative defaults that suit
+      // the 5-minute health cadence; tune per-monitor if cadences diverge.
+      maxRuntime: 5,
+      checkinMargin: 1,
+    });
+  } finally {
+    await flushSentry();
+  }
 }
