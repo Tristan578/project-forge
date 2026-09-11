@@ -214,6 +214,7 @@ same one `DATABASE_URL` points at in production.
 - `scripts/db-migration-guard.sh` — the classifier, and the full write-up of the
   three drizzle-kit hazards
 - `scripts/neon-branch.sh` — snapshot create / delete / prune
-- `docs/decisions/2026-08-29-drizzle-push-vs-migrate.md` — why we still use `push`
+- `docs/decisions/2026-09-11-drizzle-migrate-not-push.md` — why production applies
+  migrations with `migrate` (supersedes the 2026-08-29 `push` decision)
 - `docs/operations/backup-recovery.md` — general Neon PITR guidance
 - `docs/operations/incident-runbook.md` — broader incident process
