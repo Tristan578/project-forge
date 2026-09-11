@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, cleanup } from '@testing-library/react';
 
 // Mock initLog before importing the hook
 vi.mock('@/lib/initLog', () => {
@@ -26,18 +26,23 @@ vi.mock('@/lib/initLog', () => {
 });
 
 import { useEngineStatus, emitStatusEvent } from '../useEngineStatus';
-import type { InitEvent } from '@/lib/initLog';
+import { clearInitEvents, type InitEvent } from '@/lib/initLog';
 
 describe('useEngineStatus', () => {
   let originalLocationDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
     vi.useFakeTimers();
+    clearInitEvents();
     vi.clearAllMocks();
     originalLocationDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
   });
 
   afterEach(() => {
+    // Vitest does not expose global afterEach, so RTL cannot auto-register cleanup.
+    // Unmount while fake timers and jsdom still exist to remove event listeners.
+    cleanup();
+    expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
     if (originalLocationDescriptor) {
       Object.defineProperty(window, 'location', originalLocationDescriptor);
@@ -327,11 +332,16 @@ describe('useEngineStatus', () => {
   // ---------------------------------------------------------------------------
   // Cleanup
   // ---------------------------------------------------------------------------
-  it('cleans up listener on unmount', () => {
-    const { unmount } = renderHook(() => useEngineStatus());
+  it('cleans up listeners and pending phase timers on unmount', () => {
+    const { result, unmount } = renderHook(() => useEngineStatus());
 
-    // Should not throw on unmount
+    act(() => {
+      result.current.logEvent('wasm_loading');
+    });
+    expect(vi.getTimerCount()).toBe(2);
+
     unmount();
+    expect(vi.getTimerCount()).toBe(0);
 
     // Emitting events after unmount should not cause errors
     const event: InitEvent = { phase: 'ready', timestamp: 1000 };
