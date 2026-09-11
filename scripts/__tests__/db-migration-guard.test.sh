@@ -450,10 +450,16 @@ if [ -f "$CD_YML" ]; then
     fail "cd.yml does not run db-migration-guard.sh plan — the destructive-diff gate is not wired"
   fi
 
-  if grep -qF 'scripts/db-migration-guard.sh verify' <<<"$cd_exec"; then
-    pass "cd.yml verifies convergence after the production apply"
+  # Convergence after the apply. Under `push` this was `db-migration-guard.sh
+  # verify`, which re-ran push and required "No changes detected" — the only
+  # honest test available when the apply tool exits 0 on failure. Production now
+  # applies migrations, and convergence is asserted by the drift check, which is
+  # strictly stronger: it compares every table, column and index against
+  # schema.ts AND the journal against _journal.json (#9979 / #9980).
+  if grep -qF 'npm run db:drift' <<<"$cd_exec"; then
+    pass "cd.yml verifies schema convergence after the production apply"
   else
-    fail "cd.yml does not run db-migration-guard.sh verify — a half-applied migration would ship green"
+    fail "cd.yml does not run the schema-drift check — a half-applied migration would ship green"
   fi
 
   if grep -qF 'scripts/neon-branch.sh create' <<<"$cd_exec"; then
@@ -466,18 +472,36 @@ if [ -f "$CD_YML" ]; then
   # statement runs against production. Compare line numbers of the snapshot
   # creation against every production-mutating step. `grep -n` on the file (not
   # the comment-stripped copy) keeps the numbers meaningful.
+  #
+  # ANCHOR TO THE STEP NAME, not a bare substring. The previous version grepped
+  # `-F 'Enable pgvector extension'`, and when #9979 deleted that step and left a
+  # comment explaining why, the grep matched the COMMENT and the ordering check
+  # passed having compared the snapshot against a sentence. A pin that matches
+  # prose is not a pin (lesson 16).
   snap_line="$(grep -nF 'db-snapshot' "$CD_YML" | head -1 | cut -d: -f1)"
-  pgvector_line="$(grep -nF 'Enable pgvector extension' "$CD_YML" | head -1 | cut -d: -f1)"
-  apply_line="$(grep -nF 'Apply schema migration to production' "$CD_YML" | head -1 | cut -d: -f1)"
-  if [ -n "$snap_line" ] && [ -n "$pgvector_line" ] && [ "$snap_line" -lt "$pgvector_line" ]; then
-    pass "snapshot branch is created BEFORE the pgvector step (the first production mutation)"
+  apply_line="$(grep -nE '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Apply schema migrations to production' "$CD_YML" | head -1 | cut -d: -f1)"
+  drift_line="$(grep -nE '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Verify the production schema matches the migration set' "$CD_YML" | head -1 | cut -d: -f1)"
+
+  # Non-vacuity: if either step cannot be located the comparisons below are
+  # unsatisfiable, and "could not find it" must fail rather than read as absent.
+  if [ -n "$apply_line" ] && [ -n "$drift_line" ]; then
+    pass "the production apply and drift steps are both present by name"
   else
-    fail "snapshot branch is not created before the pgvector step (snap=$snap_line pgvector=$pgvector_line)"
+    fail "could not locate the apply/drift steps by name (apply=$apply_line drift=$drift_line) — renaming a step must not silently disable these checks"
   fi
+
   if [ -n "$snap_line" ] && [ -n "$apply_line" ] && [ "$snap_line" -lt "$apply_line" ]; then
     pass "snapshot branch is created BEFORE the production schema apply"
   else
     fail "snapshot branch is not created before the production apply (snap=$snap_line apply=$apply_line)"
+  fi
+
+  # Convergence must be checked AFTER the apply, not before — a drift check that
+  # ran first would describe the previous deploy.
+  if [ -n "$apply_line" ] && [ -n "$drift_line" ] && [ "$apply_line" -lt "$drift_line" ]; then
+    pass "the drift check runs AFTER the production apply"
+  else
+    fail "the drift check does not run after the apply (apply=$apply_line drift=$drift_line)"
   fi
 
   # The snapshot id has to reach the log, or the operator cannot restore from it.
@@ -494,15 +518,31 @@ if [ -f "$CD_YML" ]; then
     fail "cd.yml never writes a job summary — the pending diff would only exist in raw logs"
   fi
 
-  # --force on the PRODUCTION apply is deliberate and load-bearing: without it,
-  # a data-loss diff hits the TTY-gated prompt, which throws, which pgPush
-  # swallows — silently SKIPPING the migration while the deploy proceeds. The
-  # destructive gate runs BEFORE this point, so --force here is not a bypass;
-  # removing it would reintroduce the silent-skip bug.
-  if grep -qE 'drizzle-kit push[^|]*--force' <<<"$cd_exec"; then
-    pass "the production apply passes --force (no TTY prompt to silently swallow)"
+  # PRODUCTION MUST NOT BE PUSHED (#9979). This replaces the old `--force`
+  # assertion, which pinned a mitigation rather than the property it bought.
+  #
+  # Under `push`, `--force` was load-bearing: without it a data-loss diff hit a
+  # TTY-gated prompt that throws, pgPush swallowed the throw, and the migration
+  # was SILENTLY SKIPPED while the deploy proceeded. Production now applies
+  # recorded migrations, whose applier exits non-zero on any failure, so the
+  # silent-skip mode does not exist and there is no prompt to force past.
+  #
+  # Pin both halves. First: the apply is migrations.
+  if grep -qF 'npm run db:migrate' <<<"$cd_exec"; then
+    pass "the production apply runs recorded migrations (which fail loudly)"
   else
-    fail "the production apply omits --force — a data-loss diff would be silently skipped in CI"
+    fail "cd.yml does not apply migrations to production — #9969 was caused by pushing instead"
+  fi
+
+  # Second, and this is the one that would catch a regression: no executable
+  # `drizzle-kit push` may target production. The dry run against a THROWAWAY
+  # clone is the only push allowed to remain, so exclude it by its log path
+  # rather than by counting.
+  stray_push="$(grep -nE 'drizzle-kit push' <<<"$cd_exec" | grep -v 'dryrun' || true)"
+  if [ -z "$stray_push" ]; then
+    pass "no executable drizzle-kit push targets production (only the dry-run clone)"
+  else
+    fail "a drizzle-kit push outside the dry run reappeared in cd.yml: ${stray_push}"
   fi
 
   # The rollback step must be honest that `vercel promote` reverts CODE ONLY.
