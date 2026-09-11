@@ -1,0 +1,99 @@
+name: Schema Drift
+
+# Detect production schema drift on a schedule (#9980).
+#
+# Nothing detected #9969. Production was seven tables, two columns and two unique
+# indexes short of the migration set, and the only reason it surfaced was a cron
+# happening to query one of the missing tables — which then took seven days to
+# notice because the health monitor was itself blind (#9981). Absence of alerts
+# was absence of traffic, not evidence of health.
+#
+# This is the scheduled half. The post-deploy half runs inside cd.yml immediately
+# after the migrate step, so a deploy that leaves the schema drifted fails in that
+# run rather than up to 24 hours later. Both halves call the same script, and
+# neither substitutes for the other: a deploy is not the only way a schema changes.
+
+on:
+  schedule:
+    # 07:00 UTC daily, an hour before the PITR verification job.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: schema-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Detect production schema drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Assert native bindings survived the install
+        # npm/cli#4828: an install can exit 0 having silently dropped a
+        # platform-native optional package. Cheap, and it keeps a failure in this
+        # job meaning "the schema drifted" rather than "the toolchain broke".
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Check for drift
+        working-directory: web
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:drift
+
+      - name: Open an issue when drift is detected
+        # `failure()` covers a tooling error (exit 2) as well as drift (exit 1),
+        # deliberately: a drift check that could not run is not a clean result.
+        # Treating "could not check" as "nothing wrong" is the shape of failure
+        # that kept #9969 invisible for as long as it was.
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: 'PROD: production schema has drifted from the migration set'
+        run: |
+          set -euo pipefail
+
+          # One open issue at a time. A daily job must not file a fresh duplicate
+          # every morning while the first one is still being worked.
+          existing="$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still drifting as of $(date -u +%FT%TZ). Run: ${RUN_URL}"
+            echo "commented on #${existing}"
+            exit 0
+          fi
+
+          # Body via a file, not an inline multi-line string: every line of a
+          # `run: |` block must stay indented, and an unindented continuation
+          # breaks the workflow YAML silently rather than failing loudly.
+          body_file="${RUNNER_TEMP}/drift-issue.md"
+          {
+            echo "The scheduled schema-drift check failed."
+            echo
+            echo "Run: ${RUN_URL}"
+            echo
+            echo "The job log names the missing tables, columns, indexes, or journal entries."
+            echo "Repair with 'npm run db:migrate' from web/, with DATABASE_URL pointing at"
+            echo "production, then re-run this workflow to confirm it comes back clean."
+            echo
+            echo "Do NOT reach for 'npm run db:push'. Pushing is what caused #9969, and"
+            echo "assert-push-allowed.ts now refuses it against a migrate-managed database."
+          } > "$body_file"
+
+          gh issue create --title "$TITLE" --label bug --milestone "P0: Production Blockers" --body-file "$body_file"

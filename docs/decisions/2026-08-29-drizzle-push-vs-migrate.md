@@ -1,7 +1,20 @@
 # Retain `drizzle-kit push` for production schema changes
 
 - **Date:** 2026-08-29
-- **Status:** Accepted
+- **Status:** Superseded by [2026-09-11-drizzle-migrate-not-push.md](2026-09-11-drizzle-migrate-not-push.md) (#9979)
+
+> **Superseded 2026-09-11.** Two of the three conditions this ADR named under
+> "Revisit when" were met: production was re-baselined into
+> `__drizzle_migrations`, and the hand-authored SQL step turned out never to have
+> been separate from the journal. The third (snapshot history) is still unmet and is
+> now guarded by `web/scripts/assert-generate-safe.ts`.
+>
+> Section 4 below is also **factually wrong**, and the correction matters: the past
+> deploy that "hung and exited 1" was the `drizzle-kit` CLI failing, not migrations
+> failing. Reproduced 2026-09-11 — the CLI exits 1 with no message and applies
+> nothing, while `drizzle-orm`'s migrator applies the same 13 migrations to the same
+> URL successfully. The text is left intact rather than edited, because the wrong
+> inference is the instructive part.
 - **Context:** #9456 (production `drizzle-kit push` with no backup, no dry run, and
   a code-only rollback)
 - **Supersedes:** nothing. This records a decision that was previously implicit.
