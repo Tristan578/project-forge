@@ -246,3 +246,105 @@ describe('posthog analytics wrapper', () => {
     expect(mod.AnalyticsEvent.TEMPLATE_APPLIED).toBe('template_applied');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Session replay + surveys (#9973 / #9974).
+//
+// Both are adoption gaps rather than new releases: posthog-js has shipped them
+// for years, the CSP already admits the assets host that serves their bundles
+// (see posthog-origins.ts and #9047), and nothing in this repo ever turned
+// replay on. `initPostHog` returns early unless `hasConsented()`, so recording
+// and surveys both inherit the cookie gate for free -- which is the property
+// worth pinning, because it is the one a future refactor could silently drop.
+// ---------------------------------------------------------------------------
+describe('session replay and surveys', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', '');
+    vi.stubEnv('NODE_ENV', 'test');
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(CONSENT_KEY);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(CONSENT_KEY);
+  });
+
+  const initWithConsent = async () => {
+    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
+    vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'true');
+    const mod = await import('@/lib/analytics/posthog');
+    mod.initPostHog();
+    return mockInit.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+  };
+
+  it('enables session recording rather than leaving it to the SDK default', async () => {
+    const cfg = await initWithConsent();
+    expect(cfg?.disable_session_recording).toBe(false);
+  });
+
+  it('masks all inputs EXPLICITLY, not by relying on the default', async () => {
+    // maskAllInputs defaults to true today. Stating it means a future default
+    // flip cannot silently start recording keystrokes, and it makes the
+    // privacy posture readable at the call site instead of in vendor docs.
+    const cfg = await initWithConsent();
+    const rec = cfg?.session_recording as Record<string, unknown> | undefined;
+    expect(rec?.maskAllInputs).toBe(true);
+  });
+
+  it('masks text marked sensitive, which is what covers rendered secrets', async () => {
+    // maskAllInputs does NOT cover a freshly generated MCP relay token: that is
+    // rendered as TEXT, not typed into an input. Same reasoning that pinned
+    // enableScreenshot:false on the Sentry feedback widget.
+    const cfg = await initWithConsent();
+    const rec = cfg?.session_recording as Record<string, unknown> | undefined;
+    expect(typeof rec?.maskTextSelector).toBe('string');
+    expect(rec?.maskTextSelector as string).toContain('ph-no-capture');
+  });
+
+  it('does not record or survey a visitor who has not accepted cookies', async () => {
+    // The gate that matters. initPostHog returns before init(), so neither
+    // feature can start -- assert on the absence of the CALL, not on config.
+    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
+    vi.stubEnv('NODE_ENV', 'production');
+    const mod = await import('@/lib/analytics/posthog');
+    mod.initPostHog();
+    expect(mockInit).not.toHaveBeenCalled();
+  });
+
+  it('leaves surveys enabled', async () => {
+    // Surveys need no opt-in config; they ship in the main bundle and are
+    // authored in the dashboard. This pins that nobody disables them by
+    // reflex while tuning the replay options next door.
+    const cfg = await initWithConsent();
+    expect(cfg?.disable_surveys).not.toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Non-vacuity of the replay text mask (#9973).
+//
+// `maskTextSelector` that matches NOTHING is a privacy control in name only --
+// it would sit in the config, read as coverage, and mask no pixel. So assert
+// the selector has at least one real subject in the app, and name it.
+// ---------------------------------------------------------------------------
+describe('the replay text mask actually covers a rendered secret', () => {
+  it('at least one component carries ph-no-capture on a credential render', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+
+    const file = join(process.cwd(), 'src/components/settings/ApiKeyManager.tsx');
+    const src = readFileSync(file, 'utf8');
+
+    // Executable occurrence: on a className, not merely mentioned in a comment
+    // (the class name appears in the rationale comment right above it).
+    const onClassName = /className="[^"]*\bph-no-capture\b[^"]*"/.test(src);
+    expect(onClassName).toBe(true);
+
+    // And that it is the element rendering the one-time key, not some other node.
+    const block = src.slice(src.indexOf('{newMcpKey}') - 400, src.indexOf('{newMcpKey}'));
+    expect(block).toMatch(/className="[^"]*\bph-no-capture\b/);
+  });
+});
