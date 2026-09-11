@@ -36,7 +36,7 @@
     "dompurify": ">=3.4.13",
     "esbuild": ">=0.28.2",
     "fast-xml-parser": ">=5.7.2",
-    "hono": "4.13.0",
+    "hono": ">=4.13.5",
     "js-cookie": ">=3.0.7",
     "@eslint/eslintrc": { "js-yaml": ">=4.3.2" },
     "gray-matter": { "js-yaml": ">=3.15.2" },
