@@ -393,6 +393,40 @@ f="$(mkfile v8-green.txt "$V8_CRASH_AFTER_GREEN_OUTPUT")"
 rc="$(run_gate 132 "$f" --coverage)"
 if [ "$rc" = "0" ]; then pass "--coverage: 132 after both phases complete → gate 0 (132 is not special-cased)"; else fail "--coverage: 132 after both phases → expected 0, got $rc"; fi
 
+# Large logs must not turn grep's early match into a printf SIGPIPE under
+# pipefail. Put evidence before several MiB of coverage rows so a pipe writer
+# cannot finish before grep exits. Assert the classification too: a failure
+# accidentally caught by the missing-summary fallback is not marker coverage.
+large_tail() {
+  awk 'BEGIN { for (i = 0; i < 50000; i++) print "src/coverage-row.ts | 100 | 100 | 100 | 100 |                         " }'
+}
+
+check_large_log() {
+  local label="$1" expected="$2" prefix="$3" suffix="$4" diagnostic="$5"
+  local fixture="$TMPDIR_T/large-output.txt" output rc
+  {
+    printf '%s\n' "$prefix"
+    large_tail
+    printf '%s\n' "$suffix"
+  } > "$fixture"
+  output="$(bash "$GATE" 124 "$fixture" --coverage 2>&1)"; rc=$?
+  if [ "$rc" = "$expected" ] && [[ "$output" != *"Broken pipe"* ]] \
+    && { { [ -z "$diagnostic" ] && [ -z "$output" ]; } \
+      || { [ -n "$diagnostic" ] && [[ "$output" == *"$diagnostic"* ]]; }; }; then
+    pass "$label"
+  else
+    fail "$label: expected rc=$expected diagnostic='$diagnostic', got rc=$rc output='$output'"
+  fi
+}
+
+check_large_log "large coverage output preserves passing evidence" 0 "$COVERAGE_PASS_OUTPUT" "" "::warning::"
+check_large_log "large output detects early test failure directly" 124 "$TESTFAIL_OUTPUT" "$COVERAGE_PASS_OUTPUT" ""
+check_large_log "large output detects early coverage failure" 124 "$COVERAGE_GLOBAL_OUTPUT" "$COVERAGE_PASS_OUTPUT" "coverage thresholds not met"
+check_large_log "large output detects late coverage failure" 124 "$COVERAGE_PASS_OUTPUT" "$COVERAGE_UNCOVERED_PERFILE_OUTPUT" "coverage thresholds not met"
+check_large_log "large output rejects unhandled errors after green tests" 124 "$COVERAGE_PASS_OUTPUT" "     Errors  2 errors" "reported unhandled errors"
+check_large_log "large output without summary fails closed" 124 "$TRUNCATED_OUTPUT" "" "no completed passing run"
+check_large_log "large output without coverage fails closed" 124 "$PASS_OUTPUT" "" "BEFORE the coverage report"
+
 # --- Call-site wiring pins -------------------------------------------------
 #
 # Cases 1-33 prove the gate adjudicates correctly when it is CALLED correctly.

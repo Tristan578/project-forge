@@ -118,13 +118,19 @@ if grep -qE "Test Files.*failed" <<< "$CLEAN"; then
   exit "$EXIT_CODE"
 fi
 
+# Vitest can pass every assertion but still fail on unhandled exceptions.
+# Its error summary is failure evidence even with a green test summary.
+if grep -qE "^[[:space:]]*Errors[[:space:]]+[1-9][0-9]* errors?([[:space:]]|$)" <<<"$CLEAN"; then
+  echo "::error::vitest reported unhandled errors — failing the build"
+  exit "$EXIT_CODE"
+fi
+
 # (2) A coverage threshold was not met → propagate (the #8598 fix). Matches BOTH
 #     vitest forms: the positive-% "Coverage for X does not meet ... threshold"
 #     and the negative-count "Uncovered X exceed ... threshold" — global and
 #     per-file variants alike. Missing form B would re-open #8598 for any repo
 #     (or future config) that sets a max-uncovered threshold.
-if printf '%s\n' "$CLEAN" \
-  | grep -qiE "coverage for .*does not meet .*threshold|uncovered .*exceed .*threshold"; then
+if grep -qiE "coverage for .*does not meet .*threshold|uncovered .*exceed .*threshold" <<< "$CLEAN"; then
   echo "::error::vitest coverage thresholds not met — failing the build (this was previously swallowed: #8598)"
   exit "$EXIT_CODE"
 fi
