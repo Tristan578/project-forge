@@ -13,13 +13,49 @@
  * TS7016, and nothing in CI ran that: both typecheck jobs are scoped to web/,
  * and the docs gate ran vitest only. Next.js type-checks during `next build`,
  * so the first thing to notice would have been the production docs deploy.
+ *
+ * SELF-CONTAINED ON PURPOSE — and this is the part that actually broke that
+ * deploy.
+ *
+ * This file used to open with `import type { AxeResults, RunOptions, Spec }
+ * from 'axe-core'`. Neither `jest-axe` nor `axe-core` is declared in
+ * apps/docs/package.json: they resolve from the workspace root during local
+ * development, which is exactly the "cannot see above itself" trap the
+ * paragraph above warns about. Vercel builds this app with
+ * `rootDirectory: apps/docs`, where those packages do not exist, so the import
+ * resolved to nothing, `AxeResults` became an error type, `results` collapsed
+ * to `any`, and `results.violations.map((v) => v.id)` failed `next build` with
+ * TS7006 — breaking the production docs deploy on four consecutive commits.
+ *
+ * A local `tsc --noEmit` cannot catch this, because locally those packages ARE
+ * resolvable. The only environment that sees the truth is the deploy root, so
+ * the declarations below borrow no types from outside this directory and
+ * describe only what this app actually calls.
  */
 
 declare module 'jest-axe' {
-  import type { AxeResults, RunOptions, Spec } from 'axe-core';
+  /** One accessibility violation — only the fields this app reads. */
+  interface AxeViolation {
+    id: string;
+    impact?: string | null;
+    description?: string;
+    help?: string;
+    helpUrl?: string;
+    nodes?: unknown[];
+  }
 
-  interface AxeOptions extends RunOptions {
-    globalOptions?: Spec;
+  interface AxeResults {
+    violations: AxeViolation[];
+    passes?: unknown[];
+    incomplete?: unknown[];
+    inapplicable?: unknown[];
+  }
+
+  interface AxeOptions {
+    rules?: Record<string, { enabled: boolean }>;
+    runOnly?: unknown;
+    globalOptions?: unknown;
+    [key: string]: unknown;
   }
 
   export function axe(
