@@ -1267,7 +1267,9 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       needs.quality-gates.result == 'success' &&
-      (needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-mcp == 'true')
+      (needs.ci-gate.outputs.needs-web == 'true' ||
+       needs.ci-gate.outputs.needs-mcp == 'true' ||
+       needs.ci-gate.outputs.needs-ci == 'true')
     runs-on: ubuntu-latest
     # Vercel builds remotely, so the CLI can legitimately wait longer than the
     # local Next.js build job. Recent healthy uploads were still building when
