@@ -1,80 +1,98 @@
 /**
- * Refuse `drizzle-kit generate` while the snapshot history is incomplete (#9979).
+ * Refuse `drizzle-kit generate` when the latest migration has no snapshot (#9983).
  *
- * THE TRAP THIS CLOSES
- * --------------------
- * `drizzle-kit generate` diffs `schema.ts` against the **latest snapshot** in
- * `drizzle/meta/`. This repository has 13 journal entries and, at the time of
- * writing, a single snapshot: `0000_snapshot.json`. So the next `generate` would
- * diff today's schema against the state as of `0000` and emit a migration that
- * re-creates twelve migrations' worth of tables, columns, types and indexes.
- * Applied to a database that already has them, that is destructive.
+ * WHAT DRIZZLE-KIT ACTUALLY DOES
+ * ------------------------------
+ * `generate` diffs `schema.ts` against the **latest snapshot** in `drizzle/meta/`.
+ * Only that one matters. Intermediate snapshots are history; their absence
+ * changes nothing about the next migration drizzle-kit emits.
  *
- * This was harmless while `cd.yml` applied schema changes with `drizzle-kit
- * push`, because nobody needed `generate` — push diffed `schema.ts` onto the
- * database directly. Moving production to `migrate` (#9979) makes `generate` the
- * only way to author a schema change, which turns a dormant hazard into the
- * default path. Hence this guard, landing in the same change.
+ * THE ORIGINAL BUG (#9979). This repository had exactly one snapshot,
+ * `0000_snapshot.json`, against 13 journal entries — so the latest was twelve
+ * migrations stale. Running `generate` did not merely emit a destructive diff:
+ * it reached `promptNamedWithSchemasConflict` trying to resolve phantom renames,
+ * `render10` threw for want of a TTY, and **drizzle-kit still exited 0** having
+ * written nothing. Silent success, no migration, same failure shape as the
+ * `drizzle-kit push` this project moved off.
  *
- * The `docs/decisions/` ADR on push-vs-migrate named exactly this as one of
- * three conditions for revisiting that decision. The other two are now met; this
- * one is not, and repairing it means reconstructing snapshots from history — real,
- * separable work, tracked separately.
+ * WHY THIS GUARD IS NOT COUNT PARITY ANY MORE
+ * -------------------------------------------
+ * Its first version required one snapshot per journal entry. That was the wrong
+ * property, and the repair proved it: #9983 squashed the history to a single
+ * `0012_snapshot.json` describing the current schema, leaving 2 snapshots for 13
+ * entries. `generate` then emitted a correct one-line diff — while the parity
+ * check would still have refused. A guard that blocks a healthy repository gets
+ * overridden by reflex, and then it guards nothing.
  *
- * WHAT "COMPLETE" MEANS: one snapshot per journal entry. drizzle-kit writes
- * `NNNN_snapshot.json` alongside each generated migration, so a healthy repo has
- * exactly as many snapshots as entries.
+ * What matters is that the LAST journal entry has a snapshot beside it.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const GENERATE_CONFIRM_FLAG = '--confirm=GENERATE_WITH_INCOMPLETE_SNAPSHOTS';
+export const GENERATE_CONFIRM_FLAG = '--confirm=GENERATE_WITH_STALE_SNAPSHOT';
 
 export interface GenerateGuardState {
-  journalEntryCount: number;
-  snapshotCount: number;
+  /** `idx` of the newest journal entry, or `null` when the journal is unreadable. */
+  latestEntryIdx: number | null;
+  /** Numeric prefixes of every `NNNN_snapshot.json` present. */
+  snapshotIndices: number[];
   confirmed: boolean;
 }
 
 export function assertGenerateSafe(state: GenerateGuardState): void {
-  const { journalEntryCount, snapshotCount, confirmed } = state;
+  const { latestEntryIdx, snapshotIndices, confirmed } = state;
 
-  // A gate that scans nothing is not a gate (lesson 9).
-  if (journalEntryCount === 0) {
+  // A gate that scans nothing is not a gate (lesson 9). An unreadable or empty
+  // journal must fail rather than read as "nothing to check".
+  if (latestEntryIdx === null) {
     throw new Error(
-      'Refusing to generate: the migration journal is empty, so there is nothing ' +
-        'to diff against. This almost certainly means drizzle/meta/_journal.json ' +
-        'could not be read.',
+      'Refusing to generate: drizzle/meta/_journal.json is empty or unreadable, ' +
+        'so the snapshot state cannot be judged.',
     );
   }
 
-  if (snapshotCount >= journalEntryCount) return;
+  if (snapshotIndices.includes(latestEntryIdx)) return;
 
   if (confirmed) return;
 
+  const newest = snapshotIndices.length
+    ? String(Math.max(...snapshotIndices)).padStart(4, '0')
+    : 'none';
   throw new Error(
-    `Refusing to generate: drizzle/meta/ holds ${snapshotCount} snapshot(s) for ` +
-      `${journalEntryCount} journal entries. drizzle-kit diffs against the LATEST ` +
-      'snapshot, so the migration it emits would re-create every object added ' +
-      `since then — see #9979. Repair the snapshot history first. To override ` +
-      `deliberately (you will be reviewing the emitted SQL by hand), re-run with ` +
-      `${GENERATE_CONFIRM_FLAG}.`,
+    `Refusing to generate: the newest journal entry is ${String(latestEntryIdx).padStart(4, '0')} ` +
+      `but the newest snapshot is ${newest}. drizzle-kit diffs against the LATEST ` +
+      'snapshot, so it would try to re-create every object added since then — and ' +
+      'on a large gap it stalls on an interactive rename prompt and exits 0 having ' +
+      'written nothing (#9983). Generate a snapshot for the latest migration first. ' +
+      `To override deliberately (you will be reviewing the emitted SQL by hand), ` +
+      `re-run with ${GENERATE_CONFIRM_FLAG}.`,
   );
 }
 
-/** Read the on-disk counts. Exported so the CLI and tests share one reader. */
+/** Read the on-disk state. Exported so the CLI and tests share one reader. */
 export function readSnapshotState(metaDir: string): {
-  journalEntryCount: number;
-  snapshotCount: number;
+  latestEntryIdx: number | null;
+  snapshotIndices: number[];
 } {
-  const journal = JSON.parse(
-    readFileSync(join(metaDir, '_journal.json'), 'utf8'),
-  ) as { entries: unknown[] };
-  const snapshotCount = readdirSync(metaDir).filter((f) =>
-    /^\d+_snapshot\.json$/.test(f),
-  ).length;
-  return { journalEntryCount: journal.entries.length, snapshotCount };
+  let latestEntryIdx: number | null = null;
+  try {
+    const journal = JSON.parse(
+      readFileSync(join(metaDir, '_journal.json'), 'utf8'),
+    ) as { entries: Array<{ idx: number }> };
+    if (Array.isArray(journal.entries) && journal.entries.length > 0) {
+      latestEntryIdx = Math.max(...journal.entries.map((e) => e.idx));
+    }
+  } catch {
+    latestEntryIdx = null;
+  }
+
+  const snapshotIndices = readdirSync(metaDir)
+    .map((f) => /^(\d+)_snapshot\.json$/.exec(f))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => Number(m[1]));
+
+  return { latestEntryIdx, snapshotIndices };
 }
 
 // --- CLI -------------------------------------------------------------------
@@ -86,14 +104,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       'drizzle',
       'meta',
     );
-    const { journalEntryCount, snapshotCount } = readSnapshotState(metaDir);
+    const { latestEntryIdx, snapshotIndices } = readSnapshotState(metaDir);
     assertGenerateSafe({
-      journalEntryCount,
-      snapshotCount,
+      latestEntryIdx,
+      snapshotIndices,
       confirmed: process.argv.includes(GENERATE_CONFIRM_FLAG),
     });
     console.log(
-      JSON.stringify({ generateGuard: 'passed', journalEntryCount, snapshotCount }),
+      JSON.stringify({ generateGuard: 'passed', latestEntryIdx, snapshotIndices }),
     );
   } catch (error: unknown) {
     console.error(error instanceof Error ? error.message : String(error));
