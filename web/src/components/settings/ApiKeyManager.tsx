@@ -261,7 +261,14 @@ export function ApiKeyManager() {
               Save this key now — it won&apos;t be shown again!
             </p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 rounded bg-zinc-950 px-2 py-1 text-xs text-zinc-200">
+              {/*
+                `ph-no-capture` masks this element in PostHog session replays
+                (#9973). It is load-bearing: this is the ONE render of the full
+                API key, and `maskAllInputs` does not cover it because the key
+                is TEXT, not an input value. Removing the class silently starts
+                recording a live credential.
+              */}
+              <code className="ph-no-capture flex-1 rounded bg-zinc-950 px-2 py-1 text-xs text-zinc-200">
                 {newMcpKey}
               </code>
               <button onClick={copyKey} className="text-yellow-400 hover:text-yellow-300">

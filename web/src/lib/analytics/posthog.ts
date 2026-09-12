@@ -63,6 +63,30 @@ export function initPostHog(): void {
     asset_host: POSTHOG_ASSET_ORIGIN,
     person_profiles: 'identified_only',
     capture_pageview: false, // We handle page views manually via Next.js router
+
+    // Session replay (#9973). Stated rather than left to the SDK default, for
+    // the same reason `asset_host` is: a default is a bet on library internals,
+    // and this one decides whether we record users at all.
+    //
+    // CONSENT IS ALREADY HANDLED. `initPostHog` returns above unless
+    // `hasConsented()`, so recording cannot begin before the visitor accepts
+    // cookies -- there is deliberately no second gate here that could drift out
+    // of step with the first.
+    disable_session_recording: false,
+    session_recording: {
+      // Defaults to true today. Stating it means a future default flip cannot
+      // quietly start capturing keystrokes.
+      maskAllInputs: true,
+      // maskAllInputs does NOT cover a rendered secret. A freshly generated MCP
+      // relay token is TEXT, not an input value, so it needs an explicit text
+      // mask -- the same hazard that pinned `enableScreenshot: false` on the
+      // Sentry feedback widget, where a screenshot could capture one.
+      //
+      // `.ph-no-capture` is posthog-js's own convention: the element is replaced
+      // by a same-size block on playback. Add the class to any surface that
+      // renders a credential.
+      maskTextSelector: '.ph-no-capture, [data-ph-no-capture]',
+    },
     loaded: () => {
       initialized = true;
     },
