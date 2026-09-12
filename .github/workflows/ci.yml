@@ -1306,19 +1306,98 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
+      - name: Create a Neon branch for this preview
+        # BRANCH PER PREVIEW (#9972). Production schema drift (#9969) reached
+        # production because no environment ever applied the migration set to a
+        # database shaped like production before the deploy did. A preview that
+        # runs its own migrations against its own copy-on-write branch turns that
+        # from a production discovery into a PR-time failure.
+        #
+        # Unblocked by #9969's baseline: a Neon branch clones
+        # `drizzle.__drizzle_migrations` from its parent, so before production
+        # had a journal every branch would have inherited the broken state and
+        # failed its migrate step on arrival.
+        #
+        # The name is derived from the PR number and nothing else, so the
+        # cleanup workflow can find it without carrying state between runs.
+        id: neon-branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # ZERO-PADDED, and this is load-bearing. neon-branch.sh's prune
+          # matches by `startswith`, so an unpadded "preview-pr-1" is a prefix of
+          # "preview-pr-12" and pruning PR 1 would delete the branches of PRs
+          # 12 through 19. Fixed-width names are all the same length, so no name
+          # can prefix another and startswith degenerates to equality.
+          name="preview-pr-$(printf '%06d' "$PR_NUMBER")"
+          uri_file="${RUNNER_TEMP}/preview-db-uri"
+
+          # A push to an open PR replaces its branch rather than accumulating
+          # one per push: create does not dedupe names, and the free allowance is
+          # 10 branches. Retention 0 means "everything with this exact name".
+          echo "$(bash scripts/neon-branch.sh prune "$name" 0 2>&1 || true)"
+
+          out="$(bash scripts/neon-branch.sh create "$name" --endpoint --uri-out "$uri_file")"
+          echo "$out"
+          branch_id="$(printf '%s\n' "$out" | sed -nE 's/.*(br-[a-z0-9-]+).*/\1/p' | head -1)"
+          if [ -z "$branch_id" ]; then
+            echo "::error::could not read the branch id from neon-branch.sh output — refusing to deploy a preview that would silently use the shared staging database."
+            exit 1
+          fi
+          echo "branch_id=${branch_id}" >> "$GITHUB_OUTPUT"
+          echo "uri_file=${uri_file}" >> "$GITHUB_OUTPUT"
+          echo "Neon preview branch: ${name} (${branch_id})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply migrations to the preview branch
+        # THE WHOLE POINT. A migration that cannot apply must fail the PR here,
+        # not surface in production days later. `npm run db:migrate` is the same
+        # command cd.yml runs against production: the --guard-migrate preflight
+        # followed by scripts/apply-migrations.ts.
+        working-directory: web
+        env:
+          URI_FILE: ${{ steps.neon-branch.outputs.uri_file }}
+        run: |
+          set -euo pipefail
+          DATABASE_URL="$(cat "$URI_FILE")"
+          export DATABASE_URL
+          npm run db:migrate
+
+      - name: Verify the preview schema matches the migration set
+        # Same detector cd.yml runs post-deploy (#9980). A migrate that exits 0
+        # having converged on the wrong shape is caught here rather than by
+        # whoever clicks the preview link.
+        working-directory: web
+        env:
+          URI_FILE: ${{ steps.neon-branch.outputs.uri_file }}
+        run: |
+          set -euo pipefail
+          DATABASE_URL="$(cat "$URI_FILE")"
+          export DATABASE_URL
+          npm run db:drift
+
       - name: Deploy preview
         id: deploy
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          URI_FILE: ${{ steps.neon-branch.outputs.uri_file }}
         run: |
           # Deploy directly instead of build+deploy-prebuilt.
           # vercel build uses child_process.spawn('npm') which fails on GHA
           # runners because setup-node's PATH isn't inherited by spawned
           # processes. vercel deploy builds remotely on Vercel infrastructure
           # where npm is always available.
-          url=$(vercel deploy --token="$VERCEL_TOKEN")
+          # --env sets RUNTIME environment on this deployment only, so the
+          # preview reads its own Neon branch instead of the shared staging
+          # database the Vercel project's preview env points at. Without it the
+          # branch above would be created, migrated, and then ignored -- a gate
+          # that runs and proves nothing.
+          DATABASE_URL="$(cat "$URI_FILE")"
+          url=$(vercel deploy --token="$VERCEL_TOKEN" --env DATABASE_URL="$DATABASE_URL")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Preview deployment: $url" >> "$GITHUB_STEP_SUMMARY"
 
