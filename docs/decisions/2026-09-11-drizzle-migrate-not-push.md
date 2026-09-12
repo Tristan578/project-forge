@@ -41,19 +41,28 @@ which is why `CONCURRENTLY` — illegal inside a transaction — applies cleanly
 
 That was the first end-to-end test this migration chain has ever had.
 
-### Condition: "`drizzle/meta/` is repaired so `generate` produces correct diffs" — NOT MET, now guarded
+### Condition: "`drizzle/meta/` is repaired so `generate` produces correct diffs" — MET as of 2026-09-11 (#9983)
 
-`drizzle/meta/` still holds one snapshot for 13 journal entries. `drizzle-kit generate`
-diffs against the latest snapshot, so the next one would emit a migration re-creating
-twelve migrations' worth of objects.
+Originally unmet: `drizzle/meta/` held one snapshot for 13 journal entries, and
+`drizzle-kit generate` diffs against the latest snapshot.
 
-This did not matter while `push` owned production, because nobody needed `generate`.
-Moving to `migrate` makes `generate` the only way to author a schema change, which turns a
-dormant hazard into the default path. So `npm run db:generate` now runs
-`scripts/assert-generate-safe.ts` first, which refuses while snapshots lag the journal and
-names an override flag for someone who intends to review the emitted SQL by hand.
+Measured while repairing it, the failure was worse than "emits a destructive diff".
+`generate` reached `promptNamedWithSchemasConflict` resolving phantom renames, `render10`
+threw for want of a TTY, and **drizzle-kit exited 0 having written nothing** — a silent
+no-op, the same shape as the `push` this ADR moved off.
 
-Repairing the snapshot history is separable work, tracked separately.
+Repaired by squashing: `0012_snapshot.json` now describes the current schema, chained by
+`prevId` to the original `0000`. Intermediate snapshots are history and drizzle-kit never
+reads them. Proven rather than assumed — adding one nullable column to `schema.ts` and
+running `generate` emits exactly `ALTER TABLE "waitlist_signups" ADD COLUMN "probe_tmp"
+text;` and nothing else.
+
+`scripts/assert-generate-safe.ts` is retained, with its test rewritten. Its first version
+required one snapshot per journal entry, which the repair proved to be the wrong property —
+the squashed history is healthy with 2 snapshots against 13 entries, and parity would have
+refused it. It now asserts what drizzle-kit actually depends on: **the latest journal entry
+has a snapshot beside it.** That can regress the moment someone commits a migration without
+one, so the guard stays.
 
 ## The correction the old ADR could not have made
 
@@ -122,7 +131,8 @@ first line, ordered before `graph_nodes`.
 
 ## Revisit when
 
-- the snapshot history is repaired — then delete `assert-generate-safe.ts` and its test,
+- ~~the snapshot history is repaired~~ — done 2026-09-11 (#9983); the guard was kept and
+  re-pointed at the latest-entry property rather than deleted,
 - the dry run is converted to rehearse `migrate`,
 - `drizzle-kit migrate` gains a working neon path — then `apply-migrations.ts` could go,
   though the explicit error reporting is worth keeping regardless.
