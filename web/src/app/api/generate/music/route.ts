@@ -1,22 +1,33 @@
 export const maxDuration = 180; // API_MAX_DURATION_HEAVY_GEN_S
 
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
-import { SunoClient } from '@/lib/generate/sunoClient';
+import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 
+/**
+ * Music generation (PF-1301 / #9522). Routes to ElevenLabs `/v1/music`, which
+ * returns the audio bytes directly — so this route resolves SYNCHRONOUSLY and
+ * returns `audioBase64` inline, exactly like the sibling ElevenLabs `sfx` and
+ * `voice` routes. There is no provider task id to poll: `GenerateMusicDialog`
+ * and the chat `generate_music` tool both consume the inline `audioBase64`
+ * branch and attach the track immediately.
+ *
+ * The async `/api/generate/music/status` route and `pollProviderStatus('music')`
+ * are kept as defensive terminal-on-first-poll paths (the client contract still
+ * exposes them), but nothing enqueues a music job for polling now — see those
+ * files. The Suno provider is gone; `PLATFORM_ELEVENLABS_KEY` covers all three
+ * audio capabilities.
+ */
 const POST_impl = createGenerationHandler<
   { prompt: string; durationSeconds: number; instrumental: boolean },
-  { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
+  { audioBase64: string; durationSeconds: number; provider: string }
 >({
   route: '/api/generate/music',
   // Heavy route: matches `export const maxDuration` above so the generation
   // agent derives its step-timeout cap against the real 180s budget.
   maxDurationSeconds: 180,
   provider: DB_PROVIDER.music,
-  // Declared unavailable in UNAVAILABLE_CAPABILITIES until #9522 lands: every
-  // request is refused 503 before any token is deducted (#9117).
-  capability: 'music',
   operation: 'music_generation',
   rateLimitKey: 'gen-music',
   successStatus: 201,
@@ -44,28 +55,25 @@ const POST_impl = createGenerationHandler<
       },
     };
   },
+  cacheKeyParams: (params) => ({
+    prompt: params.prompt,
+    durationSeconds: params.durationSeconds,
+    instrumental: params.instrumental,
+  }),
   execute: async (params, apiKey, ctx) => {
-    const client = new SunoClient({ apiKey });
-    const result = await client.createMusic({
+    const client = new ElevenLabsClient({ apiKey });
+    const result = await client.generateMusic({
       prompt: params.prompt,
-      durationSeconds: params.durationSeconds,
-      instrumental: params.instrumental,
+      musicLengthMs: params.durationSeconds * 1000,
+      forceInstrumental: params.instrumental,
       signal: ctx.abortSignal,
     });
 
     return {
-      jobId: result.taskId,
+      audioBase64: result.audioBase64,
+      durationSeconds: result.durationSeconds,
       provider: DB_PROVIDER.music,
-      status: 'pending',
-      estimatedSeconds: 60,
-      usageId: ctx.usageId,
     };
-  },
-  // Durable server-side completion + refund (PF-906). Dormant unless QStash set.
-  asyncJob: {
-    type: 'music',
-    providerJobId: (result) => result.jobId,
-    estimatedSeconds: 60,
   },
 });
 

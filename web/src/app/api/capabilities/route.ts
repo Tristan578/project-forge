@@ -31,7 +31,6 @@ const ENV_VAR_PROVIDER_NAMES: Record<string, string> = {
   [PLATFORM_KEY_ENV.openai]: 'OpenAI',
   [PLATFORM_KEY_ENV.meshy]: 'Meshy',
   [PLATFORM_KEY_ENV.elevenlabs]: 'ElevenLabs',
-  [PLATFORM_KEY_ENV.suno]: 'Suno',
   [PLATFORM_KEY_ENV.replicate]: 'Replicate',
   [PLATFORM_KEY_ENV.removebg]: 'remove.bg',
   [PLATFORM_KEY_ENV.hyper3d]: 'Hyper3D',

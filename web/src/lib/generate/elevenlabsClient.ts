@@ -28,6 +28,17 @@ export interface GenerateVoiceParams {
   signal?: AbortSignal;
 }
 
+export interface GenerateMusicParams {
+  prompt: string;
+  /** Track length in milliseconds. ElevenLabs accepts 3000–600000. */
+  musicLengthMs?: number;
+  /** When true, request an instrumental (no vocals) track. */
+  forceInstrumental?: boolean;
+  /** ElevenLabs music model: 'music_v1' (default) or 'music_v2'. */
+  modelId?: string;
+  signal?: AbortSignal;
+}
+
 export interface AudioResult {
   audioBase64: string;
   durationSeconds: number;
@@ -105,6 +116,50 @@ export class ElevenLabsClient {
     return {
       audioBase64,
       durationSeconds,
+    };
+  }
+
+  /**
+   * Generate a music track (PF-1301 / #9522 — replaces Suno).
+   *
+   * ElevenLabs `POST /v1/music` returns the audio bytes directly (no async task
+   * id), so this resolves to an {@link AudioResult} exactly like `generateSfx`
+   * and `generateVoice`: the caller persists/attaches the base64 inline rather
+   * than polling a status route. `xi-api-key` is the same header/credential the
+   * SFX and voice calls use — one key now covers all three audio capabilities.
+   */
+  async generateMusic(params: GenerateMusicParams): Promise<AudioResult> {
+    // ElevenLabs bounds: 3000–600000 ms. The route validates 15–120s upstream;
+    // clamp defensively so a stray value can never post an out-of-range length.
+    const requestedMs = params.musicLengthMs ?? 30000;
+    const musicLengthMs = Math.min(600000, Math.max(3000, Math.round(requestedMs)));
+
+    const response = await fetch(`${this.baseUrl}/music`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': this.config.apiKey,
+      },
+      body: JSON.stringify({
+        prompt: params.prompt,
+        music_length_ms: musicLengthMs,
+        force_instrumental: params.forceInstrumental ?? true,
+        model_id: params.modelId ?? 'music_v1',
+      }),
+      signal: composeAbortSignal(params.signal, 180000),
+    });
+
+    if (!response.ok) {
+      const error = await response.text().catch(() => 'Unknown error');
+      throw new Error(`ElevenLabs Music API error (${response.status}): ${error}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
+
+    return {
+      audioBase64,
+      durationSeconds: Math.round(musicLengthMs / 1000),
     };
   }
 }
