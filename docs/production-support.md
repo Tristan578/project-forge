@@ -71,7 +71,7 @@ Vercel Edge (CDN, routing, headers)
   |       +---> Anthropic API          -- AI chat, scene generation
   |       |       (ANTHROPIC_API_KEY)
   |       |
-  |       +---> Meshy / ElevenLabs         -- AI asset generation (music: unavailable, #9522)
+  |       +---> Meshy / ElevenLabs         -- AI asset generation (music via ElevenLabs, #9522)
   |       |
   |       +---> Cloudflare R2          -- asset upload/download (S3 API)
   |       |       (ASSET_R2_ACCESS_KEY_ID, ASSET_R2_SECRET_ACCESS_KEY, ASSET_BUCKET_NAME)
