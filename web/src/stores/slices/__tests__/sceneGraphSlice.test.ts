@@ -337,6 +337,27 @@ describe('sceneGraphSlice', () => {
 
       expect(store.getState().sceneGraph.completionMode).toBeUndefined();
     });
+
+    // Devin review, PR #9999: without an explicit scene-boundary reset, this
+    // fallback alone cannot tell "engine rebuilt the SAME scene" apart from
+    // "a DIFFERENT scene just replaced this one" — both arrive with no
+    // completionMode key. transformEvents.ts's SCENE_LOADED handler is that
+    // boundary and clears the mode before the incoming scene's first
+    // SCENE_GRAPH_UPDATE; this test reproduces that sequence end-to-end.
+    it('should not leak a previous scene mode across a load/new-scene boundary reset', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
+      // The SCENE_LOADED boundary (transformEvents.ts) clears the mode via a
+      // raw store write, deliberately NOT setFullGraph's `??` fallback — `??`
+      // cannot tell an explicitly-reset `completionMode: undefined` apart
+      // from an absent key, so routing the reset through setFullGraph would
+      // just fall back to the outgoing scene's 'sandbox' again.
+      store.setState({ sceneGraph: { ...store.getState().sceneGraph, completionMode: undefined } });
+      // The incoming scene's own SCENE_GRAPH_UPDATE, which — like every
+      // engine payload — carries no completionMode key at all.
+      store.getState().setFullGraph({ nodes: {}, rootIds: [] });
+
+      expect(store.getState().sceneGraph.completionMode).toBeUndefined();
+    });
   });
 
   describe('addNode', () => {

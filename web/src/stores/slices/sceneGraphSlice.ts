@@ -128,12 +128,21 @@ export const createSceneGraphSlice: StateCreator<
     // SCENE_GRAPH_UPDATE handler in transformEvents.ts — the only production
     // caller of this action) hands back a payload with the key entirely
     // absent. Falling back to the previous value keeps an already-authored
-    // mode alive across incremental edits instead of silently reverting a
-    // scene to the `win` default on the next entity change. A genuine scene
-    // load that means to change the mode (including resetting a
-    // legacy/undefined one) must pass `completionMode` explicitly on `graph`
-    // — that write path is the persistence migration tracked as a child of
-    // #9901, not this shared-contract slice.
+    // mode alive across an INCREMENTAL rebuild of the same scene, instead of
+    // silently reverting it to the `win` default on the next entity change.
+    //
+    // This fallback must never be the thing that decides a scene BOUNDARY,
+    // because it cannot tell "same scene, engine rebuilt the graph" apart
+    // from "different scene just replaced this one" — both arrive as the
+    // identical shape (no `completionMode` key). That distinction is made
+    // one layer up: the SCENE_LOADED handler in transformEvents.ts (the
+    // load_scene / new_scene boundary, emitted before the engine's first
+    // SCENE_GRAPH_UPDATE for the incoming scene) clears
+    // `sceneGraph.completionMode` explicitly, so `get().sceneGraph
+    // .completionMode` already reads `undefined` by the time this runs for
+    // the new scene. A genuine scene load that means to SET a mode still
+    // wins here too — pass `completionMode` explicitly on `graph` — that
+    // write path is the persistence migration tracked as a child of #9901.
     const completionMode = graph.completionMode ?? get().sceneGraph.completionMode;
     set({ sceneGraph: { ...graph, completionMode }, nodeCount: Object.keys(graph.nodes).length });
   },

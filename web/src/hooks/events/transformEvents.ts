@@ -220,6 +220,18 @@ export function handleTransformEvent(
         // user clicks each entity in turn. Empty for `new_scene`, which is
         // correct — an empty scene has no audio.
         entityAudio: takeStagedSceneAudio(),
+        // completionMode (#9901) is frontend-only — the engine's
+        // SceneGraphData never carries it, so setFullGraph's fallback to the
+        // PREVIOUS mode (sceneGraphSlice.ts) exists precisely to survive an
+        // in-place incremental rebuild of the SAME scene. SCENE_LOADED is the
+        // one unambiguous "a different scene is replacing this one" boundary
+        // — new_scene and a real load both emit it — so it is the one place
+        // that must clear the mode explicitly rather than let it leak from
+        // whatever scene was open before. The SCENE_GRAPH_UPDATE that follows
+        // then starts from `undefined` and correctly stays there (legacy
+        // default) until the persisted-mode write path (child of #9901) has
+        // something to set. Devin review, PR #9999.
+        sceneGraph: { ...useEditorStore.getState().sceneGraph, completionMode: undefined },
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context
