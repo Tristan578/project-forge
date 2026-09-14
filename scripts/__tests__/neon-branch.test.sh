@@ -861,10 +861,20 @@ real_jq="$(command -v jq)"
 } > "$CRJQ_DIR/jq"
 chmod +x "$CRJQ_DIR/jq"
 cr="$(printf '\r')"
-case "$(printf '"x"' | PATH="$CRJQ_DIR:$PATH" jq -r .)" in
-  *"$cr"*) pass "the CRLF-jq fixture really emits a CR (the case below cannot pass vacuously)" ;;
-  *) fail "the CRLF-jq fixture emits no CR — the normalisation case below would be vacuous" ;;
-esac
+# Prove it the way the case below consumes it: a fresh `bash` started through
+# `env` with the wrapper first on PATH (run_helper_env's exact shape), reading
+# the bytes through a PIPE and od's rendering rather than a command
+# substitution. Two Windows quirks made the first cut of this guard trip while
+# the case it guards was genuinely exercised: Git Bash's `$(...)` strips a
+# trailing carriage return, so a one-line capture can never show one (which is
+# also why the single-value jq captures elsewhere never exposed the bug and
+# only the multi-row `list` output did), and a `PATH=... jq` prefix in the
+# suite's own shell did not resolve to the wrapper the child bash resolved to.
+if env PATH="$CRJQ_DIR:$PATH" bash -c 'echo "\"x\"" | jq -r .' | od -c | grep -q '\\r'; then
+  pass "the CRLF-jq fixture really emits a CR (the case below cannot pass vacuously)"
+else
+  fail "the CRLF-jq fixture emits no CR — the normalisation case below would be vacuous"
+fi
 stub_reset
 stub_status 1 200
 stub_body 1 <<'EOF'
