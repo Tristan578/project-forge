@@ -32,6 +32,7 @@
  */
 
 import type { AudioData } from '@/stores/slices/types';
+import { AUDIO_CLIP_DOCUMENT_VERSION, type AudioClipDocument } from './audioClipDocument';
 
 /**
  * Mirrors `impl Default for AudioData` in `engine/src/core/audio.rs`.
@@ -128,6 +129,103 @@ export function parseSceneAudio(json: string): Record<string, AudioData> {
     audio[entityId] = readAudioData(audioData as Record<string, unknown>);
   }
   return audio;
+}
+
+// ---------------------------------------------------------------------------
+// Clip documents (trim/fade/gain/loop) — additive, backward-compatible.
+//
+// A scene entity MAY carry `audioData.clip`, the persisted `AudioClipDocument`
+// describing how its source is trimmed/faded/gained/looped (#9903). It is read
+// and written entirely separately from `AudioData` above, which keeps mirroring
+// the Rust struct byte-for-byte. An old manifest has no `clip` key, so it reads
+// back as "no clip edits" and round-trips unchanged — the same fallback the
+// existing `loopAudio`/`readBoolean` pattern gives every other field.
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a persisted clip document defensively. Returns `null` — meaning "no clip
+ * edits, play the source as-is" — for an absent, malformed, or degenerate clip,
+ * so a scene file can never inject a corrupt window. A clip is adopted only when
+ * it names a source and has a real (`end > start`) trim window; every numeric
+ * field is validated with the same `Number.isFinite` guard as `AudioData`.
+ */
+export function readClipDocument(raw: unknown): AudioClipDocument | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+
+  if (typeof r.sourceAssetId !== 'string' || r.sourceAssetId.length === 0) return null;
+
+  const trimStartSec = readNumber(r.trimStartSec, 0);
+  const trimEndSec = readNumber(r.trimEndSec, Number.NaN);
+  // A window that is missing, reversed or empty is not a usable edit — drop it
+  // rather than fabricate a duration we do not have.
+  if (!Number.isFinite(trimEndSec) || trimEndSec <= trimStartSec) return null;
+
+  const loopStartSec = readNumber(r.loopStartSec, trimStartSec);
+  const loopEndSec = readNumber(r.loopEndSec, trimEndSec);
+
+  return {
+    version: readNumber(r.version, AUDIO_CLIP_DOCUMENT_VERSION),
+    sourceAssetId: r.sourceAssetId,
+    sourceHash: typeof r.sourceHash === 'string' ? r.sourceHash : '',
+    trimStartSec,
+    trimEndSec,
+    gainDb: readNumber(r.gainDb, 0),
+    fadeInSec: Math.max(0, readNumber(r.fadeInSec, 0)),
+    fadeOutSec: Math.max(0, readNumber(r.fadeOutSec, 0)),
+    loopStartSec,
+    loopEndSec,
+  };
+}
+
+/**
+ * The plain object to embed under `audioData.clip` when serializing a scene.
+ * Round-trips exactly through {@link readClipDocument}.
+ */
+export function serializeClipDocument(doc: AudioClipDocument): Record<string, number | string> {
+  return {
+    version: doc.version,
+    sourceAssetId: doc.sourceAssetId,
+    sourceHash: doc.sourceHash,
+    trimStartSec: doc.trimStartSec,
+    trimEndSec: doc.trimEndSec,
+    gainDb: doc.gainDb,
+    fadeInSec: doc.fadeInSec,
+    fadeOutSec: doc.fadeOutSec,
+    loopStartSec: doc.loopStartSec,
+    loopEndSec: doc.loopEndSec,
+  };
+}
+
+/**
+ * Pull `entityId → AudioClipDocument` out of a serialized scene, reading each
+ * entity's `audioData.clip`. Never throws (same contract as `parseSceneAudio`);
+ * a scene with no clips returns an empty map.
+ */
+export function parseSceneClipDocuments(json: string): Record<string, AudioClipDocument> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== 'object' || parsed === null) return {};
+
+  const entities = (parsed as { entities?: unknown }).entities;
+  if (!Array.isArray(entities)) return {};
+
+  const clips: Record<string, AudioClipDocument> = {};
+  for (const entity of entities) {
+    if (typeof entity !== 'object' || entity === null) continue;
+    const { entityId, audioData } = entity as { entityId?: unknown; audioData?: unknown };
+    if (typeof entityId !== 'string' || entityId.length === 0) continue;
+    if (entityId.length > MAX_ENTITY_ID_LENGTH) continue;
+    if (RESERVED_ENTITY_IDS.has(entityId)) continue;
+    if (typeof audioData !== 'object' || audioData === null) continue;
+    const clip = readClipDocument((audioData as Record<string, unknown>).clip);
+    if (clip) clips[entityId] = clip;
+  }
+  return clips;
 }
 
 /** Hold a scene's audio until the engine confirms the load. */
