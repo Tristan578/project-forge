@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import {
   validateObservation,
   validateMetricValue,
@@ -6,7 +6,6 @@ import {
   deriveMetricValue,
 } from '../validator';
 import { FORMULA_VERSIONS } from '../schema';
-import type { Observation } from '../types';
 
 /** A well-formed completeness observation (4 of 5 verified). */
 function baseCompletenessObservation(): Record<string, unknown> {
@@ -261,12 +260,23 @@ describe('observatory/validator — half-open window boundaries', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('narrows the returned type so a measured value exposes its numeric value', () => {
+  it('narrows the returned type so ONLY a measured value exposes a numeric value', () => {
     const result = deriveMetricValue(baseCompletenessObservation());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Type-narrowing smoke check: the Observation type is importable and used.
-    const asObservation: Observation | null = null;
-    expect(asObservation).toBeNull();
+    // The MetricValue union keys `value` on `state`: `measured` carries a
+    // `number`, every other branch narrows `value` to `null`. Assert BOTH the
+    // compile-time narrowing and its runtime witness, so widening `value` off
+    // `state` (e.g. back to `number | null` on the measured branch) fails here.
+    if (result.data.state === 'measured') {
+      expectTypeOf(result.data.value).toEqualTypeOf<number>();
+      expect(typeof result.data.value).toBe('number');
+    } else {
+      expectTypeOf(result.data.value).toEqualTypeOf<null>();
+      expect(result.data.value).toBeNull();
+    }
+    // A well-formed 4/5 completeness observation must land on the measured
+    // branch — a regression that misrouted it would trip the checks above.
+    expect(result.data.state).toBe('measured');
   });
 });
