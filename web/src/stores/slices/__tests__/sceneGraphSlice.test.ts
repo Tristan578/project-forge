@@ -309,6 +309,34 @@ describe('sceneGraphSlice', () => {
       store.getState().setFullGraph({ nodes: {}, rootIds: [] });
       expect(store.getState().sceneGraph).toEqual({ nodes: {}, rootIds: [] });
     });
+
+    // completionMode gating (idea.FR-1.OP-04 / #9901): the engine's
+    // SceneGraphData has no completionMode field, so the SCENE_GRAPH_UPDATE
+    // event handler (transformEvents.ts) always calls setFullGraph with a
+    // payload where the key is entirely absent. Losing the mode here would
+    // silently revert any sandbox/endless/narrative scene to `win` on the
+    // very next entity edit (Devin review, PR #9999).
+    it('should preserve completionMode across an engine-driven rebuild that carries no mode', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
+      // Simulate the engine's SCENE_GRAPH_UPDATE payload: nodes/rootIds only.
+      store.getState().setFullGraph({ nodes: mockGraph.nodes, rootIds: mockGraph.rootIds });
+
+      expect(store.getState().sceneGraph.completionMode).toBe('sandbox');
+    });
+
+    it('should let an explicit completionMode on the incoming graph win', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'endless' });
+
+      expect(store.getState().sceneGraph.completionMode).toBe('endless');
+    });
+
+    it('should stay undefined (legacy default) when neither side specifies a mode', () => {
+      store.getState().setFullGraph({ nodes: {}, rootIds: [] });
+      store.getState().setFullGraph(mockGraph);
+
+      expect(store.getState().sceneGraph.completionMode).toBeUndefined();
+    });
   });
 
   describe('addNode', () => {
@@ -368,6 +396,15 @@ describe('sceneGraphSlice', () => {
 
       expect(store.getState().sceneGraph.nodes['child-1']).toEqual(expect.objectContaining({ entityId: 'child-1' }));
     });
+
+    // completionMode gating (idea.FR-1.OP-04 / #9901): incremental mutators
+    // must not silently drop an already-authored mode (Devin review, PR #9999).
+    it('should preserve completionMode across an incremental add', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'endless' });
+      store.getState().addNode(newRootNode);
+
+      expect(store.getState().sceneGraph.completionMode).toBe('endless');
+    });
   });
 
   describe('removeNode', () => {
@@ -394,6 +431,14 @@ describe('sceneGraphSlice', () => {
       store.getState().removeNode('no-such-entity');
 
       expect(Object.keys(store.getState().sceneGraph.nodes)).toHaveLength(3);
+    });
+
+    // completionMode gating (idea.FR-1.OP-04 / #9901): Devin review, PR #9999.
+    it('should preserve completionMode across an incremental remove', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'narrative' });
+      store.getState().removeNode('sphere-1');
+
+      expect(store.getState().sceneGraph.completionMode).toBe('narrative');
     });
   });
 
@@ -450,6 +495,14 @@ describe('sceneGraphSlice', () => {
       const node = store.getState().sceneGraph.nodes['cube-1'];
       expect(node.name).toBe('Multi');
       expect(node.visible).toBe(false);
+    });
+
+    // completionMode gating (idea.FR-1.OP-04 / #9901): Devin review, PR #9999.
+    it('should preserve completionMode across an incremental update, including a reparent', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
+      store.getState().updateNode('sphere-1', { parentId: null });
+
+      expect(store.getState().sceneGraph.completionMode).toBe('sandbox');
     });
   });
 });

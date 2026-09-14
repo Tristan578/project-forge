@@ -123,11 +123,24 @@ export const createSceneGraphSlice: StateCreator<
   // ---------------------------------------------------------------------------
 
   setFullGraph: (graph) => {
-    set({ sceneGraph: graph, nodeCount: Object.keys(graph.nodes).length });
+    // `completionMode` (#9901) is frontend-only: the engine's SceneGraphData
+    // has no such field, so every engine-driven rebuild (the
+    // SCENE_GRAPH_UPDATE handler in transformEvents.ts — the only production
+    // caller of this action) hands back a payload with the key entirely
+    // absent. Falling back to the previous value keeps an already-authored
+    // mode alive across incremental edits instead of silently reverting a
+    // scene to the `win` default on the next entity change. A genuine scene
+    // load that means to change the mode (including resetting a
+    // legacy/undefined one) must pass `completionMode` explicitly on `graph`
+    // — that write path is the persistence migration tracked as a child of
+    // #9901, not this shared-contract slice.
+    const completionMode = graph.completionMode ?? get().sceneGraph.completionMode;
+    set({ sceneGraph: { ...graph, completionMode }, nodeCount: Object.keys(graph.nodes).length });
   },
 
   updateSceneGraph: (graph) => {
-    set({ sceneGraph: graph, nodeCount: Object.keys(graph.nodes).length });
+    const completionMode = graph.completionMode ?? get().sceneGraph.completionMode;
+    set({ sceneGraph: { ...graph, completionMode }, nodeCount: Object.keys(graph.nodes).length });
   },
 
   // ---------------------------------------------------------------------------
@@ -155,7 +168,10 @@ export const createSceneGraphSlice: StateCreator<
         ? [...sceneGraph.rootIds, node.entityId]
         : sceneGraph.rootIds;
 
-    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds }, nodeCount: Object.keys(newNodes).length });
+    set({
+      sceneGraph: { nodes: newNodes, rootIds: newRootIds, completionMode: sceneGraph.completionMode },
+      nodeCount: Object.keys(newNodes).length,
+    });
   },
 
   removeNode: (entityId) => {
@@ -178,7 +194,10 @@ export const createSceneGraphSlice: StateCreator<
     // Remove from rootIds if present
     const newRootIds = sceneGraph.rootIds.filter((id) => id !== entityId);
 
-    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds }, nodeCount: Object.keys(newNodes).length });
+    set({
+      sceneGraph: { nodes: newNodes, rootIds: newRootIds, completionMode: sceneGraph.completionMode },
+      nodeCount: Object.keys(newNodes).length,
+    });
   },
 
   updateNode: (entityId, changes) => {
@@ -228,7 +247,7 @@ export const createSceneGraphSlice: StateCreator<
       }
     }
 
-    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds } });
+    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds, completionMode: sceneGraph.completionMode } });
   },
 
   // ---------------------------------------------------------------------------
