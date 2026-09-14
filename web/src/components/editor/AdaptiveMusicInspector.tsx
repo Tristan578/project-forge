@@ -147,11 +147,36 @@ export default function AdaptiveMusicInspector() {
       toast.error('Add at least one stem asset ID before configuring.');
       return;
     }
+    // setAdaptiveMusic registers every entered stem in the track regardless of
+    // whether its asset is loaded — addLayer silently no-ops on an unloaded
+    // buffer (audioManager.ts), so a track can be "configured" with zero
+    // playable layers while setMusicIntensity still reports success (the
+    // track exists, even though nothing audible is attached to it). Predict
+    // that outcome here with the same buffer lookup addLayer uses, so a bad
+    // asset ID surfaces an error instead of a misleading success toast — and
+    // so a Configure Stems click with an all-unloaded config doesn't call
+    // setAdaptiveMusic at all, which would stopAdaptiveMusic() any previously
+    // working track for a replacement with nothing playable in it.
+    const unloaded = configured.filter((stem) => !audioManager.getBuffer(stem.assetId));
+    if (unloaded.length === configured.length) {
+      toast.error(
+        `None of the entered stem assets are loaded yet: ${unloaded.map((s) => s.assetId).join(', ')}. Load them before configuring.`,
+        { id: 'adaptive-music-stems-unloaded' },
+      );
+      return;
+    }
     // Start the track at the slider's current position so the two agree.
     audioManager.setAdaptiveMusic(DEFAULT_MUSIC_TRACK_ID, configured, {
       initialIntensity: intensity,
     });
-    toast.success(`Adaptive music configured with ${configured.length} stem${configured.length === 1 ? '' : 's'}.`);
+    if (unloaded.length > 0) {
+      toast.error(
+        `Configured ${configured.length - unloaded.length} of ${configured.length} stems; not loaded yet: ${unloaded.map((s) => s.assetId).join(', ')}.`,
+        { id: 'adaptive-music-stems-unloaded' },
+      );
+    } else {
+      toast.success(`Adaptive music configured with ${configured.length} stem${configured.length === 1 ? '' : 's'}.`);
+    }
   }, [stems, intensity]);
 
   return (

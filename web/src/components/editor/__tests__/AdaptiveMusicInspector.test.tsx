@@ -15,6 +15,9 @@ vi.mock('@/lib/audio/audioManager', () => ({
     // Default: a track is registered, so the slider path applies cleanly.
     setMusicIntensity: vi.fn(() => true),
     setAdaptiveMusic: vi.fn(),
+    // Default: every entered asset ID is "loaded", so Configure Stems tests
+    // that don't care about the unloaded-asset path see the plain success case.
+    getBuffer: vi.fn(() => ({})),
   },
 }));
 
@@ -186,6 +189,48 @@ describe('AdaptiveMusicInspector', () => {
 
     expect(audioManager.setAdaptiveMusic).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('does not register a track and warns when the only entered stem asset is not loaded', () => {
+    // No buffer for this asset id: addLayer would no-op inside setAdaptiveMusic,
+    // producing a track with zero playable layers, so the call must not happen.
+    vi.mocked(audioManager.getBuffer).mockReturnValue(undefined);
+    render(<AdaptiveMusicInspector />);
+    const padInput = screen.getAllByPlaceholderText('Asset ID')[0];
+    fireEvent.change(padInput, { target: { value: 'missing-asset' } });
+    fireEvent.click(screen.getByText('Configure Stems'));
+
+    expect(audioManager.setAdaptiveMusic).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('missing-asset'),
+      expect.objectContaining({ id: 'adaptive-music-stems-unloaded' }),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('registers only the loaded stems and warns about skipped ones on a partial load', () => {
+    // pad-asset is loaded, bass-asset is not.
+    vi.mocked(audioManager.getBuffer).mockImplementation((assetId: string) => (assetId === 'pad-asset' ? {} as AudioBuffer : undefined));
+    setupStore({ intensity: 0.5 });
+    render(<AdaptiveMusicInspector />);
+    const [padInput, bassInput] = screen.getAllByPlaceholderText('Asset ID');
+    fireEvent.change(padInput, { target: { value: 'pad-asset' } });
+    fireEvent.change(bassInput, { target: { value: 'bass-asset' } });
+    fireEvent.click(screen.getByText('Configure Stems'));
+
+    expect(audioManager.setAdaptiveMusic).toHaveBeenCalledWith(
+      'default',
+      [
+        { name: 'pad', assetId: 'pad-asset' },
+        { name: 'bass', assetId: 'bass-asset' },
+      ],
+      { initialIntensity: 0.5 },
+    );
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('bass-asset'),
+      expect.objectContaining({ id: 'adaptive-music-stems-unloaded' }),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it('warns via toast when the slider moves but no adaptive track is registered', () => {
