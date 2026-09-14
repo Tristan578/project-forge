@@ -58,37 +58,61 @@ export const entitySetupExecutor: ExecutorDefinition = {
     // — a second copy here would drift and leave a capsule player floating
     // inside a cuboid collider.
     const entityType = resolveEntityShape(entity.role, entity.appearance, projectType);
-
-    // Spawn into the engine's active scene. The engine holds exactly one scene at a
-    // time and rejects `switch_scene` by design — multi-scene management is JS-side
-    // (`lib/scenes/sceneManager`), and the plan's `scene` field is JS-side metadata.
-    // Leading the batch with it made every entity step fail on the rejection (PF-1097).
-    // The engine honors a caller-supplied `id` on spawn_entity (see
-    // core/entity_factory.rs `is_valid_override_id`) precisely so JS can address the
-    // entity without waiting for the async SELECTION_CHANGED round-trip. Every later
-    // step in the plan binds to this id.
-    const commands = [
-      {
-        command: 'spawn_entity',
-        payload: { entityType, name: entity.name, ...(entityId ? { id: entityId } : {}) },
-      },
-    ];
-
     const operationId = SPAWN_TRANSFORM_OPERATION;
 
-    if (!sendCommands(ctx, commands)) {
-      // Acceptance failed at the wire — no observation to attempt. Report the
-      // rejection with its operation id so the failure is correlatable.
-      const rejected = rejectedEffect(operationId, entityId ?? entity.name);
-      return failResult(
-        makeStepError(
-          'COMMAND_FAILED',
-          'Engine command rejected',
-          this.userFacingErrorMessage,
-          false,
-          { effect: rejected },
-        ),
-      );
+    // Idempotency guard for a RETRY (`pipelineRunner` reruns the whole executor
+    // when the observation below reports `timed-out`, which is retryable — see
+    // that branch's comment). A timeout means the CONFIRMATION was slow, not
+    // that the spawn failed: the engine does not reject a caller-supplied `id`
+    // already in use (core/entity_factory.rs has no such check), so blindly
+    // redispatching `spawn_entity` on retry would create a SECOND entity
+    // carrying the identical `EntityId`, and every later step addressing this
+    // id would then hit whichever of the two duplicates the engine's query/
+    // update path happens to find first (#9997 review). The observation cache
+    // is a per-RUN singleton (cleared once, at `runPipelineFromPlan`'s start —
+    // see `clearEntityObservations`), so a confirmation that arrived just after
+    // the first attempt's deadline is already sitting in it by the time a
+    // retry checks: this reads as "already spawned" and skips straight to
+    // confirming, rather than spawning a duplicate.
+    //
+    // Gated on `!ctx.signal.aborted` too: an already-cancelled call must reach
+    // the engine exactly as often as before this guard existed (zero times),
+    // not once more for a check whose answer it will never act on.
+    const alreadySpawned =
+      ctx.observeEntity !== undefined && entityId !== undefined && !ctx.signal.aborted
+        ? ctx.observeEntity(entityId) !== undefined
+        : false;
+
+    if (!alreadySpawned) {
+      // Spawn into the engine's active scene. The engine holds exactly one scene at a
+      // time and rejects `switch_scene` by design — multi-scene management is JS-side
+      // (`lib/scenes/sceneManager`), and the plan's `scene` field is JS-side metadata.
+      // Leading the batch with it made every entity step fail on the rejection (PF-1097).
+      // The engine honors a caller-supplied `id` on spawn_entity (see
+      // core/entity_factory.rs `is_valid_override_id`) precisely so JS can address the
+      // entity without waiting for the async SELECTION_CHANGED round-trip. Every later
+      // step in the plan binds to this id.
+      const commands = [
+        {
+          command: 'spawn_entity',
+          payload: { entityType, name: entity.name, ...(entityId ? { id: entityId } : {}) },
+        },
+      ];
+
+      if (!sendCommands(ctx, commands)) {
+        // Acceptance failed at the wire — no observation to attempt. Report the
+        // rejection with its operation id so the failure is correlatable.
+        const rejected = rejectedEffect(operationId, entityId ?? entity.name);
+        return failResult(
+          makeStepError(
+            'COMMAND_FAILED',
+            'Engine command rejected',
+            this.userFacingErrorMessage,
+            false,
+            { effect: rejected },
+          ),
+        );
+      }
     }
 
     // CONFIRMED path (#9899): when the context can query the engine AND the plan

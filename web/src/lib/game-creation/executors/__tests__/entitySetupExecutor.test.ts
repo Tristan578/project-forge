@@ -532,5 +532,66 @@ describe('entitySetupExecutor', () => {
       expect(observeEntity).not.toHaveBeenCalled();
       expect(result.output).not.toHaveProperty('effectStatus');
     });
+
+    // `pipelineRunner` retries the whole executor when `EFFECT_TIMED_OUT` is
+    // reported (that branch marks it retryable) — a retry is exactly a second
+    // `execute()` call for the same planned entityId, on the SAME shared
+    // observation cache. Confirmation arriving late but before the retry
+    // checks is what this simulates: `observeEntity` already answers for
+    // `ID` on the very first call, before any command has been sent.
+    it('does not redispatch spawn_entity when a retry finds the entity already observed', async () => {
+      const observeEntity = vi.fn().mockReturnValue({
+        entityId: ID,
+        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output).toMatchObject({ entityId: ID, effectStatus: 'applied' });
+      // The whole point: a duplicate EntityId is a real engine-state bug, not
+      // merely a redundant call, so this asserts the command was never sent —
+      // not just that the outcome looks right.
+      expect(ctx.dispatchCommand).not.toHaveBeenCalledWith(
+        'spawn_entity',
+        expect.anything(),
+      );
+      // Still queried before acting, exactly as the non-retry path does.
+      expect(observeEntity).toHaveBeenCalledWith(ID);
+    });
+
+    it('still spawns on a genuine retry (never observed, a real failure)', async () => {
+      // Every check before the entity exists returns undefined — this is the
+      // "real failure, not a slow confirmation" case, where redispatching is
+      // correct and required. Fake timers so the 5s deadline this then runs
+      // out does not make the test actually take 5s.
+      vi.useFakeTimers();
+      const observeEntity = vi.fn().mockReturnValue(undefined);
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const pending = entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({
+        id: ID,
+      }));
+
+      await vi.advanceTimersByTimeAsync(6_000);
+      const result = await pending;
+      vi.useRealTimers();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+    });
   });
 });
