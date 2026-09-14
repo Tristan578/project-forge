@@ -230,7 +230,7 @@ export function handleTransformEvent(
         // whatever scene was open before. The SCENE_GRAPH_UPDATE that follows
         // then starts from `undefined` and correctly stays there (legacy
         // default) until the persisted-mode write path (child of #9901) has
-        // something to set. Devin review, PR #9999.
+        // something to set.
         sceneGraph: { ...useEditorStore.getState().sceneGraph, completionMode: undefined },
       });
       resetEntityAudioGraphForScene();

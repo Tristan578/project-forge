@@ -67,6 +67,34 @@ describe('sceneGraphSlice', () => {
       expect(store.getState().sceneGraph.rootIds).toEqual(['cam-1', 'cube-1']);
       expect(Object.keys(store.getState().sceneGraph.nodes)).toHaveLength(3);
     });
+
+    // completionMode gating (idea.FR-1.OP-04 / #9901): updateSceneGraph carries
+    // the same `?? get().sceneGraph.completionMode` fallback as setFullGraph, but
+    // any caller that rebuilds through this (deprecated) path instead of
+    // setFullGraph hands back an engine payload with no completionMode key. Losing
+    // the mode here would silently revert a sandbox/endless/narrative scene to the
+    // `win` default on the next rebuild, and only setFullGraph was covered.
+    it('should preserve completionMode across a rebuild that carries no mode', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
+      // Simulate the engine payload: nodes/rootIds only, no completionMode key.
+      store.getState().updateSceneGraph({ nodes: mockGraph.nodes, rootIds: mockGraph.rootIds });
+
+      expect(store.getState().sceneGraph.completionMode).toBe('sandbox');
+    });
+
+    it('should let an explicit completionMode on the incoming graph win', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
+      store.getState().updateSceneGraph({ ...mockGraph, completionMode: 'endless' });
+
+      expect(store.getState().sceneGraph.completionMode).toBe('endless');
+    });
+
+    it('should stay undefined (legacy default) when neither side specifies a mode', () => {
+      store.getState().updateSceneGraph({ nodes: {}, rootIds: [] });
+      store.getState().updateSceneGraph(mockGraph);
+
+      expect(store.getState().sceneGraph.completionMode).toBeUndefined();
+    });
   });
 
   describe('toggleVisibility', () => {
