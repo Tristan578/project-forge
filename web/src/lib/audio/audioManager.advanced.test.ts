@@ -513,6 +513,22 @@ describe('audioManager - Advanced', () => {
       expect(audioManager.getMusicIntensity('battle')).toBe(0.7);
     });
 
+    it('setMusicIntensity returns true for a registered track', () => {
+      audioManager.setAdaptiveMusic('battle', [
+        { name: 'ambient', assetId: 'ambient-asset' },
+      ]);
+
+      // The inspector slider relies on this boolean to know the mix changed.
+      expect(audioManager.setMusicIntensity('battle', 0.5)).toBe(true);
+    });
+
+    it('setMusicIntensity returns false for an unknown track', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // No track registered: the slider path uses this to warn the user.
+      expect(audioManager.setMusicIntensity('never-registered', 0.5)).toBe(false);
+      warnSpy.mockRestore();
+    });
+
     it('stopAdaptiveMusic removes track', () => {
       audioManager.setAdaptiveMusic('battle', [
         { name: 'ambient', assetId: 'ambient-asset' },

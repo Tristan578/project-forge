@@ -1217,12 +1217,20 @@ class AudioManager {
   /**
    * Set the intensity of an adaptive music track (0.0 = calm, 1.0 = max action).
    * Smoothly ramps stem volumes based on their intensity ranges.
+   *
+   * Returns `true` when the intensity was applied to a registered track and
+   * `false` when no track with `trackId` exists (the call is otherwise a no-op).
+   * The `set_music_intensity` chat handler and script command ignore the return
+   * (a preceding `set_adaptive_music`/`loadStems` always registers the track
+   * first), but the inspector's slider uses it: the UI-only path has no such
+   * guarantee, so a `false` return is what lets it tell the user to configure
+   * stems instead of silently moving a slider that changes nothing.
    */
-  setMusicIntensity(trackId: string, intensity: number, rampMs?: number): void {
+  setMusicIntensity(trackId: string, intensity: number, rampMs?: number): boolean {
     const track = this.adaptiveTracks.get(trackId);
     if (!track) {
       console.warn(`[AudioManager] Adaptive track not found: ${trackId}`);
-      return;
+      return false;
     }
 
     // `Math.max(0, Math.min(1, NaN))` is NaN — a min/max clamp does not exclude
@@ -1233,7 +1241,10 @@ class AudioManager {
     track.intensity = clamped;
 
     const ctx = this.ctx;
-    if (!ctx) return;
+    // The track exists and its target intensity is recorded; the live ramp just
+    // waits for an audio context. Report success so the caller does not treat a
+    // registered track as missing.
+    if (!ctx) return true;
 
     const rampDuration = (rampMs ?? 500) / 1000;
     const now = ctx.currentTime;
@@ -1249,6 +1260,8 @@ class AudioManager {
       instance.gainNode.gain.setValueAtTime(instance.gainNode.gain.value, now);
       instance.gainNode.gain.linearRampToValueAtTime(targetVol, now + rampDuration);
     }
+
+    return true;
   }
 
   /**

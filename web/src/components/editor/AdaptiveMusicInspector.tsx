@@ -9,6 +9,12 @@ import { useState, useCallback } from 'react';
 import { Play, Pause, Save, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEditorStore } from '@/stores/editorStore';
+import { audioManager } from '@/lib/audio/audioManager';
+
+// The inspector has no notion of which adaptive-music track is active (only one
+// stems config loads at a time), so it forwards to the same 'default' trackId
+// the set_music_intensity chat handler falls back to (audioHandlers.ts).
+const DEFAULT_MUSIC_TRACK_ID = 'default';
 
 interface StemConfig {
   pad?: string;
@@ -61,7 +67,26 @@ export default function AdaptiveMusicInspector() {
   }, []);
 
   const handleIntensityChange = useCallback((value: number) => {
-    setAdaptiveMusicIntensity(value);
+    // Guard against NaN/non-finite input from the slider's parseFloat: a NaN
+    // intensity reaches linearRampToValueAtTime and throws, so refuse it and
+    // leave the previous mix in place.
+    if (!Number.isFinite(value)) return;
+    const clamped = Math.max(0, Math.min(1, value));
+    // Forward to the shared audio manager on the same path the
+    // set_music_intensity chat handler uses (audioHandlers.ts), so manual
+    // slider edits actually change the mix rather than only store state.
+    const applied = audioManager.setMusicIntensity(DEFAULT_MUSIC_TRACK_ID, clamped);
+    setAdaptiveMusicIntensity(clamped);
+    // setMusicIntensity is a no-op until an adaptive track named 'default' is
+    // registered (via Configure Stems, or the chat/script path). Without that
+    // the slider would move the percentage readout while changing nothing
+    // audible, so surface the missing track instead of swallowing the warning.
+    // A stable toast id dedupes the many change events a single drag fires.
+    if (!applied) {
+      toast.error('Configure stems to start adaptive music before adjusting intensity.', {
+        id: 'adaptive-music-no-track',
+      });
+    }
   }, [setAdaptiveMusicIntensity]);
 
   const handlePlayPause = useCallback(() => {
@@ -108,7 +133,51 @@ export default function AdaptiveMusicInspector() {
     try {
       localStorage.setItem('adaptiveMusicStems', JSON.stringify(stems));
     } catch { /* ignore */ }
-  }, [stems]);
+
+    // Register the 'default' adaptive track the intensity slider drives. Without
+    // this, a UI-only user who configures stems here never calls
+    // audioManager.setAdaptiveMusic (its only other callers are the chat/script
+    // paths), so setMusicIntensity stays a no-op and the slider is inert. Build
+    // the array shape setAdaptiveMusic expects from the named stem fields,
+    // skipping any left blank — an empty asset id would register a silent layer.
+    const configured = (['pad', 'bass', 'melody', 'drums'] as const)
+      .map((name) => ({ name, assetId: (stems[name] ?? '').trim() }))
+      .filter((stem) => stem.assetId.length > 0);
+    if (configured.length === 0) {
+      toast.error('Add at least one stem asset ID before configuring.');
+      return;
+    }
+    // setAdaptiveMusic registers every entered stem in the track regardless of
+    // whether its asset is loaded — addLayer silently no-ops on an unloaded
+    // buffer (audioManager.ts), so a track can be "configured" with zero
+    // playable layers while setMusicIntensity still reports success (the
+    // track exists, even though nothing audible is attached to it). Predict
+    // that outcome here with the same buffer lookup addLayer uses, so a bad
+    // asset ID surfaces an error instead of a misleading success toast — and
+    // so a Configure Stems click with an all-unloaded config doesn't call
+    // setAdaptiveMusic at all, which would stopAdaptiveMusic() any previously
+    // working track for a replacement with nothing playable in it.
+    const unloaded = configured.filter((stem) => !audioManager.getBuffer(stem.assetId));
+    if (unloaded.length === configured.length) {
+      toast.error(
+        `None of the entered stem assets are loaded yet: ${unloaded.map((s) => s.assetId).join(', ')}. Load them before configuring.`,
+        { id: 'adaptive-music-stems-unloaded' },
+      );
+      return;
+    }
+    // Start the track at the slider's current position so the two agree.
+    audioManager.setAdaptiveMusic(DEFAULT_MUSIC_TRACK_ID, configured, {
+      initialIntensity: intensity,
+    });
+    if (unloaded.length > 0) {
+      toast.error(
+        `Configured ${configured.length - unloaded.length} of ${configured.length} stems; not loaded yet: ${unloaded.map((s) => s.assetId).join(', ')}.`,
+        { id: 'adaptive-music-stems-unloaded' },
+      );
+    } else {
+      toast.success(`Adaptive music configured with ${configured.length} stem${configured.length === 1 ? '' : 's'}.`);
+    }
+  }, [stems, intensity]);
 
   return (
     <div className="space-y-4 p-4 bg-zinc-900 rounded-lg border border-zinc-700">
