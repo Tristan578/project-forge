@@ -709,7 +709,7 @@ export function collectSkeleton2dWarnings(data: SkeletonSource2d): string[] {
  * by the engine, which is the wire shape above and NOT the store shape. Narrowing
  * it here rather than casting keeps the store's declared types true — a 3-tuple
  * `localPosition` written into a `[number, number]` field is a lie the inspector
- * then renders, and `weights` has nowhere to live on the store's flat attachment.
+ * then renders. `weights` now has a store home (#9732) and is carried through.
  *
  * Returns `null` for anything that is not a plain object. The engine is a trusted
  * source, so a null here means the payload key was misread — which is exactly the
@@ -796,8 +796,16 @@ export function parseSkeletonWire2d(source: unknown): StoreSkeletonData2d | null
 /**
  * The store's attachment is one flat struct; the engine's is a tagged enum. An
  * unknown tag is dropped rather than written with a `type` the store's union
- * forbids. `weights` has no store field and is deliberately not carried — the
- * outbound path rebuilds it from the mesh, and a half-kept copy would drift.
+ * forbids.
+ *
+ * `weights` IS carried now that the store models it (#9732): the inspector's
+ * mesh editor writes weights into the store, and `setSkeleton2d` echoes a full
+ * `create_skeleton2d` back — which the engine answers with `SKELETON2D_UPDATED`,
+ * routed through here. Dropping weights on that return trip would blank the very
+ * skinning the creator just authored on the next inbound frame. There is no
+ * warning channel inbound (the engine is trusted), so `wireVertexWeights` reports
+ * into a sink; a per-vertex influence the engine cannot have sent (a non-string
+ * bone) is normalized the same way the outbound builder normalizes it.
  */
 function parseAttachmentWire2d(attachment: SourceAttachment2d): StoreAttachment2d | null {
   const textureId = text(attachment.textureId, '');
@@ -814,12 +822,18 @@ function parseAttachmentWire2d(attachment: SourceAttachment2d): StoreAttachment2
 
   if (attachment.type === 'mesh') {
     const vertices = wireVec2List(attachment.vertices);
+    const noop = () => {};
+    const weights: WireVertexWeights2d[] = [];
+    for (let i = 0; i < (attachment.weights?.length ?? 0); i += 1) {
+      weights.push(wireVertexWeights(attachment.weights?.[i], '', i, noop));
+    }
     return {
       type: 'mesh',
       textureId,
       vertices,
       uvs: wireVec2List(attachment.uvs),
       triangles: wireTriangles(attachment.triangles, vertices.length),
+      weights,
     };
   }
 

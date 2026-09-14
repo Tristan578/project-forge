@@ -496,4 +496,125 @@ describe('SkeletonInspector', () => {
     expect(screen.getByText('Position').textContent).toBe('Position');
     expect(screen.getByText('Rotation (deg)').textContent).toBe('Rotation (deg)');
   });
+
+  // --- Mesh attachment editor (#9732) ---
+  // The panel is the manual, no-chat authoring path for the same data
+  // `add_skeleton2d_mesh_attachment` writes: vertices plus per-vertex bone
+  // weights. It shares that command's validation (unknown-bone reference and
+  // zero-total-weight are rejected) and writes through `setSkeleton2d`, the same
+  // store setter every other edit in this panel uses.
+
+  const skeletonWithMesh: SkeletonData2d = {
+    ...baseSkeleton,
+    skins: {
+      default: {
+        name: 'default',
+        attachments: {
+          cloak: {
+            type: 'mesh',
+            textureId: '',
+            vertices: [
+              [1, 1],
+              [2, 2],
+            ],
+            uvs: [
+              [0, 0],
+              [0, 0],
+            ],
+            triangles: [],
+            weights: [
+              { bones: ['root'], weights: [1] },
+              { bones: ['root'], weights: [1] },
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  it('renders the Mesh Attachments section for the selected skin', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Mesh Attachments').textContent).toBe('Mesh Attachments');
+  });
+
+  it('opens a draft editor pre-populated with the first bone when a mesh attachment is added', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'cloak' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    expect(screen.getByLabelText('Vertex 1 influence 1 bone')).toHaveValue('root');
+  });
+
+  it('writes a valid mesh attachment into the store on Apply', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'cloak' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    fireEvent.change(screen.getByLabelText('Vertex 1 X'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Vertex 1 Y'), { target: { value: '3' } });
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    expect(mockSetSkeleton2d).toHaveBeenCalledWith(
+      'entity-1',
+      expect.objectContaining({
+        skins: expect.objectContaining({
+          default: expect.objectContaining({
+            attachments: expect.objectContaining({
+              cloak: expect.objectContaining({
+                type: 'mesh',
+                vertices: [[2, 3]],
+                weights: [{ bones: ['root'], weights: [1] }],
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects an unknown bone reference and leaves the store untouched', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'cloak' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 bone'), { target: { value: 'ghost' } });
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    expect(screen.getByText(/unknown bone "ghost"/i)).toBeInTheDocument();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+  });
+
+  it('rejects a zero-total-weight vertex and leaves the store untouched', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'cloak' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 weight'), { target: { value: '0' } });
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    expect(screen.getByText(/zero total weight/i)).toBeInTheDocument();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite the prior attachment when Apply is rejected', () => {
+    // The negative Gherkin: an invalid Apply identifies the bad row and the prior
+    // attachment (here, the one already in the store) is left unchanged — proven
+    // by `setSkeleton2d` never being called on the reject path.
+    setupStore({ skeleton: skeletonWithMesh });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'belt' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 bone'), { target: { value: 'ghost' } });
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+  });
+
+  it('lists an existing mesh attachment and loads it for editing', () => {
+    setupStore({ skeleton: skeletonWithMesh });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText(/cloak/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    expect(screen.getByLabelText('Vertex 2 X')).toHaveValue(2);
+    expect(screen.getByLabelText('Vertex 2 influence 1 bone')).toHaveValue('root');
+  });
 });
