@@ -404,6 +404,12 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
         components: string[];
         visible: boolean;
       }
+      type Vec3 = [number, number, number];
+      interface TransformSnapshot {
+        position: Vec3;
+        rotation: Vec3;
+        scale: Vec3;
+      }
 
       const recorded: Recorded[] = [];
       (window as unknown as { __E2E_COMMANDS: Recorded[] }).__E2E_COMMANDS = recorded;
@@ -430,6 +436,39 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
           add(next);
           next = queued.shift();
         }
+      };
+
+      // Confirmed-transform stand-in (#9899): `worldBuildExecutor` and
+      // `autoPolishExecutor` now poll `get_entity_details` until the observed
+      // `scale` matches what they just sent, exactly as `entitySetupExecutor`
+      // already does for spawn existence. A real engine reports the CURRENT
+      // transform once `apply_pending_transforms` lands it a frame later — so
+      // this stand-in tracks each entity's last-known transform and answers
+      // with it, rather than a fixed identity transform that could never
+      // satisfy a resize confirmation and would time out every world-build and
+      // auto-polish step regardless of whether the wiring under test works.
+      const transforms = new Map<string, TransformSnapshot>();
+      const pendingTransforms: Array<{ entityId: string; patch: Partial<TransformSnapshot> }> = [];
+      let transformScheduled = false;
+      const flushTransforms = () => {
+        transformScheduled = false;
+        let next = pendingTransforms.shift();
+        while (next) {
+          const current = transforms.get(next.entityId) ?? {
+            position: [0, 0, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1],
+          };
+          transforms.set(next.entityId, { ...current, ...next.patch });
+          next = pendingTransforms.shift();
+        }
+      };
+      const asVec3 = (value: unknown): Vec3 | undefined => {
+        if (!Array.isArray(value) || value.length < 3) return undefined;
+        const [x, y, z] = value;
+        return typeof x === 'number' && typeof y === 'number' && typeof z === 'number'
+          ? [x, y, z]
+          : undefined;
       };
 
       window.__FORGE_SET_DISPATCH!((command: string, payload: unknown) => {
@@ -468,9 +507,41 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
             components: [],
             visible: true,
           });
+          // Seed a transform immediately (not deferred with the node add):
+          // existence confirmation only checks the scene graph, so this can
+          // never race it, and `update_transform` needs somewhere to merge
+          // onto even for an entity spawned in the same batch.
+          transforms.set(id, {
+            position: asVec3(p.position) ?? [0, 0, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1],
+          });
           if (!scheduled) {
             scheduled = true;
             requestAnimationFrame(flush);
+          }
+        }
+
+        // `update_transform` is deferred exactly like a spawn (#9899): the real
+        // engine lands it a frame later inside `apply_pending_transforms`, and
+        // `observeTransformEffect` exists specifically to catch a confirmation
+        // that reports "applied" before that frame passes. Only the fields the
+        // caller actually sent are merged — `worldBuildExecutor` sends scale
+        // alone, `autoPolishExecutor` sends scale alongside a separate
+        // `toggle_physics` command, and merging an absent field would stomp a
+        // previously-confirmed axis with a phantom [0,0,0].
+        if (command === 'update_transform' && target !== null) {
+          const patch: Partial<TransformSnapshot> = {};
+          const position = asVec3(p.position);
+          const rotation = asVec3(p.rotation);
+          const scale = asVec3(p.scale);
+          if (position) patch.position = position;
+          if (rotation) patch.rotation = rotation;
+          if (scale) patch.scale = scale;
+          pendingTransforms.push({ entityId: target, patch });
+          if (!transformScheduled) {
+            transformScheduled = true;
+            requestAnimationFrame(flushTransforms);
           }
         }
 
@@ -482,9 +553,15 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
         // answer, so answering nothing before the flush and something after
         // is the faithful shape — not a synchronous shortcut that would
         // pass regardless of whether the ordering bug this gate exists to
-        // catch is actually fixed.
+        // catch is actually fixed. The transform snapshot rides along so
+        // `worldBuildExecutor`/`autoPolishExecutor`'s scale confirmation has a
+        // real (deferred) value to compare against, not just an existence bit.
         if (command === 'get_entity_details' && target !== null && Object.hasOwn(nodes, target)) {
-          window.__FORGE_RECORD_ENTITY_OBSERVATION?.({ entityId: target });
+          const snapshot = transforms.get(target);
+          window.__FORGE_RECORD_ENTITY_OBSERVATION?.({
+            entityId: target,
+            ...(snapshot ?? {}),
+          });
         }
 
         return { success: true };
