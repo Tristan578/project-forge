@@ -108,6 +108,30 @@ declare global {
       rotation?: [number, number, number];
       scale?: [number, number, number];
     }) => void;
+
+    /**
+     * Reads the confirmed spawn/transform observation cache back (#9899,
+     * `lib/game-creation/engineObservation.ts`) — the mirror of
+     * `__FORGE_RECORD_ENTITY_OBSERVATION`. Available only when E2E hooks are
+     * enabled (`e2eHooksEnabled()`).
+     *
+     * Returns the same typed `ObservedEntity` the orchestrator's `observeEntity`
+     * reads, or `undefined` while the engine has answered nothing for `entityId`
+     * (its own "does not exist yet" signal). Lets an `@engine` spec assert on
+     * the confirmation the slice actually adds — the cached observation fed by
+     * the real `QUERY_ENTITY_DETAILS` event — rather than an adjacent store
+     * field such as `primaryTransform`.
+     *
+     * @param entityId - The id to read the latest observation for.
+     */
+    __FORGE_READ_ENTITY_OBSERVATION?: (entityId: string) => {
+      entityId: string;
+      transform?: {
+        position: [number, number, number];
+        rotation: [number, number, number];
+        scale: [number, number, number];
+      };
+    } | undefined;
   }
 }
 

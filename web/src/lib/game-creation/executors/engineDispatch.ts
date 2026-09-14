@@ -144,6 +144,73 @@ export function rejectedEffect(operationId: string, entityId: string): EngineEff
 }
 
 /**
+ * Tolerance for confirming an observed transform vector equals the requested one
+ * (#9899). The engine stores transforms as f32 and the query round-trips them
+ * back through JSON, so a value that WAS applied comes back rounded — an exact
+ * `===` would reject a correctly-applied transform and report `timed-out`
+ * against the very effect it was meant to confirm.
+ *
+ * Both an absolute floor (a near-zero axis has no meaningful relative term) and
+ * a relative term (`update_transform` scale runs up to 1000, where f32 spacing
+ * is coarser than any fixed epsilon), so a single ratio holds across the whole
+ * validated range.
+ */
+export const OBSERVED_VEC3_TOLERANCE = 1e-3;
+
+/**
+ * A `satisfied` building block: true when an observed [x, y, z] equals `expected`
+ * within `OBSERVED_VEC3_TOLERANCE` on every axis. A missing or malformed vector
+ * (the engine has not answered yet, or answered without a transform) is NOT a
+ * match — the caller keeps polling until the real value lands, which is exactly
+ * the transform half of the #9899 contract: acceptance is not application.
+ */
+export function observedVec3Matches(
+  observed: readonly number[] | undefined,
+  expected: readonly [number, number, number],
+): boolean {
+  if (!observed || observed.length < 3) return false;
+  for (let i = 0; i < 3; i += 1) {
+    const axis = observed[i];
+    if (typeof axis !== 'number' || !Number.isFinite(axis)) return false;
+    const tolerance = Math.max(OBSERVED_VEC3_TOLERANCE, Math.abs(expected[i]) * OBSERVED_VEC3_TOLERANCE);
+    if (Math.abs(axis - expected[i]) > tolerance) return false;
+  }
+  return true;
+}
+
+/**
+ * Confirm one deferred `update_transform` by reading the engine's REAL state
+ * until the observed field (`position` or `scale`) reaches `expected` (#9899).
+ *
+ * This is the transform half of the same contract `entitySetupExecutor` uses for
+ * spawn existence: an accepted `update_transform` dispatch reports only that the
+ * engine TOOK the command — the deferred `apply_pending_transforms` runs a frame
+ * later inside a system with no way back to the caller (see `waitForEngineFrame`
+ * and PF-1213), and an update matching no entity is dropped and never retried.
+ * So after acceptance the caller polls the engine's own state and reports
+ * `applied` ONLY once it shows the requested value, never on acceptance plus a
+ * frame wait.
+ */
+export function observeTransformEffect(options: {
+  operationId?: string;
+  entityId: string;
+  field: 'position' | 'scale';
+  expected: readonly [number, number, number];
+  observe: (entityId: string) => ObservedEntity | undefined;
+  signal: AbortSignal;
+  deadlineMs?: number;
+  pollIntervalMs?: number;
+  now?: () => number;
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+}): Promise<EngineEffectResult> {
+  const { field, expected, ...rest } = options;
+  return observeEngineEffect({
+    ...rest,
+    satisfied: (observed) => observedVec3Matches(observed.transform?.[field], expected),
+  });
+}
+
+/**
  * Sleep for `ms`, resolving EARLY when `signal` aborts.
  *
  * Resolving early rather than rejecting keeps the caller's loop simple: it wakes

@@ -59,7 +59,7 @@ import { useMcpBridgeRequested } from '@/lib/mcp/bridgeOptIn';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher, setCommandDispatcher } from '@/stores/editorStore';
 import type { CommandResponse } from '@/hooks/useEngine';
-import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
+import { recordEntityObservation, readEntityObservation } from '@/lib/game-creation/engineObservation';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useUserStore } from '@/stores/userStore';
@@ -625,6 +625,16 @@ export function EditorLayout() {
       // exposes, only a way to answer a query the real engine would.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__FORGE_RECORD_ENTITY_OBSERVATION = recordEntityObservation;
+      // Reads the confirmed spawn/transform observation cache back (#9899), the
+      // mirror of the recorder above. Same build-time gate. A real engine build
+      // populates that cache off the `QUERY_ENTITY_DETAILS` event, so this lets
+      // an @engine E2E assert on the SAME typed `ObservedEntity` the
+      // orchestrator's `observeEntity` reads — the confirmation the slice adds —
+      // rather than an adjacent store field like `primaryTransform`. Read-only:
+      // it exposes no way to observe or mutate scene state beyond what
+      // `__EDITOR_STORE` already does.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__FORGE_READ_ENTITY_OBSERVATION = readEntityObservation;
     }
   }, []);
 

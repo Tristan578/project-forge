@@ -19,6 +19,9 @@ import {
   waitForEngineFrame,
   sendCommands,
   observeEngineEffect,
+  observeTransformEffect,
+  observedVec3Matches,
+  OBSERVED_VEC3_TOLERANCE,
   rejectedEffect,
   SPAWN_TRANSFORM_OPERATION,
 } from '../engineDispatch';
@@ -541,5 +544,119 @@ describe('observeEngineEffect', () => {
     // observe is the only engine interaction and it is a query — replaying the
     // operation cannot produce a second crate.
     expect(observe).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('observedVec3Matches', () => {
+  it('matches an exactly-equal vector', () => {
+    expect(observedVec3Matches([40, 1, 40], [40, 1, 40])).toBe(true);
+  });
+
+  it('tolerates an f32 round-trip within the relative tolerance', () => {
+    // 1000 * 1e-3 = 1.0 of relative slop; a value 0.5 off on the largest axis
+    // is a correctly-applied scale that came back rounded, not a wrong one.
+    expect(observedVec3Matches([1000.4, 1, 6], [1000, 1, 6])).toBe(true);
+  });
+
+  it('rejects a vector off by more than the tolerance on any axis', () => {
+    // Still the spawn-time origin on the axis that was supposed to change — the
+    // transform has NOT applied, so this is not a match and the caller polls on.
+    expect(observedVec3Matches([40, 1, 1], [40, 1, 40])).toBe(false);
+  });
+
+  it('treats a missing or malformed vector as not-yet-applied', () => {
+    expect(observedVec3Matches(undefined, [1, 1, 1])).toBe(false);
+    expect(observedVec3Matches([1, 1], [1, 1, 1])).toBe(false);
+    expect(observedVec3Matches([Number.NaN, 1, 1], [1, 1, 1])).toBe(false);
+  });
+
+  it('applies an absolute floor for a near-zero expected axis', () => {
+    // Relative slop around 0 is 0; the absolute floor is what lets a
+    // correctly-applied zero-ish axis confirm.
+    expect(observedVec3Matches([OBSERVED_VEC3_TOLERANCE / 2, 1, 1], [0, 1, 1])).toBe(true);
+    expect(observedVec3Matches([OBSERVED_VEC3_TOLERANCE * 2, 1, 1], [0, 1, 1])).toBe(false);
+  });
+});
+
+describe('observeTransformEffect', () => {
+  const AT_ORIGIN: ObservedEntity = {
+    entityId: 'ground-1',
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  };
+  const SIZED: ObservedEntity = {
+    entityId: 'ground-1',
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [40, 1, 40] },
+  };
+
+  it('confirms a scale only once the engine reports the requested value, not on acceptance', async () => {
+    // The unsized cube is observable immediately (the spawn applied) but its
+    // scale is still 1x1x1 — an accepted `update_transform` is not an applied
+    // one. `applied` must wait for the real scale to land.
+    const clock = fakeClock();
+    const observe = vi.fn<(id: string) => ObservedEntity | undefined>()
+      .mockReturnValueOnce(AT_ORIGIN)
+      .mockReturnValue(SIZED);
+
+    const result = await observeTransformEffect({
+      entityId: 'ground-1',
+      field: 'scale',
+      expected: [40, 1, 40],
+      observe,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+    });
+
+    expect(result.status).toBe('applied');
+    expect(result.observed).toEqual(SIZED);
+    expect(result.operationId).toBe(SPAWN_TRANSFORM_OPERATION);
+    // The origin observation did not satisfy it — the executor kept polling.
+    expect(observe).toHaveBeenCalledTimes(2);
+  });
+
+  it('times out when the scale never reaches its requested value', async () => {
+    const clock = fakeClock();
+    // The engine keeps reporting the unsized cube — the resize was dropped.
+    const observe = vi.fn().mockReturnValue(AT_ORIGIN);
+
+    const result = await observeTransformEffect({
+      entityId: 'ground-1',
+      field: 'scale',
+      expected: [40, 1, 40],
+      observe,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+    });
+
+    expect(result.status).toBe('timed-out');
+    expect(result.observed).toBeUndefined();
+  });
+
+  it('confirms a position field the same way scale is confirmed', async () => {
+    const clock = fakeClock();
+    const moved: ObservedEntity = {
+      entityId: 'crate-1',
+      transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    };
+    const observe = vi.fn<(id: string) => ObservedEntity | undefined>()
+      .mockReturnValueOnce({
+        entityId: 'crate-1',
+        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      })
+      .mockReturnValue(moved);
+
+    const result = await observeTransformEffect({
+      entityId: 'crate-1',
+      field: 'position',
+      expected: [1, 2, 3],
+      observe,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+    });
+
+    expect(result.status).toBe('applied');
+    expect(result.observed).toEqual(moved);
   });
 });
