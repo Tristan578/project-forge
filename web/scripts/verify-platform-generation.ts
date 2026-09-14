@@ -134,7 +134,6 @@ export const PROVIDER_PROBES: Record<PlatformKeyProvider, Probe | null> = {
     docs: 'https://www.remove.bg/api#account-balance',
   },
   hyper3d: null,
-  suno: null,
 };
 
 /** The gateway's authenticated, credit-free endpoint (serves GATEWAY_CAPABILITIES). */

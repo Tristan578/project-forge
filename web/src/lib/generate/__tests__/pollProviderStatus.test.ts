@@ -12,19 +12,14 @@ vi.mock('@/lib/generate/meshyClient', () => ({
     this.getTextureStatus = getTextureStatus;
   }),
 }));
-const getStatus = vi.fn();
-vi.mock('@/lib/generate/sunoClient', () => ({
-  SunoClient: vi.fn(function (this: Record<string, unknown>) { this.getStatus = getStatus; }),
-}));
 const getReplicateStatus = vi.fn();
 vi.mock('@/lib/generate/spriteClient', () => ({
   SpriteClient: vi.fn(function (this: Record<string, unknown>) { this.getReplicateStatus = getReplicateStatus; }),
 }));
 
 import { MeshyClient } from '@/lib/generate/meshyClient';
-import { SunoClient } from '@/lib/generate/sunoClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
-import { pollProviderStatus, ASYNC_TYPE_TO_DB_CAPABILITY } from '../pollProviderStatus';
+import { pollProviderStatus, ASYNC_TYPE_TO_DB_CAPABILITY, MUSIC_SYNC_TERMINAL_MESSAGE } from '../pollProviderStatus';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 const KEY = 'provider-key';
@@ -138,34 +133,22 @@ describe('pollProviderStatus — skybox (Meshy single image)', () => {
   });
 });
 
-describe('pollProviderStatus — music (Suno)', () => {
-  it('completed/succeeded with audio both complete', async () => {
-    for (const s of ['completed', 'succeeded']) {
-      getStatus.mockResolvedValueOnce({ status: s, progress: 100, audioUrl: 'https://x/a.mp3' });
-      const r = await pollProviderStatus('music', 'job', KEY);
-      expect(vi.mocked(SunoClient)).toHaveBeenCalledWith({ apiKey: KEY });
-      expect(r).toMatchObject({ status: 'completed', resultUrl: 'https://x/a.mp3' });
-    }
-  });
-
-  it('success with no audio is succeededButEmpty', async () => {
-    getStatus.mockResolvedValueOnce({ status: 'completed', progress: 100 });
-    expect(await pollProviderStatus('music', 'job', KEY)).toMatchObject({
-      status: 'failed', succeededButEmpty: true, errorMessage: withRetryGuidance('Music generation produced no audio'),
+// #9522: music routes to ElevenLabs `/v1/music`, which returns audio inline —
+// there is no async task to poll, so a music poll is a defensive terminal that
+// makes no provider call and reports failed with the shared sync message.
+describe('pollProviderStatus — music (ElevenLabs, synchronous)', () => {
+  it('returns a terminal failed state without calling any provider client', async () => {
+    const r = await pollProviderStatus('music', 'job', KEY);
+    expect(r).toEqual({
+      status: 'failed',
+      progress: 0,
+      succeededButEmpty: false,
+      errorMessage: MUSIC_SYNC_TERMINAL_MESSAGE,
     });
-  });
-
-  it('both "failed" and "error" provider statuses map to failed; processing/generating to processing', async () => {
-    for (const s of ['failed', 'error']) {
-      getStatus.mockResolvedValueOnce({ status: s, progress: 0 });
-      expect(await pollProviderStatus('music', 'job', KEY)).toMatchObject({
-        status: 'failed', succeededButEmpty: false, errorMessage: withRetryGuidance('Music generation failed'),
-      });
-    }
-    getStatus.mockResolvedValueOnce({ status: 'processing', progress: 10 });
-    expect((await pollProviderStatus('music', 'job', KEY)).status).toBe('processing');
-    getStatus.mockResolvedValueOnce({ status: 'generating', progress: 20 });
-    expect((await pollProviderStatus('music', 'job', KEY)).status).toBe('processing');
+    // No music status endpoint exists; the message carries retry guidance.
+    expect(MUSIC_SYNC_TERMINAL_MESSAGE).toBe(
+      withRetryGuidance('Music generation completes inline and has no job to poll'),
+    );
   });
 });
 
