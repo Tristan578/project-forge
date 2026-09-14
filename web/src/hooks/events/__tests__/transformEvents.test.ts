@@ -826,7 +826,7 @@ describe('handleTransformEvent', () => {
         // completionMode gating (idea.FR-1.OP-04 / #9901): SCENE_LOADED is the
         // scene-replacement boundary, so it must clear a leftover mode rather
         // than let setFullGraph's preserve-across-rebuilds fallback carry the
-        // OUTGOING scene's mode into the incoming one (Devin review, PR #9999).
+        // OUTGOING scene's mode into the incoming one.
         sceneGraph: { completionMode: undefined },
       });
     });

@@ -343,7 +343,7 @@ describe('sceneGraphSlice', () => {
     // event handler (transformEvents.ts) always calls setFullGraph with a
     // payload where the key is entirely absent. Losing the mode here would
     // silently revert any sandbox/endless/narrative scene to `win` on the
-    // very next entity edit (Devin review, PR #9999).
+    // very next entity edit.
     it('should preserve completionMode across an engine-driven rebuild that carries no mode', () => {
       store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
       // Simulate the engine's SCENE_GRAPH_UPDATE payload: nodes/rootIds only.
@@ -366,7 +366,7 @@ describe('sceneGraphSlice', () => {
       expect(store.getState().sceneGraph.completionMode).toBeUndefined();
     });
 
-    // Devin review, PR #9999: without an explicit scene-boundary reset, this
+    // Without an explicit scene-boundary reset, this
     // fallback alone cannot tell "engine rebuilt the SAME scene" apart from
     // "a DIFFERENT scene just replaced this one" — both arrive with no
     // completionMode key. transformEvents.ts's SCENE_LOADED handler is that
@@ -447,7 +447,7 @@ describe('sceneGraphSlice', () => {
     });
 
     // completionMode gating (idea.FR-1.OP-04 / #9901): incremental mutators
-    // must not silently drop an already-authored mode (Devin review, PR #9999).
+    // must not silently drop an already-authored mode.
     it('should preserve completionMode across an incremental add', () => {
       store.getState().setFullGraph({ ...mockGraph, completionMode: 'endless' });
       store.getState().addNode(newRootNode);
@@ -482,7 +482,7 @@ describe('sceneGraphSlice', () => {
       expect(Object.keys(store.getState().sceneGraph.nodes)).toHaveLength(3);
     });
 
-    // completionMode gating (idea.FR-1.OP-04 / #9901): Devin review, PR #9999.
+    // completionMode gating (idea.FR-1.OP-04 / #9901).
     it('should preserve completionMode across an incremental remove', () => {
       store.getState().setFullGraph({ ...mockGraph, completionMode: 'narrative' });
       store.getState().removeNode('sphere-1');
@@ -546,7 +546,7 @@ describe('sceneGraphSlice', () => {
       expect(node.visible).toBe(false);
     });
 
-    // completionMode gating (idea.FR-1.OP-04 / #9901): Devin review, PR #9999.
+    // completionMode gating (idea.FR-1.OP-04 / #9901).
     it('should preserve completionMode across an incremental update, including a reparent', () => {
       store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
       store.getState().updateNode('sphere-1', { parentId: null });
