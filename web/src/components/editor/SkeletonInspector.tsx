@@ -18,6 +18,8 @@ interface MeshInfluenceDraft {
 interface MeshVertexDraft {
   x: string;
   y: string;
+  /** Index in the existing attachment, retained when other vertices are removed. */
+  originalIndex?: number;
   influences: MeshInfluenceDraft[];
 }
 
@@ -165,6 +167,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
       vertices: vertices.map((v, i) => ({
         x: String(v[0]),
         y: String(v[1]),
+        originalIndex: i,
         influences: (weights[i]?.bones ?? []).map((bone, j) => ({
           bone,
           weight: String(weights[i]?.weights?.[j] ?? 0),
@@ -238,12 +241,33 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
       weights.push({ bones, weights: vertexWeights });
     }
 
+    // Vertex/weight edits must preserve the mesh's texture and topology. Map
+    // original indices through deletions so surviving triangles and UVs keep
+    // referring to the same vertices; new vertices start with a neutral UV.
+    const original = meshDraft.original === null
+      ? undefined
+      : activeSkinData?.attachments[meshDraft.original];
+    const remappedIndices = new Map<number, number>();
+    const uvs: [number, number][] = meshDraft.vertices.map((vertex, index) => {
+      if (vertex.originalIndex === undefined) return [0, 0];
+      remappedIndices.set(vertex.originalIndex, index);
+      return original?.uvs?.[vertex.originalIndex] ?? [0, 0];
+    });
+    const triangles: number[] = [];
+    const originalTriangles = original?.triangles ?? [];
+    for (let i = 0; i + 2 < originalTriangles.length; i += 3) {
+      const a = remappedIndices.get(originalTriangles[i]);
+      const b = remappedIndices.get(originalTriangles[i + 1]);
+      const c = remappedIndices.get(originalTriangles[i + 2]);
+      if (a !== undefined && b !== undefined && c !== undefined) triangles.push(a, b, c);
+    }
+
     const attachment: AttachmentData2d = {
       type: 'mesh',
-      textureId: '',
+      textureId: original?.textureId ?? '',
       vertices,
-      uvs: vertices.map(() => [0, 0] as [number, number]),
-      triangles: [],
+      uvs,
+      triangles,
       weights,
     };
     const skin = activeSkinData ?? { name: selectedSkin, attachments: {} };

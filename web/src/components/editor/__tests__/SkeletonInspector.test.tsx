@@ -500,8 +500,8 @@ describe('SkeletonInspector', () => {
   // --- Mesh attachment editor (#9732) ---
   // The panel is the manual, no-chat authoring path for the same data
   // `add_skeleton2d_mesh_attachment` writes: vertices plus per-vertex bone
-  // weights. It shares that command's validation (unknown-bone reference and
-  // zero-total-weight are rejected) and writes through `setSkeleton2d`, the same
+  // weights. The editor additionally rejects unknown-bone references and
+  // zero-total weights, and writes through `setSkeleton2d`, the same
   // store setter every other edit in this panel uses.
 
   const skeletonWithMesh: SkeletonData2d = {
@@ -531,6 +531,75 @@ describe('SkeletonInspector', () => {
       },
     },
   };
+
+  const texturedSkeleton: SkeletonData2d = {
+    ...baseSkeleton,
+    skins: {
+      default: {
+        name: 'default',
+        attachments: {
+          cloak: {
+            type: 'mesh',
+            textureId: 'cloak-texture',
+            vertices: [[0, 0], [1, 0], [1, 1], [0, 1]],
+            uvs: [[0, 0], [1, 0], [1, 1], [0, 1]],
+            triangles: [0, 1, 2, 0, 2, 3],
+            weights: Array.from({ length: 4 }, () => ({ bones: ['root'], weights: [1] })),
+          },
+        },
+      },
+    },
+  };
+
+  it('preserves texture, UVs, and triangles when editing mesh positions and weights', () => {
+    setupStore({ skeleton: texturedSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    fireEvent.change(screen.getByLabelText('Vertex 2 X'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Vertex 2 influence 1 weight'), { target: { value: '0.5' } });
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.skins.default.attachments.cloak).toEqual({
+      ...texturedSkeleton.skins.default.attachments.cloak,
+      vertices: [[0, 0], [5, 0], [1, 1], [0, 1]],
+      weights: [
+        { bones: ['root'], weights: [1] },
+        { bones: ['root'], weights: [0.5] },
+        { bones: ['root'], weights: [1] },
+        { bones: ['root'], weights: [1] },
+      ],
+    });
+  });
+
+  it('remaps surviving triangles and UVs when an interior vertex is deleted', () => {
+    setupStore({ skeleton: texturedSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    fireEvent.click(screen.getByLabelText('Remove vertex 2'));
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.skins.default.attachments.cloak).toMatchObject({
+      textureId: 'cloak-texture',
+      vertices: [[0, 0], [1, 1], [0, 1]],
+      uvs: [[0, 0], [1, 1], [0, 1]],
+      triangles: [0, 1, 2],
+    });
+  });
+
+  it('preserves existing topology and UVs when appending a vertex', () => {
+    setupStore({ skeleton: texturedSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    fireEvent.click(screen.getByText('+ Add vertex'));
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.skins.default.attachments.cloak).toMatchObject({
+      textureId: 'cloak-texture',
+      uvs: [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]],
+      triangles: [0, 1, 2, 0, 2, 3],
+    });
+    expect(payload.skins.default.attachments.cloak.vertices).toHaveLength(5);
+  });
 
   it('renders the Mesh Attachments section for the selected skin', () => {
     setupStore({ skeleton: baseSkeleton });
