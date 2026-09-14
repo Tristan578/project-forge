@@ -429,4 +429,198 @@ describe('entitySetupExecutor', () => {
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('INVALID_INPUT');
   });
+
+  // -------------------------------------------------------------------------
+  // Confirmed spawn (#9899, operation family ai.FR-1.OP-01)
+  // -------------------------------------------------------------------------
+  //
+  // When the context can query the engine AND the plan named an addressable id,
+  // the spawn is confirmed by READING the engine's real state after the deferred
+  // command applies — not by trusting acceptance plus a frame wait. A context
+  // without `observeEntity` (every test above) keeps the legacy frame-wait path,
+  // which is why none of them had to change.
+  describe('confirmed spawn observation', () => {
+    const ID = 'e1e1e1e1-0000-4000-8000-000000000042';
+
+    it('queries real engine state and reports applied only once the entity is observed', async () => {
+      // Not observable on the first read, then present — proving the executor
+      // waits for the engine to actually show the entity, not merely for a frame.
+      const observeEntity = vi.fn<(id: string) => unknown>()
+        .mockReturnValueOnce(undefined)
+        .mockReturnValue({ entityId: ID, transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } });
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output).toMatchObject({
+        entityId: ID,
+        effectStatus: 'applied',
+        operationId: 'ai.FR-1.OP-01',
+      });
+      // The engine WAS queried for this id — confirmation is a real read.
+      expect(observeEntity).toHaveBeenCalledWith(ID);
+      expect(observeEntity.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('reports timed-out with the operation id and NEVER completed when the effect is dropped', async () => {
+      // The dropped-effect case: the command is accepted (dispatchCommand does
+      // not refuse) but the engine never shows the entity. A short deadline via
+      // fake timers keeps the test instant.
+      vi.useFakeTimers();
+      const observeEntity = vi.fn().mockReturnValue(undefined); // never observed
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const pending = entitySetupExecutor.execute({
+        entity: { name: 'Ghost', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      await vi.advanceTimersByTimeAsync(6_000); // past the 5s observation deadline
+      const result = await pending;
+      vi.useRealTimers();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+      const effect = (result.error?.details as { effect?: { status?: string; operationId?: string } }).effect;
+      expect(effect?.status).toBe('timed-out');
+      expect(effect?.operationId).toBe('ai.FR-1.OP-01');
+      // A dropped effect must never masquerade as a completed spawn.
+      expect(result.output).toBeUndefined();
+    });
+
+    it('reports a cancelled observation as an aborted step, never applied', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const observeEntity = vi.fn().mockReturnValue(undefined);
+      const ctx = makeCtx({ observeEntity, signal: controller.signal } as never);
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ABORTED');
+      // Aborted before any read — a cancelled observation cannot report applied.
+      expect(observeEntity).not.toHaveBeenCalled();
+      // And it must not have spawned an orphan the cancelled run will never
+      // address — this is the up-front guard, not the mid-observation one.
+      expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+    });
+
+    // Sentry review (PR #9997): `pipelineRunner`'s retry loop only checks
+    // `signal.aborted` BETWEEN attempts, never before the first one, so a
+    // cancel landing exactly as this step starts previously still reached
+    // `sendCommands` and spawned an entity nothing in the cancelled run would
+    // ever address or clean up — the ABORTED failure only surfaced afterward,
+    // from `observeEngineEffect`'s own (later) abort check. This is the SAME
+    // scenario as the test above with the query capability removed, to prove
+    // the guard fires unconditionally rather than only as a side effect of the
+    // idempotency check.
+    it('never dispatches spawn_entity when already aborted, even without a query capability', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const ctx = makeCtx({ signal: controller.signal } as never); // no observeEntity
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ABORTED');
+      expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the frame wait when no id is addressable, even with a query capability', async () => {
+      // No `entityId` means the engine minted its own UUID nothing can query, so
+      // the confirmed path cannot correlate — the legacy frame wait still runs
+      // and the step still succeeds.
+      const observeEntity = vi.fn();
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Anon', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(observeEntity).not.toHaveBeenCalled();
+      expect(result.output).not.toHaveProperty('effectStatus');
+    });
+
+    // `pipelineRunner` retries the whole executor when `EFFECT_TIMED_OUT` is
+    // reported (that branch marks it retryable) — a retry is exactly a second
+    // `execute()` call for the same planned entityId, on the SAME shared
+    // observation cache. Confirmation arriving late but before the retry
+    // checks is what this simulates: `observeEntity` already answers for
+    // `ID` on the very first call, before any command has been sent.
+    it('does not redispatch spawn_entity when a retry finds the entity already observed', async () => {
+      const observeEntity = vi.fn().mockReturnValue({
+        entityId: ID,
+        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output).toMatchObject({ entityId: ID, effectStatus: 'applied' });
+      // The whole point: a duplicate EntityId is a real engine-state bug, not
+      // merely a redundant call, so this asserts the command was never sent —
+      // not just that the outcome looks right.
+      expect(ctx.dispatchCommand).not.toHaveBeenCalledWith(
+        'spawn_entity',
+        expect.anything(),
+      );
+      // Still queried before acting, exactly as the non-retry path does.
+      expect(observeEntity).toHaveBeenCalledWith(ID);
+    });
+
+    it('still spawns on a genuine retry (never observed, a real failure)', async () => {
+      // Every check before the entity exists returns undefined — this is the
+      // "real failure, not a slow confirmation" case, where redispatching is
+      // correct and required. Fake timers so the 5s deadline this then runs
+      // out does not make the test actually take 5s.
+      vi.useFakeTimers();
+      const observeEntity = vi.fn().mockReturnValue(undefined);
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const pending = entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(ctx.dispatchCommand).toHaveBeenCalledWith('spawn_entity', expect.objectContaining({
+        id: ID,
+      }));
+
+      await vi.advanceTimersByTimeAsync(6_000);
+      const result = await pending;
+      vi.useRealTimers();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+    });
+  });
 });
