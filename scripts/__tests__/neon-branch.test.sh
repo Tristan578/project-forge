@@ -622,6 +622,50 @@ else
   pass "the error body is truncated to a bounded excerpt"
 fi
 
+# --- 5a. A 422 BRANCHES_LIMIT_EXCEEDED is distinct from a generic API error ---
+# Branch-per-preview (#10016): once enough PRs are open the project hits its
+# 10-branch allowance and `create` gets a 422 whose body carries
+# code=BRANCHES_LIMIT_EXCEEDED. That is the ONE create failure the caller can
+# recover from — by evicting an older preview branch and retrying — so it must
+# exit a DISTINCT code (5), not the generic 3 that every other API error uses,
+# and not 4 (a poll timeout, where retrying-after-eviction would be wrong).
+stub_reset
+stub_status 1 422
+stub_body 1 <<'EOF'
+{"code":"BRANCHES_LIMIT_EXCEEDED","message":"branches limit exceeded"}
+EOF
+res="$(run_helper create preview-pr-000042 --endpoint --uri-out "$TMPDIR_T/limit.uri")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "5" ]; then
+  pass "create on BRANCHES_LIMIT_EXCEEDED exits 5 (distinct from 3 and 4)"
+else
+  fail "BRANCHES_LIMIT_EXCEEDED should exit 5, got $rc ($out)"
+fi
+if grep -qF 'BRANCHES_LIMIT_EXCEEDED' <<<"$out" && grep -qF 'evict' <<<"$out"; then
+  pass "the cap error names the condition and the recovery (evict + retry)"
+else
+  fail "the BRANCHES_LIMIT_EXCEEDED error is not actionable: $out"
+fi
+if [ ! -s "$TMPDIR_T/limit.uri" ]; then
+  pass "no connection URI is written when create is refused at the cap"
+else
+  fail "a URI was written for a create that never happened: $(cat "$TMPDIR_T/limit.uri")"
+fi
+# A 422 WITHOUT that code is a different problem and must stay the generic 3 —
+# retrying-after-eviction would mask it.
+stub_reset
+stub_status 1 422
+stub_body 1 <<'EOF'
+{"code":"SOMETHING_ELSE","message":"nope"}
+EOF
+res="$(run_helper create preview-pr-000043 --endpoint --uri-out "$TMPDIR_T/other.uri")"
+rc="${res%%|*}"
+if [ "$rc" = "3" ]; then
+  pass "a 422 that is NOT BRANCHES_LIMIT_EXCEEDED stays the generic error (exit 3)"
+else
+  fail "a non-capacity 422 should exit 3, got $rc"
+fi
+
 echo ""
 echo "=== neon-branch.sh: missing credentials fail CLOSED ==="
 # The most important negative case in the file. If the credentials are absent
@@ -725,6 +769,172 @@ if [ "$rc" = "0" ]; then pass "a failed prune delete does not fail the job (exit
 if grep -qF '::warning::' <<<"$out"; then pass "a failed prune delete emits a ::warning::"; else fail "a failed prune delete is silent"; fi
 
 echo ""
+echo "=== neon-branch.sh: evict-oldest (preview-branch cap, #10016) ==="
+# Branch-per-preview holds one preview-pr-<NNNNNN> branch per open PR against a
+# 10-branch Neon allowance (production, staging, one db-snapshot-* permanent).
+# evict-oldest trims the preview population to a cap BEFORE the next create, by
+# deleting oldest-by-created_at first, so an active (newest) branch is last to
+# go and the permanent branches are never in scope.
+
+# --- E1. Under the cap: no eviction, nothing deleted -------------------------
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-p1","name":"preview-pr-000010","created_at":"2026-09-01T00:00:00Z"},
+  {"id":"br-p2","name":"preview-pr-000011","created_at":"2026-09-02T00:00:00Z"},
+  {"id":"br-prod","name":"production","created_at":"2020-01-01T00:00:00Z"},
+  {"id":"br-stg","name":"staging","created_at":"2020-01-01T00:00:00Z"}
+]}
+EOF
+res="$(run_helper evict-oldest preview-pr- 6 --except preview-pr-000099)"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && grep -qxF 'evicted=0' <<<"$out"; then
+  pass "under the cap, evict-oldest reports evicted=0 (exit 0)"
+else
+  fail "under-cap should report evicted=0 exit 0, got rc=$rc out=$out"
+fi
+if grep -qF 'DELETE' <<<"$(requests)"; then
+  fail "evict-oldest deleted a branch while under the cap"
+else
+  pass "under the cap, evict-oldest issues no DELETE"
+fi
+
+# --- E2. At the cap: evict EXACTLY the oldest non-current preview branch ------
+# Four preview branches + the current one is --except'd. Cap 3 ⇒ evict exactly
+# one, and it must be the oldest (br-old), never a newer one, never the
+# --except'd current branch, and never a non-preview branch.
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-old","name":"preview-pr-000001","created_at":"2026-08-01T00:00:00Z"},
+  {"id":"br-mid","name":"preview-pr-000002","created_at":"2026-08-15T00:00:00Z"},
+  {"id":"br-new","name":"preview-pr-000003","created_at":"2026-09-01T00:00:00Z"},
+  {"id":"br-newer","name":"preview-pr-000004","created_at":"2026-09-10T00:00:00Z"},
+  {"id":"br-self","name":"preview-pr-000042","created_at":"2026-08-05T00:00:00Z"},
+  {"id":"br-prod","name":"production","created_at":"2020-01-01T00:00:00Z"},
+  {"id":"br-snap","name":"db-snapshot-20260101","created_at":"2020-01-01T00:00:00Z"}
+]}
+EOF
+res="$(run_helper evict-oldest preview-pr- 3 --except preview-pr-000042)"
+rc="${res%%|*}"; out="${res#*|}"
+reqs="$(requests)"
+if [ "$rc" = "0" ] && grep -qxF 'evicted=1' <<<"$out"; then
+  pass "at the cap, evict-oldest deletes exactly one branch (evicted=1)"
+else
+  fail "at-cap should evict exactly 1, got rc=$rc out=$out"
+fi
+if grep -qF 'branches/br-old' <<<"$reqs"; then
+  pass "the branch evicted is the OLDEST preview branch (br-old)"
+else
+  fail "evict-oldest did not delete the oldest branch; log: $reqs"
+fi
+for keep in br-mid br-new br-newer; do
+  if grep -qF "branches/$keep" <<<"$reqs"; then
+    fail "evict-oldest deleted a newer preview branch ($keep) — it must evict oldest-first"
+  else
+    pass "a newer preview branch ($keep) is retained"
+  fi
+done
+if grep -qF 'branches/br-self' <<<"$reqs"; then
+  fail "evict-oldest deleted the --except'd current branch (br-self)"
+else
+  pass "the --except'd current branch is never evicted (even though it is older)"
+fi
+if grep -qF 'branches/br-prod' <<<"$reqs" || grep -qF 'branches/br-snap' <<<"$reqs"; then
+  fail "evict-oldest deleted a permanent branch (production/db-snapshot) outside the prefix"
+else
+  pass "permanent branches outside the prefix are never touched"
+fi
+
+# --- E3. Only permanent branches: clear no-op, permanents untouched ----------
+# The project can be AT the Neon allowance with no preview branch to free —
+# production, staging and several db-snapshot-*. evict-oldest must delete none
+# of them and say plainly that nothing matched the prefix, listing what exists.
+# (The create-side exit 5 above is the loud half of "fails clearly"; this half
+# guarantees the eviction attempt does no damage.)
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-prod","name":"production","created_at":"2020-01-01T00:00:00Z"},
+  {"id":"br-stg","name":"staging","created_at":"2020-01-01T00:00:00Z"},
+  {"id":"br-s1","name":"db-snapshot-20260101","created_at":"2026-01-01T00:00:00Z"},
+  {"id":"br-s2","name":"db-snapshot-20260201","created_at":"2026-02-01T00:00:00Z"}
+]}
+EOF
+res="$(run_helper evict-oldest preview-pr- 0 --except preview-pr-000042)"
+rc="${res%%|*}"; out="${res#*|}"
+reqs="$(requests)"
+if [ "$rc" = "0" ] && grep -qxF 'evicted=0' <<<"$out"; then
+  pass "only-permanent-branches: evict-oldest evicts nothing (evicted=0, exit 0)"
+else
+  fail "only-permanent should evict nothing, got rc=$rc out=$out"
+fi
+if grep -qF 'DELETE' <<<"$reqs"; then
+  fail "evict-oldest issued a DELETE against a project with no preview branch — production/staging/db-snapshot at risk; log: $reqs"
+else
+  pass "only-permanent-branches: no DELETE is issued (production/staging/db-snapshot untouched)"
+fi
+if grep -qF 'no branches match prefix' <<<"$out" && grep -qF 'production' <<<"$out"; then
+  pass "the no-preview diagnostic names the prefix and lists the present branches"
+else
+  fail "the only-permanent diagnostic is not clear: $out"
+fi
+
+# --- E4. A missing created_at is treated as newest, not evicted on a guess ---
+# Neon normally returns created_at, but if a branch lacks it the sort must not
+# silently pick it as "oldest". Cap 1 with one dated-old branch and one undated
+# branch ⇒ the DATED old one is evicted, the undated one is retained.
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-dated-old","name":"preview-pr-000001","created_at":"2026-01-01T00:00:00Z"},
+  {"id":"br-undated","name":"preview-pr-000002"}
+]}
+EOF
+res="$(run_helper evict-oldest preview-pr- 1 --except preview-pr-000099)"
+rc="${res%%|*}"; out="${res#*|}"
+reqs="$(requests)"
+if [ "$rc" = "0" ] && grep -qxF 'evicted=1' <<<"$out"; then
+  pass "with one over the cap, evict-oldest deletes exactly one"
+else
+  fail "expected evicted=1, got rc=$rc out=$out"
+fi
+if grep -qF 'branches/br-dated-old' <<<"$reqs" && ! grep -qF 'branches/br-undated' <<<"$reqs"; then
+  pass "the dated-old branch is evicted; the branch with no created_at is retained (treated as newest)"
+else
+  fail "a branch with no created_at was evicted on a guess; log: $reqs"
+fi
+
+# --- E5. Unparseable created_at is also treated as newest (fail-safe) --------
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-good","name":"preview-pr-000001","created_at":"2026-01-01T00:00:00Z"},
+  {"id":"br-bad","name":"preview-pr-000002","created_at":"not-a-date"}
+]}
+EOF
+res="$(run_helper evict-oldest preview-pr- 1 --except preview-pr-000099)"
+rc="${res%%|*}"; out="${res#*|}"
+reqs="$(requests)"
+if [ "$rc" = "0" ] && grep -qF 'branches/br-good' <<<"$reqs" && ! grep -qF 'branches/br-bad' <<<"$reqs"; then
+  pass "an unparseable created_at is treated as newest and retained, not evicted"
+else
+  fail "an unparseable created_at was mis-sorted; rc=$rc log: $reqs"
+fi
+
+# --- E6. GETs the branch list from the documented endpoint -------------------
+if grep -qF 'GET https://console.neon.tech/api/v2/projects/proj-test/branches' <<<"$reqs"; then
+  pass "evict-oldest lists branches via GET /projects/{id}/branches"
+else
+  fail "evict-oldest did not GET the branches endpoint; log: $reqs"
+fi
+
+echo ""
 echo "=== neon-branch.sh: usage contract ==="
 assert_usage() {
   local label="$1"; shift
@@ -742,6 +952,11 @@ assert_usage "delete with no id" delete
 assert_usage "prune with no prefix" prune
 assert_usage "prune with a non-numeric retention" prune predeploy- seven
 assert_usage "prune with a negative retention" prune predeploy- -3
+assert_usage "evict-oldest with no prefix" evict-oldest
+assert_usage "evict-oldest with a non-numeric keep-count" evict-oldest preview-pr- six
+assert_usage "evict-oldest with a negative keep-count" evict-oldest preview-pr- -1
+assert_usage "evict-oldest with an unknown flag" evict-oldest preview-pr- 6 --wat
+assert_usage "evict-oldest --except with no name" evict-oldest preview-pr- 6 --except
 # --uri-out without --endpoint is a usage error, not a silent no-op: a branch
 # with no compute has no connection URI, so the caller's expectation is wrong
 # and the dry-run step downstream would read an empty file.

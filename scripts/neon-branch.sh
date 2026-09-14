@@ -43,6 +43,16 @@
 #   prune <name-prefix> <retention-days>
 #       Deletes branches whose name starts with <name-prefix> and which are
 #       older than <retention-days>. Housekeeping only.
+#   evict-oldest <name-prefix> <keep-count> [--except <name>]
+#       Trim-to-cap for the branch-per-preview allowance (#10016). Deletes the
+#       oldest-by-`created_at` branches whose name starts with <name-prefix>
+#       until at most <keep-count> such branches remain, so the NEXT `create`
+#       does not hit BRANCHES_LIMIT_EXCEEDED. --except <name> excludes one branch
+#       (the current PR's, which is about to be recreated) from BOTH the count
+#       and the deletion set. Names outside the prefix — production, staging,
+#       db-snapshot-* — never match and are never touched, by construction. A
+#       branch whose created_at is missing/unparseable is treated as newest, so
+#       it is retained rather than evicted on a guess. Prints: evicted=<n>.
 #
 # ENVIRONMENT
 #   NEON_API_KEY      (required)
@@ -65,13 +75,19 @@
 #   2   missing NEON_API_KEY / NEON_PROJECT_ID
 #   3   Neon API error (non-2xx, unparseable body, or a missing expected field)
 #   4   a branch-creation operation did not finish inside the poll timeout
+#   5   create failed with BRANCHES_LIMIT_EXCEEDED — the project is at its branch
+#       allowance. DISTINCT from 4 (a slow-but-accepted create) on purpose: the
+#       caller responds by evicting an older preview branch and retrying create,
+#       which is exactly the wrong response to a poll timeout, so the two codes
+#       must not be conflated (#10016).
 #   64  usage error
 set -uo pipefail
 
 NEON_API_BASE='https://console.neon.tech/api/v2'
 USAGE='usage: neon-branch.sh create <name> [--endpoint] [--uri-out <path>]
        neon-branch.sh delete <branch_id>
-       neon-branch.sh prune <name-prefix> <retention-days>'
+       neon-branch.sh prune <name-prefix> <retention-days>
+       neon-branch.sh evict-oldest <name-prefix> <keep-count> [--except <name>]'
 
 command -v jq >/dev/null 2>&1 || { echo "::error::neon-branch.sh requires jq"; exit 3; }
 
@@ -115,6 +131,15 @@ neon_api() {
       -o "$tmp" -w '%{http_code}' 2>/dev/null)"
   fi
   payload="$(cat "$tmp" 2>/dev/null)"
+  # Optional structured-inspection seam (#10016). When a caller sets
+  # NEON_CAPTURE_BODY_FILE, copy the raw body there so it can be parsed with jq
+  # for a machine-readable field (e.g. an error `code`) WITHOUT ever printing it.
+  # The file is written to disk, so it survives the command-substitution subshell
+  # neon_api runs inside; it is NEVER echoed. Callers are responsible for its
+  # lifetime (mktemp + rm).
+  if [ -n "${NEON_CAPTURE_BODY_FILE:-}" ]; then
+    printf '%s' "$payload" > "$NEON_CAPTURE_BODY_FILE" 2>/dev/null || true
+  fi
   rm -f "$tmp"
   case "$status" in
     2*) printf '%s' "$payload"; return 0 ;;
@@ -286,8 +311,26 @@ cmd_create() {
     body="$(jq -nc --arg n "$name" '{branch: {name: $n}}')"
   fi
 
-  local resp
-  resp="$(neon_api POST "/projects/${NEON_PROJECT_ID}/branches" "$body")" || exit 3
+  # Capture the create response body so a BRANCHES_LIMIT_EXCEEDED refusal can be
+  # told apart from any other API error and reported with a distinct exit code
+  # (#10016). The body goes to a temp file, is parsed only with jq, and is never
+  # printed — neon_api already logs a redacted, bounded excerpt on failure.
+  local resp cap_body create_rc
+  cap_body="$(mktemp)" || { echo "::error::mktemp failed"; exit 3; }
+  NEON_CAPTURE_BODY_FILE="$cap_body"
+  resp="$(neon_api POST "/projects/${NEON_PROJECT_ID}/branches" "$body")"; create_rc=$?
+  NEON_CAPTURE_BODY_FILE=""
+  if [ "$create_rc" -ne 0 ]; then
+    local err_code=""
+    [ -s "$cap_body" ] && err_code="$(jq -r '.code // empty' <"$cap_body" 2>/dev/null)"
+    rm -f "$cap_body"
+    if [ "$err_code" = "BRANCHES_LIMIT_EXCEEDED" ]; then
+      echo "::error::Neon refused to create '${name}': BRANCHES_LIMIT_EXCEEDED — the project is at its branch allowance (10). Evict an older preview branch (neon-branch.sh evict-oldest) and retry." >&2
+      exit 5
+    fi
+    exit 3
+  fi
+  rm -f "$cap_body"
 
   local branch_id
   branch_id="$(jq -r '.branch.id // empty' <<<"$resp" 2>/dev/null)"
@@ -361,9 +404,102 @@ cmd_prune() {
   echo "pruned=${n}"
 }
 
+# Trim the preview-branch population down to <keep-count> (#10016).
+#
+# Since branch-per-preview (#9972) every open PR holds a `preview-pr-<NNNNNN>`
+# branch, and the Neon project allowance is 10 (production, staging and one
+# db-snapshot-* are permanent). Once enough PRs are open concurrently, the next
+# PR's `create` gets a 422 BRANCHES_LIMIT_EXCEEDED and fails closed. This makes
+# room by deleting the OLDEST preview branches first, so the branch a PR is
+# actively working on (the newest) is the last to go.
+#
+# SAFETY: the prefix is the only thing that selects a branch. production,
+# staging and db-snapshot-* do not start with 'preview-pr-', so they can never
+# be chosen — the same startswith filter prune relies on. --except pins the
+# current PR's branch out of both the count and the deletion set, because it is
+# about to be pruned-and-recreated and must not be evicted here.
+#
+# created_at MISSING/UNPARSEABLE → treated as the newest possible instant, so
+# such a branch sorts last and is retained rather than evicted on a guess (the
+# risk called out on #10016). A delete that fails is a ::warning::, never fatal:
+# the caller's create + retry is what ultimately surfaces a real capacity wall.
+cmd_evict_oldest() {
+  local prefix="" keep="" except=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --except) except="${2:-}"; [ -n "$except" ] || { echo "::error::--except needs a name"; exit 64; }; shift 2 ;;
+      -*) echo "::error::unknown flag '$1'"; echo "$USAGE"; exit 64 ;;
+      *)
+        if [ -z "$prefix" ]; then prefix="$1"
+        elif [ -z "$keep" ]; then keep="$1"
+        else echo "::error::$USAGE"; exit 64
+        fi
+        shift ;;
+    esac
+  done
+  [ -n "$prefix" ] || { echo "::error::$USAGE"; exit 64; }
+  case "$keep" in
+    ''|*[!0-9]*) echo "::error::keep-count must be a non-negative integer, got '${keep}'"; exit 64 ;;
+  esac
+
+  local resp
+  resp="$(neon_api GET "/projects/${NEON_PROJECT_ID}/branches")" || exit 3
+
+  # How many preview branches (matching the prefix, excluding --except) exist?
+  local matching
+  matching="$(jq -r --arg p "$prefix" --arg ex "$except" '
+      (.branches // [])
+      | map(select(((.name // "") | startswith($p)) and ((.name // "") != $ex)))
+      | length
+    ' <<<"$resp" 2>/dev/null)"
+  case "$matching" in ''|*[!0-9]*) matching=0 ;; esac
+
+  if [ "$matching" -le "$keep" ]; then
+    # Nothing to evict. If there are branches but none match the prefix, say so
+    # and list what IS there — this is the "only permanent branches" case, where
+    # the project can be at the Neon allowance yet offer no preview slot to free.
+    # It is a clear diagnostic, not a deletion: production/staging/db-snapshot-*
+    # are never in scope here.
+    if [ "$matching" -eq 0 ]; then
+      local all_names
+      all_names="$(jq -r '(.branches // []) | map(.name // empty) | join(", ")' <<<"$resp" 2>/dev/null)"
+      echo "::warning::no branches match prefix '${prefix}' to evict; ${keep}-branch cap not the limit. Present branches: ${all_names:-<none>}"
+    fi
+    echo "evicted=0"
+    return 0
+  fi
+
+  local to_evict ids
+  to_evict=$(( matching - keep ))
+  ids="$(jq -r --arg p "$prefix" --arg ex "$except" --argjson n "$to_evict" '
+      (.branches // [])
+      | map(select(((.name // "") | startswith($p)) and ((.name // "") != $ex)))
+      | map({ id: .id,
+              ts: ((.created_at // null)
+                   | if . == null then 9999999999
+                     else (try fromdateiso8601 catch 9999999999) end) })
+      | sort_by(.ts)
+      | .[0:$n]
+      | .[].id
+    ' <<<"$resp" 2>/dev/null)"
+
+  local n=0 id
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    if neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${id}" >/dev/null; then
+      echo "evicted_branch=${id}"
+      n=$(( n + 1 ))
+    else
+      echo "::warning::could not evict preview branch ${id}"
+    fi
+  done <<<"$ids"
+  echo "evicted=${n}"
+}
+
 case "${1:-}" in
   create) shift; cmd_create "$@" ;;
   delete) shift; cmd_delete "$@" ;;
   prune)  shift; cmd_prune  "$@" ;;
+  evict-oldest) shift; cmd_evict_oldest "$@" ;;
   *) echo "::error::$USAGE"; exit 64 ;;
 esac
