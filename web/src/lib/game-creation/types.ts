@@ -172,11 +172,17 @@ export interface OrchestratorGDD {
   /**
    * The game's intentional completion semantics (#9901). Optional on the brief:
    * absent means the classic `win` default, preserving every GDD authored before
-   * the field existed. Propagated to `SceneGraph.completionMode` so the shared
-   * Play/verify validator gates winnability by the creator's choice rather than
-   * demanding a win condition for sandbox/endless/narrative games. The mode is
-   * chosen explicitly (manual control or typed AI op, child of #9901), never
-   * inferred from entity names.
+   * the field existed.
+   *
+   * NOT YET WIRED. Nothing in this slice reads this field off a GDD or copies it
+   * anywhere: `ExecutorContext` exposes no `gdd`, so `sceneCreateExecutor` — the
+   * only code that builds a scene's `SceneGraph` — structurally cannot read it.
+   * Once the child issue (#9998) adds a `gdd` reference to `ExecutorContext` and
+   * wires `scene_create` to read it, this WILL be propagated to
+   * `SceneGraph.completionMode` so the shared Play/verify validator gates
+   * winnability by the creator's choice rather than demanding a win condition for
+   * sandbox/endless/narrative games. The mode will be chosen explicitly (manual
+   * control or typed AI op), never inferred from entity names.
    */
   completionMode?: CompletionMode;
 }
