@@ -2221,22 +2221,22 @@
       }
     },
     "/api/keys/{provider}": {
-      "parameters": [
-        {
-          "name": "provider",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs", "suno"]
-          }
-        }
-      ],
       "put": {
         "tags": ["Keys"],
         "summary": "Store or update a BYOK provider key",
-        "description": "Encrypts and stores an API key for the specified provider. Requires hobbyist tier or above.",
+        "description": "Encrypts and stores an API key for the specified provider. Requires hobbyist tier or above. Retired providers (Suno) can no longer be added, so this enum omits them — it mirrors BYOK_PROVIDERS in web/src/lib/config/providers.ts.",
         "security": [{ "ClerkSession": [] }],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs"]
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2275,7 +2275,19 @@
       "delete": {
         "tags": ["Keys"],
         "summary": "Remove a BYOK provider key",
+        "description": "Removes a stored BYOK key. Retired providers (Suno) can no longer be added but a stale stored key must stay removable, so this enum retains them — it mirrors REMOVABLE_BYOK_PROVIDERS in web/src/lib/config/providers.ts.",
         "security": [{ "ClerkSession": [] }],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs", "suno"]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Key removed",
