@@ -830,8 +830,8 @@ describe('healthChecks', () => {
       expect((await checkAiProviders()).configurationOnly).toBeUndefined();
     });
 
-    // No Suno key here on purpose: music is declared unavailable (#9522), so
-    // a fully provisioned platform has NO key for it and must still be green.
+    // #9522: music now shares PLATFORM_ELEVENLABS_KEY with sfx/voice, so a fully
+    // provisioned platform (ElevenLabs key present) covers music too and is green.
     it('returns healthy when a chat backend and every provisionable generation key are configured', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '');
@@ -875,12 +875,14 @@ describe('healthChecks', () => {
       const providers = result.details?.generationProviders as Record<string, boolean>;
       expect(providers.meshy).toBe(true);
       expect(providers.elevenlabs).toBe(true);
-      expect(providers.suno).toBe(false);
+      // #9522: Suno is gone from PLATFORM_KEY_ENV, so it is no longer probed.
+      expect(providers.suno).toBeUndefined();
       const missing = result.details?.unconfiguredCapabilities as string[];
       expect(missing).not.toContain('model3d');
       expect(missing).not.toContain('sfx');
       expect(missing).toContain('sprite');
-      // Declared unavailable (#9522), so never reported as an omission.
+      // #9522: music shares the ElevenLabs key, which is set here, so it is
+      // configured and not reported as an omission.
       expect(missing).not.toContain('music');
     });
 

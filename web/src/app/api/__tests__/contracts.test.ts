@@ -1045,8 +1045,8 @@ describe('OpenAPI contract — real route responses', () => {
     expect(body.status).toBe('failed');
     // A failed status carries `error` and omits `resultUrl`/`durationSeconds`.
     expectContract('get', '/api/generate/music/status', 200, body, [
-      'missing $.resultUrl',
       'missing $.durationSeconds',
+      'missing $.resultUrl',
     ]);
   });
 
