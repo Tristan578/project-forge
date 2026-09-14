@@ -438,3 +438,208 @@ describe('observatory/validator — latency distribution invariants', () => {
     expect(result.data.value).toBeNull();
   });
 });
+
+describe('observatory/validator — minimum sample gates the resolved denominator, not sampleSize', () => {
+  it('cannot fabricate a measured value by inflating sampleSize above the real denominator', () => {
+    // friction minimum is 5 resolved attempts. Only 3 attempts actually
+    // resolved (denominator: 3), but sampleSize claims 5 — the gate must key
+    // off the denominator, not the caller-controlled sampleSize.
+    const obs = {
+      ...baseCompletenessObservation(),
+      metric: 'friction',
+      formulaVersion: FORMULA_VERSIONS.friction,
+      evidence: { journeyId: 'jrn:first-game@1' },
+      source: 'journey-telemetry',
+      numerator: 1,
+      denominator: 3,
+      sampleSize: 5,
+    };
+    const result = deriveMetricValue(obs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.state).toBe('insufficient_sample');
+    expect(result.data.value).toBeNull();
+  });
+
+  it('rejects an observation whose sampleSize is less than its denominator', () => {
+    const obs = { ...baseCompletenessObservation(), numerator: 4, denominator: 5, sampleSize: 4 };
+    const result = validateObservation(obs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('sampleSize cannot be less than denominator');
+  });
+
+  it('rejects a latency observation whose sampleSize is less than latencyDistribution.eligible', () => {
+    const obs = {
+      observationId: 'obs:01J9LATENCYSAMPLE0000001',
+      metric: 'latency',
+      environment: 'production',
+      window: { label: '24h', start: '2026-09-13T00:00:00Z', end: '2026-09-14T00:00:00Z' },
+      evidence: { capabilityId: 'cap:generate.gdd@1' },
+      source: 'latency-monitor',
+      releaseSha: 'a1b2c3d4',
+      observedAt: '2026-09-13T23:00:00Z',
+      ingestedAt: '2026-09-13T23:05:00Z',
+      confidence: 'verified',
+      applicability: 'applicable',
+      formulaVersion: FORMULA_VERSIONS.latency,
+      sampleSize: 50,
+      latencyDistribution: {
+        p50Ms: 820,
+        p95Ms: 1900,
+        p99Ms: 4200,
+        budgetMs: 5000,
+        withinBudget: 95,
+        eligible: 100,
+      },
+    };
+    const result = validateObservation(obs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('sampleSize cannot be less than latencyDistribution.eligible');
+  });
+});
+
+describe('observatory/validator — window labels must carry their exact duration', () => {
+  it('rejects a window labeled 24h that actually spans 7 days', () => {
+    const obs = {
+      ...baseCompletenessObservation(),
+      window: { label: '24h', start: '2026-09-07T00:00:00Z', end: '2026-09-14T00:00:00Z' },
+    };
+    const result = validateObservation(obs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('must span exactly');
+  });
+});
+
+describe('observatory/validator — metric metadata must match the dictionary', () => {
+  function measuredCompleteness(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      metric: 'completeness',
+      unit: 'ratio',
+      direction: 'higher_is_better',
+      environment: 'production',
+      window: { label: '30d', start: '2026-08-15T00:00:00Z', end: '2026-09-14T00:00:00Z' },
+      source: 'capability-contract',
+      releaseSha: 'a1b2c3d4',
+      observedAt: '2026-09-13T23:00:00Z',
+      ingestedAt: '2026-09-13T23:05:00Z',
+      confidence: 'verified',
+      applicability: 'applicable',
+      formulaVersion: FORMULA_VERSIONS.completeness,
+      state: 'measured',
+      value: 0.8,
+      numerator: 4,
+      denominator: 5,
+      sampleSize: 5,
+      freshnessTtlSeconds: 86400,
+      ...overrides,
+    };
+  }
+
+  it('rejects a completeness value whose source names another metric\'s system', () => {
+    const result = validateMetricValue(measuredCompleteness({ source: 'synthetic-monitor' }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('source: expected capability-contract');
+  });
+
+  it('rejects a completeness value with a mismatched display direction', () => {
+    const result = validateMetricValue(measuredCompleteness({ direction: 'lower_is_better' }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('direction: expected higher_is_better');
+  });
+
+  it('rejects a completeness value with a mismatched freshnessTtlSeconds', () => {
+    const result = validateMetricValue(measuredCompleteness({ freshnessTtlSeconds: 60 }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('freshnessTtlSeconds: expected 86400');
+  });
+
+  it('rejects an observation whose source names another metric\'s system', () => {
+    const obs = {
+      ...baseCompletenessObservation(),
+      source: 'synthetic-monitor',
+    };
+    const result = validateObservation(obs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('source: expected capability-contract');
+  });
+});
+
+describe('observatory/validator — measured/stale values must stay within their unit range', () => {
+  it('rejects a measured ratio value above 1, even when internally "consistent"', () => {
+    // numerator/denominator here agree with value (both express a 2x ratio),
+    // so the numerator<=denominator check on Observation never runs — only a
+    // direct range check on the persisted MetricValue catches this.
+    const value = {
+      metric: 'uptime',
+      unit: 'ratio',
+      direction: 'higher_is_better',
+      environment: 'production',
+      window: { label: '24h', start: '2026-09-13T00:00:00Z', end: '2026-09-14T00:00:00Z' },
+      source: 'synthetic-monitor',
+      releaseSha: null,
+      observedAt: '2026-09-13T23:00:00Z',
+      ingestedAt: '2026-09-13T23:05:00Z',
+      confidence: 'verified',
+      applicability: 'applicable',
+      formulaVersion: FORMULA_VERSIONS.uptime,
+      state: 'measured',
+      value: 2,
+      numerator: 20,
+      denominator: 10,
+      sampleSize: 20,
+      freshnessTtlSeconds: 900,
+    };
+    const result = validateMetricValue(value);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('is outside the valid range for unit ratio');
+  });
+
+  it('rejects a stale lastObservedValue outside [0,1]', () => {
+    const value = {
+      metric: 'uptime',
+      unit: 'ratio',
+      direction: 'higher_is_better',
+      environment: 'production',
+      window: { label: '24h', start: '2026-09-13T00:00:00Z', end: '2026-09-14T00:00:00Z' },
+      source: 'synthetic-monitor',
+      releaseSha: null,
+      observedAt: '2026-09-13T18:00:00Z',
+      ingestedAt: '2026-09-13T18:01:00Z',
+      confidence: 'verified',
+      applicability: 'applicable',
+      formulaVersion: FORMULA_VERSIONS.uptime,
+      state: 'stale',
+      value: null,
+      lastObservedValue: -1,
+      lastObservedAt: '2026-09-13T18:00:00Z',
+      sampleSize: 216,
+      freshnessTtlSeconds: 900,
+    };
+    const result = validateMetricValue(value);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('lastObservedValue -1 is outside the valid range for unit ratio');
+  });
+});
+
+describe('observatory/validator — snapshot schemaVersion is pinned', () => {
+  it('rejects a snapshot whose schemaVersion is not the current SCHEMA_VERSION', () => {
+    const snapshot = {
+      snapshotId: 'snap:01J9OLDSCHEMA0000000001',
+      environment: 'production',
+      builtAt: '2026-09-14T00:05:00Z',
+      schemaVersion: '0.9.0',
+      values: [],
+    };
+    const result = validateSnapshot(snapshot);
+    expect(result.ok).toBe(false);
+  });
+});

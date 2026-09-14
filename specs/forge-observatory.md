@@ -173,7 +173,20 @@ change.
   `numerator / denominator`.
 - **Mixed environments in one snapshot** ⇒ rejected.
 - **Stale** ⇒ `value: null`; last-good lives on `lastObservedValue`.
-- **Half-open window** ⇒ `end` must be strictly after `start`.
+- **Half-open window** ⇒ `end` must be strictly after `start`, AND the span
+  must equal the label's exact duration (see Windows table) — a mislabeled
+  window is rejected, not just an inverted one.
+- **Metric metadata contradiction** ⇒ `unit`, `direction`, `source` (and, on
+  measured/stale values, `freshnessTtlSeconds`) must equal the dictionary's
+  registered value for that metric; rejected otherwise.
+- **Out-of-range value** ⇒ a measured `value` or stale `lastObservedValue`
+  outside the range its `unit` permits (ratio: `[0,1]`) is rejected.
+- **Minimum sample vs. denominator** ⇒ the minimum-sample gate is applied to
+  the resolved denominator (eligible/resolved count), not a caller-supplied
+  `sampleSize` alone; `sampleSize` itself can never be less than the
+  denominator (or, for latency, `latencyDistribution.eligible`).
+- **Schema version** ⇒ a snapshot's `schemaVersion` must equal the current
+  `SCHEMA_VERSION`; any other value is rejected as a different wire contract.
 
 ## Golden fixtures
 

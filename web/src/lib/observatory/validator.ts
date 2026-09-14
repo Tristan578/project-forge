@@ -19,6 +19,15 @@
  *  - Mixed environments in one snapshot: every value's `environment` must equal
  *    the snapshot's.
  *  - A stale record never claims current health (schema pins `value: null`).
+ *  - Metric metadata contradiction: `unit`, `direction`, `source` (and, for
+ *    measured/stale, `freshnessTtlSeconds`) must equal the metric dictionary's
+ *    registered values — a per-record override of these is never valid.
+ *  - Out-of-range ratios: a measured `value` or a stale `lastObservedValue`
+ *    must lie within the range its `unit` permits (ratio: [0,1]).
+ *  - Fabricated minimum sample: the minimum-sample gate applies to the
+ *    denominator (eligible/resolved count), not the caller-supplied
+ *    `sampleSize` alone — `sampleSize` can never be smaller than it either
+ *    (schema-enforced on `Observation`).
  */
 import type { ZodType } from 'zod';
 import {
@@ -75,6 +84,67 @@ const METRIC_SOURCE: Record<MetricName, keyof typeof FRESHNESS_TTL_SECONDS> = {
   uptime: 'synthetic-monitor',
 };
 
+/**
+ * Canonical unit per metric — all four primary metrics are a ratio in [0,1]
+ * (see "Metric dictionary", `specs/forge-observatory.md`). Companion
+ * distributions (raw latency ms, retry/abandonment counts) are shown
+ * separately and never become the primary `MetricValue.unit`.
+ */
+const METRIC_UNIT: Record<MetricName, MetricUnit> = {
+  completeness: 'ratio',
+  friction: 'ratio',
+  latency: 'ratio',
+  uptime: 'ratio',
+};
+
+/**
+ * True when `value`/`lastObservedValue` lies in the range its declared unit
+ * permits. Ratios are [0,1]; the other units are currently unused by any
+ * primary metric but are kept unit-correct rather than assuming ratio.
+ */
+function inUnitRange(unit: MetricUnit, n: number): boolean {
+  switch (unit) {
+    case 'ratio':
+      return n >= 0 && n <= 1;
+    case 'percent':
+      return n >= 0 && n <= 100;
+    case 'milliseconds':
+    case 'count':
+      return n >= 0;
+  }
+}
+
+/**
+ * Metric metadata that does not vary per record: unit, display direction,
+ * canonical source and (for measured/stale) freshness TTL are all fixed by
+ * the metric dictionary, not caller-suppliable per-record choices. A record
+ * whose metadata disagrees with the registry is internally contradictory even
+ * when its own fields are pairwise consistent.
+ */
+function metricMetadataErrors(value: MetricValue): string[] {
+  const errors: string[] = [];
+  if (value.unit !== METRIC_UNIT[value.metric]) {
+    errors.push(`unit: expected ${METRIC_UNIT[value.metric]} for ${value.metric}, got ${value.unit}`);
+  }
+  if (value.direction !== METRIC_DIRECTION[value.metric]) {
+    errors.push(
+      `direction: expected ${METRIC_DIRECTION[value.metric]} for ${value.metric}, got ${value.direction}`,
+    );
+  }
+  if (value.source !== METRIC_SOURCE[value.metric]) {
+    errors.push(`source: expected ${METRIC_SOURCE[value.metric]} for ${value.metric}, got ${value.source}`);
+  }
+  if (value.state === 'measured' || value.state === 'stale') {
+    const expectedTtl = FRESHNESS_TTL_SECONDS[METRIC_SOURCE[value.metric]];
+    if (value.freshnessTtlSeconds !== expectedTtl) {
+      errors.push(
+        `freshnessTtlSeconds: expected ${expectedTtl} for ${value.metric}, got ${value.freshnessTtlSeconds}`,
+      );
+    }
+  }
+  return errors;
+}
+
 function flattenZodErrors(error: { issues: { path: PropertyKey[]; message: string }[] }): string[] {
   return error.issues.map((i) => {
     const path = i.path.length > 0 ? i.path.join('.') : '(root)';
@@ -104,7 +174,7 @@ export function validateMetricValue(input: unknown): ValidationResult<MetricValu
   const shape = parseWith(zMetricValue, input);
   if (!shape.ok) return shape;
   const value = shape.data;
-  const errors: string[] = [];
+  const errors: string[] = [...metricMetadataErrors(value)];
 
   if (!formulaMatches(value.metric, value.formulaVersion)) {
     errors.push(
@@ -112,14 +182,25 @@ export function validateMetricValue(input: unknown): ValidationResult<MetricValu
     );
   }
 
-  if (value.state === 'measured' && RATIO_METRICS.has(value.metric)) {
-    if (value.numerator === undefined || value.denominator === undefined) {
-      errors.push('measured ratio metric requires numerator and denominator');
-    } else if (Math.abs(value.value - value.numerator / value.denominator) > RATIO_EPSILON) {
-      errors.push(
-        `value ${value.value} does not equal numerator/denominator ${value.numerator}/${value.denominator}`,
-      );
+  if (value.state === 'measured') {
+    if (!inUnitRange(value.unit, value.value)) {
+      errors.push(`value ${value.value} is outside the valid range for unit ${value.unit}`);
     }
+    if (RATIO_METRICS.has(value.metric)) {
+      if (value.numerator === undefined || value.denominator === undefined) {
+        errors.push('measured ratio metric requires numerator and denominator');
+      } else if (Math.abs(value.value - value.numerator / value.denominator) > RATIO_EPSILON) {
+        errors.push(
+          `value ${value.value} does not equal numerator/denominator ${value.numerator}/${value.denominator}`,
+        );
+      }
+    }
+  }
+
+  if (value.state === 'stale' && !inUnitRange(value.unit, value.lastObservedValue)) {
+    errors.push(
+      `lastObservedValue ${value.lastObservedValue} is outside the valid range for unit ${value.unit}`,
+    );
   }
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, data: value };
@@ -130,15 +211,18 @@ export function validateObservation(input: unknown): ValidationResult<Observatio
   const shape = parseWith(zObservation, input);
   if (!shape.ok) return shape;
   const obs = shape.data;
+  const errors: string[] = [];
+
   if (!formulaMatches(obs.metric, obs.formulaVersion)) {
-    return {
-      ok: false,
-      errors: [
-        `formulaVersion: expected ${FORMULA_VERSIONS[obs.metric]} for ${obs.metric}, got ${obs.formulaVersion}`,
-      ],
-    };
+    errors.push(
+      `formulaVersion: expected ${FORMULA_VERSIONS[obs.metric]} for ${obs.metric}, got ${obs.formulaVersion}`,
+    );
   }
-  return { ok: true, data: obs as Observation };
+  if (obs.source !== METRIC_SOURCE[obs.metric]) {
+    errors.push(`source: expected ${METRIC_SOURCE[obs.metric]} for ${obs.metric}, got ${obs.source}`);
+  }
+
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, data: obs as Observation };
 }
 
 /**
@@ -224,7 +308,7 @@ export function deriveMetricValue(input: unknown): ValidationResult<MetricValue>
     numerator === undefined ||
     denominator === undefined ||
     denominator === 0 ||
-    obs.sampleSize < minimum
+    denominator < minimum
   ) {
     return {
       ok: true,

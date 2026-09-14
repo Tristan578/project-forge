@@ -96,6 +96,20 @@ export const zTimeWindow = z
   .refine((w) => Date.parse(w.end) > Date.parse(w.start), {
     message: 'window end must be strictly after start (half-open [start, end))',
     path: ['end'],
+  })
+  // Each label denotes an EXACT UTC duration (see the table above) — ordering
+  // alone lets a 7-day span carry the '24h' label into an aggregation bucket
+  // it does not belong to.
+  .superRefine((w, ctx) => {
+    const actualMs = Date.parse(w.end) - Date.parse(w.start);
+    const expectedMs = WINDOW_DURATION_MS[w.label];
+    if (actualMs !== expectedMs) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['end'],
+        message: `window labeled '${w.label}' must span exactly ${expectedMs}ms (start->end), got ${actualMs}ms`,
+      });
+    }
   });
 
 export const zEvidenceRef = z
@@ -213,12 +227,31 @@ export const zObservation = z
   .refine((o) => o.numerator === undefined || o.denominator === undefined || o.numerator <= o.denominator, {
     message: 'numerator cannot exceed denominator',
     path: ['numerator'],
-  });
+  })
+  // The denominator (applicable requirements / resolved attempts / eligible
+  // observations) counts a subset of the underlying data points — sampleSize
+  // is the audit trail for "how many points backed this", so it can never be
+  // smaller than the count MINIMUM_SAMPLE_SIZE is actually gated on. Without
+  // this, a caller can satisfy a metric's minimum with an inflated sampleSize
+  // while the real (denominator) count stays below threshold.
+  .refine((o) => o.denominator === undefined || o.sampleSize >= o.denominator, {
+    message: 'sampleSize cannot be less than denominator',
+    path: ['sampleSize'],
+  })
+  .refine(
+    (o) => o.latencyDistribution === undefined || o.sampleSize >= o.latencyDistribution.eligible,
+    {
+      message: 'sampleSize cannot be less than latencyDistribution.eligible',
+      path: ['sampleSize'],
+    },
+  );
 
 export const zSnapshot = z.object({
   snapshotId: zSnapshotId,
   environment: zEnvironment,
   builtAt: zIsoUtc,
-  schemaVersion: z.string().min(1).max(20),
+  // Pinned to the current wire shape — an older/newer SCHEMA_VERSION is a
+  // different contract, not a string to pass through unchecked.
+  schemaVersion: z.literal(SCHEMA_VERSION),
   values: z.array(zMetricValue),
 });
