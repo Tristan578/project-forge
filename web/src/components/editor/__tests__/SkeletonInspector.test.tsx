@@ -617,4 +617,89 @@ describe('SkeletonInspector', () => {
     expect(screen.getByLabelText('Vertex 2 X')).toHaveValue(2);
     expect(screen.getByLabelText('Vertex 2 influence 1 bone')).toHaveValue('root');
   });
+
+  it('deletes a mesh attachment through the store, removing it from the skin', () => {
+    // handleDeleteMeshAttachment had no test — nothing exercised the delete
+    // button or asserted the payload `setSkeleton2d` receives.
+    setupStore({ skeleton: skeletonWithMesh });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Delete mesh attachment cloak'));
+    expect(mockSetSkeleton2d).toHaveBeenCalledTimes(1);
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.skins.default.attachments).not.toHaveProperty('cloak');
+    expect(Object.keys(payload.skins.default.attachments)).toHaveLength(0);
+  });
+
+  it('closes the open draft when the attachment being edited is deleted', () => {
+    // The `meshDraft?.original === name` branch: deleting the attachment whose
+    // draft is open must clear that draft, not leave a stale editor pointing at
+    // a slot that no longer exists.
+    setupStore({ skeleton: skeletonWithMesh });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Delete mesh attachment cloak'));
+    expect(mockSetSkeleton2d).toHaveBeenCalledTimes(1);
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.skins.default.attachments).not.toHaveProperty('cloak');
+    // The draft editor (its "Mesh: cloak" header) is gone; the list entry
+    // "cloak (2 verts)" is derived from the mocked store and is unaffected here.
+    expect(screen.queryByText('Mesh: cloak')).not.toBeInTheDocument();
+  });
+
+  it('shows the duplicate-name error and opens no draft when the name already exists', () => {
+    // The duplicate-name guard sets `meshError` and returns BEFORE creating a
+    // draft, so the message must render outside the `{meshDraft && ...}` gate.
+    // Before the fix it was a silent no-op: no draft, no error anywhere in the
+    // DOM. Covers the guard (setMeshError branch) and its rendering.
+    setupStore({ skeleton: skeletonWithMesh });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'cloak' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    expect(screen.getByText(/already exists/i)).toBeInTheDocument();
+    // No draft opened (the editor header is absent) and nothing was written.
+    expect(screen.queryByText('Mesh: cloak')).not.toBeInTheDocument();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+  });
+
+  it('rejects Apply when every vertex has been removed', () => {
+    // The `meshDraft.vertices.length === 0` guard: remove the sole vertex, then
+    // Apply must name the empty-mesh error and leave the store untouched.
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'belt' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    fireEvent.click(screen.getByLabelText('Remove vertex 1'));
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    expect(screen.getByText(/at least one vertex/i)).toBeInTheDocument();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+  });
+
+  it('discards the draft when Cancel is clicked, writing nothing', () => {
+    // The Cancel button clears `meshDraft`/`meshError`; the editor closes and no
+    // store write happens.
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'belt' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    expect(screen.getByText('Mesh: belt')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Cancel'));
+    expect(screen.queryByText('Mesh: belt')).not.toBeInTheDocument();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+  });
+
+  it('rejects a vertex influence with a blank bone name', () => {
+    // The `!bone` branch in handleApplyMesh — the bone field is a text input, so
+    // it can be cleared to an empty string (unlike the numeric position/weight
+    // fields, which the number input sanitizes to '' → Number('') === 0). Only
+    // unknown-bone and zero-total-weight were covered before.
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'belt' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 bone'), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    expect(screen.getByText(/has no bone/i)).toBeInTheDocument();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+  });
 });

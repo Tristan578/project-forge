@@ -120,11 +120,13 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
   // --- Mesh attachments (#9732) ---------------------------------------------
   // The manual, no-chat authoring path for the same vertex/weight data
   // `add_skeleton2d_mesh_attachment` writes. Edits round-trip through
-  // `setSkeleton2d` like every other change in this panel, and Apply shares the
-  // command's validation: an influence must name a real bone, and a vertex must
-  // carry a positive total weight or the engine's skinning drops it to its bind
-  // position. Weights are rejected, not silently normalized, so an author sees
-  // and fixes the row rather than having their numbers quietly rewritten.
+  // `setSkeleton2d` like every other change in this panel. Apply adds
+  // client-side validation the command / chat path does NOT enforce (that path
+  // only checks vertices.length === weights.length): an influence must name a
+  // real bone, and a vertex must carry a positive total weight — otherwise the
+  // engine's skinning drops it to its bind position. Weights are rejected here,
+  // not silently normalized, so an author sees and fixes the row rather than
+  // having their numbers quietly rewritten.
   const activeSkinData = skeleton.skins[selectedSkin];
   const meshAttachments = Object.entries(activeSkinData?.attachments ?? {}).filter(
     ([, a]) => a.type === 'mesh',
@@ -494,6 +496,19 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             <Plus className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
+
+        {/*
+          The add-time error (e.g. a duplicate attachment name) is set before any
+          draft exists and returns early, so it must render OUTSIDE the
+          `{meshDraft && ...}` gate below or it would never be shown — a silent
+          no-op on the collision. Guarded by `!meshDraft` so it and the in-draft
+          error never render at once (they share `meshError`).
+        */}
+        {!meshDraft && meshError && (
+          <div className="mt-1 text-xs text-red-400" role="alert">
+            {meshError}
+          </div>
+        )}
 
         {meshDraft && (
           <div className="mt-2 bg-zinc-800 rounded p-2 space-y-2">
