@@ -1322,27 +1322,62 @@ jobs:
         #
         # The name is derived from the PR number and nothing else, so the
         # cleanup workflow can find it without carrying state between runs.
+        #
+        # BRANCH ALLOWANCE (#10016). The Neon project allows 10 branches. Three
+        # are permanent — production, staging, and one db-snapshot-* — leaving 7
+        # preview slots. NEON_PREVIEW_BRANCH_CAP (default 6) is that budget minus
+        # one slot of headroom for the branch this run is about to create, so
+        # capping OTHER previews at 6 keeps the total at or under 7. When enough
+        # PRs are open, `create` would otherwise 422 with BRANCHES_LIMIT_EXCEEDED
+        # and fail closed (never falling back to the shared staging DB, by
+        # design). We evict the OLDEST preview branch first to make room. An
+        # evicted still-open PR simply recreates its branch on its next run.
         id: neon-branch
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          NEON_PREVIEW_BRANCH_CAP: '6'
         run: |
           set -euo pipefail
-          # ZERO-PADDED, and this is load-bearing. neon-branch.sh's prune
-          # matches by `startswith`, so an unpadded "preview-pr-1" is a prefix of
-          # "preview-pr-12" and pruning PR 1 would delete the branches of PRs
-          # 12 through 19. Fixed-width names are all the same length, so no name
-          # can prefix another and startswith degenerates to equality.
+          # ZERO-PADDED, and this is load-bearing. neon-branch.sh's prune and
+          # evict-oldest match by `startswith`, so an unpadded "preview-pr-1" is
+          # a prefix of "preview-pr-12" and pruning PR 1 would delete the
+          # branches of PRs 12 through 19. Fixed-width names are all the same
+          # length, so no name can prefix another and startswith degenerates to
+          # equality — and --except below is compared for exact equality, so the
+          # padding also keeps one PR's branch from being mistaken for another's.
           name="preview-pr-$(printf '%06d' "$PR_NUMBER")"
           uri_file="${RUNNER_TEMP}/preview-db-uri"
+          cap="${NEON_PREVIEW_BRANCH_CAP:-6}"
+
+          # Make room BEFORE create: trim OTHER preview branches (never this PR's,
+          # never production/staging/db-snapshot-*) to the cap, oldest-first.
+          echo "$(bash scripts/neon-branch.sh evict-oldest 'preview-pr-' "$cap" --except "$name" 2>&1 || true)"
 
           # A push to an open PR replaces its branch rather than accumulating
-          # one per push: create does not dedupe names, and the free allowance is
-          # 10 branches. Retention 0 means "everything with this exact name".
+          # one per push: create does not dedupe names. Retention 0 means
+          # "everything with this exact name".
           echo "$(bash scripts/neon-branch.sh prune "$name" 0 2>&1 || true)"
 
-          out="$(bash scripts/neon-branch.sh create "$name" --endpoint --uri-out "$uri_file")"
+          # Create, with a retry-once-after-eviction path. Exit 5 is the DISTINCT
+          # BRANCHES_LIMIT_EXCEEDED code (not the generic 3, not the poll-timeout
+          # 4): a slot was lost to a concurrent preview run between our eviction
+          # and our create. Evict one more and retry create exactly once. Any
+          # other non-zero exit is a genuine failure and is NOT retried, so a
+          # non-capacity fault is never masked and the retry cannot loop. The
+          # `if` wrapper is what lets create fail without `set -e` aborting here.
+          if out="$(bash scripts/neon-branch.sh create "$name" --endpoint --uri-out "$uri_file")"; then rc=0; else rc=$?; fi
+          if [ "$rc" -eq 5 ]; then
+            echo "::notice::Neon branch cap hit on create; evicting one more preview branch and retrying once."
+            echo "$(bash scripts/neon-branch.sh evict-oldest 'preview-pr-' "$cap" --except "$name" 2>&1 || true)"
+            if out="$(bash scripts/neon-branch.sh create "$name" --endpoint --uri-out "$uri_file")"; then rc=0; else rc=$?; fi
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "$out"
+            echo "::error::neon-branch.sh create failed (exit ${rc}) for ${name}. The Neon project is at its ${cap}-preview cap (10-branch allowance minus production, staging and one db-snapshot-*) and no older preview branch could be freed. Close or merge an open PR to release a slot."
+            exit 1
+          fi
           echo "$out"
           branch_id="$(printf '%s\n' "$out" | sed -nE 's/.*(br-[a-z0-9-]+).*/\1/p' | head -1)"
           if [ -z "$branch_id" ]; then
