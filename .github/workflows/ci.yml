@@ -1096,6 +1096,7 @@ jobs:
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
+            scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
@@ -1166,6 +1167,9 @@ jobs:
 
       - name: Run Neon branch-helper test suite
         run: bash scripts/__tests__/neon-branch.test.sh
+
+      - name: Run preview-database branch-policy test suite
+        run: bash scripts/__tests__/preview-db-branch.test.sh
 
       # Executes the ci-gate `Detect changed paths` step body extracted from this
       # very file. Rides needs-ci, which every ci.yml edit sets, so the filters
@@ -1322,36 +1326,63 @@ jobs:
         #
         # The name is derived from the PR number and nothing else, so the
         # cleanup workflow can find it without carrying state between runs.
+        #
+        # CAPACITY IS MANAGED, NOT ASSUMED (#10015). The project's branch
+        # allowance is ten and it is shared with production, staging and
+        # cd.yml's 14-day snapshots, so open PRs alone can fill it -- they did
+        # on 2026-09-14, and every preview deploy then failed with
+        # BRANCHES_LIMIT_EXCEEDED until a branch was deleted by hand. The policy
+        # script (scripts/preview-db-branch.sh, with its own suite) replaces this
+        # PR's own branch and, when Neon says the allowance is full, first
+        # deletes previews of CLOSED PRs, then evicts the least recently built
+        # preview older than this job's timeout, retrying after each. An
+        # evicted PR is named on the summary and told by the step below; its
+        # next push rebuilds it. GH_TOKEN is what the closed-PR lookups use.
         id: neon-branch
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          # ZERO-PADDED, and this is load-bearing. neon-branch.sh's prune
-          # matches by `startswith`, so an unpadded "preview-pr-1" is a prefix of
-          # "preview-pr-12" and pruning PR 1 would delete the branches of PRs
-          # 12 through 19. Fixed-width names are all the same length, so no name
-          # can prefix another and startswith degenerates to equality.
-          name="preview-pr-$(printf '%06d' "$PR_NUMBER")"
           uri_file="${RUNNER_TEMP}/preview-db-uri"
 
-          # A push to an open PR replaces its branch rather than accumulating
-          # one per push: create does not dedupe names, and the free allowance is
-          # 10 branches. Retention 0 means "everything with this exact name".
-          echo "$(bash scripts/neon-branch.sh prune "$name" 0 2>&1 || true)"
-
-          out="$(bash scripts/neon-branch.sh create "$name" --endpoint --uri-out "$uri_file")"
+          out="$(bash scripts/preview-db-branch.sh create "$PR_NUMBER" --uri-out "$uri_file")"
           echo "$out"
-          branch_id="$(printf '%s\n' "$out" | sed -nE 's/.*(br-[a-z0-9-]+).*/\1/p' | head -1)"
+          # Read the TYPED line, never the first br- token: the output carries
+          # evicted_branch=br-... BEFORE branch_id= when a branch was reclaimed,
+          # and a loose match would ship the evicted id as this preview's.
+          branch_id="$(printf '%s\n' "$out" | sed -n 's/^branch_id=//p' | head -1)"
+          name="$(printf '%s\n' "$out" | sed -n 's/^branch_name=//p' | head -1)"
           if [ -z "$branch_id" ]; then
-            echo "::error::could not read the branch id from neon-branch.sh output — refusing to deploy a preview that would silently use the shared staging database."
+            echo "::error::could not read the branch id from preview-db-branch.sh output — refusing to deploy a preview that would silently use the shared staging database."
             exit 1
           fi
           echo "branch_id=${branch_id}" >> "$GITHUB_OUTPUT"
           echo "uri_file=${uri_file}" >> "$GITHUB_OUTPUT"
           echo "Neon preview branch: ${name} (${branch_id})" >> "$GITHUB_STEP_SUMMARY"
+
+          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | head -1)"
+          if [ -n "$evicted_pr" ]; then
+            echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
+            echo "Reclaimed the preview database of #${evicted_pr} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Tell the evicted PR its preview database was reclaimed
+        # Without this the evicted PR's preview URL simply starts failing on
+        # database access, with nothing on the PR to say why or that a push
+        # brings it back. Housekeeping never fails the deploy it made room for.
+        if: steps.neon-branch.outputs.evicted_pr != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVICTED_PR: ${{ steps.neon-branch.outputs.evicted_pr }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "$EVICTED_PR" --repo "$REPO" \
+            --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
 
       - name: Apply migrations to the preview branch
         # THE WHOLE POINT. A migration that cannot apply must fail the PR here,

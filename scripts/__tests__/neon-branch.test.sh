@@ -725,6 +725,92 @@ if [ "$rc" = "0" ]; then pass "a failed prune delete does not fail the job (exit
 if grep -qF '::warning::' <<<"$out"; then pass "a failed prune delete emits a ::warning::"; else fail "a failed prune delete is silent"; fi
 
 echo ""
+echo "=== neon-branch.sh: list (the audit view the preview reclaim reads) ==="
+# Oldest first, prefix-filtered, TSV. The preview policy evicts the FIRST row
+# it may, so the order is part of the contract, not a nicety.
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-new","name":"preview-pr-000300","created_at":"2026-09-14T20:00:00Z"},
+  {"id":"br-main","name":"production","created_at":"2026-03-01T00:00:00Z"},
+  {"id":"br-old","name":"preview-pr-000100","created_at":"2026-09-13T04:00:00Z"},
+  {"id":"br-mid","name":"preview-pr-000200","created_at":"2026-09-14T18:00:00Z"},
+  {"id":"br-snap","name":"db-snapshot-1-abc","created_at":"2026-09-04T00:00:00Z"}
+]}
+EOF
+res="$(run_helper list preview-pr-)"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "list succeeds (exit 0)"; else fail "list should exit 0, got $rc ($out)"; fi
+expected="$(printf 'br-old\tpreview-pr-000100\t2026-09-13T04:00:00Z\nbr-mid\tpreview-pr-000200\t2026-09-14T18:00:00Z\nbr-new\tpreview-pr-000300\t2026-09-14T20:00:00Z')"
+if [ "$out" = "$expected" ]; then
+  pass "list prints id/name/created_at as TSV, prefix-filtered, OLDEST FIRST"
+else
+  fail "list output differs: $(tr '\n\t' '|,' <<<"$out")"
+fi
+if grep -qF 'DELETE' <<<"$(requests)"; then fail "list issued a DELETE"; else pass "list is read-only"; fi
+
+# An empty prefix is the whole-project audit view.
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-b","name":"staging","created_at":"2026-03-03T00:00:00Z"},
+  {"id":"br-a","name":"production","created_at":"2026-03-01T00:00:00Z"}
+]}
+EOF
+res="$(run_helper list '')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ "$(grep -c . <<<"$out")" = "2" ] && [ "$(head -1 <<<"$out" | cut -f1)" = "br-a" ]; then
+  pass "list '' prints every branch, oldest first"
+else
+  fail "list '' should print both branches oldest first (rc=$rc): $(tr '\n\t' '|,' <<<"$out")"
+fi
+
+# No matches: empty output and exit 0, so a caller can tell "nothing there"
+# from "could not look" (next case).
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[{"id":"br-main","name":"production","created_at":"2026-03-01T00:00:00Z"}]}
+EOF
+res="$(run_helper list preview-pr-)"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ -z "$out" ]; then pass "list with no matches prints nothing and exits 0"; else fail "list with no matches: rc=$rc out='$out'"; fi
+
+stub_reset
+stub_status 1 500
+res="$(run_helper list preview-pr-)"
+rc="${res%%|*}"
+if [ "$rc" = "3" ]; then pass "list fails loudly on an API error (exit 3)"; else fail "list on a 500 should exit 3, got $rc"; fi
+
+echo ""
+echo "=== neon-branch.sh: a full branch allowance is a DISTINCT failure (exit 5) ==="
+# Observed live on #10000 (run 34889902111; #10015): the allowance is ten
+# branches, and once the eleventh create is refused every preview deploy fails
+# the same way until something is deleted. The caller can only reclaim-and-retry
+# if it can tell this apart from every other 4xx, so the code is typed, not
+# grepped out of a message.
+stub_reset
+stub_status 1 422
+stub_body 1 <<'EOF'
+{"request_id":"abc","code":"BRANCHES_LIMIT_EXCEEDED","message":"branches limit exceeded"}
+EOF
+res="$(run_helper create preview-pr-000042 --endpoint --uri-out "$TMPDIR_T/full.uri")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "5" ]; then pass "BRANCHES_LIMIT_EXCEEDED exits 5"; else fail "BRANCHES_LIMIT_EXCEEDED should exit 5, got $rc ($out)"; fi
+if grep -qF 'BRANCHES_LIMIT_EXCEEDED' <<<"$out"; then pass "the allowance error names the Neon code"; else fail "the allowance error does not name the code"; fi
+# Any OTHER 422 stays exit 3: the retry path must never fire on a validation error.
+stub_reset
+stub_status 1 422
+stub_body 1 <<'EOF'
+{"request_id":"abc","code":"INVALID_BRANCH_NAME","message":"bad name"}
+EOF
+res="$(run_helper create 'bad name')"
+rc="${res%%|*}"
+if [ "$rc" = "3" ]; then pass "a 422 with any other code stays exit 3"; else fail "a non-allowance 422 should exit 3, got $rc"; fi
+
+echo ""
 echo "=== neon-branch.sh: usage contract ==="
 assert_usage() {
   local label="$1"; shift
@@ -742,6 +828,8 @@ assert_usage "delete with no id" delete
 assert_usage "prune with no prefix" prune
 assert_usage "prune with a non-numeric retention" prune predeploy- seven
 assert_usage "prune with a negative retention" prune predeploy- -3
+assert_usage "list with no prefix" list
+assert_usage "list with two prefixes" list a b
 # --uri-out without --endpoint is a usage error, not a silent no-op: a branch
 # with no compute has no connection URI, so the caller's expectation is wrong
 # and the dry-run step downstream would read an empty file.

@@ -43,6 +43,11 @@
 #   prune <name-prefix> <retention-days>
 #       Deletes branches whose name starts with <name-prefix> and which are
 #       older than <retention-days>. Housekeeping only.
+#   list <name-prefix>
+#       Prints id<TAB>name<TAB>created_at for every branch whose name starts
+#       with <name-prefix>, OLDEST FIRST, and nothing at all when none match.
+#       An empty prefix lists the whole project. Read-only: this is the audit
+#       view scripts/preview-db-branch.sh reclaims capacity from (#10015).
 #
 # ENVIRONMENT
 #   NEON_API_KEY      (required)
@@ -65,13 +70,17 @@
 #   2   missing NEON_API_KEY / NEON_PROJECT_ID
 #   3   Neon API error (non-2xx, unparseable body, or a missing expected field)
 #   4   a branch-creation operation did not finish inside the poll timeout
+#   5   Neon refused to CREATE because the project's branch allowance is full
+#       (body code BRANCHES_LIMIT_EXCEEDED). Distinct from 3 so a caller can
+#       reclaim capacity and retry instead of grepping a message (#10015).
 #   64  usage error
 set -uo pipefail
 
 NEON_API_BASE='https://console.neon.tech/api/v2'
 USAGE='usage: neon-branch.sh create <name> [--endpoint] [--uri-out <path>]
        neon-branch.sh delete <branch_id>
-       neon-branch.sh prune <name-prefix> <retention-days>'
+       neon-branch.sh prune <name-prefix> <retention-days>
+       neon-branch.sh list <name-prefix>'
 
 command -v jq >/dev/null 2>&1 || { echo "::error::neon-branch.sh requires jq"; exit 3; }
 
@@ -89,7 +98,8 @@ if [ -z "$NEON_API_KEY" ] || [ -z "$NEON_PROJECT_ID" ]; then
   exit 2
 fi
 
-# Perform one Neon API call. Echoes the response body on 2xx; returns 3 otherwise.
+# Perform one Neon API call. Echoes the response body on 2xx; returns 3
+# otherwise, or 5 when the error body names BRANCHES_LIMIT_EXCEEDED.
 # The body goes to a temp file via -o and ONLY the status code reaches stdout, so
 # curl's own diagnostics can never be spliced into the payload (which would let a
 # transport failure masquerade as a valid response).
@@ -128,6 +138,12 @@ neon_api() {
       excerpt="$(sed -E 's#postgres(ql)?://[^"[:space:]]*#postgres://REDACTED#g' <<<"${payload:0:300}")"
       echo "::error::Neon API ${method} ${path} failed with status '${status:-none}'." >&2
       echo "::error::${excerpt}" >&2
+      # A full branch allowance is the one failure a caller can do something
+      # about (delete a branch, retry), so it gets its own code. Neon names it
+      # in the body: {"code":"BRANCHES_LIMIT_EXCEEDED",...} on a 422 (#10015).
+      if [ "$(jq -r '.code // empty' <<<"$payload" 2>/dev/null)" = "BRANCHES_LIMIT_EXCEEDED" ]; then
+        return 5
+      fi
       return 3
       ;;
   esac
@@ -287,7 +303,9 @@ cmd_create() {
   fi
 
   local resp
-  resp="$(neon_api POST "/projects/${NEON_PROJECT_ID}/branches" "$body")" || exit 3
+  # Propagate the API's own code: 5 (allowance full) is what the preview
+  # policy reclaims-and-retries on; everything else stays 3.
+  resp="$(neon_api POST "/projects/${NEON_PROJECT_ID}/branches" "$body")" || exit $?
 
   local branch_id
   branch_id="$(jq -r '.branch.id // empty' <<<"$resp" 2>/dev/null)"
@@ -361,9 +379,27 @@ cmd_prune() {
   echo "pruned=${n}"
 }
 
+cmd_list() {
+  [ $# -eq 1 ] || { echo "::error::$USAGE"; exit 64; }
+  local prefix="$1" resp
+  resp="$(neon_api GET "/projects/${NEON_PROJECT_ID}/branches")" || exit 3
+  # Oldest first: the preview policy evicts the FIRST row it may, so the order
+  # is part of the contract. Prints nothing when nothing matches; a failed
+  # list is the exit 3 above, never an empty success.
+  jq -r --arg p "$prefix" '
+      (.branches // [])
+      | map(select((.name // "") | startswith($p)))
+      | sort_by(.created_at // "")
+      | .[]
+      | [.id, (.name // ""), (.created_at // "")]
+      | @tsv
+    ' <<<"$resp" 2>/dev/null || { echo "::error::Neon list-branches response could not be parsed." >&2; exit 3; }
+}
+
 case "${1:-}" in
   create) shift; cmd_create "$@" ;;
   delete) shift; cmd_delete "$@" ;;
   prune)  shift; cmd_prune  "$@" ;;
+  list)   shift; cmd_list   "$@" ;;
   *) echo "::error::$USAGE"; exit 64 ;;
 esac
