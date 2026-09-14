@@ -228,7 +228,7 @@ export const worldBuildExecutor: ExecutorDefinition = {
                 : `World geometry entity ${entity.entityId} was not confirmed at its requested scale `
                   + `(operation ${effect.operationId})`,
               this.userFacingErrorMessage,
-              effect.status === 'timed-out',
+              false, // Accepted spawns may still apply; replaying would create duplicates.
               { effect },
             ),
           );

@@ -623,8 +623,7 @@ export function EditorLayout() {
       // (`lib/game-creation/engineObservation.ts`) — it adds no new way to
       // observe or mutate scene state beyond what `__EDITOR_STORE` already
       // exposes, only a way to answer a query the real engine would.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__FORGE_RECORD_ENTITY_OBSERVATION = recordEntityObservation;
+      window.__FORGE_RECORD_ENTITY_OBSERVATION = recordEntityObservation;
       // Reads the confirmed spawn/transform observation cache back (#9899), the
       // mirror of the recorder above. Same build-time gate. A real engine build
       // populates that cache off the `QUERY_ENTITY_DETAILS` event, so this lets
@@ -633,8 +632,7 @@ export function EditorLayout() {
       // rather than an adjacent store field like `primaryTransform`. Read-only:
       // it exposes no way to observe or mutate scene state beyond what
       // `__EDITOR_STORE` already does.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__FORGE_READ_ENTITY_OBSERVATION = readEntityObservation;
+      window.__FORGE_READ_ENTITY_OBSERVATION = readEntityObservation;
     }
   }, []);
 
