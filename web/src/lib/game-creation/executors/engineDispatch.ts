@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import type { ExecutorContext } from '../types';
+import type { ExecutorContext, EngineEffectResult, ObservedEntity } from '../types';
+import {
+  ENGINE_EFFECT_OBSERVATION_DEADLINE_MS,
+  ENGINE_EFFECT_POLL_INTERVAL_MS,
+} from '@/lib/config/timeouts';
 
 /**
  * Dispatch helpers shared by every executor that talks to the engine.
@@ -125,4 +129,128 @@ export function sendCommands(ctx: ExecutorContext, commands: EngineCommand[]): b
     if (response && response.success === false) accepted = false;
   }
   return accepted;
+}
+
+/**
+ * The operation family this slice confirms (#9899). Recorded on every
+ * `EngineEffectResult` and used as the default operation id so a caller that
+ * does not mint its own still produces a correlatable, traceable result.
+ */
+export const SPAWN_TRANSFORM_OPERATION = 'ai.FR-1.OP-01';
+
+/** A `rejected` result for a command the dispatcher refused outright. */
+export function rejectedEffect(operationId: string, entityId: string): EngineEffectResult {
+  return { status: 'rejected', operationId, entityId };
+}
+
+/**
+ * Sleep for `ms`, resolving EARLY when `signal` aborts.
+ *
+ * Resolving early rather than rejecting keeps the caller's loop simple: it wakes
+ * up, re-reads `signal.aborted` at the top, and returns `cancelled`. A rejection
+ * would force a try/catch around every poll for a state the loop already checks.
+ */
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export interface ObserveEngineEffectOptions {
+  /** Correlation id echoed on the result; defaults to `SPAWN_TRANSFORM_OPERATION`. */
+  operationId?: string;
+  /** The entity whose real engine state proves (or disproves) the effect. */
+  entityId: string;
+  /**
+   * Reads the engine's live view of `entityId`, or `undefined` while it is not
+   * yet observable. Normally `ctx.observeEntity` — a call fires a fresh query
+   * AND returns the latest cached answer.
+   */
+  observe: (entityId: string) => ObservedEntity | undefined;
+  /**
+   * True when an observation satisfies the INTENDED effect. For a spawn this is
+   * simply "something was observed" (existence); for a transform it compares the
+   * observed position/scale against the requested value. Defaults to existence.
+   */
+  satisfied?: (observed: ObservedEntity) => boolean;
+  /** Cancellation token — an abort mid-observation yields `cancelled`. */
+  signal: AbortSignal;
+  /** Observation deadline; defaults to `ENGINE_EFFECT_OBSERVATION_DEADLINE_MS` (5 s). */
+  deadlineMs?: number;
+  /** Gap between polls; defaults to `ENGINE_EFFECT_POLL_INTERVAL_MS`. */
+  pollIntervalMs?: number;
+  /** Injectable clock (tests); defaults to `Date.now`. */
+  now?: () => number;
+  /** Injectable sleep (tests); defaults to an abort-aware `setTimeout`. */
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+}
+
+/**
+ * Observe the REAL engine until a deferred spawn/transform is confirmed, the
+ * deadline expires, or the caller cancels — returning a typed, correlated
+ * result (#9899).
+ *
+ * This is the contract the whole slice turns on: an accepted dispatch is NOT an
+ * applied effect. `sendCommands` reports only that the engine took the command;
+ * the deferred work runs a frame later inside a system with no way back to the
+ * caller (see `waitForEngineFrame`). So after acceptance we query the engine's
+ * own state and report `applied` ONLY once it shows the effect.
+ *
+ * The synchronous acceptance (`sendCommands`) is unaffected and stays the local
+ * ack — this observation is the separate, up-to-5-second confirmation half, so
+ * the ack latency NFR is met by returning acceptance immediately and confirming
+ * asynchronously here.
+ *
+ * Correlation & cancellation (the "boundary and recovery" scenario): every
+ * result carries its own `operationId`, and an aborted observation returns
+ * `cancelled` and can NEVER return `applied`. A stale observation that resolves
+ * after a retry therefore cannot be mistaken for the completion of the newer
+ * operation — it resolves as its own `cancelled` result under its own id.
+ */
+export async function observeEngineEffect(
+  options: ObserveEngineEffectOptions,
+): Promise<EngineEffectResult> {
+  const {
+    entityId,
+    observe,
+    signal,
+    operationId = SPAWN_TRANSFORM_OPERATION,
+    satisfied = () => true,
+    deadlineMs = ENGINE_EFFECT_OBSERVATION_DEADLINE_MS,
+    pollIntervalMs = ENGINE_EFFECT_POLL_INTERVAL_MS,
+    now = () => Date.now(),
+    sleep = abortableSleep,
+  } = options;
+
+  const start = now();
+
+  // `while (true)` with the abort check FIRST so a context aborted before the
+  // first poll reports `cancelled`, never a spurious `applied`/`timed-out`.
+  for (;;) {
+    if (signal.aborted) {
+      return { status: 'cancelled', operationId, entityId };
+    }
+
+    const observed = observe(entityId);
+    if (observed && satisfied(observed)) {
+      return { status: 'applied', operationId, entityId, observed };
+    }
+
+    // Deadline is checked AFTER a fresh observation, so an effect that lands
+    // exactly at the deadline is still reported `applied` rather than lost.
+    if (now() - start >= deadlineMs) {
+      return { status: 'timed-out', operationId, entityId };
+    }
+
+    await sleep(pollIntervalMs, signal);
+  }
 }

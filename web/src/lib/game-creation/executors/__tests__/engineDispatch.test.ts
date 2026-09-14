@@ -13,8 +13,15 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import type { ExecutorContext } from '../../types';
-import { engineEntityId, waitForEngineFrame, sendCommands } from '../engineDispatch';
+import type { ExecutorContext, ObservedEntity } from '../../types';
+import {
+  engineEntityId,
+  waitForEngineFrame,
+  sendCommands,
+  observeEngineEffect,
+  rejectedEffect,
+  SPAWN_TRANSFORM_OPERATION,
+} from '../engineDispatch';
 
 /** Two bytes in UTF-8, one character in JS — the whole point of the byte check. */
 const ACCENT = String.fromCharCode(0xe9);
@@ -297,5 +304,242 @@ describe('sendCommands', () => {
     });
 
     expect(sendCommands(ctx, [{ command: 'spawn_entity', payload: {} }])).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// observeEngineEffect (#9899, operation family ai.FR-1.OP-01)
+// ---------------------------------------------------------------------------
+//
+// The heart of the slice: an accepted dispatch is NOT an applied effect. This
+// adapter queries the real engine after the deferred command runs and reports
+// applied / timed-out / cancelled, correlated by operationId + entityId. The
+// clock and sleep are injected so the 5-second deadline is exercised in
+// microseconds and deterministically — a real `setTimeout` loop would make the
+// timed-out case a five-second test.
+
+/**
+ * A deterministic clock whose `sleep` advances time by exactly the slept
+ * interval. `now()` reads it, so the deadline is reached in a bounded, exact
+ * number of polls with no wall-clock wait and no ordering nondeterminism.
+ */
+function fakeClock(startAborted = false) {
+  let t = 0;
+  const controller = new AbortController();
+  if (startAborted) controller.abort();
+  return {
+    signal: controller.signal,
+    abort: () => controller.abort(),
+    now: () => t,
+    sleep: (ms: number) => {
+      t += ms;
+      return Promise.resolve();
+    },
+  };
+}
+
+const CRATE: ObservedEntity = {
+  entityId: 'crate-1',
+  transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+};
+
+describe('rejectedEffect', () => {
+  it('builds a correlated rejected result', () => {
+    expect(rejectedEffect('ai.FR-1.OP-01', 'crate-1')).toEqual({
+      status: 'rejected',
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+    });
+  });
+});
+
+describe('observeEngineEffect', () => {
+  it('reports applied once the engine query shows the entity, echoing the operation id', async () => {
+    const clock = fakeClock();
+    const observe = vi.fn().mockReturnValue(CRATE);
+
+    const result = await observeEngineEffect({
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+      observe,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+    });
+
+    expect(result).toEqual({
+      status: 'applied',
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+      observed: CRATE,
+    });
+  });
+
+  it('defaults the operation id to the ai.FR-1.OP-01 family', async () => {
+    const clock = fakeClock();
+    const result = await observeEngineEffect({
+      entityId: 'crate-1',
+      observe: () => CRATE,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+    });
+    expect(result.operationId).toBe(SPAWN_TRANSFORM_OPERATION);
+    expect(SPAWN_TRANSFORM_OPERATION).toBe('ai.FR-1.OP-01');
+  });
+
+  it('keeps polling until the effect appears, then reports applied', async () => {
+    const clock = fakeClock();
+    // Undefined (not observable yet) for the first two polls, then the entity.
+    const observe = vi.fn<(id: string) => ObservedEntity | undefined>()
+      .mockReturnValueOnce(undefined)
+      .mockReturnValueOnce(undefined)
+      .mockReturnValue(CRATE);
+
+    const result = await observeEngineEffect({
+      entityId: 'crate-1',
+      observe,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+      pollIntervalMs: 10,
+      deadlineMs: 5000,
+    });
+
+    expect(result.status).toBe('applied');
+    // Two misses that had to sleep, then the hit on the third read.
+    expect(observe).toHaveBeenCalledTimes(3);
+  });
+
+  it('applies a position predicate: an entity at the wrong place is not confirmed until it moves', async () => {
+    // The transform half of the contract — "set its position to (1,2,3)" is not
+    // applied while the engine still reports the spawn-time origin.
+    const clock = fakeClock();
+    const atOrigin: ObservedEntity = {
+      entityId: 'crate-1',
+      transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    };
+    const observe = vi.fn<(id: string) => ObservedEntity | undefined>()
+      .mockReturnValueOnce(atOrigin)
+      .mockReturnValue(CRATE);
+
+    const result = await observeEngineEffect({
+      entityId: 'crate-1',
+      observe,
+      satisfied: (o) => {
+        const p = o.transform?.position;
+        return !!p && p[0] === 1 && p[1] === 2 && p[2] === 3;
+      },
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+    });
+
+    expect(result.status).toBe('applied');
+    expect(result.observed).toEqual(CRATE);
+    expect(observe).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports timed-out at the deadline with the operation id and never applied', async () => {
+    // The negative case: a command accepted but its deferred effect deliberately
+    // never applied. The engine query returns nothing for the whole window.
+    const clock = fakeClock();
+    const observe = vi.fn().mockReturnValue(undefined);
+
+    const result = await observeEngineEffect({
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+      observe,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+      deadlineMs: 100,
+      pollIntervalMs: 30,
+    });
+
+    expect(result).toEqual({
+      status: 'timed-out',
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+    });
+    expect(result.observed).toBeUndefined();
+  });
+
+  it('reports cancelled when the signal is already aborted, never observing', async () => {
+    const clock = fakeClock(true); // aborted before the first poll
+    const observe = vi.fn().mockReturnValue(CRATE);
+
+    const result = await observeEngineEffect({
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+      observe,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: clock.sleep,
+    });
+
+    expect(result).toEqual({
+      status: 'cancelled',
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+    });
+    // The abort check is FIRST — a cancelled observation must not read the
+    // engine and cannot be laundered into an applied result.
+    expect(observe).not.toHaveBeenCalled();
+  });
+
+  it('a cancellation mid-observation yields cancelled, not applied', async () => {
+    // Aborts DURING the sleep between polls, while the entity is still not
+    // observable. The next loop iteration must see the abort and stop.
+    const clock = fakeClock();
+    const observe = vi.fn().mockReturnValue(undefined);
+
+    const result = await observeEngineEffect({
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+      observe,
+      signal: clock.signal,
+      now: clock.now,
+      sleep: (ms: number) => {
+        clock.abort();
+        return clock.sleep(ms);
+      },
+      deadlineMs: 5000,
+    });
+
+    expect(result.status).toBe('cancelled');
+    expect(result.observed).toBeUndefined();
+  });
+
+  it('a replayed operation id reads state idempotently — no double application', async () => {
+    // The "boundary and recovery" scenario: the same operation id is retried
+    // after the spawn already applied. Observation is a pure READ, so a second
+    // call returns the same applied result and never mutates engine state.
+    const clock1 = fakeClock();
+    const clock2 = fakeClock();
+    const observe = vi.fn().mockReturnValue(CRATE);
+
+    const first = await observeEngineEffect({
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+      observe,
+      signal: clock1.signal,
+      now: clock1.now,
+      sleep: clock1.sleep,
+    });
+    const second = await observeEngineEffect({
+      operationId: 'ai.FR-1.OP-01',
+      entityId: 'crate-1',
+      observe,
+      signal: clock2.signal,
+      now: clock2.now,
+      sleep: clock2.sleep,
+    });
+
+    expect(first).toEqual(second);
+    expect(first.status).toBe('applied');
+    // observe is the only engine interaction and it is a query — replaying the
+    // operation cannot produce a second crate.
+    expect(observe).toHaveBeenCalledTimes(2);
   });
 });
