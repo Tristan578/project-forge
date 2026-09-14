@@ -77,6 +77,24 @@ declare global {
     ) => void;
 
     /**
+     * Replays a bounded input trace through the REAL runtime runner and returns
+     * the observed-state outcome (#9902). Available only when E2E hooks are
+     * enabled (`e2eHooksEnabled()`). Used by `e2e/engine/inputReplay.spec.ts` to
+     * prove the record/replay path against the live WASM engine.
+     */
+    __FORGE_REPLAY?: (
+      trace: unknown,
+      config: { playerEntityId: string; collectibleEntityIds: string[] },
+    ) => Promise<{
+      command: string;
+      verdict: 'passed' | 'failed';
+      ticksReplayed: number;
+      assertions: Array<{ operationId: string; description: string; passed: boolean }>;
+      movedDistance: number | null;
+      collectiblesCollected: number;
+    }>;
+
+    /**
      * When set to `true` before page load (via `addInitScript`), skips WASM
      * engine loading. Used by @ui E2E tests that don't need the engine.
      */

@@ -609,6 +609,31 @@ export function EditorLayout() {
       ) => {
         setCommandDispatcher(dispatch);
       };
+      // Runtime input-trace replay (#9902). The engine-replay spec drives the
+      // REAL replay runner through this: it builds the same DOM-keyboard runtime
+      // boundary the manual Replay button uses, runs `invokeReplay('manual', …)`
+      // — the same typed command the AI path dispatches — and returns the
+      // JSON-serializable observed-state outcome. Same build-time gate as the
+      // hooks above; never attached in a normal production build.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__FORGE_REPLAY = async (
+        trace: unknown,
+        config: { playerEntityId: string; collectibleEntityIds: string[] },
+      ) => {
+        const [{ invokeReplay, createDomKeyboardEnvironment }, { parseInputTrace }] =
+          await Promise.all([
+            import('@/lib/playtest/replayInvocation'),
+            import('@/lib/playtest/inputTrace'),
+          ]);
+        const validated = parseInputTrace(trace);
+        const env = createDomKeyboardEnvironment({
+          bindings: useEditorStore.getState().inputBindings,
+          playerEntityId: config.playerEntityId,
+          collectibleEntityIds: config.collectibleEntityIds,
+        });
+        const result = await invokeReplay('manual', validated, env);
+        return result.outcome;
+      };
     }
   }, []);
 
