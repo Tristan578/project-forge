@@ -296,7 +296,7 @@ describe('AudioInspector music gate (#9117)', () => {
     useUserStore.setState({ tier: 'creator' });
     vi.mocked(useGenerationGate).mockImplementation((featureId) =>
       featureId === 'music-generation'
-        ? { ...UNCONFIGURED, reason: 'Configure a Suno API key in Settings to enable Music Generation.' }
+        ? { ...UNCONFIGURED, reason: 'Configure an ElevenLabs API key in Settings to enable Music Generation.' }
         : OPEN,
     );
     render(<AudioInspector />);

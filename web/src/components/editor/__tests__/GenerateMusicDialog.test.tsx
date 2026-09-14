@@ -216,15 +216,17 @@ describe('GenerateMusicDialog', () => {
     });
 
     it('registers the async job so something eventually polls for the track', async () => {
-      respondWith({ jobId: 'suno-42', provider: 'suno', usageId: 'usage-9' });
+      // The route resolves inline now (#9522), but the dialog still handles the
+      // async jobId shape defensively — pinned here so that branch cannot rot.
+      respondWith({ jobId: 'job-42', provider: 'elevenlabs', usageId: 'usage-9' });
       generate('entity-1');
 
       await waitFor(() => expect(trackJob).toHaveBeenCalledTimes(1));
       expect(trackJob).toHaveBeenCalledWith(
         expect.objectContaining({
-          providerJobId: 'suno-42',
+          providerJobId: 'job-42',
           type: 'music',
-          provider: 'suno',
+          provider: 'elevenlabs',
           usageId: 'usage-9',
           autoPlace: true,
           targetEntityId: 'entity-1',

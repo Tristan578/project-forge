@@ -84,6 +84,15 @@ vi.mock('@/lib/qstash/client', () => ({
 vi.mock('@/lib/flags/posthogFlags', () => ({
   isProviderKilled: vi.fn(() => false),
 }));
+// Real providers module except `getCapabilityUnavailability`, wrapped so the
+// unavailable-capability gate describe can declare a capability unavailable
+// on demand. #9522 emptied UNAVAILABLE_CAPABILITIES (music moved to
+// ElevenLabs), so the gate must be exercised via this seam, not the live table.
+vi.mock('@/lib/config/providers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/config/providers')>();
+  return { ...actual, getCapabilityUnavailability: vi.fn(actual.getCapabilityUnavailability) };
+});
+import { getCapabilityUnavailability } from '@/lib/config/providers';
 
 // Client-facing message for every 500 (#8597). Raw err.message can leak server
 // internals (env var names, DB DSNs, provider request IDs), so the client gets
@@ -898,15 +907,30 @@ describe('createGenerationHandler', () => {
     expect(mockSanitize).toHaveBeenCalledWith('test prompt');
   });
 
-  // #9117 / #9522: a capability declared unavailable in
-  // UNAVAILABLE_CAPABILITIES must be refused before the key resolves and before
-  // any token is deducted, with a message the caller can act on. Music is the
-  // live case — Suno has no API, so a request can never succeed and a charge
-  // would be an incorrect charge.
+  // #9117: a capability declared unavailable in UNAVAILABLE_CAPABILITIES must be
+  // refused before the key resolves and before any token is deducted, with a
+  // message the caller can act on. #9522 emptied the live table (music moved to
+  // ElevenLabs), so this exercises the GATE MECHANISM via a mocked declaration
+  // rather than a real permanently-unavailable capability.
   describe('unavailable capability gate (#9117)', () => {
+    beforeEach(() => {
+      vi.mocked(getCapabilityUnavailability).mockImplementation((cap) =>
+        cap === 'music'
+          ? {
+              reason:
+                'Music generation is not available yet. Upload your own track from the Asset panel, or generate a sound effect instead.',
+              issue: 9522,
+            }
+          : null,
+      );
+    });
+    afterEach(() => {
+      vi.mocked(getCapabilityUnavailability).mockRestore();
+    });
+
     const musicHandler = createGenerationHandler({
       route: '/api/generate/music',
-      provider: 'suno',
+      provider: 'elevenlabs',
       capability: 'music',
       operation: 'music_generation',
       rateLimitKey: 'gen-music',
@@ -941,7 +965,7 @@ describe('createGenerationHandler', () => {
     it('gates a route through ROUTE_CAPABILITY when the config omits `capability`', async () => {
       const handler = createGenerationHandler({
         route: '/api/generate/music',
-        provider: 'suno',
+        provider: 'elevenlabs',
         operation: 'music_generation',
         rateLimitKey: 'gen-music',
         validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),

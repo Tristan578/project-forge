@@ -126,8 +126,9 @@ describe('PROVIDER_PROBES', () => {
   });
 
   it('has no probe for providers that can never be served by a platform key', () => {
-    expect(PROVIDER_PROBES.suno).toBeNull();
+    // Suno was removed entirely (#9522); hyper3d has no credit-free probe.
     expect(PROVIDER_PROBES.hyper3d).toBeNull();
+    expect(Object.keys(PROVIDER_PROBES)).not.toContain('suno');
   });
 
   it('probes the gateway credits endpoint with Bearer auth', () => {
