@@ -513,6 +513,35 @@ describe('entitySetupExecutor', () => {
       expect(result.error?.code).toBe('ABORTED');
       // Aborted before any read — a cancelled observation cannot report applied.
       expect(observeEntity).not.toHaveBeenCalled();
+      // And it must not have spawned an orphan the cancelled run will never
+      // address — this is the up-front guard, not the mid-observation one.
+      expect(ctx.dispatchCommand).not.toHaveBeenCalled();
+    });
+
+    // Sentry review (PR #9997): `pipelineRunner`'s retry loop only checks
+    // `signal.aborted` BETWEEN attempts, never before the first one, so a
+    // cancel landing exactly as this step starts previously still reached
+    // `sendCommands` and spawned an entity nothing in the cancelled run would
+    // ever address or clean up — the ABORTED failure only surfaced afterward,
+    // from `observeEngineEffect`'s own (later) abort check. This is the SAME
+    // scenario as the test above with the query capability removed, to prove
+    // the guard fires unconditionally rather than only as a side effect of the
+    // idempotency check.
+    it('never dispatches spawn_entity when already aborted, even without a query capability', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const ctx = makeCtx({ signal: controller.signal } as never); // no observeEntity
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ABORTED');
+      expect(ctx.dispatchCommand).not.toHaveBeenCalled();
     });
 
     it('falls back to the frame wait when no id is addressable, even with a query capability', async () => {

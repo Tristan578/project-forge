@@ -49,6 +49,20 @@ export const entitySetupExecutor: ExecutorDefinition = {
       );
     }
 
+    // Checked BEFORE any command is dispatched, matching `worldBuildExecutor`'s
+    // same guard. Without this, a cancel that lands right as this step starts
+    // (the retry loop in `pipelineRunner` only checks `signal.aborted` BETWEEN
+    // attempts, never before the first one) would still send `spawn_entity` —
+    // the ABORTED failure only surfaces later, from inside
+    // `observeEngineEffect`'s own abort check, by which point the engine has
+    // already created an entity nothing in this run will ever address or clean
+    // up (Sentry review, PR #9997).
+    if (ctx.signal.aborted) {
+      return failResult(
+        makeStepError('ABORTED', 'Executor was aborted before running', this.userFacingErrorMessage),
+      );
+    }
+
     // `scene` stays a required input (a plan step that names no scene is malformed)
     // but is not dispatched — see the note on `commands` below.
     const { entity, entityId, projectType } = parsed.data;
