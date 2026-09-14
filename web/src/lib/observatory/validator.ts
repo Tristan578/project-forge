@@ -46,8 +46,18 @@ export type ValidationResult<T> =
 /** Ratio equality tolerance for the measured-value consistency check. */
 const RATIO_EPSILON = 1e-9;
 
-/** Ratio metrics carry numerator/denominator; latency carries a distribution. */
-const RATIO_METRICS: ReadonlySet<MetricName> = new Set(['completeness', 'friction', 'uptime']);
+/**
+ * Metrics whose measured `value` must equal `numerator / denominator`. Latency
+ * is included: its measured value is itself a ratio (budget compliance,
+ * `withinBudget / eligible`), and `deriveMetricValue` populates
+ * numerator/denominator for it exactly like the other three metrics.
+ */
+const RATIO_METRICS: ReadonlySet<MetricName> = new Set([
+  'completeness',
+  'friction',
+  'uptime',
+  'latency',
+]);
 
 /** Normalized display direction per metric (see `specs/forge-observatory.md`). */
 const METRIC_DIRECTION: Record<MetricName, MetricDirection> = {

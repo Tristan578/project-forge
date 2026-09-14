@@ -181,6 +181,63 @@ describe('observatory/validator — validateMetricValue', () => {
     if (result.ok) return;
     expect(result.errors.join(' ')).toContain('does not equal numerator/denominator');
   });
+
+  it('rejects a measured latency value whose value disagrees with withinBudget/eligible', () => {
+    // Latency's measured value is itself a ratio (budget compliance,
+    // withinBudget/eligible). A hand-built or API-supplied value that never
+    // passed through deriveMetricValue must still be caught by the consistency
+    // check — 95/100 is 0.95, so a stated 0.5 is a lie about the same axis a
+    // completeness mismatch would be.
+    const value = {
+      metric: 'latency',
+      unit: 'ratio',
+      direction: 'higher_is_better',
+      environment: 'production',
+      window: { label: '24h', start: '2026-09-13T00:00:00Z', end: '2026-09-14T00:00:00Z' },
+      source: 'latency-monitor',
+      releaseSha: 'a1b2c3d4',
+      observedAt: '2026-09-13T23:00:00Z',
+      ingestedAt: '2026-09-13T23:05:00Z',
+      confidence: 'verified',
+      applicability: 'applicable',
+      formulaVersion: FORMULA_VERSIONS.latency,
+      state: 'measured',
+      value: 0.5,
+      numerator: 95,
+      denominator: 100,
+      sampleSize: 100,
+      freshnessTtlSeconds: 3600,
+    };
+    const result = validateMetricValue(value);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('does not equal numerator/denominator');
+  });
+
+  it('accepts a measured latency value whose value equals withinBudget/eligible', () => {
+    const value = {
+      metric: 'latency',
+      unit: 'ratio',
+      direction: 'higher_is_better',
+      environment: 'production',
+      window: { label: '24h', start: '2026-09-13T00:00:00Z', end: '2026-09-14T00:00:00Z' },
+      source: 'latency-monitor',
+      releaseSha: 'a1b2c3d4',
+      observedAt: '2026-09-13T23:00:00Z',
+      ingestedAt: '2026-09-13T23:05:00Z',
+      confidence: 'verified',
+      applicability: 'applicable',
+      formulaVersion: FORMULA_VERSIONS.latency,
+      state: 'measured',
+      value: 0.95,
+      numerator: 95,
+      denominator: 100,
+      sampleSize: 100,
+      freshnessTtlSeconds: 3600,
+    };
+    const result = validateMetricValue(value);
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe('observatory/validator — validateSnapshot', () => {
@@ -278,5 +335,106 @@ describe('observatory/validator — half-open window boundaries', () => {
     // A well-formed 4/5 completeness observation must land on the measured
     // branch — a regression that misrouted it would trip the checks above.
     expect(result.data.state).toBe('measured');
+  });
+});
+
+describe('observatory/validator — evidence subject requirement', () => {
+  it('rejects an observation whose evidence references no subject id', () => {
+    // zEvidenceRef.refine: a metric anchored to nothing (no capability,
+    // artifact, journey, or dependency) cannot be attributed to anything.
+    const obs = { ...baseCompletenessObservation(), evidence: {} };
+    const result = validateObservation(obs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('at least one subject');
+  });
+
+  it('rejects evidence carrying only observationIds but no subject id', () => {
+    const obs = {
+      ...baseCompletenessObservation(),
+      evidence: { observationIds: ['obs:01J9EVIDENCEONLY00000001'] },
+    };
+    const result = validateObservation(obs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('at least one subject');
+  });
+});
+
+describe('observatory/validator — latency distribution invariants', () => {
+  /** A well-formed latency observation: 95 within budget of 100 eligible. */
+  function baseLatencyObservation(): Record<string, unknown> {
+    return {
+      observationId: 'obs:01J9LATENCYBASE0000000001',
+      metric: 'latency',
+      environment: 'production',
+      window: { label: '24h', start: '2026-09-13T00:00:00Z', end: '2026-09-14T00:00:00Z' },
+      evidence: { capabilityId: 'cap:generate.gdd@1' },
+      source: 'latency-monitor',
+      releaseSha: 'a1b2c3d4',
+      observedAt: '2026-09-13T23:00:00Z',
+      ingestedAt: '2026-09-13T23:05:00Z',
+      confidence: 'verified',
+      applicability: 'applicable',
+      formulaVersion: FORMULA_VERSIONS.latency,
+      sampleSize: 100,
+      latencyDistribution: {
+        p50Ms: 820,
+        p95Ms: 1900,
+        p99Ms: 4200,
+        budgetMs: 5000,
+        withinBudget: 95,
+        eligible: 100,
+      },
+    };
+  }
+
+  it('rejects a distribution whose percentiles are not monotonic (p99 < p95)', () => {
+    const obs = {
+      ...baseLatencyObservation(),
+      latencyDistribution: {
+        p50Ms: 820,
+        p95Ms: 1900,
+        p99Ms: 1000,
+        budgetMs: 5000,
+        withinBudget: 95,
+        eligible: 100,
+      },
+    };
+    const result = validateObservation(obs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('monotonic');
+  });
+
+  it('rejects a distribution whose withinBudget exceeds eligible', () => {
+    const obs = {
+      ...baseLatencyObservation(),
+      latencyDistribution: {
+        p50Ms: 820,
+        p95Ms: 1900,
+        p99Ms: 4200,
+        budgetMs: 5000,
+        withinBudget: 101,
+        eligible: 100,
+      },
+    };
+    const result = deriveMetricValue(obs);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('withinBudget cannot exceed eligible');
+  });
+
+  it('derives insufficient_sample (null) for a latency observation with no distribution', () => {
+    // sampleSize (100) is well above the latency minimum (20), so the ONLY
+    // reason this falls through to insufficient_sample is the absent
+    // numerator/denominator that the missing distribution would have supplied.
+    const obs = { ...baseLatencyObservation() };
+    delete (obs as Record<string, unknown>).latencyDistribution;
+    const result = deriveMetricValue(obs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.state).toBe('insufficient_sample');
+    expect(result.data.value).toBeNull();
   });
 });
