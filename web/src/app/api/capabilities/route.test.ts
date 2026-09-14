@@ -91,17 +91,71 @@ describe('GET /api/capabilities', () => {
     expect(body.unavailable).toContain('model3d');
   });
 
-  it('marks an unprovisionable capability with the tracking issue instead of a key hint (#9117)', async () => {
+  it('marks music available when its ElevenLabs platform key is set (#9522)', async () => {
+    process.env.PLATFORM_ELEVENLABS_KEY = 'el-test';
+
     const { GET } = await import('./route');
-    const res = await GET(new NextRequest(BASE_URL));
-    const body = await res.json();
+    const body = await (await GET(new NextRequest(BASE_URL))).json();
 
     const music = body.capabilities.find((c: { capability: string }) => c.capability === 'music');
+    expect(music.available).toBe(true);
+    // No longer unprovisionable: #9522 moved music from Suno (no console) to
+    // ElevenLabs, so the #9117 tracking-issue fields must be absent.
+    expect(music.unprovisionable).toBeUndefined();
+    expect(music.issue).toBeUndefined();
+    expect(body.available).toContain('music');
+  });
+
+  it('treats music as BYOK-configurable via ElevenLabs when no platform key is set (#9522)', async () => {
+    delete process.env.PLATFORM_ELEVENLABS_KEY;
+
+    const { GET } = await import('./route');
+    const body = await (await GET(new NextRequest(BASE_URL))).json();
+
+    const music = body.capabilities.find((c: { capability: string }) => c.capability === 'music');
+    // Unavailable because unconfigured — NOT unprovisionable. ElevenLabs is a
+    // BYOK provider, so the user can turn it on in Settings, exactly like the
+    // sibling sfx/voice capabilities.
     expect(music.available).toBe(false);
-    expect(music.unprovisionable).toBe(true);
-    expect(music.issue).toBe(9522);
-    expect(music.hint).not.toContain('#9522');
-    expect(music.requiredProviders).toBeUndefined();
+    expect(music.unprovisionable).toBeUndefined();
+    expect(music.issue).toBeUndefined();
+    expect(music.byokConfigurable).toBe(true);
+    expect(music.hint).toContain('ElevenLabs');
+    expect(music.hint).toContain('Settings');
+  });
+
+  it('marks an unprovisionable capability with the tracking issue instead of a key hint (#9117)', async () => {
+    // The UNAVAILABLE_CAPABILITIES table is empty after #9522, so exercise the
+    // route's unprovisionable branch by declaring one capability unavailable —
+    // the machinery must still render `issue`/`hint` and suppress key hints for
+    // the next capability retired into that table.
+    vi.resetModules();
+    vi.doMock('@/lib/config/providers', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/config/providers')>();
+      return {
+        ...actual,
+        getCapabilityUnavailability: (cap: string) =>
+          cap === 'music'
+            ? { reason: 'Music generation is not available yet.', issue: 4242 }
+            : null,
+      };
+    });
+    try {
+      const { GET } = await import('./route');
+      const body = await (await GET(new NextRequest(BASE_URL))).json();
+
+      const music = body.capabilities.find((c: { capability: string }) => c.capability === 'music');
+      expect(music.available).toBe(false);
+      expect(music.unprovisionable).toBe(true);
+      expect(music.issue).toBe(4242);
+      expect(music.hint).toBe('Music generation is not available yet.');
+      expect(music.hint).not.toContain('#');
+      expect(music.requiredProviders).toBeUndefined();
+      expect(body.unavailable).toContain('music');
+    } finally {
+      vi.doUnmock('@/lib/config/providers');
+      vi.resetModules();
+    }
   });
 
   it('includes human-readable labels', async () => {

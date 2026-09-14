@@ -9,7 +9,7 @@ The four entry points:
 | Column | Meaning |
 |--------|---------|
 | **Human/UI** | A person using the editor's panels, inspectors and dialogs. |
-| **In-app AI** | The built-in chat assistant and the game-creation pipeline, which call manifest commands through `web/src/lib/chat/executor.ts`. The model is offered every manifest command with a `:write` scope plus the `query` category (`getChatTools()`): 274 of the 354. |
+| **In-app AI** | The built-in chat assistant and the game-creation pipeline, which call manifest commands through `web/src/lib/chat/executor.ts`. The model is offered every manifest command with a `:write` scope plus the `query` category (`getChatTools()`): 275 of the 354. |
 | **Scripting** | A user-authored game script calling the `forge.*` API (`web/src/lib/scripting/forgeTypes.ts`), which dispatches only the names in `scriptAllowlist.ts`. |
 | **External MCP** | An MCP client (Claude Code, Claude Desktop, any MCP host) attached to the editor through `mcp-server/` and its relay. The bridge is an allowlist (`web/src/lib/mcp/bridgeAllowlist.ts`): it executes 296 of the 354 commands and withholds the `scripting`, `generation`, `export`, `publishing`, `security` and `economy` categories and the `ai:generate` / `project:manage` scopes by design. |
 

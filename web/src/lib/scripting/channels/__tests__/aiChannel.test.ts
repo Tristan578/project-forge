@@ -68,16 +68,48 @@ describe('createAiHandler', () => {
     expect(result).toEqual({ url: 'texture.png' });
   });
 
-  // #9117: `music` is declared unavailable in code, so forge.ai.generateMusic
-  // is refused inside the worker with the same reason the editor shows —
-  // before any request leaves, so no fetch, no job, no poll.
-  it('refuses generateMusic without submitting while music is declared unavailable', async () => {
-    const fetchJson = makeFetchJson([{ jobId: 'never' }]);
+  // #9522: music routes to ElevenLabs, a SYNCHRONOUS route that returns the
+  // audio bytes inline with no jobId — so generateMusic posts once and returns
+  // the payload directly, never polling a status endpoint. The old #9117 gate
+  // (refuse before submitting) no longer applies now that music is offered.
+  it('generateMusic posts once and returns the inline ElevenLabs result without polling (#9522)', async () => {
+    const inline = { audioBase64: 'AA==', durationSeconds: 30, provider: 'elevenlabs' };
+    const fetchJson = makeFetchJson([inline]);
     const handler = createAiHandler({ fetchJson });
-    await expect(handler('generateMusic', {}, reportProgress, makeSignal())).rejects.toThrow(
-      /not available yet/i,
-    );
-    expect(fetchJson).not.toHaveBeenCalled();
+
+    const resultPromise = handler('generateMusic', { prompt: 'chiptune loop' }, reportProgress, makeSignal());
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(fetchJson.mock.calls[0][0]).toBe('/api/generate/music');
+    // No status poll: the single call is the POST, not a /status/ request.
+    expect(fetchJson.mock.calls[0][0]).not.toContain('status');
+    expect(result).toEqual(inline);
+    expect(reportProgress).toHaveBeenCalledWith(100, 'Done');
+  });
+
+  // The same synchronous contract for the sibling sfx ElevenLabs route: a
+  // response with no jobId is the asset itself, not a submission failure.
+  it('returns the inline result for a synchronous route (generateSound) without polling', async () => {
+    const inline = { audioBase64: 'BB==', durationSeconds: 3, provider: 'elevenlabs' };
+    const fetchJson = makeFetchJson([inline]);
+    const handler = createAiHandler({ fetchJson });
+
+    const resultPromise = handler('generateSound', { prompt: 'laser' }, reportProgress, makeSignal());
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(fetchJson.mock.calls[0][0]).toBe('/api/generate/sfx');
+    expect(result).toEqual(inline);
+  });
+
+  it('propagates an error response from a synchronous route (generateMusic)', async () => {
+    const fetchJson = makeFetchJson([{ error: 'quota exceeded' }]);
+    const handler = createAiHandler({ fetchJson });
+    await expect(handler('generateMusic', {}, reportProgress, makeSignal())).rejects.toThrow('quota exceeded');
+    expect(fetchJson).toHaveBeenCalledTimes(1);
   });
 
   // AI_METHODS is a second route table beside ROUTE_CAPABILITY. The latter is
@@ -158,7 +190,9 @@ describe('createAiHandler', () => {
     ]);
     const handler = createAiHandler({ fetchJson });
 
-    const error = await handler('generateSound', {}, reportProgress, makeSignal()).catch((e: Error) => e);
+    // generateModel is an async (polled) route — sfx/voice/music are now
+    // synchronous, so the poll machinery is exercised with a job-based method.
+    const error = await handler('generateModel', {}, reportProgress, makeSignal()).catch((e: Error) => e);
     await vi.runAllTimersAsync();
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe('Generation failed');
@@ -187,7 +221,8 @@ describe('createAiHandler', () => {
     ]);
     const handler = createAiHandler({ fetchJson });
 
-    const resultPromise = handler('generateVoice', {}, reportProgress, makeSignal());
+    // generateModel is an async (polled) route; sfx/voice/music are synchronous.
+    const resultPromise = handler('generateModel', {}, reportProgress, makeSignal());
     await vi.runAllTimersAsync();
     await resultPromise;
 
