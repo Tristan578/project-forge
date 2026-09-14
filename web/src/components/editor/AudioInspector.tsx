@@ -11,6 +11,7 @@ import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
+import { ClipEditor } from './ClipEditor';
 
 interface SliderRowProps {
   label: string;
@@ -431,6 +432,17 @@ export function AudioInspector() {
             onChange={(v) => handleUpdate({ autoplay: v })}
             term="audioAutoplay"
           />
+
+          {/* Clip editing: trim / fades / gain / loop with undo (#9903). Shown
+              only for a present source asset — the edits describe how that
+              source is played, and the source bytes are never mutated. */}
+          {selectedAssetId !== '' && !selectedAssetMissing && (
+            <ClipEditor
+              key={selectedAssetId}
+              assetId={selectedAssetId}
+              asset={audioAssets.find((a) => a.id === selectedAssetId)}
+            />
+          )}
 
           {/* Preview Buttons */}
           <div className="flex gap-2 pt-2">
