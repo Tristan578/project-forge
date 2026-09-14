@@ -8,10 +8,20 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 import AdaptiveMusicInspector from '../AdaptiveMusicInspector';
 import { useEditorStore } from '@/stores/editorStore';
 import { audioManager } from '@/lib/audio/audioManager';
+import { toast } from 'sonner';
 
 vi.mock('@/lib/audio/audioManager', () => ({
   audioManager: {
-    setMusicIntensity: vi.fn(),
+    // Default: a track is registered, so the slider path applies cleanly.
+    setMusicIntensity: vi.fn(() => true),
+    setAdaptiveMusic: vi.fn(),
+  },
+}));
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
   },
 }));
 
@@ -151,6 +161,54 @@ describe('AdaptiveMusicInspector', () => {
   it('renders Configure Stems button', () => {
     render(<AdaptiveMusicInspector />);
     expect(screen.getByText('Configure Stems').textContent).toBe('Configure Stems');
+  });
+
+  it('registers the default adaptive track when Configure Stems runs with a stem asset', () => {
+    setupStore({ intensity: 0.5 });
+    render(<AdaptiveMusicInspector />);
+    // First "Asset ID" input is the pad stem.
+    const padInput = screen.getAllByPlaceholderText('Asset ID')[0];
+    fireEvent.change(padInput, { target: { value: 'pad-asset' } });
+    fireEvent.click(screen.getByText('Configure Stems'));
+
+    expect(audioManager.setAdaptiveMusic).toHaveBeenCalledWith(
+      'default',
+      [{ name: 'pad', assetId: 'pad-asset' }],
+      { initialIntensity: 0.5 },
+    );
+    expect(toast.success).toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('does not register a track and warns when Configure Stems runs with no stem assets', () => {
+    render(<AdaptiveMusicInspector />);
+    fireEvent.click(screen.getByText('Configure Stems'));
+
+    expect(audioManager.setAdaptiveMusic).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('warns via toast when the slider moves but no adaptive track is registered', () => {
+    // No track registered: setMusicIntensity reports it did nothing.
+    vi.mocked(audioManager.setMusicIntensity).mockReturnValue(false);
+    render(<AdaptiveMusicInspector />);
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '0.6' } });
+
+    expect(audioManager.setMusicIntensity).toHaveBeenCalledWith('default', 0.6);
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('Configure stems'),
+      expect.objectContaining({ id: 'adaptive-music-no-track' }),
+    );
+  });
+
+  it('does not warn when the slider moves and a track is registered', () => {
+    // Track present: setMusicIntensity reports success, so no toast should fire.
+    vi.mocked(audioManager.setMusicIntensity).mockReturnValue(true);
+    render(<AdaptiveMusicInspector />);
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '0.6' } });
+
+    expect(audioManager.setMusicIntensity).toHaveBeenCalledWith('default', 0.6);
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it('renders Segments section', () => {
