@@ -1,6 +1,43 @@
 import React, { useEffect, useCallback } from 'react';
 import { usePerformanceStore } from '@/stores/performanceStore';
 import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import {
+  buildMeasurementManifestAsync,
+  UNKNOWN,
+  type MeasurementManifest,
+  type ManifestViewport,
+} from '@/lib/config/measurementManifest';
+import { environment } from '@/lib/environment';
+
+/**
+ * Render a manifest field for display. The `'unknown'` sentinel and a null
+ * value both render as the literal text "unknown" — an unsupported field must
+ * never surface as 0, false, or a blank that reads like a passed budget
+ * (#9904, negative-case acceptance scenario).
+ */
+function formatManifestValue(value: unknown): string {
+  if (value === UNKNOWN || value === null || value === undefined) return 'unknown';
+  if (typeof value === 'object') {
+    const v = value as ManifestViewport;
+    if (typeof v.width === 'number' && typeof v.height === 'number') {
+      return `${v.width}×${v.height} @${v.devicePixelRatio}x`;
+    }
+  }
+  return String(value);
+}
+
+const MANIFEST_ROWS: Array<[keyof MeasurementManifest, string]> = [
+  ['backend', 'Backend'],
+  ['browserVersion', 'Browser'],
+  ['os', 'OS'],
+  ['deviceMemory', 'Device memory (GB)'],
+  ['viewport', 'Viewport'],
+  ['gpuDriver', 'GPU / driver'],
+  ['buildSha', 'Build'],
+  ['fixtureChecksum', 'Fixture'],
+  ['cacheState', 'Cache'],
+  ['sampleCount', 'Samples'],
+];
 
 export function PerformanceProfiler() {
   const {
@@ -11,6 +48,8 @@ export function PerformanceProfiler() {
     warnings,
     setProfilerOpen,
     updateStats,
+    captureReport,
+    capturedReport,
   } = usePerformanceStore();
 
   // Update stats periodically (every frame)
@@ -57,6 +96,18 @@ export function PerformanceProfiler() {
   const handleToggle = useCallback(() => {
     setProfilerOpen(!isProfilerOpen);
   }, [isProfilerOpen, setProfilerOpen]);
+
+  // Manual capture: snapshot the current stats and pin them to a measurement
+  // manifest describing this machine + build. Backend detection is async, so
+  // the handler is async; every field the browser cannot expose is recorded as
+  // 'unknown' by the builder (never a zero). Operation performance.FR-3.OP-01.
+  const handleCapture = useCallback(async () => {
+    const manifest = await buildMeasurementManifestAsync({
+      buildSha: environment.commit,
+      sampleCount: history.length,
+    });
+    captureReport({ stats, manifest, capturedAt: Date.now() });
+  }, [captureReport, history.length, stats]);
 
   // Keyboard shortcut (F12 or Ctrl+Shift+P)
   useEffect(() => {
@@ -214,6 +265,40 @@ export function PerformanceProfiler() {
                   <span>{warning}</span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Manual capture */}
+          <div className="mt-3 pt-3 border-t border-gray-700">
+            <button
+              type="button"
+              onClick={handleCapture}
+              className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors"
+            >
+              Capture report
+            </button>
+          </div>
+
+          {/* Captured report — stats pinned to a measurement manifest */}
+          {capturedReport && (
+            <div
+              className="mt-3 pt-3 border-t border-gray-700 space-y-1"
+              aria-label="Captured measurement manifest"
+            >
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+                Measurement manifest
+              </div>
+              {MANIFEST_ROWS.map(([key, label]) => {
+                const raw = capturedReport.manifest[key];
+                const display = formatManifestValue(raw);
+                const isUnknown = display === 'unknown';
+                return (
+                  <div key={key} className="flex justify-between text-xs">
+                    <span className="text-gray-400">{label}</span>
+                    <span className={isUnknown ? 'text-gray-500 italic' : ''}>{display}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

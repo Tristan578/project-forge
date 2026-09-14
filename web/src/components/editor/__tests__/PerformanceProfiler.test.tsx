@@ -4,9 +4,10 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
 import { PerformanceProfiler } from '../PerformanceProfiler';
 import { usePerformanceStore } from '@/stores/performanceStore';
+import type { MeasurementManifest } from '@/lib/config/measurementManifest';
 
 vi.mock('@/stores/performanceStore', () => ({
   usePerformanceStore: vi.fn(() => ({})),
@@ -34,9 +35,24 @@ const defaultBudget = {
   warningThreshold: 0.8,
 };
 
+const sampleManifest: MeasurementManifest = {
+  schemaVersion: 1,
+  buildSha: 'abc12345',
+  fixtureChecksum: 'deadbeef',
+  os: 'macOS',
+  browserVersion: 'Chrome 140',
+  gpuDriver: 'unknown',
+  backend: 'webgpu',
+  viewport: { width: 1920, height: 1080, devicePixelRatio: 2 },
+  deviceMemory: 8,
+  cacheState: 'cold',
+  sampleCount: 5,
+};
+
 describe('PerformanceProfiler', () => {
   const mockSetProfilerOpen = vi.fn();
   const mockUpdateStats = vi.fn();
+  const mockCaptureReport = vi.fn();
 
   function setupStore({
     isProfilerOpen = false,
@@ -44,6 +60,11 @@ describe('PerformanceProfiler', () => {
     budget = defaultBudget,
     history = [] as { fps: number }[],
     warnings = [] as string[],
+    capturedReport = null as null | {
+      stats: typeof defaultStats;
+      manifest: MeasurementManifest;
+      capturedAt: number;
+    },
   } = {}) {
     vi.mocked(usePerformanceStore).mockReturnValue({
       stats,
@@ -53,7 +74,12 @@ describe('PerformanceProfiler', () => {
       warnings,
       setProfilerOpen: mockSetProfilerOpen,
       updateStats: mockUpdateStats,
+      captureReport: mockCaptureReport,
+      capturedReport,
     });
+    // getState is used nowhere in the component's render path, but guard it so
+    // any future use in this suite does not throw against the mocked module.
+    (usePerformanceStore as unknown as { getState: () => unknown }).getState = () => ({ stats });
   }
 
   beforeEach(() => {
@@ -142,7 +168,60 @@ describe('PerformanceProfiler', () => {
   it('aria-expanded is true when expanded', () => {
     setupStore({ isProfilerOpen: true });
     render(<PerformanceProfiler />);
-    const button = screen.getByRole('button');
+    // Target the toggle specifically — the expanded view also has a Capture button.
+    const button = screen.getByRole('button', { name: /performance panel/i });
     expect(button.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  // Manual capture + manifest display — operation performance.FR-3.OP-01 (#9904)
+  describe('manual capture (performance.FR-3.OP-01)', () => {
+    it('renders a Capture report button when expanded', () => {
+      setupStore({ isProfilerOpen: true });
+      render(<PerformanceProfiler />);
+      expect(screen.getByRole('button', { name: 'Capture report' })).toBeInTheDocument();
+    });
+
+    it('does not render the Capture button when collapsed', () => {
+      setupStore({ isProfilerOpen: false });
+      render(<PerformanceProfiler />);
+      expect(screen.queryByRole('button', { name: 'Capture report' })).not.toBeInTheDocument();
+    });
+
+    it('invokes captureReport with a manifest when the button is clicked', async () => {
+      vi.useRealTimers(); // handleCapture awaits async backend detection
+      setupStore({ isProfilerOpen: true, history: [{ fps: 60 }, { fps: 59 }] });
+      render(<PerformanceProfiler />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Capture report' }));
+
+      await waitFor(() => expect(mockCaptureReport).toHaveBeenCalledTimes(1));
+      const report = mockCaptureReport.mock.calls[0][0];
+      expect(report.manifest.schemaVersion).toBe(1);
+      expect(report.manifest.sampleCount).toBe(2); // history length
+      expect(typeof report.capturedAt).toBe('number');
+    });
+
+    it('renders captured manifest fields, showing unsupported metrics as "unknown" not zero', () => {
+      const unknownManifest = {
+        ...sampleManifest,
+        deviceMemory: 'unknown' as const,
+        gpuDriver: 'unknown' as const,
+        backend: 'unknown' as const,
+      };
+      setupStore({
+        isProfilerOpen: true,
+        capturedReport: { stats: defaultStats, manifest: unknownManifest, capturedAt: 1 },
+      });
+      render(<PerformanceProfiler />);
+
+      const panel = screen.getByLabelText('Captured measurement manifest');
+      expect(panel).toBeInTheDocument();
+      // Unsupported metrics render literally as "unknown", never as 0.
+      expect(panel.textContent).toContain('unknown');
+      expect(panel.textContent).not.toMatch(/Device memory \(GB\)\s*0/);
+      // Supported fields still render their real values.
+      expect(panel.textContent).toContain('Chrome 140');
+      expect(panel.textContent).toContain('1920×1080');
+    });
   });
 });
