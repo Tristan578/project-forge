@@ -9,6 +9,12 @@ import { useState, useCallback } from 'react';
 import { Play, Pause, Save, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEditorStore } from '@/stores/editorStore';
+import { audioManager } from '@/lib/audio/audioManager';
+
+// The inspector has no notion of which adaptive-music track is active (only one
+// stems config loads at a time), so it forwards to the same 'default' trackId
+// the set_music_intensity chat handler falls back to (audioHandlers.ts).
+const DEFAULT_MUSIC_TRACK_ID = 'default';
 
 interface StemConfig {
   pad?: string;
@@ -61,7 +67,16 @@ export default function AdaptiveMusicInspector() {
   }, []);
 
   const handleIntensityChange = useCallback((value: number) => {
-    setAdaptiveMusicIntensity(value);
+    // Guard against NaN/non-finite input from the slider's parseFloat: a NaN
+    // intensity reaches linearRampToValueAtTime and throws, so refuse it and
+    // leave the previous mix in place.
+    if (!Number.isFinite(value)) return;
+    const clamped = Math.max(0, Math.min(1, value));
+    // Forward to the shared audio manager on the same path the
+    // set_music_intensity chat handler uses (audioHandlers.ts), so manual
+    // slider edits actually change the mix rather than only store state.
+    audioManager.setMusicIntensity(DEFAULT_MUSIC_TRACK_ID, clamped);
+    setAdaptiveMusicIntensity(clamped);
   }, [setAdaptiveMusicIntensity]);
 
   const handlePlayPause = useCallback(() => {

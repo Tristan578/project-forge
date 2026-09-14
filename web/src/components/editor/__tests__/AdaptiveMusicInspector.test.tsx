@@ -7,6 +7,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import AdaptiveMusicInspector from '../AdaptiveMusicInspector';
 import { useEditorStore } from '@/stores/editorStore';
+import { audioManager } from '@/lib/audio/audioManager';
+
+vi.mock('@/lib/audio/audioManager', () => ({
+  audioManager: {
+    setMusicIntensity: vi.fn(),
+  },
+}));
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: Object.assign(vi.fn(() => ({})), {
@@ -93,6 +100,34 @@ describe('AdaptiveMusicInspector', () => {
     const slider = screen.getByRole('slider');
     fireEvent.change(slider, { target: { value: '0.8' } });
     expect(mockSetAdaptiveMusicIntensity).toHaveBeenCalledWith(0.8);
+  });
+
+  it('forwards slider changes to audioManager.setMusicIntensity with the default trackId', () => {
+    render(<AdaptiveMusicInspector />);
+    const slider = screen.getByRole('slider');
+    fireEvent.change(slider, { target: { value: '0.8' } });
+    expect(audioManager.setMusicIntensity).toHaveBeenCalledWith('default', 0.8);
+  });
+
+  it('clamps out-of-range slider values before forwarding to audioManager and store', () => {
+    render(<AdaptiveMusicInspector />);
+    const slider = screen.getByRole('slider');
+    // The DOM range input caps at max="1", so drive the handler directly via a
+    // synthetic value above the range to prove the clamp, not the browser cap.
+    fireEvent.change(slider, { target: { value: '1.5' } });
+    expect(audioManager.setMusicIntensity).toHaveBeenCalledWith('default', 1);
+    expect(mockSetAdaptiveMusicIntensity).toHaveBeenCalledWith(1);
+    // No unclamped value ever reaches the manager.
+    expect(audioManager.setMusicIntensity).not.toHaveBeenCalledWith('default', 1.5);
+  });
+
+  it('does not forward a NaN slider value to audioManager or the store', () => {
+    render(<AdaptiveMusicInspector />);
+    const slider = screen.getByRole('slider');
+    // An empty value yields parseFloat('') === NaN; the previous mix must hold.
+    fireEvent.change(slider, { target: { value: '' } });
+    expect(audioManager.setMusicIntensity).not.toHaveBeenCalled();
+    expect(mockSetAdaptiveMusicIntensity).not.toHaveBeenCalled();
   });
 
   it('renders Stems section', () => {
