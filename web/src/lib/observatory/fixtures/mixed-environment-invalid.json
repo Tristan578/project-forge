@@ -1,0 +1,56 @@
+{
+  "snapshotId": "snap:01J9MIXEDENV0000000001",
+  "environment": "production",
+  "builtAt": "2026-09-14T00:05:00Z",
+  "schemaVersion": "1.0.0",
+  "values": [
+    {
+      "metric": "completeness",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "environment": "production",
+      "window": {
+        "label": "30d",
+        "start": "2026-08-15T00:00:00Z",
+        "end": "2026-09-14T00:00:00Z"
+      },
+      "source": "capability-contract",
+      "releaseSha": "a1b2c3d4",
+      "observedAt": "2026-09-13T23:00:00Z",
+      "ingestedAt": "2026-09-13T23:05:00Z",
+      "confidence": "verified",
+      "applicability": "applicable",
+      "formulaVersion": "completeness@1",
+      "state": "measured",
+      "value": 0.8,
+      "numerator": 4,
+      "denominator": 5,
+      "sampleSize": 5,
+      "freshnessTtlSeconds": 86400
+    },
+    {
+      "metric": "uptime",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "environment": "preview",
+      "window": {
+        "label": "24h",
+        "start": "2026-09-13T00:00:00Z",
+        "end": "2026-09-14T00:00:00Z"
+      },
+      "source": "synthetic-monitor",
+      "releaseSha": null,
+      "observedAt": "2026-09-13T23:55:00Z",
+      "ingestedAt": "2026-09-13T23:56:00Z",
+      "confidence": "verified",
+      "applicability": "applicable",
+      "formulaVersion": "uptime@1",
+      "state": "measured",
+      "value": 1,
+      "numerator": 288,
+      "denominator": 288,
+      "sampleSize": 288,
+      "freshnessTtlSeconds": 900
+    }
+  ]
+}
