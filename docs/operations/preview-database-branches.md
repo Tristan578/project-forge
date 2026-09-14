@@ -48,8 +48,9 @@ below the number of open PRs.
       outcome — close some PRs or raise the plan — not a pipeline defect.
 
 **When a PR closes** (`preview-db-cleanup.yml`, `pull_request: closed`): that
-PR's branch is deleted, then anything under `preview-pr-` older than seven
-days.
+PR's branch is deleted, then the same state-aware sweep used by scheduled
+cleanup runs. Other open PRs keep their preview databases regardless of age;
+an unavailable GitHub state also keeps the branch.
 
 **Every six hours** (`preview-db-cleanup.yml`, `schedule`; also
 `workflow_dispatch`): `scripts/preview-db-branch.sh sweep` deletes preview

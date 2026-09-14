@@ -38,6 +38,9 @@ jobs:
     name: Delete the preview Neon branch
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
     # Dependabot-triggered runs cannot read repo secrets, and the preview job
     # skips for the same reason — so there is no branch to delete.
     if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
@@ -61,18 +64,14 @@ jobs:
           bash scripts/neon-branch.sh prune "$name" 0
 
       - name: Sweep abandoned preview branches
-        # Safety net for the case the per-PR delete never ran — a cancelled
-        # workflow, a force-pushed close, a secret outage. Seven days is well
-        # past any live PR's preview while still bounding the allowance.
-        #
-        # `continue-on-error` because housekeeping must never turn a merged PR's
-        # workflow red; the per-PR delete above is the real cleanup and it fails
-        # loudly.
+        # Use the same state-aware policy as scheduled cleanup. An old branch
+        # can still back an open PR; age alone does not make it abandoned.
         continue-on-error: true
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-        run: bash scripts/neon-branch.sh prune 'preview-pr-' 7
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/preview-db-branch.sh sweep
 
   sweep:
     name: Sweep closed-PR previews, dry-run leftovers and expired snapshots

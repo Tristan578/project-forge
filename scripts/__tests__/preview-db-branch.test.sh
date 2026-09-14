@@ -589,6 +589,15 @@ fi
 # The sweep job's event gate, derived from the job block rather than restated:
 # a run: line that exists but sits under a false if: is not wiring.
 sweep_block="$(awk '/^  sweep:/{f=1} f' <<<"$cleanup_exec")"
+cleanup_block="$(awk '/^  cleanup:/{f=1} /^  sweep:/{f=0} f' <<<"$cleanup_exec")"
+if grep -qF 'bash scripts/preview-db-branch.sh sweep' <<<"$cleanup_block" \
+  && ! grep -qE "prune ['\"]?preview-pr-['\"]? [0-9]+" <<<"$cleanup_block" \
+  && grep -qF 'pull-requests: read' <<<"$cleanup_block" \
+  && grep -qF 'GH_TOKEN:' <<<"$cleanup_block"; then
+  pass "close-event housekeeping checks PR state instead of deleting old open previews"
+else
+  fail "close-event housekeeping bypasses the state-aware sweep or cannot read PR state"
+fi
 if [ -n "$sweep_block" ] && grep -qE "^[[:space:]]+if: github\.event_name != 'pull_request'" <<<"$sweep_block"; then
   pass "the sweep job admits the schedule and dispatch events"
 else
