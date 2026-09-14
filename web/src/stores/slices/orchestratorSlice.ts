@@ -526,8 +526,9 @@ export const createOrchestratorSlice: StateCreator<
       // `get_entity_details` and RETURNS the latest cached answer: the engine
       // answers asynchronously on `QUERY_ENTITY_DETAILS` a frame later, so the
       // observation adapter's next poll reads the state this poll requested.
-      // A miss (`undefined`) is the engine's "does not exist yet" answer — it
-      // emits nothing for an entity it cannot find.
+      // A miss (`undefined`) means no answer is cached. The engine emits
+      // nothing for an absent entity, but a present entity's reply may also
+      // still be in flight; a miss must not authorize another spawn.
       observeEntity: (entityId: string) => {
         dispatcher('get_entity_details', { entityId });
         return readEntityObservation(entityId);

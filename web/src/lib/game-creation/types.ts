@@ -404,9 +404,9 @@ export interface ExecutorResult {
  *
  * This is what `get_entity_details` -> `QUERY_ENTITY_DETAILS` carries back
  * (engine/src/bridge/query.rs). The engine emits this event ONLY when the
- * entity exists, so a `readEntityObservation` miss (undefined) is itself the
- * "does not exist yet" answer — there is no null-transform sentinel to
- * disambiguate. `transform` is present whenever the observation arrived.
+ * entity exists. A `readEntityObservation` miss means no response has been
+ * cached yet; it cannot distinguish an absent entity from a delayed response.
+ * The cache may also contain an older observation for the same entity.
  */
 export interface ObservedEntity {
   entityId: string;
@@ -422,10 +422,9 @@ export interface ObservedEntity {
 /**
  * The four terminal verdicts of a confirmed spawn/transform (#9899).
  *
- *  - `applied`    — the engine was queried AFTER the deferred command ran and
- *                   the observed state satisfies the intended effect. This is
- *                   the ONLY status that proves application; neither a void
- *                   dispatcher return nor two animation frames earns it.
+ *  - `applied`    — an engine observation for the target entity satisfies the
+ *                   intended effect. The adapter reads the latest cached
+ *                   response; it does not receive a command acknowledgement.
  *  - `rejected`   — the dispatcher refused the command outright (`sendCommands`
  *                   returned false). No observation is attempted.
  *  - `timed-out`  — the command was accepted but the observation deadline
@@ -437,11 +436,9 @@ export type EngineEffectStatus = 'applied' | 'rejected' | 'timed-out' | 'cancell
 /**
  * A typed, correlated result for one spawn or transform operation.
  *
- * `operationId` + `entityId` are the correlation keys the whole slice is built
- * around: a result can always be traced back to the request that produced it,
- * and a stale/cancelled observation carries its OWN operationId so it can never
- * be mistaken for the completion of a newer operation retried under a different
- * id (the #9899 "boundary and recovery" scenario).
+ * `operationId` identifies the caller's observation attempt and `entityId`
+ * identifies its target. The engine query response carries only the entity id;
+ * the operation id on this result does not prove when that response was taken.
  */
 export interface EngineEffectResult {
   status: EngineEffectStatus;

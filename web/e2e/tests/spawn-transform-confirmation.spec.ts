@@ -59,7 +59,7 @@ type EditorStoreShape = {
   setSelection: (ids: string[], primaryId: string | null, primaryName: string | null) => void;
   selectedIds: Set<string>;
   primaryTransform: { entityId?: string; position?: number[] } | null;
-  sceneGraph: { nodes: Record<string, { name?: string }> };
+  sceneGraph: { nodes: Record<string, { name?: string }>; rootIds: string[] };
 };
 
 type ObservedEntityShape = {
@@ -76,14 +76,23 @@ type EditorHandle = {
   __FORGE_READ_ENTITY_OBSERVATION?: (entityId: string) => ObservedEntityShape | undefined;
 };
 
-/** Count scene-graph nodes whose id OR name is crate-1 — the engine's own view. */
+/** Root IDs retain duplicate root entities; the nodes map collapses duplicate IDs. */
 async function countCrates(page: Page): Promise<number> {
   return page.evaluate((id: string) => {
-    const nodes = (window as unknown as EditorHandle).__EDITOR_STORE.getState().sceneGraph.nodes;
-    return Object.entries(nodes).filter(
-      ([nodeId, node]) => nodeId === id || node?.name === id,
-    ).length;
+    const rootIds = (window as unknown as EditorHandle).__EDITOR_STORE.getState().sceneGraph.rootIds;
+    return rootIds.filter(nodeId => nodeId === id).length;
   }, CRATE_ID);
+}
+
+async function waitForCrate(page: Page): Promise<void> {
+  await page.waitForFunction(
+    (id: string) => Object.hasOwn(
+      (window as unknown as EditorHandle).__EDITOR_STORE.getState().sceneGraph.nodes,
+      id,
+    ),
+    CRATE_ID,
+    { timeout: E2E_TIMEOUT_ELEMENT_MS },
+  );
 }
 
 /**
@@ -172,6 +181,7 @@ test.describe('Confirmed spawn/transform through the live engine @engine', () =>
       const store = (window as unknown as EditorHandle).__EDITOR_STORE.getState();
       store.dispatchCommand('spawn_entity', { entityType: 'cube', name: id, id });
     }, CRATE_ID);
+    await waitForCrate(page);
     await page.evaluate(({ id, position, scale }: { id: string; position: number[]; scale: number[] }) => {
       (window as unknown as EditorHandle).__EDITOR_STORE.getState()
         .dispatchCommand('update_transform', { entityId: id, position, scale });
@@ -197,6 +207,7 @@ test.describe('Confirmed spawn/transform through the live engine @engine', () =>
         detail: { command: 'spawn_entity', payload: { entityType: 'cube', name: id, id } },
       }));
     }, CRATE_ID);
+    await waitForCrate(page);
     await page.evaluate(({ id, position, scale }: { id: string; position: number[]; scale: number[] }) => {
       window.dispatchEvent(new CustomEvent('forge-command', {
         detail: { command: 'update_transform', payload: { entityId: id, position, scale } },

@@ -357,6 +357,7 @@ describe('autoPolishExecutor', () => {
 
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+      expect(result.error?.retryable).toBe(false);
       const effect = (result.error?.details as { effect?: { status?: string; operationId?: string } }).effect;
       expect(effect?.status).toBe('timed-out');
       expect(effect?.operationId).toBe('ai.FR-1.OP-01');

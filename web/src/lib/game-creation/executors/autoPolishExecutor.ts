@@ -262,7 +262,7 @@ export const autoPolishExecutor: ExecutorDefinition = {
                 ? 'Ground-plane resize cancelled before the engine confirmed it'
                 : `Repaired ground plane was not confirmed at its requested scale (operation ${effect.operationId})`,
               this.userFacingErrorMessage,
-              effect.status === 'timed-out',
+              false, // Accepted spawns may still apply; replaying would create duplicates.
               { effect },
             ),
           );
