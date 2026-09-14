@@ -29,6 +29,12 @@ SpawnForge uses [Neon](https://neon.tech) as its managed PostgreSQL provider. Ne
 
 SpawnForge production runs on the **Launch plan** (7-day retention). Any data loss event discovered more than 7 days after it occurred cannot be recovered via PITR alone — see [Section 6: Manual Export Strategy](#6-manual-export-strategy).
 
+### Preview Branch Allowance (branch-per-preview)
+
+The Neon project has a **10-branch allowance**. Three branches are permanent — `production`, `staging`, and one `db-snapshot-*` — leaving **7 preview slots**. Since branch-per-preview (#9972) each open PR's Preview Deployment creates its own `preview-pr-<NNNNNN>` branch, migrates it, and points the preview at it (never at the shared staging DB).
+
+To stay under the allowance, the Preview Deployment job in `.github/workflows/ci.yml` calls `scripts/neon-branch.sh evict-oldest 'preview-pr-' <cap> --except <this-PR>` before creating its branch: it deletes the **oldest** `preview-pr-*` branches first until at most `<cap>` remain. The cap is `NEON_PREVIEW_BRANCH_CAP` (default **6** — 7 preview slots minus one for the branch about to be created). Evicting an older PR's branch is safe: that PR recreates its own branch on its next CI run, and no data is shared between PRs. If `create` still returns `BRANCHES_LIMIT_EXCEEDED` (a concurrent run took the freed slot), the job evicts once more and retries `create` exactly once; a genuine non-capacity failure is not retried. When only permanent branches remain (no `preview-pr-*` to evict), eviction touches nothing and the job fails clearly, naming the cap. On PR close, `preview-db-cleanup.yml` deletes that PR's branch and sweeps any left over 7+ days old.
+
 ---
 
 ## 2. How Neon PITR Works
