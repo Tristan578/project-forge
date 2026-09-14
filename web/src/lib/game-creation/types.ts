@@ -11,6 +11,7 @@
 import { z } from 'zod';
 import type { GddScope } from '@/lib/config/enums';
 import type { EditorState } from '@/stores/editorStore';
+import type { CompletionMode } from '@/stores/slices/types';
 import type { Behavior } from './behaviorVocabulary';
 
 // ---------------------------------------------------------------------------
@@ -168,6 +169,16 @@ export interface OrchestratorGDD {
   feelDirective: FeelDirective;
   constraints: string[];
   projectType: '2d' | '3d';
+  /**
+   * The game's intentional completion semantics (#9901). Optional on the brief:
+   * absent means the classic `win` default, preserving every GDD authored before
+   * the field existed. Propagated to `SceneGraph.completionMode` so the shared
+   * Play/verify validator gates winnability by the creator's choice rather than
+   * demanding a win condition for sandbox/endless/narrative games. The mode is
+   * chosen explicitly (manual control or typed AI op, child of #9901), never
+   * inferred from entity names.
+   */
+  completionMode?: CompletionMode;
 }
 
 // ---------------------------------------------------------------------------
