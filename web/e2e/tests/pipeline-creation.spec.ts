@@ -441,7 +441,17 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
         const nodes = store.getState().sceneGraph.nodes;
         recorded.push({
           command,
-          targetFlushed: target === null ? true : Object.hasOwn(nodes, target),
+          // `get_entity_details` is a READ-ONLY existence probe (#9899's
+          // confirmed-observation poll), not a mutation that requires its
+          // target to already exist — asking "does this exist yet" before it
+          // does is the whole point of the poll, not the PF-1213 ordering bug
+          // this tripwire exists to catch. Every mutating command (the class
+          // PF-1213 is actually about) still has to name an already-flushed
+          // target.
+          targetFlushed:
+            target === null || command === 'get_entity_details'
+              ? true
+              : Object.hasOwn(nodes, target),
         });
 
         if (command === 'spawn_entity') {
