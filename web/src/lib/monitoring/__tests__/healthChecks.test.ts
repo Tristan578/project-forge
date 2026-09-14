@@ -783,7 +783,7 @@ describe('healthChecks', () => {
       expect(result.details?.generationConfiguredCount).toBe(0);
       const missing = result.details?.unconfiguredCapabilities as string[];
       expect(missing).toEqual(
-        expect.arrayContaining(['model3d', 'texture', 'sfx', 'voice', 'sprite', 'bg_removal']),
+        expect.arrayContaining(['model3d', 'texture', 'sfx', 'voice', 'music', 'sprite', 'bg_removal']),
       );
       expect(missing).not.toContain('chat');
       expect(result.error).toContain('model3d');
@@ -794,12 +794,13 @@ describe('healthChecks', () => {
       // tell a creator whose own Meshy/ElevenLabs keys work that those features
       // are down (#9727 review).
       expect(result.summary).toBe(
-        'Available only with your own API key: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation. Unavailable on this platform: Sprite Generation, Background Removal',
+        'Available only with your own API key: 3D Model Generation, Texture Generation, Sound Effect Generation, Voice Generation, Music Generation. Unavailable on this platform: Sprite Generation, Background Removal',
       );
       expect(result.summary).not.toContain('PLATFORM_');
-      // music is declared unavailable (#9522), not unconfigured.
-      expect(missing).not.toContain('music');
-      expect(result.summary).not.toContain('Music');
+      // #9522: music now shares the ElevenLabs key, so it is a normal
+      // byok-configurable unconfigured capability, listed like sfx/voice.
+      expect(missing).toContain('music');
+      expect(result.summary).toContain('Music Generation');
       // #9727 review: this verdict is production's documented steady state
       // (docs/guides/platform-keys.md — provisioning is deliberately
       // deferred), so it is marked as a configuration state. The service entry
@@ -810,7 +811,9 @@ describe('healthChecks', () => {
 
     it('suppresses only explicitly declared missing capabilities and detects later key loss', async () => {
       vi.stubEnv('AI_GATEWAY_API_KEY', 'gw');
-      vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', 'sfx,voice,sprite,bg_removal');
+      // #9522: music joins the ElevenLabs-served capabilities, so with no
+      // ElevenLabs key it is unconfigured too and must be in the declared set.
+      vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', 'sfx,voice,music,sprite,bg_removal');
       vi.stubEnv('PLATFORM_MESHY_KEY', 'provisioned');
       const { checkAiProviders, computeOverallStatus } = await import('@/lib/monitoring/healthChecks');
       const baseline = await checkAiProviders();

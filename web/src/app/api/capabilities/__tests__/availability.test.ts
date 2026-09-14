@@ -229,7 +229,8 @@ describe('GET /api/capabilities availability', () => {
   it.each([
     ['sfx', true],
     ['model3d', true],
-    ['music', undefined],
+    // #9522: music now resolves to ElevenLabs (a BYOK provider) like sfx.
+    ['music', true],
     ['sprite', false],
     ['image', false],
     ['bg_removal', false],
