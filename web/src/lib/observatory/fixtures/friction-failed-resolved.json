@@ -1,0 +1,23 @@
+{
+  "observationId": "obs:01J9FRICTION00000000001",
+  "metric": "friction",
+  "environment": "production",
+  "window": {
+    "label": "7d",
+    "start": "2026-09-07T00:00:00Z",
+    "end": "2026-09-14T00:00:00Z"
+  },
+  "evidence": {
+    "journeyId": "jrn:first-game@1"
+  },
+  "source": "journey-telemetry",
+  "releaseSha": "a1b2c3d4",
+  "observedAt": "2026-09-13T23:00:00Z",
+  "ingestedAt": "2026-09-13T23:05:00Z",
+  "confidence": "verified",
+  "applicability": "applicable",
+  "formulaVersion": "friction@1",
+  "numerator": 2,
+  "denominator": 10,
+  "sampleSize": 10
+}
