@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { Play, PlayCircle, AlertTriangle, CheckCircle, XCircle, Info, Loader2 } from 'lucide-react';
+import { useState, useCallback, useRef, useMemo } from 'react';
+import { Play, PlayCircle, AlertTriangle, CheckCircle, XCircle, Info, Loader2, Circle, Repeat } from 'lucide-react';
 import {
   BOT_STRATEGIES,
   simulatePlaytest,
@@ -13,6 +13,12 @@ import {
   type SceneContext,
 } from '@/lib/ai/gameplayBot';
 import { useEditorStore } from '@/stores/editorStore';
+import { InputTraceRecorder, type InputTrace } from '@/lib/playtest/inputTrace';
+import {
+  invokeReplay,
+  createDomKeyboardEnvironment,
+} from '@/lib/playtest/replayInvocation';
+import type { ReplayOutcome } from '@/lib/playtest/replayRunner';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -156,6 +162,174 @@ function MetricsTable({ report }: { report: PlaytestReport }) {
 }
 
 // ---------------------------------------------------------------------------
+// Runtime replay (real engine) — distinct from the heuristic AI Playtest above
+// ---------------------------------------------------------------------------
+
+/**
+ * Manual Record + Replay controls for the REAL runtime (#9902).
+ *
+ * Record captures the engine's per-tick named-action input into a bounded
+ * `InputTrace`; Replay drives that same trace back through the real input path
+ * via `invokeReplay('manual', ...)` — the identical typed command the AI path
+ * uses — and reports an OBSERVED-state verdict (entity moved, one collectible
+ * collected). This is deliberately kept separate from, and never conflated
+ * with, the heuristic "AI Playtest" rating above.
+ */
+function RuntimeReplaySection() {
+  const engineMode = useEditorStore((s) => s.engineMode);
+  const primaryId = useEditorStore((s) => s.primaryId);
+  const inputBindings = useEditorStore((s) => s.inputBindings);
+  const allGameComponents = useEditorStore((s) => s.allGameComponents);
+  const sceneName = useEditorStore((s) => s.sceneName);
+
+  const recorderRef = useRef<InputTraceRecorder | null>(null);
+  const traceRef = useRef<InputTrace | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [hasTrace, setHasTrace] = useState(false);
+  const [isReplaying, setIsReplaying] = useState(false);
+  const [outcome, setOutcome] = useState<ReplayOutcome | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const isPlaying = engineMode === 'play';
+  const bindings = useMemo(() => inputBindings ?? [], [inputBindings]);
+  const actionNames = useMemo(() => bindings.map((b) => b.actionName), [bindings]);
+
+  const collectibleEntityIds = useMemo(
+    () =>
+      Object.entries(allGameComponents ?? {})
+        .filter(([, components]) => (components ?? []).some((c) => c.type === 'collectible'))
+        .map(([id]) => id),
+    [allGameComponents],
+  );
+
+  const toggleRecord = useCallback(() => {
+    setError(null);
+    if (recorderRef.current?.isRecording()) {
+      const trace = recorderRef.current.stop();
+      traceRef.current = trace;
+      recorderRef.current = null;
+      setHasTrace(true);
+      setIsRecording(false);
+      return;
+    }
+    const recorder = new InputTraceRecorder(sceneName ?? 'current-scene', actionNames);
+    recorder.start();
+    recorderRef.current = recorder;
+    setIsRecording(true);
+    setOutcome(null);
+  }, [actionNames, sceneName]);
+
+  const runReplay = useCallback(async () => {
+    const trace = traceRef.current;
+    if (!trace || !primaryId) return;
+    setError(null);
+    setIsReplaying(true);
+    try {
+      const env = createDomKeyboardEnvironment({
+        bindings,
+        playerEntityId: primaryId,
+        collectibleEntityIds,
+      });
+      const result = await invokeReplay('manual', trace, env);
+      setOutcome(result.outcome);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsReplaying(false);
+    }
+  }, [bindings, primaryId, collectibleEntityIds]);
+
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase text-zinc-400 mb-2">
+        Runtime Replay
+      </h3>
+      <p className="text-xs text-zinc-400 mb-2">
+        Record your inputs while playing, then replay them through the real engine
+        to verify the game responds. This is a runtime check, not the heuristic
+        rating above.
+      </p>
+      {!isPlaying && (
+        <div className="text-xs text-zinc-500 italic mb-2">
+          Enter Play mode to record and replay input.
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button
+          onClick={toggleRecord}
+          disabled={!isPlaying}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
+          aria-label={isRecording ? 'Stop recording input' : 'Record input'}
+          aria-pressed={isRecording}
+        >
+          <Circle size={14} className={isRecording ? 'text-red-400 animate-pulse' : ''} />
+          {isRecording ? 'Stop Recording' : 'Record'}
+        </button>
+        <button
+          onClick={runReplay}
+          disabled={!isPlaying || !hasTrace || isRecording || isReplaying}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
+          aria-label="Replay recorded input"
+        >
+          {isReplaying ? <Loader2 size={14} className="animate-spin" /> : <Repeat size={14} />}
+          Replay
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-2 px-2.5 py-2 rounded border text-xs bg-red-500/20 text-red-400 border-red-500/30">
+          {error}
+        </div>
+      )}
+
+      {outcome && (
+        <div className="mt-2 space-y-1.5">
+          <div
+            className={`flex items-center gap-2 px-3 py-2 rounded border ${
+              outcome.verdict === 'passed'
+                ? 'bg-green-500/10 border-green-500/30'
+                : 'bg-red-500/10 border-red-500/30'
+            }`}
+          >
+            {outcome.verdict === 'passed' ? (
+              <CheckCircle size={16} className="text-green-400" />
+            ) : (
+              <XCircle size={16} className="text-red-400" />
+            )}
+            <span
+              className={`text-sm font-semibold ${
+                outcome.verdict === 'passed' ? 'text-green-400' : 'text-red-400'
+              }`}
+            >
+              Replay {outcome.verdict}
+            </span>
+            <span className="text-xs text-zinc-400 ml-auto">
+              {outcome.ticksReplayed} ticks
+            </span>
+          </div>
+          {outcome.assertions.map((a) => (
+            <div
+              key={a.operationId}
+              className="flex items-start gap-1.5 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"
+            >
+              {a.passed ? (
+                <CheckCircle size={14} className="text-green-400 mt-0.5 shrink-0" />
+              ) : (
+                <XCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
+              )}
+              <div>
+                <div className="text-zinc-300">{a.description}</div>
+                <div className="text-zinc-500 mt-0.5">{a.operationId}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
 
@@ -259,6 +433,9 @@ export function PlaytestPanel() {
             Run All
           </button>
         </div>
+
+        {/* Runtime replay (real engine) — separate from the heuristic bot above */}
+        <RuntimeReplaySection />
 
         {/* Results */}
         {report && (
