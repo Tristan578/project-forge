@@ -59,6 +59,7 @@ import { useMcpBridgeRequested } from '@/lib/mcp/bridgeOptIn';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher, setCommandDispatcher } from '@/stores/editorStore';
 import type { CommandResponse } from '@/hooks/useEngine';
+import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useUserStore } from '@/stores/userStore';
@@ -609,6 +610,21 @@ export function EditorLayout() {
       ) => {
         setCommandDispatcher(dispatch);
       };
+      // Feeds a `get_entity_details` answer into the confirmed spawn/transform
+      // observation cache (#9899). Same gate and rationale as
+      // `__FORGE_SET_DISPATCH` above: the strict journey gate's stand-in
+      // dispatcher can accept a `get_entity_details` command, but has no
+      // engine event callback to answer it through — `useEngineEvents` only
+      // registers one against a real `wasmModule`, which this gate never
+      // builds. Without this, `entitySetupExecutor`'s confirmed-observation
+      // poll runs out its deadline against an always-empty cache on every
+      // spawn. This writes straight to the same module-singleton cache the
+      // real `QUERY_ENTITY_DETAILS` event populates
+      // (`lib/game-creation/engineObservation.ts`) — it adds no new way to
+      // observe or mutate scene state beyond what `__EDITOR_STORE` already
+      // exposes, only a way to answer a query the real engine would.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__FORGE_RECORD_ENTITY_OBSERVATION = recordEntityObservation;
     }
   }, []);
 

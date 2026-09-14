@@ -464,6 +464,19 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
           }
         }
 
+        // Answer `get_entity_details` the way the real engine does (#9899):
+        // ONLY once the target is actually in the scene graph, never on the
+        // dispatch that spawned it (spawn is still queued for the next rAF
+        // flush above). `entitySetupExecutor`'s confirmed-observation poll
+        // (`observeEngineEffect`) calls this every 50ms until it gets an
+        // answer, so answering nothing before the flush and something after
+        // is the faithful shape — not a synchronous shortcut that would
+        // pass regardless of whether the ordering bug this gate exists to
+        // catch is actually fixed.
+        if (command === 'get_entity_details' && target !== null && Object.hasOwn(nodes, target)) {
+          window.__FORGE_RECORD_ENTITY_OBSERVATION?.({ entityId: target });
+        }
+
         return { success: true };
       });
     });

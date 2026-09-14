@@ -81,6 +81,33 @@ declare global {
      * engine loading. Used by @ui E2E tests that don't need the engine.
      */
     __SKIP_ENGINE?: boolean;
+
+    /**
+     * Feeds a `get_entity_details` answer into the confirmed spawn/transform
+     * observation cache (#9899, `lib/game-creation/engineObservation.ts`).
+     * Available only when E2E hooks are enabled (`e2eHooksEnabled()`).
+     *
+     * Real engine builds populate that cache asynchronously, off the
+     * `QUERY_ENTITY_DETAILS` event `useEngineEvents` receives from
+     * `wasmModule.set_event_callback` — a callback the strict journey gate
+     * never registers, since it builds no WASM and installs a recording
+     * stand-in through `__FORGE_SET_DISPATCH` instead. Without this, every
+     * `entity_setup` step's confirmed-observation poll (`observeEngineEffect`)
+     * runs out its 5s deadline against an always-empty cache and the step
+     * reports `EFFECT_TIMED_OUT` — a real gate failure caused by the stand-in
+     * being unable to answer a query, not by the pipeline. This lets a
+     * stand-in dispatcher answer `get_entity_details` the same way a real
+     * engine's event eventually would.
+     *
+     * @param payload - Same shape as the engine's `QUERY_ENTITY_DETAILS`
+     *                  payload: `{ entityId, position?, rotation?, scale? }`.
+     */
+    __FORGE_RECORD_ENTITY_OBSERVATION?: (payload: {
+      entityId: string;
+      position?: [number, number, number];
+      rotation?: [number, number, number];
+      scale?: [number, number, number];
+    }) => void;
   }
 }
 
