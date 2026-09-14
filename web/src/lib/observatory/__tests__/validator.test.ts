@@ -552,6 +552,13 @@ describe('observatory/validator — metric metadata must match the dictionary', 
     expect(result.errors.join(' ')).toContain('direction: expected higher_is_better');
   });
 
+  it('rejects a completeness value whose unit contradicts the dictionary', () => {
+    const result = validateMetricValue(measuredCompleteness({ unit: 'percent' }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join(' ')).toContain('unit: expected ratio');
+  });
+
   it('rejects a completeness value with a mismatched freshnessTtlSeconds', () => {
     const result = validateMetricValue(measuredCompleteness({ freshnessTtlSeconds: 60 }));
     expect(result.ok).toBe(false);
