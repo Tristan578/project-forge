@@ -429,4 +429,108 @@ describe('entitySetupExecutor', () => {
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('INVALID_INPUT');
   });
+
+  // -------------------------------------------------------------------------
+  // Confirmed spawn (#9899, operation family ai.FR-1.OP-01)
+  // -------------------------------------------------------------------------
+  //
+  // When the context can query the engine AND the plan named an addressable id,
+  // the spawn is confirmed by READING the engine's real state after the deferred
+  // command applies — not by trusting acceptance plus a frame wait. A context
+  // without `observeEntity` (every test above) keeps the legacy frame-wait path,
+  // which is why none of them had to change.
+  describe('confirmed spawn observation', () => {
+    const ID = 'e1e1e1e1-0000-4000-8000-000000000042';
+
+    it('queries real engine state and reports applied only once the entity is observed', async () => {
+      // Not observable on the first read, then present — proving the executor
+      // waits for the engine to actually show the entity, not merely for a frame.
+      const observeEntity = vi.fn<(id: string) => unknown>()
+        .mockReturnValueOnce(undefined)
+        .mockReturnValue({ entityId: ID, transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } });
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output).toMatchObject({
+        entityId: ID,
+        effectStatus: 'applied',
+        operationId: 'ai.FR-1.OP-01',
+      });
+      // The engine WAS queried for this id — confirmation is a real read.
+      expect(observeEntity).toHaveBeenCalledWith(ID);
+      expect(observeEntity.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('reports timed-out with the operation id and NEVER completed when the effect is dropped', async () => {
+      // The dropped-effect case: the command is accepted (dispatchCommand does
+      // not refuse) but the engine never shows the entity. A short deadline via
+      // fake timers keeps the test instant.
+      vi.useFakeTimers();
+      const observeEntity = vi.fn().mockReturnValue(undefined); // never observed
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const pending = entitySetupExecutor.execute({
+        entity: { name: 'Ghost', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      await vi.advanceTimersByTimeAsync(6_000); // past the 5s observation deadline
+      const result = await pending;
+      vi.useRealTimers();
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+      const effect = (result.error?.details as { effect?: { status?: string; operationId?: string } }).effect;
+      expect(effect?.status).toBe('timed-out');
+      expect(effect?.operationId).toBe('ai.FR-1.OP-01');
+      // A dropped effect must never masquerade as a completed spawn.
+      expect(result.output).toBeUndefined();
+    });
+
+    it('reports a cancelled observation as an aborted step, never applied', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const observeEntity = vi.fn().mockReturnValue(undefined);
+      const ctx = makeCtx({ observeEntity, signal: controller.signal } as never);
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Crate', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+        entityId: ID,
+      }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ABORTED');
+      // Aborted before any read — a cancelled observation cannot report applied.
+      expect(observeEntity).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the frame wait when no id is addressable, even with a query capability', async () => {
+      // No `entityId` means the engine minted its own UUID nothing can query, so
+      // the confirmed path cannot correlate — the legacy frame wait still runs
+      // and the step still succeeds.
+      const observeEntity = vi.fn();
+      const ctx = makeCtx({ observeEntity } as never);
+
+      const result = await entitySetupExecutor.execute({
+        entity: { name: 'Anon', role: 'decoration' },
+        scene: 'MainScene',
+        projectType: '3d',
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(observeEntity).not.toHaveBeenCalled();
+      expect(result.output).not.toHaveProperty('effectStatus');
+    });
+  });
 });
