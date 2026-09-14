@@ -16,7 +16,7 @@ The per-entry-point status of every capability — editor UI, in-app AI, game sc
 | External MCP is local-only, and allowlisted | `NEXT_PUBLIC_MCP_BRIDGE` is absent from the production build, so `mcpBridgeEnabled()` is false and no external MCP client can attach to the production editor. A local build, or a production build made with the flag, can attach after the in-tab consent prompt — to 296 of the 354 commands: `web/src/lib/mcp/bridgeAllowlist.ts` withholds the `scripting`, `generation`, `export`, `publishing`, `security` and `economy` categories and the `ai:generate` / `project:manage` scopes by design. That local path has not been verified end to end. | [#9722](https://github.com/Tristan578/project-forge/issues/9722) |
 | Phantom script commands | 16 names in `SCRIPT_ALLOWED_COMMANDS` have no engine arm: the velocity setters, `set_music_intensity` / `set_music_stems`, all four sprite-animation calls, the four `camera_*` names, `stop_skeletal_animation2d`, `set_ik_target2d` and `vibrate`. A script calling one gets no error and no effect. The `forge.*` functions that dispatch them: `forge.physics.setVelocity`, `forge.physics2d.setVelocity` / `setAngularVelocity`, `forge.audio.setMusicIntensity` / `loadStems`, every dispatching call on `forge.sprite`, `forge.camera.follow` / `stopFollow` / `setPosition` / `lookAt`, `forge.skeleton2d.stopAnimation` / `setIkTarget`, `forge.input.vibrate`. | [#9284](https://github.com/Tristan578/project-forge/issues/9284) |
 | Declared but unimplemented script namespaces | `forgeTypes.ts` declares `forge.i18n` and `forge.leaderboard`; `scriptWorker.ts` builds neither, so a call throws at play time. | [#9733](https://github.com/Tristan578/project-forge/issues/9733) |
-| Adaptive-music intensity has one working control | The AdaptiveMusicInspector slider writes `adaptiveMusicIntensity` to the store and nothing forwards it to `audioManager`; the script call dispatches a phantom (#9284). The chat tool `set_music_intensity` is the only path that reaches the audio engine. | [#9735](https://github.com/Tristan578/project-forge/issues/9735) |
+| Adaptive-music intensity: script path only | The AdaptiveMusicInspector's Configure Stems button registers the `default` adaptive track via `audioManager.setAdaptiveMusic`, after which the intensity slider forwards to `audioManager.setMusicIntensity('default', clamped)` (the same path as the chat tool `set_music_intensity`) and changes the mix; moving the slider before any track is registered surfaces a toast instead of silently doing nothing (#9735). The script call remains a phantom (#9284). | [#9284](https://github.com/Tristan578/project-forge/issues/9284) |
 | No editor UI for 2D mesh attachments | `add_skeleton2d_mesh_attachment` works by command and chat; there is no inspector panel for vertex/weight data (see 2D Subsystem below). | [#9732](https://github.com/Tristan578/project-forge/issues/9732) |
 | Public MCP reference is down | docs.spawnforge.ai/mcp returns 500 because the commands manifest is not traced into the serverless function. Fix in [PR #9730](https://github.com/Tristan578/project-forge/pull/9730), open and unmerged. | [#9718](https://github.com/Tristan578/project-forge/issues/9718) |
 
@@ -65,12 +65,12 @@ Working:
 - Audio bus routing and effects
 - Reverb zones
 - Audio layering and crossfades
-- Adaptive music with stem mixing and intensity control — via the chat tool `set_music_intensity` only; the inspector slider does not reach the audio engine ([#9735](https://github.com/Tristan578/project-forge/issues/9735)) and the script call is a phantom ([#9284](https://github.com/Tristan578/project-forge/issues/9284))
+- Adaptive music with stem mixing and intensity control — the inspector (Configure Stems registers the `default` track, then the slider drives it) and the chat tool `set_music_intensity` both reach the audio engine ([#9735](https://github.com/Tristan578/project-forge/issues/9735)); the script call is a phantom ([#9284](https://github.com/Tristan578/project-forge/issues/9284))
 - Audio occlusion (per-entity low-pass filtering)
 - Music stem layering
 
 Remaining limitations:
-- **Adaptive-music intensity from the UI** — see #9735 above.
+- **Adaptive-music intensity from a script** — `forge.audio.setMusicIntensity` dispatches a phantom command; see #9284. The inspector slider and chat tool now work (#9735).
 - **Occlusion raycasting is physics-based only** — graduated distance-based attenuation is implemented (`handlePhysicsEvent` computes occlusion amount 0–1 and calls `audioManager.updateOcclusionAmount`), but occlusion requires physics colliders between source and listener. Scenes without collision geometry get no occlusion effect.
 
 ### Music generation — not available (#9522)
