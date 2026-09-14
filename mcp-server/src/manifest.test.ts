@@ -109,11 +109,7 @@ describe('command manifest', () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const { fileURLToPath } = await import('node:url');
-    // fileURLToPath yields a platform-correct absolute directory path and
-    // decodes percent-encoded characters (e.g. spaces). Using URL.pathname
-    // instead prepends a leading slash to Windows drive letters
-    // (`/D:/repos/...`), which resolve() mangles into `D:\D:\repos\...` and
-    // the readFileSync below then ENOENTs. See #9958.
+    // Decode file URLs before resolving filesystem paths, including Windows drives.
     const here = fileURLToPath(new URL('.', import.meta.url));
     const docs = [resolve(here, '../README.md'), resolve(here, '../../docs/guides/mcp-server-setup.md')];
     let claims = 0;
@@ -127,25 +123,14 @@ describe('command manifest', () => {
     expect(claims).toBeGreaterThan(0);
   });
 
-  // #9958: the doc-count sweep above resolves its file paths from
-  // `import.meta.url`. On Windows, `new URL('.', import.meta.url).pathname`
-  // returns `/D:/repos/...` — a leading slash ahead of the drive letter that
-  // `path.resolve` turns into `D:\D:\repos\...`, so readFileSync ENOENTs and
-  // the whole doc-truth guard is lost on Windows checkouts. `fileURLToPath`
-  // is the portable conversion and also decodes percent-encoded characters.
   it('converts a file URL to a portable, space-decoded path (fileURLToPath)', async () => {
     const { fileURLToPath } = await import('node:url');
 
-    // A path segment containing a space arrives percent-encoded in the URL and
-    // must decode back to a real space, or readFileSync would look for the
-    // literal "%20" name (AC: "a path containing spaces … decoded paths remain
-    // correct").
-    const spaced = fileURLToPath(new URL('file:///tmp/my%20repo/mcp-server/src/'));
+    // Resolve from this module so the fixture has a drive on Windows.
+    const spaced = fileURLToPath(new URL('./my%20repo/', import.meta.url));
     expect(spaced).toContain('my repo');
     expect(spaced).not.toContain('%20');
 
-    // The conversion of this module's own directory must be absolute and free
-    // of the doubled leading slash that produced `/D:/...` → `D:\D:\...`.
     const here = fileURLToPath(new URL('.', import.meta.url));
     expect(here).not.toMatch(/^\/[A-Za-z]:/);
     expect(here).toMatch(/mcp-server/);
