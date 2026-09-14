@@ -113,6 +113,11 @@ vi.mock('@/stores/editorStore', () => ({
         activeSceneId: 'scene-1',
         activeGameCameraId: 'cam-1',
         allGameCameras: { 'cam-1': { mode: 'thirdPersonFollow', targetEntity: null } },
+        locales: {
+          ja: { locale: 'ja', translations: { 'ui.start': 'スタート' } },
+        },
+        sourceLocale: 'en',
+        previewLocale: 'ja',
       }),
     },
   ),
@@ -220,6 +225,66 @@ describe('useScriptRunner', () => {
     expect(initMsg).toBeDefined();
     expect((initMsg as Record<string, unknown>).scripts).toBeDefined();
     expect((initMsg as Record<string, unknown>).entityInfos).toBeDefined();
+  });
+
+  it('includes localization bundles and locale in the init message', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    const initMsg = workerPostMessages.find(
+      (m) => (m as Record<string, unknown>).type === 'init',
+    ) as Record<string, unknown>;
+    expect(initMsg).toBeDefined();
+    expect(initMsg.locales).toEqual({
+      ja: { locale: 'ja', translations: { 'ui.start': 'スタート' } },
+    });
+    expect(initMsg.sourceLocale).toBe('en');
+    expect(initMsg.previewLocale).toBe('ja');
+  });
+
+  it('registers the leaderboard channel and rejects without a published-game identity', async () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    // Worker asks to submit a score through the leaderboard channel.
+    await act(async () => {
+      latestWorker!.simulateMessage({
+        type: 'async_request',
+        requestId: 'req_1',
+        channel: 'leaderboard',
+        method: 'submit',
+        args: { name: 'hs', playerName: 'Ada', score: 1 },
+      });
+      // Let the router's async handler settle so its response is queued.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Drive a play tick, which flushes queued async responses to the worker.
+    act(() => {
+      mockPlayTickCallback!({
+        entities: {},
+        entityInfos: {},
+        inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+      });
+    });
+
+    const tickMsg = workerPostMessages
+      .filter(
+        (m) =>
+          (m as Record<string, unknown>).type === 'tick' &&
+          Array.isArray((m as Record<string, unknown>).asyncResponses),
+      )
+      .pop() as Record<string, unknown> | undefined;
+    expect(tickMsg).toBeDefined();
+    const responses = tickMsg!.asyncResponses as Array<Record<string, unknown>>;
+    const resp = responses.find((r) => r.requestId === 'req_1');
+    expect(resp).toBeDefined();
+    // A registered-but-unavailable channel yields the handler's own error, NOT
+    // the router's "Unknown async channel" — that distinction proves it is wired.
+    expect(resp!.status).toBe('error');
+    expect(resp!.error).toContain('only available when playing a published game');
+    expect(resp!.error).not.toContain('Unknown async channel');
   });
 
   it('sends scene_info message after init', () => {
