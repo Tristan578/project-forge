@@ -27,15 +27,16 @@
 #         1. preview branches whose PR is CLOSED (merged or not). The
 #            pull_request:closed cleanup can miss: a cancelled run, a secret
 #            outage, a close that raced the preview job's own create.
-#         2. the least recently CREATED preview branch of a still-open PR,
-#            provided it is older than $PREVIEW_DB_MIN_AGE_SECONDS. created_at
-#            is when that PR last pushed (every push recreates the branch), so
-#            oldest-first is least-recently-pushed-first. A branch younger than
-#            the preview job's own timeout may still be mid-migration; one older
-#            cannot belong to a running job. The evicted PR regains a branch on
-#            its next push, and its number is printed (evicted_pr=N) so the
-#            caller can say so on that PR rather than leave a preview URL that
-#            fails on its first query with no explanation.
+#         2. the least recently CREATED preview branch whose PR state GitHub
+#            could confirm, provided it is older than
+#            $PREVIEW_DB_MIN_AGE_SECONDS. created_at is when that PR last pushed
+#            (every push recreates the branch), so oldest-first is
+#            least-recently-pushed-first. A branch younger than the preview
+#            job's own timeout may still be mid-migration; one older cannot
+#            belong to a running job. The evicted PR regains a branch on its
+#            next push, and its number is printed (evicted_pr=N) so the caller
+#            can say so on that PR rather than leave a preview URL that fails
+#            on its first query with no explanation.
 #       Prints branch_id= / branch_name= like neon-branch.sh create, plus
 #       swept_pr=N per closed-PR branch step 1 deleted and evicted_pr=N /
 #       evicted_branch=<id> when step 2 fired.
@@ -50,19 +51,33 @@
 #       Prints the branch name for a PR: preview-pr-NNNNNN, zero-padded to six
 #       digits.
 #
+# OUTPUT CHANNELS. The typed lines above (branch_id=, evicted_pr=, ...) go to
+# STDOUT; every ::error::, ::warning:: and ::notice:: goes to STDERR, like
+# neon-branch.sh. The caller captures stdout to read the typed lines and must
+# still see the diagnostics when the script fails -- with them on stderr they
+# reach the job log whatever the caller does with the capture.
+#
 # THE NAME IS FIXED-WIDTH ON PURPOSE. neon-branch.sh prune matches by
 # `startswith`, so an unpadded "preview-pr-1" would prefix "preview-pr-12" and
 # pruning PR 1 would delete PRs 12 through 19. Six digits make every name the
 # same length, so no name can prefix another and startswith degenerates to
 # equality. Everything here that reads a PR number back OUT of a name requires
 # the full shape ^preview-pr-[0-9]{6}$; a branch that merely starts with the
-# prefix is never treated as some PR's.
+# prefix is never treated as some PR's. (Above PR 999999 the name would widen
+# to seven digits and stop matching that shape; such a branch could then only
+# be reclaimed by the close event. This repository is nowhere near it.)
 #
-# PR STATE COMES FROM GITHUB, AND UNCERTAINTY MEANS KEEP. `gh api` answers
-# open or closed; a lookup that fails (rate limit, 404, no token) leaves the
-# branch alone with a ::warning::. Deleting on a guess would turn a transient
-# GitHub error into a preview silently reading a database that no longer
-# exists.
+# PR STATE COMES FROM GITHUB, AND UNCERTAINTY MEANS KEEP -- in BOTH reclaim
+# steps. `gh api` answers open or closed; a lookup that fails (rate limit,
+# 404, no token) leaves the branch alone with a ::warning::, and it is never an
+# eviction candidate either. Deleting on a guess would turn a transient GitHub
+# error into a preview silently reading a database that no longer exists.
+#
+# THE AGE FLOOR EQUALS THE JOB TIMEOUT WITH NO MARGIN, DELIBERATELY. The
+# branch is created several minutes INTO the preview job (after checkout and
+# npm ci), and the job is killed at its timeout-minutes, so any branch older
+# than the timeout belongs to a job that has already ended; the migrate and
+# deploy steps that read the branch finish well inside that window besides.
 #
 # ENVIRONMENT
 #   NEON_API_KEY, NEON_PROJECT_ID   required; consumed by neon-branch.sh, which
@@ -94,8 +109,8 @@ USAGE='usage: preview-db-branch.sh create <pr-number> --uri-out <path>
 : "${GITHUB_REPOSITORY:=}"
 case "$PREVIEW_DB_MIN_AGE_SECONDS" in ''|*[!0-9]*) PREVIEW_DB_MIN_AGE_SECONDS=1800 ;; esac
 
-command -v jq >/dev/null 2>&1 || { echo "::error::preview-db-branch.sh requires jq"; exit 3; }
-[ -f "$NEON" ] || { echo "::error::neon-branch.sh not found next to preview-db-branch.sh"; exit 3; }
+command -v jq >/dev/null 2>&1 || { echo "::error::preview-db-branch.sh requires jq" >&2; exit 3; }
+[ -f "$NEON" ] || { echo "::error::neon-branch.sh not found next to preview-db-branch.sh" >&2; exit 3; }
 
 pr_name() {
   local n="$1"
@@ -114,10 +129,11 @@ pr_of() {
 }
 
 # open | closed on stdout; rc 1 (nothing printed) when GitHub could not answer.
+# stdin is closed so a call inside a `read` loop can never eat the loop's rows.
 pr_state() {
   local n="$1" state
   [ -n "$GITHUB_REPOSITORY" ] || return 1
-  state="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.state' 2>/dev/null)" || return 1
+  state="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.state' 2>/dev/null </dev/null)" || return 1
   case "$state" in
     open|closed) printf '%s' "$state" ;;
     *) return 1 ;;
@@ -129,7 +145,16 @@ pr_state() {
 # there".
 list_previews() { bash "$NEON" list "$PREFIX"; }
 
-delete_branch() { bash "$NEON" delete "$1" >/dev/null; }
+# neon-branch.sh delete waits for the deletion's operations to finish, so a
+# create retried right after it is not racing the branch still being counted.
+delete_branch() { bash "$NEON" delete "$1" >/dev/null </dev/null; }
+
+# created_at -> epoch seconds, or nothing when it does not parse. Neon emits
+# second precision; fractional seconds are tolerated in case that ever changes,
+# because an unparseable date silently makes a row un-evictable.
+epoch_of() {
+  jq -rn --arg t "$1" '$t | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch empty' 2>/dev/null
+}
 
 # Step 1. Prints swept_pr=N per branch deleted and swept=<count>; keeps (with a
 # warning) anything whose PR state is unknown.
@@ -139,11 +164,11 @@ sweep_closed() {
   while IFS=$'\t' read -r id name _created; do
     [ -n "$id" ] || continue
     if ! pr="$(pr_of "$name")"; then
-      echo "::notice::${name} does not carry a PR number; leaving it alone"
+      echo "::notice::${name} does not carry a PR number; leaving it alone" >&2
       continue
     fi
     if ! state="$(pr_state "$pr")"; then
-      echo "::warning::could not resolve the state of PR #${pr} for ${name}; keeping it"
+      echo "::warning::could not resolve the state of PR #${pr} for ${name}; keeping it" >&2
       continue
     fi
     [ "$state" = "closed" ] || continue
@@ -151,16 +176,16 @@ sweep_closed() {
       echo "swept_pr=${pr}"
       n=$(( n + 1 ))
     else
-      echo "::warning::could not delete ${name} (${id}) for closed PR #${pr}"
+      echo "::warning::could not delete ${name} (${id}) for closed PR #${pr}" >&2
     fi
   done <<<"$rows"
   echo "swept=${n}"
 }
 
-# Step 2. The oldest preview branch of a still-open PR, skipping our own name
-# and anything younger than the minimum age. Prints evicted_pr= and
-# evicted_branch=; rc 1 when nothing qualifies, the list's own code when it
-# failed.
+# Step 2. The oldest preview branch whose PR state GitHub confirmed, skipping
+# our own name, anything whose state is unknown, and anything younger than the
+# minimum age. Prints evicted_pr= and evicted_branch=; rc 1 when nothing
+# qualifies, the list's own code when it failed.
 evict_oldest() {
   local own="$1" rows id name created pr now ts age
   rows="$(list_previews)" || return $?
@@ -169,7 +194,11 @@ evict_oldest() {
     [ -n "$id" ] || continue
     [ "$name" != "$own" ] || continue
     pr="$(pr_of "$name")" || continue
-    ts="$(jq -rn --arg t "$created" '$t | try fromdateiso8601 catch empty' 2>/dev/null)"
+    if ! pr_state "$pr" >/dev/null; then
+      echo "::warning::could not resolve the state of PR #${pr} for ${name}; not an eviction candidate" >&2
+      continue
+    fi
+    ts="$(epoch_of "$created")"
     # No parseable age means no proof it is not in use.
     [ -n "$ts" ] || continue
     age=$(( now - ts ))
@@ -179,7 +208,7 @@ evict_oldest() {
       echo "evicted_branch=${id}"
       return 0
     fi
-    echo "::warning::could not evict ${name} (${id}); trying the next oldest"
+    echo "::warning::could not evict ${name} (${id}); trying the next oldest" >&2
   done <<<"$rows"
   return 1
 }
@@ -198,48 +227,48 @@ cmd_create() {
   local pr="" uri_out=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --uri-out) uri_out="${2:-}"; [ -n "$uri_out" ] || { echo "::error::--uri-out needs a path"; exit 64; }; shift 2 ;;
-      -*) echo "::error::unknown flag '$1'"; echo "$USAGE"; exit 64 ;;
-      *) [ -z "$pr" ] || { echo "::error::$USAGE"; exit 64; }; pr="$1"; shift ;;
+      --uri-out) uri_out="${2:-}"; [ -n "$uri_out" ] || { echo "::error::--uri-out needs a path" >&2; exit 64; }; shift 2 ;;
+      -*) echo "::error::unknown flag '$1'" >&2; echo "$USAGE" >&2; exit 64 ;;
+      *) [ -z "$pr" ] || { echo "::error::$USAGE" >&2; exit 64; }; pr="$1"; shift ;;
     esac
   done
-  { [ -n "$pr" ] && [ -n "$uri_out" ]; } || { echo "::error::$USAGE"; exit 64; }
+  { [ -n "$pr" ] && [ -n "$uri_out" ]; } || { echo "::error::$USAGE" >&2; exit 64; }
   local name rc
   name="$(pr_name "$pr")" || exit 64
 
   # A push REPLACES the PR's branch. Retention 0 = everything with exactly this
   # name (fixed width makes startswith equality). Not fatal on its own: if the
   # old branch survives, the create below refuses loudly anyway.
-  bash "$NEON" prune "$name" 0 || echo "::warning::could not prune the previous ${name}; continuing"
+  bash "$NEON" prune "$name" 0 || echo "::warning::could not prune the previous ${name}; continuing" >&2
 
   try_create "$name" "$uri_out"; rc=$?
   [ "$rc" -ne 0 ] || return 0
   [ "$rc" -eq 5 ] || exit "$rc"
 
-  echo "::notice::Neon branch allowance is full; reclaiming preview branches of closed PRs"
+  echo "::notice::Neon branch allowance is full; reclaiming preview branches of closed PRs" >&2
   sweep_closed || exit $?
   try_create "$name" "$uri_out"; rc=$?
   [ "$rc" -ne 0 ] || return 0
   [ "$rc" -eq 5 ] || exit "$rc"
 
-  echo "::notice::still full after the closed-PR sweep; evicting the least recently built preview"
+  echo "::notice::still full after the closed-PR sweep; evicting the least recently built preview" >&2
   evict_oldest "$name"; rc=$?
   if [ "$rc" -eq 1 ]; then
-    echo "::error::Neon branch allowance is full and nothing is safe to reclaim: every other preview branch is younger than ${PREVIEW_DB_MIN_AGE_SECONDS}s and may belong to a running preview job. Close or merge some PRs, or raise the plan's branch allowance, then re-run this job."
+    echo "::error::Neon branch allowance is full and nothing is safe to reclaim: every other preview branch is younger than ${PREVIEW_DB_MIN_AGE_SECONDS}s, may belong to a running preview job, or has a PR whose state GitHub could not confirm. Close or merge some PRs, or raise the plan's branch allowance, then re-run this job." >&2
     exit 5
   fi
   [ "$rc" -eq 0 ] || exit "$rc"
   try_create "$name" "$uri_out"; rc=$?
   [ "$rc" -ne 0 ] || return 0
   if [ "$rc" -eq 5 ]; then
-    echo "::error::Neon still reports BRANCHES_LIMIT_EXCEEDED after reclaiming a branch. Something outside this pipeline is holding branches; audit with: bash scripts/neon-branch.sh list ''"
+    echo "::error::Neon still reports BRANCHES_LIMIT_EXCEEDED after reclaiming a branch. Something outside this pipeline is holding branches; audit with: bash scripts/neon-branch.sh list ''" >&2
     exit 5
   fi
   exit "$rc"
 }
 
 cmd_sweep() {
-  [ $# -eq 0 ] || { echo "::error::$USAGE"; exit 64; }
+  [ $# -eq 0 ] || { echo "::error::$USAGE" >&2; exit 64; }
   local rc=0 step_rc
   sweep_closed || rc=$?
   # Housekeeping neon-branch.sh already knows how to do. Both warn, never fail,
@@ -251,7 +280,7 @@ cmd_sweep() {
 }
 
 cmd_name() {
-  [ $# -eq 1 ] || { echo "::error::$USAGE"; exit 64; }
+  [ $# -eq 1 ] || { echo "::error::$USAGE" >&2; exit 64; }
   local name
   name="$(pr_name "$1")" || exit 64
   printf '%s\n' "$name"
@@ -261,5 +290,5 @@ case "${1:-}" in
   create) shift; cmd_create "$@" ;;
   sweep)  shift; cmd_sweep  "$@" ;;
   name)   shift; cmd_name   "$@" ;;
-  *) echo "::error::$USAGE"; exit 64 ;;
+  *) echo "::error::$USAGE" >&2; exit 64 ;;
 esac

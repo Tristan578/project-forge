@@ -40,9 +40,12 @@
 #       before the caller has masked it.
 #       Prints: branch_id=<id> / branch_name=<name>
 #   delete <branch_id>
+#       Deletes the branch and waits for the deletion's operations to finish,
+#       so a create issued right after it is not refused for a branch Neon is
+#       still counting.
 #   prune <name-prefix> <retention-days>
 #       Deletes branches whose name starts with <name-prefix> and which are
-#       older than <retention-days>. Housekeeping only.
+#       older than <retention-days>. Housekeeping only. Waits like delete.
 #   list <name-prefix>
 #       Prints id<TAB>name<TAB>created_at for every branch whose name starts
 #       with <name-prefix>, OLDEST FIRST, and nothing at all when none match.
@@ -337,9 +340,14 @@ cmd_create() {
 }
 
 cmd_delete() {
-  local branch_id="${1:-}"
+  local branch_id="${1:-}" resp
   [ -n "$branch_id" ] || { echo "::error::$USAGE"; exit 64; }
-  neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${branch_id}" >/dev/null || exit 3
+  resp="$(neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${branch_id}")" || exit 3
+  # Deleting is asynchronous like creating: the 200 carries `operations`
+  # (delete_timeline, suspend_compute) that may still be running, and until
+  # they finish the branch can still count against the allowance a caller is
+  # about to retry a create against (#10015). Wait, exactly as create does.
+  neon_wait_for_operations "$resp" || exit $?
   echo "deleted=${branch_id}"
 }
 
@@ -353,10 +361,12 @@ cmd_prune() {
   local resp cutoff stale
   resp="$(neon_api GET "/projects/${NEON_PROJECT_ID}/branches")" || exit 3
   cutoff=$(( $(date -u +%s) - days * 86400 ))
+  # Neon emits second-precision timestamps; fractional seconds are tolerated
+  # so a format change cannot silently turn every branch into "not stale".
   stale="$(jq -r --arg p "$prefix" --argjson c "$cutoff" '
       (.branches // [])
       | map(select((.name // "") | startswith($p)))
-      | map(select(((.created_at // "1970-01-01T00:00:00Z") | fromdateiso8601) < $c))
+      | map(select(((.created_at // "1970-01-01T00:00:00Z") | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < $c))
       | .[].id
     ' <<<"$resp" 2>/dev/null)"
 
@@ -365,10 +375,13 @@ cmd_prune() {
     return 0
   fi
 
-  local n=0 id
+  local n=0 id resp_del
   while IFS= read -r id; do
     [ -n "$id" ] || continue
-    if neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${id}" >/dev/null; then
+    if resp_del="$(neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${id}")"; then
+      # Same asynchrony as cmd_delete; a caller that creates right after a
+      # prune (the preview job replacing its own branch) must not race it.
+      neon_wait_for_operations "$resp_del" || echo "::warning::deletion of ${id} was accepted but its operations had not finished when polling stopped"
       echo "pruned_branch=${id}"
       n=$(( n + 1 ))
     else
@@ -386,6 +399,13 @@ cmd_list() {
   # Oldest first: the preview policy evicts the FIRST row it may, so the order
   # is part of the contract. Prints nothing when nothing matches; a failed
   # list is the exit 3 above, never an empty success.
+  #
+  # `tr -d '\r'`: jq.exe on Windows opens stdout in text mode and terminates
+  # every line with CRLF (the same quirk scripts/check-openapi-route-sync.sh
+  # normalises). A row ending in "Z\r" is not the TSV promised above -- the
+  # consumer's date parse fails on it and that row is silently never evicted --
+  # so the CR is stripped at the one point rows leave this script. pipefail
+  # keeps a jq failure visible through the pipe.
   jq -r --arg p "$prefix" '
       (.branches // [])
       | map(select((.name // "") | startswith($p)))
@@ -393,7 +413,8 @@ cmd_list() {
       | .[]
       | [.id, (.name // ""), (.created_at // "")]
       | @tsv
-    ' <<<"$resp" 2>/dev/null || { echo "::error::Neon list-branches response could not be parsed." >&2; exit 3; }
+    ' <<<"$resp" 2>/dev/null | tr -d '\r' \
+    || { echo "::error::Neon list-branches response could not be parsed." >&2; exit 3; }
 }
 
 case "${1:-}" in

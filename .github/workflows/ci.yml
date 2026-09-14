@@ -1348,8 +1348,25 @@ jobs:
           set -euo pipefail
           uri_file="${RUNNER_TEMP}/preview-db-uri"
 
-          out="$(bash scripts/preview-db-branch.sh create "$PR_NUMBER" --uri-out "$uri_file")"
+          # Capture the exit code instead of letting errexit abort at the
+          # assignment: the policy's typed lines (evicted_pr=, swept_pr=) are
+          # on stdout and must reach the log and the outputs below even when
+          # the create ultimately fails, so an evicted PR is told either way.
+          # Its diagnostics are on stderr and reach the log on their own.
+          rc=0
+          out="$(bash scripts/preview-db-branch.sh create "$PR_NUMBER" --uri-out "$uri_file")" || rc=$?
           echo "$out"
+
+          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | head -1)"
+          if [ -n "$evicted_pr" ]; then
+            echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
+            echo "Reclaimed the preview database of #${evicted_pr} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::preview-db-branch.sh create exited ${rc}; the lines above say why."
+            exit "$rc"
+          fi
+
           # Read the TYPED line, never the first br- token: the output carries
           # evicted_branch=br-... BEFORE branch_id= when a branch was reclaimed,
           # and a loose match would ship the evicted id as this preview's.
@@ -1363,17 +1380,13 @@ jobs:
           echo "uri_file=${uri_file}" >> "$GITHUB_OUTPUT"
           echo "Neon preview branch: ${name} (${branch_id})" >> "$GITHUB_STEP_SUMMARY"
 
-          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | head -1)"
-          if [ -n "$evicted_pr" ]; then
-            echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
-            echo "Reclaimed the preview database of #${evicted_pr} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Tell the evicted PR its preview database was reclaimed
         # Without this the evicted PR's preview URL simply starts failing on
         # database access, with nothing on the PR to say why or that a push
-        # brings it back. Housekeeping never fails the deploy it made room for.
-        if: steps.neon-branch.outputs.evicted_pr != ''
+        # brings it back. always(): the eviction happened even if this PR's own
+        # create then failed, and the evicted PR is owed the notice either way.
+        # Housekeeping never fails the deploy it made room for.
+        if: always() && steps.neon-branch.outputs.evicted_pr != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

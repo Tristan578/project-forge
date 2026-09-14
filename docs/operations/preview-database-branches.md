@@ -37,11 +37,13 @@ below the number of open PRs.
    helper's exit code 5):
    1. preview branches whose PR is **closed** are deleted (state from GitHub;
       an unknown state keeps the branch), then the create is retried;
-   2. if still full, the **least recently created** preview branch of an open
-      PR is deleted, provided it is older than the preview job's own timeout
-      (30 minutes, `PREVIEW_DB_MIN_AGE_SECONDS`), so it cannot belong to a
-      running job. The evicted PR is named on the job summary and gets a
-      comment; its next push rebuilds its branch. Then the create is retried.
+   2. if still full, the **least recently created** preview branch whose PR
+      state GitHub could confirm is deleted, provided it is older than the
+      preview job's own timeout (30 minutes, `PREVIEW_DB_MIN_AGE_SECONDS`), so
+      it cannot belong to a running job. A branch whose PR state is unknown is
+      never a candidate. The evicted PR is named on the job summary and gets a
+      comment, even if this PR's own create then fails; its next push rebuilds
+      its branch. Then the create is retried.
    3. if still full, the job fails with exit 5 and says so. That is a capacity
       outcome — close some PRs or raise the plan — not a pipeline defect.
 
@@ -85,6 +87,6 @@ check `active_time_seconds` and `current_state` in the Neon console first.
    run the audit above.
 2. Any other failure is not capacity. Start from the `::error::` lines, which
    name the Neon status and code.
-3. Raising the ceiling is a Neon plan change (the Launch plan's included
-   allowance is the same ten; extra branches bill per branch-month). That is an
-   owner decision, not something this pipeline does.
+3. Raising the ceiling is a Neon plan change; the current allowances and
+   per-branch pricing live on Neon's pricing page, not in this repository. That
+   is an owner decision, not something this pipeline does.

@@ -137,6 +137,23 @@ run_script() {
   printf '%s|%s' "$rc" "$out"
 }
 
+# Same, with stderr kept APART in $TMPDIR_T/stderr.log — for the output-channel
+# case, which is the only one that must tell the two streams apart.
+run_script_split() {
+  local envs=()
+  while [ $# -gt 0 ] && [ "${1#*=}" != "$1" ]; do envs+=("$1"); shift; done
+  local out rc
+  out="$(NEON_CURL_CMD="$STUB" STUB_DIR="$TMPDIR_T/stub" STUB_LOG="$TMPDIR_T/stub.log" \
+         NEON_API_KEY='test-key-not-real' NEON_PROJECT_ID='proj-test' \
+         GH_TOKEN='test-token-not-real' GITHUB_REPOSITORY='acme/widgets' \
+         GH_STUB_DIR="$TMPDIR_T/gh" GH_STUB_LOG="$TMPDIR_T/gh.log" \
+         PATH="$TMPDIR_T/bin:$PATH" \
+         env ${envs[@]+"${envs[@]}"} bash "$SCRIPT" "$@" 2>"$TMPDIR_T/stderr.log")"
+  rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+stderr_log() { cat "$TMPDIR_T/stderr.log"; }
+
 NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 CREATE_OK='{"branch":{"id":"br-new-1"},"connection_uris":[{"connection_uri":"postgresql://u:p@ep-new.neon.tech/db"}]}'
 LIMIT_FULL='{"request_id":"r","code":"BRANCHES_LIMIT_EXCEEDED","message":"branches limit exceeded"}'
@@ -331,6 +348,110 @@ res="$(run_script NEON_API_KEY= create 42 --uri-out "$TMPDIR_T/h.uri")"; rc="${r
 if [ "$rc" = "2" ]; then pass "missing Neon credentials exit 2 (propagated from neon-branch.sh)"; else fail "missing credentials should exit 2, got $rc"; fi
 
 echo ""
+echo "=== create: eviction never touches a branch whose PR state GitHub could not confirm ==="
+# "Uncertainty means keep" has to hold in BOTH reclaim steps. The first cut
+# checked state only in the closed-PR sweep, so a GitHub outage, a rate limit
+# or a token without pull-requests scope let step 2 evict a branch it knew
+# nothing about — ten lines after warning that it was keeping it.
+LIST_OLD_ONLY='{"branches":[{"id":"br-a","name":"preview-pr-000001","created_at":"2026-01-01T00:00:00Z"}]}'
+stub_reset; gh_reset                       # no fixtures: every lookup fails
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_OLD_ONLY" | stub_body 3
+stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
+printf '%s' "$LIST_OLD_ONLY" | stub_body 5
+res="$(run_script create 42 --uri-out "$TMPDIR_T/i.uri")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "5" ]; then pass "GitHub unreachable while the allowance is full exits 5"; else fail "expected exit 5 with GitHub unreachable, got $rc ($out)"; fi
+if [ -z "$(deletes)" ]; then pass "a branch whose PR state is unknown is never evicted"; else fail "evicted with state unknown: $(deletes | tr '\n' ' ')"; fi
+if grep -qF 'not an eviction candidate' <<<"$out"; then pass "the skipped branch is warned about by name"; else fail "no warning for the unknown-state branch: $out"; fi
+
+# The unknown one is skipped; the next oldest with a confirmed state is taken.
+LIST_TWO_OLD='{"branches":[{"id":"br-a","name":"preview-pr-000001","created_at":"2026-01-01T00:00:00Z"},{"id":"br-b","name":"preview-pr-000002","created_at":"2026-06-01T00:00:00Z"}]}'
+stub_reset; gh_reset; gh_pr 2 open         # PR 1 unknown, PR 2 open
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_TWO_OLD" | stub_body 3
+stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
+printf '%s' "$LIST_TWO_OLD" | stub_body 5
+# call 6 = DELETE br-b; call 7 = POST -> ok
+stub_status 7 201; printf '%s' "$CREATE_OK" | stub_body 7
+res="$(run_script create 42 --uri-out "$TMPDIR_T/j.uri")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ "$(deletes)" = "br-b" ] && grep -qxF 'evicted_pr=2' <<<"$out"; then
+  pass "eviction skips the unknown-state branch and takes the next oldest whose state is confirmed"
+else
+  fail "unknown-first eviction: rc=$rc deletes=$(deletes | tr '\n' ' ') out=$out"
+fi
+
+echo ""
+echo "=== create: a refused delete during eviction moves on to the next oldest ==="
+stub_reset; gh_reset; gh_pr 1 open; gh_pr 2 open
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_TWO_OLD" | stub_body 3
+stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
+printf '%s' "$LIST_TWO_OLD" | stub_body 5
+stub_status 6 500                          # DELETE br-a refused
+# call 7 = DELETE br-b (default 200); call 8 = POST -> ok
+stub_status 8 201; printf '%s' "$CREATE_OK" | stub_body 8
+res="$(run_script create 42 --uri-out "$TMPDIR_T/k.uri")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ "$(deletes | tr '\n' ' ')" = "br-a br-b " ] && grep -qxF 'evicted_pr=2' <<<"$out"; then
+  pass "a refused delete is stepped over and the next oldest is evicted instead"
+else
+  fail "failed-delete advance: rc=$rc deletes=$(deletes | tr '\n' ' ') out=$out"
+fi
+if grep -qF 'trying the next oldest' <<<"$out"; then pass "the refused delete is warned about"; else fail "no warning for the refused delete"; fi
+
+echo ""
+echo "=== create: a fractional-seconds created_at still parses (an unparseable date would make a row un-evictable) ==="
+LIST_FRAC='{"branches":[{"id":"br-frac","name":"preview-pr-000001","created_at":"2026-01-01T00:00:00.500Z"}]}'
+stub_reset; gh_reset; gh_pr 1 open
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_FRAC" | stub_body 3
+stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
+printf '%s' "$LIST_FRAC" | stub_body 5
+stub_status 7 201; printf '%s' "$CREATE_OK" | stub_body 7
+res="$(run_script create 42 --uri-out "$TMPDIR_T/m.uri")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ "$(deletes)" = "br-frac" ] && grep -qxF 'evicted_pr=1' <<<"$out"; then
+  pass "a created_at with fractional seconds is parsed and the branch is evictable"
+else
+  fail "fractional created_at: rc=$rc deletes=$(deletes | tr '\n' ' ') out=$out"
+fi
+
+echo ""
+echo "=== output channels: typed lines on stdout, diagnostics on stderr, even when the create fails ==="
+# ci.yml captures stdout to read evicted_pr= and must still see the ::error::
+# lines when the script exits non-zero — an eviction followed by a failed
+# create is the one case where both matter at once. Re-run that shape with the
+# streams kept apart. Every other case merges them, so this is the only one
+# that can see a diagnostic land on the wrong stream.
+stub_reset; gh_reset; gh_pr 1 open
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_ONE" | stub_body 3
+stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
+printf '%s' "$LIST_ONE" | stub_body 5
+stub_status 7 422; printf '%s' "$LIMIT_FULL" | stub_body 7
+res="$(run_script_split create 42 --uri-out "$TMPDIR_T/l.uri")"; rc="${res%%|*}"; out="${res#*|}"
+err="$(stderr_log)"
+if [ "$rc" = "5" ]; then pass "(shape reproduced: exit 5 after an eviction)"; else fail "expected exit 5, got $rc"; fi
+if grep -qxF 'evicted_pr=1' <<<"$out"; then
+  pass "evicted_pr= reaches STDOUT although the create then failed (the caller can still tell that PR)"
+else
+  fail "evicted_pr= missing from stdout: $out"
+fi
+if grep -qE '^::(error|warning|notice)::' <<<"$out"; then
+  fail "diagnostics leaked into stdout, where a caller that captures it would hide them: $out"
+else
+  pass "no ::error::/::warning::/::notice:: on stdout"
+fi
+if grep -qF 'outside this pipeline' <<<"$err"; then
+  pass "the ::error:: is on STDERR, so it reaches the job log whatever the caller does with stdout"
+else
+  fail "the ::error:: did not reach stderr: $err"
+fi
+
+echo ""
 echo "=== sweep: closed PRs, dry-run leftovers, expired snapshots — and nothing else ==="
 stub_reset; gh_reset
 gh_pr 7 closed; gh_pr 8 open            # 9 unknown
@@ -365,6 +486,19 @@ else
 fi
 res="$(run_script sweep extra)"; rc="${res%%|*}"
 if [ "$rc" = "64" ]; then pass "sweep takes no arguments (exit 64)"; else fail "sweep extra should exit 64, got $rc"; fi
+
+# A refused delete is warned about, never fatal, and the count stays honest.
+stub_reset; gh_reset; gh_pr 7 closed
+stub_default <<'EOF'
+{"branches":[{"id":"br-c7","name":"preview-pr-000007","created_at":"2026-09-01T00:00:00Z"}]}
+EOF
+stub_status 2 500                          # DELETE br-c7 refused
+res="$(run_script sweep)"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && grep -qxF 'swept=0' <<<"$out" && grep -qF 'could not delete' <<<"$out"; then
+  pass "a refused delete in the sweep is warned about and not counted (exit 0)"
+else
+  fail "sweep refused-delete: rc=$rc out=$out"
+fi
 
 echo ""
 echo "=== sweep: GitHub unreachable -> nothing swept, warned, still exit 0; Neon unreachable -> exit 3 ==="
@@ -436,6 +570,29 @@ if grep -qF "sed -n 's/^branch_id=//p'" <<<"$ci_exec"; then
   pass "preview-deploy reads branch_id from its typed line, not the first br- token"
 else
   fail "ci.yml no longer parses branch_id= by its typed line"
+fi
+# Under `set -e`, a bare `out="$(...)"` aborts the step at the assignment when
+# the policy fails, and everything it printed to stdout — evicted_pr= above
+# all — is dropped. The capture has to record the code and go on.
+# shellcheck disable=SC2016
+# Literal "$uri_file" / "$?" in the workflow's run: block; no expansion wanted.
+if grep -qE 'bash scripts/preview-db-branch\.sh create "\$PR_NUMBER" --uri-out "\$uri_file"\)" \|\| rc=\$\?' <<<"$ci_exec"; then
+  pass "preview-deploy captures the policy's exit code instead of letting errexit drop its output"
+else
+  fail "ci.yml lets errexit abort at the capture — evicted_pr= never reaches the outputs when the create fails"
+fi
+if grep -qE "^[[:space:]]+if: always\(\) && steps\.neon-branch\.outputs\.evicted_pr != ''" <<<"$ci_exec"; then
+  pass "the evicted-PR comment runs even when this PR's own create then failed (always())"
+else
+  fail "the evicted-PR comment step is not gated on always(): an eviction followed by a failed create tells nobody"
+fi
+# The sweep job's event gate, derived from the job block rather than restated:
+# a run: line that exists but sits under a false if: is not wiring.
+sweep_block="$(awk '/^  sweep:/{f=1} f' <<<"$cleanup_exec")"
+if [ -n "$sweep_block" ] && grep -qE "^[[:space:]]+if: github\.event_name != 'pull_request'" <<<"$sweep_block"; then
+  pass "the sweep job admits the schedule and dispatch events"
+else
+  fail "could not find the sweep job's event gate in preview-db-cleanup.yml"
 fi
 if grep -qF 'bash scripts/__tests__/preview-db-branch.test.sh' <<<"$ci_exec"; then
   pass "CI runs this suite"
