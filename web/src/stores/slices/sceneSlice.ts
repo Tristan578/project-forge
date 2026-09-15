@@ -163,7 +163,10 @@ export function setSceneDispatcher(
   dispatcher: ((command: string, payload: unknown) => DispatchResult) | null,
 ): void {
   dispatchCommand = dispatcher;
-  setSceneValidator(dispatcher ? (json) => dispatcher('validate_scene', { json })?.success === true : null);
+  setSceneValidator(dispatcher ? (json) => {
+    if (!dispatchCommand) return false;
+    return dispatchCommand('validate_scene', { json })?.success === true;
+  } : null);
 }
 
 /** Outcome of {@link SceneSlice.loadTemplate}. */
@@ -199,14 +202,16 @@ export type TemplateApplyDeps = {
  *
  * The watch is armed BEFORE the command goes out, because a synchronous
  * dispatcher (the test doubles, and a same-frame engine) can finish the load
- * before `dispatchCommand` returns. `sceneGraph` identity is part of the
- * predicate so a scene that already had entities cannot satisfy it instantly.
+ * before `dispatchCommand` returns. A fresh nodes map with the expected entity
+ * IDs is required; SCENE_LOADED alone still carries the outgoing scene nodes.
  */
 function watchForSceneApplied(
   api: StoreApi<SceneSlice & TemplateApplyDeps>,
   timeoutMs: number,
+  expectedEntityIds: readonly string[],
+  operationRevision: number,
 ): { applied: Promise<boolean>; abandon: () => void } {
-  const previousGraph = api.getState().sceneGraph;
+  const previousNodes = api.getState().sceneGraph.nodes;
   let settle: ((value: boolean) => void) | null = null;
   let unsubscribe: (() => void) | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -223,7 +228,15 @@ function watchForSceneApplied(
   const applied = new Promise<boolean>((resolve) => {
     settle = resolve;
     unsubscribe = api.subscribe((state) => {
-      if (state.sceneGraph !== previousGraph && state.nodeCount > 0) finish(true);
+      if (state.sceneOperationRevision !== operationRevision) {
+        finish(false);
+        return;
+      }
+      if (
+        state.sceneGraph.nodes !== previousNodes
+        && state.nodeCount === expectedEntityIds.length
+        && expectedEntityIds.every((id) => state.sceneGraph.nodes[id] !== undefined)
+      ) finish(true);
     });
     timer = setTimeout(() => finish(false), timeoutMs);
   });
@@ -258,16 +271,16 @@ function withCapturedScene(project: ProjectScenes, capture: SceneCapture): Proje
 /** Dispatch a load owned by the current recovery transaction. */
 function dispatchSceneLoad(json: string): boolean {
   if (!dispatchCommand) return false;
-  stageSceneAudio(json);
+  const rollbackAudio = stageSceneAudio(json);
   try {
     const response = dispatchCommand('load_scene', { json });
     if (response?.success === false) {
-      clearStagedSceneAudio();
+      rollbackAudio();
       return false;
     }
     return true;
   } catch (error) {
-    clearStagedSceneAudio();
+    rollbackAudio();
     throw error;
   }
 }
@@ -312,10 +325,17 @@ export const createSceneSlice: StateCreator<
     if (!dispatchCommand) return;
     // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
     // rejected would otherwise be adopted by this empty scene.
-    clearStagedSceneAudio();
-    const response = dispatchCommand('new_scene', {});
-    if (response?.success !== false) {
+    const rollbackAudio = clearStagedSceneAudio();
+    try {
+      const response = dispatchCommand('new_scene', {});
+      if (response?.success === false) {
+        rollbackAudio();
+        return;
+      }
       set({ sceneOperationRevision: get().sceneOperationRevision + 1 });
+    } catch (error) {
+      rollbackAudio();
+      throw error;
     }
   },
   setSceneName: (name) => set({ sceneName: name }),
@@ -410,10 +430,16 @@ export const createSceneSlice: StateCreator<
   setCloudSaveStatus: (status) => set({ cloudSaveStatus: status }),
   setLastCloudSave: (timestamp) => set({ lastCloudSave: timestamp }),
   loadTemplate: async (templateId, options) => {
-    set({ sceneOperationRevision: get().sceneOperationRevision + 1 });
     if (!dispatchCommand) {
       return { success: false, error: 'The engine is not ready yet — try again in a moment.' };
     }
+
+    let operationRevision = get().sceneOperationRevision + 1;
+    set({ sceneOperationRevision: operationRevision });
+    const supersededResult: TemplateLoadResult = {
+      success: false,
+      error: 'Another scene was requested before this template finished loading.',
+    };
 
     // Dynamic so the registry and its eleven lazily-imported scene files stay
     // out of the store bundle, and so nothing in `@/data/templates` is reachable
@@ -425,8 +451,14 @@ export const createSceneSlice: StateCreator<
     } catch (error) {
       return {
         success: false,
-        error: `Could not read template "${templateId}": ${(error instanceof Error || error instanceof DOMException) ? error.message : String(error)}`,
+        error: `Could not read template "${templateId}": ${error instanceof Error ? error.message : String(error)}`,
       };
+    }
+    // Importing a template yields to other scene operations. An older request
+    // must not replace the registry or queue a load over the newer scene.
+    if (get().sceneOperationRevision !== operationRevision) return supersededResult;
+    if (!dispatchCommand) {
+      return { success: false, error: 'The engine is not ready yet — try again in a moment.' };
     }
     // A registry miss returns null. Reporting that as success is exactly the
     // bug this action had: the gallery closed and the chat handler said
@@ -441,33 +473,54 @@ export const createSceneSlice: StateCreator<
       };
     }
 
+    const skipped = new Set(skippedEntityIds);
+    const expectedEntityIds = template.sceneData.entities
+      .filter((entity) => !skipped.has(entity.entityId))
+      .map((entity) => entity.entityId);
+    // Imports can yield to a new checkpoint capture. Invalidate that recovery
+    // immediately before dispatch, while retaining this template's ownership.
+    operationRevision += 1;
+    set({ sceneOperationRevision: operationRevision });
     const { applied, abandon } = watchForSceneApplied(
       api,
       options?.timeoutMs ?? TEMPLATE_APPLY_TIMEOUT_MS,
+      expectedEntityIds,
+      operationRevision,
     );
 
     // Staged for the SCENE_LOADED handler, same contract as `loadScene`.
     // `stageSceneAudio` REPLACES the stash rather than adding to it, so this
     // also displaces anything a previous rejected load left armed — the reason
-    // it runs even though no template currently declares audio, and the reason
-    // neither failure path below needs its own clear.
-    stageSceneAudio(sceneJson);
-    // Template loading awaits imports and file reads. Invalidate recovery again
-    // at dispatch so a restore started during that wait cannot undo this load.
-    set({ sceneOperationRevision: get().sceneOperationRevision + 1 });
-    const response = dispatchCommand('load_scene', { json: sceneJson });
+    // it runs even though no template currently declares audio. The accepted
+    // stash remains armed across a timeout because the queued load may still
+    // emit SCENE_LOADED.
+    const rollbackAudio = stageSceneAudio(sceneJson);
+    let response: DispatchResult;
+    try {
+      response = dispatchCommand('load_scene', { json: sceneJson });
+    } catch (error) {
+      abandon();
+      rollbackAudio();
+      return {
+        success: false,
+        error: `Could not load template "${templateId}": ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     if (response && response.success === false) {
       abandon();
+      rollbackAudio();
       return {
         success: false,
         error: response.error ?? `The engine refused to load template "${templateId}".`,
       };
     }
 
-    if (!(await applied)) {
+    const didApply = await applied;
+    if (get().sceneOperationRevision !== operationRevision) return supersededResult;
+    if (!didApply) {
       return {
         success: false,
-        error: `Template "${templateId}" was sent to the engine but no entities appeared. The scene was not changed.`,
+        error: `Template "${templateId}" is still waiting for the engine. It may appear without its scripts or gameplay setup. Wait for the engine to respond, then load the template again.`,
       };
     }
 
@@ -477,7 +530,6 @@ export const createSceneSlice: StateCreator<
     // for the SELECTED entity, so a template applied through the file alone
     // would leave `allScripts` empty — and that map, not the engine, is what
     // the script worker runs in Play mode.
-    const skipped = new Set(skippedEntityIds);
     const state = get();
     for (const entity of template.sceneData.entities) {
       if (skipped.has(entity.entityId)) continue;
@@ -594,7 +646,8 @@ export const createSceneSlice: StateCreator<
   restoreCheckpoint: async (checkpointId) => {
     if (get().checkpointBusy) return false;
     const before = get();
-    const { projectId, projectRevision, sceneOperationRevision, activeSceneId } = before;
+    const { projectId, projectRevision, activeSceneId } = before;
+    let sceneOperationRevision = before.sceneOperationRevision;
     const isCurrent = () => get().projectId === projectId && get().projectRevision === projectRevision && get().sceneOperationRevision === sceneOperationRevision && get().activeSceneId === activeSceneId;
     set({ checkpointBusy: true, checkpointError: null, autoSaveEnabled: false });
     let prior: Awaited<ReturnType<typeof captureCheckpointScene>> | undefined;
@@ -602,6 +655,9 @@ export const createSceneSlice: StateCreator<
     try {
       const result = restoreCheckpointIn(checkpointId, projectId);
       if ('error' in result) throw new Error(result.error);
+      // A valid restore supersedes earlier template imports and pending setup.
+      sceneOperationRevision += 1;
+      set({ sceneOperationRevision });
       // Preserve the live, possibly unsaved scene before sending any load.
       prior = await captureCheckpointScene(requestSceneExport);
       if (!isCurrent()) throw new Error('The project changed while restoring. Try again in the intended project.');
@@ -627,7 +683,8 @@ export const createSceneSlice: StateCreator<
           message += ' The previous save is intact, but the viewport could not be recovered. Reload the project before editing.';
         }
       }
-      clearStagedSceneAudio();
+      // Dispatch rejection restores its own staging. Accepted loads can still
+      // complete after timeout, so recovery must not clear their audio here.
       set({ checkpointError: message });
       return false;
     } finally {
