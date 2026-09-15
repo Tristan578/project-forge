@@ -603,6 +603,57 @@ describe('gameSlice', () => {
       expect(mockDispatch).toHaveBeenCalledWith('play', {});
     });
 
+    it('dispatches play for a sandbox scene with no win condition (#9901)', () => {
+      // The human Play gate must forward sceneGraph.completionMode into the
+      // validator, not just pass the default 'win'. A sandbox scene with a
+      // player and no win condition is intentionally complete and must play.
+      // A regression that stops forwarding the mode (or forwards the wrong
+      // property) would re-block this scene and turn this test red.
+      setWinnabilityStateReader(() => ({
+        sceneGraph: {
+          nodes: {
+            player: { entityId: 'player', name: 'Player', parentId: null, children: [], components: [], visible: true },
+          },
+          rootIds: ['player'],
+          completionMode: 'sandbox',
+        } as SceneGraph,
+        allGameComponents: {
+          player: [player],
+        },
+      }));
+
+      store.getState().play();
+
+      expect(mockDispatch).toHaveBeenCalledWith('play', {});
+      // No winnability message is surfaced on the winnable path.
+      expect(chatSetState).not.toHaveBeenCalled();
+    });
+
+    it('still blocks a malformed win condition even under a sandbox completionMode (#9901)', async () => {
+      // The completionMode exemption only removes the "must have a win
+      // condition" requirement; a win condition that IS present is validated in
+      // every mode. A sandbox scene with a broken reachGoal target must still be
+      // blocked, proving the mode is not a blanket bypass at the Play gate.
+      setWinnabilityStateReader(() => ({
+        sceneGraph: {
+          nodes: {
+            player: { entityId: 'player', name: 'Player', parentId: null, children: [], components: [], visible: true },
+          },
+          rootIds: ['player'],
+          completionMode: 'sandbox',
+        } as SceneGraph,
+        allGameComponents: {
+          player: [player],
+          wc: [{ type: 'winCondition', winCondition: { conditionType: 'reachGoal', targetScore: null, targetEntityId: 'ghost' } }] as GameComponentData[],
+        },
+      }));
+
+      store.getState().play();
+
+      expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
+      await vi.waitFor(() => expect(chatSetState).toHaveBeenCalled());
+    });
+
     it('blocks play and surfaces a chat message when the scene has no win condition', async () => {
       setWinnabilityStateReader(() => ({
         sceneGraph: { nodes: {}, rootIds: [] } as SceneGraph,

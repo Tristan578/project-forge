@@ -154,12 +154,16 @@ describe('GET /api/capabilities', () => {
 
       const sfx = body.capabilities.find((c) => c.capability === 'sfx');
       const voice = body.capabilities.find((c) => c.capability === 'voice');
+      const music = body.capabilities.find((c) => c.capability === 'music');
       expect(sfx?.available).toBe(true);
       expect(voice?.available).toBe(true);
+      // #9522: one ElevenLabs key now serves all three audio capabilities.
+      expect(music?.available).toBe(true);
     });
 
-    it('keeps music unavailable even when PLATFORM_SUNO_KEY is set (#9522: Suno has no API)', async () => {
-      vi.stubEnv('PLATFORM_SUNO_KEY', 'suno-test');
+    it('reports music unavailable-but-provisionable when PLATFORM_ELEVENLABS_KEY is absent (#9522)', async () => {
+      // No ElevenLabs key: music (like sfx/voice) is offered-but-unconfigured,
+      // not unprovisionable — Suno's permanent-unavailability flag is gone.
       vi.resetModules();
       const mod = await import('../route');
       const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
@@ -167,7 +171,7 @@ describe('GET /api/capabilities', () => {
 
       const music = body.capabilities.find((c) => c.capability === 'music');
       expect(music?.available).toBe(false);
-      expect(music?.unprovisionable).toBe(true);
+      expect(music?.unprovisionable).toBeFalsy();
     });
   });
 
@@ -238,11 +242,11 @@ describe('GET /api/capabilities', () => {
       const sfx = body.capabilities.find((c) => c.capability === 'sfx');
       expect(sfx?.hint).toContain('ElevenLabs');
 
-      // Unprovisionable: the hint is plain product copy; the tracking issue is
-      // a separate machine-readable field (#9117).
+      // #9522: music now points at ElevenLabs like sfx/voice — its hint names
+      // that provider and it carries no unprovisionable tracking issue.
       const music = body.capabilities.find((c) => c.capability === 'music');
-      expect(music?.issue).toBe(9522);
-      expect(music?.hint).not.toMatch(/Suno|#9522/);
+      expect(music?.hint).toContain('ElevenLabs');
+      expect(music?.issue).toBeUndefined();
     });
 
     it('does not include hint for available capabilities', async () => {

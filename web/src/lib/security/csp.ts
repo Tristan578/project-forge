@@ -166,7 +166,7 @@ export function buildContentSecurityPolicy({
     `style-src 'self' 'unsafe-inline'${swaggerCdn}`,
     `img-src 'self' data: blob: https://img.clerk.com ${clerkImageOrigin}`,
     "font-src 'self' data:",
-    `connect-src 'self' ${clerkOrigins} ${POSTHOG_SOURCES} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai${cdnDirective}`,
+    `connect-src 'self' ${clerkOrigins} ${POSTHOG_SOURCES} https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://api.hyper3d.ai${cdnDirective}`,
     `frame-src 'self' ${clerkOrigins} https://challenges.cloudflare.com`,
     "worker-src 'self' blob:",
     "media-src 'self' blob:",

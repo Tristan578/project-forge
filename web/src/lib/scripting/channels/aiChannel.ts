@@ -17,13 +17,17 @@ const POLL_INTERVAL_MS = 2000;
  * (pinned by aiChannel.test.ts) — that table is checked against the routes on
  * disk, so an entry here cannot point at a route that does not exist.
  * Hoisted to module scope to avoid reconstruction on every invocation.
+ *
+ * `sync` marks a route that returns the generated asset inline in its POST
+ * response with no provider job id to poll — the ElevenLabs audio capabilities
+ * (sfx, voice, and, since #9522, music). The rest enqueue a job and are polled.
  */
-export const AI_METHODS: Readonly<Record<string, { route: string; capability: ProviderCapability }>> = {
+export const AI_METHODS: Readonly<Record<string, { route: string; capability: ProviderCapability; sync?: boolean }>> = {
   generateTexture: { route: '/api/generate/texture', capability: 'texture' },
   generateModel: { route: '/api/generate/model', capability: 'model3d' },
-  generateSound: { route: '/api/generate/sfx', capability: 'sfx' },
-  generateVoice: { route: '/api/generate/voice', capability: 'voice' },
-  generateMusic: { route: '/api/generate/music', capability: 'music' },
+  generateSound: { route: '/api/generate/sfx', capability: 'sfx', sync: true },
+  generateVoice: { route: '/api/generate/voice', capability: 'voice', sync: true },
+  generateMusic: { route: '/api/generate/music', capability: 'music', sync: true },
 };
 
 export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
@@ -49,10 +53,25 @@ export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args),
       signal,
-    }) as { jobId?: string; error?: string };
+    }) as { jobId?: string; error?: string; [key: string]: unknown };
+
+    // A route that answered with an error produced no asset, sync or async.
+    if (submitResult.error) {
+      throw new Error(submitResult.error);
+    }
+
+    // Synchronous routes (the ElevenLabs audio capabilities) return the asset
+    // inline with no jobId — there is nothing to poll, so return the payload
+    // directly. Without this, generateMusic/generateSound/generateVoice threw
+    // "Failed to submit generation request" the moment their capability became
+    // available, because the poll-only path below demands a jobId (#9522).
+    if (entry.sync) {
+      reportProgress(100, 'Done');
+      return submitResult;
+    }
 
     if (!submitResult.jobId) {
-      throw new Error(submitResult.error ?? 'Failed to submit generation request');
+      throw new Error('Failed to submit generation request');
     }
 
     // Poll for completion

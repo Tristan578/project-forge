@@ -1142,28 +1142,33 @@ describe('compoundHandlers', () => {
       expect(data.generationJobs).toBe(0);
     });
 
-    describe('setup_game_from_description with the #9117 music gate bypassed', () => {
+    describe('setup_game_from_description with the #9117 music gate engaged', () => {
+      // #9522 made music available by default (the main test below pins the
+      // dispatch path). This block forces the OTHER branch by declaring music
+      // unavailable, so the skip machinery stays covered if a future capability
+      // is retired into UNAVAILABLE_CAPABILITIES.
       beforeEach(() => {
-        vi.mocked(getCapabilityUnavailability).mockReturnValue(null);
+        vi.mocked(getCapabilityUnavailability).mockImplementation((cap) =>
+          cap === 'music'
+            ? { reason: 'Music generation is not available yet.', issue: 9522 }
+            : null,
+        );
       });
       afterEach(() => {
         vi.mocked(getCapabilityUnavailability).mockRestore();
       });
 
-      it('dispatches generate_music as the third generation job when music is offered', async () => {
+      it('skips generate_music and records the skip when music is declared unavailable', async () => {
         const { dispatchCommand, result } = await invoke(
           'setup_game_from_description',
           { description: 'a shooter game', targetTier: 'high' },
           gameOverrides(),
         );
-        expect(dispatchCommand).toHaveBeenCalledWith(
-          'generate_music',
-          expect.objectContaining({ prompt: expect.stringContaining('background music') }),
-        );
+        expect(dispatchCommand).not.toHaveBeenCalledWith('generate_music', expect.any(Object));
         const data = result.result as Record<string, unknown>;
-        expect(data.generationJobs).toBe(3);
-        expect(data.operations as Array<{ action: string }>).not.toContainEqual(
-          expect.objectContaining({ action: 'skip background music (not available yet)' }),
+        expect(data.generationJobs).toBe(2);
+        expect(data.operations as Array<{ action: string; success: boolean }>).toContainEqual(
+          expect.objectContaining({ action: 'skip background music (not available yet)', success: true }),
         );
       });
     });
@@ -1191,15 +1196,18 @@ describe('compoundHandlers', () => {
       // Guard against regressing to the wrong key (the pre-fix contract).
       expect(texturePayload).not.toHaveProperty('targetEntityId');
 
-      // #9117: music is declared unavailable, so the compound action skips it
-      // (recorded in the operations list) instead of dispatching a job the
-      // route refuses.
-      expect(dispatchCommand).not.toHaveBeenCalledWith('generate_music', expect.any(Object));
+      // #9522: music now routes to ElevenLabs and is offered by default, so the
+      // compound action dispatches generate_music as the third job rather than
+      // recording a skip.
+      expect(dispatchCommand).toHaveBeenCalledWith(
+        'generate_music',
+        expect.objectContaining({ prompt: expect.stringContaining('background music') }),
+      );
 
       const data = result.result as Record<string, unknown>;
-      expect(data.generationJobs).toBe(2);
-      expect(data.operations as Array<{ action: string; success: boolean }>).toContainEqual(
-        expect.objectContaining({ action: 'skip background music (not available yet)', success: true }),
+      expect(data.generationJobs).toBe(3);
+      expect(data.operations as Array<{ action: string }>).not.toContainEqual(
+        expect.objectContaining({ action: 'skip background music (not available yet)' }),
       );
 
       // End-to-end: feed the EXACT dispatched payload into the REAL

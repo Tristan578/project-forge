@@ -46,6 +46,20 @@ describe('database schema', () => {
     }
   });
 
+  // #9522: music moved from Suno to ElevenLabs, but the pg `provider` enum must
+  // KEEP 'suno' — historical tokenUsage/apiKeys/costLog rows still reference it,
+  // and dropping the value would break reads of those rows. No migration drops it.
+  it("pg provider enum retains 'suno' for historical rows (#9522)", () => {
+    expect(schema.providerEnum.enumValues).toContain('suno');
+  });
+
+  // #9522: the TS `Provider` union is the read-path type for provider columns;
+  // it must still admit 'suno' so old rows type-check when read back.
+  it("Provider union still admits 'suno' for read-path typing (#9522)", () => {
+    const historical: schema.Provider = 'suno';
+    expect(historical).toBe('suno');
+  });
+
   it('generationJobs table has expected column structure', () => {
     const { generationJobs } = schema;
     // Drizzle tables expose their columns as object keys
