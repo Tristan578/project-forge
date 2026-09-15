@@ -2618,6 +2618,7 @@ STEPS_EOF
 
   assert_job_key_lines "$ci_exec" "ci.yml" "  ci-gate:
   quality-gates:
+  observatory-tests:
   command-parity:
   build-nextjs:
   docs-internal-gate:
@@ -2737,6 +2738,7 @@ STEPS_EOF
       needs-ghaw: ${{ steps.changes.outputs.ghaw }}
       needs-api: ${{ steps.changes.outputs.api }}
       needs-skills: ${{ steps.changes.outputs.skills }}
+      needs-observatory: ${{ steps.changes.outputs.observatory }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
 OUTPUTS_EOF
   readonly expected_ci_gate_outputs
@@ -3384,7 +3386,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=625
+readonly SELF_EXEC_EXPECTED_DROP=628
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3915,7 +3917,7 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           HEAD_SHA: ${{ steps.refs.outputs.head-sha }}
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
           echo "$CHANGED" | grep -qE '^web/|^docs/capability-matrix\.md$' && web=true
           echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
@@ -3930,6 +3932,7 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$|^scripts/audit-pr-readiness\.ps1$|^scripts/__tests__/audit-pr-readiness\.test\.ps1$' && skills=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/get-ghaw-compiler-version\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
           echo "$CHANGED" | grep -qE '^web/src/app/api/|^docs/api/openapi\.json$|^docs/api/openapi-internal-routes\.json$|^scripts/check-openapi-route-sync\.sh$|^scripts/__tests__/check-openapi-route-sync\.test\.sh$' && api=true
+          echo "$CHANGED" | grep -q '^tools/observatory/' && observatory=true
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
             any_code=true
@@ -3949,11 +3952,12 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
             echo "ghaw=$ghaw"
             echo "api=$api"
             echo "skills=$skills"
+            echo "observatory=$observatory"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills any-code=$any_code"
-          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ]; then
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills observatory=$observatory any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ] && [ "$observatory" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
 STEPS_EOF
