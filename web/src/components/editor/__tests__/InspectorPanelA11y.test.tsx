@@ -16,12 +16,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import userEvent from '@testing-library/user-event';
-import { axe, toHaveNoViolations } from 'jest-axe';
+import { axe } from 'jest-axe';
 import { InspectorPanel } from '../InspectorPanel';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 
-expect.extend(toHaveNoViolations);
+function summarize(violations: { id: string; impact?: string | null; help?: string }[]): string {
+  return violations.map((v) => `[${v.impact ?? 'unknown'}] ${v.id}: ${v.help ?? ''}`).join('\n');
+}
 
 vi.mock('@/stores/editorStore', () => ({ useEditorStore: vi.fn(() => ({})) }));
 vi.mock('@/stores/chatStore', () => ({ useChatStore: vi.fn(() => ({})) }));
@@ -112,7 +114,7 @@ describe('InspectorPanel accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     const copyBtn = screen.getByRole('button', { name: 'Copy transform' });
     await user.click(copyBtn);
     const results = await axe(container);
-    expect(results).toHaveNoViolations();
+    expect(results.violations, summarize(results.violations)).toHaveLength(0);
   });
 
   it('gives every icon-only transform control an accessible name', () => {

@@ -14,10 +14,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import userEvent from '@testing-library/user-event';
-import { axe, toHaveNoViolations } from 'jest-axe';
+import { axe } from 'jest-axe';
 import { SceneHierarchy } from '../SceneHierarchy';
 
-expect.extend(toHaveNoViolations);
+function summarize(violations: { id: string; impact?: string | null; help?: string }[]): string {
+  return violations.map((v) => `[${v.impact ?? 'unknown'}] ${v.id}: ${v.help ?? ''}`).join('\n');
+}
 
 // Render lucide icons as null so the axe/keyboard assertions focus on the
 // tree's own semantics (roles, names, tabindex), not the icon SVGs.
@@ -82,7 +84,7 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
   it('has zero axe violations over the rendered tree', async () => {
     const { container } = render(<SceneHierarchy />);
     const results = await axe(container);
-    expect(results).toHaveNoViolations();
+    expect(results.violations, summarize(results.violations)).toHaveLength(0);
   });
 
   it('exposes exactly one row in the tab order (roving tabindex)', () => {
