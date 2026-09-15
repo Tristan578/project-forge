@@ -115,19 +115,47 @@ export const worldBuildExecutor: ExecutorDefinition = {
     // has no scale field, so sizing always costs a second command — and that
     // second command CANNOT ride in the same frame as the spawn it resizes.
     // See `waitForEngineFrame` in ./engineDispatch for why.
+    // Captured once for the retry guard below; a context wired before #9899 (and
+    // every unit test that supplies none) leaves it undefined and keeps the
+    // legacy spawn-every-time behaviour.
+    const observe = ctx.observeEntity;
+
     const spawnCommands: Array<{ command: string; payload: unknown }> = [];
     const sizeCommands: Array<{ command: string; payload: unknown }> = [];
     for (let i = 0; i < entities.length; i += 1) {
       const entity = entities[i];
-      spawnCommands.push({
-        command: 'spawn_entity',
-        payload: {
-          entityType: entity.entityType,
-          name: entity.name,
-          position: [entity.position[0], entity.position[1], entity.position[2]],
-          id: entity.entityId,
-        },
-      });
+
+      // Idempotency guard for a RETRY (#9899 review). The confirmation branch
+      // below can return `EFFECT_TIMED_OUT` marked retryable, and `pipelineRunner`
+      // then reruns this WHOLE executor (world_build gets maxRetries: 1 from
+      // planBuilder's `makeStep`) with the SAME static `step.input` — the same
+      // entity ids. A timeout means the CONFIRMATION was slow, not that the spawn
+      // failed: the engine does not reject a caller-supplied `id` already in use
+      // (core/entity_factory.rs has no such check), so redispatching
+      // `spawn_entity` for an entity a prior attempt already created would spawn a
+      // SECOND entity carrying the identical `EntityId`, and every later step
+      // addressing that id would resolve to whichever duplicate the engine's
+      // query/update path finds first. The observation cache is a per-RUN
+      // singleton (cleared once at run start), so an id already observable is one
+      // a prior attempt spawned — skip its spawn and let the resize and
+      // confirmation below run idempotently against it. Mirrors
+      // `entitySetupExecutor`'s `alreadySpawned` guard.
+      //
+      // The resize is always (re)queued: `update_transform` writes an ABSOLUTE
+      // scale, so replaying it for an already-correct entity is a no-op, while the
+      // entity the retry actually exists for still needs it.
+      const alreadySpawned = observe ? observe(entity.entityId) !== undefined : false;
+      if (!alreadySpawned) {
+        spawnCommands.push({
+          command: 'spawn_entity',
+          payload: {
+            entityType: entity.entityType,
+            name: entity.name,
+            position: [entity.position[0], entity.position[1], entity.position[2]],
+            id: entity.entityId,
+          },
+        });
+      }
       sizeCommands.push({
         command: 'update_transform',
         payload: {

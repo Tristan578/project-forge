@@ -19,6 +19,25 @@ import { buildDefaultGroundDescriptor } from '../worldGeometry';
 // which do not exist on a freshly-built game. auto_polish uses STRUCTURAL
 // heuristics instead -- checking for common setup problems, not player behavior.
 
+/**
+ * Stable id for the ground plane `auto_polish` spawns to repair a
+ * `no_ground_plane` scene (#9899 review).
+ *
+ * DETERMINISTIC, not `crypto.randomUUID()`. The scale-confirmation below can
+ * return a retryable `EFFECT_TIMED_OUT`, and `pipelineRunner` then reruns this
+ * whole executor (auto_polish gets maxRetries: 1 from planBuilder's `makeStep`).
+ * A fresh random id minted inside `execute()` on every attempt made a retry
+ * spawn a BRAND-NEW ground plane and orphan the first — already spawned, possibly
+ * already scaled — as an untracked duplicate the scene now carries two of. A
+ * stable id lets the retry address the SAME plane, and the idempotency guard at
+ * the spawn site then skips re-spawning it. It only has to be unique within the
+ * engine's single active scene, which a fresh run clears (`newScene`); a
+ * `no_ground_plane` issue means verify found none, so nothing else here holds it.
+ * Satisfies `engineEntityId` / `is_valid_override_id`: non-empty, <= 64 bytes, no
+ * control characters.
+ */
+export const AUTO_POLISH_GROUND_ENTITY_ID = 'ai.auto-polish.ground';
+
 const inputSchema = z.object({
   projectType: z.enum(['2d', '3d']),
   feelDirective: z.object({
@@ -149,16 +168,33 @@ export const autoPolishExecutor: ExecutorDefinition = {
     // `update_transform` below, exactly as `worldBuildExecutor` pays it.
     const groundDescriptor = buildDefaultGroundDescriptor(parsed.data.projectType);
     if (issues.includes('no_ground_plane')) {
-      groundEntityId = crypto.randomUUID();
-      commands.push({
-        command: 'spawn_entity',
-        payload: {
-          id: groundEntityId,
-          entityType: groundDescriptor.entityType,
-          name: groundDescriptor.name,
-          position: groundDescriptor.position,
-        },
-      });
+      // Deterministic, so a retry addresses the SAME ground plane rather than
+      // minting a fresh UUID and spawning a second one — see the constant's note.
+      groundEntityId = AUTO_POLISH_GROUND_ENTITY_ID;
+
+      // Idempotency guard for that retry (#9899 review). The observation cache is
+      // a per-RUN singleton, so an id already observable is one a prior attempt
+      // spawned: re-dispatching `spawn_entity` for it would create a second
+      // ground plane carrying the identical `EntityId`. Gated on
+      // `!ctx.signal.aborted` so an already-cancelled call reaches the engine
+      // exactly as often as before this guard existed (the spawn here has no
+      // up-front abort check). Mirrors `entitySetupExecutor`'s `alreadySpawned`
+      // guard.
+      const alreadySpawned =
+        ctx.observeEntity !== undefined && !ctx.signal.aborted
+          ? ctx.observeEntity(groundEntityId) !== undefined
+          : false;
+      if (!alreadySpawned) {
+        commands.push({
+          command: 'spawn_entity',
+          payload: {
+            id: groundEntityId,
+            entityType: groundDescriptor.entityType,
+            name: groundDescriptor.name,
+            position: groundDescriptor.position,
+          },
+        });
+      }
       fixes.push('Added ground plane');
     }
 
