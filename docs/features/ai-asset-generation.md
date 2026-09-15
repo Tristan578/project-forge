@@ -1,19 +1,18 @@
 # AI Asset Generation
 
-Four generation dialogs that create 3D models, textures, sound effects, and voice lines directly inside the editor using text descriptions. A fifth, music, is not available yet — see [Music Track](#music-track) below for what it will do when it returns.
+Five generation dialogs that create 3D models, textures, sound effects, voice lines, and background music directly inside the editor using text descriptions.
 
 ## Overview
 
-AI Asset Generation lets you describe what you want in plain language and receive a game-ready asset a few seconds later. Generated assets are added to your **Asset Panel** automatically and can be placed in the scene like any other asset. Each generation type uses tokens from your account balance; the cost is shown in the dialog before you submit.
+AI Asset Generation lets you describe what you want in plain language. When generation finishes, the asset is added to your **Asset Panel** automatically and can be placed in the scene like any other asset. Platform-key generation uses tokens from your account balance; the cost is shown in the dialog before you submit. Generation with your own provider key is billed by that provider.
 
 ## Accessing the Generation Dialogs
 
 All generation dialogs are available from the **Asset Panel**:
 
 1. Open the **Asset Panel** from the left sidebar.
-2. Click the generation button for the asset type you want (3D Model, Texture, Sound, or Voice), or right-click in the panel to see all options.
-   - **Music** is shown disabled, with an "Unavailable" badge and the reason, until music generation returns — no key can enable it.
-   - Any other type whose provider key is missing (neither configured on the platform nor added as your own key in **Settings**) stays clickable: opening it shows a notice naming the provider you need and a link to Settings. Generate is disabled until the key is there.
+2. Click the generation button for the asset type you want (3D Model, Texture, Sound, Voice, or Music), or right-click in the panel to see all options.
+   - Any type whose provider key is missing (neither configured on the platform nor added as your own key in **Settings**) stays clickable: opening it shows a notice naming the provider you need and a link to Settings. Generate is disabled until the key is there.
    - If the app cannot read your saved keys for a moment (a database blip), nothing is disabled — the request is allowed through and the route decides.
 3. Fill in the prompt and options, then click **Generate**.
 4. A progress indicator appears while the job runs. When complete, the asset appears in your Asset Panel.
@@ -69,9 +68,7 @@ Token cost: 40 tokens.
 
 ### Music Track
 
-**Not available yet.** Music generation is temporarily switched off while it moves to a new provider. Upload your own track from the Asset panel, or generate a sound effect instead. Nothing is charged while it is off. The options below describe the feature as it will return; see Known Limitations for status.
-
-Generates a background music loop from a description.
+Generates a background music track from a description, using ElevenLabs (the same provider as sound effects and voice — a single ElevenLabs key covers all three). When generation finishes, the audio is returned inline and added to your Asset Panel.
 
 | Option | Description |
 |---|---|

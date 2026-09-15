@@ -74,7 +74,15 @@ describe('Regression #2: refund endpoint idempotency', () => {
     // Async generation routes need usageId in success responses because
     // the client polls for job status and triggers refund via
     // useGenerationPolling.ts → triggerRefund() if the job fails after queuing.
-    const ASYNC_ROUTES = ['model', 'music', 'skybox', 'sprite', 'texture', 'pixel-art', 'sprite-sheet', 'tileset-gen'];
+    //
+    // `music` is NOT here since #9522: it moved from Suno (async, polled) to
+    // ElevenLabs, which returns the audio bytes inline, so the route resolves
+    // synchronously and refunds server-side within the request — exactly like
+    // its sibling `sfx`/`voice` routes, which were never in this list. Their
+    // synchronous shape (no asyncJob, no jobId to poll) is pinned by the test
+    // below so music cannot silently regress back into the async contract
+    // without exposing usageId.
+    const ASYNC_ROUTES = ['model', 'skybox', 'sprite', 'texture', 'pixel-art', 'sprite-sheet', 'tileset-gen'];
 
     const missing: string[] = [];
     for (const dir of ASYNC_ROUTES) {
@@ -119,6 +127,33 @@ describe('Regression #2: refund endpoint idempotency', () => {
     }
 
     expect(missing, `Routes missing usageId: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  // #9522: the synchronous ElevenLabs audio routes are excluded from
+  // ASYNC_ROUTES on purpose — they return the asset inline and refund
+  // server-side inside the request, so they never poll and need no usageId in
+  // the response. Pin that they stay synchronous: a `music` route that declared
+  // `asyncJob` (a pollable provider job) without exposing usageId would break
+  // the client refund path, the very regression #2 guards. If one is ever made
+  // async, add it back to ASYNC_ROUTES above so it is held to the usageId rule.
+  it('the synchronous ElevenLabs audio routes declare no async job (music, sfx, voice)', () => {
+    const SYNC_AUDIO_ROUTES = ['music', 'sfx', 'voice'];
+    const violations: string[] = [];
+    for (const dir of SYNC_AUDIO_ROUTES) {
+      const content = readFileSync(join(GENERATE_DIR, dir, 'route.ts'), 'utf-8');
+      // Sync shape: built on the factory, returns audioBase64 inline, and does
+      // NOT declare an `asyncJob` (which is what marks a route pollable).
+      if (!content.includes('createGenerationHandler')) {
+        violations.push(`generate/${dir}/route.ts does not use createGenerationHandler`);
+      }
+      if (!/\baudioBase64\b/.test(content)) {
+        violations.push(`generate/${dir}/route.ts no longer returns audioBase64 inline`);
+      }
+      if (/^\s*asyncJob\s*:/m.test(content)) {
+        violations.push(`generate/${dir}/route.ts declares asyncJob — if it is now async, add it to ASYNC_ROUTES`);
+      }
+    }
+    expect(violations, violations.join('\n')).toEqual([]);
   });
 });
 

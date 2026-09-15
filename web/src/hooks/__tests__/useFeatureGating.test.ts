@@ -29,7 +29,7 @@ function mockCapabilitiesResponse(
       { capability: 'texture', available: false, label: 'Texture Generation', requiredProviders: ['Meshy'], hint: 'Configure Meshy API key in Settings to enable Texture Generation.' },
       { capability: 'sfx', available: false, label: 'Sound Effect Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Sound Effect Generation.' },
       { capability: 'voice', available: false, label: 'Voice Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Voice Generation.' },
-      { capability: 'music', available: false, label: 'Music Generation', requiredProviders: ['Suno'], hint: 'Configure Suno API key in Settings to enable Music Generation.' },
+      { capability: 'music', available: false, label: 'Music Generation', requiredProviders: ['ElevenLabs'], hint: 'Configure ElevenLabs API key in Settings to enable Music Generation.' },
       { capability: 'sprite', available: false, label: 'Sprite Generation', requiredProviders: ['Replicate'], hint: 'Configure Replicate API key in Settings to enable Sprite Generation.' },
       { capability: 'bg_removal', available: false, label: 'Background Removal', requiredProviders: ['remove.bg'], hint: 'Configure remove.bg API key in Settings to enable Background Removal.' },
     ],
