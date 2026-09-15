@@ -454,17 +454,9 @@ describe('worldBuildExecutor', () => {
       expect(result.error?.code).toBe('ABORTED');
     });
 
-    /**
-     * #9899 review: `pipelineRunner` reruns this executor on the retryable
-     * `EFFECT_TIMED_OUT` above with the SAME static `step.input` — the same entity
-     * ids. Without the idempotency guard, the retry redispatched `spawn_entity`
-     * for every entity, and because the engine does not reject a caller-supplied
-     * id already in use, each already-spawned entity got a SECOND copy carrying
-     * the identical `EntityId`. The per-run observation cache (modelled by the
-     * shared `spawned` set below) still holds the prior attempt's confirmation, so
-     * the retry must skip the spawn for every already-observed id.
-     */
-    it('does not respawn an entity a prior attempt already spawned when the step is retried', async () => {
+    // A repeated invocation reuses positively observed entities. Automatic
+    // retry suppression for an uncertain timeout is covered by pipelineRunner.
+    it('does not respawn observed entities on a repeated invocation', async () => {
       const scaleById: Record<string, [number, number, number]> = {
         [GROUND.entityId]: GROUND.scale as [number, number, number],
         [PLATFORM.entityId]: PLATFORM.scale as [number, number, number],
@@ -475,8 +467,7 @@ describe('worldBuildExecutor', () => {
       const first = await worldBuildExecutor.execute({ entities: [GROUND, PLATFORM] }, ctx);
       expect(first.success).toBe(true);
 
-      // The identical step, rerun by the retry loop against the SAME context (so
-      // the observation cache carries over, exactly as it does in a real run).
+      // Invoke the same input against the context that retains its observations.
       const second = await worldBuildExecutor.execute({ entities: [GROUND, PLATFORM] }, ctx);
       expect(second.success).toBe(true);
 
@@ -494,7 +485,7 @@ describe('worldBuildExecutor', () => {
       }
       expect(spawnCounts.get(GROUND.entityId)).toBe(1);
       expect(spawnCounts.get(PLATFORM.entityId)).toBe(1);
-      // The retry still reported the world built, via the resize + confirmation
+      // The second invocation reports the world built via resize + confirmation
       // path — a skipped spawn is not a skipped step.
       expect(second.output).toMatchObject({ spawned: 2, confirmed: 2 });
     });

@@ -125,25 +125,12 @@ export const worldBuildExecutor: ExecutorDefinition = {
     for (let i = 0; i < entities.length; i += 1) {
       const entity = entities[i];
 
-      // Idempotency guard for a RETRY (#9899 review). The confirmation branch
-      // below can return `EFFECT_TIMED_OUT` marked retryable, and `pipelineRunner`
-      // then reruns this WHOLE executor (world_build gets maxRetries: 1 from
-      // planBuilder's `makeStep`) with the SAME static `step.input` — the same
-      // entity ids. A timeout means the CONFIRMATION was slow, not that the spawn
-      // failed: the engine does not reject a caller-supplied `id` already in use
-      // (core/entity_factory.rs has no such check), so redispatching
-      // `spawn_entity` for an entity a prior attempt already created would spawn a
-      // SECOND entity carrying the identical `EntityId`, and every later step
-      // addressing that id would resolve to whichever duplicate the engine's
-      // query/update path finds first. The observation cache is a per-RUN
-      // singleton (cleared once at run start), so an id already observable is one
-      // a prior attempt spawned — skip its spawn and let the resize and
-      // confirmation below run idempotently against it. Mirrors
-      // `entitySetupExecutor`'s `alreadySpawned` guard.
-      //
-      // The resize is always (re)queued: `update_transform` writes an ABSOLUTE
-      // scale, so replaying it for an already-correct entity is a no-op, while the
-      // entity the retry actually exists for still needs it.
+      // Reuse an entity positively identified by the observation cache when this
+      // executor is invoked again. The engine accepts duplicate caller-supplied
+      // ids, so an observed entity must not be spawned a second time.
+      // A cache miss cannot prove that an earlier spawn failed: confirmation
+      // timeouts below remain terminal because accepted commands may apply late.
+      // Always queue the absolute scale so an observed entity can be resized.
       const alreadySpawned = observe ? observe(entity.entityId) !== undefined : false;
       if (!alreadySpawned) {
         spawnCommands.push({

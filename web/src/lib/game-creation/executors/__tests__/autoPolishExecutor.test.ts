@@ -425,16 +425,9 @@ describe('autoPolishExecutor', () => {
       expect(result.error?.code).toBe('ABORTED');
     });
 
-    /**
-     * #9899 review: the ground id used to be minted with `crypto.randomUUID()`
-     * INSIDE execute(), so when the scale-confirmation above returned a retryable
-     * `EFFECT_TIMED_OUT` and `pipelineRunner` reran the whole executor, a BRAND-NEW
-     * random id was minted and an entirely new ground plane was spawned — leaving
-     * the first (already spawned, possibly already scaled) one orphaned in the
-     * scene as an untracked duplicate. A deterministic id plus the idempotency
-     * guard means the retry addresses — and does not re-spawn — the same plane.
-     */
-    it('does not respawn the ground plane when the step is retried', async () => {
+    // A repeated invocation uses the reserved id to reuse an observed repair.
+    // The timeout test above separately asserts that uncertain results are terminal.
+    it('does not respawn an observed ground plane on a repeated invocation', async () => {
       const { dispatchCommand, observeEntity, spawned } = spawnGatedSingle(GROUND_SCALE);
       const ctx = makeCtx({
         resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
@@ -448,8 +441,7 @@ describe('autoPolishExecutor', () => {
       }, ctx);
       expect(first.success).toBe(true);
 
-      // The identical step, rerun by the retry loop against the SAME context (so
-      // the observation cache carries over, exactly as in a real run).
+      // Invoke the same input against the context that retains its observations.
       const second = await autoPolishExecutor.execute({
         projectType: '3d',
         feelDirective: FEEL_DIRECTIVE,
@@ -461,8 +453,7 @@ describe('autoPolishExecutor', () => {
       const spawnCalls = vi.mocked(dispatchCommand).mock.calls.filter((c) => c[0] === 'spawn_entity');
       expect(spawnCalls).toHaveLength(1);
       expect(spawned.size).toBe(1);
-      // The retry still applied the fix (against the existing plane), never
-      // dropped it.
+      // The second invocation still applies the fix against the existing plane.
       expect(second.output?.fixesApplied).toContain('Added ground plane');
     });
   });
