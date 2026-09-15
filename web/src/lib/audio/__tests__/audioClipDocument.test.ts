@@ -128,13 +128,24 @@ describe('audio.FR-1.OP-02 — Scenario: Manual and AI success', () => {
     expect(amplitudeAt(doc, 1)).toBeCloseTo(2, 3);
   });
 
-  it('reaches the same document by manual value and by AI-supplied value (parity)', () => {
-    // The manual control and the (follow-up) AI command call the SAME pure
-    // function with the same arguments, so their results are identical.
+  it('setTrim is a pure, non-mutating command — the input is never modified and equal inputs converge', () => {
+    // The manual control and the (follow-up) AI command funnel through the SAME
+    // pure command, so what actually protects reversibility and shared behaviour
+    // is purity: the input document is never mutated in place, and an independent
+    // input built the same way reaches an equal document. (True manual-vs-AI
+    // parity can only be asserted once a distinct AI-invocation entry point
+    // exists; this codebase has none yet, so a second identical call to setTrim
+    // would prove nothing.)
     const base = freshDoc('h');
-    const manual = ok(setTrim(base, { startSec: 0.25, endSec: 1.75 }, BOUNDS));
-    const ai = ok(setTrim(base, { startSec: 0.25, endSec: 1.75 }, BOUNDS));
-    expect(ai).toEqual(manual);
+    const snapshot = JSON.parse(JSON.stringify(base)) as AudioClipDocument;
+    const trimmed = ok(setTrim(base, { startSec: 0.25, endSec: 1.75 }, BOUNDS));
+    // The command must not have mutated its input — this fails if setTrim ever
+    // writes back into `doc` instead of returning a fresh object.
+    expect(base).toEqual(snapshot);
+    expect(trimmed).not.toBe(base);
+    // An independent input built the same way converges on an equal document.
+    const independent = ok(setTrim(freshDoc('h'), { startSec: 0.25, endSec: 1.75 }, BOUNDS));
+    expect(independent).toEqual(trimmed);
   });
 });
 
