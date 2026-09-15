@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, memo, useState, useEffect } from 'react';
-import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown, Loader2, Lock } from 'lucide-react';
+import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Boxes, Sparkles, ChevronDown, Loader2, Lock } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
@@ -9,6 +9,7 @@ import { useGenerationGate, combineGenerationGates } from '@/hooks/useGeneration
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
+import { PrefabLibraryPanel } from './PrefabLibraryPanel';
 import { GenerateModelDialog } from './GenerateModelDialog';
 import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { GenerateSoundDialog } from './GenerateSoundDialog';
@@ -71,7 +72,7 @@ function AssetCard({ asset }: { asset: AssetMetadata }) {
   );
 }
 
-type AssetPanelTab = 'assets' | 'materials';
+type AssetPanelTab = 'assets' | 'materials' | 'prefabs';
 
 export const AssetPanel = memo(function AssetPanel() {
   const [activeTab, setActiveTab] = useState<AssetPanelTab>('assets');
@@ -276,6 +277,17 @@ export const AssetPanel = memo(function AssetPanel() {
             <Palette size={12} />
             Materials
           </button>
+          <button
+            onClick={() => setActiveTab('prefabs')}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              activeTab === 'prefabs'
+                ? 'border-b-2 border-emerald-400 text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-400'
+            }`}
+          >
+            <Boxes size={12} />
+            Prefabs
+          </button>
         </div>
         {activeTab === 'assets' && (
           <div className="flex gap-1 pr-2">
@@ -423,6 +435,10 @@ export const AssetPanel = memo(function AssetPanel() {
       {activeTab === 'materials' ? (
         <div className="flex-1 overflow-y-auto">
           <MaterialLibraryPanel />
+        </div>
+      ) : activeTab === 'prefabs' ? (
+        <div className="flex flex-1 flex-col overflow-y-auto">
+          <PrefabLibraryPanel />
         </div>
       ) : (
         <>

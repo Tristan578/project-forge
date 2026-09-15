@@ -4976,6 +4976,107 @@
       "visibility": "public"
     },
     {
+      "name": "create_prefab_instance",
+      "description": "Create a linked instance of a source prefab with optional per-field overrides (inherited fields follow the source)",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Source prefab ID to link to"
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Snapshot fields this instance overrides; everything else is inherited live from the source"
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Scene entity to bind the instance to (optional)"
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "nest_prefab",
+      "description": "Nest a child prefab inside a parent prefab; rejects a cyclic reference with the offending chain and no mutation",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "parentPrefabId": {
+            "type": "string",
+            "description": "User prefab to nest into"
+          },
+          "childPrefabId": {
+            "type": "string",
+            "description": "Prefab to nest as a linked child"
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Per-field overrides for the nested child (optional)"
+          }
+        },
+        "required": [
+          "parentPrefabId",
+          "childPrefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "apply_prefab_to_instances",
+      "description": "Propagate a source prefab onto all of its linked instances; non-overridden fields follow the source, overridden fields are preserved",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Source prefab whose instances to update"
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "list_prefab_instances",
+      "description": "List the linked instances of a source prefab with the fields each one overrides",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Source prefab whose instances to list"
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
       "name": "create_scene",
       "description": "Create a new empty scene in the project",
       "category": "scene",

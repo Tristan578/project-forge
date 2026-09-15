@@ -43,6 +43,10 @@ vi.mock('../MaterialLibraryPanel', () => ({
   MaterialLibraryPanel: () => <div data-testid="material-library">Material Library</div>,
 }));
 
+vi.mock('../PrefabLibraryPanel', () => ({
+  PrefabLibraryPanel: () => <div data-testid="prefab-library">Prefab Library</div>,
+}));
+
 vi.mock('../GenerateModelDialog', () => ({
   GenerateModelDialog: ({ isOpen }: { isOpen: boolean }) => isOpen ? <div data-testid="gen-model-dialog">GenModel</div> : null,
 }));
@@ -258,6 +262,20 @@ describe('AssetPanel', () => {
     fireEvent.click(screen.getByText('Materials'));
     fireEvent.click(screen.getByText('Assets'));
     expect(screen.getByText(/No assets imported/)).toBeInTheDocument();
+  });
+
+  it('switches to Prefabs tab', () => {
+    setupStore();
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByText('Prefabs'));
+    expect(screen.getByTestId('prefab-library')).toBeInTheDocument();
+  });
+
+  it('hides import buttons on prefabs tab', () => {
+    setupStore();
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByText('Prefabs'));
+    expect(screen.queryByLabelText('Import 3D model')).toBeNull();
   });
 
   // ── Asset cards ───────────────────────────────────────────────────────
