@@ -409,70 +409,84 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       {/* Search input */}
       <HierarchySearch matchCount={isFiltering ? filterResult.matchCount : undefined} />
 
-      {/* Tree view */}
-      <div
-        className="flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50"
-        data-editor-region="hierarchy"
-        tabIndex={0}
-        role="tree"
-        aria-label="Scene hierarchy"
-        onClick={handleBackgroundClick}
-        onContextMenu={handleBackgroundContextMenu}
-        onKeyDown={handleKeyDown}
-        onDragOver={handleRootDragOver}
-        onDrop={handleRootDrop}
-      >
-        {hasEntities ? (
-          filterResult.filteredRootIds.map((rootId) => {
-            const node = sceneGraph.nodes[rootId];
-            if (!node) return null;
-            return (
-              <SceneNode
-                key={rootId}
-                node={node}
-                depth={0}
-                onContextMenu={handleContextMenu}
-                isEditing={editingEntityId === rootId}
-                onEditComplete={(newName) => {
-                  if (newName && editingEntityId) {
-                    renameEntity(editingEntityId, newName);
-                  }
-                  setEditingEntityId(null);
-                }}
-                isDragging={dragState.isDragging}
-                draggedEntityId={dragState.draggedEntityId}
-                invalidTargetIds={dragState.invalidTargetIds}
-                dropTarget={dropTarget?.entityId === rootId ? dropTarget : null}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                filterTerm={isFiltering ? hierarchyFilter : undefined}
-                matchingIds={isFiltering ? filterResult.matchingIds : undefined}
-                visibleIds={isFiltering ? filterResult.visibleIds : undefined}
-                focusedEntityId={focusedEntityId}
-                onToggleExpand={toggleExpanded}
-                expandedIds={effectiveExpandedIds}
-              />
-            );
-          })
-        ) : isFiltering ? (
-          <div className="flex flex-col items-center justify-center h-32 text-neutral-500 text-sm">
-            <span>No matching entities</span>
-          </div>
-        ) : (
-          <div className="flex flex-1 items-center justify-center p-4">
-            <EmptyState
-              icon={PackagePlus}
-              title="No entities yet"
-              description="Add entities using the toolbar above, or ask AI to build a scene for you"
-            />
-          </div>
-        )}
+      {/* Tree view region.
+          The role="tree" element must only ever own role="treeitem"/role="group"
+          children (WCAG aria-required-children). Empty-state and no-match
+          messaging therefore render as siblings OUTSIDE the tree — dropping them
+          inside would make the tree own generic text content and fail the rule
+          while masking real violations behind the .dv-dockview axe exclusion
+          (PF-1372 / #9677). The role stays on the focusable scroll container in
+          every state; it is the empty content, not the role, that moves out. */}
+      <div className="flex-1 relative min-h-0">
+        <div
+          className="absolute inset-0 overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50"
+          data-editor-region="hierarchy"
+          tabIndex={0}
+          role="tree"
+          aria-label="Scene hierarchy"
+          onClick={handleBackgroundClick}
+          onContextMenu={handleBackgroundContextMenu}
+          onKeyDown={handleKeyDown}
+          onDragOver={handleRootDragOver}
+          onDrop={handleRootDrop}
+        >
+          {hasEntities &&
+            filterResult.filteredRootIds.map((rootId) => {
+              const node = sceneGraph.nodes[rootId];
+              if (!node) return null;
+              return (
+                <SceneNode
+                  key={rootId}
+                  node={node}
+                  depth={0}
+                  onContextMenu={handleContextMenu}
+                  isEditing={editingEntityId === rootId}
+                  onEditComplete={(newName) => {
+                    if (newName && editingEntityId) {
+                      renameEntity(editingEntityId, newName);
+                    }
+                    setEditingEntityId(null);
+                  }}
+                  isDragging={dragState.isDragging}
+                  draggedEntityId={dragState.draggedEntityId}
+                  invalidTargetIds={dragState.invalidTargetIds}
+                  dropTarget={dropTarget?.entityId === rootId ? dropTarget : null}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  filterTerm={isFiltering ? hierarchyFilter : undefined}
+                  matchingIds={isFiltering ? filterResult.matchingIds : undefined}
+                  visibleIds={isFiltering ? filterResult.visibleIds : undefined}
+                  focusedEntityId={focusedEntityId}
+                  onToggleExpand={toggleExpanded}
+                  expandedIds={effectiveExpandedIds}
+                />
+              );
+            })}
 
-        {/* Root drop zone indicator */}
-        {dragState.isDragging && dropTarget?.zone === 'root' && (
-          <div className="h-0.5 bg-blue-500 rounded-full mx-2 mt-2" />
+          {/* Root drop zone indicator (decorative, not a tree child role) */}
+          {dragState.isDragging && dropTarget?.zone === 'root' && (
+            <div
+              role="presentation"
+              className="h-0.5 bg-blue-500 rounded-full mx-2 mt-2"
+            />
+          )}
+        </div>
+
+        {/* Empty / no-match messaging — sibling of role="tree", never a child. */}
+        {!hasEntities && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
+            {isFiltering ? (
+              <span className="text-neutral-500 text-sm">No matching entities</span>
+            ) : (
+              <EmptyState
+                icon={PackagePlus}
+                title="No entities yet"
+                description="Add entities using the toolbar above, or ask AI to build a scene for you"
+              />
+            )}
+          </div>
         )}
       </div>
 
