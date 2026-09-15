@@ -76,14 +76,6 @@ type EditorHandle = {
   __FORGE_READ_ENTITY_OBSERVATION?: (entityId: string) => ObservedEntityShape | undefined;
 };
 
-/** Root IDs retain duplicate root entities; the nodes map collapses duplicate IDs. */
-async function countCrates(page: Page): Promise<number> {
-  return page.evaluate((id: string) => {
-    const rootIds = (window as unknown as EditorHandle).__EDITOR_STORE.getState().sceneGraph.rootIds;
-    return rootIds.filter(nodeId => nodeId === id).length;
-  }, CRATE_ID);
-}
-
 async function waitForCrate(page: Page): Promise<void> {
   await page.waitForFunction(
     (id: string) => Object.hasOwn(
@@ -195,7 +187,6 @@ test.describe('Confirmed spawn/transform through the live engine @engine', () =>
     const observed = await readConfirmationCache(page);
     expect(observed.transform?.position, 'cached observation missing (1,2,3)').toBeTruthy();
     expect(observed.transform?.scale, 'cached observation missing the confirmed scale').toBeTruthy();
-    expect(await countCrates(page), 'more than one crate-1 in the scene graph').toBe(1);
   });
 
   test('in-app AI path: engine query returns crate-1 at (1,2,3), matching the manual path', async ({ page }) => {
@@ -223,6 +214,5 @@ test.describe('Confirmed spawn/transform through the live engine @engine', () =>
     const observed = await readConfirmationCache(page);
     expect(observed.transform?.position, 'AI path cached observation missing (1,2,3)').toBeTruthy();
     expect(observed.transform?.scale, 'AI path cached observation missing the confirmed scale').toBeTruthy();
-    expect(await countCrates(page), 'more than one crate-1 in the scene graph').toBe(1);
   });
 });

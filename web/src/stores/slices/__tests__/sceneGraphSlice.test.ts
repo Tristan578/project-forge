@@ -338,12 +338,23 @@ describe('sceneGraphSlice', () => {
       expect(sceneGraph.rootIds).toContain('light-1');
     });
 
-    it('should not duplicate rootIds when adding root node twice', () => {
+    // Both rootIds AND nodes key-collapse a repeated same-entityId addNode to a
+    // single entry: rootIds via the `!rootIds.includes(entityId)` guard in
+    // addNode, nodes via being an entityId-keyed record. A store-derived count of
+    // either — e.g. `rootIds.filter(id => id === X).length` — is therefore always
+    // 0 or 1 and can NEVER expose a duplicate-spawn regression for a fixed id;
+    // the engine's own entity count is the only source that can. #10027 removed
+    // one such vacuous E2E assertion; this guards the invariant that made it
+    // vacuous so nobody re-adds a store-based duplicate counter.
+    it('collapses a repeated same-id addNode to one rootIds entry and one node', () => {
       store.getState().setFullGraph(mockGraph);
       store.getState().addNode(newRootNode);
       store.getState().addNode(newRootNode);
 
       expect(store.getState().sceneGraph.rootIds.filter((id) => id === 'light-1')).toHaveLength(1);
+      expect(
+        Object.keys(store.getState().sceneGraph.nodes).filter((id) => id === 'light-1'),
+      ).toHaveLength(1);
     });
 
     it('should attach child node to parent children list', () => {
