@@ -62,7 +62,14 @@ export interface SceneSlice {
    * debounced autosave, the chat tool) can omit it.
    */
   saveScene: (requestId?: string) => void;
-  loadScene: (json: string) => void;
+  /**
+   * Send scene JSON to the engine. Returns whether the engine accepted the
+   * load (false on an explicit `{ success: false }` response, or when no
+   * dispatcher is attached yet) so callers that drive visible state off the
+   * result — {@link SceneSlice.restoreCheckpoint} in particular — can tell a
+   * rejected load apart from one that actually replaced the viewport.
+   */
+  loadScene: (json: string) => boolean;
   newScene: () => void;
   setSceneName: (name: string) => void;
   setSceneModified: (modified: boolean) => void;
@@ -284,8 +291,13 @@ export const createSceneSlice: StateCreator<
       // sounds to it. `new_scene` already clears for the same reason; a
       // rejection is the other way the stash outlives its load.
       const response = dispatchCommand('load_scene', { json });
-      if (response && response.success === false) clearStagedSceneAudio();
+      if (response && response.success === false) {
+        clearStagedSceneAudio();
+        return false;
+      }
+      return true;
     }
+    return false;
   },
   newScene: () => {
     // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
@@ -543,9 +555,13 @@ export const createSceneSlice: StateCreator<
       );
       return null;
     }
-    // Fold captured live work into the active project so it and the checkpoint agree.
-    if (captured.status === 'captured') saveProjectScenes(project);
     try {
+      // Fold captured live work into the active project so it and the
+      // checkpoint agree. Kept inside the try: this is the same
+      // `localStorage.setItem` path `saveProjectScenes` always uses, so a
+      // quota error here must be caught exactly like one from
+      // `createCheckpointIn` below rather than reject the async call.
+      if (captured.status === 'captured') saveProjectScenes(project);
       return createCheckpointIn(project, label).checkpoint;
     } catch (err) {
       console.error('[Scenes] Failed to store checkpoint:', err);
@@ -554,17 +570,36 @@ export const createSceneSlice: StateCreator<
   },
   listCheckpoints: () => listCheckpointsIn(),
   restoreCheckpoint: (checkpointId) => {
-    const result = restoreCheckpointIn(checkpointId);
+    let result: ReturnType<typeof restoreCheckpointIn>;
+    try {
+      result = restoreCheckpointIn(checkpointId);
+    } catch (err) {
+      console.error('[Scenes] Failed to restore checkpoint:', err);
+      return false;
+    }
     if ('error' in result) return false;
     const project = result.project;
     get().setScenes(toSceneList(project), project.activeSceneId);
     const active = project.scenes.find((s) => s.id === project.activeSceneId);
     if (active?.data) {
-      get().loadScene(JSON.stringify(active.data));
-    } else {
-      get().newScene();
+      const loaded = get().loadScene(JSON.stringify(active.data));
+      if (!loaded) {
+        console.error(
+          '[Scenes] Checkpoint was restored to storage but the engine rejected the scene load — ' +
+            'the viewport still shows the prior scene.'
+        );
+      }
+      return loaded;
     }
+    get().newScene();
     return true;
   },
-  deleteCheckpoint: (checkpointId) => deleteCheckpointIn(checkpointId),
+  deleteCheckpoint: (checkpointId) => {
+    try {
+      return deleteCheckpointIn(checkpointId);
+    } catch (err) {
+      console.error('[Scenes] Failed to delete checkpoint:', err);
+      return listCheckpointsIn();
+    }
+  },
 });

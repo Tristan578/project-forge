@@ -12,10 +12,11 @@
  * Only the engine capture is mocked; there is no engine attached in a unit
  * test, so a real capture would just time out. Everything else is real.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
 import { sceneManagementHandlers } from '../sceneManagementHandlers';
 import { createSceneTestStore } from '@/stores/slices/__tests__/sceneSliceTestStore';
+import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
 import {
   saveProjectScenes,
   loadProjectScenes,
@@ -61,6 +62,19 @@ function seedProject(tag: string): ProjectScenes {
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  // The manual `restoreCheckpoint` store action now reports whether the
+  // engine accepted the scene load, not just whether storage was restored
+  // (scene.FR-3.OP-02's #9813 fix for "rejected restores still report
+  // success"). No engine is attached in this unit test, so without a
+  // dispatcher every restore would read as an engine rejection even though
+  // this suite only exercises persistence. A dispatcher that answers nothing
+  // (the documented legacy shape `sceneSlice.ts` still treats as success)
+  // is enough — the assertions below only care about storage.
+  setSceneDispatcher(() => undefined);
+});
+
+afterEach(() => {
+  setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
 });
 
 describe('checkpoint manual/AI parity (real persistence)', () => {

@@ -274,11 +274,14 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     let project = loadProjectScenes();
     if (capture.status === 'captured') {
       project = saveCurrentSceneData(project, capture.data);
-      // Fold the captured live scene into the active project too, so the
-      // checkpoint and the on-disk project agree.
-      saveProjectScenes(project);
     }
     try {
+      // Fold the captured live scene into the active project too, so the
+      // checkpoint and the on-disk project agree. Kept inside the try: this
+      // is the same `localStorage.setItem` path `saveProjectScenes` always
+      // uses, so a quota error here must return a failed `ExecutionResult`
+      // like one from `createCheckpoint` below, not an unhandled rejection.
+      if (capture.status === 'captured') saveProjectScenes(project);
       const { checkpoint, checkpoints } = createCheckpoint(project, p.data.label);
       return {
         success: true,
@@ -318,7 +321,15 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ checkpointId: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { restoreCheckpoint } = await import('@/lib/scenes/sceneManager');
-    const result = restoreCheckpoint(p.data.checkpointId);
+    let result: Awaited<ReturnType<typeof restoreCheckpoint>>;
+    try {
+      result = restoreCheckpoint(p.data.checkpointId);
+    } catch (err) {
+      return {
+        success: false,
+        error: `Could not restore checkpoint: ${err instanceof Error ? err.message : 'storage error'}`,
+      };
+    }
     if ('error' in result) return { success: false, error: result.error };
 
     const project = result.project;
@@ -327,10 +338,17 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       project.activeSceneId
     );
     const active = project.scenes.find((s) => s.id === project.activeSceneId);
+    let loaded = true;
     if (active?.data) {
-      ctx.store.loadScene(JSON.stringify(active.data));
+      loaded = ctx.store.loadScene(JSON.stringify(active.data));
     } else {
       ctx.store.newScene();
+    }
+    if (!loaded) {
+      return {
+        success: false,
+        error: 'Checkpoint was restored to storage but the engine rejected the scene load.',
+      };
     }
     return {
       success: true,
@@ -345,7 +363,15 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     // (`deleteCheckpoint`). Missing IDs are a no-op that returns the current
     // list, so the AI and manual paths converge on identical stored state.
     const { deleteCheckpoint } = await import('@/lib/scenes/sceneManager');
-    const remaining = deleteCheckpoint(p.data.checkpointId);
+    let remaining: ReturnType<typeof deleteCheckpoint>;
+    try {
+      remaining = deleteCheckpoint(p.data.checkpointId);
+    } catch (err) {
+      return {
+        success: false,
+        error: `Could not delete checkpoint: ${err instanceof Error ? err.message : 'storage error'}`,
+      };
+    }
     return {
       success: true,
       result: { message: 'Deleted checkpoint', count: remaining.length },

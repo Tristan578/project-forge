@@ -24,6 +24,7 @@ const mockSaveCurrentSceneData = vi.fn();
 const mockCreateCheckpoint = vi.fn();
 const mockListCheckpoints = vi.fn();
 const mockRestoreCheckpoint = vi.fn();
+const mockDeleteCheckpoint = vi.fn();
 
 vi.mock('@/lib/scenes/sceneManager', () => ({
   loadProjectScenes: (...args: unknown[]) => mockLoadProjectScenes(...args),
@@ -39,6 +40,7 @@ vi.mock('@/lib/scenes/sceneManager', () => ({
   createCheckpoint: (...args: unknown[]) => mockCreateCheckpoint(...args),
   listCheckpoints: (...args: unknown[]) => mockListCheckpoints(...args),
   restoreCheckpoint: (...args: unknown[]) => mockRestoreCheckpoint(...args),
+  deleteCheckpoint: (...args: unknown[]) => mockDeleteCheckpoint(...args),
 }));
 
 // PF-1100: switching and duplicating first read the live scene back out of the
@@ -110,6 +112,7 @@ beforeEach(() => {
   });
   mockListCheckpoints.mockReturnValue([]);
   mockRestoreCheckpoint.mockReturnValue({ project: baseProject });
+  mockDeleteCheckpoint.mockReturnValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -744,6 +747,21 @@ describe('create_checkpoint', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('Quota exceeded');
   });
+
+  it('surfaces a storage failure from folding the captured scene in, not only from the checkpoint write', async () => {
+    // #9813 review finding: `saveProjectScenes(project)` — the fold-in write —
+    // used to run outside the try block, so a quota error there rejected the
+    // async handler instead of returning a graceful ExecutionResult.
+    const liveScene = { formatVersion: 3, sceneName: 'Live', entities: [{ id: 'e9' }] };
+    mockCaptureActiveScene.mockResolvedValueOnce({ status: 'captured', data: liveScene });
+    mockSaveProjectScenes.mockImplementationOnce(() => {
+      throw new Error('Quota exceeded');
+    });
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {});
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Quota exceeded');
+    expect(mockCreateCheckpoint).not.toHaveBeenCalled();
+  });
 });
 
 describe('list_checkpoints', () => {
@@ -812,6 +830,68 @@ describe('restore_checkpoint', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
     expect(mockRestoreCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a storage error from the underlying atomic save instead of an unhandled rejection', async () => {
+    mockRestoreCheckpoint.mockImplementationOnce(() => {
+      throw new Error('Quota exceeded');
+    });
+    const { result } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
+      checkpointId: 'ckpt_1',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Quota exceeded');
+  });
+
+  it('reports failure when the engine rejects the restored scene load, instead of a phantom success', async () => {
+    // #9813 review finding: the handler always returned success once storage
+    // was restored, even when `loadScene`'s engine round trip failed — so the
+    // caller had no way to know the live viewport was still the old scene.
+    const restoredProject = {
+      version: '1.0',
+      activeSceneId: 'scene_1',
+      scenes: [
+        { id: 'scene_1', name: 'Main', isStartScene: true, data: { formatVersion: 3, sceneName: 'Main', entities: [] } },
+      ],
+    };
+    mockRestoreCheckpoint.mockReturnValueOnce({ project: restoredProject });
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
+      checkpointId: 'ckpt_1',
+    }, { loadScene: vi.fn(() => false) });
+    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(restoredProject.scenes[0].data));
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('rejected the scene load');
+  });
+});
+
+describe('delete_checkpoint', () => {
+  it('deletes the checkpoint and reports the remaining count', async () => {
+    mockDeleteCheckpoint.mockReturnValueOnce([{ id: 'ckpt_2', label: 'keep', createdAt: 't', snapshot: baseProject }]);
+    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', {
+      checkpointId: 'ckpt_1',
+    });
+    expect(result.success).toBe(true);
+    expect(mockDeleteCheckpoint).toHaveBeenCalledWith('ckpt_1');
+    expect((result.result as { count: number }).count).toBe(1);
+  });
+
+  it('rejects a missing checkpointId', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', {});
+    expect(result.success).toBe(false);
+    expect(mockDeleteCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a storage error instead of an unhandled rejection', async () => {
+    // #9813 review finding: `deleteCheckpoint`'s unguarded `localStorage.setItem`
+    // (sceneManager.ts) is now caught here, matching every other checkpoint handler.
+    mockDeleteCheckpoint.mockImplementationOnce(() => {
+      throw new Error('Storage disabled');
+    });
+    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', {
+      checkpointId: 'ckpt_1',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Storage disabled');
   });
 });
 
