@@ -277,6 +277,43 @@ describe('verifyExecutor', () => {
       expect(result.success).toBe(false);
       expect(outputOf(result).winnabilityIssues).toContain('GOAL_TARGET_MISSING');
     });
+
+    // #9901: Check 6 forwards sceneGraph.completionMode into validateWinnability.
+    // Without a case that sets a non-'win' mode, dropping the third argument at
+    // this call site would go undetected — every other case here omits the field
+    // and rides the 'win' default. These two lock the wiring in both directions.
+    it('passes a sandbox scene with no win condition (completionMode exemption)', async () => {
+      const store = makeStore(completeNodes(), { e1: [player] });
+      store.sceneGraph.completionMode = 'sandbox';
+      const ctx = makeCtx({ store });
+
+      const result = await verifyExecutor.execute({}, ctx);
+
+      expect(result.success).toBe(true);
+      const output = outputOf(result);
+      expect(output.winnable).toBe(true);
+      expect(output.winnabilityIssues).toEqual([]);
+      expect(output.winnabilityIssues).not.toContain('NO_WIN_CONDITION');
+      expect(output.passed).toBe(true);
+    });
+
+    it('still fails a malformed win condition even under a sandbox completionMode', async () => {
+      // The exemption only removes the "must have a win condition" requirement.
+      // A win condition that IS present is validated in every mode, so a broken
+      // reachGoal target must still fail verification here.
+      const store = makeStore(completeNodes(), {
+        e1: [player],
+        wc: [winCondition('reachGoal', null, 'deleted-entity')],
+      });
+      store.sceneGraph.completionMode = 'sandbox';
+      const ctx = makeCtx({ store });
+
+      const result = await verifyExecutor.execute({}, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('NOT_WINNABLE');
+      expect(outputOf(result).winnabilityIssues).toContain('GOAL_TARGET_MISSING');
+    });
   });
 
   describe('cosmetic checks', () => {

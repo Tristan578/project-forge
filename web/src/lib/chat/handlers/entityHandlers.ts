@@ -58,7 +58,13 @@ export const entityHandlers: Record<string, ToolHandler> = {
     // surface it to chat on this path — that would duplicate the message into the
     // model. store.play() re-runs the same pure check for the human Play-button
     // path; both call the same function on the same snapshot, so they can't diverge.
-    const report = validateWinnability(ctx.store.sceneGraph, ctx.store.allGameComponents);
+    // Pass the scene's completionMode (absent => 'win') so this AI path and the
+    // human Play button gate identically for sandbox/endless/narrative games (#9901).
+    const report = validateWinnability(
+      ctx.store.sceneGraph,
+      ctx.store.allGameComponents,
+      ctx.store.sceneGraph.completionMode,
+    );
     if (!report.winnable) {
       return { success: false, error: formatWinnabilityMessage(report) };
     }
