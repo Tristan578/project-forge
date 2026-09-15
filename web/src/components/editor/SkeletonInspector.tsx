@@ -139,6 +139,24 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
     setMeshDraft(prev => (prev ? updater(prev) : prev));
   };
 
+  // Vertex/weight edits live only in local `meshDraft` state and reach the store
+  // solely on Apply (unlike the bone fields, which write through `setSkeleton2d`
+  // on every keystroke). So opening a new draft — or switching the edit target —
+  // silently discards every unapplied edit on the current one. When a draft is
+  // already open, gate that loss behind the same confirm dialog the Remove
+  // Skeleton button uses. When none is open there is nothing to lose, so `open`
+  // runs synchronously — that keeps the common first-open path free of the extra
+  // microtask an `await` would insert.
+  const guardDiscardThen = (open: () => void) => {
+    if (!meshDraft) {
+      open();
+      return;
+    }
+    void confirm('Discard unsaved mesh edits?').then((ok) => {
+      if (ok) open();
+    });
+  };
+
   const handleAddMeshAttachment = () => {
     const name = newAttachmentName.trim();
     if (!name) return;
@@ -146,35 +164,39 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
       setMeshError(`An attachment named "${name}" already exists in skin "${selectedSkin}".`);
       return;
     }
-    const firstBone = skeleton.bones[0]?.name ?? '';
-    setMeshDraft({
-      name,
-      original: null,
-      vertices: [{ x: '0', y: '0', influences: [{ bone: firstBone, weight: '1' }] }],
+    guardDiscardThen(() => {
+      const firstBone = skeleton.bones[0]?.name ?? '';
+      setMeshDraft({
+        name,
+        original: null,
+        vertices: [{ x: '0', y: '0', influences: [{ bone: firstBone, weight: '1' }] }],
+      });
+      setMeshError(null);
+      setNewAttachmentName('');
     });
-    setMeshError(null);
-    setNewAttachmentName('');
   };
 
   const handleEditMeshAttachment = (name: string) => {
     const attachment = activeSkinData?.attachments?.[name];
     if (!attachment || attachment.type !== 'mesh') return;
-    const vertices = attachment.vertices ?? [];
-    const weights = attachment.weights ?? [];
-    setMeshDraft({
-      name,
-      original: name,
-      vertices: vertices.map((v, i) => ({
-        x: String(v[0]),
-        y: String(v[1]),
-        originalIndex: i,
-        influences: (weights[i]?.bones ?? []).map((bone, j) => ({
-          bone,
-          weight: String(weights[i]?.weights?.[j] ?? 0),
+    guardDiscardThen(() => {
+      const vertices = attachment.vertices ?? [];
+      const weights = attachment.weights ?? [];
+      setMeshDraft({
+        name,
+        original: name,
+        vertices: vertices.map((v, i) => ({
+          x: String(v[0]),
+          y: String(v[1]),
+          originalIndex: i,
+          influences: (weights[i]?.bones ?? []).map((bone, j) => ({
+            bone,
+            weight: String(weights[i]?.weights?.[j] ?? 0),
+          })),
         })),
-      })),
+      });
+      setMeshError(null);
     });
-    setMeshError(null);
   };
 
   const handleDeleteMeshAttachment = (name: string) => {

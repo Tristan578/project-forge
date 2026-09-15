@@ -771,4 +771,95 @@ describe('SkeletonInspector', () => {
     expect(screen.getByText(/has no bone/i)).toBeInTheDocument();
     expect(mockSetSkeleton2d).not.toHaveBeenCalled();
   });
+
+  // --- Discard-guard on an open mesh draft (#9732) ---
+  // Vertex/weight edits live only in local draft state until Apply, so opening a
+  // new draft or switching the edit target throws away every unapplied edit.
+  // Both entry points route through the same confirm dialog Remove Skeleton uses.
+
+  const skeletonWithTwoMeshes: SkeletonData2d = {
+    ...baseSkeleton,
+    skins: {
+      default: {
+        name: 'default',
+        attachments: {
+          cloak: {
+            type: 'mesh',
+            textureId: '',
+            vertices: [[1, 1]],
+            uvs: [[0, 0]],
+            triangles: [],
+            weights: [{ bones: ['root'], weights: [1] }],
+          },
+          belt: {
+            type: 'mesh',
+            textureId: '',
+            vertices: [[2, 2]],
+            uvs: [[0, 0]],
+            triangles: [],
+            weights: [{ bones: ['root'], weights: [1] }],
+          },
+        },
+      },
+    },
+  };
+
+  it('does not prompt when the first mesh draft is opened (nothing to discard)', () => {
+    setupStore({ skeleton: skeletonWithTwoMeshes });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    // meshDraft was null on the first open, so the discard dialog must be skipped.
+    expect(mockConfirm).not.toHaveBeenCalled();
+  });
+
+  it('keeps the open draft when switching edit targets is declined', async () => {
+    // Editing cloak, then clicking Edit belt, must confirm the discard first. A
+    // declined confirm leaves the cloak draft intact — the destructive switch is
+    // gated exactly like Remove Skeleton.
+    mockConfirm.mockResolvedValueOnce(false);
+    setupStore({ skeleton: skeletonWithTwoMeshes });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment belt'));
+    await vi.waitFor(() => {
+      expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
+    });
+    // Target never switched: still editing cloak, never belt.
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    expect(screen.queryByText('Mesh: belt')).not.toBeInTheDocument();
+  });
+
+  it('switches the edit target when the discard is confirmed', async () => {
+    mockConfirm.mockResolvedValue(true);
+    setupStore({ skeleton: skeletonWithTwoMeshes });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment belt'));
+    await vi.waitFor(() => {
+      expect(screen.getByText('Mesh: belt')).toBeInTheDocument();
+    });
+    expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
+    expect(screen.queryByText('Mesh: cloak')).not.toBeInTheDocument();
+  });
+
+  it('keeps the open draft when adding a new attachment is declined', async () => {
+    // The other destructive entry point: typing a fresh name and clicking Add
+    // while a draft is open. A declined confirm preserves the current draft and
+    // opens no new one.
+    mockConfirm.mockResolvedValueOnce(false);
+    setupStore({ skeleton: skeletonWithTwoMeshes });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'sash' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    await vi.waitFor(() => {
+      expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
+    });
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    expect(screen.queryByText('Mesh: sash')).not.toBeInTheDocument();
+  });
 });
