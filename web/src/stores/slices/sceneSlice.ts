@@ -13,9 +13,12 @@ import {
   duplicateScene as duplicateSceneIn,
   switchScene as switchSceneIn,
   saveCurrentSceneData,
+  readPrefabInstances,
   type ProjectScenes,
+  type SceneFileData,
 } from '@/lib/scenes/sceneManager';
-import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
+import { captureActiveScene, attachPrefabInstances, type SceneCapture } from '@/lib/scenes/captureScene';
+import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import {
   buildTemplateSceneFile,
@@ -220,6 +223,38 @@ function withCapturedScene(project: ProjectScenes, capture: SceneCapture): Proje
   return saveCurrentSceneData(project, capture.data);
 }
 
+/**
+ * Fold the live prefab-instance registry into a capture before it is persisted
+ * (scene.FR-1 N1). The engine export knows nothing about linked instances — they
+ * live in the prefab store, not the ECS — so a scene switch/duplicate that only
+ * captured the engine scene would drop every instance, override and link the
+ * user built. `attachPrefabInstances` no-ops on a non-`captured` status, so the
+ * "abort rather than overwrite" contract survives. Empty registry is left
+ * un-attached so instance-free scenes stay byte-identical: `saveCurrentSceneData`
+ * replaces the whole `data` with this fresh capture, so a scene that had
+ * instances deleted persists as having none (no resurrection on reopen).
+ */
+function withPrefabInstances(capture: SceneCapture): SceneCapture {
+  const instances = loadPrefabInstances();
+  return instances.length ? attachPrefabInstances(capture, instances) : capture;
+}
+
+/**
+ * Restore a loaded scene's prefab-instance registry into the prefab store
+ * (scene.FR-1 N1) so `PrefabLibraryPanel` and the AI instance commands see the
+ * instances the scene was saved with. The registry mirrors the ACTIVE scene, so
+ * a scene with no instances (or unparseable JSON) resets it to empty rather than
+ * carrying the previous scene's instances forward.
+ */
+function restorePrefabInstances(json: string): void {
+  try {
+    const parsed = JSON.parse(json) as SceneFileData;
+    savePrefabInstancesToStorage(readPrefabInstances(parsed));
+  } catch {
+    savePrefabInstancesToStorage([]);
+  }
+}
+
 export const createSceneSlice: StateCreator<
   SceneSlice & TemplateApplyDeps,
   [],
@@ -258,6 +293,11 @@ export const createSceneSlice: StateCreator<
     // the dispatch keeps the stash and the pending load a single fact.
     if (dispatchCommand) {
       stageSceneAudio(json);
+      // Restore the scene's linked prefab instances into the prefab store
+      // before the engine load. Done alongside the dispatch for the same reason
+      // audio is: with no dispatcher the engine never loads, so mutating the
+      // registry here would desync it from what is actually rendered.
+      restorePrefabInstances(json);
       // A rejected load never emits SCENE_LOADED, so a stash left armed here
       // waits for the NEXT scene's SCENE_LOADED and attaches this scene's
       // sounds to it. `new_scene` already clears for the same reason; a
@@ -463,7 +503,7 @@ export const createSceneSlice: StateCreator<
   // had no production caller at all, so every scene's `data` stayed null forever
   // — switching away discarded the outgoing scene's work AND loaded nothing back.
   switchScene: async (sceneId) => {
-    const captured = await captureActiveScene(requestSceneExport);
+    const captured = withPrefabInstances(await captureActiveScene(requestSceneExport));
     const project = withCapturedScene(loadProjectScenes(), captured);
     if (!project) {
       console.error(
@@ -477,8 +517,12 @@ export const createSceneSlice: StateCreator<
     saveProjectScenes(result.project);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
     if (result.sceneToLoad) {
+      // `loadScene` restores the incoming scene's prefab-instance registry.
       get().loadScene(JSON.stringify(result.sceneToLoad));
     } else {
+      // An unsaved scene carries no instances — reset the registry so the
+      // outgoing scene's instances do not bleed into it.
+      savePrefabInstancesToStorage([]);
       get().newScene();
     }
   },
@@ -494,7 +538,7 @@ export const createSceneSlice: StateCreator<
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
   duplicateScene: async (sceneId) => {
-    const captured = await captureActiveScene(requestSceneExport);
+    const captured = withPrefabInstances(await captureActiveScene(requestSceneExport));
     const project = withCapturedScene(loadProjectScenes(), captured);
     if (!project) {
       console.error(

@@ -41,6 +41,13 @@ vi.mock('@/lib/scenes/sceneManager', () => ({
 const mockCaptureActiveScene = vi.fn();
 vi.mock('@/lib/scenes/captureScene', () => ({
   captureActiveScene: (...args: unknown[]) => mockCaptureActiveScene(...args),
+  // scene.FR-1 N1: switch/duplicate fold the prefab-instance registry into the
+  // capture before persisting. Kept as a real passthrough so the module shape is
+  // complete; it is a no-op here because the registry is empty in this env.
+  attachPrefabInstances: (capture: { status: string; data?: unknown }, instances: unknown[]) =>
+    capture.status === 'captured'
+      ? { status: 'captured', data: { ...(capture.data as object), prefabInstances: instances } }
+      : capture,
 }));
 
 const mockTemplateRegistry = [

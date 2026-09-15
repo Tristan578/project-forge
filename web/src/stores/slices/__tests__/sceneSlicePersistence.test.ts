@@ -11,8 +11,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
-import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
+import { loadProjectScenes, saveProjectScenes, readPrefabInstances } from '@/lib/scenes/sceneManager';
 import { SCENE_EXPORTED_EVENT, SCENE_CAPTURE_TIMEOUT_MS } from '@/lib/scenes/captureScene';
+import {
+  loadPrefabInstances,
+  savePrefabInstancesToStorage,
+  type PrefabInstance,
+} from '@/lib/prefabs/prefabStore';
 
 const LIVE_SCENE = {
   formatVersion: 1,
@@ -126,5 +131,79 @@ describe('sceneSlice scene persistence', () => {
     await store.getState().switchScene(target!.id);
 
     expect(loadProjectScenes().activeSceneId).toBe(target!.id);
+  });
+
+  // scene.FR-1 N1: linked prefab instances must survive save/reopen with zero
+  // silent data loss. These drive the REAL switch path end to end — not the
+  // isolated writePrefabInstances/readPrefabInstances helpers — because the bug
+  // this guards is exactly that the helpers were never wired into it.
+  describe('prefab-instance round-trip through the real switch path', () => {
+    const INSTANCE: PrefabInstance = {
+      instanceId: 'pfi_round',
+      prefabId: 'prefab_src',
+      overrides: { name: 'Overridden', entityType: 'sphere' },
+      entityId: 'ent_1',
+    };
+
+    it('writes the live registry into the outgoing scene and restores it on return', async () => {
+      const { dispatch } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+
+      const originalId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      // The user has built a linked prefab instance in the active (original) scene.
+      savePrefabInstancesToStorage([INSTANCE]);
+
+      // Switch away: the instance must be folded into the outgoing scene's file...
+      await store.getState().switchScene(target!.id);
+      const outgoing = loadProjectScenes().scenes.find((s) => s.id === originalId);
+      expect(readPrefabInstances(outgoing?.data)).toEqual([INSTANCE]);
+      // ...and the empty incoming scene must reset the live registry so its
+      // instances do not bleed across the scene boundary.
+      expect(loadPrefabInstances()).toEqual([]);
+
+      // Reopen the original scene: the registry must repopulate with the exact
+      // instance — stable id, source link, overrides and entity binding intact.
+      await store.getState().switchScene(originalId);
+      const restored = loadPrefabInstances();
+      expect(restored).toHaveLength(1);
+      expect(restored[0].instanceId).toBe('pfi_round');
+      expect(restored[0].prefabId).toBe('prefab_src');
+      expect(restored[0].overrides).toEqual({ name: 'Overridden', entityType: 'sphere' });
+      expect(restored[0].entityId).toBe('ent_1');
+    });
+
+    it('carries the live registry into a duplicated scene', async () => {
+      const { dispatch } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+
+      const activeId = loadProjectScenes().activeSceneId;
+      savePrefabInstancesToStorage([INSTANCE]);
+
+      await store.getState().duplicateScene(activeId);
+
+      const copy = loadProjectScenes().scenes.find((s) => s.name.endsWith('Copy'));
+      expect(readPrefabInstances(copy?.data)).toEqual([INSTANCE]);
+    });
+
+    it('leaves an instance-free scene byte-identical (no empty prefabInstances field)', async () => {
+      const { dispatch } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+
+      const originalId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      // Registry is empty — deleting all instances must persist as "no instances",
+      // and the outgoing scene file must not gain a spurious prefabInstances key.
+      savePrefabInstancesToStorage([]);
+
+      await store.getState().switchScene(target!.id);
+      const outgoing = loadProjectScenes().scenes.find((s) => s.id === originalId);
+      expect(outgoing?.data).toEqual(LIVE_SCENE);
+      expect(outgoing?.data && 'prefabInstances' in outgoing.data).toBe(false);
+    });
   });
 });
