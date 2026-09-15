@@ -25,6 +25,10 @@ import { EXECUTOR_REGISTRY } from '@/lib/game-creation/executors';
 import { collectStepWarnings } from '@/lib/game-creation/stepWarnings';
 import { QUICK_START_AUTO_GATES } from '@/lib/game-creation/quickStart';
 import { captureException } from '@/lib/monitoring/sentry-client';
+import {
+  clearEntityObservations,
+  readEntityObservation,
+} from '@/lib/game-creation/engineObservation';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -504,6 +508,11 @@ export const createOrchestratorSlice: StateCreator<
     // character steps all depend on it.
     useEditorStore.getState().setProjectType(currentPlan.gdd.projectType);
 
+    // A fresh run must not read a spawn/transform observation left in the cache
+    // by an earlier run (or an earlier cancelled operation on the same id) —
+    // that would let stale engine state satisfy a new observation (#9899).
+    clearEntityObservations();
+
     const ctx: ExecutorContext = {
       dispatchCommand: dispatcher,
       dispatchCommandBatch: getCommandBatchDispatcher() ?? undefined,
@@ -513,6 +522,16 @@ export const createOrchestratorSlice: StateCreator<
       signal: _abortController.signal,
       resolveStepOutput: () => undefined, // overridden by runPipeline
       resolveStepOutputs: () => [], // overridden by runPipeline
+      // Confirmed-effect query (#9899). Each call FIRES a fresh
+      // `get_entity_details` and RETURNS the latest cached answer: the engine
+      // answers asynchronously on `QUERY_ENTITY_DETAILS` a frame later, so the
+      // observation adapter's next poll reads the state this poll requested.
+      // A miss (`undefined`) is the engine's "does not exist yet" answer — it
+      // emits nothing for an entity it cannot find.
+      observeEntity: (entityId: string) => {
+        dispatcher('get_entity_details', { entityId });
+        return readEntityObservation(entityId);
+      },
     };
 
     const { reservationId } = get();

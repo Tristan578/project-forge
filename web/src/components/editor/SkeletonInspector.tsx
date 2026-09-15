@@ -217,16 +217,30 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
 
   const handleDeleteMeshAttachment = (name: string) => {
     if (!activeSkinData) return;
-    if (name === newAttachmentName.trim()) setNewAttachmentError(null);
-    const { [name]: _removed, ...rest } = activeSkinData.attachments;
-    setSkeleton2d(entityId, {
-      ...skeleton,
-      skins: { ...skeleton.skins, [selectedSkin]: { ...activeSkinData, attachments: rest } },
-    });
+    const deleteIt = () => {
+      if (name === newAttachmentName.trim()) setNewAttachmentError(null);
+      const { [name]: _removed, ...rest } = activeSkinData.attachments;
+      setSkeleton2d(entityId, {
+        ...skeleton,
+        skins: { ...skeleton.skins, [selectedSkin]: { ...activeSkinData, attachments: rest } },
+      });
+      if (meshDraft?.original === name) {
+        setMeshDraft(null);
+        setMeshError(null);
+      }
+    };
+    // Deleting the attachment currently open in an unsaved draft would discard
+    // those edits the same way switching targets or adding a new attachment
+    // does, so it goes through the same confirm dialog rather than clearing
+    // silently. Deleting an unrelated attachment while a different draft is
+    // open does not touch that draft, so it proceeds without a prompt.
     if (meshDraft?.original === name) {
-      setMeshDraft(null);
-      setMeshError(null);
+      void confirm('Discard unsaved mesh edits?').then((ok) => {
+        if (ok) deleteIt();
+      });
+      return;
     }
+    deleteIt();
   };
 
   const handleApplyMesh = () => {

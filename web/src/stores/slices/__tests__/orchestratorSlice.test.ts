@@ -13,9 +13,17 @@ import type {
   ApprovalGate,
   TokenEstimate,
   ExecutorResult,
+  ExecutorContext,
+  ObservedEntity,
 } from '@/lib/game-creation/types';
 import { runPipeline } from '@/lib/game-creation/pipelineRunner';
 import type { PipelineCallbacks } from '@/lib/game-creation/pipelineRunner';
+import {
+  recordEntityObservation,
+  readEntityObservation,
+  clearEntityObservations,
+} from '@/lib/game-creation/engineObservation';
+import { getCommandDispatcher } from '@/stores/editorStore';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -988,6 +996,120 @@ describe('orchestratorSlice', () => {
       expect(decision).toBe('rejected');
       expect(_getGateResolver()).toBeNull();
       expect(store.getState().pendingGate).toBeNull();
+    });
+  });
+
+  /**
+   * The two logic paths #9899 added to `runPipelineFromPlan`: it clears the
+   * confirmed-effect observation cache before building `ctx`, and it wires
+   * `ctx.observeEntity` to fire `get_entity_details` and read the cache back.
+   *
+   * Both are asserted here against the REAL `engineObservation` module (not a
+   * mock) — the same singleton the slice imports — because the guarantee is a
+   * cross-run one: a stale snapshot left by an earlier or cancelled run must
+   * never satisfy a fresh observation. Ctx is captured the same way the
+   * stale-run guard captures callbacks: a fake runner that never settles, so
+   * the run is paused exactly at "first step about to execute".
+   */
+  describe('confirmed-effect observation wiring (#9899)', () => {
+    beforeEach(() => {
+      clearEntityObservations();
+    });
+    afterEach(() => {
+      clearEntityObservations();
+    });
+
+    async function startRunCapturingCtx(): Promise<{
+      ctx: ExecutorContext;
+      settle: (plan: OrchestratorPlan) => void;
+      runPromise: Promise<void>;
+    }> {
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+
+      let capturedCtx!: ExecutorContext;
+      let settle!: (plan: OrchestratorPlan) => void;
+      let markCalled!: () => void;
+      const called = new Promise<void>((resolve) => {
+        markCalled = resolve;
+      });
+      const pending = new Promise<OrchestratorPlan>((resolve) => {
+        settle = resolve;
+      });
+      vi.mocked(runPipeline).mockImplementationOnce(
+        (_plan: unknown, _registry: unknown, ctx: ExecutorContext) => {
+          capturedCtx = ctx;
+          markCalled();
+          return pending;
+        },
+      );
+
+      const runPromise = store.getState().runPipelineFromPlan();
+      // Resolves once `runPipeline` (the first step) is actually invoked, which
+      // is AFTER the slice built ctx — and therefore after it cleared the cache.
+      await called;
+      return { ctx: capturedCtx, settle, runPromise };
+    }
+
+    it('clears a stale observation before the first step runs', async () => {
+      // A prior (or cancelled) run left an observation for this id in the cache.
+      recordEntityObservation({
+        entityId: 'stale-entity',
+        position: [9, 9, 9],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      });
+      expect(readEntityObservation('stale-entity')).toBeDefined();
+
+      const { settle, runPromise } = await startRunCapturingCtx();
+
+      // The first step has just been invoked; the slice must have wiped the
+      // cache while building ctx, so the stale snapshot can no longer satisfy a
+      // fresh observation. Deleting the `clearEntityObservations()` call, or
+      // moving it after the runner starts, fails right here.
+      expect(readEntityObservation('stale-entity')).toBeUndefined();
+
+      settle(makeMockPlan());
+      await runPromise;
+    });
+
+    it('wires observeEntity to fire get_entity_details and return the cached snapshot', async () => {
+      const { ctx, settle, runPromise } = await startRunCapturingCtx();
+      expect(ctx.observeEntity).toBeDefined();
+
+      // The dispatcher the slice captured at run start (the mocked editorStore
+      // returns one stable spy). Clear its history so the assertion below sees
+      // only the call `observeEntity` makes.
+      const dispatcher = vi.mocked(getCommandDispatcher)() as unknown as ReturnType<typeof vi.fn>;
+      dispatcher.mockClear();
+
+      // Seed AFTER the run started (the slice already cleared the cache), so the
+      // read returns exactly what the engine's QUERY_ENTITY_DETAILS handler
+      // would have recorded for this id.
+      recordEntityObservation({
+        entityId: 'observe-target',
+        position: [1, 2, 3],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      });
+      const expected: ObservedEntity = {
+        entityId: 'observe-target',
+        transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      };
+
+      const result = ctx.observeEntity!('observe-target');
+
+      // Fires a fresh engine query for exactly the id it was asked about...
+      expect(dispatcher).toHaveBeenCalledTimes(1);
+      expect(dispatcher).toHaveBeenCalledWith('get_entity_details', {
+        entityId: 'observe-target',
+      });
+      // ...and returns `readEntityObservation(id)`'s value (same reference).
+      expect(result).toBe(readEntityObservation('observe-target'));
+      expect(result).toEqual(expected);
+
+      settle(makeMockPlan());
+      await runPromise;
     });
   });
 

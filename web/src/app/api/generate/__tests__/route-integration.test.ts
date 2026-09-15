@@ -89,6 +89,8 @@ vi.mock('@/lib/generate/elevenlabsClient', () => ({
   ElevenLabsClient: vi.fn(function (this: Record<string, unknown>) {
     this.generateSfx = vi.fn().mockResolvedValue({ audioBase64: 'base64==', durationSeconds: 5 });
     this.generateVoice = vi.fn().mockResolvedValue({ audioBase64: 'base64==', durationSeconds: 3 });
+    // #9522: music now routes to ElevenLabs, resolving audio inline.
+    this.generateMusic = vi.fn().mockResolvedValue({ audioBase64: 'base64music==', durationSeconds: 30 });
   }),
 }));
 
@@ -97,12 +99,6 @@ vi.mock('@/lib/generate/meshyClient', () => ({
     this.createTextTo3D = vi.fn().mockResolvedValue({ taskId: 'meshy-1' });
     this.createImageTo3D = vi.fn().mockResolvedValue({ taskId: 'meshy-2' });
     this.createTextToTexture = vi.fn().mockResolvedValue({ taskId: 'meshy-3' });
-  }),
-}));
-
-vi.mock('@/lib/generate/sunoClient', () => ({
-  SunoClient: vi.fn(function (this: Record<string, unknown>) {
-    this.createMusic = vi.fn().mockResolvedValue({ taskId: 'suno-1' });
   }),
 }));
 
@@ -132,7 +128,7 @@ vi.mock('@/lib/config/providers', async (importOriginal) => ({
   // pre-existing pins this suite asserts against.
   ...(await importOriginal<typeof import('@/lib/config/providers')>()),
   DB_PROVIDER: {
-    chat: 'anthropic', sfx: 'elevenlabs', voice: 'elevenlabs', music: 'suno',
+    chat: 'anthropic', sfx: 'elevenlabs', voice: 'elevenlabs', music: 'elevenlabs',
     model3d: 'meshy', texture: 'meshy', sprite: 'replicate', image: 'openai',
   },
   SPRITE_SIZES: ['32x32', '64x64', '128x128', '256x256', '512x512', '1024x1024'],
@@ -221,15 +217,16 @@ describe('generate route integration (route → factory → provider)', () => {
     expect(data.audioBase64).toBe('base64==');
   });
 
-  // #9117 / #9522: music is declared unavailable until it moves to ElevenLabs.
-  // The route refuses 503 before the key resolves, so no jobId is ever minted.
-  it('music: valid request → 503 SERVICE_UNAVAILABLE (declared unavailable, #9522)', async () => {
+  // #9522: music moved to ElevenLabs and resolves synchronously, returning
+  // audio inline like sfx/voice — no jobId, no polling.
+  it('music: valid request → 201 with audioBase64 inline (ElevenLabs)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(201);
     const data = await res.json();
-    expect(data.code).toBe('SERVICE_UNAVAILABLE');
-    expect(data.details).toEqual({ capability: 'music', issue: 9522 });
+    expect(data.audioBase64).toBe('base64music==');
+    expect(data.provider).toBe('elevenlabs');
+    expect(data.jobId).toBeUndefined();
   });
 
   it('skybox: valid request → 201 with jobId', async () => {
@@ -478,12 +475,12 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     expect(data.provider).toBe('elevenlabs');
   });
 
-  it('music: the unavailable gate precedes the agent — 503, no usageId minted (#9117)', async () => {
+  it('music: runs through the agent — 201 with audio inline (#9522)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(201);
     const data = await res.json();
-    expect(data.usageId).toBeUndefined();
+    expect(data.audioBase64).toBe('base64music==');
   });
 
   it('model: 201 with jobId AND usageId preserved through the agent', async () => {
@@ -610,12 +607,14 @@ describe('generate route integration — generation agent path (USE_GENERATION_A
     expect(instance.createTextToTexture.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('test 17 — music route: SunoClient is never constructed while music is declared unavailable (#9117)', async () => {
-    const { SunoClient } = await import('@/lib/generate/sunoClient');
+  it('test 17 — music route: ElevenLabsClient.generateMusic receives ctx.abortSignal (#9522)', async () => {
+    const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(503);
-    expect(vi.mocked(SunoClient)).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const instance = vi.mocked(ElevenLabsClient).mock.instances.at(-1) as any;
+    expect(instance.generateMusic.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
   });
 
   it('test 17 — sfx route: ElevenLabsClient.generateSfx receives ctx.abortSignal', async () => {
@@ -845,11 +844,11 @@ describe('generate routes match the published OpenAPI response contract', () => 
     ).toEqual(expectedDivergences);
   }
 
-  it('POST /api/generate/music 503 matches Error (declared unavailable, #9117)', async () => {
+  it('POST /api/generate/music 201 matches the inline AudioResult (#9522)', async () => {
     const { POST } = await import('@/app/api/generate/music/route');
     const res = await POST(makeRequest('http://test/api/generate/music', { prompt: 'epic battle', durationSeconds: 30 }));
-    expect(res.status).toBe(503);
-    expectContract('/api/generate/music', 503, await res.json());
+    expect(res.status).toBe(201);
+    expectContract('/api/generate/music', 201, await res.json());
   });
 
   it('POST /api/generate/skybox 201 matches GenerationJob', async () => {

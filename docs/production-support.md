@@ -23,8 +23,7 @@
 | Rate Limiting | Upstash Redis | Distributed rate limiting | `EVAL return 1` via the limiter's own REST transport (read-only; billed per command; bounded by the shared fan-out budget) — `degraded` carries Upstash's error body when the command is refused or stalls | No |
 | AI (Anthropic) | Anthropic API | Chat, scene generation | HEAD `api.anthropic.com` | No |
 | AI (Meshy) | Meshy API | 3D model generation | Config check | No |
-| AI (ElevenLabs) | ElevenLabs API | SFX/voice generation | Config check | No |
-| AI (music) | none — Suno has no public API; `music` is declared unavailable until #9522 moves it to ElevenLabs | Music generation | Declared unavailable in code | No |
+| AI (ElevenLabs) | ElevenLabs API | SFX/voice/music generation | Config check | No |
 
 ### Critical vs Non-Critical
 
@@ -72,7 +71,7 @@ Vercel Edge (CDN, routing, headers)
   |       +---> Anthropic API          -- AI chat, scene generation
   |       |       (ANTHROPIC_API_KEY)
   |       |
-  |       +---> Meshy / ElevenLabs         -- AI asset generation (music: unavailable, #9522)
+  |       +---> Meshy / ElevenLabs         -- AI asset generation (music via ElevenLabs, #9522)
   |       |
   |       +---> Cloudflare R2          -- asset upload/download (S3 API)
   |       |       (ASSET_R2_ACCESS_KEY_ID, ASSET_R2_SECRET_ACCESS_KEY, ASSET_BUCKET_NAME)
@@ -561,7 +560,7 @@ gh workflow run cd.yml
 # 1. Rotate the exposed key in the provider's dashboard:
 #    - Anthropic: console.anthropic.com > API Keys
 #    - Stripe: dashboard.stripe.com > Developers > API Keys
-#    - Meshy/ElevenLabs: respective dashboards (Suno has none; see docs/guides/platform-keys.md)
+#    - Meshy/ElevenLabs: respective dashboards (ElevenLabs covers SFX, voice AND music; see docs/guides/platform-keys.md)
 
 # 2. Update in Vercel env vars
 
@@ -641,8 +640,7 @@ Source of truth: `web/src/lib/config/validateEnv.ts` (`OPTIONAL_VARS`). App degr
 | `NEXT_PUBLIC_POSTHOG_KEY` | PostHog analytics | (empty) |
 | `ASSET_R2_ACCOUNT_ID` | R2 asset storage | (empty) |
 | `PLATFORM_MESHY_KEY` † | Meshy 3D gen | (empty — see `docs/guides/platform-keys.md`) |
-| `PLATFORM_ELEVENLABS_KEY` † | ElevenLabs audio | (empty — see `docs/guides/platform-keys.md`) |
-| `PLATFORM_SUNO_KEY` † | Suno music — unobtainable; `music` is declared unavailable (#9522) | (empty) |
+| `PLATFORM_ELEVENLABS_KEY` † | ElevenLabs audio — SFX, voice AND music (#9522) | (empty — see `docs/guides/platform-keys.md`) |
 | `ASSET_R2_ACCESS_KEY_ID` | R2 auth | (empty) |
 | `ASSET_R2_SECRET_ACCESS_KEY` | R2 auth | (empty) |
 | `ASSET_BUCKET_NAME` | R2 bucket | (empty) |

@@ -1,0 +1,24 @@
+{
+  "metric": "uptime",
+  "unit": "ratio",
+  "direction": "higher_is_better",
+  "environment": "production",
+  "window": {
+    "label": "24h",
+    "start": "2026-09-13T00:00:00Z",
+    "end": "2026-09-14T00:00:00Z"
+  },
+  "source": "synthetic-monitor",
+  "releaseSha": null,
+  "observedAt": "2026-09-13T18:00:00Z",
+  "ingestedAt": "2026-09-13T18:01:00Z",
+  "confidence": "verified",
+  "applicability": "applicable",
+  "formulaVersion": "uptime@1",
+  "state": "stale",
+  "value": null,
+  "lastObservedValue": 0.997,
+  "lastObservedAt": "2026-09-13T18:00:00Z",
+  "sampleSize": 216,
+  "freshnessTtlSeconds": 900
+}

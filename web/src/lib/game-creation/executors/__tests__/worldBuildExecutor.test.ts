@@ -7,9 +7,13 @@
  * payload ships fields the engine silently drops.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { worldBuildExecutor } from '../worldBuildExecutor';
-import type { ExecutorContext } from '../../types';
+import type { ExecutorContext, ObservedEntity } from '../../types';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 type CtxOverrides = Partial<ExecutorContext> & { store?: unknown };
 
@@ -300,5 +304,102 @@ describe('worldBuildExecutor', () => {
 
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('INVALID_INPUT');
+  });
+
+  /**
+   * The transform half of #9899. Every `update_transform` this executor sends
+   * sizes a piece of geometry, and an accepted resize is NOT an applied one —
+   * `apply_pending_transforms` runs a frame later and drops any update matching
+   * no entity, with nothing JS-side to see it. When the context can query the
+   * engine, the step must PROVE each entity reached its requested scale before
+   * reporting a built world; otherwise a floor left at 1x1x1 gets a half-metre
+   * collider the player falls through (PF-1138), reported as success.
+   *
+   * A context WITHOUT `observeEntity` (every test above) keeps the legacy
+   * frame-wait path, which is why none of them had to change.
+   */
+  describe('confirmed transform observation', () => {
+    function observedAt(id: string, scale: [number, number, number]): ObservedEntity {
+      return { entityId: id, transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale } };
+    }
+
+    it('confirms every entity reached its requested scale, then reports the world built', async () => {
+      const scaleById: Record<string, [number, number, number]> = {
+        [GROUND.entityId]: GROUND.scale as [number, number, number],
+        [PLATFORM.entityId]: PLATFORM.scale as [number, number, number],
+      };
+      const observeEntity = vi.fn((id: string) => observedAt(id, scaleById[id]));
+      const batch = vi.fn().mockReturnValue({ success: true });
+      const ctx = makeCtx({ dispatchCommandBatch: batch, observeEntity } as never);
+
+      const result = await worldBuildExecutor.execute({ entities: [GROUND, PLATFORM] }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output).toMatchObject({
+        spawned: 2,
+        confirmed: 2,
+        operationId: 'ai.FR-1.OP-01',
+      });
+      // The engine was actually queried for BOTH ids — confirmation is a real read.
+      expect(observeEntity).toHaveBeenCalledWith(GROUND.entityId);
+      expect(observeEntity).toHaveBeenCalledWith(PLATFORM.entityId);
+    });
+
+    it('waits for the real scale to land rather than trusting acceptance', async () => {
+      // Observable immediately (spawn applied) but still unsized on the first
+      // read — `applied` must wait for the requested scale, not the frame.
+      const observeEntity = vi.fn<(id: string) => ObservedEntity | undefined>()
+        .mockReturnValueOnce(observedAt(GROUND.entityId, [1, 1, 1]))
+        .mockReturnValue(observedAt(GROUND.entityId, GROUND.scale as [number, number, number]));
+      const batch = vi.fn().mockReturnValue({ success: true });
+      const ctx = makeCtx({ dispatchCommandBatch: batch, observeEntity } as never);
+
+      const result = await worldBuildExecutor.execute({ entities: [GROUND] }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(observeEntity.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('fails the step with EFFECT_TIMED_OUT when a resize is dropped', async () => {
+      vi.useFakeTimers();
+      // The engine keeps reporting the unsized cube — the deferred resize never
+      // landed. The step must NOT report a built world.
+      const observeEntity = vi.fn((id: string) => observedAt(id, [1, 1, 1]));
+      const batch = vi.fn().mockReturnValue({ success: true });
+      const ctx = makeCtx({ dispatchCommandBatch: batch, observeEntity } as never);
+
+      const pending = worldBuildExecutor.execute({ entities: [GROUND] }, ctx);
+      await vi.advanceTimersByTimeAsync(6_000); // past the 5s observation deadline
+      const result = await pending;
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+      const effect = (result.error?.details as { effect?: { status?: string; operationId?: string } }).effect;
+      expect(effect?.status).toBe('timed-out');
+      expect(effect?.operationId).toBe('ai.FR-1.OP-01');
+      // A dropped resize must never masquerade as a built world.
+      expect(result.output).toBeUndefined();
+    });
+
+    it('reports a cancelled observation as an aborted step, never a built world', async () => {
+      const controller = new AbortController();
+      // Abort the moment the size batch is dispatched, so the observation that
+      // follows opens already-cancelled.
+      const batch = vi.fn().mockImplementation((commands: Array<{ command: string }>) => {
+        if (commands[0]?.command === 'update_transform') controller.abort();
+        return { success: true };
+      });
+      const observeEntity = vi.fn((id: string) => observedAt(id, [1, 1, 1]));
+      const ctx = makeCtx({
+        signal: controller.signal,
+        dispatchCommandBatch: batch,
+        observeEntity,
+      } as never);
+
+      const result = await worldBuildExecutor.execute({ entities: [GROUND] }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ABORTED');
+    });
   });
 });

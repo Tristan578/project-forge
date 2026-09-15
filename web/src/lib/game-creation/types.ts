@@ -11,6 +11,7 @@
 import { z } from 'zod';
 import type { GddScope } from '@/lib/config/enums';
 import type { EditorState } from '@/stores/editorStore';
+import type { CompletionMode } from '@/stores/slices/types';
 import type { Behavior } from './behaviorVocabulary';
 
 // ---------------------------------------------------------------------------
@@ -168,6 +169,22 @@ export interface OrchestratorGDD {
   feelDirective: FeelDirective;
   constraints: string[];
   projectType: '2d' | '3d';
+  /**
+   * The game's intentional completion semantics (#9901). Optional on the brief:
+   * absent means the classic `win` default, preserving every GDD authored before
+   * the field existed.
+   *
+   * NOT YET WIRED. Nothing in this slice reads this field off a GDD or copies it
+   * anywhere: `ExecutorContext` exposes no `gdd`, so `sceneCreateExecutor` — the
+   * only code that builds a scene's `SceneGraph` — structurally cannot read it.
+   * Once the child issue (#9998) adds a `gdd` reference to `ExecutorContext` and
+   * wires `scene_create` to read it, this WILL be propagated to
+   * `SceneGraph.completionMode` so the shared Play/verify validator gates
+   * winnability by the creator's choice rather than demanding a win condition for
+   * sandbox/endless/narrative games. The mode will be chosen explicitly (manual
+   * control or typed AI op), never inferred from entity names.
+   */
+  completionMode?: CompletionMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +383,20 @@ export interface ExecutorContext {
    * ids in as finished work would go unnoticed.
    */
   resolveStepOutputs: (executorName: string) => Record<string, unknown>[];
+  /**
+   * Reads the engine's REAL current view of one entity, correlated by id
+   * (#9899). Backed by `get_entity_details` -> `QUERY_ENTITY_DETAILS`
+   * (engine/src/bridge/query.rs), whose response the orchestrator caches. A call
+   * fires a fresh query AND returns the most recently observed snapshot, so
+   * `observeEngineEffect` polling it eventually reads the state the query
+   * produced — or `undefined` while the entity does not (yet) exist.
+   *
+   * OPTIONAL on purpose. A context without it (every existing unit test, and any
+   * WASM build wired before this field existed) keeps the legacy
+   * `waitForEngineFrame` path in the spawn/transform executors — confirmation is
+   * an upgrade, never a hard dependency that could strand a caller.
+   */
+  observeEntity?: (entityId: string) => ObservedEntity | undefined;
 }
 
 export interface ExecutorDefinition {
@@ -379,4 +410,60 @@ export interface ExecutorResult {
   success: boolean;
   output?: Record<string, unknown>;
   error?: OrchestratorStepError;
+}
+
+// ---------------------------------------------------------------------------
+// Confirmed engine effects (#9899, operation family ai.FR-1.OP-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * A snapshot of the engine's REAL view of one entity, correlated by id.
+ *
+ * This is what `get_entity_details` -> `QUERY_ENTITY_DETAILS` carries back
+ * (engine/src/bridge/query.rs). The engine emits this event ONLY when the
+ * entity exists, so a `readEntityObservation` miss (undefined) is itself the
+ * "does not exist yet" answer — there is no null-transform sentinel to
+ * disambiguate. `transform` is present whenever the observation arrived.
+ */
+export interface ObservedEntity {
+  entityId: string;
+  transform?: {
+    /** World-space translation, engine order [x, y, z]. */
+    position: [number, number, number];
+    /** Euler degrees, matching the `QUERY_ENTITY_DETAILS` payload. */
+    rotation: [number, number, number];
+    scale: [number, number, number];
+  };
+}
+
+/**
+ * The four terminal verdicts of a confirmed spawn/transform (#9899).
+ *
+ *  - `applied`    — the engine was queried AFTER the deferred command ran and
+ *                   the observed state satisfies the intended effect. This is
+ *                   the ONLY status that proves application; neither a void
+ *                   dispatcher return nor two animation frames earns it.
+ *  - `rejected`   — the dispatcher refused the command outright (`sendCommands`
+ *                   returned false). No observation is attempted.
+ *  - `timed-out`  — the command was accepted but the observation deadline
+ *                   (5 s) expired without the engine ever showing the effect.
+ *  - `cancelled`  — the caller aborted while the observation was still open.
+ */
+export type EngineEffectStatus = 'applied' | 'rejected' | 'timed-out' | 'cancelled';
+
+/**
+ * A typed, correlated result for one spawn or transform operation.
+ *
+ * `operationId` + `entityId` are the correlation keys the whole slice is built
+ * around: a result can always be traced back to the request that produced it,
+ * and a stale/cancelled observation carries its OWN operationId so it can never
+ * be mistaken for the completion of a newer operation retried under a different
+ * id (the #9899 "boundary and recovery" scenario).
+ */
+export interface EngineEffectResult {
+  status: EngineEffectStatus;
+  operationId: string;
+  entityId: string;
+  /** Present only for `applied` — the observed engine state that satisfied it. */
+  observed?: ObservedEntity;
 }

@@ -46,10 +46,32 @@ export const BYOK_PROVIDERS = [
   'meshy',
   'hyper3d',
   'elevenlabs',
-  'suno',
 ] as const;
 
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
+
+/**
+ * Providers a user can no longer ADD a key for, but may still hold a stored key
+ * for from before they were retired. They are rejected by the key-issuing path
+ * (PUT `/api/keys/[provider]`) yet must stay REMOVABLE (DELETE) so a user can
+ * clear a stale credential — see `ApiKeyManager`'s "no longer offered" row.
+ *
+ * Suno is the live case (#9522): its music capability moved to ElevenLabs and
+ * it has no public API, so no new Suno key can be minted, but historical keys
+ * must still be deletable.
+ */
+export const RETIRED_BYOK_PROVIDERS = ['suno'] as const;
+
+export type RetiredByokProvider = (typeof RETIRED_BYOK_PROVIDERS)[number];
+
+/**
+ * Providers the DELETE key path accepts: every currently-addable provider plus
+ * every retired one. A stored key for any of these can be removed.
+ */
+export const REMOVABLE_BYOK_PROVIDERS = [
+  ...BYOK_PROVIDERS,
+  ...RETIRED_BYOK_PROVIDERS,
+] as const;
 
 /**
  * Whether a user could add this provider's key themselves — the single
@@ -112,7 +134,7 @@ export const DIRECT_CAPABILITY_PROVIDER: Record<ProviderCapability, ProviderName
   texture: 'meshy',
   sfx: 'elevenlabs',
   voice: 'elevenlabs',
-  music: 'suno',
+  music: 'elevenlabs',
   image: 'openai',
   sprite: 'replicate',
   bg_removal: 'removebg',
@@ -142,7 +164,7 @@ export const DB_PROVIDER: Record<DbCapability, Provider> = {
   texture: 'meshy',
   sfx: 'elevenlabs',
   voice: 'elevenlabs',
-  music: 'suno',
+  music: 'elevenlabs',
   image: 'openai',
   sprite: 'replicate',
   bg_removal: 'removebg',
@@ -177,16 +199,15 @@ export const BACKEND_TO_PROVIDER: Partial<Record<BackendId, ProviderName>> = {
  *
  * This lived in three places before PF-1054, and the copy in
  * `lib/monitoring/healthChecks.ts` had drifted to a set of names
- * (`MESHY_API_KEY`, `ELEVENLABS_API_KEY`, `SUNO_API_KEY`) that nothing else in
- * the tree reads and no environment sets — so the public status page reported a
- * permanent "AI Assistant: outage" against a working install.
+ * (`MESHY_API_KEY`, `ELEVENLABS_API_KEY`) that nothing else in the tree reads
+ * and no environment sets — so the public status page reported a permanent
+ * "AI Assistant: outage" against a working install.
  */
 export const PLATFORM_KEY_ENV = {
   anthropic: 'ANTHROPIC_API_KEY',
   meshy: 'PLATFORM_MESHY_KEY',
   hyper3d: 'PLATFORM_HYPER3D_KEY',
   elevenlabs: 'PLATFORM_ELEVENLABS_KEY',
-  suno: 'PLATFORM_SUNO_KEY',
   openai: 'PLATFORM_OPENAI_KEY',
   replicate: 'PLATFORM_REPLICATE_KEY',
   removebg: 'PLATFORM_REMOVEBG_KEY',
@@ -209,8 +230,10 @@ export function getPlatformKeyEnvVar(provider: string): string | null {
  * Where a human mints each provider's platform key. `null` means the provider
  * has NO self-serve console — its key cannot be obtained by anyone, so every
  * capability it serves must be declared in `UNAVAILABLE_CAPABILITIES` (pinned
- * by `capabilityAvailability.test.ts`, per #9522). Suno is the live case: no
- * public API as of 2026-08, so `PLATFORM_SUNO_KEY` can never exist.
+ * by `capabilityAvailability.test.ts`, per #9522). Every current provider has a
+ * console; the guard stays in place so the next unobtainable provider fails CI
+ * instead of shipping. (Suno was the historical `null` case; #9522 moved its
+ * `music` capability to ElevenLabs and dropped `PLATFORM_SUNO_KEY` entirely.)
  *
  * URLs were confirmed against each vendor's current documentation for #9117;
  * the OpenAI path is the standard console location (platform.openai.com
@@ -221,7 +244,6 @@ export const PLATFORM_KEY_CONSOLE_URL: Record<PlatformKeyProvider, string | null
   meshy: 'https://www.meshy.ai/settings/api',
   hyper3d: 'https://developer.hyper3d.ai/',
   elevenlabs: 'https://elevenlabs.io/app/settings/api-keys',
-  suno: null,
   openai: 'https://platform.openai.com/api-keys',
   replicate: 'https://replicate.com/account/api-tokens',
   removebg: 'https://www.remove.bg/dashboard#api-key',
@@ -266,11 +288,11 @@ export const GATEWAY_CAPABILITIES = ['chat', 'embedding', 'image'] as const sati
  * one real artifact has been generated through it (the #9117 done-when).
  */
 export const UNAVAILABLE_CAPABILITIES: Partial<Record<ProviderCapability, CapabilityUnavailability>> = {
-  music: {
-    reason:
-      'Music generation is not available yet. Upload your own track from the Asset panel, or generate a sound effect instead.',
-    issue: 9522,
-  },
+  // `music` was declared unavailable while it routed to Suno (no public API).
+  // #9522 moved it to ElevenLabs — the same provider that already serves `sfx`
+  // and `voice` — so it is offered again whenever PLATFORM_ELEVENLABS_KEY is
+  // set. The map is intentionally empty; the machinery around it stays wired so
+  // the next unprovisionable capability can be declared here in one line.
 };
 
 /** The unavailability record for a capability, or null when it is offered. */
@@ -514,7 +536,7 @@ export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> 
   texture: [PLATFORM_KEY_ENV.meshy],
   sfx: [PLATFORM_KEY_ENV.elevenlabs],
   voice: [PLATFORM_KEY_ENV.elevenlabs],
-  music: [PLATFORM_KEY_ENV.suno],
+  music: [PLATFORM_KEY_ENV.elevenlabs],
   // Independent sprite paths: OpenAI or Replicate.
   sprite: CAPABILITY_REQUIRED_PROVIDERS.sprite!.map((p) => PLATFORM_KEY_ENV[p]),
   bg_removal: [PLATFORM_KEY_ENV.removebg],
