@@ -8,11 +8,11 @@ relatedFiles:
 
 # Known Limitations & Workarounds
 
-SpawnForge is feature-complete for most game creation workflows. This guide covers the few areas with genuine constraints and how to work around them.
+SpawnForge has implemented feature areas with different levels of verification and completeness. This guide describes known gaps and available workarounds.
 
-## What's Fully Working
+## Implemented feature areas
 
-These features are complete, tested, and production-ready:
+These areas have implementations; the capability matrix records their current workflow status.
 
 - **2D Engine**: Sprites, tilemaps, 2D physics (Rapier2D), joints, sprite animation, camera
 - **3D Engine**: PBR materials, skeletal animation, physics (Rapier3D), particles, terrain, CSG, LOD

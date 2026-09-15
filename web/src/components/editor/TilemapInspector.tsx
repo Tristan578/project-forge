@@ -326,6 +326,7 @@ export function TilemapInspector() {
             <div>
               <label htmlFor={`${shapeFieldId}-layer`} className="text-xs">Layer</label>
               <Select
+                className="min-h-[44px] sm:min-h-0"
                 id={`${shapeFieldId}-layer`}
                 value={shapeLayer}
                 onChange={(event) => setShapeLayer(Number(event.target.value))}
@@ -338,6 +339,7 @@ export function TilemapInspector() {
             <div>
               <label htmlFor={`${shapeFieldId}-x`} className="text-xs">X</label>
               <Input
+                className="min-h-[44px] sm:min-h-0"
                 id={`${shapeFieldId}-x`}
                 type="number"
                 value={shapeX}
@@ -350,6 +352,7 @@ export function TilemapInspector() {
             <div>
               <label htmlFor={`${shapeFieldId}-y`} className="text-xs">Y</label>
               <Input
+                className="min-h-[44px] sm:min-h-0"
                 id={`${shapeFieldId}-y`}
                 type="number"
                 value={shapeY}
@@ -361,6 +364,7 @@ export function TilemapInspector() {
             </div>
           </div>
           <Select
+            className="min-h-[44px] sm:min-h-0"
             aria-label="Collision shape"
             value={shapeValue}
             onChange={(event) => {
