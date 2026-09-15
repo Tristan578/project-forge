@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 358 MCP commands available in SpawnForge.
+Reference for all 358 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -4729,13 +4729,13 @@ Scope: `scene:read` | Token cost: 0
 
 ### `create_prefab_instance`
 
-Create a linked instance of a source prefab with optional per-field overrides (inherited fields follow the source)
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `prefabId` | string | Yes | Source prefab ID to link to |
-| `overrides` | object | No | Snapshot fields this instance overrides; everything else is inherited live from the source |
-| `entityId` | string | No | Scene entity to bind the instance to (optional) |
+| `prefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `overrides` | object | No | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `entityId` | string | No | Reserved for future linked prefab editing; this command currently makes no changes. |
 
 **Example:**
 ```json
@@ -4753,13 +4753,13 @@ Scope: `scene:write` | Token cost: 0
 
 ### `nest_prefab`
 
-Nest a child prefab inside a parent prefab; rejects a cyclic reference with the offending chain and no mutation
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `parentPrefabId` | string | Yes | User prefab to nest into |
-| `childPrefabId` | string | Yes | Prefab to nest as a linked child |
-| `overrides` | object | No | Per-field overrides for the nested child (optional) |
+| `parentPrefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `childPrefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `overrides` | object | No | Reserved for future linked prefab editing; this command currently makes no changes. |
 
 **Example:**
 ```json
@@ -4778,11 +4778,11 @@ Scope: `scene:write` | Token cost: 0
 
 ### `apply_prefab_to_instances`
 
-Propagate a source prefab onto all of its linked instances; non-overridden fields follow the source, overridden fields are preserved
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `prefabId` | string | Yes | Source prefab whose instances to update |
+| `prefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
 
 **Example:**
 ```json
@@ -4800,7 +4800,7 @@ Scope: `scene:write` | Token cost: 0
 
 ### `list_prefab_instances`
 
-List the linked instances of a source prefab with the fields each one overrides
+Inspect saved editor link metadata for a prefab by ID or name, including overridden field names. Records do not verify scene entity placement or propagation. This read is not advertised to the in-app chat model.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

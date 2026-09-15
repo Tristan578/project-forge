@@ -11,7 +11,7 @@ import { exportAsZip, type ZipExportOptions } from './zipExporter';
 import type { LoadingScreenConfig } from './loadingScreen';
 import type { ExportFormat, ExportPreset } from './presets';
 import type { CompressionConfig } from './textureCompression';
-import { stagePrefabInstancesForExport, discardStagedPrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
+import { loadPrefabInstances, stagePrefabInstancesForExport, discardStagedPrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
 
 export interface ExportOptions {
   title: string;
@@ -129,10 +129,10 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
       clearTimeout(timeoutId);
       window.removeEventListener(SCENE_EXPORTED_EVENT, handler);
       signal?.removeEventListener('abort', onAbort);
-      // The success path already consumed this via `takeStagedPrefabInstancesForExport`
+      // The success path already consumed this via `takeStagedPrefabDataForExport`
       // inside the SCENE_EXPORTED handler (a no-op discard here then); a
       // timeout/abort/pre-aborted exit never reaches that handler, so without
-      // this the empty snapshot staged below would sit in the map for the rest
+      // this the snapshot staged below would sit in the map for the rest
       // of the page's life (scene.FR-1 N1 — bounded further by the map's own
       // eviction cap, this closes the leak at its actual source).
       discardStagedPrefabInstancesForExport(requestId);
@@ -145,6 +145,10 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
       cleanup();
       try {
         const sceneData = JSON.parse(customEvent.detail.json);
+        // The shared export event also feeds autosave and recovery. Strip
+        // editor metadata only from this consumer's parsed game-bundle copy.
+        delete sceneData.prefabInstances;
+        delete sceneData.prefabDefinitions;
         const uiData = injectUIData(sceneData);
         resolve(uiData);
       } catch (err) {
@@ -179,22 +183,16 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
       ));
     }, 5000);
 
-    // Explicitly stage an EMPTY prefab-instance snapshot for this request
-    // (scene.FR-1 N1). The shared `SCENE_EXPORTED` fold in `transformEvents.ts`
-    // folds instances/definitions into every export by default, which is right
-    // for a `.forge` project save but wrong here: this scene JSON gets embedded
-    // verbatim into the PLAYED game bundle (`sceneData` below), and the prefab
-    // instance registry is an editor-only override-tracking concern the
-    // runtime never resolves (see prefabInstance.ts's "OUT OF SCOPE" note) —
-    // folding it in would bloat every exported game with the user's whole
-    // linked-prefab library for no runtime benefit. Staging `[]` (rather than
-    // leaving this requestId unstaged) opts out explicitly instead of relying
-    // on the live registry happening to be empty.
-    stagePrefabInstancesForExport(requestId, []);
-
-    // Trigger export_scene command
-    const store = useEditorStore.getState();
-    store.saveScene(requestId);
+    // Recovery and autosave consume this same response. Preserve the complete
+    // editor snapshot there; the handler above removes it only from the game.
+    try {
+      stagePrefabInstancesForExport(requestId, loadPrefabInstances());
+      const store = useEditorStore.getState();
+      store.saveScene(requestId);
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
   });
 }
 

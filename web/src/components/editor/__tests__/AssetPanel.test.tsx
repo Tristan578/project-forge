@@ -43,7 +43,7 @@ vi.mock('../MaterialLibraryPanel', () => ({
   MaterialLibraryPanel: () => <div data-testid="material-library">Material Library</div>,
 }));
 
-vi.mock('../PrefabLibraryPanel', () => ({
+vi.mock('@/components/editor/PrefabLibraryPanel', () => ({
   PrefabLibraryPanel: () => <div data-testid="prefab-library">Prefab Library</div>,
 }));
 

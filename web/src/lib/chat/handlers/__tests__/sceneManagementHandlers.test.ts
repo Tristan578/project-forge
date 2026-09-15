@@ -22,7 +22,8 @@ const mockSetStartScene = vi.fn();
 const mockGetSceneByName = vi.fn();
 const mockSaveCurrentSceneData = vi.fn();
 
-vi.mock('@/lib/scenes/sceneManager', () => ({
+vi.mock('@/lib/scenes/sceneManager', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/scenes/sceneManager')>()),
   loadProjectScenes: (...args: unknown[]) => mockLoadProjectScenes(...args),
   saveProjectScenes: (...args: unknown[]) => mockSaveProjectScenes(...args),
   createScene: (...args: unknown[]) => mockCreateScene(...args),
@@ -58,7 +59,8 @@ vi.mock('@/lib/scenes/captureScene', () => ({
 // non-empty registry; default empty keeps every other scene test unchanged
 // (the fold no-ops on an empty registry, exactly as in production).
 const mockLoadPrefabInstances = vi.fn();
-vi.mock('@/lib/prefabs/prefabStore', () => ({
+vi.mock('@/lib/prefabs/prefabStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/prefabs/prefabStore')>()),
   loadPrefabInstances: (...args: unknown[]) => mockLoadPrefabInstances(...args),
 }));
 
@@ -139,6 +141,12 @@ describe('export_scene', () => {
 // ---------------------------------------------------------------------------
 
 describe('load_scene', () => {
+  it('reports rejected prefab validation or engine loading instead of success', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json: '{}' }, { loadScene: vi.fn(() => false) });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not loaded');
+  });
+
   it('calls loadScene with provided json and returns success message', async () => {
     const json = JSON.stringify({ entities: [] });
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json });
@@ -159,6 +167,12 @@ describe('load_scene', () => {
 // ---------------------------------------------------------------------------
 
 describe('new_scene', () => {
+  it('reports a rejected engine transition instead of success', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'new_scene', {}, { newScene: vi.fn(() => false) });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('unchanged');
+  });
+
   it('calls newScene on the store and returns success message', async () => {
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'new_scene');
     expect(result.success).toBe(true);

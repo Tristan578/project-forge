@@ -15,6 +15,7 @@ import { loadProjectScenes, saveProjectScenes, readPrefabInstances } from '@/lib
 import { SCENE_EXPORTED_EVENT, SCENE_CAPTURE_TIMEOUT_MS } from '@/lib/scenes/captureScene';
 import {
   loadPrefabInstances,
+  savePrefabsToStorage,
   savePrefabInstancesToStorage,
   type PrefabInstance,
 } from '@/lib/prefabs/prefabStore';
@@ -124,13 +125,15 @@ describe('sceneSlice scene persistence', () => {
     error.mockRestore();
   });
 
-  it('still switches when no engine is connected — there is no live scene to lose', async () => {
+  it('keeps the current scene selected when no engine can accept the switch', async () => {
     store.getState().createNewScene('Second');
     const target = store.getState().scenes.find((s) => s.name === 'Second');
+    const before = loadProjectScenes();
 
     await store.getState().switchScene(target!.id);
 
-    expect(loadProjectScenes().activeSceneId).toBe(target!.id);
+    expect(loadProjectScenes()).toEqual(before);
+    expect(store.getState().activeSceneId).toBe(before.activeSceneId);
   });
 
   // scene.FR-1 N1: linked prefab instances must survive save/reopen with zero
@@ -144,6 +147,45 @@ describe('sceneSlice scene persistence', () => {
       overrides: { name: 'Overridden', entityType: 'sphere' },
       entityId: 'ent_1',
     };
+
+    beforeEach(() => {
+      // A portable saved link must have a real source definition.
+      savePrefabsToStorage([{
+        id: 'prefab_src', name: 'Source', category: 'test', description: '',
+        createdAt: '2026-09-15T00:00:00Z', updatedAt: '2026-09-15T00:00:00Z',
+        snapshot: { entityType: 'cube', name: 'Source', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      }]);
+    });
+
+    it('preserves links when switching to an unsaved scene is rejected', async () => {
+      const { dispatch } = answeringDispatcher();
+      setSceneDispatcher((command, payload) => {
+        dispatch(command, payload);
+        if (command === 'new_scene') return { success: false, error: 'Rejected' };
+      });
+      store.getState().createNewScene('Unsaved');
+      const target = store.getState().scenes.find((scene) => scene.name === 'Unsaved')!;
+      const project = loadProjectScenes();
+      project.scenes.find((scene) => scene.id === target.id)!.data = null;
+      saveProjectScenes(project);
+      savePrefabInstancesToStorage([INSTANCE]);
+
+      await store.getState().switchScene(target.id);
+
+      expect(loadPrefabInstances()).toEqual([INSTANCE]);
+      expect(loadProjectScenes().activeSceneId).toBe(project.activeSceneId);
+      expect(store.getState().activeSceneId).not.toBe(target.id);
+    });
+
+    it('does not restore an instance whose source was explicitly deleted', () => {
+      savePrefabInstancesToStorage([INSTANCE]);
+      store.getState().loadScene(JSON.stringify({ ...LIVE_SCENE, prefabInstances: [{ ...INSTANCE, prefabId: 'deleted' }] }));
+      // With no dispatcher there is no transition, so the old registry remains.
+      expect(loadPrefabInstances()).toEqual([INSTANCE]);
+      setSceneDispatcher(() => ({ success: true }));
+      store.getState().loadScene(JSON.stringify({ ...LIVE_SCENE, prefabInstances: [{ ...INSTANCE, prefabId: 'deleted' }] }));
+      expect(loadPrefabInstances()).toEqual([]);
+    });
 
     it('writes the live registry into the outgoing scene and restores it on return', async () => {
       const { dispatch } = answeringDispatcher();

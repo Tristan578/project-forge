@@ -16,11 +16,11 @@ import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
 import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
 import {
   loadPrefabInstances,
-  takeStagedPrefabInstancesForExport,
+  takeStagedPrefabDataForExport,
+  type PrefabExportSnapshot,
   collectTransitivePrefabDefinitions,
 } from '@/lib/prefabs/prefabStore';
 import { writePrefabInstances, writePrefabDefinitions, type SceneFileData } from '@/lib/scenes/sceneManager';
-import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
 
@@ -32,11 +32,11 @@ const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
  * a fold that could not run, matching `readPrefabInstances`'s own fail-soft
  * posture toward malformed data.
  */
-function foldPrefabDataIntoSceneJson(json: string, instances: PrefabInstance[]): string {
+function foldPrefabDataIntoSceneJson(json: string, { instances, definitions }: PrefabExportSnapshot): string {
   try {
     const data = JSON.parse(json) as SceneFileData;
     const withInstances = writePrefabInstances(data, instances);
-    const withDefinitions = writePrefabDefinitions(withInstances, collectTransitivePrefabDefinitions(instances));
+    const withDefinitions = writePrefabDefinitions(withInstances, definitions);
     return JSON.stringify(withDefinitions);
   } catch {
     return json;
@@ -220,14 +220,15 @@ export function handleTransformEvent(
       // sees the JSON (scene.FR-1 N1). The engine export knows nothing about
       // linked instances — they live in the prefab store, not the ECS — so
       // recovering any of these consumers (autosave, panic recovery) used to
-      // silently drop every instance and override. `takeStagedPrefabInstancesForExport`
+      // silently drop every instance and override. `takeStagedPrefabDataForExport`
       // prefers the registry as it stood when THIS export was requested over
       // the live one: a save in flight while the user loads a different scene
       // must fold the instances that were active when it was requested, not
       // whatever the registry now holds.
-      const stagedInstances = takeStagedPrefabInstancesForExport(requestId);
-      const instances = stagedInstances ?? loadPrefabInstances();
-      const json = instances.length ? foldPrefabDataIntoSceneJson(rawJson, instances) : rawJson;
+      const staged = takeStagedPrefabDataForExport(requestId);
+      const instances = staged?.instances ?? loadPrefabInstances();
+      const snapshot = staged ?? { instances, definitions: collectTransitivePrefabDefinitions(instances) };
+      const json = instances.length ? foldPrefabDataIntoSceneJson(rawJson, snapshot) : rawJson;
 
       // Cache for periodic IndexedDB auto-save
       setLastExportedScene(json, name);

@@ -128,6 +128,10 @@ describe('sceneSlice', () => {
         JSON.stringify({
           entities: [],
           prefabInstances: [{ instanceId: 'pfi_new', prefabId: 'new', overrides: {} }],
+          prefabDefinitions: [{
+            id: 'new', name: 'New', category: 'test', description: '',
+            snapshot: { entityType: 'cube', name: 'New', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+          }],
         })
       );
       expect(loadPrefabInstances()).toEqual([{ instanceId: 'pfi_new', prefabId: 'new', overrides: {} }]);
@@ -199,6 +203,22 @@ describe('sceneSlice', () => {
       );
 
       expect(getPrefab('prefab_rejected')).toBeUndefined();
+    });
+
+    it('rejects invalid dependency graphs before dispatch without replacing existing prefab state', () => {
+      const previous = [{ instanceId: 'old-link', prefabId: 'old-source', overrides: { name: 'Kept' } }];
+      savePrefabInstancesToStorage(previous);
+      const dispatcher = vi.fn();
+      setSceneDispatcher(dispatcher);
+      const definition = {
+        id: 'cycle', name: 'Cycle', category: 'test', description: '',
+        snapshot: { entityType: 'cube', name: 'Cycle', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+        children: [{ instanceId: 'edge', prefabId: 'cycle' }],
+      };
+      expect(store.getState().loadScene(JSON.stringify({ entities: [], prefabDefinitions: [definition] }))).toBe(false);
+      expect(dispatcher).not.toHaveBeenCalled();
+      expect(loadPrefabInstances()).toEqual(previous);
+      expect(getPrefab('cycle')).toBeUndefined();
     });
 
     it('newScene restores the PREVIOUS registry when the engine rejects new_scene', () => {

@@ -1,35 +1,7 @@
 /**
- * Nested / linked prefab instances with per-field override tracking.
- *
- * DESIGN (scene.FR-1.OP-01 / OP-02 / OP-03 / OP-04)
- * ------------------------------------------------
- * A `Prefab` (see `prefabStore.ts`) is a single flat `PrefabSnapshot`. A
- * `PrefabInstance` is a *linked* reference to that source prefab: it carries the
- * source `prefabId`, a stable `instanceId`, and an `overrides` map recording the
- * snapshot fields the instance has deliberately diverged on. Everything NOT in
- * `overrides` is inherited live from the source prefab.
- *
- * Resolution is therefore a field-level merge computed on read
- * (`resolveInstance`): start from the source snapshot, then let each overridden
- * field win. This is what makes propagation automatic — when the source prefab
- * changes, every instance's UN-overridden fields follow it on the next resolve,
- * while overridden fields stay put (`applyPrefabUpdate`). There is no second
- * copy of the inherited data to drift out of sync.
- *
- * Nesting: a prefab may contain child instances of OTHER prefabs
- * (`PrefabChildRef`, held on `Prefab.children` in the store). That makes the
- * prefab graph a DAG, and a cycle in it (A contains B contains A) would make
- * resolution non-terminating, so `detectCycle` walks the graph to arbitrary
- * depth and rejects with the offending chain BEFORE any mutation is committed.
- *
- * Everything in this module is PURE: no `localStorage`, no engine, no mutation
- * of its inputs. The persistence + wiring live in `prefabStore.ts`; the manual
- * UI control and the equivalent AI command both call through these same
- * functions so the two entry points share one validated contract (F2).
- *
- * OUT OF SCOPE for this slice (tracked on the child issue): variant management
- * UI, selective per-field apply/revert UI, the override-inspection panel, and
- * export/runtime prefab resolution.
+ * Pure data model for saved prefab links, override resolution, and nesting
+ * graph validation. Resolution computes snapshots only; it does not create or
+ * update engine entities. Linked placement and propagation remain on #9811.
  */
 
 import type { Prefab, PrefabSnapshot } from './prefabStore';
@@ -87,9 +59,8 @@ function generateInstanceId(): string {
 /**
  * Bound on an override map's serialized size (bytes). Overrides reach cloning
  * (`resolveInstance`) and `localStorage` serialization on every instance
- * create/save, so an unbounded value — from a crafted `.forge` scene file or a
- * public `nest_prefab`/`create_prefab_instance` chat command — is a resource-
- * exhaustion vector (persistent quota pressure, ever-larger clone cost). 64KiB
+ * create/save, so an unbounded value from a crafted `.forge` scene file is a
+ * resource-exhaustion vector (persistent quota pressure, growing clone cost). 64KiB
  * comfortably covers a legitimate multi-field override (transform + material +
  * a short script snippet) while blocking pathological payloads.
  */
@@ -175,7 +146,7 @@ export function sanitizeInstanceRecord(raw: unknown): PrefabInstance | null {
 }
 
 /**
- * Create a new linked instance of a source prefab (OP-01).
+ * Create a link metadata record for a source prefab; no engine entity is spawned.
  *
  * @param overrides Optional initial per-field overrides. Unknown keys are
  *   dropped so a caller cannot seed an instance with fields that never resolve.
@@ -203,15 +174,16 @@ export function resolveInstance(instance: PrefabInstance, prefab: Prefab): Prefa
   const base: PrefabSnapshot = structuredCloneCompat(prefab.snapshot);
   for (const field of SNAPSHOT_FIELDS) {
     if (Object.hasOwn(instance.overrides, field) && instance.overrides[field] !== undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- override values are field-typed at the call sites that set them
-      (base as any)[field] = structuredCloneCompat(instance.overrides[field]);
+      // Assign only whitelisted own fields; this resolves saved metadata and
+      // does not validate component values for a future engine transaction.
+      Object.assign(base, { [field]: structuredCloneCompat(instance.overrides[field]) });
     }
   }
   return base;
 }
 
 /**
- * Propagate a (possibly updated) source prefab onto an instance (OP-04).
+ * Compute the snapshot a source update would produce for a link record.
  *
  * Returns the instance UNCHANGED (its override set is the durable state) plus
  * the freshly resolved snapshot, so a caller can materialize the propagated
@@ -268,18 +240,29 @@ export function detectCycle(
   rootPrefabId: string,
   getChildPrefabIds: (prefabId: string) => string[],
 ): CycleCheckResult {
-  const walk = (prefabId: string, path: string[]): CycleCheckResult => {
-    if (path.includes(prefabId)) {
-      return { hasCycle: true, chain: [...path, prefabId] };
+  // Iterative DFS visits each node/edge once, even when a DAG has many
+  // overlapping paths. An explicit stack also accepts deeply nested input
+  // without depending on the JavaScript call-stack limit.
+  const visited = new Set<string>();
+  const visiting = new Set<string>([rootPrefabId]);
+  const stack = [{ id: rootPrefabId, children: getChildPrefabIds(rootPrefabId), next: 0 }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    if (frame.next === frame.children.length) {
+      visiting.delete(frame.id);
+      visited.add(frame.id);
+      stack.pop();
+      continue;
     }
-    const nextPath = [...path, prefabId];
-    for (const child of getChildPrefabIds(prefabId)) {
-      const result = walk(child, nextPath);
-      if (result.hasCycle) return result;
+    const child = frame.children[frame.next++];
+    if (visiting.has(child)) {
+      return { hasCycle: true, chain: [...stack.map((entry) => entry.id), child] };
     }
-    return { hasCycle: false, chain: [] };
-  };
-  return walk(rootPrefabId, []);
+    if (visited.has(child)) continue;
+    visiting.add(child);
+    stack.push({ id: child, children: getChildPrefabIds(child), next: 0 });
+  }
+  return { hasCycle: false, chain: [] };
 }
 
 /**
@@ -296,8 +279,7 @@ export function wouldCreateCycle(
     const base = getChildPrefabIds(prefabId);
     return prefabId === parentPrefabId ? [...base, childPrefabId] : base;
   };
-  // Start the walk from the child: a cycle exists iff following the child's
-  // descendants (through the proposed edge) leads back to the parent.
+  // Check the parent's reachable graph including the proposed edge.
   return detectCycle(parentPrefabId, augmented);
 }
 

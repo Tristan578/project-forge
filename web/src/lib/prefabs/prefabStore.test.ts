@@ -503,16 +503,15 @@ describe('importPrefab preserves nested children (export/reimport round-trip)', 
     expect(getPrefab(imported!.id)?.children).toHaveLength(1);
   });
 
-  it('drops a malformed child entry rather than failing the whole import', () => {
+  it('rejects malformed children atomically instead of importing a partial prefab', () => {
     const json = JSON.stringify({
       name: 'HasBadChild',
       snapshot: mockSnapshot,
       children: [{ prefabId: 'ok_child' }, { notAPrefabId: true }, null, 'garbage'],
     });
     const imported = importPrefab(json);
-    expect(imported).toBeDefined();
-    expect(imported?.children).toHaveLength(1);
-    expect(imported?.children?.[0].prefabId).toBe('ok_child');
+    expect(imported).toBeNull();
+    expect(loadPrefabs()).toEqual([]);
   });
 
   it('imports a prefab with no children exactly as before (no regression)', () => {
@@ -736,8 +735,7 @@ describe('sanitizePrefabDefinition (scene.FR-1 N1 SEC — structural validation)
       children: [{ prefabId: 'child_1' }, { notAPrefabId: true }],
     };
     const sanitized = sanitizePrefabDefinition(def);
-    expect(sanitized?.children).toHaveLength(1);
-    expect(sanitized?.children?.[0].prefabId).toBe('child_1');
+    expect(sanitized).toBeNull();
   });
 });
 
