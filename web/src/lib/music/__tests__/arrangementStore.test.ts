@@ -291,6 +291,19 @@ describe('undo / redo (music.FR-2 — required for OP-01/OP-02)', () => {
     expect(s().past.length).toBe(undoDepthBefore);
   });
 
+  it('records no history entry for setTrackMuted / renameTrack called with the current value', () => {
+    const trackId = s().addTrack('Lead');
+    s().setTrackMuted(trackId, true);
+    const undoDepthAfterRealMutes = s().past.length;
+
+    s().setTrackMuted(trackId, true); // already true — no-op
+    expect(s().past.length).toBe(undoDepthAfterRealMutes);
+
+    s().renameTrack(trackId, 'Lead'); // same name (after trim) — no-op
+    expect(s().past.length).toBe(undoDepthAfterRealMutes);
+    expect(s().canRedo()).toBe(false);
+  });
+
   it('records no history entry for moveClip with an invalid target track and an unchanged offset', () => {
     const trackId = s().addTrack();
     const clipId = s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 })!;

@@ -253,7 +253,8 @@ export const createArrangementSlice: StateCreator<ArrangementSlice, [], [], Arra
       const trimmed = name.trim();
       if (!trimmed) return;
       const s = get();
-      if (!s.arrangement.tracks.some((t) => t.id === trackId)) return;
+      const track = s.arrangement.tracks.find((t) => t.id === trackId);
+      if (!track || track.name === trimmed) return;
       commit({
         ...s.arrangement,
         tracks: s.arrangement.tracks.map((t) => (t.id === trackId ? { ...t, name: trimmed } : t)),
@@ -262,7 +263,8 @@ export const createArrangementSlice: StateCreator<ArrangementSlice, [], [], Arra
 
     setTrackMuted: (trackId, muted) => {
       const s = get();
-      if (!s.arrangement.tracks.some((t) => t.id === trackId)) return;
+      const track = s.arrangement.tracks.find((t) => t.id === trackId);
+      if (!track || track.muted === muted) return;
       commit({
         ...s.arrangement,
         tracks: s.arrangement.tracks.map((t) => (t.id === trackId ? { ...t, muted } : t)),
