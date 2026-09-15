@@ -163,6 +163,14 @@ export function InitOverlay() {
   };
 
   const showFailedState = retryCount >= 3 || (!canRetry && (isTimedOut || error));
+  // The error InlineAlert below renders its own inline Retry button for the
+  // non-timeout error case. The bottom bar must not render a second one for
+  // that same case (#9726 review) — it still owns Retry for the timeout case,
+  // where TimeoutWarning has no button of its own.
+  const showInlineRetry = Boolean(error) && !isTimedOut && canRetry;
+  const showFooterRetry = canRetry && (isTimedOut || Boolean(error)) && !showInlineRetry;
+  const showFooterWebGL2Retry =
+    canRetry && (isTimedOut || Boolean(error)) && retryCount >= 1;
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950">
@@ -205,15 +213,17 @@ export function InitOverlay() {
                 {retryCount > 0 && ` | Attempt ${retryCount + 1}/3`}
               </div>
 
-              {canRetry && (isTimedOut || error) && (
+              {(showFooterRetry || showFooterWebGL2Retry) && (
                 <div className="flex gap-2">
-                  <button
-                    onClick={retry}
-                    className="rounded bg-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-600"
-                  >
-                    Retry
-                  </button>
-                  {retryCount >= 1 && (
+                  {showFooterRetry && (
+                    <button
+                      onClick={retry}
+                      className="rounded bg-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-600"
+                    >
+                      Retry
+                    </button>
+                  )}
+                  {showFooterWebGL2Retry && (
                     <button
                       onClick={() => {
                         setPreferredBackend('webgl2');

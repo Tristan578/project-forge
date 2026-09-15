@@ -241,11 +241,40 @@ describe('InitOverlay', () => {
       retry: mockRetry,
     });
     render(<InitOverlay />);
-    // Component renders Retry in both the error block and the bottom bar
     const retryButtons = screen.getAllByText('Retry');
     expect(retryButtons.length).toBeGreaterThanOrEqual(1);
     fireEvent.click(retryButtons[0]);
     expect(mockRetry).toHaveBeenCalled();
+  });
+
+  // Sentry finding on #9726: the error InlineAlert and the bottom bar each had
+  // their own condition for a Retry button, and both were true simultaneously
+  // for a non-timeout error with canRetry — two Retry buttons on screen for
+  // one action. Only the InlineAlert's inline Retry should render here; the
+  // bottom bar defers to it and only adds the WebGL2 fallback once retried.
+  it('shows exactly one Retry button in non-timeout error state when canRetry (#9726)', () => {
+    vi.mocked(useEngineStatus).mockReturnValue({
+      ...baseStatus,
+      error: 'WebGPU context lost',
+      canRetry: true,
+      isTimedOut: false,
+      retryCount: 0,
+    });
+    render(<InitOverlay />);
+    expect(screen.getAllByText('Retry')).toHaveLength(1);
+  });
+
+  it('still shows exactly one Retry button after a non-timeout retry, alongside WebGL2 fallback (#9726)', () => {
+    vi.mocked(useEngineStatus).mockReturnValue({
+      ...baseStatus,
+      error: 'WebGPU context lost',
+      canRetry: true,
+      isTimedOut: false,
+      retryCount: 1,
+    });
+    render(<InitOverlay />);
+    expect(screen.getAllByText('Retry')).toHaveLength(1);
+    expect(screen.getByText('Try WebGL2 Mode')).toBeInTheDocument();
   });
 
   it('does not show Retry button in non-timeout error state when canRetry is false', () => {
