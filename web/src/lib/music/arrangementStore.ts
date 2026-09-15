@@ -112,7 +112,26 @@ export interface ArrangementSlice {
   hydrate: (arrangement: MusicArrangement | null) => void;
 }
 
-/** Update one clip in the arrangement via a mapping function. */
+/** Shallow field comparison — every `MusicClip` property is a primitive. */
+function clipsEqual(a: MusicClip, b: MusicClip): boolean {
+  return (
+    a.id === b.id &&
+    a.trackId === b.trackId &&
+    a.sourceUrl === b.sourceUrl &&
+    a.sourceDurationSeconds === b.sourceDurationSeconds &&
+    a.startOffset === b.startOffset &&
+    a.trimStart === b.trimStart &&
+    a.trimEnd === b.trimEnd &&
+    a.loopEnabled === b.loopEnabled &&
+    a.name === b.name
+  );
+}
+
+/** Update one clip in the arrangement via a mapping function. `changed` is set
+ *  only when `fn`'s result actually differs from the input — `fn` always
+ *  returns a fresh object (spread), so a no-op edit (e.g. `moveClip` with an
+ *  invalid target track and an unchanged offset) must not be mistaken for a
+ *  real mutation and pushed onto the undo stack. */
 function mapClip(
   arrangement: MusicArrangement,
   clipId: string,
@@ -121,8 +140,9 @@ function mapClip(
   let changed = false;
   const clips = arrangement.clips.map((clip) => {
     if (clip.id !== clipId) return clip;
-    changed = true;
-    return fn(clip);
+    const next = fn(clip);
+    if (!clipsEqual(clip, next)) changed = true;
+    return next;
   });
   return changed ? { ...arrangement, clips } : arrangement;
 }

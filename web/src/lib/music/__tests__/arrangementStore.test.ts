@@ -291,6 +291,23 @@ describe('undo / redo (music.FR-2 — required for OP-01/OP-02)', () => {
     expect(s().past.length).toBe(undoDepthBefore);
   });
 
+  it('records no history entry for moveClip with an invalid target track and an unchanged offset', () => {
+    const trackId = s().addTrack();
+    const clipId = s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 })!;
+    s().moveClip(clipId, 3); // real move: startOffset 0 -> 3
+    const undoDepthAfterRealMove = s().past.length;
+
+    // Same startOffset, unknown target track: `targetTrackValid` is false so
+    // the mapped clip is field-for-field identical to the original — this
+    // must not push a new undo entry (previously it always did, because
+    // mapClip's `changed` flag ignored whether fn's result actually differed).
+    s().moveClip(clipId, 3, 'ghost-track');
+    expect(s().past.length).toBe(undoDepthAfterRealMove);
+    expect(s().canRedo()).toBe(false);
+    expect(s().arrangement.clips[0].trackId).toBe(trackId);
+    expect(s().arrangement.clips[0].startOffset).toBe(3);
+  });
+
   it('hydrate resets history so undo cannot cross a project load', () => {
     s().addTrack();
     expect(s().canUndo()).toBe(true);

@@ -447,6 +447,23 @@ describe('audioHandlers — music arrangement (in-app AI parity)', () => {
     expect(arr().arrangement.clips[0].loopEnabled).toBe(true);
   });
 
+  it('arrangement_move_clip reports an unknown target track instead of silently no-op-ing', async () => {
+    const trackId = arr().addTrack();
+    const clipId = arr().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 20 })!;
+
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_move_clip', {
+      clipId,
+      startOffset: 4,
+      trackId: 'ghost-track',
+    });
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('track not found'),
+    });
+    // The clip must be untouched — no silent partial move.
+    expect(arr().arrangement.clips[0]).toMatchObject({ trackId, startOffset: 0 });
+  });
+
   // Each of the three clip-mutating handlers guards on the clip existing before
   // touching the store. Without a test per handler, a regression that silently
   // no-ops (or throws) on an unknown clipId would pass the suite — the mutate

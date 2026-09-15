@@ -226,6 +226,9 @@ export const audioHandlers: Record<string, ToolHandler> = {
     if (!store.arrangement.clips.some((c) => c.id === p.data.clipId)) {
       return { success: false, error: `Arrangement clip not found: ${p.data.clipId}` };
     }
+    if (p.data.trackId !== undefined && !store.arrangement.tracks.some((t) => t.id === p.data.trackId)) {
+      return { success: false, error: `Arrangement track not found: ${p.data.trackId}` };
+    }
     store.moveClip(p.data.clipId, p.data.startOffset, p.data.trackId);
     return { success: true, result: { message: `Moved clip ${p.data.clipId}.` } };
   },
