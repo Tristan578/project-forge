@@ -47,7 +47,10 @@ interface ClipNumberFieldProps {
   unit?: string;
   invalid?: boolean;
   disabled?: boolean;
-  onCommit: (v: number) => void;
+  /** Returns whether the edit was accepted, so the field knows whether a
+   * revert is needed (see `commit` below) instead of guessing from a stale
+   * closure. */
+  onCommit: (v: number) => boolean;
 }
 
 function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invalid, disabled, onCommit }: ClipNumberFieldProps) {
@@ -76,11 +79,16 @@ function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invali
   const commit = useCallback(() => {
     if (!dirtyRef.current || disabled) return;
     dirtyRef.current = false;
-    onCommit(parseFloat(text));
-    // On reject the committed `value` is unchanged and the effect above does not
-    // fire, so drop the rejected intermediate text back to the last committed
-    // value here; on accept the effect refreshes it to the new value.
-    setText(format(value));
+    const accepted = onCommit(parseFloat(text));
+    // On reject, `value` is unchanged and the effect above never fires (its
+    // guard is keyed off `value` changing), so drop the rejected intermediate
+    // text back to the last committed value here — `value` is still current
+    // in that case, unlike on accept. On accept, `value` in this closure is
+    // stale (the parent's state update from `onCommit` has not re-rendered
+    // this component yet): formatting it here would flash the OLD value for a
+    // frame before the effect corrects it once the new `value` prop arrives.
+    // Leaving `text` alone lets the effect apply the new value exactly once.
+    if (!accepted) setText(format(value));
   }, [onCommit, text, value, disabled, format]);
 
   return (
@@ -218,7 +226,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
     };
   }, [asset, assetId]);
 
-  const apply = useCallback((result: CommandResult) => {
+  const apply = useCallback((result: CommandResult): boolean => {
     if (result.ok) {
       historyRef.current.push(doc, result.data);
       setDoc(result.data);
@@ -229,6 +237,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
     } else {
       setErrors(result.errors);
     }
+    return result.ok;
   }, [doc]);
 
   const onUndo = useCallback(() => {

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Profiler } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ClipEditor } from '../ClipEditor';
@@ -129,6 +130,36 @@ describe('ClipEditor decoded source bounds', () => {
     fireEvent.blur(screen.getByLabelText('Gain'));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
+  });
+
+  it('does not flash the stale pre-edit value while a valid commit lands (#10032)', async () => {
+    const source = mockDeferredDecode();
+    // `commit()` used to reformat the field from a stale closed-over `value`
+    // right after an accepted edit, so the change and the store update were
+    // batched into ONE commit that painted the input back to the PRE-edit
+    // value ('4') before a later effect-driven commit corrected it to the
+    // new, sample-snapped value. A `Profiler` observes every commit — unlike
+    // reading the DOM once after the event settles, which only ever sees the
+    // final, already-corrected state — so the intermediate flash is visible.
+    let trimEnd: HTMLInputElement | null = null;
+    const commits: string[] = [];
+    render(
+      <Profiler id="clip-editor-probe" onRender={() => { if (trimEnd) commits.push(trimEnd.value); }}>
+        <ClipEditor assetId={asset.id} asset={asset} />
+      </Profiler>,
+    );
+    trimEnd = screen.getByLabelText('Trim end') as HTMLInputElement;
+    await waitFor(() => expect(source.decode).toHaveBeenCalledOnce());
+    await act(async () => source.resolveDecode());
+    expect(trimEnd).toHaveValue(4);
+
+    fireEvent.change(trimEnd, { target: { value: '2.31' } });
+    commits.length = 0; // only the commit(s) made while handling blur matter
+    fireEvent.blur(trimEnd);
+
+    expect(commits).not.toContain('4');
+    expect(commits.at(-1)).toBe('2.25');
+    expect(trimEnd).toHaveValue(2.25); // 18 samples at the decoded 8 Hz rate.
   });
 
 });
