@@ -1,19 +1,21 @@
 /**
- * End-to-end integration: a game design document becomes a game that can
- * actually be PLAYED.
+ * Integration: a game design document becomes built-in game components whose
+ * winnability and Play gate are checked against the resulting store state.
  *
  * Everything between the GDD and the store is real here — the real
  * `buildPlan`, the real system registry (importing `planBuilder` registers all
  * seven categories), the real `EXECUTOR_REGISTRY`, the real `runPipeline`, the
- * real Zustand slices, and the real `validateWinnability`. The ONLY fake is the
- * outermost edge: the WASM `dispatchCommand`, which is a recorder that also
+ * real Zustand slices, and the real `validateWinnability`. The engine boundary
+ * is a fake WASM `dispatchCommand`, which is a recorder that also
  * mirrors `spawn_entity` back into the scene graph the way the engine's
  * SCENE_GRAPH event would. Nothing in the pipeline is stubbed, because the
  * pipeline is the thing under test.
  *
- * There is no network fake because there is no network edge: every GDD below
- * uses registered system categories, so `custom_script_generate` — the one
- * executor that calls out — is never planned, and `asset_generate` is local.
+ * Unexpected network requests are rejected and fail the test. Generated
+ * assets remain unavailable: a required texture must fail its plan, while an
+ * optional texture is skipped with a visible warning. The gameplay fixtures
+ * use their authored primitives; these tests do not prove generated-asset
+ * delivery or live browser gameplay.
  *
  * Why this shape of test exists at all: `dispatchCommand` returns `void`, so a
  * command the engine would reject, drop, or silently mangle produces no signal
@@ -28,7 +30,7 @@
  * by watching `play()` refuse.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { buildPlan } from '@/lib/game-creation/planBuilder';
 import { runPipeline } from '@/lib/game-creation/pipelineRunner';
@@ -136,6 +138,16 @@ const CRYSTAL_CAVERNS: OrchestratorGDD = {
       fallback: 'primitive:sphere',
     },
   ],
+};
+
+/** The same primitive-based game, with its decorative texture explicitly optional. */
+const CRYSTAL_CAVERNS_WITH_OPTIONAL_TEXTURE: OrchestratorGDD = {
+  ...CRYSTAL_CAVERNS,
+  id: 'gdd_crystal_caverns_optional_texture',
+  assetManifest: CRYSTAL_CAVERNS.assetManifest.map(asset => ({
+    ...asset,
+    priority: 'nice-to-have' as const,
+  })),
 };
 
 /** 2D reach-goal: run to the exit door, grab a coin on the way. */
@@ -298,7 +310,7 @@ function stepByExecutor(plan: OrchestratorPlan, executor: string): PlanStep {
 
 interface RunResult {
   plan: OrchestratorPlan;
-  /** Warnings surfaced by steps that only partly applied. */
+  /** Direct step notices; skipped optional steps also have plan-level notices. */
   warnings: string[];
 }
 
@@ -379,8 +391,11 @@ async function runGame(h: TestHarness, gdd: OrchestratorGDD): Promise<RunResult>
 
 describe('game creation: idea -> plan -> playable game', () => {
   let h: TestHarness;
+  let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    fetchMock = vi.fn().mockRejectedValue(new Error('Unexpected network request in game creation integration'));
+    vi.stubGlobal('fetch', fetchMock);
     h = createTestHarness();
     // The gate `play()` consults. The harness does NOT wire this, and without
     // it `play()` dispatches unconditionally — every assertion below about the
@@ -394,15 +409,33 @@ describe('game creation: idea -> plan -> playable game', () => {
   afterEach(() => {
     setWinnabilityStateReader(null);
     h.cleanup();
+    vi.unstubAllGlobals();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('builds a winnable 3D collect-all game that Play accepts', async () => {
-    const { plan, warnings } = await runGame(h, CRYSTAL_CAVERNS);
+  it('builds a winnable primitive-based 3D game while reporting its unavailable optional texture', async () => {
+    const { plan, warnings } = await runGame(h, CRYSTAL_CAVERNS_WITH_OPTIONAL_TEXTURE);
 
     expect(plan.status).toBe('completed');
-    // A step that only half-applied reports it here rather than failing, so an
-    // empty list is the difference between "ran" and "actually did the work".
+    const asset = stepByExecutor(plan, 'asset_generate');
+    expect(asset.optional).toBe(true);
+    expect(asset.status).toBe('skipped');
+    expect(asset.error).toMatchObject({
+      code: 'ASSET_GENERATION_UNAVAILABLE',
+      retryable: false,
+      userFacingMessage: EXECUTOR_REGISTRY.get('asset_generate')!.userFacingErrorMessage,
+    });
+    expect(asset.output).toEqual({
+      unsupported: true,
+      pending: true,
+      assetType: 'texture',
+      fallbackAssetId: 'primitive:sphere',
+    });
     expect(warnings).toEqual([]);
+    expect(plan.warnings).toEqual([
+      `Not everything in the plan could be applied: ${asset.error?.userFacingMessage}`,
+    ]);
+    expect(plan.steps.filter(step => step.status === 'skipped')).toEqual([asset]);
 
     const playerId = plannedIdOf(plan, 'Miner');
     const cameraId = plannedIdOf(plan, 'MainCamera');
@@ -496,6 +529,37 @@ describe('game creation: idea -> plan -> playable game', () => {
     h.dispatch.mockClear();
     h.getState().play();
     expect(commandsOf(h, 'play')).toEqual([{}]);
+  });
+
+  it('fails the original required-texture design before verification or polish', async () => {
+    const { plan, warnings } = await runGame(h, CRYSTAL_CAVERNS);
+
+    expect(CRYSTAL_CAVERNS.assetManifest[0].priority).toBe('required');
+    expect(plan.status).toBe('failed');
+    const asset = stepByExecutor(plan, 'asset_generate');
+    expect(asset.optional).toBe(false);
+    expect(asset.status).toBe('failed');
+    expect(asset.error).toMatchObject({
+      code: 'ASSET_GENERATION_UNAVAILABLE',
+      retryable: false,
+      userFacingMessage: EXECUTOR_REGISTRY.get('asset_generate')!.userFacingErrorMessage,
+    });
+    expect(asset.output).toEqual({
+      unsupported: true,
+      pending: true,
+      assetType: 'texture',
+      fallbackAssetId: 'primitive:sphere',
+    });
+    expect(warnings).toEqual([]);
+    const assetSteps = plan.steps.filter(step => step.executor === 'asset_generate');
+    expect(assetSteps).toHaveLength(1);
+    expect(assetSteps.some(step => step.status === 'completed')).toBe(false);
+    for (const executor of ['verify_all_scenes', 'auto_polish']) {
+      const skipped = stepByExecutor(plan, executor);
+      expect(skipped.status).toBe('skipped');
+      expect(skipped.output).toBeUndefined();
+    }
+    expect(commandsOf(h, 'update_ambient_light')).toEqual([]);
   });
 
   it('builds a winnable 2D reach-goal game that Play accepts', async () => {

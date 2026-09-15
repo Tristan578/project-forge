@@ -315,10 +315,33 @@ describe('autoPolishExecutor', () => {
       return { entityId: id, transform: { position: [0, -0.5, 0], rotation: [0, 0, 0], scale } };
     }
 
+    /**
+     * A `dispatchCommand` / `observeEntity` pair that models the per-run
+     * observation cache HONESTLY: the ground is `undefined` (not yet spawned)
+     * until its `spawn_entity` has been dispatched, and observable at `scale`
+     * afterwards — exactly what `ctx.observeEntity` returns in production, where
+     * the first attempt's idempotency guard read precedes the spawn.
+     *
+     * An always-returns mock would report the ground as already spawned and make
+     * the guard drop the spawn on the FIRST attempt (leaving the call list
+     * missing `spawn_entity`); the dedicated retry test below is what proves the
+     * short-circuit itself.
+     */
+    function spawnGatedSingle(scale: [number, number, number]) {
+      const spawned = new Set<string>();
+      const dispatchCommand = vi.fn((command: string, payload?: unknown) => {
+        if (command === 'spawn_entity') spawned.add((payload as { id: string }).id);
+      });
+      const observeEntity = vi.fn((id: string) =>
+        (spawned.has(id) ? observedAt(id, scale) : undefined));
+      return { dispatchCommand, observeEntity, spawned };
+    }
+
     it('confirms the ground reached its descriptor scale before building its collider', async () => {
-      const observeEntity = vi.fn((id: string) => observedAt(id, GROUND_SCALE));
+      const { dispatchCommand, observeEntity } = spawnGatedSingle(GROUND_SCALE);
       const ctx = makeCtx({
         resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+        dispatchCommand,
         observeEntity,
       } as never);
 
@@ -329,22 +352,26 @@ describe('autoPolishExecutor', () => {
 
       expect(result.success).toBe(true);
       expect(result.output?.fixesApplied).toContain('Added ground plane');
-      // The collider-building update_physics still ran AFTER the confirmed size.
-      const calls = vi.mocked(ctx.dispatchCommand).mock.calls;
+      // The ground was actually SPAWNED (the guard did not short-circuit on a
+      // first attempt) and the collider-building update_physics ran AFTER the
+      // confirmed size.
+      const calls = vi.mocked(dispatchCommand).mock.calls;
       expect(calls.map((c: unknown[]) => c[0])).toEqual([
         'spawn_entity', 'update_transform', 'toggle_physics', 'update_physics',
       ]);
-      // The engine was queried for the exact id the spawn minted.
+      // The engine was queried for the exact id the spawn used.
       const groundId = (calls[0][1] as Record<string, unknown>)['id'] as string;
       expect(observeEntity).toHaveBeenCalledWith(groundId);
     });
 
     it('fails with EFFECT_TIMED_OUT and never builds the collider when the resize is dropped', async () => {
       vi.useFakeTimers();
-      // The engine keeps reporting the unsized cube — the resize never landed.
-      const observeEntity = vi.fn((id: string) => observedAt(id, [1, 1, 1]));
+      // Spawned, but the engine keeps reporting the unsized cube — the resize
+      // never landed.
+      const { dispatchCommand, observeEntity } = spawnGatedSingle([1, 1, 1]);
       const ctx = makeCtx({
         resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+        dispatchCommand,
         observeEntity,
       } as never);
 
@@ -357,26 +384,34 @@ describe('autoPolishExecutor', () => {
 
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+      expect(result.error?.retryable).toBe(false);
       const effect = (result.error?.details as { effect?: { status?: string; operationId?: string } }).effect;
       expect(effect?.status).toBe('timed-out');
       expect(effect?.operationId).toBe('ai.FR-1.OP-01');
       // update_physics must NOT have run: a collider built from an unconfirmed
       // scale is the false success this check exists to prevent.
-      const dispatched = vi.mocked(ctx.dispatchCommand).mock.calls.map((c: unknown[]) => c[0]);
+      const dispatched = vi.mocked(dispatchCommand).mock.calls.map((c: unknown[]) => c[0]);
       expect(dispatched).not.toContain('update_physics');
     });
 
     it('reports a cancellation during confirmation as an aborted step', async () => {
       const controller = new AbortController();
-      // Abort mid-observation: the first query aborts the run and returns the
-      // unsized cube, so the next poll sees the abort and reports cancelled —
-      // reachable only past the up-front abort checks, inside the observation.
-      const observeEntity = vi.fn((id: string) => {
+      const spawned = new Set<string>();
+      const dispatchCommand = vi.fn((command: string, payload?: unknown) => {
+        if (command === 'spawn_entity') spawned.add((payload as { id: string }).id);
+      });
+      // undefined until spawned (so the guard read does NOT abort and the spawn
+      // proceeds); once spawned, the confirm read aborts the run and returns the
+      // still-unsized cube, so the next poll sees the abort and reports cancelled
+      // — reachable only past the up-front abort checks, inside the observation.
+      const observeEntity = vi.fn((id: string): ObservedEntity | undefined => {
+        if (!spawned.has(id)) return undefined;
         controller.abort();
         return observedAt(id, [1, 1, 1]);
       });
       const ctx = makeCtx({
         resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+        dispatchCommand,
         observeEntity,
         signal: controller.signal,
       } as never);
@@ -388,6 +423,38 @@ describe('autoPolishExecutor', () => {
 
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe('ABORTED');
+    });
+
+    // A repeated invocation uses the reserved id to reuse an observed repair.
+    // The timeout test above separately asserts that uncertain results are terminal.
+    it('does not respawn an observed ground plane on a repeated invocation', async () => {
+      const { dispatchCommand, observeEntity, spawned } = spawnGatedSingle(GROUND_SCALE);
+      const ctx = makeCtx({
+        resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+        dispatchCommand,
+        observeEntity,
+      } as never);
+
+      const first = await autoPolishExecutor.execute({
+        projectType: '3d',
+        feelDirective: FEEL_DIRECTIVE,
+      }, ctx);
+      expect(first.success).toBe(true);
+
+      // Invoke the same input against the context that retains its observations.
+      const second = await autoPolishExecutor.execute({
+        projectType: '3d',
+        feelDirective: FEEL_DIRECTIVE,
+      }, ctx);
+      expect(second.success).toBe(true);
+
+      // spawn_entity fired EXACTLY ONCE across both attempts, for one stable id —
+      // the scene never carried two ground planes.
+      const spawnCalls = vi.mocked(dispatchCommand).mock.calls.filter((c) => c[0] === 'spawn_entity');
+      expect(spawnCalls).toHaveLength(1);
+      expect(spawned.size).toBe(1);
+      // The second invocation still applies the fix against the existing plane.
+      expect(second.output?.fixesApplied).toContain('Added ground plane');
     });
   });
 

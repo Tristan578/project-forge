@@ -595,24 +595,30 @@ describe('asset_generate executor', () => {
     expect(executor.name).toBe('asset_generate');
   });
 
-  it('succeeds with assetId and usedFallback=false on happy path', async () => {
+  it('fails unavailable texture generation with diagnostic fallback data (#9900)', async () => {
     const ctx = makeMockCtx();
     const result = await executor.execute(baseInput, ctx);
 
-    expect(result.success).toBe(true);
-    expect(typeof result.output?.['assetId']).toBe('string');
-    expect(result.output?.['usedFallback']).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatchObject({ code: 'ASSET_GENERATION_UNAVAILABLE', retryable: false });
+    expect(result.output?.['unsupported']).toBe(true);
+    expect(result.output?.['pending']).toBe(true);
+    expect(result.output?.['fallbackAssetId']).toBe('primitive:cube');
+    expect(result.output).not.toHaveProperty('assetId');
+    expect(result.output).not.toHaveProperty('usedFallback');
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 
-  it('uses fallback when signal is aborted before execution', async () => {
+  it('fails with nonretryable cancellation when already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
     const ctx = makeMockCtx({ signal: controller.signal });
     const result = await executor.execute(baseInput, ctx);
 
-    expect(result.success).toBe(true);
-    expect(result.output?.['usedFallback']).toBe(true);
-    expect(result.output?.['assetId']).toBe('primitive:cube');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatchObject({ code: 'CANCELLED', retryable: false });
+    expect(result.output).toBeUndefined();
+    expect(ctx.dispatchCommand).not.toHaveBeenCalled();
   });
 
   it('fails with INVALID_FALLBACK when fallback does not match schema', async () => {
@@ -624,12 +630,15 @@ describe('asset_generate executor', () => {
     expect(result.error?.code).toBe('INVALID_FALLBACK');
   });
 
-  it('accepts builtin: prefix fallback', async () => {
+  it('retains a valid builtin fallback as diagnostics without claiming success', async () => {
     const ctx = makeMockCtx();
     const input = { ...baseInput, fallback: 'builtin:stone-texture' };
     const result = await executor.execute(input, ctx);
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('ASSET_GENERATION_UNAVAILABLE');
+    expect(result.output?.['fallbackAssetId']).toBe('builtin:stone-texture');
+    expect(result.output).not.toHaveProperty('assetId');
   });
 
   it('fails with INVALID_INPUT when type is unknown', async () => {
