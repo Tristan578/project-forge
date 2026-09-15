@@ -28,7 +28,7 @@ const mockReorderWidget = vi.fn();
 let mockScreens: Array<{
   id: string;
   name: string;
-  widgets: Array<{ id: string; name?: string; type?: string }>;
+  widgets: Array<{ id: string; name?: string; type?: string; constraints?: unknown }>;
   showOnStart?: boolean;
   showOnKey?: string;
 }> = [];
@@ -374,14 +374,27 @@ describe('add_ui_widget', () => {
     });
   });
 
-  it('rejects constraints whose minWidth exceeds maxWidth (actionable error, no mutation)', async () => {
+  // Parity with the manual property panel: it persists a min>max pair with only
+  // a non-blocking warning and lets the renderer's documented "min wins" rule
+  // (clampSize) resolve it. The AI path must reach the SAME widget state, not
+  // hard-reject an edit a human can make by hand (ui.FR-1.OP-01 / F2).
+  it('accepts a minWidth>maxWidth pair to match the manual panel (min wins at render)', async () => {
     const { result } = await invokeHandler(uiBuilderHandlers, 'add_ui_widget', {
       screenId: 's1',
       type: 'button',
       constraints: { minWidth: 300, maxWidth: 100 },
     });
-    expect(result.success).toBe(false);
-    expect(mockUpdateWidget).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(mockUpdateWidget).toHaveBeenCalledWith('s1', 'widget_1', {
+      constraints: {
+        offsetX: 0,
+        offsetY: 0,
+        minWidth: 300,
+        maxWidth: 100,
+        minHeight: null,
+        maxHeight: null,
+      },
+    });
   });
 
   it('rejects a negative size bound', async () => {
@@ -472,14 +485,105 @@ describe('update_ui_widget', () => {
     expect(mockUpdateWidget).toHaveBeenCalledWith('s1', 'w1', { constraints: null });
   });
 
-  it('rejects an invalid min/max height pair without mutating', async () => {
+  // Same parity rule as add_ui_widget: a min>max pair is accepted (min wins at
+  // render), not hard-rejected, so AI and the manual panel reach the same state.
+  it('accepts a minHeight>maxHeight pair to match the manual panel', async () => {
     const { result } = await invokeHandler(uiBuilderHandlers, 'update_ui_widget', {
       screenId: 's1',
       widgetId: 'w1',
       constraints: { minHeight: 200, maxHeight: 50 },
     });
-    expect(result.success).toBe(false);
-    expect(mockUpdateWidget).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(mockUpdateWidget).toHaveBeenCalledWith('s1', 'w1', {
+      constraints: {
+        offsetX: 0,
+        offsetY: 0,
+        minWidth: null,
+        maxWidth: null,
+        minHeight: 200,
+        maxHeight: 50,
+      },
+    });
+  });
+
+  // Regression: an AI update that touches only the offset must NOT wipe a
+  // previously-set (e.g. manual 44px touch-target) min/max bound. The handler
+  // merges the partial payload onto the widget's CURRENT constraints, exactly
+  // as WidgetPropertyPanel does with `{ ...existing, [field]: value }`.
+  it('merges a partial constraints update onto the widget existing bounds', async () => {
+    mockScreens = [
+      {
+        id: 's1',
+        name: 'HUD',
+        widgets: [
+          {
+            id: 'w1',
+            name: 'PlayButton',
+            constraints: {
+              offsetX: 0,
+              offsetY: 0,
+              minWidth: 44,
+              maxWidth: 200,
+              minHeight: 44,
+              maxHeight: 120,
+            },
+          },
+        ],
+      },
+    ];
+    await invokeHandler(uiBuilderHandlers, 'update_ui_widget', {
+      screenId: 's1',
+      widgetId: 'w1',
+      constraints: { offsetX: -16, offsetY: 16 },
+    });
+    expect(mockUpdateWidget).toHaveBeenCalledWith('s1', 'w1', {
+      constraints: {
+        offsetX: -16,
+        offsetY: 16,
+        minWidth: 44,
+        maxWidth: 200,
+        minHeight: 44,
+        maxHeight: 120,
+      },
+    });
+  });
+
+  it('clears only a single bound (explicit null) while preserving the rest', async () => {
+    mockScreens = [
+      {
+        id: 's1',
+        name: 'HUD',
+        widgets: [
+          {
+            id: 'w1',
+            name: 'PlayButton',
+            constraints: {
+              offsetX: 8,
+              offsetY: 8,
+              minWidth: 44,
+              maxWidth: 200,
+              minHeight: 44,
+              maxHeight: 120,
+            },
+          },
+        ],
+      },
+    ];
+    await invokeHandler(uiBuilderHandlers, 'update_ui_widget', {
+      screenId: 's1',
+      widgetId: 'w1',
+      constraints: { maxWidth: null },
+    });
+    expect(mockUpdateWidget).toHaveBeenCalledWith('s1', 'w1', {
+      constraints: {
+        offsetX: 8,
+        offsetY: 8,
+        minWidth: 44,
+        maxWidth: null,
+        minHeight: 44,
+        maxHeight: 120,
+      },
+    });
   });
 });
 
