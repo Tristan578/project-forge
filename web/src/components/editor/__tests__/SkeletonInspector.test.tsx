@@ -1016,6 +1016,8 @@ describe('SkeletonInspector', () => {
     fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'belt' } });
     fireEvent.click(screen.getByLabelText('Add mesh attachment'));
     expect(screen.getByText('Mesh: belt')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Vertex 1 X'), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 weight'), { target: { value: '0.5' } });
     fireEvent.change(screen.getByLabelText('Active skin'), { target: { value: 'alt' } });
     await vi.waitFor(() => {
       expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
@@ -1023,6 +1025,17 @@ describe('SkeletonInspector', () => {
     // Draft still open, and no skin write happened.
     expect(screen.getByText('Mesh: belt')).toBeInTheDocument();
     expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Active skin')).toHaveValue('default');
+    expect(screen.getByLabelText('Vertex 1 X')).toHaveValue(9);
+    expect(screen.getByLabelText('Vertex 1 influence 1 weight')).toHaveValue(0.5);
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.activeSkin).toBe('default');
+    expect(payload.skins.default.attachments.belt).toEqual(expect.objectContaining({
+      vertices: [[9, 0]],
+      weights: [{ bones: ['root'], weights: [0.5] }],
+    }));
+    expect(payload.skins.alt).toEqual(skeletonWithTwoSkins.skins.alt);
   });
 
   it('switches the active skin and drops the draft when the discard is confirmed', async () => {
