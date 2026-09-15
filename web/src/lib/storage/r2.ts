@@ -96,6 +96,28 @@ export async function uploadToR2(
 }
 
 /**
+ * Read an R2 object's body as a UTF-8 string.
+ *
+ * Narrowly scoped to the "small JSON document" case (published game bundles,
+ * #7580): the whole body is buffered into a string via the AWS SDK's
+ * `transformToString`, so it is NOT appropriate for large binary assets. Throws
+ * on a missing object (the SDK raises `NoSuchKey`), a transport failure, or a
+ * response with no body — callers treat any throw as "not available in R2" and
+ * fall back to their primary source.
+ */
+export async function getObjectFromR2(key: string): Promise<string> {
+  const r2 = getR2Client();
+  const bucket = getBucket();
+
+  const response = await r2.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const body = response.Body as { transformToString?: () => Promise<string> } | undefined;
+  if (!body || typeof body.transformToString !== 'function') {
+    throw new Error(`R2 object ${key} returned no readable body`);
+  }
+  return body.transformToString();
+}
+
+/**
  * S3/R2 hard limit on how many keys a single DeleteObjects request accepts.
  * Cloudflare R2 implements the S3 DeleteObjects API with the same 1000-key cap.
  */
