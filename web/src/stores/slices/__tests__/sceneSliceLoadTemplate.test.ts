@@ -273,14 +273,14 @@ describe('sceneSlice.loadTemplate', () => {
       expect(loadPrefabInstances()).toEqual(STALE);
     });
 
-    it('restores the previous registry when the engine acknowledges but never applies', async () => {
+    it('retains the accepted template registry when application is still unconfirmed', async () => {
       savePrefabInstancesToStorage(STALE);
       setSceneDispatcher(silentDispatcher());
 
       const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
 
-      expect(result.success).toBe(false);
-      expect(loadPrefabInstances()).toEqual(STALE);
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining('may change after this timeout') });
+      expect(loadPrefabInstances()).toEqual([]);
     });
   });
 });

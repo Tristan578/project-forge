@@ -42,6 +42,8 @@ function toSceneList(project: ProjectScenes) {
 export interface SceneSlice {
   sceneName: string;
   sceneModified: boolean;
+  /** Invalidates asynchronous scene work when another scene is requested. */
+  sceneOperationRevision: number;
   autoSaveEnabled: boolean;
   scenes: Array<{ id: string; name: string; isStartScene: boolean }>;
   activeSceneId: string | null;
@@ -174,18 +176,21 @@ export type TemplateApplyDeps = {
 };
 
 /**
- * Resolve `true` once a scene load has visibly landed, `false` on timeout.
+ * Resolve `true` once the expected scene has landed, `false` on timeout or supersession.
  *
  * The watch is armed BEFORE the command goes out, because a synchronous
  * dispatcher (the test doubles, and a same-frame engine) can finish the load
- * before `dispatchCommand` returns. `sceneGraph` identity is part of the
- * predicate so a scene that already had entities cannot satisfy it instantly.
+ * before `dispatchCommand` returns. Require the expected entities in a new
+ * nodes map: SCENE_LOADED clones the outgoing graph before the actual graph
+ * update arrives, so graph identity alone can report success too early.
  */
 function watchForSceneApplied(
   api: StoreApi<SceneSlice & TemplateApplyDeps>,
   timeoutMs: number,
+  expectedEntityIds: readonly string[],
+  operationRevision: number,
 ): { applied: Promise<boolean>; abandon: () => void } {
-  const previousGraph = api.getState().sceneGraph;
+  const previousNodes = api.getState().sceneGraph.nodes;
   let settle: ((value: boolean) => void) | null = null;
   let unsubscribe: (() => void) | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -202,7 +207,15 @@ function watchForSceneApplied(
   const applied = new Promise<boolean>((resolve) => {
     settle = resolve;
     unsubscribe = api.subscribe((state) => {
-      if (state.sceneGraph !== previousGraph && state.nodeCount > 0) finish(true);
+      if (state.sceneOperationRevision !== operationRevision) {
+        finish(false);
+        return;
+      }
+      if (
+        state.sceneGraph.nodes !== previousNodes
+        && state.nodeCount === expectedEntityIds.length
+        && expectedEntityIds.every((id) => state.sceneGraph.nodes[id] !== undefined)
+      ) finish(true);
     });
     timer = setTimeout(() => finish(false), timeoutMs);
   });
@@ -310,6 +323,7 @@ export const createSceneSlice: StateCreator<
 > = (set, get, api) => ({
   sceneName: 'Untitled',
   sceneModified: false,
+  sceneOperationRevision: 0,
   autoSaveEnabled: true,
   scenes: [],
   activeSceneId: null,
@@ -339,7 +353,7 @@ export const createSceneSlice: StateCreator<
     // scene loads next claimed another scene's sounds. Staging only alongside
     // the dispatch keeps the stash and the pending load a single fact.
     if (dispatchCommand) {
-      stageSceneAudio(json);
+      const rollbackAudio = stageSceneAudio(json);
       // Restore the scene's linked prefab instances (and merge its embedded
       // definitions) into the prefab store before the engine load. Done
       // alongside the dispatch for the same reason audio is: with no
@@ -347,16 +361,23 @@ export const createSceneSlice: StateCreator<
       // desync it from what is actually rendered.
       const snapshot = restorePrefabInstances(json);
       if (!snapshot) {
-        clearStagedSceneAudio();
+        rollbackAudio();
         return false;
       }
       // A rejected load never emits SCENE_LOADED, so a stash left armed here
       // waits for the NEXT scene's SCENE_LOADED and attaches this scene's
       // sounds to it. `new_scene` already clears for the same reason; a
       // rejection is the other way the stash outlives its load.
-      const response = dispatchCommand('load_scene', { json });
+      let response: DispatchResult;
+      try {
+        response = dispatchCommand('load_scene', { json });
+      } catch {
+        rollbackAudio();
+        rollbackPrefabState(snapshot);
+        return false;
+      }
       if (response && response.success === false) {
-        clearStagedSceneAudio();
+        rollbackAudio();
         // The engine never adopted the incoming scene — the scene still on
         // screen is the previous one, so its instance registry AND its prefab
         // LIBRARY must both come back (scene.FR-1 N1 BUG-2/BUG-5): the merge
@@ -367,14 +388,12 @@ export const createSceneSlice: StateCreator<
         rollbackPrefabState(snapshot);
         return false;
       }
+      set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1 }));
       return true;
     }
     return false;
   },
   newScene: () => {
-    // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
-    // rejected would otherwise be adopted by this empty scene.
-    clearStagedSceneAudio();
     if (!dispatchCommand) {
       // No engine to change scenes at all — the scene, and therefore its
       // registry, is unchanged. Clearing here (as the dispatched path below
@@ -382,6 +401,9 @@ export const createSceneSlice: StateCreator<
       // (scene.FR-1 N1 BUG-4).
       return false;
     }
+    // An accepted empty scene must consume no audio. Restore any pending load's
+    // staging if this command is rejected before it can replace that scene.
+    const rollbackAudio = clearStagedSceneAudio();
     const previousInstances = loadPrefabInstances();
     // The new scene has no linked instances of its own — leaving the outgoing
     // scene's registry in place would attach its instances to this empty
@@ -391,14 +413,23 @@ export const createSceneSlice: StateCreator<
     // registry must already describe the empty scene the instant that event
     // could land.
     savePrefabInstancesToStorage([]);
-    const response = dispatchCommand('new_scene', {});
+    let response: DispatchResult;
+    try {
+      response = dispatchCommand('new_scene', {});
+    } catch {
+      rollbackAudio();
+      savePrefabInstancesToStorage(previousInstances);
+      return false;
+    }
     if (response && response.success === false) {
+      rollbackAudio();
       // The engine never accepted the new scene — the scene on screen is
       // unchanged, so its registry must come back rather than stay cleared
       // out from under it (scene.FR-1 N1 BUG-4).
       savePrefabInstancesToStorage(previousInstances);
       return false;
     }
+    set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1 }));
     return true;
   },
   setSceneName: (name) => set({ sceneName: name }),
@@ -494,6 +525,13 @@ export const createSceneSlice: StateCreator<
       return { success: false, error: 'The engine is not ready yet — try again in a moment.' };
     }
 
+    const operationRevision = get().sceneOperationRevision + 1;
+    set({ sceneOperationRevision: operationRevision });
+    const supersededResult: TemplateLoadResult = {
+      success: false,
+      error: 'Another scene was requested before this template finished loading.',
+    };
+
     // Dynamic so the registry and its eleven lazily-imported scene files stay
     // out of the store bundle, and so nothing in `@/data/templates` is reachable
     // from a module an API route pulls in.
@@ -506,6 +544,12 @@ export const createSceneSlice: StateCreator<
         success: false,
         error: `Could not read template "${templateId}": ${error instanceof Error ? error.message : String(error)}`,
       };
+    }
+    // Importing a template yields to other scene operations. An older request
+    // must not replace the registry or queue a load over the newer scene.
+    if (get().sceneOperationRevision !== operationRevision) return supersededResult;
+    if (!dispatchCommand) {
+      return { success: false, error: 'The engine is not ready yet — try again in a moment.' };
     }
     // A registry miss returns null. Reporting that as success is exactly the
     // bug this action had: the gallery closed and the chat handler said
@@ -520,32 +564,52 @@ export const createSceneSlice: StateCreator<
       };
     }
 
+    const skipped = new Set(skippedEntityIds);
+    const expectedEntityIds = template.sceneData.entities
+      .filter((entity) => !skipped.has(entity.entityId))
+      .map((entity) => entity.entityId);
     const { applied, abandon } = watchForSceneApplied(
       api,
       options?.timeoutMs ?? TEMPLATE_APPLY_TIMEOUT_MS,
+      expectedEntityIds,
+      operationRevision,
     );
 
     // Staged for the SCENE_LOADED handler, same contract as `loadScene`.
     // `stageSceneAudio` REPLACES the stash rather than adding to it, so this
     // also displaces anything a previous rejected load left armed — the reason
-    // it runs even though no template currently declares audio, and the reason
-    // neither failure path below needs its own clear.
-    stageSceneAudio(sceneJson);
+    // it runs even though no template currently declares audio. The accepted
+    // stash remains armed across a timeout because the queued load may still
+    // emit SCENE_LOADED.
+    const rollbackAudio = stageSceneAudio(sceneJson);
     // Same registry handling as `loadScene` (scene.FR-1 N1) — this used to
     // dispatch `load_scene` directly and never touch the prefab-instance
     // registry at all, so the OUTGOING scene's instances rode along into the
     // template. A template's freshly-built `sceneJson` carries no
-    // `prefabInstances`, so this clears the registry outright; any failure
-    // path below restores exactly what the outgoing scene had.
+    // `prefabInstances`, so this clears the registry outright. Only a rejected
+    // dispatch can restore the outgoing registry: a timeout cannot cancel a
+    // load that the engine has already queued.
     const snapshot = restorePrefabInstances(sceneJson);
     if (!snapshot) {
       abandon();
-      clearStagedSceneAudio();
+      rollbackAudio();
       return { success: false, error: 'The template contains invalid prefab metadata.' };
     }
-    const response = dispatchCommand('load_scene', { json: sceneJson });
+    let response: DispatchResult;
+    try {
+      response = dispatchCommand('load_scene', { json: sceneJson });
+    } catch (error) {
+      abandon();
+      rollbackAudio();
+      rollbackPrefabState(snapshot);
+      return {
+        success: false,
+        error: `Could not load template "${templateId}": ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     if (response && response.success === false) {
       abandon();
+      rollbackAudio();
       rollbackPrefabState(snapshot);
       return {
         success: false,
@@ -553,11 +617,12 @@ export const createSceneSlice: StateCreator<
       };
     }
 
-    if (!(await applied)) {
-      rollbackPrefabState(snapshot);
+    const didApply = await applied;
+    if (get().sceneOperationRevision !== operationRevision) return supersededResult;
+    if (!didApply) {
       return {
         success: false,
-        error: `Template "${templateId}" was sent to the engine but no entities appeared. The scene was not changed.`,
+        error: `Template "${templateId}" is still waiting for the engine. It may appear without its scripts or gameplay setup. Wait for the engine to respond, then load the template again.`,
       };
     }
 
@@ -567,7 +632,6 @@ export const createSceneSlice: StateCreator<
     // for the SELECTED entity, so a template applied through the file alone
     // would leave `allScripts` empty — and that map, not the engine, is what
     // the script worker runs in Play mode.
-    const skipped = new Set(skippedEntityIds);
     const state = get();
     for (const entity of template.sceneData.entities) {
       if (skipped.has(entity.entityId)) continue;
