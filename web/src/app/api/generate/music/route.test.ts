@@ -1,6 +1,6 @@
 vi.mock('server-only', () => ({}));
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
@@ -10,6 +10,7 @@ import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { refundTokens } from '@/lib/tokens/service';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
+import { isGenerationAgentEnabled } from '@/lib/api/generationAgent';
 import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
@@ -23,6 +24,10 @@ vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   return { ...mod, resolveApiKey: vi.fn() };
 });
 vi.mock('@/lib/tokens/pricing');
+vi.mock('@/lib/api/generationAgent', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/api/generationAgent')>(),
+  isGenerationAgentEnabled: vi.fn(() => false),
+}));
 // #9522: music now routes to ElevenLabs `/v1/music`, returning audio inline.
 vi.mock('@/lib/generate/elevenlabsClient', () => ({
   ElevenLabsClient: vi.fn(function (this: Record<string, unknown>) {
@@ -52,6 +57,11 @@ function makeRequest(body: unknown): NextRequest {
 }
 
 describe('POST /api/generate/music', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -68,6 +78,47 @@ describe('POST /api/generate/music', () => {
         this.generateMusic = vi.fn().mockResolvedValue({ audioBase64: 'bXVzaWNhdWRpbw==', durationSeconds: 30 });
       } as unknown as typeof ElevenLabsClient
     );
+  });
+
+  it('aborts stalled music and refunds before the host deadline with the agent flag off', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    expect(isGenerationAgentEnabled()).toBe(false);
+    const authResult = await authenticateRequest();
+    let finishAuth!: (result: typeof authResult) => void;
+    vi.mocked(authenticateRequest).mockReturnValue(new Promise((resolve) => {
+      finishAuth = resolve;
+    }));
+    const { ElevenLabsClient: ActualElevenLabsClient } = await vi.importActual<
+      typeof import('@/lib/generate/elevenlabsClient')
+    >('@/lib/generate/elevenlabsClient');
+    vi.mocked(ElevenLabsClient).mockImplementation(function () {
+      return new ActualElevenLabsClient({ apiKey: 'test-key' });
+    });
+    let providerSignal: AbortSignal | null = null;
+    vi.stubGlobal('fetch', vi.fn((_url: unknown, options: RequestInit) => {
+      providerSignal = options.signal ?? null;
+      return new Promise<Response>((_resolve, reject) => {
+        providerSignal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      });
+    }));
+
+    const response = POST(makeRequest({ prompt: 'epic battle theme' }));
+    await vi.advanceTimersByTimeAsync(10_000);
+    finishAuth(authResult);
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('https://api.elevenlabs.io/v1/music', expect.any(Object));
+    }, { interval: 1 });
+    await vi.advanceTimersByTimeAsync(174_999 - Date.now());
+    expect(refundTokens).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect((providerSignal as AbortSignal | null)?.aborted).toBe(true);
+    expect((await response).status).toBe(500);
+    expect(refundTokens).toHaveBeenCalledExactlyOnceWith('user_1', 'usage-1');
+    expect(Date.now()).toBe(175_000); // Five seconds remain within maxDuration=180.
   });
 
   it('returns 401 when unauthenticated', async () => {

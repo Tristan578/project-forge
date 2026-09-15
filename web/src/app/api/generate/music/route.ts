@@ -24,9 +24,10 @@ const POST_impl = createGenerationHandler<
   { audioBase64: string; durationSeconds: number; provider: string }
 >({
   route: '/api/generate/music',
-  // Heavy route: matches `export const maxDuration` above so the generation
-  // agent derives its step-timeout cap against the real 180s budget.
+  // Synchronous audio must leave time for a refund before the host stops the
+  // request, even when the optional generation-agent flag is disabled.
   maxDurationSeconds: 180,
+  enforceRequestDeadline: true,
   provider: DB_PROVIDER.music,
   operation: 'music_generation',
   rateLimitKey: 'gen-music',
