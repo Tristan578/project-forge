@@ -259,8 +259,7 @@ describe('replayInputTrace — frame-to-frame key diffing', () => {
     expect(pressLog).toEqual([['KeyD'], ['KeyD']]);
     // First release is the frame-gap release; the trailing release is the
     // finally-block cleanup for the key still held after the last frame.
-    expect(releaseLog[0]).toEqual(['KeyD']);
-    expect(releaseLog).toContainEqual(['KeyD']);
+    expect(releaseLog).toEqual([['KeyD'], ['KeyD']]);
   });
 
   it('diffs keys in both directions when the pressed action switches across ticks', async () => {
@@ -288,7 +287,6 @@ describe('replayInputTrace — frame-to-frame key diffing', () => {
     expect(pressLog).toEqual([['KeyD'], ['KeyA']]);
     // KeyD released at the switch (tick 2, before KeyA is pressed); KeyA
     // released by the finally-block cleanup after the last frame.
-    expect(releaseLog[0]).toEqual(['KeyD']);
-    expect(releaseLog).toContainEqual(['KeyA']);
+    expect(releaseLog).toEqual([['KeyD'], ['KeyA']]);
   });
 });
