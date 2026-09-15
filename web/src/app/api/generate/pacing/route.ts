@@ -3,9 +3,11 @@ export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { getTokenCost } from '@/lib/tokens/pricing';
-import { DB_PROVIDER } from '@/lib/config/providers';
-import { generateText, Output } from 'ai';
+import { DB_PROVIDER, isGatewayApiKey } from '@/lib/config/providers';
+import { generateText, Output, type LanguageModel } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGateway } from '@ai-sdk/gateway';
+import { vercelGatewayBackend } from '@/lib/providers/backends/vercelGateway';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { z } from 'zod';
@@ -111,10 +113,15 @@ ${existingSuggestions || 'None yet.'}
 
 Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
 
-    const anthropicClient = createAnthropic({ apiKey });
+    // See localize/route.ts: the 'chat' capability's platform path resolves
+    // AI_GATEWAY_API_KEY (#9523), which needs the SDK's gateway client and
+    // gateway-format model id, not a direct `createAnthropic` client.
+    const languageModel: LanguageModel = isGatewayApiKey(apiKey)
+      ? createGateway({ apiKey })(vercelGatewayBackend.resolveModelId(AI_MODEL_FAST))
+      : createAnthropic({ apiKey })(AI_MODEL_FAST);
     const startedAt = Date.now();
     const aiResult = await generateText({
-      model: anthropicClient(AI_MODEL_FAST),
+      model: languageModel,
       system: SYSTEM_PROMPT,
       prompt,
       maxOutputTokens: 800,

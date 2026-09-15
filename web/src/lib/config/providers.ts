@@ -429,6 +429,24 @@ export const GATEWAY_KEY_ENV = {
   githubModels: 'GITHUB_MODELS_PAT',
 } as const satisfies Record<string, string>;
 
+/**
+ * True when `key` is literally the platform's AI Gateway secret (#9523 review).
+ * `resolveApiKey` returns ONE key string and a `type` ('byok'|'platform'), but
+ * not which platform var backed a 'platform' result — for a gateway-routed
+ * capability that is `AI_GATEWAY_API_KEY` (see `isGatewayRoutedCapability`),
+ * for every other capability it is the provider's own `PLATFORM_*` var. A
+ * route whose client construction differs by backend (the AI SDK's
+ * `createGateway` speaks a different protocol than a direct `createAnthropic`
+ * client, see `localize`/`pacing`) needs to tell the two apart from the key
+ * alone. The comparison is safe unconditionally: a BYOK key is a per-user
+ * decrypted secret and can never equal this env var, and it is simply false
+ * whenever `AI_GATEWAY_API_KEY` is unset.
+ */
+export function isGatewayApiKey(key: string): boolean {
+  const gatewayKey = process.env[GATEWAY_KEY_ENV.vercelGateway];
+  return Boolean(gatewayKey) && key === gatewayKey;
+}
+
 // ---------------------------------------------------------------------------
 // Chat backends
 // ---------------------------------------------------------------------------

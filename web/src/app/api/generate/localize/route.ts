@@ -2,7 +2,7 @@ export const maxDuration = 120; // API_MAX_DURATION_BATCH_S
 
 import { createGenerationHandler } from '@/lib/api/createGenerationHandler';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
-import { DB_PROVIDER } from '@/lib/config/providers';
+import { DB_PROVIDER, isGatewayApiKey } from '@/lib/config/providers';
 import {
   buildTranslationPrompt,
   parseTranslationResponse,
@@ -11,8 +11,10 @@ import {
   type TranslatableString,
   type LocaleBundle,
 } from '@/lib/i18n/gameLocalization';
-import { generateText } from 'ai';
+import { generateText, type LanguageModel } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGateway } from '@ai-sdk/gateway';
+import { vercelGatewayBackend } from '@/lib/providers/backends/vercelGateway';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
@@ -121,7 +123,16 @@ const POST_impl = createGenerationHandler<
     targetLocales: params.targetLocales,
   }),
   execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
-    const anthropicProvider = createAnthropic({ apiKey });
+    // The platform path for the 'chat' capability resolves AI_GATEWAY_API_KEY
+    // (#9523), which a direct `createAnthropic` client cannot authenticate
+    // with — it speaks Anthropic's own API, not the Gateway's. BYOK still
+    // resolves a real per-user Anthropic key, so only the gateway branch
+    // needs the SDK's gateway client and the gateway's `anthropic/<model>`
+    // naming (`vercelGatewayBackend.resolveModelId`, the same table the
+    // `/api/chat` gateway path and `verify-platform-generation.ts` use).
+    const languageModel: LanguageModel = isGatewayApiKey(apiKey)
+      ? createGateway({ apiKey })(vercelGatewayBackend.resolveModelId(AI_MODEL_FAST))
+      : createAnthropic({ apiKey })(AI_MODEL_FAST);
     const result: Record<string, LocaleBundle> = {};
 
     // Resolve consent + a single trace id once for the whole localize op — every
@@ -137,7 +148,7 @@ const POST_impl = createGenerationHandler<
         const prompt = buildTranslationPrompt(chunk, params.sourceLocale, targetLocale);
         const startedAt = Date.now();
         const { text: raw, usage } = await generateText({
-          model: anthropicProvider(AI_MODEL_FAST),
+          model: languageModel,
           system: 'You are a professional video game localizer. Return only valid JSON.',
           prompt,
           maxOutputTokens: 4096,

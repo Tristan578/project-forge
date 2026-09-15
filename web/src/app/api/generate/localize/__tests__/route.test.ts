@@ -6,7 +6,7 @@
  * it directly, asserting the route's contribution: one content-free, consent-gated
  * capture per generation, all sharing a single trace id.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
@@ -28,8 +28,16 @@ vi.mock('ai', () => ({
   generateText: (...args: unknown[]) => generateText(...args),
 }));
 
+const createAnthropicMock = vi.fn((_opts: { apiKey: string }) => (model: string) => ({ __backend: 'anthropic', __model: model }));
 vi.mock('@ai-sdk/anthropic', () => ({
-  createAnthropic: vi.fn(() => (model: string) => ({ __model: model })),
+  createAnthropic: (opts: { apiKey: string }) => createAnthropicMock(opts),
+}));
+
+// The 'chat' capability's platform path resolves AI_GATEWAY_API_KEY (#9523) —
+// exercised below by setting that env var and passing it as `apiKey`.
+const createGatewayMock = vi.fn((_opts: { apiKey: string }) => (model: string) => ({ __backend: 'gateway', __model: model }));
+vi.mock('@ai-sdk/gateway', () => ({
+  createGateway: (opts: { apiKey: string }) => createGatewayMock(opts),
 }));
 
 // Deterministic localization helpers — one chunk per locale, fixed parse output.
@@ -98,5 +106,50 @@ describe('POST /api/generate/localize — $ai_generation capture (PF-907)', () =
     hasAnalyticsConsent.mockResolvedValue(false);
     await holder.execute!(PARAMS, 'anthropic-key', CTX);
     expect(captureAiGeneration.mock.calls.every((c) => c[0].consented === false)).toBe(true);
+  });
+});
+
+// Regression (#9523 review): the 'chat' capability's platform path resolves
+// AI_GATEWAY_API_KEY, which a direct `createAnthropic` client cannot
+// authenticate with. The route must switch backends based on which key it
+// actually received, not always assume a direct Anthropic key.
+describe('POST /api/generate/localize — gateway vs. direct backend selection (#9523)', () => {
+  const ORIGINAL_GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hasAnalyticsConsent.mockResolvedValue(true);
+    generateText.mockResolvedValue({ text: '{"greeting":"hola"}', usage: { inputTokens: 200, outputTokens: 80 } });
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_GATEWAY_KEY === undefined) {
+      delete process.env.AI_GATEWAY_API_KEY;
+    } else {
+      process.env.AI_GATEWAY_API_KEY = ORIGINAL_GATEWAY_KEY;
+    }
+  });
+
+  it('uses the direct Anthropic client for a BYOK/direct-platform key', async () => {
+    delete process.env.AI_GATEWAY_API_KEY;
+    await holder.execute!(PARAMS, 'anthropic-key', CTX);
+
+    expect(createAnthropicMock).toHaveBeenCalledWith({ apiKey: 'anthropic-key' });
+    expect(createGatewayMock).not.toHaveBeenCalled();
+    const model = generateText.mock.calls[0][0].model as { __backend: string };
+    expect(model.__backend).toBe('anthropic');
+  });
+
+  it('uses the AI SDK gateway client when the resolved key is AI_GATEWAY_API_KEY', async () => {
+    process.env.AI_GATEWAY_API_KEY = 'gw-secret-123';
+    await holder.execute!(PARAMS, 'gw-secret-123', CTX);
+
+    expect(createGatewayMock).toHaveBeenCalledWith({ apiKey: 'gw-secret-123' });
+    expect(createAnthropicMock).not.toHaveBeenCalled();
+    const model = generateText.mock.calls[0][0].model as { __backend: string; __model: string };
+    expect(model.__backend).toBe('gateway');
+    // Gateway model ids are namespaced ('anthropic/<model>'), never the bare
+    // canonical id a direct Anthropic client expects.
+    expect(model.__model).toBe('anthropic/claude-haiku-4-5');
   });
 });
