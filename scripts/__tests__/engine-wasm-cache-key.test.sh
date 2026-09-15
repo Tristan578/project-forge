@@ -402,6 +402,110 @@ else
     else
       pass "build-wasm has no continue-on-error: step field (a reuse failure surfaces as a red step)"
     fi
+
+    # 5. Every BUILD step is gated on a cache MISS. On a hit the four variants
+    #    were restored, so installing a toolchain and rebuilding all four is pure
+    #    waste; more importantly, if any of these `if:` guards is ever dropped
+    #    (an edit near the block, a bad merge resolution) build-wasm silently
+    #    reverts to ALWAYS rebuilding — the exact silent-reuse-breakage #9525
+    #    exists to fix, and nothing would go red to say so. Each guarded step is
+    #    checked by name (or by its `uses:` for the two unnamed action steps) so
+    #    a dropped guard names the specific step that lost it.
+    guard="if: steps.engine-cache-all4.outputs.cache-hit != 'true'"
+    # Extract a single step's block (its opening `- ` line through the line
+    # before the next `- ` step) and report whether it carries the guard:
+    # 0 = guarded, 1 = present but unguarded, 2 = no such step.
+    step_has_guard() {
+      local ident="$1" block
+      block="$(awk -v id="$ident" '
+        /^      - / { instep = (index($0, id) > 0) }
+        instep { print }
+      ' <<<"$buildwasm")"
+      if [ -z "$block" ]; then
+        return 2
+      fi
+      if grep -qF "$guard" <<<"$block"; then
+        return 0
+      fi
+      return 1
+    }
+    # label => identifying substring of the step's opening line. The three setup
+    # steps (toolchain, cargo cache, wasm-bindgen-cli) plus the six cargo
+    # build/bindgen steps are the nine that must never run on a hit.
+    gated_steps=(
+      "rust toolchain install|dtolnay/rust-toolchain"
+      "cargo target cache|Swatinem/rust-cache"
+      "wasm-bindgen-cli install|Install wasm-bindgen-cli"
+      "build WebGL2 editor|Build WebGL2 + wasm-bindgen"
+      "build WebGPU editor|Build WebGPU + wasm-bindgen"
+      "build WebGL2 runtime|Build WebGL2 Runtime (stripped editor)"
+      "bindgen WebGL2 runtime|Run wasm-bindgen (WebGL2 Runtime)"
+      "build WebGPU runtime|Build WebGPU Runtime (stripped editor)"
+      "bindgen WebGPU runtime|Run wasm-bindgen (WebGPU Runtime)"
+    )
+    for entry in "${gated_steps[@]}"; do
+      label="${entry%%|*}"
+      ident="${entry#*|}"
+      step_has_guard "$ident"
+      rc=$?
+      if [ "$rc" -eq 0 ]; then
+        pass "build-wasm's '$label' step is gated on a cache miss"
+      elif [ "$rc" -eq 2 ]; then
+        fail "build-wasm has no step matching '$ident' — the '$label' build step was renamed or removed, so its cache-miss gate is unverifiable"
+      else
+        fail "build-wasm's '$label' step lost its '$guard' guard — on a MISS a dropped guard is invisible, but a merge that drops it silently reverts build-wasm to rebuilding on every run (#9525)"
+      fi
+    done
+
+    # The guard total pins the whole set at once: nine build steps above plus the
+    # Persist save below = 10. A guard silently dropped from any one of them
+    # takes this count off 10 even if a step was also renamed past the per-step
+    # checks above, so this catches the drop the per-step loop would miss.
+    guard_count="$(grep -cF "$guard" <<<"$buildwasm")"
+    if [ "$guard_count" -eq 10 ]; then
+      pass "build-wasm carries exactly 10 cache-miss guards (9 build steps + the Persist save)"
+    else
+      fail "build-wasm has $guard_count cache-miss guards (expected 10) — a guard was added or dropped; a dropped one silently reverts build-wasm to rebuilding on every run"
+    fi
+
+    # 6. The `Persist all 4 WASM variants` save step exists, is itself gated on a
+    #    cache MISS (re-saving an existing key warns and no-ops, and on a hit the
+    #    set came from this same cache), writes all four variant directories, and
+    #    keys them on the SAME all4 key the restore reads. Without this step the
+    #    four-variant set is never written from CD, so a later re-run/dispatch on
+    #    the same engine tree rebuilds all four for no benefit — the reuse the
+    #    ticket adds would look installed and do nothing.
+    persist="$(awk '
+      /^      - / { instep = (index($0, "Persist all 4 WASM variants") > 0) }
+      instep { print }
+    ' <<<"$buildwasm")"
+    if [ -z "$persist" ]; then
+      fail "build-wasm has no 'Persist all 4 WASM variants' step — the four-variant set is never written to the content-addressed cache from CD, so every later run rebuilds it"
+    else
+      pass "build-wasm has the 'Persist all 4 WASM variants' save step"
+      if grep -qF "$guard" <<<"$persist"; then
+        pass "the Persist step is gated on a cache miss (no redundant re-save on a hit)"
+      else
+        fail "the Persist step is not gated on '$guard' — on a hit it re-saves a key that already exists (warns/no-ops), and losing the gate here hides the reuse's write path"
+      fi
+      if grep -qE '^[[:space:]]*uses:[[:space:]]*actions/cache/save' <<<"$persist"; then
+        pass "the Persist step uses actions/cache/save"
+      else
+        fail "the Persist step does not use actions/cache/save — it cannot write the four-variant entry"
+      fi
+      for v in pkg-webgl2 pkg-webgpu pkg-webgl2-runtime pkg-webgpu-runtime; do
+        if grep -qE "^[[:space:]]+engine/${v}$" <<<"$persist"; then
+          pass "the Persist step saves engine/${v}"
+        else
+          fail "the Persist step does not list engine/${v} — the four-variant entry it writes would be incomplete, and a later restore would serve a partial set"
+        fi
+      done
+      if grep -qE 'key: \$\{\{ steps\.engine-key-all4\.outputs\.key \}\}' <<<"$persist"; then
+        pass "the Persist step keys the save on steps.engine-key-all4.outputs.key (the same key the restore reads)"
+      else
+        fail "the Persist step does not key on steps.engine-key-all4.outputs.key — a save under any other key can never be restored, so the reuse never hits"
+      fi
+    fi
   fi
 fi
 
