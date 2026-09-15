@@ -433,11 +433,19 @@ describe('performanceStore', () => {
       expect(second?.sampleCount).toBe(99);
     });
 
-    it('should treat a partial as the whole manifest when none exists yet', () => {
+    it('should create a complete versioned manifest when updated before capture', () => {
       usePerformanceStore.getState().updateManifest({ backend: 'webgl2', sampleCount: 3 });
       const state = usePerformanceStore.getState();
       expect(state.manifest?.backend).toBe('webgl2');
       expect(state.manifest?.sampleCount).toBe(3);
+      expect(state.manifest?.schemaVersion).toBe(1);
+      expect(state.manifest?.fixtureChecksum).toBe('unknown');
+      expect(state.manifest?.gpuDriver).toBe('unknown');
+      expect(state.manifest?.cacheState).toBe('unknown');
+      expect(Object.keys(state.manifest ?? {}).sort()).toEqual([
+        'backend', 'browserVersion', 'buildSha', 'cacheState', 'deviceMemory',
+        'fixtureChecksum', 'gpuDriver', 'os', 'sampleCount', 'schemaVersion', 'viewport',
+      ]);
     });
   });
 

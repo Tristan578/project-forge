@@ -7,7 +7,7 @@ import {
   type MeasurementManifest,
   type ManifestViewport,
 } from '@/lib/config/measurementManifest';
-import { environment } from '@/lib/environment';
+import { getActiveEngineBackend } from '@/hooks/useEngine';
 
 /**
  * Render a manifest field for display. The `'unknown'` sentinel and a null
@@ -98,12 +98,12 @@ export function PerformanceProfiler() {
   }, [isProfilerOpen, setProfilerOpen]);
 
   // Manual capture: snapshot the current stats and pin them to a measurement
-  // manifest describing this machine + build. Backend detection is async, so
-  // the handler is async; every field the browser cannot expose is recorded as
+  // manifest describing this machine + build and the engine's selected backend.
+  // Every metadata field the browser cannot expose is recorded as
   // 'unknown' by the builder (never a zero). Operation performance.FR-3.OP-01.
   const handleCapture = useCallback(async () => {
     const manifest = await buildMeasurementManifestAsync({
-      buildSha: environment.commit,
+      backend: getActiveEngineBackend(),
       sampleCount: history.length,
     });
     captureReport({ stats, manifest, capturedAt: Date.now() });

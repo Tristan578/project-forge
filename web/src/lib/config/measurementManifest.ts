@@ -21,8 +21,6 @@
  * subject of the negative-case acceptance scenario in #9904.
  */
 
-import { environment } from '@/lib/environment';
-
 /** Current manifest schema version. Bump on any breaking field change. */
 export const MEASUREMENT_MANIFEST_SCHEMA_VERSION = 1;
 
@@ -51,7 +49,7 @@ export interface ManifestViewport {
 export interface MeasurementManifest {
   /** Schema version — always a concrete number, never unknown. */
   schemaVersion: number;
-  /** Git commit SHA of the build under test (short), or `'unknown'`. */
+  /** Git commit SHA of the build under test, or `'unknown'`. */
   buildSha: string | Unknown;
   /** Stable digest of the exported fixture's serialized bytes, or `'unknown'`. */
   fixtureChecksum: string | Unknown;
@@ -139,11 +137,11 @@ export function readDeviceMemory(nav: ManifestNavigator | undefined): number | U
 }
 
 /**
- * Detect the render backend the engine will actually run on.
+ * Probe which backend the browser can support.
  *
- * Mirrors `selectPlayEngineBackend` (loadPlayEngine.ts): a browser may expose
- * `navigator.gpu` yet deny an adapter, in which case the engine falls back to
- * WebGL2 — so `'webgl2'` here is a true statement about what runs, not a guess.
+ * This probe cannot report the initialized editor backend: user preferences
+ * and engine loading failures can select WebGL2 even with an available adapter.
+ * Captures must pass the engine's selected backend explicitly.
  * Off-navigator (SSR, tests without a DOM) it returns {@link UNKNOWN} because we
  * genuinely cannot know, rather than defaulting to a backend that may be wrong.
  *
@@ -251,8 +249,9 @@ export function buildMeasurementManifest(options: BuildManifestOptions = {}): Me
   const nav = 'nav' in options ? options.nav : defaultNavigator();
   const win = 'win' in options ? options.win : defaultWindow();
 
-  const rawBuildSha =
-    options.buildSha ?? (typeof environment.commit === 'string' ? environment.commit : UNKNOWN);
+  // Next.js only exposes public environment variables in browser bundles.
+  // Keep local or unidentified builds explicit instead of reporting 'local' as a SHA.
+  const rawBuildSha = options.buildSha ?? process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? UNKNOWN;
   const buildSha = rawBuildSha === '' ? UNKNOWN : rawBuildSha;
 
   return {
@@ -277,7 +276,8 @@ export function buildMeasurementManifest(options: BuildManifestOptions = {}): Me
 
 /**
  * Convenience async wrapper: resolve the render backend, then build the
- * manifest. Used by the profiler's manual capture path.
+ * manifest. Callers capturing a running engine must provide its actual backend
+ * (or explicit 'unknown') to avoid substituting capability for observed state.
  */
 export async function buildMeasurementManifestAsync(
   options: BuildManifestOptions = {},

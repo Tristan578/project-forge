@@ -401,6 +401,11 @@ let loadAbortController: AbortController | null = null;
 /** Actual rendering backend chosen by loadWasm (not just capability detection). */
 let resolvedBackend: 'webgpu' | 'webgl2' = 'webgl2';
 
+/** Backend of the initialized editor engine, including explicit and automatic fallback. */
+export function getActiveEngineBackend(): 'webgpu' | 'webgl2' | 'unknown' {
+  return currentLoadingState.phase === 'ready' && !_engineCrashed ? resolvedBackend : 'unknown';
+}
+
 async function loadWasm(): Promise<WasmModule> {
   // Skip WASM loading when engine is explicitly disabled (CI E2E @ui tests)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

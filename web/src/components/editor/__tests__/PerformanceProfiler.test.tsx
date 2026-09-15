@@ -8,6 +8,11 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/compon
 import { PerformanceProfiler } from '../PerformanceProfiler';
 import { usePerformanceStore } from '@/stores/performanceStore';
 import type { MeasurementManifest } from '@/lib/config/measurementManifest';
+import { getActiveEngineBackend } from '@/hooks/useEngine';
+
+vi.mock('@/hooks/useEngine', () => ({
+  getActiveEngineBackend: vi.fn(() => 'webgl2'),
+}));
 
 vi.mock('@/stores/performanceStore', () => ({
   usePerformanceStore: vi.fn(() => ({})),
@@ -198,7 +203,25 @@ describe('PerformanceProfiler', () => {
       const report = mockCaptureReport.mock.calls[0][0];
       expect(report.manifest.schemaVersion).toBe(1);
       expect(report.manifest.sampleCount).toBe(2); // history length
+      expect(report.manifest.backend).toBe('webgl2');
       expect(typeof report.capturedAt).toBe('number');
+    });
+
+    it('reports the active WebGL2 fallback even when WebGPU is available', async () => {
+      vi.useRealTimers();
+      vi.mocked(getActiveEngineBackend).mockReturnValue('webgl2');
+      const requestAdapter = vi.fn(async () => ({}));
+      vi.stubGlobal('navigator', { gpu: { requestAdapter } });
+      try {
+        setupStore({ isProfilerOpen: true });
+        render(<PerformanceProfiler />);
+        fireEvent.click(screen.getByRole('button', { name: 'Capture report' }));
+        await waitFor(() => expect(mockCaptureReport).toHaveBeenCalledTimes(1));
+        expect(mockCaptureReport.mock.calls[0][0].manifest.backend).toBe('webgl2');
+        expect(requestAdapter).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it('renders captured manifest fields, showing unsupported metrics as "unknown" not zero', () => {

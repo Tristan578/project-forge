@@ -2,4 +2,4 @@
 "web": minor
 ---
 
-Add a versioned performance-measurement manifest that pins each captured report to the machine and build it was taken on — build SHA, fixture checksum, OS, exact browser version, GPU/driver, render backend, viewport, device memory, warm/cold cache state and sample count. The performance profiler now has a Capture report button that snapshots the live stats alongside this manifest, and any metric the browser cannot expose is recorded and displayed as "unknown" rather than silently becoming zero or a passed budget.
+Add a versioned measurement manifest alongside captured performance reports. Capture report snapshots existing profiler statistics with available build identity, OS, browser major version, active render backend, viewport, device memory and sample count. Manifest metadata that cannot be determined is shown as "unknown"; fixture identity, cache state and GPU/driver information remain unknown until supplied by a measurement harness. Capturing a report does not establish a performance budget pass.

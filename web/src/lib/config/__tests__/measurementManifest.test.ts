@@ -8,7 +8,7 @@
  * to 0/false/'' — the negative-case acceptance scenario in #9904.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   MEASUREMENT_MANIFEST_SCHEMA_VERSION,
   UNKNOWN,
@@ -35,6 +35,10 @@ const EDGE_WIN =
 const fullWindow: ManifestWindow = { innerWidth: 1920, innerHeight: 1080, devicePixelRatio: 2 };
 
 describe('measurementManifest', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   describe('parseOs (performance.FR-3.OP-01)', () => {
     it('parses common OS families', () => {
       expect(parseOs(CHROME_MAC)).toBe('macOS');
@@ -137,6 +141,17 @@ describe('measurementManifest', () => {
   });
 
   describe('buildMeasurementManifest (performance.FR-3.OP-01)', () => {
+    it('reads the commit exposed to the browser bundle', () => {
+      vi.stubEnv('NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA', 'abcd1234ef567890');
+      expect(buildMeasurementManifest().buildSha).toBe('abcd1234ef567890');
+    });
+
+    it('records an unidentified build as unknown', () => {
+      vi.stubEnv('NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA', undefined);
+      vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'server-only-commit');
+      expect(buildMeasurementManifest().buildSha).toBe(UNKNOWN);
+    });
+
     it('always carries the current schema version', () => {
       const manifest = buildMeasurementManifest();
       expect(manifest.schemaVersion).toBe(MEASUREMENT_MANIFEST_SCHEMA_VERSION);

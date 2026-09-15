@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { MeasurementManifest } from '@/lib/config/measurementManifest';
+import { buildMeasurementManifest, type MeasurementManifest } from '@/lib/config/measurementManifest';
 
 export interface PerformanceStats {
   fps: number;
@@ -131,11 +131,10 @@ export const usePerformanceStore = create<PerformanceState>((set) => ({
 
   updateManifest: (manifestUpdate) =>
     set((state) =>
-      // Merge onto the existing manifest; if none exists yet, the partial is
-      // the whole manifest. Unrelated state (stats/history/budget) is untouched.
+      // Seed every required field before applying a partial update.
       state.manifest
         ? { manifest: { ...state.manifest, ...manifestUpdate } }
-        : { manifest: { ...manifestUpdate } as MeasurementManifest },
+        : { manifest: { ...buildMeasurementManifest(), ...manifestUpdate } },
     ),
 
   captureReport: (report) => set({ capturedReport: report, manifest: report.manifest }),
