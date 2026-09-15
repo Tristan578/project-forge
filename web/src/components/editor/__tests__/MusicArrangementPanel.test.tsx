@@ -72,6 +72,23 @@ describe('MusicArrangementPanel — OP-01 arrangement', () => {
     expect(state().arrangement.clips[0].startOffset).toBe(8);
   });
 
+  // #9854 F2 parity: the AI exposes `arrangement_set_tempo`, so the panel must
+  // offer the same field manually. This is the test that would have failed while
+  // the tempo control was missing from the panel.
+  it('sets the arrangement tempo through the BPM input (manual parity with arrangement_set_tempo)', () => {
+    render(<MusicArrangementPanel />);
+    const tempo = screen.getByLabelText('Arrangement tempo (BPM)') as HTMLInputElement;
+    expect(tempo.valueAsNumber).toBe(120); // default
+    fireEvent.change(tempo, { target: { value: '140' } });
+    expect(state().arrangement.tempoBpm).toBe(140);
+  });
+
+  it('clamps a tempo above the 400 BPM ceiling', () => {
+    render(<MusicArrangementPanel />);
+    fireEvent.change(screen.getByLabelText('Arrangement tempo (BPM)'), { target: { value: '999' } });
+    expect(state().arrangement.tempoBpm).toBe(400);
+  });
+
   it('deletes a track (and its clips)', () => {
     render(<MusicArrangementPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'Add Track' }));

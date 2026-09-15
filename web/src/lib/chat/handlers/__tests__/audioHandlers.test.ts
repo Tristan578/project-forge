@@ -447,6 +447,25 @@ describe('audioHandlers — music arrangement (in-app AI parity)', () => {
     expect(arr().arrangement.clips[0].loopEnabled).toBe(true);
   });
 
+  // Each of the three clip-mutating handlers guards on the clip existing before
+  // touching the store. Without a test per handler, a regression that silently
+  // no-ops (or throws) on an unknown clipId would pass the suite — the mutate
+  // test above only ever hands them a real clip.
+  it.each([
+    ['arrangement_move_clip', { clipId: 'ghost', startOffset: 4 }],
+    ['arrangement_trim_clip', { clipId: 'ghost', trimStart: 1, trimEnd: 5 }],
+    ['arrangement_set_loop', { clipId: 'ghost', loopEnabled: true }],
+  ] as const)('%s reports a missing clip instead of mutating', async (handler, args) => {
+    // A real track exists but no clip with this id — the guard must still fire.
+    arr().addTrack();
+    const { result } = await invokeHandler(audioHandlers, handler, args);
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('clip not found'),
+    });
+    expect(arr().arrangement.clips).toHaveLength(0);
+  });
+
   it('arrangement_delete_clip / delete_track report a missing target and remove a real one', async () => {
     const missing = await invokeHandler(audioHandlers, 'arrangement_delete_clip', { clipId: 'nope' });
     expect(missing.result.success).toBe(false);

@@ -113,6 +113,7 @@ export const MusicArrangementPanel = memo(function MusicArrangementPanel() {
   const addTrack = useMusicArrangementStore((s) => s.addTrack);
   const deleteTrack = useMusicArrangementStore((s) => s.deleteTrack);
   const setTrackMuted = useMusicArrangementStore((s) => s.setTrackMuted);
+  const setTempoBpm = useMusicArrangementStore((s) => s.setTempoBpm);
   const addClip = useMusicArrangementStore((s) => s.addClip);
   const moveClip = useMusicArrangementStore((s) => s.moveClip);
   const trimClip = useMusicArrangementStore((s) => s.trimClip);
@@ -172,6 +173,23 @@ export const MusicArrangementPanel = memo(function MusicArrangementPanel() {
         <div className="flex items-center gap-2">
           <Music size={15} className="text-purple-400" aria-hidden="true" />
           <h2 className="text-sm font-semibold">Music Arrangement</h2>
+          {/* Manual half of `arrangement_set_tempo` (#9854 F2 parity): the AI can
+              set the arrangement tempo, so a human must be able to as well. The
+              store clamps to 20-400 BPM; tempo-grid snapping is deferred (#10058). */}
+          <label className="flex items-center gap-1 text-[10px] text-zinc-400">
+            Tempo
+            <input
+              type="number"
+              min={20}
+              max={400}
+              step={1}
+              aria-label="Arrangement tempo (BPM)"
+              value={arrangement.tempoBpm}
+              onChange={(e) => setTempoBpm(parseFloat(e.target.value))}
+              className="w-14 rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-200"
+            />
+            <span aria-hidden="true">BPM</span>
+          </label>
         </div>
         <div className="flex items-center gap-1">
           <button
