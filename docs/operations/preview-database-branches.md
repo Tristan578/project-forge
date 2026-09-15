@@ -37,11 +37,12 @@ below the number of open PRs.
    helper's exit code 5):
    1. preview branches whose PR is **closed** are deleted (state from GitHub;
       an unknown state keeps the branch), then the create is retried;
-   2. if still full, the **least recently created** preview branch whose PR
-      state GitHub could confirm is deleted, provided it is older than the
-      preview job's own timeout (30 minutes, `PREVIEW_DB_MIN_AGE_SECONDS`), so
-      it cannot belong to a running job. A branch whose PR state is unknown is
-      never a candidate. The evicted PR is named on the job summary and gets a
+   2. if still full, the **least recently created** preview branch of an
+      **open** PR (state confirmed by GitHub) is deleted, provided it is older
+      than the preview job's own timeout (30 minutes,
+      `PREVIEW_DB_MIN_AGE_SECONDS`), so it cannot belong to a running job. A
+      branch whose PR state is unknown is never a candidate, and a closed PR's
+      branch is step 1's alone. The evicted PR is named on the job summary and gets a
       comment, even if this PR's own create then fails; its next push rebuilds
       its branch. Then the create is retried.
    3. if still full, the job fails with exit 5 and says so. That is a capacity

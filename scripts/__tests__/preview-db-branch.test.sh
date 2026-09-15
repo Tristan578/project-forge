@@ -382,6 +382,25 @@ else
   fail "unknown-first eviction: rc=$rc deletes=$(deletes | tr '\n' ' ') out=$out"
 fi
 
+# A CLOSED PR's branch that step 1 could not delete is not retried here either:
+# it is step 1's, and the "push to rebuild" notice would land on a PR nobody
+# will push to. The next oldest OPEN one is taken instead.
+stub_reset; gh_reset; gh_pr 1 closed; gh_pr 2 open
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_TWO_OLD" | stub_body 3
+stub_status 4 500                          # sweep: DELETE br-a (closed) refused
+stub_status 5 422; printf '%s' "$LIMIT_FULL" | stub_body 5
+printf '%s' "$LIST_TWO_OLD" | stub_body 6
+# call 7 = DELETE br-b (open, default 200); call 8 = POST -> ok
+stub_status 8 201; printf '%s' "$CREATE_OK" | stub_body 8
+res="$(run_script create 42 --uri-out "$TMPDIR_T/n.uri")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ "$(grep -c '^br-a$' <<<"$(deletes)")" = "1" ] && grep -qxF 'evicted_pr=2' <<<"$out"; then
+  pass "a closed PR's branch the sweep could not delete is not retried by eviction; the next oldest OPEN one is taken"
+else
+  fail "closed-not-evicted: rc=$rc deletes=$(deletes | tr '\n' ' ') out=$out"
+fi
+
 echo ""
 echo "=== create: a refused delete during eviction moves on to the next oldest ==="
 stub_reset; gh_reset; gh_pr 1 open; gh_pr 2 open

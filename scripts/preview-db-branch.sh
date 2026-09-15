@@ -27,8 +27,8 @@
 #         1. preview branches whose PR is CLOSED (merged or not). The
 #            pull_request:closed cleanup can miss: a cancelled run, a secret
 #            outage, a close that raced the preview job's own create.
-#         2. the least recently CREATED preview branch whose PR state GitHub
-#            could confirm, provided it is older than
+#         2. the least recently CREATED preview branch of a still-OPEN PR
+#            (state confirmed by GitHub), provided it is older than
 #            $PREVIEW_DB_MIN_AGE_SECONDS. created_at is when that PR last pushed
 #            (every push recreates the branch), so oldest-first is
 #            least-recently-pushed-first. A branch younger than the preview
@@ -187,17 +187,22 @@ sweep_closed() {
 # minimum age. Prints evicted_pr= and evicted_branch=; rc 1 when nothing
 # qualifies, the list's own code when it failed.
 evict_oldest() {
-  local own="$1" rows id name created pr now ts age
+  local own="$1" rows id name created pr state now ts age
   rows="$(list_previews)" || return $?
   now="$(date -u +%s)"
   while IFS=$'\t' read -r id name created; do
     [ -n "$id" ] || continue
     [ "$name" != "$own" ] || continue
     pr="$(pr_of "$name")" || continue
-    if ! pr_state "$pr" >/dev/null; then
+    if ! state="$(pr_state "$pr")"; then
       echo "::warning::could not resolve the state of PR #${pr} for ${name}; not an eviction candidate" >&2
       continue
     fi
+    # Only an OPEN PR's branch is evicted here. A closed PR's branch is step
+    # 1's; if that delete failed, retrying it here would fail the same way,
+    # and the "your preview was reclaimed, push to rebuild" notice the caller
+    # posts would land on a PR nobody will push to.
+    [ "$state" = "open" ] || continue
     ts="$(epoch_of "$created")"
     # No parseable age means no proof it is not in use.
     [ -n "$ts" ] || continue
