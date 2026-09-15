@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, cleanup, screen, fireEvent } from '@/test/utils/componentTestUtils';
 import { PlaytestPanel } from '../PlaytestPanel';
 import { useEditorStore } from '@/stores/editorStore';
-import { MAX_TRACE_TICKS } from '@/lib/playtest/inputTrace';
+import { InputTraceRecorder, MAX_TRACE_TICKS } from '@/lib/playtest/inputTrace';
 import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
 
 vi.mock('@/stores/editorStore', () => ({
@@ -101,4 +101,20 @@ describe('PlaytestPanel', () => {
       expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeEnabled();
     },
   );
+  it('reports an unexpected manual stop failure once and restores the recording controls', () => {
+    const cause = new Error('Recorder boundary failed');
+    const reportError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<PlaytestPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record input' }));
+    vi.spyOn(InputTraceRecorder.prototype, 'stop').mockImplementation(() => { throw cause; });
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording input' }));
+
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(reportError).toHaveBeenCalledWith('Input recording failed:', cause);
+    expect(screen.getByRole('alert')).toHaveTextContent('Recording could not be saved. Check your input bindings, then select Record to try again.');
+    expect(screen.getByRole('button', { name: 'Record input' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Record input' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled();
+  });
+
 });
