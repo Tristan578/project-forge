@@ -501,10 +501,24 @@ function restorePrefabInstances(json: string): PrefabRestoreSnapshot | null {
   return snapshot;
 }
 
-/** Roll BOTH prefab-store storage keys back to a snapshot `restorePrefabInstances` took. */
+/**
+ * Roll BOTH prefab-store storage keys back to a snapshot `restorePrefabInstances`
+ * took. Every one of this function's six call sites sits either inside a
+ * `catch` block or right before returning a rejection — none of them expect
+ * (or are wrapped to handle) a SECOND exception from the rollback write
+ * itself, so a `localStorage.setItem` failure here (quota exceeded, private
+ * browsing) must not propagate: that would replace the original, already
+ * diagnosed rejection with an unhandled exception loadScene's own callers
+ * never see coming. Logged, not silent, so a real storage failure is still
+ * visible; the prefab store may be left only partially rolled back.
+ */
 function rollbackPrefabState(snapshot: PrefabRestoreSnapshot): void {
-  savePrefabInstancesToStorage(snapshot.instances);
-  savePrefabsToStorage(snapshot.prefabs);
+  try {
+    savePrefabInstancesToStorage(snapshot.instances);
+    savePrefabsToStorage(snapshot.prefabs);
+  } catch (error) {
+    console.error('[Scenes] Failed to roll back prefab state; storage may be inconsistent:', error);
+  }
 }
 
 /**

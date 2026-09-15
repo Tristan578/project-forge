@@ -6,6 +6,7 @@ import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import { loadPrefabInstances, savePrefabInstancesToStorage, savePrefab, getPrefab } from '@/lib/prefabs/prefabStore';
+import * as prefabStoreModule from '@/lib/prefabs/prefabStore';
 
 describe('sceneSlice', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -342,6 +343,24 @@ describe('sceneSlice', () => {
         reason: expect.stringContaining('could not be opened'),
         at: expect.any(Number),
       });
+    });
+
+    // Sentry: a QuotaExceededError (or any other storage failure) from the
+    // rollback write itself used to propagate uncaught out of `loadScene`,
+    // replacing the diagnosed rejection above with an unhandled exception.
+    it('does not throw when the rollback write itself fails (Sentry)', () => {
+      const dispatcher = vi.fn();
+      setSceneDispatcher(dispatcher);
+      const spy = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage').mockImplementation(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      });
+
+      try {
+        expect(() => store.getState().loadScene(cyclicScene)).not.toThrow();
+        expect(store.getState().loadScene(cyclicScene)).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('records a reason when the engine itself rejects the load', () => {
