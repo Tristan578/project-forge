@@ -284,6 +284,25 @@ describe('resolveApiKey - platform key', () => {
     await expect(resolveApiKey('user-1', 'meshy', 50, 'texture_generation')).rejects.toThrow('User not found');
   });
 
+  it('names a retired/keyless provider (suno) instead of "undefined" when no platform env var maps (#9522)', async () => {
+    // getPlatformKeyEnvVar returns null for a retired provider (suno has no
+    // entry in PLATFORM_KEY_ENV), so getPlatformKey must fall back to the
+    // provider name in the error. Pro tier reaches the platform path; the throw
+    // happens before deductTokens, so no deduction value is queued (mock-once
+    // leak guard) and none must be consumed.
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    let caught: Error | null = null;
+    try {
+      await resolveApiKey('user-1', 'suno', 10, 'music_generation');
+    } catch (e) {
+      caught = e as Error;
+    }
+    // Exact message: proves the `envVar ?? provider` fallback resolves to the
+    // provider name, not the pre-fix 'Platform key not configured: undefined'.
+    expect(caught?.message).toBe('Platform key not configured: suno');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
   it('passes metadata to deductTokens', async () => {
     wireDb([], [makeUser({ tier: 'pro' })]);
     mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 100, monthlyTotal: 3000, addon: 0, total: 100, nextRefillDate: null }, usageId: 'u-3' });
