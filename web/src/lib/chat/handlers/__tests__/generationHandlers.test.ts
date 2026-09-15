@@ -618,6 +618,19 @@ describe('generationHandlers', () => {
       expect(clip.sourceDurationSeconds).toBe(25);
     });
 
+    it('falls back to the requested duration instead of a reported 0 (#10058)', async () => {
+      // A reported 0 is not a real duration for generated music — buildClip's
+      // clampTrimWindow treats sourceDurationSeconds:0 as "unknown" and floors
+      // trimEnd to 0.05s, leaving trimEnd > sourceDurationSeconds on the clip.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64music', durationSeconds: 0 }),
+      });
+      await invoke('generate_music', { prompt: 'calm', durationSeconds: 25 });
+      const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+      expect(clip.sourceDurationSeconds).toBe(25);
+    });
+
     it('tracks async job when no audioBase64', async () => {
       mockFetchSuccess({ audioBase64: undefined });
       const { result } = await invoke('generate_music', { prompt: 'calm ambient' });

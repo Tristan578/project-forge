@@ -472,9 +472,14 @@ export const generationHandlers: Record<string, ToolHandler> = {
       // In-app AI parity with GenerateMusicDialog (#9854): the chat tool's
       // generated track must land as an editable clip in the Music Arrangement
       // editor, not only attach to an entity. `typeof`/`Number.isFinite`, not
-      // `||`, so a 0-length report cannot mask a real duration with the default.
+      // `||`, so a 0-length report cannot mask a real duration with the
+      // default — but 0 itself is not a real duration for generated music
+      // either: `buildClip`'s `clampTrimWindow` treats a 0 source duration as
+      // "unknown" and substitutes a 0.05s floor, leaving the clip's own
+      // `sourceDurationSeconds: 0` while `trimEnd` is non-zero (#10058).
+      // `> 0`, matching the async path in `useGenerationPolling.ts`.
       const durationSeconds =
-        typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds)
+        typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds) && data.durationSeconds > 0
           ? data.durationSeconds
           : p.data.durationSeconds ?? 30;
       useMusicArrangementStore.getState().addGeneratedClip({
