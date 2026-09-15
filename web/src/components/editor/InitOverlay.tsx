@@ -1,5 +1,6 @@
 'use client';
 
+import { InlineAlert } from '@spawnforge/ui';
 import { useEngineStatus, PHASE_LABELS, type PhaseStatus } from '@/hooks/useEngineStatus';
 import { copyInitLogToClipboard } from '@/lib/initLog';
 import { setPreferredBackend } from '@/hooks/useEngine';
@@ -47,29 +48,29 @@ function TimeoutWarning({
 }) {
   if (phase === 'wasm_loading') {
     return (
-      <div role="alert" className="mt-4 rounded bg-yellow-900/50 px-3 py-2 text-sm text-yellow-200">
+      <InlineAlert variant="warning" className="mt-4 text-sm">
         Slow network? The WASM module is taking longer than expected to download.
-      </div>
+      </InlineAlert>
     );
   }
 
   if (phase === 'renderer_init') {
     return (
-      <div role="alert" className="mt-4 rounded bg-yellow-900/50 px-3 py-2 text-sm text-yellow-200">
+      <InlineAlert variant="warning" className="mt-4 text-sm">
         GPU initialization is taking a while. This may be a compatibility issue.
         {retryCount >= 1 && (
-          <div className="mt-1 text-xs text-yellow-300">
+          <div className="mt-1 text-xs opacity-80">
             Tip: Try WebGL2 mode on the next retry.
           </div>
         )}
-      </div>
+      </InlineAlert>
     );
   }
 
   return (
-    <div role="alert" className="mt-4 rounded bg-red-900/50 px-3 py-2 text-sm text-red-200">
+    <InlineAlert variant="error" className="mt-4 text-sm">
       Something went wrong during initialization.
-    </div>
+    </InlineAlert>
   );
 }
 
@@ -185,17 +186,17 @@ export function InitOverlay() {
             )}
 
             {error && !isTimedOut && (
-              <div role="alert" className="mt-4 rounded bg-red-900/50 px-3 py-2 text-sm text-red-200">
+              <InlineAlert variant="error" className="mt-4 text-sm">
                 <p>Error: {error}</p>
                 {canRetry && (
                   <button
                     onClick={retry}
-                    className="mt-2 rounded bg-red-800 px-3 py-1.5 text-sm text-red-100 hover:bg-red-700"
+                    className="mt-2 rounded bg-[var(--sf-destructive)] px-3 py-1.5 text-sm text-white hover:opacity-90"
                   >
                     Retry
                   </button>
                 )}
-              </div>
+              </InlineAlert>
             )}
 
             <div className="mt-4 flex items-center justify-between border-t border-zinc-800 pt-4">

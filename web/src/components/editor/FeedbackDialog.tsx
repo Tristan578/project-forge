@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { X, Bug, Lightbulb, MessageSquare, Send, CheckCircle } from 'lucide-react';
+import { InlineAlert } from '@spawnforge/ui';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 type FeedbackType = 'bug' | 'feature' | 'general';
@@ -169,7 +170,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
                 {description.length}/5000
               </span>
               {description.trim().length > 0 && description.trim().length < 10 && (
-                <span className="text-[10px] text-amber-500">
+                <span className="text-[10px] text-[var(--sf-warning)]">
                   Minimum 10 characters
                 </span>
               )}
@@ -177,9 +178,9 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
 
             {/* Error message */}
             {error && (
-              <div role="alert" className="mb-3 rounded border border-red-800/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
+              <InlineAlert variant="error" className="mb-3">
                 {error}
-              </div>
+              </InlineAlert>
             )}
 
             {/* Submit button */}
