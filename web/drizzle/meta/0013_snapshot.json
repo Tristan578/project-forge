@@ -2858,6 +2858,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "published_scene_data": {
+          "name": "published_scene_data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {

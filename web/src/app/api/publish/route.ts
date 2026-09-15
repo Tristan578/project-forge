@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb, queryWithResilience } from '@/lib/db/client';
-import { publishedGames, projects, gameTags } from '@/lib/db/schema';
-import { eq, ne, and, or, isNotNull, inArray, sql } from 'drizzle-orm';
+import { publishedGames, projects } from '@/lib/db/schema';
+import { eq, ne, and, or, isNotNull, inArray } from 'drizzle-orm';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { checkTrademark } from '@/lib/moderation/trademarkFilter';
 import { PUBLISH_LIMITS } from '@/lib/projects/limits';
@@ -13,7 +13,10 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
-import { writePublishedGameBundle } from '@/lib/storage/publishedGameStorage';
+import {
+  writePublishedGameBundle, deletePublishedGameBundle, isPublishedSceneData,
+} from '@/lib/storage/publishedGameStorage';
+import { commitPublication } from '@/lib/publishing/commitPublication';
 
 const publishSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -182,6 +185,7 @@ async function POST_impl(request: NextRequest) {
       id: publishedGames.id,
       slug: publishedGames.slug,
       version: publishedGames.version,
+      cdnBundleKey: publishedGames.cdnBundleKey,
       flaggedAt: publishedGames.flaggedAt,
     })
     .from(publishedGames)
@@ -238,31 +242,24 @@ async function POST_impl(request: NextRequest) {
 
   const gameUrl = `/play/${clerkId}/${slug}`;
 
-  // Mirror the published game's scene data to R2 (object storage) so the player
-  // page can be served from CDN-backed storage instead of a live Postgres read
-  // (#7580). This is FAIL-OPEN: any R2 error is logged and swallowed, the row
-  // keeps `cdn_bundle_key` NULL, and /play serves projects.sceneData exactly as
-  // before. R2 availability must never block a publish. The bundle key uses the
-  // creator's clerkId — the same identifier the /play URL and the read path use
-  // — so the write here and the read there derive an identical key.
-  const r2Enabled = isPublishToR2Enabled();
-  async function mirrorBundleToR2(
-    version: number,
-  ): Promise<{ key: string; url: string } | null> {
-    if (!r2Enabled) return null;
+  if (!isPublishedSceneData(project.sceneData)) {
+    return NextResponse.json({ error: 'Project has invalid scene data' }, { status: 422 });
+  }
+  const previous = existingSlug[0];
+  const expectedVersion = previous?.version ?? 0;
+  let bundle: { key: string } | null = null;
+  if (isPublishToR2Enabled()) {
     try {
-      return await writePublishedGameBundle(clerkId, slug, project.sceneData, {
-        version,
+      bundle = await writePublishedGameBundle(clerkId, slug, project.sceneData, {
+        schemaVersion: 1,
+        version: expectedVersion + 1,
         publishedAt: new Date().toISOString(),
         slug,
         userId: clerkId,
       });
     } catch (err) {
       captureException(err, { route: '/api/publish', stage: 'r2-bundle-write', slug });
-      reqLogAuth.warn('R2 bundle mirror failed; serving published game from Postgres', {
-        slug,
-      });
-      return null;
+      reqLogAuth.warn('Private snapshot upload failed; retaining Postgres snapshot', { slug });
     }
   }
 
@@ -274,96 +271,42 @@ async function POST_impl(request: NextRequest) {
         .slice(0, 5)
     : [];
 
-  if (existingSlug.length > 0) {
-    // Update existing publication (republish)
-    const gameDbId = existingSlug[0].id;
-    const newVersion = existingSlug[0].version + 1;
-    // A fresh bundle for the new version. On failure `bundle` is null, so the
-    // row drops back to the Postgres-served /play URL and clears any stale key
-    // — /play must never point at a bundle carrying the previous version's
-    // scene data.
-    const bundle = await mirrorBundleToR2(newVersion);
-    // cdnUrl becomes the CDN bundle URL only when the mirror succeeded, which
-    // is exactly when CDN_URL is configured (uploadToR2 throws otherwise);
-    // otherwise it stays the internal /play route.
-    await queryWithResilience(() => getDb().update(publishedGames)
-      .set({
-        title: title,
-        description: description ?? null,
-        status: 'published',
-        version: newVersion,
-        cdnUrl: bundle?.url ?? gameUrl,
-        cdnBundleKey: bundle?.key ?? null,
-        thumbnail,
-        updatedAt: new Date(),
-      })
-      .where(eq(publishedGames.id, gameDbId)));
-
-    // Replace tags
-    await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, gameDbId)));
-    if (validTags.length > 0) {
-      await queryWithResilience(() => getDb().insert(gameTags).values(
-        validTags.map((tag) => ({ gameId: gameDbId, tag }))
-      ));
-    }
-
-    reqLogAuth.info('Game republished', {
-      projectId: projectId,
-      slug: slug,
-      version: newVersion,
+  let publication;
+  try {
+    publication = await commitPublication({
+      userId: user.id, projectId, slug, title, description, thumbnail, gameUrl,
+      expectedVersion, bundleKey: bundle?.key ?? null, sceneData: project.sceneData,
+      tags: [...new Set(validTags)],
     });
-
-    const [updated] = await queryWithResilience(() => getDb().select().from(publishedGames).where(eq(publishedGames.id, gameDbId)));
-    return NextResponse.json({ publication: { ...updated, url: gameUrl } });
+  } catch (error) {
+    if (bundle) {
+      // A lost database response does not prove rollback. Confirm the candidate
+      // is unreferenced before deleting it; otherwise leave it for reconciliation.
+      try {
+        const references = await queryWithResilience(() => getDb()
+          .select({ id: publishedGames.id }).from(publishedGames)
+          .where(eq(publishedGames.cdnBundleKey, bundle!.key)).limit(1));
+        if (references.length === 0) await deletePublishedGameBundle(bundle.key, clerkId, slug);
+      } catch (verificationError) {
+        captureException(verificationError, {
+          route: '/api/publish', stage: 'r2-rollback-check', key: bundle.key,
+        });
+      }
+    }
+    throw error;
   }
 
-  // Create new publication — use onConflictDoUpdate to handle concurrent
-  // publishes with the same slug atomically (PF-212: TOCTOU fix).
-  // The unique index uq_published_games_slug(userId, slug) prevents duplicates.
-  const bundle = await mirrorBundleToR2(1);
-  const [publication] = await queryWithResilience(() => getDb().insert(publishedGames)
-    .values({
-      userId: user.id,
-      projectId: projectId,
-      slug: slug,
-      title: title,
-      description: description ?? null,
-      status: 'published',
-      cdnUrl: bundle?.url ?? gameUrl,
-      cdnBundleKey: bundle?.key ?? null,
-      thumbnail,
-    })
-    .onConflictDoUpdate({
-      target: [publishedGames.userId, publishedGames.slug],
-      set: {
-        projectId: projectId,
-        title: title,
-        description: description ?? null,
-        status: 'published',
-        cdnUrl: bundle?.url ?? gameUrl,
-        cdnBundleKey: bundle?.key ?? null,
-        thumbnail,
-        version: sql`${publishedGames.version} + 1`,
-        updatedAt: new Date(),
-      },
-    })
-    .returning());
-
-  // Replace tags atomically — delete old tags first to prevent duplicates
-  // on concurrent publishes hitting the ON CONFLICT DO UPDATE path.
-  await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, publication.id)));
-  if (validTags.length > 0) {
-    await queryWithResilience(() => getDb().insert(gameTags).values(
-      validTags.map((tag) => ({ gameId: publication.id, tag }))
-    ));
+  if (!publication) {
+    await deletePublishedGameBundle(bundle?.key, clerkId, slug);
+    return NextResponse.json(
+      { error: 'The publication changed while saving. Reload and try again.' },
+      { status: 409 },
+    );
   }
 
-  reqLogAuth.info('Game published', {
-    projectId: projectId,
-    slug: slug,
-    version: 1,
-  });
-
+  // Only a committed winner can delete the previously referenced object.
+  await deletePublishedGameBundle(previous?.cdnBundleKey, clerkId, slug);
+  reqLogAuth.info('Game published', { projectId, slug, version: publication.version });
   return NextResponse.json({ publication: { ...publication, url: gameUrl } });
   } catch (err) {
     captureException(err, { route: '/api/publish', method: 'POST' });

@@ -13,6 +13,7 @@ import {
   withStatusSidecars,
   MAX_R2_SWEEP_KEYS,
 } from '../storage/r2';
+import { resolveOwnedPublishedGameKey } from '../storage/publishedGameStorage';
 import { captureException, captureMessage } from '../monitoring/sentry-server';
 
 /** Find or create a user from Clerk webhook data */
@@ -137,7 +138,7 @@ export async function updateDisplayName(
  *   → financial / key data
  *   → users
  *
- * After the transaction commits, the user's uploaded marketplace objects are
+ * After the transaction commits, the user's marketplace objects and publication snapshots are
  * removed from R2 on a best-effort basis (PF-9457) — see the notes at that
  * call site for why storage runs last and why it can never fail the deletion.
  */
@@ -294,10 +295,14 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   statements.push(neonSql`DELETE FROM marketplace_assets WHERE seller_id = ${userId}`);
   statements.push(neonSql`DELETE FROM seller_profiles    WHERE user_id   = ${userId}`);
 
-  // 6. Published games (after community data and featured_games; only if user had any)
-  if (gameIds.length > 0) {
-    statements.push(neonSql`DELETE FROM published_games WHERE user_id = ${userId}`);
-  }
+  // 6. Return the objects actually removed by the transaction. A preceding
+  // read can be stale if a publication commits while account deletion starts.
+  const deletedGamesStatement = statements.length;
+  statements.push(neonSql`
+    DELETE FROM published_games WHERE user_id = ${userId}
+    RETURNING cdn_bundle_key, slug,
+      (SELECT clerk_id FROM users WHERE id = ${userId}) AS clerk_id
+  `);
 
   // 7. Generation jobs — must come BEFORE projects because generation_jobs.project_id
   //    is a FK that references projects.id. Deleting projects first causes a FK violation.
@@ -330,7 +335,12 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   statements.push(neonSql`DELETE FROM users WHERE id = ${userId}`);
 
   // Execute all statements atomically
-  await queryWithResilience(() => neonSql.transaction(statements));
+  const results = await queryWithResilience(() => neonSql.transaction(statements));
+  const gameKeys: string[] = [];
+  for (const row of results?.[deletedGamesStatement] ?? []) {
+    const key = resolveOwnedPublishedGameKey(row.cdn_bundle_key, row.clerk_id, row.slug);
+    if (key) gameKeys.push(key);
+  }
 
   // Object storage last, and best-effort (PF-9457).
   //
@@ -345,7 +355,7 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   // useful for the caller to retry. Failures are logged with their keys so an
   // operator can reconcile them (keys stay enumerable by the assets/{userId}/
   // prefix).
-  await deleteUserStorageObjects(userId, storageKeys, assetReadTruncated);
+  await deleteUserStorageObjects(userId, [...withStatusSidecars(gameKeys), ...storageKeys], assetReadTruncated);
 }
 
 /**
@@ -384,7 +394,7 @@ async function deleteUserStorageObjects(
     // the key shape) without re-deriving the row cap degrades to a loud report
     // rather than a silent drop.
     if (sweep.truncated) {
-      const message = `Account deletion R2 sweep truncated at ${MAX_R2_SWEEP_KEYS} keys for user ${userId}; remaining objects under assets/${userId}/ need reconciliation`;
+      const message = `Account deletion R2 sweep truncated at ${MAX_R2_SWEEP_KEYS} keys for user ${userId}; remaining marketplace and published-game objects need reconciliation`;
       console.error(message);
       captureMessage(message, 'error');
     }

@@ -19,22 +19,12 @@ export const ASSET_STORAGE_ENV = {
 export type AssetStorageEnvKey = keyof typeof ASSET_STORAGE_ENV;
 
 /**
- * Feature flag: mirror published game bundles into R2 (object storage) on
- * publish and read them back on /play, falling back to Postgres-served
- * `sceneData` when R2 is absent or errors (#7580).
+ * Enable optional private publication snapshots in R2. Play still goes through
+ * the application API and falls back to the publication snapshot in Postgres.
  *
- * DEFAULTS ON when `ASSET_BUCKET_NAME` is configured, off otherwise — so a
- * deploy that already has R2 credentials starts serving published games from
- * object storage without a second flag flip, while a deploy without a bucket
- * (local dev, preview without storage) stays on the existing Postgres path with
- * zero behaviour change. An explicit `PUBLISH_TO_R2=false` ALWAYS wins, so the
- * mirror can be killed on a configured deploy without pulling the bucket env;
- * an explicit `PUBLISH_TO_R2=true` forces it on even before a bucket is wired
- * (the write then fails open — see the publish route).
- *
- * Comparison is exact against the trimmed, lower-cased value: any string other
- * than 'true' / 'false' (a typo, an empty string) is treated as "unset" and
- * falls through to the bucket-presence default, never as an accidental enable.
+ * Explicit true/false takes precedence; an unset or unrecognized value uses
+ * bucket presence as the default. This does not enable public bucket access or
+ * CDN delivery. A failed storage operation leaves the Postgres path available.
  */
 export function isPublishToR2Enabled(): boolean {
   const raw = (process.env.PUBLISH_TO_R2 ?? '').trim().toLowerCase();

@@ -8,7 +8,7 @@ import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { extractRequestId } from '@/lib/logging/requestContext';
 import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
-import { readPublishedGameBundle } from '@/lib/storage/publishedGameStorage';
+import { readPublishedGameBundle, isPublishedSceneData } from '@/lib/storage/publishedGameStorage';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,19 +62,14 @@ async function GET_impl(
       );
     }
 
-    // Resolve the scene data. When this game was mirrored to R2 on publish
-    // (cdn_bundle_key set) and the mirror is enabled, read the bundle from
-    // object storage FIRST — that is the CDN-backed fast path (#7580). Any read
-    // failure (missing object, transport error, malformed JSON) is logged to
-    // Sentry and falls through to the existing Postgres-served sceneData, which
-    // remains the source of truth. The remix path is deliberately untouched: it
-    // still reads projects.sceneData directly and quarantines scripts.
+    // The gated API reads the private immutable object. The identical Postgres
+    // snapshot is the fallback; legacy rows still use their project until republished.
     let sceneData: unknown;
     let servedFromR2 = false;
 
     if (game.cdnBundleKey && isPublishToR2Enabled()) {
       try {
-        const bundle = await readPublishedGameBundle(clerkId, slug);
+        const bundle = await readPublishedGameBundle(game.cdnBundleKey, clerkId, slug, game.version);
         sceneData = bundle.sceneData;
         servedFromR2 = true;
       } catch (err) {
@@ -88,8 +83,13 @@ async function GET_impl(
       }
     }
 
-    if (!servedFromR2) {
-      // Fetch the project scene data (Postgres fallback / default path)
+    if (!servedFromR2 && game.publishedSceneData != null) {
+      if (!isPublishedSceneData(game.publishedSceneData)) {
+        throw new Error('Invalid publication snapshot');
+      }
+      sceneData = game.publishedSceneData;
+    } else if (!servedFromR2) {
+      // Legacy publications have no snapshot until their next publish.
       const [project] = await queryWithResilience(() => getDb()
         .select({ sceneData: projects.sceneData })
         .from(projects)
@@ -101,6 +101,9 @@ async function GET_impl(
           { error: 'Game data not found' },
           { status: 404 }
         );
+      }
+      if (!isPublishedSceneData(project.sceneData)) {
+        throw new Error('Invalid project scene data');
       }
       sceneData = project.sceneData;
     }
@@ -123,9 +126,8 @@ async function GET_impl(
         sceneData,
       },
     });
-    // Short TTL: game data changes when creators republish; stale-while-revalidate
-    // lets the CDN serve fresh data without blocking the player.
-    response.headers.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
+    // Every load must recheck publication/moderation status before exposing data.
+    response.headers.set('Cache-Control', 'private, no-store');
     return response;
   } catch (error) {
     captureException(error, { route: '/api/play/[userId]/[slug]' });

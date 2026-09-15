@@ -96,25 +96,59 @@ export async function uploadToR2(
 }
 
 /**
- * Read an R2 object's body as a UTF-8 string.
- *
- * Narrowly scoped to the "small JSON document" case (published game bundles,
- * #7580): the whole body is buffered into a string via the AWS SDK's
- * `transformToString`, so it is NOT appropriate for large binary assets. Throws
- * on a missing object (the SDK raises `NoSuchKey`), a transport failure, or a
- * response with no body — callers treat any throw as "not available in R2" and
- * fall back to their primary source.
+ * Bound the complete operation, including body consumption. The explicit race
+ * also releases the request when a transport does not honor AbortSignal.
  */
-export async function getObjectFromR2(key: string): Promise<string> {
-  const r2 = getR2Client();
-  const bucket = getBucket();
-
-  const response = await r2.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-  const body = response.Body as { transformToString?: () => Promise<string> } | undefined;
-  if (!body || typeof body.transformToString !== 'function') {
-    throw new Error(`R2 object ${key} returned no readable body`);
+async function withR2Deadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs = 3000,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('R2 operation timed out'));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
-  return body.transformToString();
+}
+
+/** Write a private object without deriving or advertising a public CDN URL. */
+export async function putPrivateObjectToR2(
+  key: string,
+  body: Buffer,
+  contentType: string,
+): Promise<void> {
+  await withR2Deadline((abortSignal) => getR2Client().send(
+    new PutObjectCommand({
+      Bucket: getBucket(), Key: key, Body: body, ContentType: contentType,
+      CacheControl: 'private, no-store',
+      IfNoneMatch: '*',
+    }),
+    { abortSignal },
+  ));
+}
+
+/** Read a small JSON object through authenticated S3 access within three seconds. */
+export async function getObjectFromR2(key: string): Promise<string> {
+  return withR2Deadline(async (abortSignal) => {
+    const response = await getR2Client().send(
+      new GetObjectCommand({ Bucket: getBucket(), Key: key }),
+      { abortSignal },
+    );
+    const body = response.Body;
+    if (!body || typeof body.transformToString !== 'function') {
+      throw new Error('R2 object returned no readable body');
+    }
+    return body.transformToString();
+  });
 }
 
 /**
@@ -199,12 +233,13 @@ export async function deleteManyFromR2(keys: string[]): Promise<R2DeleteSweepRes
   for (let i = 0; i < target.length; i += R2_DELETE_BATCH_SIZE) {
     const batch = target.slice(i, i + R2_DELETE_BATCH_SIZE);
     try {
-      const response = await r2.send(
+      const response = await withR2Deadline((abortSignal) => r2.send(
         new DeleteObjectsCommand({
           Bucket: bucket,
           Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
-        })
-      );
+        }),
+        { abortSignal },
+      ));
       const batchErrors = (response as { Errors?: { Key?: string; Code?: string; Message?: string }[] } | undefined)
         ?.Errors ?? [];
       for (const failure of batchErrors) {

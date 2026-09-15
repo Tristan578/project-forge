@@ -31,7 +31,8 @@ const captureExceptionMock = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/config/assetStorage', () => ({
   isPublishToR2Enabled: () => isPublishToR2EnabledMock(),
 }));
-vi.mock('@/lib/storage/publishedGameStorage', () => ({
+vi.mock('@/lib/storage/publishedGameStorage', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/storage/publishedGameStorage')>(),
   readPublishedGameBundle: (...args: unknown[]) => readBundleMock(...args),
 }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({
@@ -71,6 +72,7 @@ describe('GET /api/play/[userId]/[slug]', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    isPublishToR2EnabledMock.mockReturnValue(false);
   });
 
   it('returns 404 when user is not found', async () => {
@@ -221,7 +223,7 @@ describe('GET /api/play/[userId]/[slug]', () => {
 
     expect(res.status).toBe(200);
     expect(data.game.sceneData).toEqual(bundleScene);
-    expect(readBundleMock).toHaveBeenCalledWith('clerk_1', 'cdn-game');
+    expect(readBundleMock).toHaveBeenCalledWith('games/clerk_1/cdn-game/bundle.json', 'clerk_1', 'cdn-game', 2);
     // Two selects only (user + game). A third would mean it fell back to the
     // projects.sceneData query despite a successful R2 read.
     expect(select).toHaveBeenCalledTimes(2);
@@ -289,6 +291,81 @@ describe('GET /api/play/[userId]/[slug]', () => {
     expect(data.game.sceneData).toEqual(dbScene);
     expect(readBundleMock).not.toHaveBeenCalled();
     expect(select).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([false, true])('uses the published snapshot rather than an unpublished project when storage enabled=%s', async (enabled) => {
+    isPublishToR2EnabledMock.mockReturnValue(enabled);
+    readBundleMock.mockRejectedValue(new Error('R2 unavailable'));
+    const publishedSceneData = { entities: [{ id: 'published' }] };
+    const select = vi.fn()
+      .mockReturnValueOnce(mockDbChain([{ id: 'db-user-1', displayName: 'Creator' }]))
+      .mockReturnValueOnce(mockDbChain([{
+        id: 'game-1', userId: 'db-user-1', slug: 'snapshot-game', status: 'published',
+        title: 'Snapshot', version: 2, projectId: 'project-1',
+        cdnBundleKey: 'games/clerk_1/snapshot-game/7179eeca-ffba-48b3-9897-c598813a8bd5/bundle.json',
+        publishedSceneData,
+      }]));
+    vi.mocked(getDb).mockReturnValue({ select, update: vi.fn().mockReturnValue(mockUpdateChain()) } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/play/clerk_1/snapshot-game'), {
+      params: Promise.resolve({ userId: 'clerk_1', slug: 'snapshot-game' }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).game.sceneData).toEqual(publishedSceneData);
+    expect(select).toHaveBeenCalledTimes(2);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+  });
+
+  it.each(['r2', 'postgres'])('redacts secret-shaped content from the %s snapshot response', async (source) => {
+    const secret = 'sk-ant-api03-0123456789abcdefghijKLMNOPQRSTUVWXYZ';
+    const scene = { entities: [], configuration: { diagnostic: secret } };
+    isPublishToR2EnabledMock.mockReturnValue(source === 'r2');
+    readBundleMock.mockResolvedValue({ sceneData: scene });
+    const select = vi.fn()
+      .mockReturnValueOnce(mockDbChain([{ id: 'db-user-1' }]))
+      .mockReturnValueOnce(mockDbChain([{
+        id: 'game-1', status: 'published', slug: 'secret-game', version: 1,
+        cdnBundleKey: 'private-key', publishedSceneData: scene,
+      }]));
+    vi.mocked(getDb).mockReturnValue({ select, update: vi.fn().mockReturnValue(mockUpdateChain()) } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/play/clerk_1/secret-game'), {
+      params: Promise.resolve({ userId: 'clerk_1', slug: 'secret-game' }),
+    });
+    const payload = await response.text();
+    expect(response.status).toBe(200);
+    expect(payload).not.toContain(secret);
+    expect(JSON.parse(payload).game.sceneData.configuration.diagnostic).toContain('REDACTED');
+  });
+
+  it('checks publication status before touching object storage', async () => {
+    isPublishToR2EnabledMock.mockReturnValue(true);
+    const select = vi.fn()
+      .mockReturnValueOnce(mockDbChain([{ id: 'db-user-1' }]))
+      .mockReturnValueOnce(mockDbChain([{
+        id: 'game-1', status: 'flagged', cdnBundleKey: 'private-object',
+        publishedSceneData: { entities: [] },
+      }]));
+    vi.mocked(getDb).mockReturnValue({ select } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/play/clerk_1/held'), {
+      params: Promise.resolve({ userId: 'clerk_1', slug: 'held' }),
+    });
+    expect(response.status).toBe(404);
+    expect(readBundleMock).not.toHaveBeenCalled();
+  });
+
+  it.each([[], 'invalid', 5])('does not serve malformed stored snapshots %#', async (publishedSceneData) => {
+    const select = vi.fn()
+      .mockReturnValueOnce(mockDbChain([{ id: 'db-user-1' }]))
+      .mockReturnValueOnce(mockDbChain([{ id: 'game-1', status: 'published', publishedSceneData }]));
+    vi.mocked(getDb).mockReturnValue({ select } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/play/clerk_1/game'), {
+      params: Promise.resolve({ userId: 'clerk_1', slug: 'game' }),
+    });
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toBe('Failed to load game');
   });
 
   it('returns 500 when an unexpected error occurs', async () => {

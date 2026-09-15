@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockSend = vi.fn();
 
@@ -21,6 +21,7 @@ vi.mock('@aws-sdk/s3-request-presigner', () => ({
 }));
 
 describe('R2 storage client', () => {
+  afterEach(() => { vi.useRealTimers(); });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
@@ -48,6 +49,48 @@ describe('R2 storage client', () => {
       const { buildAssetKey } = await import('../r2');
       const key = buildAssetKey('s1', 'a1', 'my file (1).glb', 'file');
       expect(key).toBe('assets/s1/a1/file/my_file__1_.glb');
+    });
+  });
+
+  describe('bounded private publication access', () => {
+    it('writes privately without CDN configuration and refuses overwrite', async () => {
+      delete process.env.CDN_URL;
+      mockSend.mockResolvedValue({});
+      const { putPrivateObjectToR2 } = await import('../r2');
+      await expect(putPrivateObjectToR2('games/key.json', Buffer.from('{}'), 'application/json')).resolves.toBeUndefined();
+      expect(mockSend.mock.calls[0][0].args).toMatchObject({
+        Key: 'games/key.json', Bucket: 'test-bucket', CacheControl: 'private, no-store',
+        IfNoneMatch: '*', ContentType: 'application/json',
+      });
+      expect(mockSend.mock.calls[0][1].abortSignal.aborted).toBe(false);
+    });
+
+    it.each(['read', 'write', 'body'])('bounds a stalled %s, including body consumption', async (operation) => {
+      const { getObjectFromR2, putPrivateObjectToR2 } = await import('../r2');
+      vi.useFakeTimers();
+      mockSend.mockImplementation(() => operation === 'body'
+        ? Promise.resolve({ Body: { transformToString: () => new Promise(() => {}) } })
+        : new Promise(() => {}));
+      const request = operation === 'write'
+        ? putPrivateObjectToR2('key', Buffer.from('{}'), 'application/json')
+        : getObjectFromR2('key');
+      const rejection = expect(request).rejects.toThrow('timed out');
+      await vi.advanceTimersByTimeAsync(3000);
+      await rejection;
+      expect(mockSend.mock.calls[0][1].abortSignal.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('bounds each cleanup batch and reports every failed key', async () => {
+      const { deleteManyFromR2 } = await import('../r2');
+      vi.useFakeTimers();
+      mockSend.mockImplementation(() => new Promise(() => {}));
+      const request = deleteManyFromR2(['games/key.json', 'games/key.json.status.json']);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(await request).toMatchObject({
+        deleted: 0, failedKeys: ['games/key.json', 'games/key.json.status.json'],
+      });
+      expect(mockSend.mock.calls[0][1].abortSignal.aborted).toBe(true);
     });
   });
 

@@ -1,127 +1,113 @@
 /**
- * Published-game bundle storage (#7580).
- *
- * On publish we mirror a game's scene data into R2 as a single JSON bundle so
- * the player page can be served from CDN-backed object storage instead of a
- * live Postgres read. The bundle is deliberately self-describing — it carries a
- * manifest alongside the scene data — so a bundle read back later can be
- * validated without a second DB round trip.
- *
- * This module is the ONLY producer/consumer of the `games/{userId}/{slug}/`
- * key space. It is intentionally separate from `buildAssetKey` in `r2.ts`
- * (which owns the `assets/{sellerId}/...` marketplace space) so the two key
- * schemes can never collide and neither route can address the other's objects.
- *
- * FAIL-OPEN CONTRACT: `writePublishedGameBundle` may throw (R2 unconfigured,
- * network) and `readPublishedGameBundle` may throw (missing object, malformed
- * JSON). Callers on the publish and play paths catch and fall back to Postgres;
- * object storage is a cache in front of the database, never the source of
- * truth. See `src/app/api/publish/route.ts` and
- * `src/app/api/play/[userId]/[slug]/route.ts`.
+ * Private, immutable publication snapshots. Only the gated play API reads these
+ * objects; the assets bucket must remain private. Postgres retains the same
+ * snapshot so storage outages do not reveal subsequent unpublished edits.
  */
-import { uploadToR2, getObjectFromR2 } from '@/lib/storage/r2';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import {
+  putPrivateObjectToR2, getObjectFromR2, deleteManyFromR2, withStatusSidecars,
+} from '@/lib/storage/r2';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
-/** Manifest embedded in every published-game bundle. */
-export interface PublishedGameManifest {
-  /** Publication version — matches `published_games.version` at write time. */
-  version: number;
-  /** ISO-8601 timestamp the bundle was written. */
-  publishedAt: string;
-  /** The game's slug (redundant with the key; lets a bundle self-verify). */
-  slug: string;
-  /** The creator's public id (Clerk id) used in the /play URL and the key. */
-  userId: string;
+const segment = z.string().regex(/^[a-zA-Z0-9_-]+$/);
+const revision = z.string().uuid();
+const manifestSchema = z.object({
+  schemaVersion: z.literal(1),
+  version: z.number().int().positive(),
+  publishedAt: z.string().datetime(),
+  slug: segment,
+  userId: segment,
+}).strict();
+
+// Scene formats vary by engine/template version; this boundary requires a JSON
+// object and leaves component-level validation to the scene loader.
+const sceneSchema = z.record(z.string(), z.unknown());
+const bundleSchema = z.object({
+  sceneData: sceneSchema,
+  manifest: manifestSchema,
+}).strict();
+
+export type PublishedGameManifest = z.infer<typeof manifestSchema>;
+export type PublishedGameBundle = z.infer<typeof bundleSchema>;
+
+export function isPublishedSceneData(value: unknown): value is PublishedGameBundle['sceneData'] {
+  return sceneSchema.safeParse(value).success;
 }
 
-/** Shape stored at `games/{userId}/{slug}/bundle.json`. */
-export interface PublishedGameBundle {
-  sceneData: unknown;
-  manifest: PublishedGameManifest;
-}
-
-/**
- * Reject a userId or slug segment that could escape the intended prefix or
- * introduce encoding ambiguity, BEFORE it ever reaches an R2 key.
- *
- * Forbidden: `/` and `\` (path separators), `%` (percent-encoding ambiguity),
- * the `..` sequence (traversal), and any C0/DEL control character. The publish
- * route already constrains slugs to `[a-z0-9-]` and Clerk ids are opaque
- * alphanumerics, so this is defence in depth — a second wall so a future caller
- * that forgets the route-level validation cannot mint a traversing key.
- *
- * Implemented as a codepoint scan rather than a regex literal so it carries no
- * fragile inline control-character escapes.
- */
-function assertSafeSegment(label: string, value: string): void {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new Error(`Published game bundle key rejected: ${label} is empty`);
-  }
-  if (value.includes('..')) {
-    throw new Error(
-      `Published game bundle key rejected: ${label} contains an unsafe character`,
-    );
-  }
-  for (let i = 0; i < value.length; i += 1) {
-    const code = value.charCodeAt(i);
-    const ch = value[i];
-    const isControl = code < 0x20 || code === 0x7f;
-    if (isControl || ch === '/' || ch === '\\' || ch === '%') {
-      throw new Error(
-        `Published game bundle key rejected: ${label} contains an unsafe character`,
-      );
-    }
-  }
-}
-
-/**
- * Deterministic R2 key for a published game's bundle:
- * `games/{userId}/{slug}/bundle.json`.
- *
- * Rejects any userId/slug that could escape the prefix or introduce encoding
- * ambiguity BEFORE returning a key (and therefore before any R2 call).
- */
+/** Generate a unique publication key; no later publication overwrites it. */
 export function buildPublishedGameKey(userId: string, slug: string): string {
-  assertSafeSegment('userId', userId);
-  assertSafeSegment('slug', slug);
-  return `games/${userId}/${slug}/bundle.json`;
-}
-
-/**
- * Write a published game's bundle to R2. Returns the object key and the public
- * CDN URL (the latter only exists when `CDN_URL` is configured — `uploadToR2`
- * throws otherwise, which the publish route treats as "mirror unavailable").
- *
- * Throws on unsafe key input (before any R2 call) and on any R2/upload failure.
- */
-export async function writePublishedGameBundle(
-  userId: string,
-  slug: string,
-  sceneData: unknown,
-  manifest: PublishedGameManifest,
-): Promise<{ key: string; url: string }> {
-  const key = buildPublishedGameKey(userId, slug);
-  const bundle: PublishedGameBundle = { sceneData, manifest };
-  const body = Buffer.from(JSON.stringify(bundle), 'utf-8');
-  return uploadToR2(key, body, 'application/json');
-}
-
-/**
- * Read a published game's bundle back from R2.
- *
- * Throws when the object is missing, the read fails, the payload is not valid
- * JSON, or the parsed payload is not a well-formed bundle (no `sceneData`). A
- * throw is the fall-back signal for the play route — a malformed bundle must
- * never be served as if it were empty scene data.
- */
-export async function readPublishedGameBundle(
-  userId: string,
-  slug: string,
-): Promise<PublishedGameBundle> {
-  const key = buildPublishedGameKey(userId, slug);
-  const raw = await getObjectFromR2(key);
-  const parsed = JSON.parse(raw) as Partial<PublishedGameBundle>;
-  if (parsed === null || typeof parsed !== 'object' || !('sceneData' in parsed)) {
-    throw new Error(`Published game bundle at ${key} is malformed (no sceneData)`);
+  if (!segment.safeParse(userId).success || !segment.safeParse(slug).success) {
+    throw new Error('Published game bundle key rejected');
   }
-  return parsed as PublishedGameBundle;
+  return `games/${userId}/${slug}/${randomUUID()}/bundle.json`;
+}
+
+/** Validate an exact stored key before reads or deletion; never trust a prefix alone. */
+export function resolveOwnedPublishedGameKey(
+  key: string | null | undefined, userId: string, slug: string,
+): string | null {
+  if (!key || !segment.safeParse(userId).success || !segment.safeParse(slug).success) return null;
+  const parts = key.split('/');
+  return parts.length === 5 && parts[0] === 'games' && parts[1] === userId &&
+    parts[2] === slug && revision.safeParse(parts[3]).success && parts[4] === 'bundle.json'
+    ? key : null;
+}
+
+/** Validate identity and version as well as structure before accepting a bundle. */
+function validateBundle(
+  data: unknown, userId: string, slug: string, version: number,
+): PublishedGameBundle {
+  const bundle = bundleSchema.parse(data);
+  if (bundle.manifest.userId !== userId || bundle.manifest.slug !== slug ||
+      bundle.manifest.version !== version) {
+    throw new Error('Published game bundle does not match the publication');
+  }
+  return bundle;
+}
+
+/** Write a new private snapshot. Failed or uncertain uploads are cleaned up best effort. */
+export async function writePublishedGameBundle(
+  userId: string, slug: string, sceneData: unknown,
+  manifest: PublishedGameManifest,
+): Promise<{ key: string }> {
+  const key = buildPublishedGameKey(userId, slug);
+  const bundle = validateBundle({ sceneData, manifest }, userId, slug, manifest.version);
+  try {
+    await putPrivateObjectToR2(key, Buffer.from(JSON.stringify(bundle), 'utf-8'), 'application/json');
+    return { key };
+  } catch (error) {
+    captureException(error, { scope: 'publishedGameStorage.write', key, userId, slug });
+    await deletePublishedGameBundle(key, userId, slug);
+    throw error;
+  }
+}
+
+/** Read the row's actual immutable key; invalid or mismatched data triggers fallback. */
+export async function readPublishedGameBundle(
+  key: string, userId: string, slug: string, version: number,
+): Promise<PublishedGameBundle> {
+  if (!resolveOwnedPublishedGameKey(key, userId, slug)) {
+    throw new Error('Published game bundle key rejected');
+  }
+  return validateBundle(JSON.parse(await getObjectFromR2(key)), userId, slug, version);
+}
+
+/** Best-effort cleanup after rollback, supersession, or account deletion. Never throws. */
+export async function deletePublishedGameBundle(
+  key: string | null | undefined, userId: string, slug: string,
+): Promise<void> {
+  const ownedKey = resolveOwnedPublishedGameKey(key, userId, slug);
+  if (!ownedKey) return;
+  try {
+    const result = await deleteManyFromR2(withStatusSidecars([ownedKey]));
+    if (result.failedKeys.length || result.truncated) {
+      captureException(new Error('Published game object cleanup incomplete'), {
+        scope: 'publishedGameStorage.cleanup', userId, slug, key: ownedKey,
+        failedKeys: result.failedKeys,
+      });
+    }
+  } catch (error) {
+    captureException(error, { scope: 'publishedGameStorage.cleanup', userId, slug, key: ownedKey });
+  }
 }
