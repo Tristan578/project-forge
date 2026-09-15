@@ -155,7 +155,7 @@ fn route_domain(command: &str) -> u8 {
         | "instantiate_prefab" | "set_quality_preset" | "get_quality_settings" => 7,
 
         // --- scene domain ---
-        "export_scene" | "load_scene" | "new_scene" | "import_gltf"
+        "export_scene" | "load_scene" | "validate_scene" | "new_scene" | "import_gltf"
         | "load_texture" | "remove_texture" | "place_asset" | "delete_asset"
         | "import_audio" | "list_assets" | "set_script" | "remove_script"
         | "get_script" | "list_script_templates" | "apply_script_template"
@@ -982,7 +982,7 @@ mod tests {
     #[test]
     fn dispatch_load_scene_reaches_scene_domain() {
         let result = dispatch("load_scene", json!({
-            "json": "{\"entities\":[]}"
+            "json": crate::core::scene_file::test_scene_json()
         }));
         assert!(result.is_err());
         let err = result.unwrap_err();

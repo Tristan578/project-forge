@@ -6,6 +6,9 @@ import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { extractRequestId } from '@/lib/logging/requestContext';
+import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
+import { readPublishedGameBundle, isPublishedSceneData } from '@/lib/storage/publishedGameStorage';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +25,7 @@ async function GET_impl(
   if (limited) return limited;
 
   try {
+    const requestId = extractRequestId(req.headers);
     const { userId: clerkId, slug } = await params;
 
     // Look up the user by their Clerk ID
@@ -58,18 +62,50 @@ async function GET_impl(
       );
     }
 
-    // Fetch the project scene data
-    const [project] = await queryWithResilience(() => getDb()
-      .select({ sceneData: projects.sceneData })
-      .from(projects)
-      .where(eq(projects.id, game.projectId))
-      .limit(1));
+    // The gated API reads the private immutable object. The identical Postgres
+    // snapshot is the fallback; legacy rows still use their project until republished.
+    let sceneData: unknown;
+    let servedFromR2 = false;
 
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Game data not found' },
-        { status: 404 }
-      );
+    if (game.cdnBundleKey && isPublishToR2Enabled()) {
+      try {
+        const bundle = await readPublishedGameBundle(game.cdnBundleKey, clerkId, slug, game.version);
+        sceneData = bundle.sceneData;
+        servedFromR2 = true;
+      } catch (err) {
+        captureException(err, {
+          route: '/api/play/[userId]/[slug]',
+          stage: 'r2-bundle-read',
+          requestId,
+          userId: clerkId,
+          slug,
+        });
+      }
+    }
+
+    if (!servedFromR2 && game.publishedSceneData != null) {
+      if (!isPublishedSceneData(game.publishedSceneData)) {
+        throw new Error('Invalid publication snapshot');
+      }
+      sceneData = game.publishedSceneData;
+    } else if (!servedFromR2) {
+      // Legacy publications have no snapshot until their next publish.
+      const [project] = await queryWithResilience(() => getDb()
+        .select({ sceneData: projects.sceneData })
+        .from(projects)
+        .where(eq(projects.id, game.projectId))
+        .limit(1));
+
+      if (!project) {
+        return NextResponse.json(
+          { error: 'Game data not found' },
+          { status: 404 }
+        );
+      }
+      if (!isPublishedSceneData(project.sceneData)) {
+        throw new Error('Invalid project scene data');
+      }
+      sceneData = project.sceneData;
     }
 
     // Increment play count (fire-and-forget)
@@ -87,12 +123,11 @@ async function GET_impl(
         slug: game.slug,
         version: game.version,
         creatorName: user.displayName || 'Unknown Creator',
-        sceneData: project.sceneData,
+        sceneData,
       },
     });
-    // Short TTL: game data changes when creators republish; stale-while-revalidate
-    // lets the CDN serve fresh data without blocking the player.
-    response.headers.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
+    // Every load must recheck publication/moderation status before exposing data.
+    response.headers.set('Cache-Control', 'private, no-store');
     return response;
   } catch (error) {
     captureException(error, { route: '/api/play/[userId]/[slug]' });

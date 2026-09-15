@@ -241,9 +241,23 @@ export function parseSceneClipDocuments(json: string): Record<string, AudioClipD
   return clips;
 }
 
-/** Hold a scene's audio until the engine confirms the load. */
-export function stageSceneAudio(json: string): void {
-  staged = parseSceneAudio(json);
+/** Replace the staged map and return a rollback limited to this unconsumed staging. */
+function replaceStagedSceneAudio(audio: Record<string, AudioData>): () => void {
+  const previous = staged;
+  staged = audio;
+  return () => {
+    if (staged === audio) staged = previous;
+  };
+}
+
+/**
+ * Hold a scene's audio until the engine confirms the load.
+ * @param json Serialized scene whose audio should be adopted on confirmation.
+ * @returns A rollback for synchronous dispatch rejection; does nothing after
+ * this staging was consumed or superseded by another request.
+ */
+export function stageSceneAudio(json: string): () => void {
+  return replaceStagedSceneAudio(parseSceneAudio(json));
 }
 
 /** Claim the staged audio, clearing it so the next load starts empty. */
@@ -259,7 +273,9 @@ export function takeStagedSceneAudio(): Record<string, AudioData> {
  * For `new_scene`, which emits the same `SCENE_LOADED` a load does: without
  * this, a load the engine rejected leaves a stash that the next empty scene
  * would adopt.
+ * @returns A rollback for a rejected new-scene dispatch; does nothing after
+ * another request replaced or consumed this staging.
  */
-export function clearStagedSceneAudio(): void {
-  staged = {};
+export function clearStagedSceneAudio(): () => void {
+  return replaceStagedSceneAudio({});
 }

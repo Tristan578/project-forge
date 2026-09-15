@@ -72,9 +72,10 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // is why creation was conditional; it now plans a `world_build` step that
     // spawns real geometry, so every step reaching this executor is a real scene
     // creation (PF-1138).
-    const project = loadProjectScenes();
+    const projectId = ctx.getStore().projectId;
+    const project = loadProjectScenes(projectId);
     const { project: withScene, sceneId } = createScene(project, name);
-    saveProjectScenes({ ...withScene, activeSceneId: sceneId });
+    saveProjectScenes({ ...withScene, activeSceneId: sceneId }, projectId);
     ctx.getStore().setScenes(
       withScene.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       sceneId,

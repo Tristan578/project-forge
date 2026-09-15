@@ -6,6 +6,7 @@ import {
   createFakeEngineDispatcher,
 } from '@/stores/slices/__tests__/sceneSliceTestStore';
 import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
+import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
 
 // ---------------------------------------------------------------------------
 // Module mocks for dynamic imports inside the handlers
@@ -21,6 +22,10 @@ const mockRenameScene = vi.fn();
 const mockSetStartScene = vi.fn();
 const mockGetSceneByName = vi.fn();
 const mockSaveCurrentSceneData = vi.fn();
+const mockCreateCheckpoint = vi.fn();
+const mockListCheckpoints = vi.fn();
+const mockRestoreCheckpoint = vi.fn();
+const mockDeleteCheckpoint = vi.fn();
 
 vi.mock('@/lib/scenes/sceneManager', () => ({
   loadProjectScenes: (...args: unknown[]) => mockLoadProjectScenes(...args),
@@ -33,6 +38,10 @@ vi.mock('@/lib/scenes/sceneManager', () => ({
   setStartScene: (...args: unknown[]) => mockSetStartScene(...args),
   getSceneByName: (...args: unknown[]) => mockGetSceneByName(...args),
   saveCurrentSceneData: (...args: unknown[]) => mockSaveCurrentSceneData(...args),
+  createCheckpoint: (...args: unknown[]) => mockCreateCheckpoint(...args),
+  listCheckpoints: (...args: unknown[]) => mockListCheckpoints(...args),
+  restoreCheckpoint: (...args: unknown[]) => mockRestoreCheckpoint(...args),
+  deleteCheckpoint: (...args: unknown[]) => mockDeleteCheckpoint(...args),
 }));
 
 // PF-1100: switching and duplicating first read the live scene back out of the
@@ -97,6 +106,14 @@ beforeEach(() => {
   mockGetSceneByName.mockReturnValue(undefined);
   // Default: no engine attached, so there is no live scene that could be lost
   mockCaptureActiveScene.mockResolvedValue({ status: 'unavailable' });
+  // Checkpoint defaults
+  mockCreateCheckpoint.mockReturnValue({
+    checkpoint: { id: 'ckpt_1', label: 'auto', createdAt: 't', snapshot: baseProject },
+    checkpoints: [{ id: 'ckpt_1', label: 'auto', createdAt: 't', snapshot: baseProject }],
+  });
+  mockListCheckpoints.mockReturnValue([]);
+  mockRestoreCheckpoint.mockReturnValue({ project: baseProject });
+  mockDeleteCheckpoint.mockReturnValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -377,7 +394,7 @@ describe('create_scene', () => {
 
     expect(mockLoadProjectScenes).toHaveBeenCalled();
     expect(mockCreateScene).toHaveBeenCalledWith(baseProject, 'Boss Fight');
-    expect(mockSaveProjectScenes).toHaveBeenCalledWith(updatedProject);
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(updatedProject, undefined);
     expect(store.setScenes).toHaveBeenCalledWith(
       updatedProject.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       updatedProject.activeSceneId
@@ -687,6 +704,71 @@ describe('list_scenes', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Recovery checkpoints — scene.FR-3.OP-02
+// (unit wiring; end-to-end manual/AI parity lives in the sibling
+//  sceneCheckpointParity.test.ts against the REAL sceneManager)
+// ---------------------------------------------------------------------------
+
+describe('checkpoint shared-action wiring', () => {
+  it('passes a checkpoint label to the same action the Scene Browser uses', async () => {
+    const checkpoint = { id: 'cp', label: 'Before', createdAt: '2026-01-01T00:00:00Z', projectId: null, snapshot: baseProject };
+    const createCheckpoint = vi.fn().mockResolvedValue(checkpoint);
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', { label: 'Before' }, {
+      createCheckpoint, listCheckpoints: () => [checkpoint],
+    });
+    expect(result.success).toBe(true);
+    expect(createCheckpoint).toHaveBeenCalledWith('Before');
+    expect(result.result).toMatchObject({ checkpointId: 'cp', count: 1 });
+    expect(mockCreateCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('reports an unsuccessful capture or persistence operation', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {}, {
+      createCheckpoint: vi.fn().mockResolvedValue(null),
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be captured or saved');
+  });
+
+  it('waits for the shared restore action before reporting success', async () => {
+    let finish!: (value: boolean) => void;
+    const restoreCheckpoint = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const pending = invokeHandler(sceneManagementHandlers, 'restore_checkpoint', { checkpointId: 'cp' }, { restoreCheckpoint });
+    expect(restoreCheckpoint).toHaveBeenCalledWith('cp');
+    finish(true);
+    expect((await pending).result.success).toBe(true);
+    expect(mockRestoreCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('does not report a failed engine restore as successful', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', { checkpointId: 'cp' }, {
+      restoreCheckpoint: vi.fn().mockResolvedValue(false),
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('previous save is intact');
+  });
+
+  it.each(['restore_checkpoint', 'delete_checkpoint'])('rejects missing IDs for %s', async (command) => {
+    expect((await invokeHandler(sceneManagementHandlers, command, {})).result.success).toBe(false);
+  });
+
+  it('lists lightweight checkpoint metadata from the shared action', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'list_checkpoints', {}, {
+      listCheckpoints: () => [{ id: 'cp', label: 'Before', createdAt: 'time', snapshot: baseProject }],
+    });
+    expect(result.result).toEqual({ checkpoints: [{ id: 'cp', label: 'Before', createdAt: 'time', sceneCount: 2 }], count: 1 });
+  });
+
+  it('reports failed deletes when the shared action retains the checkpoint', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', { checkpointId: 'cp' }, {
+      deleteCheckpoint: () => [{ id: 'cp' }],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be deleted');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // load_scene_with_transition
 // ---------------------------------------------------------------------------
 
@@ -943,5 +1025,40 @@ describe('list_doc_topics', () => {
     const { result } = await invokeHandler(sceneManagementHandlers, 'list_doc_topics');
     expect(result.success).toBe(true);
     expect(((result.result as Record<string, unknown>).message as string)).toContain('MCP server');
+  });
+});
+
+describe('validate_scene', () => {
+  afterEach(() => setSceneValidator(null));
+
+  it('validates the complete scene without loading or saving it', async () => {
+    const scene = emptySceneFile('Validation only');
+    const validate = vi.fn(() => true);
+    setSceneValidator(validate);
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(scene) });
+    expect(result).toEqual({ success: true, result: { valid: true } });
+    expect(validate).toHaveBeenCalledWith(JSON.stringify(scene));
+    expect(store.loadScene).not.toHaveBeenCalled();
+    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
+  });
+
+  it.each(['{broken', '{}', JSON.stringify({ formatVersion: 99 })])('rejects invalid scene JSON %s', async (json) => {
+    const validate = vi.fn(() => true);
+    setSceneValidator(validate);
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json });
+    expect(result.success).toBe(false);
+    expect(validate).not.toHaveBeenCalled();
+    expect(store.loadScene).not.toHaveBeenCalled();
+  });
+
+  it.each([null, () => false, () => { throw new Error('decoder unavailable'); }])('fails when the attached decoder cannot validate', async (validate) => {
+    setSceneValidator(validate);
+    const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(emptySceneFile('Refused')) });
+    expect(result.success).toBe(false);
+  });
+
+  it('requires the JSON argument', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', {});
+    expect(result.success).toBe(false);
   });
 });

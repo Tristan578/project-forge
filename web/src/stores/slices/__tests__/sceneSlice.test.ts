@@ -3,6 +3,7 @@ import { createMockDispatch } from './sliceTestTemplate';
 import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
 import { loadProjectScenes } from '@/lib/scenes/sceneManager';
+import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 
 describe('sceneSlice', () => {
@@ -363,10 +364,11 @@ describe('sceneSlice', () => {
       // correctly decline to do anything.
       setSceneDispatcher((command, payload) => {
         mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
         if (command === 'export_scene') {
           window.dispatchEvent(
             new CustomEvent('forge:scene-exported', {
-              detail: { json: '{"formatVersion":3,"sceneName":"Live","entities":[]}' },
+              detail: { json: JSON.stringify(sceneFixture('Live')) },
             })
           );
         }
