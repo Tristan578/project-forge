@@ -228,6 +228,20 @@ describe('set_input_binding', () => {
       expect.objectContaining({ actionName: 'dash', sources: [] })
     );
   });
+
+  it('forwards the player slot for a second local player (physics.FR-1.OP-04)', async () => {
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'set_input_binding', {
+      actionName: 'attack',
+      actionType: 'digital',
+      sources: ['Numpad0'],
+      player: 1,
+    });
+    expect(result.success).toBe(true);
+    expect((result.result as Record<string, unknown>).message).toBe('Set binding: attack (player 2)');
+    expect(store.setInputBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ actionName: 'attack', player: 1 })
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -243,7 +257,18 @@ describe('remove_input_binding', () => {
     );
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toBe('Removed binding: jump');
-    expect(store.removeInputBinding).toHaveBeenCalledWith('jump');
+    // player omitted → forwarded as undefined, which the store reads as slot 0.
+    expect(store.removeInputBinding).toHaveBeenCalledWith('jump', undefined);
+  });
+
+  it('forwards the player slot when the AI supplies one (physics.FR-1.OP-04)', async () => {
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'remove_input_binding',
+      { actionName: 'jump', player: 1 }
+    );
+    expect(result.success).toBe(true);
+    expect(store.removeInputBinding).toHaveBeenCalledWith('jump', 1);
   });
 });
 
@@ -260,7 +285,18 @@ describe('set_input_preset', () => {
     );
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toBe('Applied input preset: platformer');
-    expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
+    // player omitted → forwarded as undefined, which the store reads as slot 0.
+    expect(store.setInputPreset).toHaveBeenCalledWith('platformer', undefined);
+  });
+
+  it('forwards the player slot to setInputPreset when supplied (physics.FR-1.OP-04)', async () => {
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'set_input_preset',
+      { preset: 'platformer', player: 1 }
+    );
+    expect(result.success).toBe(true);
+    expect(store.setInputPreset).toHaveBeenCalledWith('platformer', 1);
   });
 });
 
