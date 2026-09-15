@@ -67,7 +67,13 @@ function matchesExpected(expected: unknown, actual: unknown, path = ''): boolean
     if (!actual || typeof actual !== 'object' || Array.isArray(actual)) return false;
     return Object.entries(expected).every(([key, value]) => {
       const field = path ? `${path}.${key}` : key;
-      return ['metadata.createdAt', 'metadata.modifiedAt', 'sceneName', 'formatVersion'].includes(field) ||
+      // `prefabInstances`/`prefabDefinitions` are editor-side metadata that live
+      // in the prefab store, not the ECS — the engine ignores them on load and
+      // never echoes them on export, so a checkpoint scene that carries them
+      // (scene.FR-1 N1) would otherwise fail this engine-application check every
+      // time. Their round trip is verified separately by the registry install in
+      // `restoreCheckpoint`; this comparison is only about what the ENGINE applied.
+      return ['metadata.createdAt', 'metadata.modifiedAt', 'sceneName', 'formatVersion', 'prefabInstances', 'prefabDefinitions'].includes(field) ||
         matchesExpected(value, (actual as Record<string, unknown>)[key], field);
     });
   }

@@ -12,6 +12,7 @@ import { getActiveEngineBackend } from '@/hooks/useEngine';
 
 vi.mock('@/hooks/useEngine', () => ({
   getActiveEngineBackend: vi.fn(() => 'webgl2'),
+  getWasmModule: vi.fn(() => null),
 }));
 
 vi.mock('@/stores/performanceStore', () => ({
@@ -54,10 +55,19 @@ const sampleManifest: MeasurementManifest = {
   sampleCount: 5,
 };
 
+const unknownSystemCosts = [
+  { group: 'entitySync', label: 'Entity sync', totalMs: 'unknown' as const },
+  { group: 'transformApply', label: 'Transform apply', totalMs: 'unknown' as const },
+  { group: 'physics', label: 'Physics', totalMs: 'unknown' as const },
+  { group: 'rendering', label: 'Rendering', totalMs: 'unknown' as const },
+];
+
 describe('PerformanceProfiler', () => {
   const mockSetProfilerOpen = vi.fn();
   const mockUpdateStats = vi.fn();
   const mockCaptureReport = vi.fn();
+  const mockStartSystemCapture = vi.fn();
+  const mockStopSystemCapture = vi.fn();
 
   function setupStore({
     isProfilerOpen = false,
@@ -70,6 +80,8 @@ describe('PerformanceProfiler', () => {
       manifest: MeasurementManifest;
       capturedAt: number;
     },
+    captureActive = false,
+    systemCosts = unknownSystemCosts as Array<{ group: string; label: string; totalMs: number | 'unknown' }>,
   } = {}) {
     vi.mocked(usePerformanceStore).mockReturnValue({
       stats,
@@ -81,6 +93,10 @@ describe('PerformanceProfiler', () => {
       updateStats: mockUpdateStats,
       captureReport: mockCaptureReport,
       capturedReport,
+      captureActive,
+      systemCosts,
+      startSystemCapture: mockStartSystemCapture,
+      stopSystemCapture: mockStopSystemCapture,
     });
     // getState is used nowhere in the component's render path, but guard it so
     // any future use in this suite does not throw against the mocked module.
@@ -247,4 +263,80 @@ describe('PerformanceProfiler', () => {
       expect(panel.textContent).toContain('1920×1080');
     });
   });
+
+  // Top costly systems panel — operation performance.FR-1.OP-01 / OP-04 (#9880)
+  describe('top costly systems (performance.FR-1.OP-01 / OP-04)', () => {
+    it('renders the panel with every group label when expanded', () => {
+      setupStore({ isProfilerOpen: true });
+      render(<PerformanceProfiler />);
+      const panel = screen.getByLabelText('Top costly systems');
+      expect(panel).toBeInTheDocument();
+      expect(panel.textContent).toContain('Entity sync');
+      expect(panel.textContent).toContain('Transform apply');
+      expect(panel.textContent).toContain('Physics');
+      expect(panel.textContent).toContain('Rendering');
+      // The over-claiming labels must not reappear (#9880 review round 1).
+      expect(panel.textContent).not.toContain('Scripting');
+      expect(panel.textContent).not.toContain('Bridge');
+    });
+
+    it('shows an unmeasured group as "unknown", never as 0', () => {
+      // Physics measured; rendering unavailable this slice (OP-02).
+      setupStore({
+        isProfilerOpen: true,
+        systemCosts: [
+          { group: 'physics', label: 'Physics', totalMs: 12.5 },
+          { group: 'rendering', label: 'Rendering', totalMs: 'unknown' },
+        ],
+      });
+      render(<PerformanceProfiler />);
+      const panel = screen.getByLabelText('Top costly systems');
+      expect(panel.textContent).toContain('12.50 ms');
+      expect(panel.textContent).toContain('unknown');
+      // The unavailable group must not read as a real, cheap 0.
+      expect(panel.textContent).not.toContain('0.00 ms');
+    });
+
+    it('renders a measured zero distinctly from unavailable', () => {
+      setupStore({
+        isProfilerOpen: true,
+        systemCosts: [
+          { group: 'transformApply', label: 'Transform apply', totalMs: 0 },
+          { group: 'rendering', label: 'Rendering', totalMs: 'unknown' },
+        ],
+      });
+      render(<PerformanceProfiler />);
+      const panel = screen.getByLabelText('Top costly systems');
+      // A measured, effectively-free group is 0.00 ms; the unmeasured one is unknown.
+      expect(panel.textContent).toContain('0.00 ms');
+      expect(panel.textContent).toContain('unknown');
+    });
+
+    it('arms a capture session when Capture systems is clicked', () => {
+      setupStore({ isProfilerOpen: true, captureActive: false });
+      render(<PerformanceProfiler />);
+      const btn = screen.getByRole('button', { name: 'Capture systems' });
+      expect(btn.getAttribute('aria-pressed')).toBe('false');
+      fireEvent.click(btn);
+      expect(mockStartSystemCapture).toHaveBeenCalledTimes(1);
+      expect(mockStopSystemCapture).not.toHaveBeenCalled();
+    });
+
+    it('stops the session when active and Stop capture is clicked', () => {
+      setupStore({ isProfilerOpen: true, captureActive: true });
+      render(<PerformanceProfiler />);
+      const btn = screen.getByRole('button', { name: 'Stop capture' });
+      expect(btn.getAttribute('aria-pressed')).toBe('true');
+      fireEvent.click(btn);
+      expect(mockStopSystemCapture).toHaveBeenCalledTimes(1);
+      expect(mockStartSystemCapture).not.toHaveBeenCalled();
+    });
+
+    it('does not render the panel when collapsed', () => {
+      setupStore({ isProfilerOpen: false });
+      render(<PerformanceProfiler />);
+      expect(screen.queryByLabelText('Top costly systems')).not.toBeInTheDocument();
+    });
+  });
+
 });

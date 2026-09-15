@@ -41,9 +41,26 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: true,
   retries: 1,
+  // Playwright 1.62 — run retries sequentially at the END of the run, after the
+  // full parallel pass, instead of interleaving them under the same 4-worker
+  // load that may have caused the flake. A retry under no contention that still
+  // passes is a real flake; one that fails is a real bug. Costs worst-case
+  // wall-clock (retries no longer overlap the main pass) — an accepted trade for
+  // a retry signal that means something. See issue #9636.
+  retryStrategy: 'isolated',
   workers: 4,
   maxFailures: 10,
-  reporter: [['github'], ['blob'], ['html', { open: 'never' }]],
+  // uiSuiteReporter performs the @ui-suite selection the @ui CI job used to do
+  // with `--grep '@ui' --grep-invert '@engine-ui|@journey'`, and asserts a
+  // non-zero, plausible selected-test count (the #9586 mis-selection a
+  // grep-invert cannot report). A no-op unless PW_UI_SUITE=1, so the @api job
+  // that shares this config (--grep '@api', no env) is untouched. See #9636.
+  reporter: [
+    ['./e2e/lib/uiSuiteReporter.ts', { minSelected: 250 }],
+    ['github'],
+    ['blob'],
+    ['html', { open: 'never' }],
+  ],
   timeout: CI_TEST_TIMEOUT_MS,
   expect: { timeout: CI_EXPECT_TIMEOUT_MS },
 

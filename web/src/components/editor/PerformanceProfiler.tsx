@@ -7,7 +7,7 @@ import {
   type MeasurementManifest,
   type ManifestViewport,
 } from '@/lib/config/measurementManifest';
-import { getActiveEngineBackend } from '@/hooks/useEngine';
+import { getActiveEngineBackend, getWasmModule } from '@/hooks/useEngine';
 
 /**
  * Render a manifest field for display. The `'unknown'` sentinel and a null
@@ -24,6 +24,16 @@ function formatManifestValue(value: unknown): string {
     }
   }
   return String(value);
+}
+
+/**
+ * Format one system group's aggregate CPU cost for display. The UNKNOWN
+ * sentinel renders as the literal "unknown" — a group the engine did not
+ * measure (e.g. rendering/GPU this slice, OP-02) must never surface as a real
+ * `0.00 ms`, which would read as "measured and free".
+ */
+function formatSystemCost(totalMs: number | typeof UNKNOWN): string {
+  return totalMs === UNKNOWN ? 'unknown' : `${totalMs.toFixed(2)} ms`;
 }
 
 const MANIFEST_ROWS: Array<[keyof MeasurementManifest, string]> = [
@@ -50,6 +60,10 @@ export function PerformanceProfiler() {
     updateStats,
     captureReport,
     capturedReport,
+    captureActive,
+    systemCosts,
+    startSystemCapture,
+    stopSystemCapture,
   } = usePerformanceStore();
 
   // Update stats periodically (every frame)
@@ -108,6 +122,25 @@ export function PerformanceProfiler() {
     });
     captureReport({ stats, manifest, capturedAt: Date.now() });
   }, [captureReport, history.length, stats]);
+
+  // Manual system-timing capture (performance.FR-1.OP-01/OP-04). Arms the JS
+  // session (store) AND signals the engine to begin/stop emitting per-frame
+  // SYSTEM_TIMINGS. Engine signalling is best-effort: it no-ops when the WASM
+  // module is not loaded (tests, @ui E2E), and the store session stays
+  // authoritative for what the panel shows.
+  const handleToggleSystemCapture = useCallback(() => {
+    const next = !captureActive;
+    if (next) {
+      startSystemCapture();
+    } else {
+      stopSystemCapture();
+    }
+    try {
+      getWasmModule()?.set_system_timing_capture?.(next);
+    } catch {
+      // best-effort only
+    }
+  }, [captureActive, startSystemCapture, stopSystemCapture]);
 
   // Keyboard shortcut (F12 or Ctrl+Shift+P)
   useEffect(() => {
@@ -267,6 +300,35 @@ export function PerformanceProfiler() {
               ))}
             </div>
           )}
+
+          {/* Top costly systems (performance.FR-1.OP-01/OP-04) */}
+          <div className="mt-3 pt-3 border-t border-gray-700" aria-label="Top costly systems">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-xs uppercase tracking-wide text-gray-400">
+                Top costly systems
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleSystemCapture}
+                aria-pressed={captureActive}
+                className="text-xs px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 transition-colors"
+              >
+                {captureActive ? 'Stop capture' : 'Capture systems'}
+              </button>
+            </div>
+            <div className="space-y-0.5">
+              {systemCosts.map((cost) => {
+                const display = formatSystemCost(cost.totalMs);
+                const isUnknown = cost.totalMs === UNKNOWN;
+                return (
+                  <div key={cost.group} className="flex justify-between text-xs">
+                    <span className="text-gray-400">{cost.label}</span>
+                    <span className={isUnknown ? 'text-gray-400 italic' : ''}>{display}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Manual capture */}
           <div className="mt-3 pt-3 border-t border-gray-700">

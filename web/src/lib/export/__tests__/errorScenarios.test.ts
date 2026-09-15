@@ -160,6 +160,33 @@ describe('exportGame: missing scene data', () => {
     vi.useRealTimers();
   });
 
+  it('refuses immediately, and blames the scene not the engine, after a rejected load (#10056)', async () => {
+    // `saveScene` refuses while `sceneLoadError` is set, so without an explicit
+    // pre-check this would burn the full 5 s timeout and then report "Engine did
+    // not respond" — and the fallback path would ship a game built from a scene
+    // the engine never accepted.
+    mocks.getState.mockReturnValue(
+      makeStoreState({
+        sceneLoadError: { reason: 'This scene could not be opened: bad prefab data.', at: 1 },
+      })
+    );
+
+    const { exportGame } = await import('../exportEngine');
+
+    const result = await exportGame({
+      title: 'Rejected Scene',
+      mode: 'single-html',
+      resolution: 'responsive',
+      bgColor: '#000000',
+      includeDebug: false,
+    }).catch((e: Error) => e);
+
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('could not be opened');
+    expect((result as Error).message).not.toContain('Engine did not respond');
+    expect(mocks.saveScene).not.toHaveBeenCalled();
+  });
+
   it('rejects with descriptive error on timeout (not silent failure)', async () => {
     vi.useFakeTimers();
 

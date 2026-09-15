@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { usePerformanceStore } from '../performanceStore';
+import {
+  usePerformanceStore,
+  computeSystemCosts,
+  MAX_SYSTEM_TIMING_FRAMES,
+  SYSTEM_GROUPS,
+  SYSTEM_GROUP_LABELS,
+} from '../performanceStore';
 
 describe('performanceStore', () => {
   beforeEach(() => {
@@ -492,4 +498,109 @@ describe('performanceStore', () => {
       expect(state.manifest?.backend).toBe('unknown');
     });
   });
+
+  describe('system timing capture (performance.FR-1.OP-01 / OP-04)', () => {
+    beforeEach(() => {
+      usePerformanceStore.setState({
+        captureActive: false,
+        systemTimingHistory: [],
+        systemCosts: computeSystemCosts([]),
+      });
+    });
+
+    it('labels each group for what it measures, not the broad name it replaced', () => {
+      // The bridge brackets do NOT measure user-script CPU (that runs off-frame
+      // in the JS Worker) or every JS→engine command drain — only the entity
+      // emit and the transform drain. The wire ids and UI labels must say so, or
+      // the "Top costly systems" panel over-claims (#9880 review round 1).
+      expect(SYSTEM_GROUPS).toEqual(['entitySync', 'transformApply', 'physics', 'rendering']);
+      expect(SYSTEM_GROUP_LABELS.entitySync).toBe('Entity sync');
+      expect(SYSTEM_GROUP_LABELS.transformApply).toBe('Transform apply');
+      // The retired over-claiming ids/labels must not come back.
+      expect(SYSTEM_GROUPS as readonly string[]).not.toContain('scripting');
+      expect(SYSTEM_GROUPS as readonly string[]).not.toContain('bridge');
+      expect(Object.values(SYSTEM_GROUP_LABELS)).not.toContain('Scripting');
+      expect(Object.values(SYSTEM_GROUP_LABELS)).not.toContain('Bridge');
+    });
+
+    it('starts with every group unavailable (unknown), never zero', () => {
+      const costs = computeSystemCosts([]);
+      expect(costs).toHaveLength(4);
+      for (const c of costs) {
+        expect(c.totalMs).toBe('unknown');
+        expect(c.totalMs).not.toBe(0);
+      }
+    });
+
+    it('startSystemCapture arms the session and clears prior frames', () => {
+      usePerformanceStore.setState({
+        captureActive: false,
+        systemTimingHistory: [{ frameIndex: 9, perGroupMs: { physics: 5 } }],
+      });
+      usePerformanceStore.getState().startSystemCapture();
+      const state = usePerformanceStore.getState();
+      expect(state.captureActive).toBe(true);
+      expect(state.systemTimingHistory).toEqual([]);
+      expect(state.systemCosts.every((c) => c.totalMs === 'unknown')).toBe(true);
+    });
+
+    it('ignores frames pushed while no session is active', () => {
+      usePerformanceStore.getState().pushSystemTimingFrame({ frameIndex: 0, perGroupMs: { physics: 3 } });
+      expect(usePerformanceStore.getState().systemTimingHistory).toEqual([]);
+    });
+
+    it('aggregates measured groups and keeps unmeasured groups unknown', () => {
+      const store = usePerformanceStore.getState();
+      store.startSystemCapture();
+      store.pushSystemTimingFrame({ frameIndex: 0, perGroupMs: { physics: 2, transformApply: 1, entitySync: 0 } });
+      store.pushSystemTimingFrame({ frameIndex: 1, perGroupMs: { physics: 3 } });
+
+      const byGroup = Object.fromEntries(
+        usePerformanceStore.getState().systemCosts.map((c) => [c.group, c.totalMs]),
+      );
+      expect(byGroup.physics).toBe(5);
+      expect(byGroup.transformApply).toBe(1);
+      // A measured 0 is a real value, distinct from unavailable.
+      expect(byGroup.entitySync).toBe(0);
+      // Rendering was never measured this slice -> unavailable, NOT 0.
+      expect(byGroup.rendering).toBe('unknown');
+      expect(byGroup.rendering).not.toBe(0);
+    });
+
+    it('ranks the costliest measured group first and unknown groups last', () => {
+      const store = usePerformanceStore.getState();
+      store.startSystemCapture();
+      store.pushSystemTimingFrame({ frameIndex: 0, perGroupMs: { entitySync: 1, physics: 8, transformApply: 4 } });
+      const costs = usePerformanceStore.getState().systemCosts;
+      expect(costs[0].group).toBe('physics');
+      expect(costs[1].group).toBe('transformApply');
+      expect(costs[2].group).toBe('entitySync');
+      expect(costs[3].group).toBe('rendering');
+      expect(costs[3].totalMs).toBe('unknown');
+    });
+
+    it('bounds the rolling buffer to MAX_SYSTEM_TIMING_FRAMES', () => {
+      const store = usePerformanceStore.getState();
+      store.startSystemCapture();
+      for (let i = 0; i < MAX_SYSTEM_TIMING_FRAMES + 25; i++) {
+        store.pushSystemTimingFrame({ frameIndex: i, perGroupMs: { physics: 1 } });
+      }
+      const history = usePerformanceStore.getState().systemTimingHistory;
+      expect(history).toHaveLength(MAX_SYSTEM_TIMING_FRAMES);
+      // Oldest frames evicted; newest retained.
+      expect(history[history.length - 1].frameIndex).toBe(MAX_SYSTEM_TIMING_FRAMES + 24);
+    });
+
+    it('stopSystemCapture retains frames but halts further recording', () => {
+      const store = usePerformanceStore.getState();
+      store.startSystemCapture();
+      store.pushSystemTimingFrame({ frameIndex: 0, perGroupMs: { physics: 2 } });
+      store.stopSystemCapture();
+      expect(usePerformanceStore.getState().captureActive).toBe(false);
+      expect(usePerformanceStore.getState().systemTimingHistory).toHaveLength(1);
+      store.pushSystemTimingFrame({ frameIndex: 1, perGroupMs: { physics: 9 } });
+      expect(usePerformanceStore.getState().systemTimingHistory).toHaveLength(1);
+    });
+  });
+
 });

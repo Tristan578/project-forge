@@ -6,6 +6,7 @@
  */
 
 import type { SceneNode, SceneGraph } from '@/stores/slices/types';
+import { inferEntityType } from '@/lib/chat/handlers/helpers';
 
 /** Aggregate of all component data for a single entity. */
 export interface EntityData {
@@ -23,19 +24,6 @@ export interface EntityIndex {
   byComponent: Map<string, Set<string>>;
   /** Entity name -> Set of entity IDs (names can be duplicated). */
   byName: Map<string, Set<string>>;
-}
-
-/**
- * Infer the high-level entity type from a SceneNode's component list.
- */
-function inferEntityType(node: SceneNode): string {
-  if (node.components.includes('TerrainEnabled')) return 'terrain';
-  if (node.components.includes('PointLight')) return 'point_light';
-  if (node.components.includes('DirectionalLight')) return 'directional_light';
-  if (node.components.includes('SpotLight')) return 'spot_light';
-  if (node.components.includes('Mesh3d')) return 'mesh';
-  if (node.components.includes('Sprite')) return 'sprite';
-  return 'entity';
 }
 
 /**

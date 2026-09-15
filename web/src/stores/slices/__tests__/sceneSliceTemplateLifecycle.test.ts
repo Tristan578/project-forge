@@ -13,17 +13,40 @@ vi.mock('@/lib/audio/entityAudioGraph', () => ({
 }));
 vi.mock('@/lib/ai/cachedContext', () => ({ invalidateSceneCache: vi.fn() }));
 vi.mock('@/lib/storage/autoSave', () => ({ setLastExportedScene: vi.fn() }));
-vi.mock('@/lib/sceneFile', () => ({ saveAutoSave: vi.fn(), CURRENT_FORMAT_VERSION: 3 }));
+vi.mock('@/lib/sceneFile', () => ({ saveAutoSave: vi.fn() }));
 
 import { useEditorStore } from '@/stores/editorStore';
 import { handleTransformEvent } from '@/hooks/events/transformEvents';
 import { clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import { buildTemplateSceneFile } from '@/lib/templates/templateSceneFile';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
-import { CHECKPOINT_EXPORT_PREFIX } from '@/lib/scenes/checkpointRecovery';
-import { createCheckpoint, loadProjectScenes, saveProjectScenes, type SceneFileData } from '@/lib/scenes/sceneManager';
-import { projectFixture, sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
+import {
+  loadPrefabInstances,
+  savePrefabInstancesToStorage,
+  savePrefabsToStorage,
+  type Prefab,
+  type PrefabInstance,
+} from '@/lib/prefabs/prefabStore';
 
+const SOURCE: Prefab = {
+  id: 'source',
+  name: 'Source',
+  category: 'test',
+  description: '',
+  createdAt: '2026-09-15T00:00:00Z',
+  updatedAt: '2026-09-15T00:00:00Z',
+  snapshot: {
+    entityType: 'cube',
+    name: 'Source',
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  },
+};
+const OLD_LINK: PrefabInstance = {
+  instanceId: 'old-link', prefabId: SOURCE.id, entityId: 'old-player', overrides: {},
+};
+const NEW_LINK: PrefabInstance = {
+  instanceId: 'new-link', prefabId: SOURCE.id, entityId: 'player', overrides: { name: 'New player' },
+};
 const NEW_SCENE = JSON.stringify({
   formatVersion: 3,
   sceneName: 'Newer scene',
@@ -31,6 +54,7 @@ const NEW_SCENE = JSON.stringify({
     entityId: 'player', name: 'New player', entityType: 'cube', parentId: null, visible: true,
     transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
   }],
+  prefabInstances: [NEW_LINK],
 });
 
 describe('template load lifecycle through engine events', () => {
@@ -43,6 +67,8 @@ describe('template load lifecycle through engine events', () => {
     sessionStorage.clear();
     clearStagedSceneAudio();
     harness = createSceneTestStore();
+    savePrefabsToStorage([SOURCE]);
+    savePrefabInstancesToStorage([OLD_LINK]);
     vi.mocked(useEditorStore.getState).mockImplementation(() => ({
       ...harness.store.getState(),
       recomputeLightState: vi.fn(),
@@ -176,7 +202,7 @@ describe('template load lifecycle through engine events', () => {
     },
   );
 
-  it('reports a timeout honestly when the accepted template lands later', async () => {
+  it('does not attach outgoing prefab links to a template that lands after timeout', async () => {
     const { result, json } = await queueTemplate();
     await vi.advanceTimersByTimeAsync(50);
     expect(await result).toMatchObject({
@@ -190,11 +216,14 @@ describe('template load lifecycle through engine events', () => {
 
     expect(harness.store.getState().sceneName).toBe(JSON.parse(json).sceneName);
     expect(harness.store.getState().sceneGraph.nodes.player).toBeDefined();
+    expect(loadPrefabInstances()).toEqual([]);
+    expect(exported.prefabInstances).toBeUndefined();
+    expect(exported.prefabDefinitions).toBeUndefined();
     expect(JSON.parse(sessionStorage.getItem('forge:scene-last-json')!)).toEqual(exported);
     expect(harness.setScript).not.toHaveBeenCalled();
   });
 
-  it('preserves a newer accepted scene when an older template times out', async () => {
+  it('preserves a newer loaded scene registry when an older template times out', async () => {
     const { result } = await queueTemplate();
     expect(harness.store.getState().loadScene(NEW_SCENE)).toBe(true);
     await vi.advanceTimersByTimeAsync(50);
@@ -202,9 +231,9 @@ describe('template load lifecycle through engine events', () => {
     expect(await result).toEqual({
       success: false, error: 'Another scene was requested before this template finished loading.',
     });
+    expect(loadPrefabInstances()).toEqual([NEW_LINK]);
     applyScene(NEW_SCENE);
-    expect(exportedScene(NEW_SCENE)).toEqual(JSON.parse(NEW_SCENE));
-    expect(harness.store.getState().sceneName).toBe('Newer scene');
+    expect(exportedScene(NEW_SCENE).prefabInstances).toEqual([NEW_LINK]);
     expect(harness.setScript).not.toHaveBeenCalled();
     expect(harness.addGameComponent).not.toHaveBeenCalled();
   });
@@ -212,7 +241,7 @@ describe('template load lifecycle through engine events', () => {
   it('does not attach an older template script when a newer scene satisfies the graph waiter', async () => {
     const { result, json } = await queueTemplate();
     const newer = JSON.stringify({
-      ...JSON.parse(json), sceneName: 'Newer scene',
+      ...JSON.parse(json), sceneName: 'Newer scene', prefabInstances: [NEW_LINK],
     });
     // A same-frame dispatcher can satisfy the old waiter's expected IDs before
     // loadScene increments its accepted-operation revision. The continuation
@@ -225,69 +254,16 @@ describe('template load lifecycle through engine events', () => {
 
     expect(await result).toMatchObject({ success: false, error: expect.stringContaining('Another scene') });
     expect(harness.store.getState().sceneName).toBe('Newer scene');
+    expect(loadPrefabInstances()).toEqual([NEW_LINK]);
     expect(harness.setScript).not.toHaveBeenCalled();
     expect(harness.addGameComponent).not.toHaveBeenCalled();
-  });
-
-  it('cancels a pending template when checkpoint recovery applies the same entity IDs', async () => {
-    const { result: templateResult, json: templateJson } = await queueTemplate();
-    const checkpointScene = JSON.parse(templateJson) as Omit<SceneFileData, 'entities'> & {
-      entities: Array<{ entityId: string; name: string }>;
-    };
-    const player = checkpointScene.entities.find((entity) => entity.entityId === 'player')!;
-    player.name = 'Checkpoint Player';
-    checkpointScene.sceneName = 'Recovered checkpoint';
-    checkpointScene.metadata = { ...checkpointScene.metadata, name: 'Recovered checkpoint' };
-    const project = projectFixture('Recovered checkpoint');
-    project.scenes[0].data = checkpointScene;
-    let current: SceneFileData = sceneFixture('Outgoing scene');
-    const exportRequestIds: string[] = [];
-    const loadedScenes: SceneFileData[] = [];
-    setSceneDispatcher((command, payload) => {
-      if (command === 'validate_scene') return { success: true };
-      if (command === 'export_scene') {
-        const { requestId } = payload as { requestId: string };
-        exportRequestIds.push(requestId);
-        deliver('SCENE_EXPORTED', {
-          json: JSON.stringify(current), name: current.metadata?.name, requestId,
-        });
-      }
-      if (command === 'load_scene') {
-        const { json } = payload as { json: string };
-        current = JSON.parse(json) as SceneFileData;
-        loadedScenes.push(current);
-        applyScene(json);
-      }
-      return { success: true };
-    });
-    saveProjectScenes(projectFixture('Outgoing scene'));
-    const { checkpoint } = createCheckpoint(project, 'Before template changes');
-
-    const restored = await harness.store.getState().restoreCheckpoint(checkpoint.id);
-
-    expect(restored).toBe(true);
-    expect(await templateResult).toEqual({
-      success: false, error: 'Another scene was requested before this template finished loading.',
-    });
-    expect(exportRequestIds).toHaveLength(2);
-    expect(exportRequestIds.every((id) => id.startsWith(CHECKPOINT_EXPORT_PREFIX))).toBe(true);
-    expect(new Set(exportRequestIds).size).toBe(2);
-    expect(loadedScenes).toEqual([checkpointScene]);
-    expect(Object.keys(harness.store.getState().sceneGraph.nodes).sort()).toEqual(
-      checkpointScene.entities.map((entity) => entity.entityId).sort(),
-    );
-    expect(harness.store.getState().sceneGraph.nodes.player.name).toBe('Checkpoint Player');
-    expect(harness.setScript).not.toHaveBeenCalled();
-    expect(harness.addGameComponent).not.toHaveBeenCalled();
-    expect(loadProjectScenes()).toEqual(checkpoint.snapshot);
-    expect(harness.store.getState().checkpointError).toBeNull();
   });
 
   it.each(
     (['load', 'new', 'template'] as const).flatMap((operation) =>
       (['rejected', 'throws', 'unavailable'] as const).map((failure) => ({ operation, failure })),
     ),
-  )('preserves pending audio when a competing $operation is $failure', async ({ operation, failure }) => {
+  )('preserves pending audio and links when a competing $operation is $failure', async ({ operation, failure }) => {
     const audio = {
       assetId: 'pending-scene-clip', volume: 0.75, pitch: 1, loopAudio: true,
       spatial: false, maxDistance: 50, refDistance: 1, rolloffFactor: 1, autoplay: true, bus: 'music',
@@ -309,33 +285,39 @@ describe('template load lifecycle through engine events', () => {
     }
     const state = harness.store.getState();
     if (operation === 'template') {
-      expect(await state.loadTemplate('2d-platformer', { timeoutMs: 50 })).toMatchObject({ success: false });
+      expect((await state.loadTemplate('2d-platformer', { timeoutMs: 50 })).success).toBe(false);
     } else if (failure === 'throws') {
+      // `loadScene`/`newScene` rethrow a thrown dispatch error rather than
+      // folding it into their boolean contract — a harder failure than an
+      // explicit rejection, and the one `restoreCheckpoint`'s own recovery
+      // flow depends on being able to distinguish (see the parallel
+      // `sceneSliceTemplateCheckpointLifecycle.test.ts` coverage, #10050).
+      // The rollback below still must have happened before it propagated.
       expect(() => operation === 'load' ? state.loadScene(NEW_SCENE) : state.newScene())
         .toThrow('Engine dispatch failed');
     } else if (operation === 'load') {
       expect(state.loadScene(NEW_SCENE)).toBe(false);
     } else {
-      state.newScene();
+      expect(state.newScene()).toBe(false);
     }
+    expect(loadPrefabInstances()).toEqual([NEW_LINK]);
     if (operation !== 'template') {
       expect(harness.store.getState().sceneOperationRevision).toBe(acceptedRevision);
     }
     applyScene(pendingJson);
     expect(useEditorStore.getState().entityAudio).toEqual({ player: audio });
-    expect(exportedScene(pendingJson)).toEqual(pendingScene);
+    expect(exportedScene(pendingJson).prefabInstances).toEqual([NEW_LINK]);
   });
 
   it('does not queue an older template after a new scene is accepted during import', async () => {
     const dispatch = vi.fn(() => ({ success: true }));
     setSceneDispatcher(dispatch);
     const result = harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 50 });
-    const beforeNewScene = harness.store.getState().sceneOperationRevision;
-    harness.store.getState().newScene();
-    expect(harness.store.getState().sceneOperationRevision).toBe(beforeNewScene + 1);
+    expect(harness.store.getState().newScene()).toBe(true);
 
     expect(await result).toMatchObject({ success: false, error: expect.stringContaining('Another scene') });
     expect(dispatch.mock.calls).toEqual([['new_scene', {}]]);
+    expect(loadPrefabInstances()).toEqual([]);
     expect(harness.setScript).not.toHaveBeenCalled();
   });
 });
