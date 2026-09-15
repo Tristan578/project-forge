@@ -163,12 +163,26 @@ export const PUZZLE_2D_TEMPLATE: GameTemplate = {
 
   scripts: {
     game_manager: {
-      source: `// Puzzle Game Manager
-let score = 0;
-let moves = 0;
-let selected = null;
+      source: `// Match-3 Puzzle Game Manager
+//
+// KEYBOARD-DRIVEN, and deliberately so. This template used to reach for a
+// mouse-and-material API the script sandbox never exposed: a material namespace,
+// a transform namespace, a scene component reader, a camera screen-to-world
+// helper, mouse-button and mouse-position input, and start/update lifecycle
+// hooks called as members of the forge object. None of those exist in
+// forgeTypes.ts, so every call threw and the match loop never advanced; the
+// score readout it drew could never change (#9815). It also scheduled its match
+// check with a timer global, which does not survive the sandbox either.
+//
+// The rewrite below uses only the real surface: a cursor moved with the default
+// move actions, action_primary to select and swap, setColor to repaint a cell
+// and setEmissive to highlight one, a board model kept in the script, and the
+// forge game win call for the reachable objective. No mouse APIs, no component
+// reads, no timers. Lifecycle is the real contract - bare top-level onStart and
+// onUpdate functions the worker picks up by name.
 
-const GRID_SIZE = 5;
+const SIZE = 5;
+const WIN_SCORE = 30;
 const COLORS = [
   [1.0, 0.2, 0.2],
   [0.2, 1.0, 0.2],
@@ -177,133 +191,144 @@ const COLORS = [
   [1.0, 0.2, 1.0],
 ];
 
-function getCellPos(name) {
-  const match = name.match(/Cell_(\\d+)_(\\d+)/);
-  if (!match) return null;
-  return { row: parseInt(match[1]), col: parseInt(match[2]) };
+// A seeded board with NO starting match and a guaranteed one-swap match:
+// swapping (2,0) with (2,1) makes column 0 rows 0-2 all colour 0, a vertical
+// three, which clears three cells for 3 * 10 = WIN_SCORE. The win is therefore
+// reachable from the initial layout with a single legal move.
+const board = [
+  [0, 1, 2, 3, 4],
+  [0, 2, 3, 4, 1],
+  [1, 0, 4, 2, 3],
+  [2, 3, 0, 1, 4],
+  [3, 4, 1, 0, 2],
+];
+
+let score = 0;
+let moves = 0;
+let won = false;
+let cursorRow = 0;
+let cursorCol = 0;
+let selected = null;
+
+function cellId(r, c) {
+  return forge.scene.findByNameExact('Cell_' + r + '_' + c)[0];
 }
 
-function getCellName(row, col) {
-  return 'Cell_' + row + '_' + col;
+function paintCell(r, c) {
+  const id = cellId(r, c);
+  if (!id) return;
+  const col = COLORS[board[r][c]];
+  forge.setColor(id, col[0], col[1], col[2], 1);
 }
 
-function swapCells(cell1, cell2) {
-  const mat1 = forge.scene.getComponent(cell1, 'material');
-  const mat2 = forge.scene.getComponent(cell2, 'material');
-  if (!mat1 || !mat2) return;
-
-  forge.material.setBaseColor(cell1, mat2.baseColor[0], mat2.baseColor[1], mat2.baseColor[2], 1);
-  forge.material.setBaseColor(cell2, mat1.baseColor[0], mat1.baseColor[1], mat1.baseColor[2], 1);
+function highlight() {
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const id = cellId(r, c);
+      if (id) forge.setEmissive(id, 0, 0, 0, 0);
+    }
+  }
+  const cur = cellId(cursorRow, cursorCol);
+  if (cur) forge.setEmissive(cur, 0.4, 0.4, 0.4, 1);
+  if (selected) {
+    const sel = cellId(selected.r, selected.c);
+    if (sel) forge.setEmissive(sel, 0.7, 0.7, 0.2, 1);
+  }
 }
 
+// Scan rows and columns for runs of three or more of the same colour, clear
+// them (refill with a shifted colour so the same cell is not instantly a match
+// again), score ten per cleared cell, and declare the win at WIN_SCORE. No
+// cascade recursion and no timers: one synchronous pass per swap.
 function checkMatches() {
-  let matchCount = 0;
+  const matched = [];
+  const seen = {};
+  const mark = (r, c) => {
+    const key = r + '_' + c;
+    if (!seen[key]) { seen[key] = true; matched.push({ r: r, c: c }); }
+  };
 
-  for (let row = 0; row < GRID_SIZE; row++) {
-    for (let col = 0; col < GRID_SIZE - 2; col++) {
-      const cells = [];
-      for (let i = 0; i < 3; i++) {
-        const cellId = forge.scene.findByName(getCellName(row, col + i))[0];
-        if (!cellId) continue;
-        const mat = forge.scene.getComponent(cellId, 'material');
-        if (!mat) continue;
-        cells.push({ id: cellId, color: mat.baseColor });
-      }
-
-      if (cells.length === 3 &&
-          cells[0].color[0] === cells[1].color[0] &&
-          cells[1].color[0] === cells[2].color[0]) {
-        matchCount++;
-        for (const cell of cells) {
-          const newColor = COLORS[Math.floor(Math.random() * COLORS.length)];
-          forge.material.setBaseColor(cell.id, newColor[0], newColor[1], newColor[2], 1);
-        }
-      }
+  for (let r = 0; r < SIZE; r++) {
+    let start = 0;
+    for (let c = 1; c <= SIZE; c++) {
+      if (c < SIZE && board[r][c] === board[r][start]) continue;
+      if (c - start >= 3) { for (let k = start; k < c; k++) mark(r, k); }
+      start = c;
+    }
+  }
+  for (let c = 0; c < SIZE; c++) {
+    let start = 0;
+    for (let r = 1; r <= SIZE; r++) {
+      if (r < SIZE && board[r][c] === board[start][c]) continue;
+      if (r - start >= 3) { for (let k = start; k < r; k++) mark(k, c); }
+      start = r;
     }
   }
 
-  for (let col = 0; col < GRID_SIZE; col++) {
-    for (let row = 0; row < GRID_SIZE - 2; row++) {
-      const cells = [];
-      for (let i = 0; i < 3; i++) {
-        const cellId = forge.scene.findByName(getCellName(row + i, col))[0];
-        if (!cellId) continue;
-        const mat = forge.scene.getComponent(cellId, 'material');
-        if (!mat) continue;
-        cells.push({ id: cellId, color: mat.baseColor });
-      }
-
-      if (cells.length === 3 &&
-          cells[0].color[0] === cells[1].color[0] &&
-          cells[1].color[0] === cells[2].color[0]) {
-        matchCount++;
-        for (const cell of cells) {
-          const newColor = COLORS[Math.floor(Math.random() * COLORS.length)];
-          forge.material.setBaseColor(cell.id, newColor[0], newColor[1], newColor[2], 1);
-        }
-      }
-    }
+  if (matched.length === 0) return;
+  for (const cell of matched) {
+    board[cell.r][cell.c] = (board[cell.r][cell.c] + 2) % COLORS.length;
+    paintCell(cell.r, cell.c);
   }
+  score += matched.length * 10;
+  forge.ui.updateText('score', 'Score: ' + score);
+  forge.game.setScore(score);
 
-  if (matchCount > 0) {
-    score += matchCount * 10;
-    forge.ui.updateText('score', 'Score: ' + score);
+  if (score >= WIN_SCORE && !won) {
+    won = true;
+    forge.ui.showText('win', 'YOU WIN!', 35, 45, { fontSize: 36, color: '#00ff00' });
+    forge.game.win();
   }
 }
 
-forge.onStart(() => {
+function onStart() {
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) paintCell(r, c);
+  }
+  forge.game.setScore(0);
   forge.ui.showText('score', 'Score: 0', 5, 5, { fontSize: 20, color: '#ffcc00' });
   forge.ui.showText('moves', 'Moves: 0', 5, 10, { fontSize: 18, color: '#cccccc' });
-  forge.ui.showText('hint', 'Click two adjacent tiles to swap', 5, 92, {
+  forge.ui.showText('hint', 'Arrows/WASD move cursor, J to select and swap', 5, 92, {
     fontSize: 14, color: '#aaa'
   });
-});
+  highlight();
+}
 
-forge.onUpdate(() => {
-  if (forge.input.isMousePressed(0)) {
-    const mousePos = forge.input.getMousePosition();
-    const worldPos = forge.camera.screenToWorld(mousePos.x, mousePos.y);
-    if (!worldPos) return;
+function onUpdate(dt) {
+  if (won) return;
 
-    const cells = forge.scene.findByType('Sprite').filter(id => {
-      const name = forge.scene.getEntityName(id);
-      return name && name.startsWith('Cell_');
-    });
+  let changed = false;
+  if (forge.input.justPressed('move_left') && cursorCol > 0) { cursorCol--; changed = true; }
+  if (forge.input.justPressed('move_right') && cursorCol < SIZE - 1) { cursorCol++; changed = true; }
+  if (forge.input.justPressed('move_up') && cursorRow > 0) { cursorRow--; changed = true; }
+  if (forge.input.justPressed('move_down') && cursorRow < SIZE - 1) { cursorRow++; changed = true; }
 
-    for (const cell of cells) {
-      const pos = forge.transform.getPosition(cell);
-      if (!pos) continue;
-
-      const dx = worldPos.x - pos.x;
-      const dy = worldPos.y - pos.y;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
-        if (!selected) {
-          selected = cell;
-          forge.material.setEmissive(cell, 0.3, 0.3, 0.3, 1);
-        } else {
-          const pos1 = getCellPos(forge.scene.getEntityName(selected));
-          const pos2 = getCellPos(forge.scene.getEntityName(cell));
-
-          if (pos1 && pos2) {
-            const adjacent = (Math.abs(pos1.row - pos2.row) === 1 && pos1.col === pos2.col) ||
-                            (Math.abs(pos1.col - pos2.col) === 1 && pos1.row === pos2.row);
-
-            if (adjacent) {
-              swapCells(selected, cell);
-              moves++;
-              forge.ui.updateText('moves', 'Moves: ' + moves);
-              setTimeout(() => checkMatches(), 200);
-            }
-          }
-
-          forge.material.setEmissive(selected, 0, 0, 0, 0);
-          selected = null;
-        }
-        break;
+  if (forge.input.justPressed('action_primary')) {
+    if (!selected) {
+      selected = { r: cursorRow, c: cursorCol };
+    } else {
+      const adjacent =
+        Math.abs(selected.r - cursorRow) + Math.abs(selected.c - cursorCol) === 1;
+      if (adjacent) {
+        const tmp = board[selected.r][selected.c];
+        board[selected.r][selected.c] = board[cursorRow][cursorCol];
+        board[cursorRow][cursorCol] = tmp;
+        paintCell(selected.r, selected.c);
+        paintCell(cursorRow, cursorCol);
+        moves++;
+        forge.ui.updateText('moves', 'Moves: ' + moves);
+        selected = null;
+        checkMatches();
+      } else {
+        // Not adjacent: move the selection to the new cursor cell instead.
+        selected = { r: cursorRow, c: cursorCol };
       }
     }
+    changed = true;
   }
-});`,
+
+  if (changed) highlight();
+}`,
       enabled: true,
     },
   },
