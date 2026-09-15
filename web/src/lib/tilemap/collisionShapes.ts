@@ -56,6 +56,10 @@ export function getCollisionShapeFromLayers(
   return isCollisionShape(shape) ? shape : null;
 }
 
+/**
+ * Result of a pure metadata edit. Changed results contain new layers; unchanged
+ * results retain the input reference. Only invalid inputs include an error.
+ */
 export interface ApplyCollisionShapeResult {
   /** Referentially unchanged for invalid inputs and edits to the current shape. */
   layers: TilemapLayer[];

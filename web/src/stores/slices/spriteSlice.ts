@@ -82,6 +82,13 @@ export interface SpriteSlice {
 type SpriteDispatcher = (command: string, payload: unknown) => CommandResponse | void;
 let dispatchCommand: SpriteDispatcher | null = null;
 
+/**
+ * Connect sprite actions to the engine transport, or detach it during teardown.
+ * @param dispatcher Command transport, or null when the engine is unavailable.
+ * Collision-shape edits require an explicit success response to report queuing;
+ * older actions may accept a void response. Only engine events confirm edits.
+ * @returns Nothing; replaces the active transport for this slice.
+ */
 export function setSpriteDispatcher(dispatcher: SpriteDispatcher | null): void {
   dispatchCommand = dispatcher;
 }

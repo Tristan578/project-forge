@@ -233,6 +233,11 @@ declare namespace forge {
      * Read the last engine-confirmed authored shape. Returns 'none' for absent
      * shape metadata, or null for an unknown cell or invalid integer coordinate.
      * Pure read; these shapes do not affect play physics yet (#9814).
+     * @param tilemapId Scene entity ID carrying the tilemap.
+     * @param x Zero-based integer column; fractional values are not floored.
+     * @param y Zero-based integer row; fractional values are not floored.
+     * @param layer Zero-based integer layer index, default 0.
+     * @returns Confirmed shape, none for unauthored metadata, or null for an invalid cell.
      */
     function getCollisionShape(
       tilemapId: string,
@@ -248,6 +253,13 @@ declare namespace forge {
      * Reads change after the next engine snapshot; a queued request is not an
      * acknowledgement that it was saved. Repeated effective shapes add no undo
      * entry. These shapes do not affect play physics yet (#9814).
+     * @param tilemapId Scene entity ID carrying the existing tilemap.
+     * @param x Zero-based column, floored before bounds checks.
+     * @param y Zero-based row, floored before bounds checks.
+     * @param shape One of none, full, halfTop, halfBottom, slopeLeft, or slopeRight.
+     * @param layer Zero-based layer index, default 0, floored before bounds checks.
+     * @returns Nothing; queues an edit for asynchronous engine application.
+     * @throws If the shape is unknown, coordinates are invalid, or the cell is unavailable.
      */
     function setCollisionShape(
       tilemapId: string,

@@ -10393,26 +10393,26 @@
         "properties": {
           "entityId": {
             "type": "string",
-            "description": "Tilemap entity ID",
+            "description": "Scene entity ID carrying the existing tilemap",
             "minLength": 1,
             "pattern": "\\S"
           },
           "layerIndex": {
             "type": "integer",
             "minimum": 0,
-            "description": "Layer index",
+            "description": "Zero-based index of an existing tilemap layer",
             "maximum": 4294967295
           },
           "x": {
             "type": "integer",
             "minimum": 0,
-            "description": "Tile X coordinate",
+            "description": "Zero-based column of an existing cell within the tilemap",
             "maximum": 4294967295
           },
           "y": {
             "type": "integer",
             "minimum": 0,
-            "description": "Tile Y coordinate",
+            "description": "Zero-based row of an existing cell within the tilemap",
             "maximum": 4294967295
           },
           "shape": {

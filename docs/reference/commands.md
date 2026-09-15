@@ -7314,10 +7314,10 @@ Author stored collision-shape metadata for one tilemap cell. These shapes do not
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `entityId` | string | Yes | Tilemap entity ID |
-| `layerIndex` | integer | Yes | Layer index |
-| `x` | integer | Yes | Tile X coordinate |
-| `y` | integer | Yes | Tile Y coordinate |
+| `entityId` | string | Yes | Scene entity ID carrying the existing tilemap |
+| `layerIndex` | integer | Yes | Zero-based index of an existing tilemap layer |
+| `x` | integer | Yes | Zero-based column of an existing cell within the tilemap |
+| `y` | integer | Yes | Zero-based row of an existing cell within the tilemap |
 | `shape` | `"none"` \| `"full"` \| `"halfTop"` \| `"halfBottom"` \| `"slopeLeft"` \| `"slopeRight"` | Yes | Stored silhouette for the cell: none (unauthored), full, halfTop, halfBottom, slopeLeft or slopeRight. Runtime colliders are not implemented. |
 
 **Example:**

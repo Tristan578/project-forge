@@ -352,11 +352,10 @@ export interface TilemapLayer {
   opacity: number;
   isCollision: boolean;
   /**
-   * Per-cell collision shape, parallel to `tiles`. Optional and absent by
-   * default: a layer with no authored shapes omits the field entirely, matching
-   * the engine's `#[serde(default)]` empty-vector default and keeping every
-   * pre-OP-04 scene load-compatible. This metadata does not generate runtime
-   * colliders yet (#9814).
+   * Per-cell collision shape, parallel to `tiles`. Legacy scenes may omit this
+   * field; Rust serialization can emit an empty array. Both mean no shapes
+   * have been authored, and missing cell entries read as `none`. This metadata
+   * does not generate runtime colliders yet (#9814).
    */
   collisionShapes?: CollisionShape[];
 }

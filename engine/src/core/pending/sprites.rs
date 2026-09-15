@@ -155,12 +155,18 @@ pub struct FillTilesRequest {
     pub tiles: Vec<TilePlacement>,
 }
 
+/// Deferred edit to a tile cell's authored metadata; does not create runtime colliders.
 #[derive(Debug, Clone)]
 pub struct SetTileCollisionShapeRequest {
+    /// Scene entity ID carrying the existing tilemap.
     pub entity_id: String,
+    /// Zero-based index of an existing layer.
     pub layer: usize,
+    /// Zero-based column within the tilemap's stored cells.
     pub x: usize,
+    /// Zero-based row within the tilemap's stored cells.
     pub y: usize,
+    /// Supported silhouette to store on the cell.
     pub shape: crate::core::tilemap::CollisionShape,
 }
 
@@ -270,6 +276,8 @@ impl PendingCommands {
         self.fill_tiles_requests.push(request);
     }
 
+    /// Enqueue a metadata edit for later validation and application by the bridge system.
+    /// Returning from this method does not confirm that a cell changed.
     pub fn queue_set_tile_collision_shape(&mut self, request: SetTileCollisionShapeRequest) {
         self.set_tile_collision_shape_requests.push(request);
     }
@@ -361,6 +369,8 @@ pub fn queue_fill_tiles_from_bridge(request: FillTilesRequest) -> bool {
     super::with_pending(|pc| pc.queue_fill_tiles(request)).is_some()
 }
 
+/// Enqueue an authored shape edit through the pending-command resource.
+/// Returns whether the queue was available, not whether the cell edit was applied.
 pub fn queue_set_tile_collision_shape_from_bridge(request: SetTileCollisionShapeRequest) -> bool {
     super::with_pending(|pc| pc.queue_set_tile_collision_shape(request)).is_some()
 }
