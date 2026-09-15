@@ -60,7 +60,7 @@ const useCases: Record<string, UseCaseData> = {
       },
       {
         title: 'Game Components',
-        text: '12 drag-and-drop behaviors including Health, Collectible, Inventory, and NPC. Configure properties in the inspector without code.',
+        text: '13 drag-and-drop behaviors including Health, Collectible, Checkpoint, and DialogueTrigger. Configure properties in the inspector without code.',
       },
       {
         title: 'Visual Scripting',
