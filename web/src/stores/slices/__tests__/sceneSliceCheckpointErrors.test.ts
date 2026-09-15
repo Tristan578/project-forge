@@ -122,6 +122,40 @@ describe('checkpoint recovery transaction', () => {
     expect(exported('after-refused-restore')).toBe(false);
   });
 
+  it('keeps the save lockout set when recovering the prior scene from a THREW lockout (#10079, finding 4)', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+
+    // Raise an ENGINE_LOAD_THREW lockout with a dispatcher that THROWS on
+    // load_scene — a throw, unlike a clean rejection, can have despawned the
+    // outgoing scene mid-apply, so the `prior` capture restoreCheckpoint takes
+    // below is made from a possibly-wrecked viewport.
+    setSceneDispatcher((command: string) => {
+      if (command === 'validate_scene') return { success: true };
+      if (command === 'load_scene') throw new Error('engine despawned mid-apply');
+      return { success: true };
+    });
+    expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Wrecking load')))).toThrow();
+    expect(store.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+
+    // Reattach the confirming engine and make the checkpoint restore FAIL its
+    // readback ('wrong'), so the recovery branch runs and re-applies `prior`.
+    setSceneDispatcher(engine.dispatch);
+    engine.setMode('wrong');
+
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+
+    // The recovery re-applied and SCENE_LOADED-confirmed `prior`, but that
+    // capture came from a viewport the throw may have wrecked. Confirming
+    // SCENE_LOADED for it does NOT make it trustworthy, so the lockout must
+    // STAND rather than be cleared over it — otherwise the next save writes the
+    // wreckage over the stored scene, the very overwrite #10056 prevents.
+    expect(store.getState().sceneLoadError).not.toBeNull();
+    expect(store.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+    // The consequence the lockout gates: saving still refuses.
+    store.getState().saveScene('after-untrusted-recovery');
+    expect(exported('after-untrusted-recovery')).toBe(false);
+  });
+
   it('times out a queued load that never applies and restores the prior live scene', async () => {
     vi.useFakeTimers();
     const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
