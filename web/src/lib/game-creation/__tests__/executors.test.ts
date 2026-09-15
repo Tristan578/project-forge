@@ -595,13 +595,18 @@ describe('asset_generate executor', () => {
     expect(executor.name).toBe('asset_generate');
   });
 
-  it('succeeds with assetId and usedFallback=false on happy path', async () => {
+  it('marks an unsupported type (texture) as pending fallback, never a random id (#9900)', async () => {
+    // Only `type: 'sound'` has a real adapter in this slice; every other type
+    // resolves to the deterministic fallback flagged unsupported/pending rather
+    // than a fabricated `asset_<id>` success.
     const ctx = makeMockCtx();
     const result = await executor.execute(baseInput, ctx);
 
     expect(result.success).toBe(true);
-    expect(typeof result.output?.['assetId']).toBe('string');
-    expect(result.output?.['usedFallback']).toBe(false);
+    expect(result.output?.['usedFallback']).toBe(true);
+    expect(result.output?.['unsupported']).toBe(true);
+    expect(result.output?.['pending']).toBe(true);
+    expect(result.output?.['assetId']).toBe('primitive:cube');
   });
 
   it('uses fallback when signal is aborted before execution', async () => {
