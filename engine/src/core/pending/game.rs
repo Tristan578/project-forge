@@ -9,16 +9,23 @@ use crate::core::input::{ActionDef, InputPreset};
 #[derive(Debug, Clone)]
 pub struct InputBindingUpdate {
     pub action_def: ActionDef,
+    /// Local-player slot this binding belongs to (0 = the primary player, the
+    /// default for every existing script and scene).
+    pub player: u8,
 }
 
 #[derive(Debug, Clone)]
 pub struct InputPresetRequest {
     pub preset: InputPreset,
+    /// Local-player slot the preset is merged into (0 = primary).
+    pub player: u8,
 }
 
 #[derive(Debug, Clone)]
 pub struct InputBindingRemoval {
     pub action_name: String,
+    /// Local-player slot the removal targets (0 = primary).
+    pub player: u8,
 }
 
 #[derive(Debug, Clone)]

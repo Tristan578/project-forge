@@ -1,6 +1,6 @@
 # Command Reference
 
-Reference for all 363 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
+Reference for all 364 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -39,7 +39,7 @@ Reference for all 363 registered MCP commands. Registration does not imply that 
 - [Sprite](#sprite) (8 commands)
 - [Sprite_animation](#sprite_animation) (6 commands)
 - [Physics2d](#physics2d) (10 commands)
-- [Tilemap](#tilemap) (10 commands)
+- [Tilemap](#tilemap) (11 commands)
 - [Skeleton2d](#skeleton2d) (13 commands)
 - [Modeling](#modeling) (6 commands)
 - [Security](#security) (2 commands)
@@ -1588,7 +1588,7 @@ Scope: `scene:read` | Token cost: 0
 
 ### `get_input_bindings`
 
-Get all current input action bindings and active preset
+Get all current input action bindings and active preset, including any additional local players' maps under `players`
 
 **Example:**
 ```json
@@ -1886,6 +1886,7 @@ Create or update an input action binding (e.g. map 'jump' to Space key)
 | `positiveKeys` | string[] | No | Positive direction keys for axis actions |
 | `negativeKeys` | string[] | No | Negative direction keys for axis actions |
 | `deadZone` | number | No | Dead zone for axis (default 0.1) |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -1909,6 +1910,7 @@ Remove an input action binding by name
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `actionName` | string | Yes | Name of the action to remove |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -1926,11 +1928,12 @@ Scope: `scene:write` | Token cost: 0
 
 ### `set_input_preset`
 
-Apply a built-in input preset (replaces all bindings)
+Merge a built-in input preset into a player's bindings (additive; the preset's own actions win on name collisions)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `preset` | `"fps"` \| `"platformer"` \| `"topdown"` \| `"racing"` | Yes | Preset name |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -7495,6 +7498,36 @@ Set a single tile on one tilemap layer
     "layerIndex": 1,
     "x": 1,
     "y": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `set_tile_collision_shape`
+
+Author stored collision-shape metadata for one tilemap cell. These shapes do not affect play physics yet.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entityId` | string | Yes | Scene entity ID carrying the existing tilemap |
+| `layerIndex` | integer | Yes | Zero-based index of an existing tilemap layer |
+| `x` | integer | Yes | Zero-based column of an existing cell within the tilemap |
+| `y` | integer | Yes | Zero-based row of an existing cell within the tilemap |
+| `shape` | `"none"` \| `"full"` \| `"halfTop"` \| `"halfBottom"` \| `"slopeLeft"` \| `"slopeRight"` | Yes | Stored silhouette for the cell: none (unauthored), full, halfTop, halfBottom, slopeLeft or slopeRight. Runtime colliders are not implemented. |
+
+**Example:**
+```json
+{
+  "command": "set_tile_collision_shape",
+  "params": {
+    "entityId": "entity_1",
+    "layerIndex": 1,
+    "x": 1,
+    "y": 1,
+    "shape": "none"
   }
 }
 ```

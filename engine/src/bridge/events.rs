@@ -531,6 +531,41 @@ pub fn emit_array_completed(source_id: &str, created_ids: &[String]) {
 }
 
 /// Emit a play tick event with all entity states for the script runtime.
+/// One extra local player's evaluated input, mirrored per slot into the
+/// play-tick payload so `forge.input.isPressed(action, player)` can resolve
+/// either player's state at runtime. Player 0 stays the flat top-level
+/// `pressed`/`axes`/… maps; this carries slots 1+ and is omitted entirely when
+/// there is only one player, so a single-player tick is byte-for-byte unchanged.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerInputSlotPayload {
+    pressed: std::collections::HashMap<String, bool>,
+    just_pressed: std::collections::HashMap<String, bool>,
+    just_released: std::collections::HashMap<String, bool>,
+    axes: std::collections::HashMap<String, f32>,
+}
+
+/// Build the slot-1+ per-player input payload from `InputState::players`.
+fn build_player_input_slots(
+    input_state: &crate::core::input::InputState,
+) -> std::collections::HashMap<u8, PlayerInputSlotPayload> {
+    input_state
+        .players
+        .iter()
+        .map(|(slot, actions)| {
+            (
+                *slot,
+                PlayerInputSlotPayload {
+                    pressed: actions.iter().map(|(k, v)| (k.clone(), v.pressed)).collect(),
+                    just_pressed: actions.iter().map(|(k, v)| (k.clone(), v.just_pressed)).collect(),
+                    just_released: actions.iter().map(|(k, v)| (k.clone(), v.just_released)).collect(),
+                    axes: actions.iter().map(|(k, v)| (k.clone(), v.axis_value)).collect(),
+                },
+            )
+        })
+        .collect()
+}
+
 pub fn emit_play_tick(entities: &[(String, [f32; 3], [f32; 3], [f32; 3], String, String, f32)], input_state: &crate::core::input::InputState) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -564,6 +599,8 @@ pub fn emit_play_tick(entities: &[(String, [f32; 3], [f32; 3], [f32; 3], String,
         just_pressed: std::collections::HashMap<String, bool>,
         just_released: std::collections::HashMap<String, bool>,
         axes: std::collections::HashMap<String, f32>,
+        #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+        players: std::collections::HashMap<u8, PlayerInputSlotPayload>,
     }
 
     let mut entity_states = std::collections::HashMap::new();
@@ -587,6 +624,7 @@ pub fn emit_play_tick(entities: &[(String, [f32; 3], [f32; 3], [f32; 3], String,
         just_pressed: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_pressed)).collect(),
         just_released: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_released)).collect(),
         axes: input_state.actions.iter().map(|(k, v)| (k.clone(), v.axis_value)).collect(),
+        players: build_player_input_slots(input_state),
     };
 
     emit_event("PLAY_TICK", &PlayTickPayload {
@@ -644,6 +682,8 @@ pub fn emit_play_tick_delta(
         just_pressed: std::collections::HashMap<String, bool>,
         just_released: std::collections::HashMap<String, bool>,
         axes: std::collections::HashMap<String, f32>,
+        #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+        players: std::collections::HashMap<u8, PlayerInputSlotPayload>,
     }
 
     let mut changed_entities = std::collections::HashMap::new();
@@ -667,6 +707,7 @@ pub fn emit_play_tick_delta(
         just_pressed: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_pressed)).collect(),
         just_released: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_released)).collect(),
         axes: input_state.actions.iter().map(|(k, v)| (k.clone(), v.axis_value)).collect(),
+        players: build_player_input_slots(input_state),
     };
 
     emit_event("PLAY_TICK_DELTA", &PlayTickDeltaPayload {

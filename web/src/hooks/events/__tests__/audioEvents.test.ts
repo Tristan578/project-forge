@@ -586,7 +586,8 @@ describe('handleAudioEvent', () => {
             deadZone: 0.0,
           }),
         ]),
-        'fps'
+        'fps',
+        { 0: 'fps' }
       );
     });
 
@@ -625,8 +626,62 @@ describe('handleAudioEvent', () => {
             deadZone: 0.15,
           }),
         ],
-        null
+        null,
+        { 0: null }
       );
+    });
+
+    // physics.FR-1.OP-04: the engine reports slots 1+ under `players`, each with
+    // its own action map AND preset. Without the loop, `players` is ignored and
+    // player 2's bindings never reach the store — the reverse of the coverage
+    // scriptSlice already gives the dispatch direction.
+    it('tags a second player slot from the `players` map and threads its preset', () => {
+      const payload = {
+        actions: {
+          jump: {
+            name: 'jump',
+            actionType: { type: 'Digital' },
+            sources: [{ type: 'Key', value: 'Space' }],
+            deadZone: 0.0,
+          },
+        },
+        preset: 'fps',
+        players: {
+          '1': {
+            actions: {
+              jump: {
+                name: 'jump',
+                actionType: { type: 'Digital' },
+                sources: [{ type: 'Key', value: 'Numpad0' }],
+                deadZone: 0.0,
+              },
+            },
+            preset: 'platformer',
+          },
+        },
+      };
+
+      const result = handleAudioEvent(
+        'INPUT_BINDINGS_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      const [bindings, preset, presetByPlayer] = vi.mocked(actions.setInputBindings).mock.calls[0];
+
+      // Player 0's binding comes from the top-level `actions`...
+      expect(bindings).toContainEqual(
+        expect.objectContaining({ actionName: 'jump', sources: ['Space'], player: 0 }),
+      );
+      // ...and player 1's from the `players` map, tagged with the numeric slot.
+      expect(bindings).toContainEqual(
+        expect.objectContaining({ actionName: 'jump', sources: ['Numpad0'], player: 1 }),
+      );
+      expect(preset).toBe('fps');
+      // Each slot's preset provenance survives, not just player 0's.
+      expect(presetByPlayer).toEqual({ 0: 'fps', 1: 'platformer' });
     });
   });
 

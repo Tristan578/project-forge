@@ -72,14 +72,21 @@ declare namespace forge {
   }
 
   namespace input {
-    /** Check if an action is currently pressed */
-    function isPressed(action: string): boolean;
-    /** Check if an action was just pressed this frame */
-    function justPressed(action: string): boolean;
-    /** Check if an action was just released this frame */
-    function justReleased(action: string): boolean;
-    /** Get axis value (-1 to 1) */
-    function getAxis(action: string): number;
+    /**
+     * Check if an action is currently pressed.
+     *
+     * player selects a local-player slot for two-player games (0 = the primary
+     * player, the default). Passing 1 reads the second player's map; omitting
+     * it, or passing 0, is the single-player behaviour every existing script
+     * already has (physics.FR-1.OP-04).
+     */
+    function isPressed(action: string, player?: number): boolean;
+    /** Check if an action was just pressed this frame (optional local-player slot). */
+    function justPressed(action: string, player?: number): boolean;
+    /** Check if an action was just released this frame (optional local-player slot). */
+    function justReleased(action: string, player?: number): boolean;
+    /** Get axis value (-1 to 1) for an optional local-player slot (0 = primary). */
+    function getAxis(action: string, player?: number): number;
     /** Check if the current device supports touch input */
     function isTouchDevice(): boolean;
     /** Trigger haptic feedback (vibration pattern in ms) */
@@ -228,6 +235,46 @@ declare namespace forge {
      * values and anything above the shared upper bound throw.
      */
     function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
+    /**
+     * Editor test-play only; unavailable in standalone HTML/ZIP scripts.
+     * Read the last engine-confirmed authored shape. Returns 'none' for absent
+     * shape metadata, or null for an unknown cell or invalid integer coordinate.
+     * Pure read; these shapes do not affect play physics yet (#9814).
+     * @param tilemapId Scene entity ID carrying the tilemap.
+     * @param x Zero-based integer column; fractional values are not floored.
+     * @param y Zero-based integer row; fractional values are not floored.
+     * @param layer Zero-based integer layer index, default 0.
+     * @returns Confirmed shape, none for unauthored metadata, or null for an invalid cell.
+     */
+    function getCollisionShape(
+      tilemapId: string,
+      x: number,
+      y: number,
+      layer?: number,
+    ): 'none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight' | null;
+    /**
+     * Editor test-play only; unavailable in standalone HTML/ZIP scripts.
+     * Queue an authoring request for a known tilemap cell. Coordinates and
+     * layer are floored and checked against the shared unsigned 32-bit bound.
+     * Unknown shapes, missing targets, and invalid coordinates throw.
+     * Reads change after the next engine snapshot; a queued request is not an
+     * acknowledgement that it was saved. Repeated effective shapes add no undo
+     * entry. These shapes do not affect play physics yet (#9814).
+     * @param tilemapId Scene entity ID carrying the existing tilemap.
+     * @param x Zero-based column, floored before bounds checks.
+     * @param y Zero-based row, floored before bounds checks.
+     * @param shape One of none, full, halfTop, halfBottom, slopeLeft, or slopeRight.
+     * @param layer Zero-based layer index, default 0, floored before bounds checks.
+     * @returns Nothing; queues an edit for asynchronous engine application.
+     * @throws If the shape is unknown, coordinates are invalid, or the cell is unavailable.
+     */
+    function setCollisionShape(
+      tilemapId: string,
+      x: number,
+      y: number,
+      shape: 'none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight',
+      layer?: number,
+    ): void;
     /** Convert world coordinates to tile coordinates */
     function worldToTile(tilemapId: string, worldX: number, worldY: number): [number, number];
     /** Convert tile coordinates to world coordinates */

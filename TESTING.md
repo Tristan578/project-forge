@@ -81,6 +81,17 @@ Manual verification checklist for user-facing features. Run these after major ch
 - [ ] Use fill tool → verify flood fill works
 - [ ] Add second layer → paint on layer 2 → verify layering
 
+### Tile collision-shape authoring
+
+These checks cover authored metadata. Runtime tilemap colliders remain unimplemented (#9814); shapes must not be presented as affecting gameplay physics. Leave these unchecked until exercised in a running editor.
+
+- [ ] Select a tilemap cell, choose each supported shape, and apply it. Verify queued feedback appears first and Authored shape changes only after the engine confirms the edit.
+- [ ] Undo and redo a shape edit. Reapply an unchanged shape (including None on a legacy layer with no shape array); verify no extra undo entry is created and existing redo remains available.
+- [ ] Save and reopen the scene; verify the authored shapes persist. Enter Play, edit a shape through an editor test-play script, then Stop; verify the pre-Play authored metadata returns.
+- [ ] Try blank, fractional, negative, and out-of-range inspector coordinates; verify Apply is disabled and existing cell data remains unchanged. With the engine unavailable, attempt an authoring action; verify an error is reported and the confirmed mirror remains unchanged.
+- [ ] In an editor test-play script, call `setCollisionShape` with fractional coordinates and verify they are floored before bounds checking. Read the same integer cell on a later update after the engine snapshot arrives; verify the authored shape. A fractional getter coordinate returns null, and unknown shapes or invalid bounds report an error without queuing an edit.
+- [ ] Verify the inspector and scripting reference identify this as authoring only. A shaped tile does not gain a physics collider, and standalone HTML/ZIP exports do not expose these tilemap script methods.
+
 ### 2D Physics
 - [ ] Add 2D physics to sprite → Play → verify gravity
 - [ ] Add 2D joint between sprites → Play → verify constraint

@@ -202,7 +202,8 @@ fn route_domain(command: &str) -> u8 {
         | "create_ik_chain2d" | "get_skeleton2d" | "auto_weight_skeleton2d"
         | "add_skeleton2d_mesh_attachment" | "get_sprite_sheet_state"
         | "get_sprite_animator_state" | "set_tilemap_data" | "remove_tilemap_data"
-        | "paint_tile" | "erase_tile" | "set_grid_2d" | "set_tileset" | "remove_tileset"
+        | "paint_tile" | "erase_tile" | "set_tile_collision_shape"
+        | "set_grid_2d" | "set_tileset" | "remove_tileset"
         // Implemented here, not in `animation.rs`. The router used to send these
         // two to domain 4, whose arms are inline `Not yet implemented` stubs, so
         // a real handler sat unreachable and every sprite state machine the
