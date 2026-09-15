@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { applyCollisionShapeToLayers } from '../collisionShapes';
-import type { TilemapLayer } from '@/stores/slices/types';
+import { applyCollisionShapeToLayers, getCollisionShapeFromLayers } from '../collisionShapes';
+import type { CollisionShape, TilemapLayer } from '@/stores/slices/types';
 
 function layer(tiles: number): TilemapLayer {
   return {
@@ -56,5 +56,42 @@ describe('applyCollisionShapeToLayers', () => {
     const { layers: next } = applyCollisionShapeToLayers(layers, [2, 1], 0, 0, 0, 'full');
     expect(next[1]).toBe(layers[1]);
     expect(next[0]).not.toBe(layers[0]);
+  });
+
+  it.each([undefined, [], ['none'] as CollisionShape[]])('preserves absent or partial metadata when none is already effective (%j)', (collisionShapes) => {
+    const layers = [{ ...layer(4), collisionShapes }];
+    const result = applyCollisionShapeToLayers(layers, [4, 1], 0, 3, 0, 'none');
+    expect(result).toEqual({ layers, changed: false });
+    expect(result.layers).toBe(layers);
+    expect(result.layers[0].collisionShapes).toBe(collisionShapes);
+  });
+
+  it('does not allocate or report a change for an already authored shape', () => {
+    const layers = [{ ...layer(2), collisionShapes: ['halfTop', 'none'] as CollisionShape[] }];
+    const result = applyCollisionShapeToLayers(layers, [2, 1], 0, 0, 0, 'halfTop');
+    expect(result.changed).toBe(false);
+    expect(result.layers).toBe(layers);
+  });
+
+  it('rejects unknown runtime shape values without writing them', () => {
+    const layers = [layer(2)];
+    const result = applyCollisionShapeToLayers(layers, [2, 1], 0, 0, 0, 'wedge' as CollisionShape);
+    expect(result.error).toMatch(/Unknown collision shape/);
+    expect(result.layers).toBe(layers);
+  });
+
+  it.each([-1, 0.5, NaN, Infinity, 0x1_0000_0000])('rejects invalid coordinates and reads them as unknown (%s)', (coordinate) => {
+    const layers = [layer(2)];
+    const result = applyCollisionShapeToLayers(layers, [2, 1], 0, coordinate, 0, 'full');
+    expect(result.changed).toBe(false);
+    expect(result.layers).toBe(layers);
+    expect(getCollisionShapeFromLayers(layers, [2, 1], 0, coordinate, 0)).toBeNull();
+  });
+
+  it('rejects fractional map dimensions and cells beyond a short tile vector', () => {
+    const layers = [layer(2)];
+    expect(applyCollisionShapeToLayers(layers, [2.5, 1], 0, 0, 0, 'full').changed).toBe(false);
+    expect(applyCollisionShapeToLayers(layers, [4, 1], 0, 3, 0, 'full').changed).toBe(false);
+    expect(getCollisionShapeFromLayers(layers, [4, 1], 0, 3, 0)).toBeNull();
   });
 });

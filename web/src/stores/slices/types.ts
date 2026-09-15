@@ -355,7 +355,8 @@ export interface TilemapLayer {
    * Per-cell collision shape, parallel to `tiles`. Optional and absent by
    * default: a layer with no authored shapes omits the field entirely, matching
    * the engine's `#[serde(default)]` empty-vector default and keeping every
-   * pre-OP-04 scene byte-compatible.
+   * pre-OP-04 scene load-compatible. This metadata does not generate runtime
+   * colliders yet (#9814).
    */
   collisionShapes?: CollisionShape[];
 }

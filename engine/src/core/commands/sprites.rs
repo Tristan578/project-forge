@@ -1284,8 +1284,11 @@ fn parse_set_tile_collision_shape(
 ) -> Result<SetTileCollisionShapeRequest, String> {
     let entity_id = payload.get("entityId")
         .and_then(|v| v.as_str())
-        .ok_or("Missing entityId")?
-        .to_string();
+        .ok_or("Missing entityId")?;
+    if entity_id.trim().is_empty() {
+        return Err("entityId must not be blank".to_string());
+    }
+    let entity_id = entity_id.to_string();
 
     let layer = tile_field_u32(payload.get("layer"))
         .ok_or("Missing or invalid layer")? as usize;
@@ -1818,6 +1821,22 @@ mod set_tile_collision_shape_tests {
         }))
         .expect_err("a missing entityId must be refused");
         assert_eq!(err, "Missing entityId");
+    }
+
+    #[test]
+    fn refuses_blank_entity_ids_without_trimming_nonblank_ids() {
+        for entity_id in ["", " ", "\t\r\n", "\u{2003}"] {
+            let err = parse_set_tile_collision_shape(&json!({
+                "entityId": entity_id, "layer": 0, "x": 0, "y": 0, "shape": "full",
+            }))
+            .expect_err("blank entity IDs cannot identify a tilemap");
+            assert_eq!(err, "entityId must not be blank");
+        }
+        let req = parse_set_tile_collision_shape(&json!({
+            "entityId": " tm-1 ", "layer": 0, "x": 0, "y": 0, "shape": "full",
+        }))
+        .expect("nonblank IDs are preserved exactly");
+        assert_eq!(req.entity_id, " tm-1 ");
     }
 
     #[test]

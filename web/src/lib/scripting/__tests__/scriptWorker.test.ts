@@ -1030,6 +1030,76 @@ describe('scriptWorker', () => {
     );
   });
 
+  it('queues a shape edit while reads wait for the next engine snapshot', async () => {
+    const handler = await setupWorker();
+    const tilemap = {
+      tileSize: [16, 16], mapSize: [2, 1], origin: 'TopLeft',
+      layers: [{ tiles: [1, 2], collisionShapes: ['halfTop', 'none'] }],
+    };
+    const source = `function onStart() {
+      forge.tilemap.setCollisionShape("tm1", 0.8, 0.2, "full", 0.9);
+      forge.log(String(forge.tilemap.getCollisionShape("tm1", 0, 0)));
+    }
+    function onUpdate() { forge.log(String(forge.tilemap.getCollisionShape("tm1", 0, 0))); }`;
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source }],
+      { tilemapStates: { tm1: tilemap } },
+    ));
+
+    expect(pushedCommands()).toEqual([
+      { cmd: 'set_tile_collision_shape', entityId: 'tm1', layer: 0, x: 0, y: 0, shape: 'full' },
+    ]);
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'halfTop' }));
+
+    await handler({ data: {
+      type: 'tick', dt: 0.016,
+      tilemapStates: { tm1: { ...tilemap, layers: [{ tiles: [1, 2], collisionShapes: ['full', 'none'] }] } },
+    } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'full' }));
+  });
+
+  it('reads absent shapes as none and invalid or missing cells as null', async () => {
+    const handler = await setupWorker();
+    const source = `function onStart() {
+      forge.log(JSON.stringify([
+        forge.tilemap.getCollisionShape("tm1", 0, 0),
+        forge.tilemap.getCollisionShape("tm1", 0.5, 0),
+        forge.tilemap.getCollisionShape("tm1", NaN, 0),
+        forge.tilemap.getCollisionShape("tm1", 2, 0),
+        forge.tilemap.getCollisionShape("tm1", 0, 0, 9),
+        forge.tilemap.getCollisionShape("__proto__", 0, 0)
+      ]));
+    }`;
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source }],
+      { tilemapStates: { tm1: { tileSize: [16, 16], mapSize: [2, 1], layers: [{ tiles: [1] }], origin: 'TopLeft' } } },
+    ));
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'log', message: '["none",null,null,null,null,null]',
+    }));
+    expect(pushedCommands()).toEqual([]);
+  });
+
+  it.each([
+    { call: 'forge.tilemap.setCollisionShape("tm1", 0, 0, "wedge")', error: 'unknown collision shape' },
+    { call: 'forge.tilemap.setCollisionShape("tm1", NaN, 0, "full")', error: 'finite number' },
+    { call: 'forge.tilemap.setCollisionShape("tm1", 0x100000000, 0, "full")', error: 'must be <=' },
+    { call: 'forge.tilemap.setCollisionShape("tm1", -1, 0, "full")', error: 'must be >=' },
+    { call: 'forge.tilemap.setCollisionShape("tm1", 3, 0, "full")', error: 'cell is unavailable' },
+    { call: 'forge.tilemap.setCollisionShape("missing", 0, 0, "full")', error: 'cell is unavailable' },
+  ])('rejects an invalid script shape request: $call', async ({ call, error }) => {
+    const handler = await setupWorker();
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: `function onStart() { ${call}; }` }],
+      { tilemapStates: { tm1: { tileSize: [16, 16], mapSize: [1, 1], layers: [{ tiles: [1] }], origin: 'TopLeft' } } },
+    ));
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'error', message: expect.stringContaining(error),
+    }));
+  });
+
   it('forge.tilemap.setTile and fillRect push real engine commands', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {

@@ -7310,7 +7310,7 @@ Scope: `scene:write` | Token cost: 0
 
 ### `set_tile_collision_shape`
 
-Author the collision shape of a single tile on one tilemap layer
+Author stored collision-shape metadata for one tilemap cell. These shapes do not affect play physics yet.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -7318,7 +7318,7 @@ Author the collision shape of a single tile on one tilemap layer
 | `layerIndex` | integer | Yes | Layer index |
 | `x` | integer | Yes | Tile X coordinate |
 | `y` | integer | Yes | Tile Y coordinate |
-| `shape` | `"none"` \| `"full"` \| `"halfTop"` \| `"halfBottom"` \| `"slopeLeft"` \| `"slopeRight"` | Yes | Collision silhouette for the cell: none (passable), full (solid), halfTop, halfBottom, slopeLeft or slopeRight |
+| `shape` | `"none"` \| `"full"` \| `"halfTop"` \| `"halfBottom"` \| `"slopeLeft"` \| `"slopeRight"` | Yes | Stored silhouette for the cell: none (unauthored), full, halfTop, halfBottom, slopeLeft or slopeRight. Runtime colliders are not implemented. |
 
 **Example:**
 ```json

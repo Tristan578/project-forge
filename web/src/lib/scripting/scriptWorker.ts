@@ -7,6 +7,7 @@ import { SHADOWED_GLOBALS } from './sandboxGlobals';
 import { revokeNetworkGlobalsIfWorker } from './revokeNetworkGlobals';
 import { MAX_COMMAND_PAYLOAD_CONTAINERS } from '../engine/commandPayloadGuard';
 import type { LocaleBundle } from '@/lib/i18n/gameLocalization';
+import { getCollisionShapeFromLayers, isCollisionShape, TILE_COLLISION_FIELD_MAX } from '@/lib/tilemap/collisionShapes';
 
 // Hard-revoke network/storage globals from this worker's scope BEFORE any user
 // script is compiled or run. Parameter shadowing (SHADOWED_GLOBALS) only hides
@@ -221,7 +222,7 @@ export const TILEMAP_FILL_MAX_CELLS =
  * layer earlier, so a script author gets a named error instead of a command the
  * engine silently refuses (PF-1181).
  */
-export const TILE_FIELD_MAX = 0xffff_ffff;
+export const TILE_FIELD_MAX = TILE_COLLISION_FIELD_MAX;
 
 /**
  * Floor a tilemap integer argument, refusing anything the engine would drop.
@@ -828,28 +829,27 @@ function buildForgeApi(scriptEntityId: string) {
       // Pure JS, no command: `null` when the tilemap, layer or cell is unknown,
       // and `'none'` for a layer that has no `collisionShapes` array yet.
       getCollisionShape: (tilemapId: string, x: number, y: number, layer = 0): string | null => {
-        const tilemap = tilemapStates[tilemapId];
-        if (!tilemap) return null;
-        const layerData = tilemap.layers[layer];
-        if (!layerData) return null;
-        const [mapW] = tilemap.mapSize;
-        if (x < 0 || y < 0 || x >= mapW || y >= tilemap.mapSize[1]) return null;
-        const idx = y * mapW + x;
-        if (idx >= layerData.tiles.length) return null;
-        return layerData.collisionShapes?.[idx] ?? 'none';
+        const tilemap = Object.hasOwn(tilemapStates, tilemapId) ? tilemapStates[tilemapId] : undefined;
+        return tilemap ? getCollisionShapeFromLayers(tilemap.layers, tilemap.mapSize, layer, x, y) : null;
       },
-      // Author a cell's collision shape (OP-04). Maps to the `set_tile_collision_shape`
-      // engine command, which records undo and re-emits `TILEMAP_CHANGED`. The
-      // engine validates the shape string and the coordinate; an out-of-range
-      // cell is a no-op there, so a bad write cannot corrupt an existing cell.
+      // Queue an authoring request. Reads reflect the next engine-supplied
+      // snapshot; this API does not create runtime colliders (#9814).
       setCollisionShape: (tilemapId: string, x: number, y: number, shape: string, layer = 0) => {
         const api = 'forge.tilemap.setCollisionShape';
+        if (!isCollisionShape(shape)) throw new Error(`${api}: unknown collision shape`);
+        const tileLayer = tileInt(api, 'layer', layer);
+        const tileX = tileInt(api, 'x', x);
+        const tileY = tileInt(api, 'y', y);
+        const tilemap = Object.hasOwn(tilemapStates, tilemapId) ? tilemapStates[tilemapId] : undefined;
+        if (!tilemap || getCollisionShapeFromLayers(tilemap.layers, tilemap.mapSize, tileLayer, tileX, tileY) === null) {
+          throw new Error(`${api}: the tilemap, layer, or cell is unavailable`);
+        }
         pendingCommands.push({
           cmd: 'set_tile_collision_shape',
           entityId: tilemapId,
-          layer: tileInt(api, 'layer', layer),
-          x: tileInt(api, 'x', x),
-          y: tileInt(api, 'y', y),
+          layer: tileLayer,
+          x: tileX,
+          y: tileY,
           shape,
         });
       },

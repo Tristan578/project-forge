@@ -31,7 +31,7 @@ use crate::core::{
         z_from_sorting, z_from_sorting_with_config,
     },
     tilemap::{
-        set_layer_collision_shape, tile_flat_index, Grid2dConfig, TilemapData, TilemapEnabled,
+        apply_tile_collision_shape_edit, tile_flat_index, Grid2dConfig, TilemapData, TilemapEnabled,
         TilemapOrigin,
     },
     tileset::{TilesetData, TilesetRegistry},
@@ -1126,9 +1126,8 @@ pub(super) fn apply_fill_tiles_requests(
 ///   store never optimistically applied it, and even when the tilemap entity is
 ///   not the selected one — the selection-emit systems only cover the selection.
 ///
-/// An out-of-range coordinate writes nothing (`set_layer_collision_shape`
-/// returns `false`), so no history entry and no event are produced for a
-/// refused edit — the "rejects or recovers from invalid work" scenario.
+/// Invalid coordinates and unchanged effective shapes write nothing, preserve
+/// undo/redo history, and produce no update event.
 pub(super) fn apply_set_tile_collision_shape_requests(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut TilemapData)>,
@@ -1138,32 +1137,17 @@ pub(super) fn apply_set_tile_collision_shape_requests(
         let found = query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id);
         let Some((_, mut tilemap_data)) = found else { continue };
 
-        if request.layer >= tilemap_data.layers.len() {
-            continue;
-        }
-        let map_w = tilemap_data.map_size[0] as usize;
-        let map_h = tilemap_data.map_size[1] as usize;
-
-        let old_tilemap = tilemap_data.clone();
-        let wrote = set_layer_collision_shape(
-            &mut tilemap_data.layers[request.layer],
+        if apply_tile_collision_shape_edit(
+            &mut tilemap_data,
+            &request.entity_id,
+            request.layer,
             request.x,
             request.y,
-            map_w,
-            map_h,
             request.shape,
-        );
-        if !wrote {
-            continue;
+            &mut history,
+        ) {
+            events::emit_tilemap_changed(&request.entity_id, Some(&tilemap_data));
         }
-
-        let new_tilemap = tilemap_data.clone();
-        history.push(UndoableAction::TilemapChange {
-            entity_id: request.entity_id.clone(),
-            old_tilemap: Some(old_tilemap),
-            new_tilemap: Some(new_tilemap.clone()),
-        });
-        events::emit_tilemap_changed(&request.entity_id, Some(&new_tilemap));
     }
 }
 

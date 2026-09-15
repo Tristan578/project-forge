@@ -229,9 +229,10 @@ declare namespace forge {
      */
     function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
     /**
-     * Read the authored collision shape of a cell. Returns 'none' for a cell
-     * with no shape authored, or null when the tilemap, layer or cell is
-     * unknown. Pure read - no command is dispatched.
+     * Editor test-play only; unavailable in standalone HTML/ZIP scripts.
+     * Read the last engine-confirmed authored shape. Returns 'none' for absent
+     * shape metadata, or null for an unknown cell or invalid integer coordinate.
+     * Pure read; these shapes do not affect play physics yet (#9814).
      */
     function getCollisionShape(
       tilemapId: string,
@@ -240,11 +241,13 @@ declare namespace forge {
       layer?: number,
     ): 'none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight' | null;
     /**
-     * Author a cell's collision shape (OP-04). Maps to the
-     * set_tile_collision_shape engine command: the edit is undoable and the
-     * change is mirrored back to the store. Coordinates are floored; the engine
-     * validates the shape and the coordinate, so an out-of-range cell is a
-     * no-op rather than a corruption.
+     * Editor test-play only; unavailable in standalone HTML/ZIP scripts.
+     * Queue an authoring request for a known tilemap cell. Coordinates and
+     * layer are floored and checked against the shared unsigned 32-bit bound.
+     * Unknown shapes, missing targets, and invalid coordinates throw.
+     * Reads change after the next engine snapshot; a queued request is not an
+     * acknowledgement that it was saved. Repeated effective shapes add no undo
+     * entry. These shapes do not affect play physics yet (#9814).
      */
     function setCollisionShape(
       tilemapId: string,

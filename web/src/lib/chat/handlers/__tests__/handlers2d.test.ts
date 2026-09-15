@@ -27,7 +27,7 @@ async function invoke(
     setSpriteAnimator: vi.fn(),
     setAnimationStateMachine: vi.fn(),
     setTilemapData: vi.fn(),
-    setTileCollisionShape: vi.fn(),
+    setTileCollisionShape: vi.fn(() => 'queued'),
     setTileset: vi.fn(),
     setPhysics2d: vi.fn(),
     removePhysics2d: vi.fn(),
@@ -396,6 +396,20 @@ describe('handlers2d tilemap edge cases', () => {
       );
       expect(result.success).toBe(true);
       expect(store.setTileCollisionShape).toHaveBeenCalledWith('e1', 0, 3, 4, 'halfTop');
+      expect(result.result).toMatchObject({ status: 'queued', message: expect.stringContaining('awaiting the engine update') });
+    });
+
+    it('reports an engine rejection without claiming the shape was saved', async () => {
+      const { result } = await invoke(
+        'set_tile_collision_shape',
+        { entityId: 'e1', layerIndex: 0, x: 0, y: 0, shape: 'full' },
+        {
+          tilemaps: { e1: baseTilemap },
+          setTileCollisionShape: vi.fn(() => { throw new Error('The engine is not ready'); }),
+        },
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('engine is not ready');
     });
 
     it('accepts every shape in the vocabulary', async () => {

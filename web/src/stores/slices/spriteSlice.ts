@@ -3,6 +3,7 @@
  */
 
 import { StateCreator } from 'zustand';
+import type { CommandResponse } from '@/hooks/useEngine';
 import { buildSetSpriteDataPayload } from '@/lib/sprite/sprite2dPayload';
 import type { ProjectType, SpriteData, Camera2dData, SortingLayerData, Grid2dSettings, SpriteSheetData, SpriteAnimatorData, AnimationStateMachineData, TilesetData, TilemapData, CollisionShape } from './types';
 import { applyCollisionShapeToLayers } from '@/lib/tilemap/collisionShapes';
@@ -51,13 +52,17 @@ export interface SpriteSlice {
   removeTileset: (assetId: string) => void;
   setTilemapData: (entityId: string, data: TilemapData) => void;
   /**
-   * Author one cell's collision shape (OP-04). Updates the store optimistically
-   * and dispatches `set_tile_collision_shape` to the engine, which records undo
-   * and re-emits `TILEMAP_CHANGED`. A no-op (nothing dispatched) when the entity
-   * has no tilemap or the layer/coordinate is out of range, matching the
-   * engine's own rejection so an invalid edit corrupts nothing.
+   * Request an authored shape change. The mirror updates only when the engine
+   * emits TILEMAP_CHANGED.
+   * @param entityId Existing mirrored tilemap entity.
+   * @param layerIndex Zero-based integer layer index.
+   * @param x Zero-based integer tile column.
+   * @param y Zero-based integer tile row.
+   * @param shape Supported stored silhouette; this does not enable runtime physics.
+   * @returns 'queued' when the engine acknowledges the request, before application.
+   * @throws If the target or shape is invalid, or the engine is unavailable or rejects the request.
    */
-  setTileCollisionShape: (entityId: string, layerIndex: number, x: number, y: number, shape: CollisionShape) => void;
+  setTileCollisionShape: (entityId: string, layerIndex: number, x: number, y: number, shape: CollisionShape) => 'queued';
   /**
    * State-only mirror of what the engine reports. `null` means the entity has
    * no tilemap (the engine's `Option<&TilemapData>` is `None`), so the entry is
@@ -74,9 +79,10 @@ export interface SpriteSlice {
   setTilemapActiveLayerIndex: (index: number | null) => void;
 }
 
-let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
+type SpriteDispatcher = (command: string, payload: unknown) => CommandResponse | void;
+let dispatchCommand: SpriteDispatcher | null = null;
 
-export function setSpriteDispatcher(dispatcher: (command: string, payload: unknown) => void): void {
+export function setSpriteDispatcher(dispatcher: SpriteDispatcher | null): void {
   dispatchCommand = dispatcher;
 }
 
@@ -202,12 +208,19 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
     if (dispatchCommand) dispatchCommand('set_tilemap_data', { entityId, ...data });
   },
   setTileCollisionShape: (entityId, layerIndex, x, y, shape) => {
-    const tilemap = get().tilemaps[entityId];
-    if (!tilemap) return;
+    const tilemaps = get().tilemaps;
+    const tilemap = Object.hasOwn(tilemaps, entityId) ? tilemaps[entityId] : undefined;
+    if (!tilemap) throw new Error('No tilemap is available for this entity.');
     const result = applyCollisionShapeToLayers(tilemap.layers, tilemap.mapSize, layerIndex, x, y, shape);
-    if (!result.changed) return;
-    set(state => ({ tilemaps: { ...state.tilemaps, [entityId]: { ...tilemap, layers: result.layers } } }));
-    if (dispatchCommand) dispatchCommand('set_tile_collision_shape', { entityId, layer: layerIndex, x, y, shape });
+    if (result.error) throw new Error(result.error);
+    // The engine decides no-ops against its current data. Comparing only the
+    // mirror here would lose the second of two edits queued before its update.
+    if (!dispatchCommand) throw new Error('The engine is not ready. Try again after it finishes loading.');
+    const response = dispatchCommand('set_tile_collision_shape', { entityId, layer: layerIndex, x, y, shape });
+    if (!response?.success) {
+      throw new Error(response?.error ?? 'The engine did not accept the shape change. Please try again.');
+    }
+    return 'queued';
   },
   applyTilemapFromEngine: (entityId, data) => {
     set(state => {

@@ -769,9 +769,9 @@ const tilemapHandlers: Record<string, ToolHandler> = {
       const p = parseArgs(
         z.object({
           entityId: zEntityId,
-          layerIndex: z.number().int().nonnegative(),
-          x: z.number().int().nonnegative(),
-          y: z.number().int().nonnegative(),
+          layerIndex: z.number().int().nonnegative().max(0xffff_ffff),
+          x: z.number().int().nonnegative().max(0xffff_ffff),
+          y: z.number().int().nonnegative().max(0xffff_ffff),
           shape: z.enum([...TILE_COLLISION_SHAPES] as [CollisionShape, ...CollisionShape[]]),
         }),
         args,
@@ -795,10 +795,13 @@ const tilemapHandlers: Record<string, ToolHandler> = {
         return { success: false, error: `Tile (${x}, ${y}) is outside the ${w}x${h} map` };
       }
 
-      ctx.store.setTileCollisionShape(entityId, layerIndex, x, y, shape);
+      const status = ctx.store.setTileCollisionShape(entityId, layerIndex, x, y, shape);
       return {
         success: true,
-        result: { message: `Set collision shape "${shape}" at (${x}, ${y}) in layer ${layerIndex}` },
+        result: {
+          status,
+          message: `Requested shape "${shape}" at (${x}, ${y}) in layer ${layerIndex}; awaiting the engine update. Stored shapes do not affect play physics yet.`,
+        },
       };
     } catch (err) {
       return {

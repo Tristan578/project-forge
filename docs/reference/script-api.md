@@ -140,6 +140,8 @@ whenever it is non-zero — that is, for **both** of its directions — so
 | `forge.tilemap.setTile(tilemapId, x, y, tileId, layer?)` | `void` | Paint one tile; `null` erases it instead |
 | `forge.tilemap.fillRect(tilemapId, x, y, w, h, tileId, layer?)` | `void` | Fill a `w`×`h` region in one command; `null` erases the region |
 | `forge.tilemap.clearTile(tilemapId, x, y, layer?)` | `void` | Erase a single tile |
+| `forge.tilemap.getCollisionShape(tilemapId, x, y, layer?)` | `CollisionShape \| null` | Editor test-play: read the last engine-confirmed authored shape; missing metadata means `none`, invalid or missing cells mean `null` |
+| `forge.tilemap.setCollisionShape(tilemapId, x, y, shape, layer?)` | `void` | Editor test-play: queue an authored shape edit; invalid inputs or an unavailable target throw |
 | `forge.tilemap.worldToTile(tilemapId, worldX, worldY)` | `[number, number]` | World → tile coordinates |
 | `forge.tilemap.tileToWorld(tilemapId, tileX, tileY)` | `[number, number]` | Tile → world coordinates |
 | `forge.tilemap.getMapSize(tilemapId)` | `[number, number]` | Map dimensions in tiles `[w, h]` |
@@ -183,6 +185,39 @@ well as its origin: `x + w - 1` and `y + h - 1` must each stay within the
 ceiling, because those derived cells are what the engine actually reads. The
 error names which axis ran off the end and the value it reached. A zero-width
 or zero-height region is a no-op.
+
+### Authored collision shapes
+
+`CollisionShape` is `none`, `full`, `halfTop`, `halfBottom`, `slopeLeft`, or
+`slopeRight`. Both shape methods default `layer` to `0`. The setter floors
+`x`, `y`, and `layer`, then checks the unsigned 32-bit bound described above
+and the mirrored map's actual cell range. The getter does not floor: fractional,
+non-finite, out-of-range, and unknown cells return `null`.
+
+These methods run only during **editor test-play** and are unavailable in
+standalone HTML/ZIP scripts. Authored metadata still persists in exported scene
+files. Reads reflect the next engine-supplied snapshot, rather than a local
+optimistic write. A request being queued does not confirm it was applied.
+
+**Stored shapes do not affect play physics yet.** Runtime collider generation is
+tracked in [#9814](https://github.com/Tristan578/project-forge/issues/9814).
+The legacy layer collision flag remains unchanged as metadata; it does not supply
+an implemented full-tile collision fallback.
+
+```typescript
+// Editor test-play: the tilemap and cell must already exist.
+function onStart() {
+  forge.tilemap.setCollisionShape("ground", 2, 0, "halfTop");
+}
+
+function onUpdate() {
+  // This becomes "halfTop" after an engine-confirmed snapshot arrives.
+  const shape = forge.tilemap.getCollisionShape("ground", 2, 0);
+  if (shape === "halfTop") {
+    // The authored metadata is now available; play physics is unchanged.
+  }
+}
+```
 
 ## forge.audio
 
