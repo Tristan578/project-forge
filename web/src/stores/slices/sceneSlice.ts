@@ -1105,6 +1105,15 @@ export const createSceneSlice: StateCreator<
     // scene) would leave saving enabled over a viewport the engine never
     // adopted. A missing dispatcher cannot reach this: `captureCheckpointScene`
     // above already fails the restore when there is no engine to ask.
+    // Rejection is set here immediately: it is certain the instant the engine
+    // answers, exactly like `loadScene`'s own rejection branch. Clearing on
+    // ACCEPTANCE is deliberately NOT done here (Sentry) — `dispatchSceneLoad`
+    // only reports that the dispatch was not immediately refused, not that
+    // `SCENE_LOADED` has confirmed the engine actually applied it. Callers
+    // clear `sceneLoadError` themselves once `applyCheckpointScene`'s await
+    // resolves, so an accepted-but-still-applying restore does not open a
+    // window where a manual save could pass the `sceneLoadError` gate against
+    // a viewport that has not yet caught up.
     const dispatchRestoreLoad = (json: string): boolean => {
       let accepted: boolean;
       try {
@@ -1118,7 +1127,9 @@ export const createSceneSlice: StateCreator<
         });
         throw error;
       }
-      set({ sceneLoadError: accepted ? null : { reason: ENGINE_LOAD_REJECTION, at: Date.now() } });
+      if (!accepted) {
+        set({ sceneLoadError: { reason: ENGINE_LOAD_REJECTION, at: Date.now() } });
+      }
       return accepted;
     };
     try {
@@ -1150,9 +1161,12 @@ export const createSceneSlice: StateCreator<
         return accepted;
       }, requestSceneExport, isCurrent);
       if (!isCurrent()) throw new Error('The project changed while restoring.');
+      // `applyCheckpointScene` above only resolves once SCENE_LOADED confirms
+      // the engine actually applied this scene — only now is the viewport
+      // trustworthy enough to clear the save lockout (Sentry).
       saveProjectScenes(result.project, projectId);
       get().setScenes(toSceneList(result.project), result.project.activeSceneId);
-      set({ sceneModified: false });
+      set({ sceneModified: false, sceneLoadError: null });
       return true;
     } catch (error) {
       let message = (error instanceof Error || error instanceof DOMException) ? error.message : 'The checkpoint could not be restored.';
@@ -1165,7 +1179,9 @@ export const createSceneSlice: StateCreator<
       if (attempted && prior && isCurrent()) {
         try {
           await applyCheckpointScene(prior, dispatchRestoreLoad, requestSceneExport, isCurrent);
-          set({ sceneName: before.sceneName, sceneModified: before.sceneModified });
+          // Confirmed by the same SCENE_LOADED wait as the success path above —
+          // the prior scene is back, so the save lockout can come back off too.
+          set({ sceneName: before.sceneName, sceneModified: before.sceneModified, sceneLoadError: null });
         } catch {
           message += ' The previous save is intact, but the viewport could not be recovered. Reload the project before editing.';
         }

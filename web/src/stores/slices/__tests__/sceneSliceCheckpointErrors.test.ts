@@ -133,6 +133,31 @@ describe('checkpoint recovery transaction', () => {
     expect(engine.getScene().metadata?.name).toBe('Unsaved live work');
   });
 
+  it('does not clear sceneLoadError on a merely-accepted dispatch — only once SCENE_LOADED confirms it (Sentry)', async () => {
+    // `dispatchSceneLoad` reports "accepted" the instant the engine does not
+    // immediately refuse — that is NOT the same fact as SCENE_LOADED
+    // confirming the engine actually applied the scene. `silent` mode accepts
+    // synchronously and then never fires SCENE_LOADED, so it isolates exactly
+    // that gap: if the lockout cleared on acceptance alone, a manual save could
+    // slip through here against a viewport that has not caught up yet.
+    vi.useFakeTimers();
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('reject');
+    expect(store.getState().loadScene(JSON.stringify(sceneFixture('Refused scene')))).toBe(false);
+    expect(store.getState().sceneLoadError).not.toBeNull();
+
+    engine.setMode('silent');
+    const pending = store.getState().restoreCheckpoint(cp.id);
+    // Long enough to flush the capture round trip and the accepted dispatch,
+    // short of the 10s SCENE_LOADED timeout applyCheckpointScene enforces.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(store.getState().sceneLoadError).not.toBeNull();
+    expect(store.getState().checkpointBusy).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(10000);
+    await expect(pending).resolves.toBe(false);
+  });
+
   it('rejects an acknowledged load whose readback contains a different scene', async () => {
     const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
     engine.setMode('wrong');
