@@ -5,6 +5,7 @@ import { setSceneDispatcher } from '../sceneSlice';
 import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 
 describe('sceneSlice', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -60,6 +61,55 @@ describe('sceneSlice', () => {
     it('should dispatch new_scene', () => {
       store.getState().newScene();
       expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
+    });
+
+    // #10058: newScene()/loadScene() used to leave whatever music arrangement
+    // was in the store from the PREVIOUS scene — stale tracks/clips that then
+    // rode along into the new scene's next cloud save.
+    it('newScene clears a stale music arrangement left by the previous scene', () => {
+      const trackId = useMusicArrangementStore.getState().addTrack('Stale');
+      useMusicArrangementStore.getState().addClip({ trackId, sourceUrl: 'x', sourceDurationSeconds: 10 });
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+      store.getState().newScene();
+
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(0);
+    });
+
+    it('loadScene clears a stale music arrangement when the loaded scene carries none', () => {
+      useMusicArrangementStore.getState().addTrack('Stale');
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+      store.getState().loadScene('{"entities":[]}');
+
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
+    });
+
+    it('loadScene restores the loaded scene\'s own music arrangement instead of the stale one', () => {
+      useMusicArrangementStore.getState().addTrack('Stale');
+
+      store.getState().loadScene(JSON.stringify({
+        entities: [],
+        musicArrangement: {
+          version: 1,
+          tracks: [{ id: 'track_new', name: 'From loaded scene', muted: false }],
+          clips: [],
+          tempoBpm: 120,
+        },
+      }));
+
+      const tracks = useMusicArrangementStore.getState().arrangement.tracks;
+      expect(tracks).toHaveLength(1);
+      expect(tracks[0].name).toBe('From loaded scene');
+    });
+
+    it('loadScene clears the music arrangement instead of throwing on malformed json', () => {
+      useMusicArrangementStore.getState().addTrack('Stale');
+
+      expect(() => store.getState().loadScene('not valid json')).not.toThrow();
+
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
     });
 
     it('stages the audio the scene declares, since SCENE_LOADED carries only a name', () => {

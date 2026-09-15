@@ -62,7 +62,11 @@ function EditorPageContent() {
         }
         loadScene(JSON.stringify(project.sceneData));
         // Restore the music arrangement persisted alongside the scene (#9854).
-        // The engine ignores the extra key; this is the only reader of it.
+        // `loadScene` itself now does this too (#10058, for every OTHER
+        // caller of loadScene/newScene) — this direct call stays as a
+        // guarantee for the initial mount specifically, since it must still
+        // run even if `loadScene` bails out early on a dispatch that isn't
+        // ready yet.
         useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(project.sceneData));
         setLoading(false);
       } catch (err) {

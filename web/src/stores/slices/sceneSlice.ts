@@ -28,6 +28,7 @@ import {
   buildTemplateSceneFile,
   buildTemplateGameComponents,
 } from '@/lib/templates/templateSceneFile';
+import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 
 /** Project scenes reduced to the shape the store mirrors for the Scene Browser. */
 function toSceneList(project: ProjectScenes) {
@@ -268,6 +269,22 @@ function withCapturedScene(project: ProjectScenes, capture: SceneCapture): Proje
   return saveCurrentSceneData(project, capture.data);
 }
 
+/**
+ * Restore the music arrangement carried by a just-loaded scene, or clear it
+ * when the scene has none. Without this, `loadScene`/`newScene` left whatever
+ * arrangement was in the store from the PREVIOUS scene — stale tracks/clips
+ * that then rode along into the new scene's next cloud save (#10058). `json`
+ * is untrusted (AI/chat input, a local file pick, an auto-save entry), so a
+ * parse failure clears rather than throws.
+ */
+function syncArrangementFromLoadedScene(json: string): void {
+  try {
+    useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(JSON.parse(json)));
+  } catch {
+    useMusicArrangementStore.getState().hydrate(null);
+  }
+}
+
 /** Dispatch a load owned by the current recovery transaction. */
 function dispatchSceneLoad(json: string): boolean {
   if (!dispatchCommand) return false;
@@ -319,6 +336,9 @@ export const createSceneSlice: StateCreator<
     if (!dispatchSceneLoad(json)) return false;
     // A rejected request must not invalidate an unrelated recovery operation.
     set({ sceneOperationRevision: get().sceneOperationRevision + 1 });
+    // Swap in this scene's own arrangement (or clear it) — see
+    // `syncArrangementFromLoadedScene` (#10058).
+    syncArrangementFromLoadedScene(json);
     return true;
   },
   newScene: () => {
@@ -333,6 +353,9 @@ export const createSceneSlice: StateCreator<
         return;
       }
       set({ sceneOperationRevision: get().sceneOperationRevision + 1 });
+      // A blank scene has no saved arrangement — clear whatever the previous
+      // scene left behind (#10058).
+      useMusicArrangementStore.getState().hydrate(null);
     } catch (error) {
       rollbackAudio();
       throw error;
