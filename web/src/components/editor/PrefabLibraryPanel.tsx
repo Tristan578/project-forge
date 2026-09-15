@@ -12,11 +12,17 @@
  * only presents the store's results and surfaces its errors (a cyclic reference
  * comes back with the offending chain, shown verbatim).
  *
- * Scope for this slice: create/instantiate linked instances, nest a child
- * prefab (with cycle rejection), inspect each instance's overridden fields, and
- * apply a source prefab onto its instances. Variant management, selective
- * per-field apply/revert, and the richer override-inspection surface are
- * tracked on the FR-1 follow-up child issue.
+ * Scope for this slice: define linked-instance records (with overrides), nest a
+ * child prefab (with cycle rejection), inspect each instance's overridden
+ * fields, and compute the propagated snapshot a source prefab would apply to its
+ * instances. This is LIBRARY bookkeeping only — it does not yet spawn scene
+ * entities or write resolved data back onto entities in the viewport, so the
+ * controls and their toasts are deliberately worded as library operations, not
+ * as scene placement/propagation (the issue's acceptance rejects a success
+ * message for an operation with no observable in-scene effect). Scene binding —
+ * spawning an entity per instance and writing resolved snapshots onto it —
+ * plus variant management and selective per-field apply/revert are tracked on
+ * the FR-1 follow-up child issue.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -75,7 +81,11 @@ export function PrefabLibraryPanel() {
     if (!selectedId) return;
     const res = createPrefabInstance(selectedId);
     if (res.ok) {
-      showSuccess(`Created linked instance of "${selected?.name ?? selectedId}"`);
+      // No scene entity is spawned here (no entityId is passed), so the copy
+      // reports the library record it actually created, not a placement that
+      // did not happen (the issue rejects a success toast for an ineffective
+      // in-scene operation).
+      showSuccess(`Registered a linked instance of "${selected?.name ?? selectedId}" in the prefab library`);
       refresh();
     } else {
       showError(res.error);
@@ -100,10 +110,13 @@ export function PrefabLibraryPanel() {
     if (!selectedId) return;
     const res = applyPrefabToInstances(selectedId);
     if (res.ok) {
+      // `applyPrefabToInstances` computes the resolved snapshot per instance
+      // (source fields with overrides preserved) but writes nothing back onto a
+      // scene entity, so the copy describes the resolve, not an in-scene apply.
       showSuccess(
         res.value.length === 0
-          ? 'No linked instances to update'
-          : `Applied "${selected?.name ?? selectedId}" to ${res.value.length} instance(s)`,
+          ? 'No linked instances to resolve'
+          : `Resolved ${res.value.length} linked instance(s) of "${selected?.name ?? selectedId}", preserving overrides`,
       );
       refresh();
     } else {
@@ -149,22 +162,30 @@ export function PrefabLibraryPanel() {
           onClick={handleCreateInstance}
           disabled={!selectedId}
           className="flex items-center gap-1 rounded bg-blue-900/40 px-2 py-1 text-xs text-blue-300 hover:bg-blue-900/60 disabled:cursor-not-allowed disabled:opacity-50"
-          title="Create a linked instance of the selected prefab"
+          title="Register a linked instance of the selected prefab in the library (does not place it in the scene yet)"
         >
           <Link2 size={12} />
-          Create Instance
+          Add Linked Instance
         </button>
         <button
           type="button"
           onClick={handleApply}
           disabled={!selectedId}
           className="flex items-center gap-1 rounded bg-emerald-900/40 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-50"
-          title="Propagate the prefab onto its instances, preserving overrides"
+          title="Resolve how the source prefab would propagate onto its instances, preserving overrides (does not write to the scene yet)"
         >
           <RefreshCw size={12} />
-          Apply to Instances
+          Resolve Instances
         </button>
       </div>
+
+      {/* Out-of-scope note: these are library operations only. Scene placement
+          (spawning an entity per instance and writing resolved snapshots onto
+          it) is tracked on the FR-1 follow-up child issue. Stated so the copy
+          above is not read as a claim that anything changed in the viewport. */}
+      <p className="text-[10px] leading-snug text-zinc-500">
+        Library bookkeeping only — instances are not placed in the scene yet.
+      </p>
 
       {/* Nest a child prefab */}
       <div className="flex flex-col gap-1 rounded border border-zinc-800 p-2">

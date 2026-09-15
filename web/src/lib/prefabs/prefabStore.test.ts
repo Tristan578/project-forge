@@ -367,6 +367,16 @@ describe('Nested / linked prefab instances', () => {
     expect(updated?.children?.[0].prefabId).toBe(child.id);
   });
 
+  it('addNestedPrefab rejects a missing child with no mutation (OP-02)', () => {
+    // The first guard in addNestedPrefab: a child id that resolves to no prefab
+    // must be refused before the parent is ever touched, so a dangling link is
+    // never written into the parent's children.
+    const parent = savePrefab('Parent', 'cat', '', mockSnapshot);
+    const result = addNestedPrefab(parent.id, 'nonexistent');
+    expect(result).toEqual({ ok: false, error: 'Child prefab not found: nonexistent' });
+    expect(getPrefab(parent.id)?.children ?? []).toHaveLength(0); // unmutated
+  });
+
   it('addNestedPrefab rejects a direct self-reference with the chain and no mutation (OP-02)', () => {
     const prefab = savePrefab('SelfRef', 'cat', '', mockSnapshot);
     const result = addNestedPrefab(prefab.id, prefab.id);

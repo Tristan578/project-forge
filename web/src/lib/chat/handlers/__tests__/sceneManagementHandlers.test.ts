@@ -42,12 +42,24 @@ const mockCaptureActiveScene = vi.fn();
 vi.mock('@/lib/scenes/captureScene', () => ({
   captureActiveScene: (...args: unknown[]) => mockCaptureActiveScene(...args),
   // scene.FR-1 N1: switch/duplicate fold the prefab-instance registry into the
-  // capture before persisting. Kept as a real passthrough so the module shape is
-  // complete; it is a no-op here because the registry is empty in this env.
+  // capture before persisting. A real passthrough so the module shape is
+  // complete; it writes `prefabInstances` onto the captured scene exactly as the
+  // real helper does, which the folding tests below assert against a seeded
+  // registry (mockLoadPrefabInstances). It is a no-op only when the registry is
+  // empty — that is what keeps the non-folding tests byte-identical.
   attachPrefabInstances: (capture: { status: string; data?: unknown }, instances: unknown[]) =>
     capture.status === 'captured'
       ? { status: 'captured', data: { ...(capture.data as object), prefabInstances: instances } }
       : capture,
+}));
+
+// scene.FR-1 N1: `foldPrefabInstances` dynamically imports the prefab store and
+// reads the live instance registry. Mocked so the folding tests can seed a
+// non-empty registry; default empty keeps every other scene test unchanged
+// (the fold no-ops on an empty registry, exactly as in production).
+const mockLoadPrefabInstances = vi.fn();
+vi.mock('@/lib/prefabs/prefabStore', () => ({
+  loadPrefabInstances: (...args: unknown[]) => mockLoadPrefabInstances(...args),
 }));
 
 const mockTemplateRegistry = [
@@ -104,6 +116,9 @@ beforeEach(() => {
   mockGetSceneByName.mockReturnValue(undefined);
   // Default: no engine attached, so there is no live scene that could be lost
   mockCaptureActiveScene.mockResolvedValue({ status: 'unavailable' });
+  // Default: empty prefab-instance registry, so folding no-ops and the non-N1
+  // scene tests stay byte-identical.
+  mockLoadPrefabInstances.mockReturnValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -453,6 +468,33 @@ describe('switch_scene', () => {
     expect(mockSwitchScene).toHaveBeenCalledWith(withLive, 'scene_2');
   });
 
+  it('folds the live prefab-instance registry into the persisted scene before switching (scene.FR-1 N1)', async () => {
+    // The AI switch path must carry linked instances the same way the manual
+    // Scene Browser path does. Without foldPrefabInstances (or with its `await`
+    // dropped, or attach/load args swapped) the persisted scene loses every
+    // instance and override on reopen — and nothing else in this suite would
+    // fail. Seed a non-empty registry and assert it reaches the persisted data.
+    const live = { formatVersion: 1, sceneName: 'Level 1', entities: [] };
+    const seeded = [{ instanceId: 'i1', prefabId: 'p1', overrides: { name: 'kept' } }];
+    mockLoadPrefabInstances.mockReturnValue(seeded);
+    mockCaptureActiveScene.mockResolvedValue({ status: 'captured', data: live });
+    mockSaveCurrentSceneData.mockReturnValue({ ...baseProject, folded: true });
+    mockSwitchScene.mockReturnValue({ project: baseProject, sceneToLoad: null });
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' }
+    );
+
+    expect(result.success).toBe(true);
+    // saveCurrentSceneData receives the capture WITH the instances folded in.
+    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, {
+      ...live,
+      prefabInstances: seeded,
+    });
+  });
+
   it('refuses to switch when the live scene could not be read', async () => {
     mockCaptureActiveScene.mockResolvedValue({
       status: 'failed',
@@ -527,6 +569,30 @@ describe('duplicate_scene', () => {
     expect((result.result as Record<string, unknown>).sceneId).toBe(newSceneId);
     expect(mockDuplicateScene).toHaveBeenCalledWith(baseProject, 'scene_1', undefined);
     expect(store.setScenes).toHaveBeenCalled();
+  });
+
+  it('folds the live prefab-instance registry into the persisted scene before duplicating (scene.FR-1 N1)', async () => {
+    // Mirror of the switch_scene N1 test: the duplicated project must be built
+    // from a capture that carries the linked instances, or the copy (and the
+    // active scene it is saved from) loses them.
+    const live = { formatVersion: 1, sceneName: 'Main', entities: [] };
+    const seeded = [{ instanceId: 'i1', prefabId: 'p1', overrides: {} }];
+    mockLoadPrefabInstances.mockReturnValue(seeded);
+    mockCaptureActiveScene.mockResolvedValue({ status: 'captured', data: live });
+    mockSaveCurrentSceneData.mockReturnValue({ ...baseProject, folded: true });
+    mockDuplicateScene.mockReturnValue({ project: baseProject, newSceneId: 'scene_copy_1' });
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'duplicate_scene',
+      { sceneId: 'scene_1' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, {
+      ...live,
+      prefabInstances: seeded,
+    });
   });
 
   it('refuses to duplicate when the live scene could not be read', async () => {

@@ -2,7 +2,7 @@
 
 This document provides an honest accounting of features that are partially implemented or have genuine technical constraints. For unbuilt roadmap features, see the taskboard and the GitHub milestones. Note: Editor Collaboration (Phase 24) and Multiplayer Networking (Phase 25) stubs were removed in PF-141/PF-142 — these will be rebuilt from scratch when prioritized.
 
-> **Last updated:** 2026-09-05
+> **Last updated:** 2026-09-15
 
 ## Launch-readiness gaps (verified 2026-09-05)
 
@@ -18,6 +18,7 @@ The per-entry-point status of every capability — editor UI, in-app AI, game sc
 | Adaptive-music intensity: script path only | The AdaptiveMusicInspector's Configure Stems button registers the `default` adaptive track via `audioManager.setAdaptiveMusic`, after which the intensity slider forwards to `audioManager.setMusicIntensity('default', clamped)` (the same path as the chat tool `set_music_intensity`) and changes the mix; moving the slider before any track is registered surfaces a toast instead of silently doing nothing (#9735). The script call remains a phantom (#9284). | [#9284](https://github.com/Tristan578/project-forge/issues/9284) |
 | 2D mesh-attachment deformation is authored but unproven | The SkeletonInspector now has a mesh-attachment editor (vertices + per-vertex bone weights, adding client-side unknown-bone and zero-total-weight validation the `add_skeleton2d_mesh_attachment` command and chat path do not enforce), so mesh attachments no longer need command or chat (see 2D Subsystem below). What remains is real-runtime evidence: that an editor-authored mesh actually deforms with the bones and round-trips through save/reopen and the manual/AI boundary. | [#10005](https://github.com/Tristan578/project-forge/issues/10005) (residual of [#9732](https://github.com/Tristan578/project-forge/issues/9732)) |
 | Public MCP reference is down | docs.spawnforge.ai/mcp returns 500 because the commands manifest is not traced into the serverless function. Fix in [PR #9730](https://github.com/Tristan578/project-forge/pull/9730), open and unmerged. | [#9718](https://github.com/Tristan578/project-forge/issues/9718) |
+| Prefab read commands are not offered to the in-app chat model | `getChatTools()` / `getAgentTools()` offer only `:write`-scoped and `query`-category commands, so the `scene:read` prefab reads — `list_prefab_instances` (linked-instance override inspection, scene.FR-1.OP-03), `list_prefabs` and `get_prefab` — are withheld from the built-in chat assistant. All three still work through the manual **Prefabs** panel (override inspection is the instance list there) and an external MCP client; they share the same validated contract, so only the chat entry point is affected. Surfacing override inspection to in-app chat is residual FR-1 scope. | [#9811](https://github.com/Tristan578/project-forge/issues/9811) |
 
 ## 2D Subsystem
 

@@ -4,6 +4,8 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
 import { saveSceneToCloud } from '@/lib/projects/cloudSave';
+import { loadPrefabInstances } from '@/lib/prefabs/prefabStore';
+import { writePrefabInstances, type SceneFileData } from '@/lib/scenes/sceneManager';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
 import { SceneBrowser } from './SceneBrowser';
@@ -14,6 +16,33 @@ import {
   newSceneExportRequestId,
   type SceneExportedDetail,
 } from '@/lib/engine/sceneExportWire';
+
+/**
+ * Fold the live prefab-instance registry into an engine-exported scene JSON
+ * before it is PERSISTED (scene.FR-1 N1). The cloud PUT and the local-file
+ * download both receive the raw `export_scene` payload, which the engine builds
+ * from the ECS and so knows nothing about linked instances — they live in the
+ * prefab store, not the scene graph. Without folding them in here the cloud
+ * save/reload cycle drops every instance and override on reopen
+ * (`restorePrefabInstances` resets the registry to `[]` because the persisted
+ * scene carried no `prefabInstances` field). This is the save/reopen
+ * counterpart to `sceneSlice.withPrefabInstances`, which already folds on the
+ * in-session Scene Browser switch path.
+ *
+ * An empty registry is left un-attached so instance-free scenes serialize
+ * byte-identically, and unparseable JSON passes through untouched rather than
+ * blocking the save on a fold that could not run.
+ */
+function foldPrefabInstancesIntoSceneJson(json: string): string {
+  const instances = loadPrefabInstances();
+  if (instances.length === 0) return json;
+  try {
+    const data = JSON.parse(json) as SceneFileData;
+    return JSON.stringify(writePrefabInstances(data, instances));
+  } catch {
+    return json;
+  }
+}
 
 export function SceneToolbar() {
   const sceneName = useEditorStore((s) => s.sceneName);
@@ -56,14 +85,14 @@ export function SceneToolbar() {
       const downloadId = pendingDownloadRef.current;
       if (downloadId !== null && isSceneExportResponseFor(downloadId, e.detail)) {
         pendingDownloadRef.current = null;
-        downloadSceneFile(e.detail.json, e.detail.name);
+        downloadSceneFile(foldPrefabInstancesIntoSceneJson(e.detail.json), e.detail.name);
       }
 
       const cloudSaveId = pendingCloudSaveRef.current;
       if (cloudSaveId !== null && isSceneExportResponseFor(cloudSaveId, e.detail) && projectId) {
         pendingCloudSaveRef.current = null;
         const { json, name } = e.detail;
-        void saveSceneToCloud(projectId, name, json).then((result) => {
+        void saveSceneToCloud(projectId, name, foldPrefabInstancesIntoSceneJson(json)).then((result) => {
           if (result.ok && result.savedAt) {
             setCloudSaveStatus('saved');
             setLastCloudSave(result.savedAt);

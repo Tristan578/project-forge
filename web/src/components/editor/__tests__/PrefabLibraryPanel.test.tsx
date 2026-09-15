@@ -59,15 +59,28 @@ describe('PrefabLibraryPanel (manual FR-1 control)', () => {
   it('creates a linked instance through the shared store contract (OP-01)', () => {
     mockCreatePrefabInstance.mockReturnValue({ ok: true, value: { instanceId: 'i1', prefabId: 'p1', overrides: {} } });
     render(<PrefabLibraryPanel />);
-    fireEvent.click(screen.getByTitle(/Create a linked instance/));
+    fireEvent.click(screen.getByTitle(/Register a linked instance/));
     expect(mockCreatePrefabInstance).toHaveBeenCalledWith('p1');
     expect(mockShowSuccess).toHaveBeenCalled();
+  });
+
+  it('reports the create as library bookkeeping, not a scene placement (ineffective-success guard)', () => {
+    // createPrefabInstance is called with no entityId, so nothing is spawned in
+    // the scene. The toast must say so — a regression to "Created ... in the
+    // scene" copy (a success message for an operation with no in-scene effect)
+    // fails here, matching #9811's acceptance rule.
+    mockCreatePrefabInstance.mockReturnValue({ ok: true, value: { instanceId: 'i1', prefabId: 'p1', overrides: {} } });
+    render(<PrefabLibraryPanel />);
+    fireEvent.click(screen.getByTitle(/Register a linked instance/));
+    const msg = mockShowSuccess.mock.calls[0][0] as string;
+    expect(msg).toContain('prefab library');
+    expect(msg).not.toMatch(/in the scene|placed|spawned/i);
   });
 
   it('surfaces a store error when instance creation fails', () => {
     mockCreatePrefabInstance.mockReturnValue({ ok: false, error: 'Prefab not found: p1' });
     render(<PrefabLibraryPanel />);
-    fireEvent.click(screen.getByTitle(/Create a linked instance/));
+    fireEvent.click(screen.getByTitle(/Register a linked instance/));
     expect(mockShowError).toHaveBeenCalledWith('Prefab not found: p1');
   });
 
@@ -80,12 +93,16 @@ describe('PrefabLibraryPanel (manual FR-1 control)', () => {
     expect(mockShowError).toHaveBeenCalledWith('Cyclic prefab reference rejected: p1 -> p2 -> p1');
   });
 
-  it('applies the prefab onto its instances (OP-04)', () => {
+  it('resolves the prefab onto its instances (OP-04)', () => {
     mockApplyPrefabToInstances.mockReturnValue({ ok: true, value: [{ instanceId: 'i1', snapshot: {} }] });
     render(<PrefabLibraryPanel />);
-    fireEvent.click(screen.getByTitle(/Propagate the prefab/));
+    fireEvent.click(screen.getByTitle(/Resolve how the source prefab/));
     expect(mockApplyPrefabToInstances).toHaveBeenCalledWith('p1');
-    expect(mockShowSuccess).toHaveBeenCalledWith(expect.stringContaining('1 instance'));
+    // Copy names the resolve, not an in-scene apply — `applyPrefabToInstances`
+    // returns resolved snapshots and writes nothing to a scene entity.
+    const msg = mockShowSuccess.mock.calls[0][0] as string;
+    expect(msg).toContain('Resolved 1 linked instance');
+    expect(msg).not.toMatch(/in the scene|applied to the scene/i);
   });
 
   it('lists linked instances with their overridden fields (OP-03 inspection)', () => {

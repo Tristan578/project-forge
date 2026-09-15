@@ -28,6 +28,21 @@ vi.mock('@/lib/sceneFile', () => ({
   openSceneFilePicker: vi.fn(),
 }));
 
+// scene.FR-1 N1: the toolbar folds the live prefab-instance registry into the
+// exported scene JSON before persisting. Mock the registry so a test can seed
+// it; default empty keeps the correlation tests byte-identical.
+const mockLoadPrefabInstances = vi.fn<() => unknown[]>(() => []);
+vi.mock('@/lib/prefabs/prefabStore', () => ({
+  loadPrefabInstances: () => mockLoadPrefabInstances(),
+}));
+
+// Mocked so the cloud-save branch is exercised without a real fetch, and so a
+// test can read back the JSON the toolbar handed to the PUT.
+const mockSaveSceneToCloud = vi.fn(async (..._a: unknown[]) => ({ ok: true, savedAt: '2026-01-01T00:00:00Z' }));
+vi.mock('@/lib/projects/cloudSave', () => ({
+  saveSceneToCloud: (...a: unknown[]) => mockSaveSceneToCloud(...a),
+}));
+
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile } from '@/lib/sceneFile';
 
@@ -58,7 +73,11 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
 }
 
 describe('SceneToolbar', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLoadPrefabInstances.mockReturnValue([]);
+    mockSaveSceneToCloud.mockResolvedValue({ ok: true, savedAt: '2026-01-01T00:00:00Z' });
+  });
   afterEach(() => cleanup());
 
   it('renders scene name button', () => {
@@ -145,6 +164,77 @@ describe('SceneToolbar', () => {
       emitExport({ json: '{"mine":true}', name: 'Mine', requestId });
 
       expect(vi.mocked(downloadSceneFile)).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // scene.FR-1 N1: the export→persist round trip (download AND cloud PUT) must
+  // carry the live prefab-instance registry, or a linked instance and its
+  // overrides vanish on reload — `restorePrefabInstances` resets the registry to
+  // `[]` when the persisted scene has no `prefabInstances` field. These drive
+  // the REAL save/reopen paths a user relies on, not the isolated fold helper.
+  describe('prefab-instance persistence (scene.FR-1 N1)', () => {
+    function emitExport(detail: SceneExportedDetail) {
+      act(() => {
+        window.dispatchEvent(new CustomEvent(SCENE_EXPORTED_EVENT, { detail }));
+      });
+    }
+
+    const SEEDED = [{ instanceId: 'i1', prefabId: 'p1', overrides: { name: 'kept' } }];
+    const SCENE = { formatVersion: 1, sceneName: 'S', entities: [] as unknown[] };
+
+    it('folds linked prefab instances into the downloaded scene', () => {
+      mockLoadPrefabInstances.mockReturnValue(SEEDED);
+      const saveScene = vi.fn();
+      mockEditorStore({ saveScene });
+      render(<SceneToolbar />);
+
+      screen.getByRole('button', { name: /save/i }).click();
+      const requestId = saveScene.mock.calls[0][0] as string;
+      emitExport({ json: JSON.stringify(SCENE), name: 'S', requestId });
+
+      const [json] = vi.mocked(downloadSceneFile).mock.calls[0];
+      const parsed = JSON.parse(json as string) as { prefabInstances?: typeof SEEDED };
+      expect(parsed.prefabInstances).toHaveLength(1);
+      expect(parsed.prefabInstances?.[0].instanceId).toBe('i1');
+      expect(parsed.prefabInstances?.[0].overrides).toEqual({ name: 'kept' });
+    });
+
+    it('leaves the downloaded scene untouched when the registry is empty', () => {
+      mockLoadPrefabInstances.mockReturnValue([]);
+      const saveScene = vi.fn();
+      mockEditorStore({ saveScene });
+      render(<SceneToolbar />);
+
+      screen.getByRole('button', { name: /save/i }).click();
+      const requestId = saveScene.mock.calls[0][0] as string;
+      emitExport({ json: JSON.stringify(SCENE), name: 'S', requestId });
+
+      // Byte-identical: no prefabInstances key injected for an instance-free scene.
+      expect(vi.mocked(downloadSceneFile)).toHaveBeenCalledExactlyOnceWith(JSON.stringify(SCENE), 'S');
+    });
+
+    it('folds linked prefab instances into the cloud PUT', () => {
+      mockLoadPrefabInstances.mockReturnValue(SEEDED);
+      const saveToCloud = vi.fn();
+      mockEditorStore({ projectId: 'proj_1', saveToCloud, setCloudSaveStatus: vi.fn(), setLastCloudSave: vi.fn() });
+      render(<SceneToolbar />);
+
+      // Ctrl+S with a projectId set routes to the cloud-save path.
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }));
+      });
+      expect(saveToCloud).toHaveBeenCalledTimes(1);
+      const requestId = saveToCloud.mock.calls[0][0] as string;
+
+      emitExport({ json: JSON.stringify(SCENE), name: 'S', requestId });
+
+      expect(mockSaveSceneToCloud).toHaveBeenCalledTimes(1);
+      const [projectId, name, json] = mockSaveSceneToCloud.mock.calls[0] as unknown as [string, string, string];
+      expect(projectId).toBe('proj_1');
+      expect(name).toBe('S');
+      const parsed = JSON.parse(json) as { prefabInstances?: typeof SEEDED };
+      expect(parsed.prefabInstances).toHaveLength(1);
+      expect(parsed.prefabInstances?.[0].instanceId).toBe('i1');
     });
   });
 });
