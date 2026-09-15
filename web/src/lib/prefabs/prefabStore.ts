@@ -832,22 +832,18 @@ export function stagePrefabInstancesForExport(requestId: string, instances: Pref
 }
 
 /**
- * Consume (take-once) the snapshot staged for `requestId`. Returns `undefined`
- * — not the live registry — when nothing was staged for it, so the caller can
- * fall back to `loadPrefabInstances()` itself for the uncorrelated paths
- * (autosave, chat `save_scene`, a pre-PF-1103 engine) that never staged one.
+ * Consume (take-once) the complete snapshot staged for `requestId`, including
+ * the definitions captured at request time. Returns `undefined` — not the live
+ * registry — when nothing was staged for it, so the caller can fall back to
+ * `loadPrefabInstances()` itself for the uncorrelated paths (autosave, chat
+ * `save_scene`, a pre-PF-1103 engine) that never staged one.
  *
- * @param requestId Optional export correlation ID.
- * @returns Staged instances, or undefined if absent. Consumes the entire staged record, including its definitions.
- */
-export function takeStagedPrefabInstancesForExport(requestId: string | undefined): PrefabInstance[] | undefined {
-  if (requestId === undefined) return undefined;
-  const staged = stagedInstancesByRequestId.get(requestId);
-  stagedInstancesByRequestId.delete(requestId);
-  return staged?.instances;
-}
-
-/** Consume the complete editor snapshot, including definitions captured at request time.
+ * This is deliberately the ONLY take-once reader of `stagedInstancesByRequestId`.
+ * An instances-only sibling used to sit alongside it, and two take-once
+ * consumers over one entry is a footgun: taking the instances silently consumed
+ * that request's definitions too, so whichever consumer ran second saw nothing
+ * staged and fell back to the live registry. Callers that want only the
+ * instances read `.instances` off this snapshot.
  *
  * @param requestId Optional export correlation ID.
  * @returns The complete staged snapshot once, or undefined if absent; deletes the staging entry.

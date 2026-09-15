@@ -223,6 +223,11 @@ export interface SceneSlice {
    * confirms the scene and the active save is committed. Failure preserves
    * the previous save and attempts to restore prior unsaved viewport data.
    * checkpointError contains user-facing recovery guidance.
+   *
+   * Tracks {@link sceneLoadError} on the same terms as {@link loadScene}: an
+   * accepted load clears it (restoring a checkpoint is a way OUT of a rejected
+   * scene, so saving comes back), a refused one sets it. That applies to the
+   * recovery load of the outgoing scene too.
    */
   restoreCheckpoint: (checkpointId: string) => Promise<boolean>;
   /** Delete a checkpoint by ID. */
@@ -991,6 +996,36 @@ export const createSceneSlice: StateCreator<
     // The checkpoint's linked prefab registry is installed eagerly (like
     // `loadScene`), so it must be rolled back if the restore does not complete.
     let prefabSnapshot: PrefabRestoreSnapshot | null = null;
+    // EVERY scene dispatch this restore makes goes through here, so
+    // `sceneLoadError` keeps describing what the ENGINE is actually holding —
+    // the same accepted/rejected contract `loadScene` maintains, applied to the
+    // one scene-load path that does not go through it. Without the clear, an
+    // ACCEPTED restore leaves an earlier rejection standing forever and the
+    // correctly restored scene is permanently unsavable: `saveScene`,
+    // `saveToCloud`, `EditorLayout`'s autosave ticker, `exportGame`,
+    // `switchScene`, `duplicateScene`, `createCheckpoint` and the chat
+    // export/switch/duplicate handlers all refuse while it is set, and
+    // `SceneLoadErrorNotice` keeps saying saving is off (#10056). Without the
+    // set, a REFUSED restore (including the recovery load of the outgoing
+    // scene) would leave saving enabled over a viewport the engine never
+    // adopted. A missing dispatcher cannot reach this: `captureCheckpointScene`
+    // above already fails the restore when there is no engine to ask.
+    const dispatchRestoreLoad = (json: string): boolean => {
+      let accepted: boolean;
+      try {
+        accepted = dispatchSceneLoad(json);
+      } catch (error) {
+        set({
+          sceneLoadError: {
+            reason: `${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`,
+            at: Date.now(),
+          },
+        });
+        throw error;
+      }
+      set({ sceneLoadError: accepted ? null : { reason: ENGINE_LOAD_REJECTION, at: Date.now() } });
+      return accepted;
+    };
     try {
       const result = restoreCheckpointIn(checkpointId, projectId);
       if ('error' in result) throw new Error(result.error);
@@ -1015,7 +1050,7 @@ export const createSceneSlice: StateCreator<
       }
       await applyCheckpointScene(activeData, (json) => {
         attempted = true;
-        const accepted = dispatchSceneLoad(json);
+        const accepted = dispatchRestoreLoad(json);
         attempted = accepted;
         return accepted;
       }, requestSceneExport, isCurrent);
@@ -1034,7 +1069,7 @@ export const createSceneSlice: StateCreator<
       if (prefabSnapshot) rollbackPrefabState(prefabSnapshot);
       if (attempted && prior && isCurrent()) {
         try {
-          await applyCheckpointScene(prior, dispatchSceneLoad, requestSceneExport, isCurrent);
+          await applyCheckpointScene(prior, dispatchRestoreLoad, requestSceneExport, isCurrent);
           set({ sceneName: before.sceneName, sceneModified: before.sceneModified });
         } catch {
           message += ' The previous save is intact, but the viewport could not be recovered. Reload the project before editing.';

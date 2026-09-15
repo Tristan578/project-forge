@@ -80,6 +80,48 @@ describe('checkpoint recovery transaction', () => {
     expect(engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene')).toHaveLength(1);
   });
 
+  /** True once `export_scene` has gone out for this correlation id. */
+  const exported = (requestId: string) => engine.dispatch.mock.calls.some(
+    ([command, payload]) => command === 'export_scene' && (payload as { requestId?: string }).requestId === requestId,
+  );
+
+  it('a successful restoreCheckpoint clears sceneLoadError', async () => {
+    // Restoring a checkpoint is a recovery route OUT of a rejected load, and
+    // `restoreCheckpoint` applies its scene through `dispatchSceneLoad`
+    // directly — bypassing every clear that `loadScene`, `newScene` and
+    // `loadTemplate` own. Without the clear the editor stays permanently
+    // unsavable over a correctly restored scene (#10056).
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('reject');
+    expect(store.getState().loadScene(JSON.stringify(sceneFixture('Refused scene')))).toBe(false);
+    expect(store.getState().sceneLoadError).not.toBeNull();
+
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(true);
+
+    expect(store.getState().sceneLoadError).toBeNull();
+    expect(engine.getScene().metadata?.name).toBe('Recovered');
+    // The consequence the field actually gates: saving works again.
+    store.getState().saveScene('after-restore');
+    expect(exported('after-restore')).toBe(true);
+  });
+
+  it('a rejected restoreCheckpoint keeps it set with the engine reason', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('reject');
+
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+
+    // The engine never adopted the checkpoint, so what it holds is not this
+    // project's restored scene and the save lockout must stand — the same
+    // reason `loadScene` records on its own rejection branch.
+    expect(store.getState().sceneLoadError).toEqual({
+      reason: expect.stringContaining('the engine refused to load it'),
+      at: expect.any(Number),
+    });
+    store.getState().saveScene('after-refused-restore');
+    expect(exported('after-refused-restore')).toBe(false);
+  });
+
   it('times out a queued load that never applies and restores the prior live scene', async () => {
     vi.useFakeTimers();
     const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;

@@ -22,7 +22,7 @@ import {
   collectTransitivePrefabDefinitions,
   mergeImportedPrefabDefinitions,
   stagePrefabInstancesForExport,
-  takeStagedPrefabInstancesForExport,
+  takeStagedPrefabDataForExport,
   discardStagedPrefabInstancesForExport,
   sanitizePrefabDefinition,
   subscribeToPrefabChanges,
@@ -580,13 +580,13 @@ describe('export-request staging (scene.FR-1 N1 race fix)', () => {
     const snapshot = loadPrefabInstances();
 
     stagePrefabInstancesForExport('req-1', snapshot);
-    expect(takeStagedPrefabInstancesForExport('req-1')).toEqual(snapshot);
-    expect(takeStagedPrefabInstancesForExport('req-1')).toBeUndefined();
+    expect(takeStagedPrefabDataForExport('req-1')?.instances).toEqual(snapshot);
+    expect(takeStagedPrefabDataForExport('req-1')).toBeUndefined();
   });
 
   it('returns undefined for an unstaged or undefined requestId', () => {
-    expect(takeStagedPrefabInstancesForExport('never-staged')).toBeUndefined();
-    expect(takeStagedPrefabInstancesForExport(undefined)).toBeUndefined();
+    expect(takeStagedPrefabDataForExport('never-staged')).toBeUndefined();
+    expect(takeStagedPrefabDataForExport(undefined)).toBeUndefined();
   });
 
   it('is unaffected by the LIVE registry changing after staging (the race this fixes)', () => {
@@ -600,7 +600,7 @@ describe('export-request staging (scene.FR-1 N1 race fix)', () => {
     createPrefabInstance(b.id);
     expect(loadPrefabInstances()).toHaveLength(2);
 
-    const taken = takeStagedPrefabInstancesForExport('req-2');
+    const taken = takeStagedPrefabDataForExport('req-2')?.instances;
     expect(taken).toHaveLength(1);
     expect(taken?.[0].prefabId).toBe(a.id);
   });
@@ -608,7 +608,7 @@ describe('export-request staging (scene.FR-1 N1 race fix)', () => {
   it('discardStagedPrefabInstancesForExport removes an entry without treating it as taken', () => {
     stagePrefabInstancesForExport('req-3', [{ instanceId: 'i', prefabId: 'p', overrides: {} }]);
     discardStagedPrefabInstancesForExport('req-3');
-    expect(takeStagedPrefabInstancesForExport('req-3')).toBeUndefined();
+    expect(takeStagedPrefabDataForExport('req-3')).toBeUndefined();
   });
 
   it('discarding an unstaged/already-taken requestId is a harmless no-op', () => {
@@ -621,8 +621,8 @@ describe('export-request staging (scene.FR-1 N1 race fix)', () => {
     for (let i = 0; i < 60; i++) {
       stagePrefabInstancesForExport(`req-${i}`, [{ instanceId: `i${i}`, prefabId: 'p', overrides: {} }]);
     }
-    expect(takeStagedPrefabInstancesForExport('req-0')).toBeUndefined(); // evicted
-    expect(takeStagedPrefabInstancesForExport('req-59')).toBeDefined(); // most recent survives
+    expect(takeStagedPrefabDataForExport('req-0')).toBeUndefined(); // evicted
+    expect(takeStagedPrefabDataForExport('req-59')).toBeDefined(); // most recent survives
   });
 });
 
