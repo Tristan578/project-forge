@@ -3,7 +3,7 @@
  *
  * Uses individual PLATFORM_*_KEY environment variables to call providers
  * directly. Supports ALL capabilities including asset generation providers
- * (Meshy, ElevenLabs, Suno, etc.) that are not available through gateways.
+ * (Meshy, ElevenLabs, etc.) that are not available through gateways.
  * This is the catch-all fallback in the resolution priority chain.
  */
 
@@ -46,7 +46,7 @@ const CAPABILITY_PROVIDER_MAP: Record<ProviderCapability, PlatformKeyProvider> =
   texture: 'meshy',
   sfx: 'elevenlabs',
   voice: 'elevenlabs',
-  music: 'suno',
+  music: 'elevenlabs',
   sprite: 'replicate',
   bg_removal: 'removebg',
 };

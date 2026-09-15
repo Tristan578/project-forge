@@ -80,6 +80,26 @@ export function extractWaveform(audioBuffer: AudioBuffer, sampleCount = DEFAULT_
 }
 
 /**
+ * Returns the slice of a normalized peaks array that falls inside a fractional
+ * window `[startFrac, endFrac)` of the whole clip, for drawing a trimmed
+ * region's waveform without re-decoding. Fractions are clamped to [0, 1] and a
+ * reversed or empty window yields an empty array.
+ *
+ * @param peaks - Full-clip normalized peaks (from {@link extractWaveform}).
+ * @param startFrac - Window start as a fraction of the clip (0 = start).
+ * @param endFrac - Window end as a fraction of the clip (1 = end).
+ */
+export function sliceWaveform(peaks: number[], startFrac: number, endFrac: number): number[] {
+  if (peaks.length === 0) return [];
+  const start = Math.min(Math.max(startFrac, 0), 1);
+  const end = Math.min(Math.max(endFrac, 0), 1);
+  if (end <= start) return [];
+  const startIdx = Math.floor(start * peaks.length);
+  const endIdx = Math.ceil(end * peaks.length);
+  return peaks.slice(startIdx, endIdx);
+}
+
+/**
  * Fetches an audio file from a URL, decodes it, and extracts its waveform.
  *
  * @param url - URL of the audio file to fetch and decode.

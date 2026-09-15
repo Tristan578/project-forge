@@ -848,6 +848,24 @@ describe('handleTransformEvent', () => {
         // Nothing staged — a new_scene, or a load whose JSON declared no audio.
         // The outgoing scene's ids are meaningless either way.
         entityAudio: {},
+        // completionMode gating (idea.FR-1.OP-04 / #9901): SCENE_LOADED is the
+        // scene-replacement boundary, so it must clear a leftover mode rather
+        // than let setFullGraph's preserve-across-rebuilds fallback carry the
+        // OUTGOING scene's mode into the incoming one.
+        sceneGraph: { completionMode: undefined },
+      });
+    });
+
+    it('clears a leftover completionMode so the incoming scene starts from the legacy default', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        sceneGraph: { nodes: {}, rootIds: [], completionMode: 'sandbox' },
+      } as unknown as StoreState);
+
+      handleTransformEvent('SCENE_LOADED', { name: 'NextScene' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({
+        sceneGraph: { completionMode: undefined },
       });
     });
 

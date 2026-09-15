@@ -45,9 +45,9 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
     !gate.blocked &&
     prompt.trim().length >= 3 &&
     prompt.trim().length <= 500 &&
-    !isSubmitting &&
-    tokenBalance !== null &&
-    tokenBalance.total >= tokenCost;
+    !isSubmitting;
+  // The route resolves a user's ElevenLabs key before checking platform
+  // tokens. A low or unloaded balance must not block that unmetered BYOK path.
 
   const handleClose = useCallback(() => {
     cancel();
@@ -230,9 +230,12 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
 
           {/* Token cost display */}
           <div className="flex items-center justify-between border-t border-zinc-800 pt-3 text-xs">
-            <span className="text-zinc-400">Token cost:</span>
+            <span className="text-zinc-400">Platform token cost:</span>
             <span className="font-semibold text-zinc-200">{tokenCost}</span>
           </div>
+          <p className="text-xs text-zinc-400">
+            With your own ElevenLabs key, generation is billed by ElevenLabs.
+          </p>
           <div className="flex items-center justify-between text-xs">
             <span className="text-zinc-400">Your balance:</span>
             <span className="font-semibold text-zinc-200">
