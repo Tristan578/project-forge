@@ -60,9 +60,10 @@ describe('POST /api/generate/sprite', () => {
     vi.mocked(resolveByokOrPlatformKey).mockResolvedValue(null);
     vi.mocked(SpriteClient).mockImplementation(
       function (this: InstanceType<typeof SpriteClient>) {
-        lastGenerateSprite = vi.fn().mockResolvedValue({ taskId: 'task-1', status: 'pending', provider: 'dalle3' });
-        this.generateSprite = lastGenerateSprite;
+        const gen = vi.fn().mockResolvedValue({ taskId: 'task-1', status: 'pending', provider: 'dalle3' });
+        this.generateSprite = gen;
         this.generateSpriteSheet = vi.fn();
+        lastGenerateSprite = gen;
       } as unknown as typeof SpriteClient
     );
   });
