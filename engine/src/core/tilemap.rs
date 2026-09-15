@@ -271,7 +271,18 @@ pub fn shape_solid_box(shape: CollisionShape) -> Option<([f32; 2], [f32; 2])> {
 ///
 /// This is the pure resolver the OP-04 fixture exercises: it is the thing that
 /// makes "a player collides with a half-top tile only in its solid half" a real
-/// assertion, and it lives in `core/` so `cargo test --lib` actually runs it.
+/// geometry assertion, and it lives in `core/` so `cargo test --lib` runs it.
+///
+/// SCOPE: this is a standalone geometry primitive, NOT yet a live gameplay
+/// control. Nothing in the Play-mode physics runtime calls it — the 2D
+/// simulation (`physics_2d_sim.rs`, bevy_rapier2d) generates no tilemap
+/// colliders at all, so a played build ignores per-tile shapes exactly as it
+/// ignores the layer-level `is_collision` flag today. The unit tests below
+/// therefore prove the silhouette math, not that a player's movement respects
+/// it in Play mode. Wiring this into rapier collider generation (including
+/// triangle colliders for the slope cases) is a separate runtime step tracked
+/// under parent #9814 (OP-05); do not read the coverage here as shipped
+/// gameplay collision.
 pub fn player_overlaps_tile_solid(
     player_min: [f32; 2],
     player_max: [f32; 2],
