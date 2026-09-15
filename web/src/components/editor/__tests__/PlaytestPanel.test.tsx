@@ -43,6 +43,7 @@ describe('PlaytestPanel', () => {
   afterEach(() => {
     cleanup();
     resetPlayTickBus();
+    vi.restoreAllMocks();
   });
 
   it('renders without crashing', () => {
@@ -53,6 +54,7 @@ describe('PlaytestPanel', () => {
   it.each(['automatic', 'manual'] as const)(
     'recovers from an invalid %s recording stop and records the updated vocabulary on restart',
     (stopMode) => {
+      const reportError = vi.spyOn(console, 'error').mockImplementation(() => {});
       const { rerender } = render(<PlaytestPanel />);
       fireEvent.click(screen.getByRole('button', { name: 'Record input' }));
       expect(screen.getByRole('button', { name: 'Stop recording input' })).toHaveAttribute('aria-pressed', 'true');
@@ -78,6 +80,8 @@ describe('PlaytestPanel', () => {
       }
 
       expect(screen.getByRole('alert')).toHaveTextContent('Recording could not be saved. Check your input bindings, then select Record to try again.');
+      expect(reportError).toHaveBeenCalledTimes(1);
+      expect(reportError).toHaveBeenCalledWith('Input recording failed:', expect.any(Error));
       expect(screen.getByRole('button', { name: 'Record input' })).toHaveAttribute('aria-pressed', 'false');
       expect(screen.getByRole('button', { name: 'Record input' })).toBeEnabled();
       expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled();

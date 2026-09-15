@@ -13,7 +13,7 @@ import {
   type SceneContext,
 } from '@/lib/ai/gameplayBot';
 import { useEditorStore } from '@/stores/editorStore';
-import { InputTraceRecorder, type InputTrace } from '@/lib/playtest/inputTrace';
+import { InputTraceRecorder, InputTraceValidationError, type InputTrace } from '@/lib/playtest/inputTrace';
 import {
   invokeReplay,
   createDomKeyboardEnvironment,
@@ -217,7 +217,12 @@ function RuntimeReplaySection() {
     setError(null);
     try {
       if (recorderRef.current?.isRecording()) {
-        recorderRef.current.stop();
+        try {
+          recorderRef.current.stop();
+        } catch (cause) {
+          // Validation failures already reach failRecording through onError.
+          if (!(cause instanceof InputTraceValidationError)) throw cause;
+        }
         return;
       }
       const recorder = new InputTraceRecorder(
