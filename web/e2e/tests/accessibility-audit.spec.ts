@@ -31,7 +31,17 @@ import { waitForHydration } from '../helpers/wait-helpers';
  * Build a scoped AxeBuilder targeting WCAG 2.1 A + AA rules.
  * Always excludes:
  *   - canvas/WebGL content (not DOM — axe cannot audit it)
- *   - third-party dockview panels (we don't own that HTML)
+ *   - Dockview's OWN chrome only — its tab strip (`.dv-tabs-and-actions-container`,
+ *     including the tabs), its drag/drop overlay (`.dv-drop-target`), and its
+ *     empty-group watermark (`.dv-watermark`). These are library-rendered HTML we
+ *     do not own.
+ *
+ * It deliberately does NOT exclude `.dv-dockview` wholesale. SpawnForge's own
+ * inspector panels (SceneHierarchy, LightInspector, SceneSettings, …) mount
+ * inside Dockview's `.dv-content-container` (role="tabpanel"), so a blanket
+ * `.dv-dockview` exclusion exempted first-party markup from every a11y assertion
+ * and masked real WCAG-critical violations (PF-1372 / #9677). Auditing the panel
+ * content while skipping only the library chrome is the point of this scope.
  *
  * Disables color-contrast globally because the zinc dark theme is
  * intentional; violations are tracked separately as PF-572.
@@ -41,7 +51,9 @@ function buildAxe(page: Page): AxeBuilder {
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .disableRules(['color-contrast'])
     .exclude('[data-testid="canvas-area"]')
-    .exclude('.dv-dockview');
+    .exclude('.dv-tabs-and-actions-container')
+    .exclude('.dv-drop-target')
+    .exclude('.dv-watermark');
 }
 
 /**
