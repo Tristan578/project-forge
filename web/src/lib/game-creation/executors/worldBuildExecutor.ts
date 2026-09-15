@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import type { ExecutorDefinition, ExecutorContext, ExecutorResult } from '../types';
 import { makeStepError, successResult, failResult } from './shared';
-import { engineEntityId, waitForEngineFrame, sendCommands } from './engineDispatch';
+import {
+  engineEntityId,
+  waitForEngineFrame,
+  sendCommands,
+  observeTransformEffect,
+  SPAWN_TRANSFORM_OPERATION,
+} from './engineDispatch';
 import { SPAWNABLE_SHAPES } from '../entityShape';
 
 /**
@@ -161,6 +167,59 @@ export const worldBuildExecutor: ExecutorDefinition = {
       );
     }
 
+    // CONFIRMED path (#9899): each `update_transform` above is a deferred scale,
+    // and an accepted dispatch is NOT an applied transform — `dispatchCommand`
+    // reports only that the engine took the command, while the resize lands a
+    // frame later inside `apply_pending_transforms`, which drops any update
+    // matching no entity yet and never retries it (see `waitForEngineFrame`).
+    // When the context can query the engine, prove every piece of geometry
+    // reached its requested scale by READING the engine's real state, rather
+    // than trusting acceptance plus a frame wait — exactly the transform half of
+    // the contract that spawn confirmation established for existence. A resize
+    // that never lands is a floor with a 1x1x1 collider the player falls
+    // through (PF-1138), so it must fail the step, never report a built world.
+    if (ctx.observeEntity) {
+      const observe = ctx.observeEntity;
+      for (let i = 0; i < entities.length; i += 1) {
+        const entity = entities[i];
+        const effect = await observeTransformEffect({
+          operationId: SPAWN_TRANSFORM_OPERATION,
+          entityId: entity.entityId,
+          field: 'scale',
+          expected: entity.scale,
+          observe,
+          signal: ctx.signal,
+        });
+
+        if (effect.status !== 'applied') {
+          return failResult(
+            makeStepError(
+              effect.status === 'cancelled' ? 'ABORTED' : 'EFFECT_TIMED_OUT',
+              effect.status === 'cancelled'
+                ? 'World geometry resize cancelled before the engine confirmed it'
+                : `World geometry entity ${entity.entityId} was not confirmed at its requested scale `
+                  + `(operation ${effect.operationId})`,
+              this.userFacingErrorMessage,
+              effect.status === 'timed-out',
+              { effect },
+            ),
+          );
+        }
+      }
+
+      return successResult({
+        spawned: entities.length,
+        worldType: worldType ?? null,
+        confirmed: entities.length,
+        operationId: SPAWN_TRANSFORM_OPERATION,
+      });
+    }
+
+    // LEGACY path: no query capability (every context wired before #9899, and
+    // every unit test that supplies no `observeEntity`). The frame wait between
+    // spawn and size above is the only guard, so the next pipeline step does not
+    // observe an unsized floor merely because rendering is slower than the JS
+    // pipeline.
     return successResult({
       spawned: entities.length,
       worldType: worldType ?? null,

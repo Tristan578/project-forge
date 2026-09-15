@@ -13,6 +13,7 @@ import { castPayload, type SetFn, type GetFn } from './types';
 import { applyWhenPrimary } from './primaryGate';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
+import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
 
@@ -115,6 +116,21 @@ export function handleTransformEvent(
       applyWhenPrimary(payload.entityId, () => {
         useEditorStore.getState().setPrimaryTransform(payload);
       });
+      return true;
+    }
+
+    /**
+     * The answer to a `get_entity_details` query (#9899). Recorded into the
+     * confirmed-effect cache so the orchestrator's `observeEntity` can read the
+     * engine's REAL post-apply state for a spawn/transform. The engine emits
+     * this ONLY when the entity exists (engine/src/bridge/query.rs), so a miss
+     * is itself the "not yet" answer — nothing else here needs to change.
+     *
+     * `return true` consumes the event: no store handler downstream reads it,
+     * and it must not fall through to be logged as unhandled.
+     */
+    case 'QUERY_ENTITY_DETAILS': {
+      recordEntityObservation(data);
       return true;
     }
 
