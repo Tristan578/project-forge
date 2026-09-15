@@ -18,7 +18,7 @@ export interface PrefabInstance {
   instanceId: string;
   /** Id of the source `Prefab` this instance is linked to. */
   prefabId: string;
-  /** Fields the instance overrides; everything else is inherited live. */
+  /** Override fields; other fields inherit during metadata resolution, without engine propagation. */
   overrides: PrefabOverrideMap;
   /** Scene entity this instance is bound to, when instantiated into a scene. */
   entityId?: string;
@@ -66,7 +66,11 @@ function generateInstanceId(): string {
  */
 export const MAX_OVERRIDE_MAP_BYTES = 64 * 1024;
 
-/** Serialized byte size of an override map. */
+/** Serialized byte size of an override map.
+ *
+ * @param overrides Override metadata to serialize as UTF-8 JSON.
+ * @returns Serialized bytes, or positive infinity if serialization fails.
+ */
 export function overrideMapByteSize(overrides: PrefabOverrideMap): number {
   try {
     return new Blob([JSON.stringify(overrides)]).size;
@@ -77,7 +81,12 @@ export function overrideMapByteSize(overrides: PrefabOverrideMap): number {
   }
 }
 
-/** Is this override map within the size bound (default `MAX_OVERRIDE_MAP_BYTES`)? */
+/** Is this override map within the size bound (default `MAX_OVERRIDE_MAP_BYTES`)?
+ *
+ * @param overrides Optional map; undefined is treated as empty.
+ * @param maxBytes Inclusive byte limit; defaults to MAX_OVERRIDE_MAP_BYTES (64 KiB).
+ * @returns Whether the raw map fits the limit, including unknown keys.
+ */
 export function isOverrideMapWithinSizeLimit(
   overrides: PrefabOverrideMap | undefined,
   maxBytes: number = MAX_OVERRIDE_MAP_BYTES,
@@ -90,6 +99,9 @@ export function isOverrideMapWithinSizeLimit(
  * Keep only override keys that name a real snapshot field. An override on an
  * unknown key can never resolve against the source and would otherwise sit in
  * the persisted instance forever as invisible dead data.
+ *
+ * @param overrides Optional untrusted map of field overrides.
+ * @returns A new map containing only defined, whitelisted own fields; values are not deep-cloned or component-validated.
  */
 export function sanitizeOverrides(overrides: PrefabOverrideMap | undefined): PrefabOverrideMap {
   const clean: PrefabOverrideMap = {};
@@ -124,6 +136,9 @@ function isBoundedString(value: unknown, maxLength: number = MAX_ID_LENGTH): val
  * silently stripped by `sanitizeOverrides` either way, so checking after
  * stripping would measure `{}` and accept a record whose actual size on the
  * wire was unbounded.
+ *
+ * @param raw Untrusted instance metadata read from a scene or import.
+ * @returns A sanitized record, or null for invalid identity/shape or oversized overrides; does not persist or bind entities.
  */
 export function sanitizeInstanceRecord(raw: unknown): PrefabInstance | null {
   if (typeof raw !== 'object' || raw === null) return null;
@@ -150,6 +165,10 @@ export function sanitizeInstanceRecord(raw: unknown): PrefabInstance | null {
  *
  * @param overrides Optional initial per-field overrides. Unknown keys are
  *   dropped so a caller cannot seed an instance with fields that never resolve.
+ *
+ * @param prefabId Source identity to record; this helper does not look up the prefab.
+ * @param entityId Optional existing entity identity to record; no engine binding occurs.
+ * @returns A fresh instance metadata record with a generated instance ID and sanitized overrides.
  */
 export function createInstance(
   prefabId: string,
@@ -167,6 +186,11 @@ export function createInstance(
 /**
  * Resolve an instance against its source prefab: inherited fields come from the
  * prefab, overridden fields win. Pure — neither argument is mutated.
+ *
+ * @param instance Saved link and its field overrides.
+ * @param prefab Source definition whose snapshot supplies inherited fields.
+ * @returns A cloned, resolved snapshot; does not propagate changes into engine entities.
+ * @throws If snapshot or override values cannot be cloned.
  */
 export function resolveInstance(instance: PrefabInstance, prefab: Prefab): PrefabSnapshot {
   // Structured-clone the source so a consumer mutating the resolved snapshot can
@@ -189,6 +213,11 @@ export function resolveInstance(instance: PrefabInstance, prefab: Prefab): Prefa
  * the freshly resolved snapshot, so a caller can materialize the propagated
  * result while the overrides it recorded stay intact. Non-overridden fields
  * reflect the new prefab; overridden fields are preserved.
+ *
+ * @param instance Link metadata whose overrides remain unchanged.
+ * @param prefab Updated source definition to resolve against.
+ * @returns The original instance reference and a newly resolved snapshot; no persistence or engine mutation occurs.
+ * @throws If resolution cannot clone the supplied data.
  */
 export function applyPrefabUpdate(
   instance: PrefabInstance,
@@ -197,7 +226,13 @@ export function applyPrefabUpdate(
   return { instance, snapshot: resolveInstance(instance, prefab) };
 }
 
-/** Add or replace one field override, returning a NEW instance (immutable). */
+/** Add or replace one field override, returning a NEW instance (immutable).
+ *
+ * @param instance Link metadata to copy.
+ * @param field Snapshot field to replace during later resolution.
+ * @param value Override value; stored by reference without component validation.
+ * @returns A new instance and override map; the input instance is unchanged.
+ */
 export function setOverride(
   instance: PrefabInstance,
   field: keyof PrefabSnapshot,
@@ -212,6 +247,10 @@ export function setOverride(
 /**
  * Remove one field override, returning a NEW instance. The field then follows
  * the source prefab again on the next resolve.
+ *
+ * @param instance Link metadata to copy.
+ * @param field Override field to remove; an absent field is harmless.
+ * @returns A new instance whose next snapshot resolution inherits that field from its source.
  */
 export function clearOverride(instance: PrefabInstance, field: keyof PrefabSnapshot): PrefabInstance {
   const next: PrefabOverrideMap = { ...instance.overrides };
@@ -219,7 +258,11 @@ export function clearOverride(instance: PrefabInstance, field: keyof PrefabSnaps
   return { ...instance, overrides: next };
 }
 
-/** The fields this instance currently overrides (OP-03 inspection). */
+/** The fields this instance currently overrides (OP-03 inspection).
+ *
+ * @param instance Link metadata to inspect.
+ * @returns Whitelisted own override keys in snapshot-field order, without changing the instance.
+ */
 export function getOverriddenFields(instance: PrefabInstance): Array<keyof PrefabSnapshot> {
   return SNAPSHOT_FIELDS.filter((f) => Object.hasOwn(instance.overrides, f));
 }
@@ -235,6 +278,9 @@ export function getOverriddenFields(instance: PrefabInstance): Array<keyof Prefa
  *   directly nests. Injected rather than reading the store so this stays pure
  *   and testable, and so the caller can run the check against a *proposed*
  *   graph (parent + candidate child) before committing anything.
+ *
+ * @param rootPrefabId Identity from which to traverse the proposed nesting graph.
+ * @returns Whether a reachable cycle exists, with the closing chain when found; otherwise an empty chain.
  */
 export function detectCycle(
   rootPrefabId: string,
@@ -269,6 +315,11 @@ export function detectCycle(
  * Would adding `childPrefabId` under `parentPrefabId` create a cycle? Evaluates
  * the PROPOSED graph (existing children plus the candidate) without mutating
  * anything, so the caller can reject before committing (OP-02).
+ *
+ * @param parentPrefabId Parent receiving the proposed edge.
+ * @param childPrefabId Child identity to append in the simulated graph.
+ * @param getChildPrefabIds Returns existing direct children for an identity.
+ * @returns Cycle detection for the proposed graph without persisting the new edge.
  */
 export function wouldCreateCycle(
   parentPrefabId: string,

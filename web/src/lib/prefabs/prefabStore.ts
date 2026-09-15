@@ -320,6 +320,9 @@ function hasValidSnapshotShape(value: unknown): value is PrefabSnapshot {
  * import, and the whole definition is capped at `MAX_PREFAB_DEFINITION_BYTES`
  * so a legitimately-shaped but enormous material/script payload cannot ride
  * along inside an otherwise-valid record.
+ *
+ * @param raw Untrusted definition, including optional nested-link metadata.
+ * @returns Sanitized metadata with default descriptive fields, or null when shape/size checks fail; no persistence occurs.
  */
 export function sanitizePrefabDefinition(raw: unknown): Prefab | null {
   if (typeof raw !== 'object' || raw === null) return null;
@@ -363,6 +366,9 @@ export function sanitizePrefabDefinition(raw: unknown): Prefab | null {
  * and its nesting edges receive fresh ids; references back to the old root are
  * remapped before validating the complete graph. Invalid or cyclic input makes
  * no storage writes and returns null.
+ *
+ * @param json Serialized root definition with optional nestedDefinitions dependencies.
+ * @returns The persisted root with a fresh ID, or null on validation, dependency, parsing, or storage failure.
  */
 export function importPrefab(json: string): Prefab | null {
   try {
@@ -423,7 +429,10 @@ export type PrefabInstanceOpResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: string; cycle?: string[] };
 
-/** Load the persisted instance registry. */
+/** Load the persisted instance registry.
+ *
+ * @returns Parsed local registry data, or an empty list when absent/unreadable. This accessor does not sanitize individual records.
+ */
 export function loadPrefabInstances(): PrefabInstance[] {
   try {
     const stored = localStorage.getItem(PREFAB_INSTANCES_STORAGE_KEY);
@@ -431,13 +440,22 @@ export function loadPrefabInstances(): PrefabInstance[] {
   } catch { return []; }
 }
 
-/** Persist the instance registry. */
+/** Persist the instance registry.
+ *
+ * @param instances Registry records prepared by the caller.
+ * @returns Nothing; replaces the local registry and notifies library subscribers.
+ * @throws If serialization or localStorage writing fails.
+ */
 export function savePrefabInstancesToStorage(instances: PrefabInstance[]): void {
   localStorage.setItem(PREFAB_INSTANCES_STORAGE_KEY, JSON.stringify(instances));
   notifyPrefabsChanged();
 }
 
-/** All instances linked to a given source prefab. */
+/** All instances linked to a given source prefab.
+ *
+ * @param prefabId Canonical source prefab identity.
+ * @returns Registry records linked to that exact identity; no engine lookup occurs.
+ */
 export function getPrefabInstances(prefabId: string): PrefabInstance[] {
   return loadPrefabInstances().filter((i) => i.prefabId === prefabId);
 }
@@ -445,6 +463,12 @@ export function getPrefabInstances(prefabId: string): PrefabInstance[] {
 /**
  * Create and persist link metadata. This internal foundation does not spawn
  * or bind an engine entity. Rejects missing sources and oversized overrides.
+ *
+ * @param prefabId Existing source ID or name accepted by getPrefab.
+ * @param overrides Optional field overrides bounded to MAX_OVERRIDE_MAP_BYTES.
+ * @param entityId Optional entity identity retained as metadata only.
+ * @returns The persisted record, or a result error for a missing source/oversized overrides.
+ * @throws If registry persistence fails.
  */
 export function createPrefabInstance(
   prefabId: string,
@@ -465,7 +489,12 @@ export function createPrefabInstance(
   return { ok: true, value: instance };
 }
 
-/** Delete one instance by id. Returns whether anything was removed. */
+/** Delete one instance by id. Returns whether anything was removed.
+ *
+ * @param instanceId Identity of the metadata record to remove.
+ * @returns True when a record was removed and persisted, otherwise false; no engine entity is deleted.
+ * @throws If registry persistence fails.
+ */
 export function deletePrefabInstance(instanceId: string): boolean {
   const instances = loadPrefabInstances();
   const filtered = instances.filter((i) => i.instanceId !== instanceId);
@@ -478,6 +507,12 @@ export function deletePrefabInstance(instanceId: string): boolean {
  * Nest a child prefab inside a parent prefab (OP-02). Rejects — with the
  * offending chain and WITHOUT mutating anything — when the edge would close a
  * cycle in the prefab graph, at any depth.
+ *
+ * @param parentPrefabId User-owned parent ID or name; built-in parents cannot be changed.
+ * @param childPrefabId Existing child ID or name, resolved to its canonical identity.
+ * @param overrides Optional bounded override metadata for the child reference.
+ * @returns The persisted parent or an error for invalid sources, oversized overrides, or cycles. No nested engine entities are created.
+ * @throws If library persistence fails.
  */
 export function addNestedPrefab(
   parentPrefabId: string,
@@ -539,6 +574,10 @@ export function addNestedPrefab(
  * Compute resolved snapshots for saved links to a source. Returns data only:
  * no viewport entities are changed. Non-overridden fields reflect the current
  * source; explicit override fields remain unchanged.
+ *
+ * @param prefabId Existing source ID or name.
+ * @returns Resolved snapshots for saved links, or a missing-source result error; neither storage nor the viewport is changed.
+ * @throws If source or override data cannot be cloned.
  */
 export function applyPrefabToInstances(
   prefabId: string,
@@ -573,6 +612,9 @@ export function applyPrefabToInstances(
  * Every user-prefab `Prefab` transitively reachable from `instances` — each
  * instance's source, and every prefab that source (recursively) nests. Built-
  * in sources resolve everywhere already, so they are left out.
+ *
+ * @param instances Scene links whose source dependencies should accompany an export.
+ * @returns Reachable user definitions, excluding built-ins; does not write storage.
  */
 export function collectTransitivePrefabDefinitions(instances: PrefabInstance[]): Prefab[] {
   return collectPrefabDefinitionClosure(instances.map((i) => i.prefabId));
@@ -625,6 +667,10 @@ function prepareImportedDefinitions(definitions: unknown[]): Prefab[] | null {
  * Merge a scene's embedded definitions without overwriting local definitions
  * or resurrecting deleted ids. Returns false for invalid, missing-target, or
  * cyclic graphs; rejection makes no writes. A valid merge writes once.
+ *
+ * @param definitions Untrusted embedded definitions, capped at MAX_MERGED_DEFINITIONS (500).
+ * @returns True for an empty input or successful validated merge; false for invalid dependency graphs without writing.
+ * @throws If the validated library cannot be persisted.
  */
 export function mergeImportedPrefabDefinitions(definitions: unknown[]): boolean {
   if (definitions.length === 0) return true;
@@ -669,7 +715,13 @@ const stagedInstancesByRequestId = new Map<string, PrefabExportSnapshot>();
  */
 const MAX_STAGED_EXPORTS = 50;
 
-/** Snapshot the current instance registry for a pending export `requestId`. */
+/** Snapshot the current instance registry for a pending export `requestId`.
+ *
+ * @param requestId Correlation ID of the pending engine export.
+ * @param instances Instance metadata to clone together with its transitive definitions.
+ * @returns Nothing; replaces this request's staged snapshot, evicting the oldest request when the 50-entry cap is reached.
+ * @throws If the snapshot cannot be serialized.
+ */
 export function stagePrefabInstancesForExport(requestId: string, instances: PrefabInstance[]): void {
   if (!stagedInstancesByRequestId.has(requestId) && stagedInstancesByRequestId.size >= MAX_STAGED_EXPORTS) {
     // `Map` preserves insertion order, so the first key is the oldest —
@@ -688,6 +740,9 @@ export function stagePrefabInstancesForExport(requestId: string, instances: Pref
  * — not the live registry — when nothing was staged for it, so the caller can
  * fall back to `loadPrefabInstances()` itself for the uncorrelated paths
  * (autosave, chat `save_scene`, a pre-PF-1103 engine) that never staged one.
+ *
+ * @param requestId Optional export correlation ID.
+ * @returns Staged instances, or undefined if absent. Consumes the entire staged record, including its definitions.
  */
 export function takeStagedPrefabInstancesForExport(requestId: string | undefined): PrefabInstance[] | undefined {
   if (requestId === undefined) return undefined;
@@ -696,7 +751,11 @@ export function takeStagedPrefabInstancesForExport(requestId: string | undefined
   return staged?.instances;
 }
 
-/** Consume the complete editor snapshot, including definitions captured at request time. */
+/** Consume the complete editor snapshot, including definitions captured at request time.
+ *
+ * @param requestId Optional export correlation ID.
+ * @returns The complete staged snapshot once, or undefined if absent; deletes the staging entry.
+ */
 export function takeStagedPrefabDataForExport(requestId: string | undefined): PrefabExportSnapshot | undefined {
   if (requestId === undefined) return undefined;
   const staged = stagedInstancesByRequestId.get(requestId);
@@ -711,6 +770,9 @@ export function takeStagedPrefabDataForExport(requestId: string | undefined): Pr
  * request's entry does not sit in the map for the rest of the page's life.
  * A no-op if nothing was staged for `requestId` (already taken, or never
  * staged), so callers may call this unconditionally on cleanup.
+ *
+ * @param requestId Correlation ID to release after an export failure or cancellation.
+ * @returns Nothing; removes the staging entry if present.
  */
 export function discardStagedPrefabInstancesForExport(requestId: string): void {
   stagedInstancesByRequestId.delete(requestId);

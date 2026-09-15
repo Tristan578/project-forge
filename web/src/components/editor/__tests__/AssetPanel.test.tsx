@@ -213,11 +213,12 @@ describe('AssetPanel', () => {
 
   // ── Basic rendering ───────────────────────────────────────────────────
 
-  it('renders Assets and Materials tabs', () => {
+  it('renders Assets, Materials, and Prefabs tabs with selected state', () => {
     setupStore();
     render(<AssetPanel />);
-    expect(screen.getByText('Assets').textContent).toBe('Assets');
-    expect(screen.getByText('Materials').textContent).toBe('Materials');
+    expect(screen.getByRole('tab', { name: 'Assets' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Materials' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('tab', { name: 'Prefabs' })).toHaveAttribute('aria-selected', 'false');
   });
 
   it('shows empty state when no assets', () => {
@@ -276,6 +277,39 @@ describe('AssetPanel', () => {
     render(<AssetPanel />);
     fireEvent.click(screen.getByText('Prefabs'));
     expect(screen.queryByLabelText('Import 3D model')).toBeNull();
+  });
+
+  it('moves keyboard focus with the selected tab and exposes its matching panel', () => {
+    setupStore();
+    render(<AssetPanel />);
+    const assets = screen.getByRole('tab', { name: 'Assets' });
+    const materials = screen.getByRole('tab', { name: 'Materials' });
+    const prefabs = screen.getByRole('tab', { name: 'Prefabs' });
+    assets.focus();
+
+    fireEvent.keyDown(assets, { key: 'End' });
+
+    expect(prefabs).toHaveFocus();
+    expect(prefabs).toHaveAttribute('aria-selected', 'true');
+    expect(assets).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('tabpanel', { name: 'Prefabs' })).toContainElement(
+      screen.getByTestId('prefab-library'),
+    );
+    expect(screen.queryByLabelText('Import 3D model')).toBeNull();
+
+    fireEvent.keyDown(prefabs, { key: 'ArrowLeft' });
+
+    expect(materials).toHaveFocus();
+    expect(screen.getByRole('tabpanel', { name: 'Materials' })).toContainElement(
+      screen.getByTestId('material-library'),
+    );
+
+    fireEvent.keyDown(materials, { key: 'Home' });
+
+    expect(assets).toHaveFocus();
+    expect(screen.getByRole('tabpanel', { name: 'Assets' })).toContainElement(
+      screen.getByLabelText('Import 3D model'),
+    );
   });
 
   // ── Asset cards ───────────────────────────────────────────────────────

@@ -57,7 +57,7 @@ The editor side is opt-in per tab (the `?mcp=` parameter), is off in production
 builds unless `NEXT_PUBLIC_MCP_BRIDGE=true`, and asks for your consent in the tab
 before it attaches — a small dialog naming what the agent can and cannot do.
 Once attached, a persistent indicator names each command that ran or was
-refused, with a one-click **Detach**. The bridge runs an **allowlist**: 293 of
+refused, with a one-click **Detach**. The bridge runs an **allowlist**: 300 of
 the 358 commands are permitted by name, and anything not enumerated — including
 any command added to the manifest later — is refused. Scripting is denied
 outright: `create_script` source reaches `Function(...)` in the editor (see SEC-2

@@ -520,7 +520,7 @@ describe('command counts quoted across the repo', () => {
         `offered ${chatToolCount} of the ${total} manifest commands`,
         // bridgeAllowedCommands(): the allowlist minus the denied scopes.
         `an allowlist of ${bridgeCount} commands`,
-        `drive ${bridgeCount} of those commands`,
+        `permits ${bridgeCount} of those command names`,
       ],
     },
     {
@@ -542,6 +542,7 @@ describe('command counts quoted across the repo', () => {
     { path: 'docs/features/limitations-guide.md', claims: [`${total} registered MCP commands`] },
     // The npm-visible description of the repo.
     { path: 'package.json', claims: [`${total} MCP commands`] },
+    { path: 'docs/guides/mcp-server-setup.md', claims: [`**allowlist**: ${bridgeCount} of\nthe ${total} commands`] },
     // The first architecture picture a new contributor sees.
     { path: 'CONTRIBUTING.md', claims: [`MCP Server (${total} commands, ${categoryCount} categories)`] },
     { path: '.claude/rules/file-map.md', claims: [`${total} commands across ${categoryCount} categories`] },

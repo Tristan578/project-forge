@@ -115,6 +115,23 @@ describe('PrefabLibraryPanel (manual FR-1 control)', () => {
     expect(mockGetPrefabInstances).toHaveBeenLastCalledWith('p1');
   });
 
+  it('updates saved link inspection through the labeled source picker', () => {
+    mockGetPrefabInstances.mockImplementation((prefabId: string) => [
+      { instanceId: `saved-${prefabId}`, prefabId, overrides: {} },
+    ]);
+    render(<PrefabLibraryPanel />);
+    const source = screen.getByRole('combobox', { name: 'Source prefab' });
+    expect(source).toHaveValue('p1');
+    expect(screen.getByText('saved-p1')).toBeInTheDocument();
+
+    fireEvent.change(source, { target: { value: 'p2' } });
+
+    expect(source).toHaveValue('p2');
+    expect(screen.queryByText('saved-p1')).toBeNull();
+    expect(screen.getByText('saved-p2')).toBeInTheDocument();
+    expect(screen.getByText(/do not confirm that an entity is placed/)).toBeInTheDocument();
+  });
+
   it('unsubscribes on unmount', () => {
     const { unmount } = render(<PrefabLibraryPanel />);
     expect(externalChangeListeners.length).toBe(1);
