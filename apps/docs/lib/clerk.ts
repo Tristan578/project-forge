@@ -197,7 +197,9 @@ export function assertClerkPublishableKeyShape(
   // mistake. The secret value is never interpolated into the message — it is a
   // real secret, unlike the publishable key.
   const publishableAbsent = (raw ?? '').trim() === '';
-  const secretPresent = (secretKey ?? '').trim() !== '';
+  // Match proxy.ts: even whitespace makes a raw secret value truthy and enters
+  // Clerk middleware. Trimming here would let that broken configuration build.
+  const secretPresent = Boolean(secretKey);
   if (publishableAbsent && secretPresent) {
     throw new Error(
       'CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent. ' +

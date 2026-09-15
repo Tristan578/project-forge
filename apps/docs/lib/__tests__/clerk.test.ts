@@ -16,7 +16,7 @@
  *
  * @vitest-environment node
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import {
@@ -39,6 +39,13 @@ const VALID_LIVE = keyFor('clerk.spawnforge.ai', 'pk_live_');
 
 const DOCS_ROOT = resolve(__dirname, '..', '..');
 const read = (...parts: string[]) => readFileSync(join(DOCS_ROOT, ...parts), 'utf-8');
+
+beforeEach(() => {
+  // Passing undefined uses the helpers' environment defaults. Keep tests
+  // independent of Clerk credentials configured in the invoking shell.
+  vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', undefined);
+  vi.stubEnv('CLERK_SECRET_KEY', undefined);
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -225,9 +232,21 @@ describe('assertClerkPublishableKeyShape', () => {
 
     it.each([
       ['both keys absent — the supported no-Clerk state', undefined, undefined],
-      ['publishable absent, secret whitespace-only', undefined, '   '],
+      ['publishable absent, secret empty', undefined, ''],
     ])('does not throw for %s', (_label, pub, secret) => {
       expect(() => assertClerkPublishableKeyShape(pub, secret)).not.toThrow();
+    });
+
+    it.each([
+      ['spaces', '   '],
+      ['a tab', '\t'],
+      ['a newline', '\r\n'],
+    ])('rejects a secret containing only %s because proxy still enables Clerk', (_label, secret) => {
+      for (const pub of [undefined, '', '   ']) {
+        expect(() => assertClerkPublishableKeyShape(pub, secret)).toThrow(
+          /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+        );
+      }
     });
 
     it('leaves the valid-publishable, absent-secret case unchanged', () => {
@@ -248,6 +267,38 @@ describe('assertClerkPublishableKeyShape', () => {
       expect(() => assertClerkPublishableKeyShape()).toThrow(
         /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
       );
+    });
+
+    it('rejects a whitespace secret supplied through environment defaults', () => {
+      vi.stubEnv('CLERK_SECRET_KEY', '   ');
+      expect(() => assertClerkPublishableKeyShape()).toThrow(
+        /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+      );
+      expect(() => assertClerkPublishableKeyShape(undefined, undefined)).toThrow(
+        /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+      );
+    });
+
+    it('uses both configured environment defaults when arguments are omitted or undefined', () => {
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', VALID_LIVE);
+      vi.stubEnv('CLERK_SECRET_KEY', SECRET);
+      expect(() => assertClerkPublishableKeyShape()).not.toThrow();
+      expect(() => assertClerkPublishableKeyShape(undefined, undefined)).not.toThrow();
+      expect(hasValidClerkKey()).toBe(true);
+    });
+
+    it('keeps the malformed-publishable diagnosis when environment defaults also contain a secret', () => {
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', PASTED_ASSIGNMENT);
+      vi.stubEnv('CLERK_SECRET_KEY', SECRET);
+      let message = '';
+      try {
+        assertClerkPublishableKeyShape();
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable');
+      expect(message).not.toContain('half-configured');
+      expect(message).not.toContain(SECRET);
     });
   });
 
