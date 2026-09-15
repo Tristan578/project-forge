@@ -46,7 +46,7 @@ export class InspectorErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="border-t border-zinc-800 pt-3 mt-3">
-          <div className="rounded border border-red-900/50 bg-red-950/20 p-3">
+          <div role="alert" className="rounded border border-red-900/50 bg-red-950/20 p-3">
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle size={14} className="text-red-400 shrink-0" />
               <span className="text-xs font-medium text-red-400">
@@ -59,8 +59,9 @@ export class InspectorErrorBoundary extends Component<Props, State> {
               </p>
             )}
             <button
+              type="button"
               onClick={this.handleRetry}
-              className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+              className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
             >
               <RotateCcw size={10} />
               Retry

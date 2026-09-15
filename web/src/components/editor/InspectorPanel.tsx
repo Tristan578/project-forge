@@ -66,6 +66,9 @@ export const InspectorPanel = memo(function InspectorPanel() {
   const [localName, setLocalName] = useState(primaryName ?? '');
   const [trackedPrimaryId, setTrackedPrimaryId] = useState(primaryId);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  // Escape blurs the field to leave edit mode; the blur handler must NOT then
+  // commit the discarded value, so Escape arms this one-shot cancel guard.
+  const cancelNameBlurCommitRef = useRef(false);
 
   // Reset local name when selection changes (avoiding useEffect with setState)
   if (primaryId !== trackedPrimaryId) {
@@ -74,6 +77,11 @@ export const InspectorPanel = memo(function InspectorPanel() {
   }
 
   const handleNameBlur = () => {
+    if (cancelNameBlurCommitRef.current) {
+      // Escape just fired: discard the unconfirmed edit and leave focus.
+      cancelNameBlurCommitRef.current = false;
+      return;
+    }
     if (primaryId && localName !== primaryName) {
       renameEntity(primaryId, localName);
     }
@@ -84,6 +92,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       nameInputRef.current?.blur();
     } else if (e.key === 'Escape') {
       setLocalName(primaryName ?? '');
+      cancelNameBlurCommitRef.current = true;
       nameInputRef.current?.blur();
     }
   };
@@ -196,7 +205,11 @@ export const InspectorPanel = memo(function InspectorPanel() {
   // No selection — show empty state hint + Scene Settings
   if (!primaryId) {
     return (
-      <div className="flex h-full flex-col bg-[var(--sf-bg-app)] px-3 py-4 overflow-y-auto">
+      <div
+        role="region"
+        aria-label="Inspector"
+        className="flex h-full flex-col bg-[var(--sf-bg-app)] px-3 py-4 overflow-y-auto"
+      >
         <EmptyState
           icon={sceneEmpty ? Plus : MousePointerClick}
           title={sceneEmpty ? 'Empty scene' : 'Select an entity'}
@@ -226,19 +239,24 @@ export const InspectorPanel = memo(function InspectorPanel() {
     rounded transition-opacity duration-150
     text-zinc-400 hover:text-zinc-200 hover:bg-[var(--sf-bg-elevated)]
     opacity-60 hover:opacity-100
-    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:opacity-100
+    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] focus-visible:opacity-100
   `;
 
   return (
-    <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
+    <div
+      role="region"
+      aria-label="Inspector"
+      className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto"
+    >
       <h2 className="mb-4 text-sm font-semibold text-zinc-300">Inspector</h2>
 
       {/* Name field */}
       <div className="mb-4">
-        <label className="mb-1 block text-xs font-medium text-zinc-400">
+        <label htmlFor="inspector-entity-name" className="mb-1 block text-xs font-medium text-zinc-400">
           <span>Name <InfoTooltip term="name" /></span>
         </label>
         <input
+          id="inspector-entity-name"
           ref={nameInputRef}
           type="text"
           value={localName}
@@ -262,6 +280,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
                 type="button"
                 onClick={handleCopyAll}
                 title="Copy transform"
+                aria-label="Copy transform"
                 className={buttonClass}
               >
                 <Copy className="w-3.5 h-3.5" />
@@ -270,6 +289,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
                 type="button"
                 onClick={handlePasteAll}
                 title="Paste transform"
+                aria-label="Paste transform"
                 className={buttonClass}
               >
                 <ClipboardPaste className="w-3.5 h-3.5" />

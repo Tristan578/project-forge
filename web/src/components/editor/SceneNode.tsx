@@ -40,6 +40,13 @@ interface SceneNodeProps {
   focusedEntityId?: string | null;
   onToggleExpand?: (entityId: string) => void;
   expandedIds?: Set<string>;
+  /**
+   * The entity id that currently holds the roving tabindex. Exactly one visible
+   * row has tabIndex=0; every other row has tabIndex=-1 (ARIA tree pattern).
+   */
+  rovingActiveId?: string | null;
+  /** Called when DOM focus lands on this row (keeps the roving index in sync). */
+  onRowFocus?: (entityId: string) => void;
 }
 
 // Icon mapping based on component types or entity names
@@ -89,6 +96,8 @@ export function SceneNode({
   focusedEntityId,
   onToggleExpand,
   expandedIds,
+  rovingActiveId,
+  onRowFocus,
 }: SceneNodeProps) {
   // Use external expanded state if provided, otherwise local state
   const [localExpanded, setLocalExpanded] = useState(true);
@@ -119,6 +128,24 @@ export function SceneNode({
       rowRef.current.scrollIntoView({ block: 'nearest' });
     }
   }, [isFocused]);
+
+  // Roving tabindex: exactly one visible row is in the tab order at a time.
+  // Fall back to isFocused only when no explicit roving id is supplied (e.g.
+  // SceneNode rendered in isolation).
+  const isRovingActive =
+    rovingActiveId != null ? rovingActiveId === node.entityId : isFocused;
+
+  // Sync the roving index when focus lands on THIS row (including its own
+  // icon-only controls), but ignore focus bubbling up from a descendant row.
+  const handleRowFocus = useCallback(
+    (e: React.FocusEvent<HTMLDivElement>) => {
+      const owner = (e.target as HTMLElement).closest('[data-tree-entity-id]');
+      if (owner?.getAttribute('data-tree-entity-id') === node.entityId) {
+        onRowFocus?.(node.entityId);
+      }
+    },
+    [node.entityId, onRowFocus],
+  );
 
   // Drag state
   const isInvalidTarget = invalidTargetIds?.has(node.entityId) ?? false;
@@ -267,9 +294,11 @@ export function SceneNode({
     onDrop?.(node.entityId);
   }, [isInvalidTarget, isBeingDragged, node.entityId, onDrop]);
 
-  // Get selection styling
+  // Get selection styling. The focus ring is driven by React state (not
+  // :focus-visible) so it renders reliably for programmatic/keyboard focus,
+  // which the browser does not always treat as focus-visible (lesson #11).
   const getSelectionClasses = () => {
-    const focus = isFocused ? ' ring-1 ring-blue-400/60 ring-inset' : '';
+    const focus = isFocused ? ' ring-2 ring-inset ring-[var(--sf-accent)]' : '';
     if (isPrimary) {
       return 'bg-blue-600/30 border-l-2 border-blue-500' + focus;
     }
@@ -308,7 +337,10 @@ export function SceneNode({
       aria-expanded={hasChildren ? isExpanded : undefined}
       aria-level={depth + 1}
       aria-label={node.name}
-      className={getVisibilityClasses()}
+      data-tree-entity-id={node.entityId}
+      tabIndex={isRovingActive ? 0 : -1}
+      onFocus={handleRowFocus}
+      className={`outline-none ${getVisibilityClasses()}`}
     >
       {/* Drop indicator BEFORE */}
       {isDropTarget && dropTarget?.zone === 'before' && (
@@ -332,7 +364,7 @@ export function SceneNode({
       >
         {/* Expand/collapse chevron */}
         <button
-          className={`w-4 h-4 flex items-center justify-center text-neutral-500 hover:text-neutral-300 ${
+          className={`w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] ${
             !hasChildren ? 'invisible' : ''
           }`}
           onClick={handleExpandClick}
@@ -348,7 +380,7 @@ export function SceneNode({
 
         {/* Visibility toggle */}
         <button
-          className="w-4 h-4 flex items-center justify-center text-neutral-500 hover:text-neutral-300"
+          className="w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
           onClick={handleVisibilityClick}
           title={node.visible ? 'Hide entity' : 'Show entity'}
           aria-label={node.visible ? `Hide ${node.name}` : `Show ${node.name}`}
@@ -430,6 +462,8 @@ export function SceneNode({
                   focusedEntityId={focusedEntityId}
                   onToggleExpand={onToggleExpand}
                   expandedIds={expandedIds}
+                  rovingActiveId={rovingActiveId}
+                  onRowFocus={onRowFocus}
                 />
               );
             })}

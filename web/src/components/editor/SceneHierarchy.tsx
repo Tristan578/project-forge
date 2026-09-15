@@ -45,6 +45,36 @@ export function flattenVisibleNodes(
   return result;
 }
 
+/**
+ * Compute the next roving-tabindex position for a navigation key, given the
+ * current index and the length of the flattened visible list.
+ *
+ * - ArrowDown / ArrowUp wrap around the ends.
+ * - Home jumps to the first visible node, End to the last.
+ * - Any other key returns null (caller should ignore it).
+ *
+ * Returns null when the list is empty.
+ */
+export function computeNavIndex(
+  key: string,
+  currentIndex: number,
+  length: number,
+): number | null {
+  if (length === 0) return null;
+  switch (key) {
+    case 'ArrowDown':
+      return currentIndex < length - 1 ? currentIndex + 1 : 0;
+    case 'ArrowUp':
+      return currentIndex > 0 ? currentIndex - 1 : length - 1;
+    case 'Home':
+      return 0;
+    case 'End':
+      return length - 1;
+    default:
+      return null;
+  }
+}
+
 export const SceneHierarchy = memo(function SceneHierarchy() {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -92,6 +122,13 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
     return { ids, indexMap: map };
   }, [sceneGraph, effectiveExpandedIds, isFiltering, filterResult]);
 
+  // Roving tabindex target: the focused row if it is still visible, otherwise
+  // the first visible row. Exactly one row is in the tab order at a time.
+  const rovingActiveId =
+    focusedEntityId && indexMap.has(focusedEntityId)
+      ? focusedEntityId
+      : (flatNodeIds[0] ?? null);
+
   // Rename editing state (declared before handleKeyDown so F2 can reference it)
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
 
@@ -120,22 +157,39 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
     });
   }, []);
 
+  // Move DOM focus to a row by entity id. The target already exists in the DOM
+  // (it is only tabIndex=-1), so it is programmatically focusable even before
+  // React re-renders to flip its tabindex to 0.
+  const focusRow = useCallback((entityId: string) => {
+    const el = containerRef.current?.querySelector<HTMLElement>(
+      `[data-tree-entity-id="${CSS.escape(entityId)}"]`,
+    );
+    el?.focus();
+  }, []);
+
+  // Keep the roving index in sync when a row (or its icon-only control) is
+  // focused by pointer or Tab, so keyboard navigation resumes from there.
+  const handleRowFocus = useCallback((entityId: string) => {
+    setFocusedEntityId((prev) => (prev === entityId ? prev : entityId));
+  }, []);
+
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (flatNodeIds.length === 0) return;
 
     const currentIndex = focusedEntityId ? (indexMap.get(focusedEntityId) ?? -1) : -1;
 
     switch (e.key) {
-      case 'ArrowDown': {
+      case 'ArrowDown':
+      case 'ArrowUp':
+      case 'Home':
+      case 'End': {
         e.preventDefault();
-        const nextIndex = currentIndex < flatNodeIds.length - 1 ? currentIndex + 1 : 0;
-        setFocusedEntityId(flatNodeIds[nextIndex]);
-        break;
-      }
-      case 'ArrowUp': {
-        e.preventDefault();
-        const prevIndex = currentIndex > 0 ? currentIndex - 1 : flatNodeIds.length - 1;
-        setFocusedEntityId(flatNodeIds[prevIndex]);
+        const nextIndex = computeNavIndex(e.key, currentIndex, flatNodeIds.length);
+        if (nextIndex !== null) {
+          const nextId = flatNodeIds[nextIndex];
+          setFocusedEntityId(nextId);
+          focusRow(nextId);
+        }
         break;
       }
       case 'ArrowRight': {
@@ -148,6 +202,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
               toggleExpanded(focusedEntityId);
             } else if (node.children.length > 0) {
               setFocusedEntityId(node.children[0]);
+              focusRow(node.children[0]);
             }
           }
         }
@@ -163,6 +218,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
           } else if (node?.parentId) {
             // Move to parent
             setFocusedEntityId(node.parentId);
+            focusRow(node.parentId);
           }
         }
         break;
@@ -213,7 +269,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       default:
         return; // Don't prevent default for unhandled keys
     }
-  }, [flatNodeIds, indexMap, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId]);
+  }, [flatNodeIds, indexMap, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId, focusRow]);
 
   // Drag state
   const [dragState, setDragState] = useState<{
@@ -411,7 +467,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
 
       {/* Tree view */}
       <div
-        className="flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50"
+        className="flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]"
         data-editor-region="hierarchy"
         tabIndex={0}
         role="tree"
@@ -434,10 +490,17 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
                 onContextMenu={handleContextMenu}
                 isEditing={editingEntityId === rootId}
                 onEditComplete={(newName) => {
-                  if (newName && editingEntityId) {
-                    renameEntity(editingEntityId, newName);
+                  const editedId = editingEntityId;
+                  if (newName && editedId) {
+                    renameEntity(editedId, newName);
                   }
                   setEditingEntityId(null);
+                  // Return focus to the row so keyboard users are not dropped
+                  // back to the top of the document after an inline rename or
+                  // an Escape-cancel (Escape discards the unconfirmed edit).
+                  if (editedId) {
+                    requestAnimationFrame(() => focusRow(editedId));
+                  }
                 }}
                 isDragging={dragState.isDragging}
                 draggedEntityId={dragState.draggedEntityId}
@@ -453,6 +516,8 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
                 focusedEntityId={focusedEntityId}
                 onToggleExpand={toggleExpanded}
                 expandedIds={effectiveExpandedIds}
+                rovingActiveId={rovingActiveId}
+                onRowFocus={handleRowFocus}
               />
             );
           })
