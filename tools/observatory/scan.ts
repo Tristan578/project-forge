@@ -25,7 +25,7 @@
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 /** Declared confidence in a file-to-capability mapping; not runtime validation. */
 export type Confidence = 'extracted' | 'reviewed';
@@ -687,11 +687,29 @@ async function main(): Promise<void> {
   process.stdout.write(`observatory: wrote ${inventoryPath}\nobservatory: wrote ${reportPath}\n`);
 }
 
-const invokedDirectly =
-  typeof process !== 'undefined' &&
-  Array.isArray(process.argv) &&
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
+/**
+ * Detect a direct CLI invocation. Comparing import.meta.url to argv[1] as raw
+ * strings breaks whenever the entry path crosses a symlink: Node resolves
+ * import.meta.url to the realpath while process.argv[1] keeps the caller's
+ * spelling (on macOS the OS temp dir is /var -> /private/var), so the two never
+ * match, main() never runs, and the CLI silently exits 0 having written nothing.
+ * Compare resolved realpaths so a symlinked invocation path still counts.
+ */
+function isInvokedDirectly(): boolean {
+  if (typeof process === 'undefined' || !Array.isArray(process.argv) || process.argv[1] === undefined) {
+    return false;
+  }
+  const modulePath = fileURLToPath(import.meta.url);
+  const entryPath = process.argv[1];
+  if (modulePath === entryPath) return true;
+  try {
+    return fs.realpathSync(modulePath) === fs.realpathSync(entryPath);
+  } catch {
+    return false;
+  }
+}
+
+const invokedDirectly = isInvokedDirectly();
 
 if (invokedDirectly) {
   main().catch((err: unknown) => {

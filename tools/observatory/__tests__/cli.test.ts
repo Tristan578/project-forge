@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,6 +140,25 @@ describe('observatory CLI', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('ENOENT');
     expect(result.stdout).not.toContain('observatory: wrote');
+  });
+
+  it('runs when the entry path is reached through a symlink', () => {
+    // A symlinked entry path makes process.argv[1] differ from the module's
+    // resolved realpath (the same mismatch macOS produces via /var -> /private/var).
+    // The direct-invocation guard must resolve realpaths, or main() silently
+    // no-ops: exit 0 with nothing written.
+    const f = fixture();
+    const linkDir = join(f.repo, 'linked-tools');
+    symlinkSync(f.tool, linkDir);
+    const result = spawnSync(process.execPath, ['--import', tsxLoader, join(linkDir, 'scan.ts')], {
+      cwd: f.repo,
+      env: { ...process.env, OBSERVATORY_OUT_DIR: f.out },
+      encoding: 'utf8',
+      timeout: 15_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('observatory: wrote');
+    expect(existsSync(join(f.out, 'inventory.json'))).toBe(true);
   });
 
   it('keeps default generated artifacts out of the tracked denominator', () => {
