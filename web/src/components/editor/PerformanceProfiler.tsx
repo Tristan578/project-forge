@@ -285,7 +285,7 @@ export function PerformanceProfiler() {
               className="mt-3 pt-3 border-t border-gray-700 space-y-1"
               aria-label="Captured measurement manifest"
             >
-              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+              <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">
                 Measurement manifest
               </div>
               {MANIFEST_ROWS.map(([key, label]) => {
@@ -295,7 +295,7 @@ export function PerformanceProfiler() {
                 return (
                   <div key={key} className="flex justify-between text-xs">
                     <span className="text-gray-400">{label}</span>
-                    <span className={isUnknown ? 'text-gray-500 italic' : ''}>{display}</span>
+                    <span className={isUnknown ? 'text-gray-400 italic' : ''}>{display}</span>
                   </div>
                 );
               })}

@@ -401,7 +401,10 @@ let loadAbortController: AbortController | null = null;
 /** Actual rendering backend chosen by loadWasm (not just capability detection). */
 let resolvedBackend: 'webgpu' | 'webgl2' = 'webgl2';
 
-/** Backend of the initialized editor engine, including explicit and automatic fallback. */
+/**
+ * Read the initialized editor's selected backend, including fallback.
+ * @returns WebGPU or WebGL2 when ready; unknown before initialization, after reset or after a crash.
+ */
 export function getActiveEngineBackend(): 'webgpu' | 'webgl2' | 'unknown' {
   return currentLoadingState.phase === 'ready' && !_engineCrashed ? resolvedBackend : 'unknown';
 }

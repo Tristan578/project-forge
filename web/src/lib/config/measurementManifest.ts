@@ -5,7 +5,7 @@
  *
  * A measurement is only trustworthy if you know the machine and build it was
  * taken on. This manifest pins that identity alongside every captured
- * performance report: build SHA, fixture checksum, OS, exact browser version,
+ * performance report: build SHA, fixture checksum, OS, browser major version,
  * GPU/driver, render backend, viewport, device memory, warm/cold cache state
  * and sample count.
  *
@@ -26,6 +26,7 @@ export const MEASUREMENT_MANIFEST_SCHEMA_VERSION = 1;
 
 /** Sentinel for any field the runtime cannot determine. Never substitute 0/false/''. */
 export const UNKNOWN = 'unknown' as const;
+/** Literal type for metadata the runtime cannot determine. */
 export type Unknown = typeof UNKNOWN;
 
 /** Render backend the engine actually runs on. */
@@ -55,7 +56,7 @@ export interface MeasurementManifest {
   fixtureChecksum: string | Unknown;
   /** Operating system family (e.g. `'macOS'`, `'Windows'`), or `'unknown'`. */
   os: string | Unknown;
-  /** Exact browser name + major version (e.g. `'Chrome 140'`), or `'unknown'`. */
+  /** Browser name and major version (e.g. `'Chrome 140'`), or `'unknown'`. */
   browserVersion: string | Unknown;
   /** GPU/driver string when the platform exposes it, else `'unknown'`. */
   gpuDriver: string | Unknown;
@@ -88,6 +89,8 @@ export interface ManifestWindow {
 /**
  * Parse an OS family out of a user-agent string.
  * Returns {@link UNKNOWN} when the string is absent or unrecognized — never a guess.
+ * @param userAgent Browser user-agent string, if available.
+ * @returns Recognized OS family or the unknown sentinel.
  */
 export function parseOs(userAgent: string | undefined): string | Unknown {
   if (!userAgent) return UNKNOWN;
@@ -105,8 +108,10 @@ export function parseOs(userAgent: string | undefined): string | Unknown {
  * Parse a browser name + major version out of a user-agent string.
  * Returns {@link UNKNOWN} when the string is absent or unrecognized.
  *
- * Order matters: Edge and Brave/Opera masquerade as Chrome, so the more
+ * Order matters: Edge and Opera include Chrome tokens, so the more
  * specific tokens are matched first.
+ * @param userAgent Browser user-agent string, if available.
+ * @returns Recognized browser name and major version, or unknown.
  */
 export function parseBrowserVersion(userAgent: string | undefined): string | Unknown {
   if (!userAgent) return UNKNOWN;
@@ -130,6 +135,8 @@ export function parseBrowserVersion(userAgent: string | undefined): string | Unk
  * Read `navigator.deviceMemory` as an approximate device-memory figure in GiB.
  * Returns {@link UNKNOWN} unless the value is a finite, positive number — a
  * missing API must not read as `0` GiB of RAM.
+ * @param nav Navigator surface exposing optional device memory.
+ * @returns Finite positive memory estimate in GiB, or unknown.
  */
 export function readDeviceMemory(nav: ManifestNavigator | undefined): number | Unknown {
   const dm = nav?.deviceMemory;
@@ -148,6 +155,8 @@ export function readDeviceMemory(nav: ManifestNavigator | undefined): number | U
  * `nav` is required (pass {@link defaultNavigator}'s result for the global):
  * an explicit `undefined` models "no navigator" and yields `'unknown'`, which a
  * default parameter could not distinguish from "argument omitted".
+ * @param nav Navigator surface to probe, or undefined when unavailable.
+ * @returns WebGPU when an adapter is available, WebGL2 otherwise, or unknown without a navigator.
  */
 export async function detectRenderBackend(
   nav: ManifestNavigator | undefined,
@@ -174,6 +183,8 @@ export async function detectRenderBackend(
  *
  * Uses a synchronous djb2 variant (matching `promptCache.computeKey`'s
  * fallback) so the manifest builder stays pure and non-async.
+ * @param bytes Serialized scene text or UTF-8 bytes; null/undefined means absent.
+ * @returns An eight-digit noncryptographic checksum, or unknown for empty input.
  */
 export function computeFixtureChecksum(
   bytes: string | Uint8Array | null | undefined,
@@ -242,6 +253,8 @@ function readViewport(win: ManifestWindow | undefined): ManifestViewport | Unkno
  * `backend`, `fixtureChecksum` and `cacheState` are resolved by the caller
  * (backend detection is async; the others are run-specific) — when omitted they
  * are recorded as `'unknown'` rather than assumed.
+ * @param options Caller-supplied metadata and optional navigator/window surfaces.
+ * @returns A complete versioned manifest with explicit unknown metadata.
  */
 export function buildMeasurementManifest(options: BuildManifestOptions = {}): MeasurementManifest {
   // `'nav' in options` (not `?? default`) lets a caller pass `undefined`
@@ -278,6 +291,8 @@ export function buildMeasurementManifest(options: BuildManifestOptions = {}): Me
  * Convenience async wrapper: resolve the render backend, then build the
  * manifest. Callers capturing a running engine must provide its actual backend
  * (or explicit 'unknown') to avoid substituting capability for observed state.
+ * @param options Manifest inputs, including an actual backend for engine captures.
+ * @returns A complete manifest, probing backend capability only if no backend was supplied.
  */
 export async function buildMeasurementManifestAsync(
   options: BuildManifestOptions = {},
