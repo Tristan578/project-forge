@@ -24,6 +24,7 @@ mod component_resync;
 mod core_systems;
 mod material;
 mod performance;
+mod observability_bridge;
 mod physics;
 mod audio;
 mod query;
@@ -731,6 +732,50 @@ impl Plugin for SelectionPlugin {
                 skeleton2d::apply_skeleton2d_skin_sets,
                 skeleton2d::handle_skeleton2d_query,
             ));
+
+        // Per-system-group CPU timing (performance.FR-1.OP-01/OP-04, #9880).
+        // Always-present: a capture session stays inert until JS calls
+        // `set_system_timing_capture`, so idle overhead is a single branch per
+        // bracket per frame. Each bracket is ordered around a representative
+        // anchor for its group via `.before`/`.after`; the brackets take no
+        // anchor resources, so they add no ordering edge beyond that pair and
+        // cannot perturb the order of the gameplay systems they wrap. Scripting,
+        // Bridge and Physics are instrumented here; Rendering/GPU (OP-02) is not,
+        // so it is never recorded and reaches the UI as "unknown", not 0.
+        app.init_resource::<crate::core::system_timing::SystemTimingBuffer>()
+            .init_resource::<observability_bridge::SystemTimingScratch>()
+            .add_systems(First, observability_bridge::apply_system_timing_capture_request)
+            .add_systems(
+                Update,
+                observability_bridge::begin_scripting_timing
+                    .before(scripts::emit_play_tick_system),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::end_scripting_timing
+                    .after(scripts::emit_play_tick_system),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::begin_bridge_timing
+                    .before(core_systems::apply_pending_transforms),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::end_bridge_timing
+                    .after(core_systems::apply_pending_transforms),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::begin_physics_timing
+                    .before(crate::core::engine_mode::PlaySystemSet),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::end_physics_timing
+                    .after(crate::core::engine_mode::PlaySystemSet),
+            )
+            .add_systems(Last, observability_bridge::commit_and_emit_system_timings);
 
         // Editor-only systems and observers
         #[cfg(not(feature = "runtime"))]
