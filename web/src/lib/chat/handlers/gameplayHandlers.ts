@@ -10,6 +10,7 @@ import type { GameCameraData, EntityType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
 import { buildStoreComponent, ENGINE_COMPONENT_TYPES, ENGINE_COMPONENT_CATALOG } from '@/lib/engine/gameComponentWire';
 import { NUMERIC_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
+import { LINKED_PREFAB_UNAVAILABLE_REASON } from '@/lib/prefabs/prefabAvailability';
 
 // Derived, not hand-listed: the hand-written list had silently fallen one type
 // behind the engine (it omitted `dialogue_trigger`), so the AI was told that type
@@ -307,6 +308,55 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     const prefab = getPrefab(p.data.prefabId);
     return prefab ? { success: true, result: prefab } : { success: false, error: 'Prefab not found' };
+  },
+
+  // Keep compatibility with saved tool calls, but never report a registry-only
+  // mutation as successful scene editing. Engine integration remains on #9811.
+  create_prefab_instance: async (args, _ctx) => {
+    const p = parseArgs(z.object({
+      prefabId: z.string().min(1),
+      overrides: z.record(z.string(), z.unknown()).optional(),
+      entityId: z.string().min(1).optional(),
+    }), args);
+    if (p.error) return p.error;
+    return { success: false, error: LINKED_PREFAB_UNAVAILABLE_REASON, result: { code: 'unavailable' } };
+  },
+
+  nest_prefab: async (args, _ctx) => {
+    const p = parseArgs(z.object({
+      parentPrefabId: z.string().min(1),
+      childPrefabId: z.string().min(1),
+      overrides: z.record(z.string(), z.unknown()).optional(),
+    }), args);
+    if (p.error) return p.error;
+    return { success: false, error: LINKED_PREFAB_UNAVAILABLE_REASON, result: { code: 'unavailable' } };
+  },
+
+  apply_prefab_to_instances: async (args, _ctx) => {
+    const p = parseArgs(z.object({ prefabId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    return { success: false, error: LINKED_PREFAB_UNAVAILABLE_REASON, result: { code: 'unavailable' } };
+  },
+
+  list_prefab_instances: async (args, _ctx) => {
+    const { getPrefab, getPrefabInstances } = await import('@/lib/prefabs/prefabStore');
+    const { getOverriddenFields } = await import('@/lib/prefabs/prefabInstance');
+    const p = parseArgs(z.object({ prefabId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    // Resolve first — every other new prefab operation rejects a missing
+    // source, and without this a deleted/unknown id filters the registry to
+    // nothing and reads exactly like a real prefab with zero instances.
+    const source = getPrefab(p.data.prefabId);
+    if (!source) return { success: false, error: `Prefab not found: ${p.data.prefabId}` };
+    // Canonical `source.id` — `p.data.prefabId` may be a NAME, and every
+    // stored `PrefabInstance.prefabId` is a canonical id.
+    const instances = getPrefabInstances(source.id).map((i) => ({
+      instanceId: i.instanceId,
+      prefabId: i.prefabId,
+      entityId: i.entityId,
+      overriddenFields: getOverriddenFields(i),
+    }));
+    return { success: true, result: { instances, scope: 'editor_metadata', message: 'Saved link metadata only; these records do not verify scene placement or propagation.' } };
   },
 
   export_game: async (args, ctx) => {

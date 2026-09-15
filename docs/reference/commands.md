@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 360 MCP commands available in SpawnForge.
+Reference for all 364 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -27,7 +27,7 @@ Complete reference for all 360 MCP commands available in SpawnForge.
 - [Export](#export) (6 commands)
 - [Documentation](#documentation) (3 commands)
 - [Shaders](#shaders) (10 commands)
-- [Prefab](#prefab) (5 commands)
+- [Prefab](#prefab) (9 commands)
 - [Game_components](#game_components) (5 commands)
 - [Game_cameras](#game_cameras) (4 commands)
 - [Generation](#generation) (24 commands)
@@ -1588,7 +1588,7 @@ Scope: `scene:read` | Token cost: 0
 
 ### `get_input_bindings`
 
-Get all current input action bindings and active preset
+Get all current input action bindings and active preset, including any additional local players' maps under `players`
 
 **Example:**
 ```json
@@ -1886,6 +1886,7 @@ Create or update an input action binding (e.g. map 'jump' to Space key)
 | `positiveKeys` | string[] | No | Positive direction keys for axis actions |
 | `negativeKeys` | string[] | No | Negative direction keys for axis actions |
 | `deadZone` | number | No | Dead zone for axis (default 0.1) |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -1909,6 +1910,7 @@ Remove an input action binding by name
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `actionName` | string | Yes | Name of the action to remove |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -1926,11 +1928,12 @@ Scope: `scene:write` | Token cost: 0
 
 ### `set_input_preset`
 
-Apply a built-in input preset (replaces all bindings)
+Merge a built-in input preset into a player's bindings (additive; the preset's own actions win on name collisions)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `preset` | `"fps"` \| `"platformer"` \| `"topdown"` \| `"racing"` | Yes | Preset name |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -4819,6 +4822,99 @@ Get full prefab data by ID or name
 ```json
 {
   "command": "get_prefab",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `create_prefab_instance`
+
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `overrides` | object | No | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `entityId` | string | No | Reserved for future linked prefab editing; this command currently makes no changes. |
+
+**Example:**
+```json
+{
+  "command": "create_prefab_instance",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `nest_prefab`
+
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `parentPrefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `childPrefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `overrides` | object | No | Reserved for future linked prefab editing; this command currently makes no changes. |
+
+**Example:**
+```json
+{
+  "command": "nest_prefab",
+  "params": {
+    "parentPrefabId": "my_parentPrefabId",
+    "childPrefabId": "my_childPrefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `apply_prefab_to_instances`
+
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+
+**Example:**
+```json
+{
+  "command": "apply_prefab_to_instances",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `list_prefab_instances`
+
+Inspect saved editor link metadata for a prefab by ID or name, including overridden field names. Records do not verify scene entity placement or propagation. This read is not advertised to the in-app chat model.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Source prefab whose instances to list |
+
+**Example:**
+```json
+{
+  "command": "list_prefab_instances",
   "params": {
     "prefabId": "my_prefabId"
   }

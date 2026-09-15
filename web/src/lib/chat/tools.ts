@@ -2,7 +2,7 @@
  * Anthropic tool definitions for the AI chat API.
  *
  * Sourced from mcp-server/manifest/commands.json via web/src/data/commands.json.
- * Only public-visibility commands are exposed. Run `npm run check:manifest-sync`
+ * Available write-scoped and query commands are exposed. Run `npm run check:manifest-sync`
  * from the repo root to verify both copies are identical.
  */
 

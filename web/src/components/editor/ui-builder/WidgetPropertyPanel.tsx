@@ -1,7 +1,16 @@
 'use client';
 
-import { useUIBuilderStore, type UIWidget } from '@/stores/uiBuilderStore';
+import { useUIBuilderStore, type UIWidget, type WidgetConstraints } from '@/stores/uiBuilderStore';
 import { DataBindingEditor } from './DataBindingEditor';
+
+const EMPTY_CONSTRAINTS: WidgetConstraints = {
+  offsetX: 0,
+  offsetY: 0,
+  minWidth: null,
+  maxWidth: null,
+  minHeight: null,
+  maxHeight: null,
+};
 
 export function WidgetPropertyPanel() {
   const activeScreenId = useUIBuilderStore((s) => s.activeScreenId);
@@ -42,6 +51,39 @@ export function WidgetPropertyPanel() {
     const updatedConfig = { ...widget.config, [field]: value };
     updateWidget(activeScreenId, widget.id, { config: updatedConfig } as Partial<UIWidget>);
   };
+
+  const constraints: WidgetConstraints = widget.constraints ?? EMPTY_CONSTRAINTS;
+
+  const handleOffsetChange = (field: 'offsetX' | 'offsetY', raw: string) => {
+    const n = Number(raw);
+    const next: WidgetConstraints = { ...constraints, [field]: Number.isFinite(n) ? n : 0 };
+    updateWidget(activeScreenId, widget.id, { constraints: next });
+  };
+
+  const handleBoundChange = (
+    field: 'minWidth' | 'maxWidth' | 'minHeight' | 'maxHeight',
+    raw: string
+  ) => {
+    // Empty input clears the bound (unconstrained); negatives clamp to 0.
+    let value: number | null = null;
+    if (raw.trim() !== '') {
+      const n = Number(raw);
+      value = Number.isFinite(n) ? Math.max(0, n) : null;
+    }
+    const next: WidgetConstraints = { ...constraints, [field]: value };
+    updateWidget(activeScreenId, widget.id, { constraints: next });
+  };
+
+  const widthConflict =
+    constraints.minWidth !== null &&
+    constraints.maxWidth !== null &&
+    constraints.minWidth > constraints.maxWidth;
+  const heightConflict =
+    constraints.minHeight !== null &&
+    constraints.maxHeight !== null &&
+    constraints.minHeight > constraints.maxHeight;
+
+  const boundValue = (v: number | null): string => (v === null ? '' : String(v));
 
   return (
     <div className="space-y-3 text-xs">
@@ -131,6 +173,100 @@ export function WidgetPropertyPanel() {
             <option value="bottom_right">Bottom Right</option>
           </select>
         </label>
+
+        {/* Responsive layout constraints (ui.FR-1.OP-01) */}
+        <div className="border-t border-zinc-800 pt-2">
+          <span className="text-zinc-400 block mb-1 font-semibold">Layout Constraints</span>
+          <p className="text-zinc-500 text-[10px] mb-2">
+            Pixel offsets from the anchor and min/max size bounds. Leave a bound blank for
+            unconstrained. Bounds keep core actions tappable (e.g. 44px) from mobile to desktop.
+          </p>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="text-zinc-400">Offset X (px)</span>
+              <input
+                type="number"
+                step="1"
+                value={constraints.offsetX}
+                onChange={(e) => handleOffsetChange('offsetX', e.target.value)}
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
+              />
+            </label>
+            <label className="block">
+              <span className="text-zinc-400">Offset Y (px)</span>
+              <input
+                type="number"
+                step="1"
+                value={constraints.offsetY}
+                onChange={(e) => handleOffsetChange('offsetY', e.target.value)}
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <label className="block">
+              <span className="text-zinc-400">Min Width (px)</span>
+              <input
+                type="number"
+                min="0"
+                placeholder="none"
+                value={boundValue(constraints.minWidth)}
+                onChange={(e) => handleBoundChange('minWidth', e.target.value)}
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
+              />
+            </label>
+            <label className="block">
+              <span className="text-zinc-400">Max Width (px)</span>
+              <input
+                type="number"
+                min="0"
+                placeholder="none"
+                value={boundValue(constraints.maxWidth)}
+                onChange={(e) => handleBoundChange('maxWidth', e.target.value)}
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
+              />
+            </label>
+          </div>
+          {widthConflict && (
+            <p role="alert" className="text-amber-400 text-[10px] mt-1">
+              Min Width ({constraints.minWidth}px) exceeds Max Width ({constraints.maxWidth}px); the
+              minimum will win at render.
+            </p>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <label className="block">
+              <span className="text-zinc-400">Min Height (px)</span>
+              <input
+                type="number"
+                min="0"
+                placeholder="none"
+                value={boundValue(constraints.minHeight)}
+                onChange={(e) => handleBoundChange('minHeight', e.target.value)}
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
+              />
+            </label>
+            <label className="block">
+              <span className="text-zinc-400">Max Height (px)</span>
+              <input
+                type="number"
+                min="0"
+                placeholder="none"
+                value={boundValue(constraints.maxHeight)}
+                onChange={(e) => handleBoundChange('maxHeight', e.target.value)}
+                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300"
+              />
+            </label>
+          </div>
+          {heightConflict && (
+            <p role="alert" className="text-amber-400 text-[10px] mt-1">
+              Min Height ({constraints.minHeight}px) exceeds Max Height ({constraints.maxHeight}px);
+              the minimum will win at render.
+            </p>
+          )}
+        </div>
 
         <div className="flex items-center gap-4">
           <label className="flex items-center gap-2">

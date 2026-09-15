@@ -1629,22 +1629,30 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          # Activates web/e2e/lib/uiSuiteReporter.ts, which selects the @ui
+          # suite in preprocess() — @ui and not @engine-ui/@journey — and FAILS
+          # the run when that count is zero or implausibly low. It replaces the
+          # `--grep '@ui' --grep-invert '@engine-ui|@journey'` pair (#9636): a
+          # grep-invert can never report how many tests it removed, which is the
+          # #9586 failure mode this whole job exists to prevent. The @api job
+          # shares playwright.ci.config.ts but does NOT set this, so the reporter
+          # is a no-op there.
+          PW_UI_SUITE: '1'
         # Two tags are excluded, for two different reasons.
         #
         # @journey needs E2E_STRICT_STORES on top of the hooks build, and has its
         # own gate (test-e2e-journey) that sets it.
         #
-        # @engine-ui marks the 37 specs that assert on the canvas. The editor
-        # holds #game-canvas `invisible` until the Bevy/wgpu renderer starts, and
-        # this job has no WASM engine and launches with --disable-gpu, so those
-        # specs cannot pass here no matter what the build sets. They run in
+        # @engine-ui marks the specs that assert on the canvas. The editor holds
+        # #game-canvas `invisible` until the Bevy/wgpu renderer starts, and this
+        # job has no WASM engine and launches with --disable-gpu, so those specs
+        # cannot pass here no matter what the build sets. They run in
         # test-e2e-engine-smoke, which has the engine and a software GL context.
-        # Selection, counted from the specs themselves rather than from a
-        # remembered run: 422 @ui tests total, 37 tagged @engine-ui, so 385 are
-        # selected here. scripts/__tests__/e2e-tag-routing.test.sh keeps this
-        # honest -- it asserts the tag is real, that something else runs it, and
-        # that cd.yml selects exactly the same set.
-        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+        # The selection tags and the plausibility floor live in
+        # web/e2e/lib/uiSuiteReporter.ts; scripts/__tests__/e2e-tag-routing.test.sh
+        # keeps this honest — it asserts the tag is real, that something else
+        # runs the excluded tags, and that cd.yml activates the same selection.
+        run: npx playwright test --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
