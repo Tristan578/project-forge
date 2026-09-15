@@ -2,3 +2,6 @@
 node_modules/
 content/mcp/*.mdx
 .vercel
+
+# fumadocs-mdx generated loader index (regenerated on build/postinstall)
+.source/

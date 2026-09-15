@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { createMDX } from 'fumadocs-mdx/next';
 import { assertClerkPublishableKeyShape } from './lib/clerk';
 
 // Fail the build on a Clerk configuration that cannot work. A MISSING pair is
@@ -21,4 +22,12 @@ if (process.env.INCLUDE_INTERNAL === 'true' && !process.env.IS_INTERNAL_DOCS_BUI
 }
 
 const nextConfig: NextConfig = {};
-export default nextConfig;
+
+// Compile the MDX under `content/` and generate the `.source` loader index that
+// `lib/source.ts` consumes. Without this the 291 generated command pages plus
+// the two index pages never compile and nothing can render them (#9061). The
+// Clerk and INCLUDE_INTERNAL guards above stay in force — they run at module
+// load, before this wrapper is applied.
+const withMDX = createMDX();
+
+export default withMDX(nextConfig);
