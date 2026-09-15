@@ -52,9 +52,14 @@ describe('ClipEditor decoded source bounds', () => {
     expect(end).toBeEnabled();
     expect(end).toHaveValue(4);
     expect(end).toHaveAttribute('max', '4');
+    // Edits commit on blur, not per keystroke: the typed value shows as-is, and
+    // sample-snapping only happens once the edit is committed.
     fireEvent.change(end, { target: { value: '2.31' } });
+    expect(end).toHaveValue(2.31);
+    fireEvent.blur(end);
     expect(end).toHaveValue(2.25); // 18 samples at the decoded 8 Hz rate.
     fireEvent.change(end, { target: { value: '4.5' } });
+    fireEvent.blur(end);
     expect(screen.getByRole('alert')).toHaveTextContent('cannot exceed the clip length');
     expect(end).toHaveValue(2.25);
     expect(source.fetchMock).toHaveBeenCalledOnce();
@@ -65,14 +70,18 @@ describe('ClipEditor decoded source bounds', () => {
     const source = mockDeferredDecode();
     render(<ClipEditor assetId={asset.id} asset={asset} sourceBounds={{ durationSec: 1, sampleRate: 8 }} />);
     const end = screen.getByLabelText('Trim end');
+    const gain = screen.getByLabelText('Gain');
     fireEvent.change(end, { target: { value: '0.5' } });
-    fireEvent.change(screen.getByLabelText('Gain'), { target: { value: '-6' } });
+    fireEvent.blur(end);
+    fireEvent.change(gain, { target: { value: '-6' } });
+    fireEvent.blur(gain);
     await waitFor(() => expect(source.decode).toHaveBeenCalledOnce());
     await act(async () => source.resolveDecode());
     expect(end).toHaveValue(0.5);
-    expect(screen.getByLabelText('Gain')).toHaveValue(-6);
+    expect(gain).toHaveValue(-6);
     expect(end).toHaveAttribute('max', '4');
     fireEvent.change(end, { target: { value: '3' } });
+    fireEvent.blur(end);
     expect(end).toHaveValue(3);
   });
 
