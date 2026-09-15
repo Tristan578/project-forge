@@ -32,9 +32,11 @@ vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }),
 }));
 
+const atomicQuery = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/db/client', () => ({
   queryWithResilience: vi.fn((fn: () => unknown) => fn()),
   getDb: vi.fn(),
+  getNeonSql: () => atomicQuery,
 }));
 
 vi.mock('@/lib/moderation/contentFilter', () => ({
@@ -84,6 +86,7 @@ function makeProject(overrides: Partial<Record<string, unknown>> = {}) {
     id: 'proj-1',
     userId: 'user-1',
     title: 'My Game',
+    sceneData: { entities: [] },
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -114,8 +117,7 @@ function makePublication(overrides: Partial<Record<string, unknown>> = {}) {
  * 1. select existing published games (for tier limit check)
  * 2. select existing slug (returns empty — new publication)
  * 3. select project (returns the project)
- * 4. insert publication → returning [publication]
- * 5. insert tags (no return value needed)
+ * 4. atomic Neon statement commits the publication, snapshot, and tags
  */
 function makeNewPublicationDb(options: {
   existingCount?: number;
@@ -128,17 +130,7 @@ function makeNewPublicationDb(options: {
 
   const existingRows = Array.from({ length: existingCount }, (_, i) => ({ id: `pub-${i}` }));
 
-  const mockInsert = vi.fn().mockReturnValue({
-    values: vi.fn().mockReturnValue({
-      onConflictDoUpdate: vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([pub]),
-      }),
-    }),
-  });
-
-  const mockInsertTags = vi.fn().mockReturnValue({
-    values: vi.fn().mockResolvedValue([]),
-  });
+  atomicQuery.mockResolvedValue([{ publication: pub }]);
 
   const selectMock = vi.fn()
     .mockReturnValueOnce({
@@ -161,10 +153,6 @@ function makeNewPublicationDb(options: {
 
   return {
     select: selectMock,
-    insert: vi.fn()
-      .mockReturnValueOnce(mockInsert()) // publication insert
-      .mockReturnValueOnce(mockInsertTags()), // tags insert (if tags exist)
-    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   };
 }
 
@@ -177,6 +165,7 @@ describe('POST /api/publish', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    atomicQuery.mockReset();
     vi.resetModules();
 
     // Default: authenticated as hobbyist
@@ -570,15 +559,7 @@ describe('POST /api/publish', () => {
       };
       const updatedPub = makePublication({ id: 'pub-existing', version: 3 });
 
-      const mockUpdate = vi.fn().mockReturnValue({
-        set: () => ({ where: () => Promise.resolve() }),
-      });
-      const mockDelete = vi.fn().mockReturnValue({
-        where: () => Promise.resolve(),
-      });
-      const mockInsertTags = vi.fn().mockReturnValue({
-        values: () => Promise.resolve(),
-      });
+      atomicQuery.mockResolvedValue([{ publication: updatedPub }]);
 
       const selectMock = vi.fn()
         .mockReturnValueOnce({
@@ -600,19 +581,10 @@ describe('POST /api/publish', () => {
               limit: () => Promise.resolve([makeProject()]),
             }),
           }),
-        })
-        .mockReturnValueOnce({
-          // final select after update
-          from: () => ({
-            where: () => Promise.resolve([updatedPub]),
-          }),
         });
 
       vi.mocked(getDb).mockReturnValue({
         select: selectMock,
-        update: mockUpdate,
-        delete: mockDelete,
-        insert: mockInsertTags,
       } as never);
 
       const res = await POST(makeRequest(validBody()));
@@ -620,6 +592,8 @@ describe('POST /api/publish', () => {
 
       const body = await res.json();
       expect(body).toHaveProperty('publication');
+      expect(body.publication.version).toBe(3);
+      expect(atomicQuery).toHaveBeenCalledTimes(1);
     });
 
     it('refuses to republish a game under a moderation hold (#8354)', async () => {
@@ -657,7 +631,8 @@ describe('POST /api/publish', () => {
 
       expect(res.status).toBe(403);
       expect(body.code).toBe('MODERATION_HOLD');
-      // The status flip must never run.
+      // Neither the atomic commit nor a legacy status update may run.
+      expect(atomicQuery).not.toHaveBeenCalled();
       expect(mockUpdate).not.toHaveBeenCalled();
     });
 
@@ -715,6 +690,7 @@ describe('POST /api/publish', () => {
       expect(res.status).toBe(403);
       expect(body.code).toBe('MODERATION_HOLD');
       // Neither a republish of the held row nor a fresh publication.
+      expect(atomicQuery).not.toHaveBeenCalled();
       expect(mockUpdate).not.toHaveBeenCalled();
       expect(mockInsert).not.toHaveBeenCalled();
     });

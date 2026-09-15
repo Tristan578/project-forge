@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, fireEvent, waitFor } from '@/test/utils/componentTestUtils';
 import { GameDetailModal } from '../GameDetailModal';
 
 vi.mock('lucide-react', () => ({
@@ -25,19 +25,9 @@ vi.mock('../CommentSection', () => ({
   CommentSection: () => <div data-testid="comment-section" />,
 }));
 
+const mockPush = vi.hoisted(() => vi.fn());
 vi.mock('next/navigation', () => ({
-  useRouter: vi.fn(() => ({ push: vi.fn() })),
-}));
-
-vi.mock('@/stores/communityStore', () => ({
-  useCommunityStore: vi.fn(() => ({
-    likedGameIds: new Set(),
-    userRatings: {},
-    likeGame: vi.fn(),
-    unlikeGame: vi.fn(),
-    rateGame: vi.fn(),
-    forkGame: vi.fn(),
-  })),
+  useRouter: vi.fn(() => ({ push: mockPush })),
 }));
 
 // Mock fetch for game detail endpoint
@@ -90,6 +80,84 @@ describe('GameDetailModal', () => {
     expect(title).toBeDefined();
     expect(screen.getByText('by Author')).toBeDefined();
     expect(screen.getByText('A great game')).toBeDefined();
+  });
+
+  it('points the Play Game link at the /play route, never a raw R2 bundle url (#7580)', async () => {
+    // Regression guard for the #7580 review: publish once repurposed cdnUrl to
+    // the absolute R2 bundle object URL when the mirror succeeded. This <a href>
+    // (and the share link built from it) is a playable-page link, so cdnUrl must
+    // stay the relative /play/{userId}/{slug} route. The publish route now keeps
+    // it there; this pins the consumer's expectation so the contract cannot
+    // silently drift back.
+    const playUrl = '/play/clerk_1/amazing-game';
+    const gameData = {
+      game: {
+        id: 'game-1',
+        title: 'Amazing Game',
+        description: 'A great game',
+        authorName: 'Author',
+        authorId: 'author-1',
+        playCount: 100,
+        likeCount: 25,
+        avgRating: 4.2,
+        ratingCount: 10,
+        ratingBreakdown: [],
+        tags: ['action'],
+        cdnUrl: playUrl,
+        createdAt: '2024-01-01',
+        comments: [],
+      },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(gameData),
+    });
+
+    render(<GameDetailModal gameId="game-1" onClose={vi.fn()} />);
+
+    const playLink = await screen.findByRole('link', { name: /Play Game/i });
+    const href = playLink.getAttribute('href');
+    expect(href).toBe(playUrl);
+    // A raw bundle object url would be an absolute https://…/bundle.json — the
+    // exact regression this guards against.
+    expect(href).not.toMatch(/^https?:\/\//);
+    expect(href).not.toContain('bundle.json');
+  });
+
+  it.each([
+    { quarantinedScripts: 3, query: '?quarantinedScripts=3' },
+    { quarantinedScripts: 0, query: '' },
+    { quarantinedScripts: undefined, query: '' },
+    { quarantinedScripts: '3&redirect=elsewhere', query: '' },
+  ])('opens the forked editor with the quarantine notice for count $quarantinedScripts', async ({ quarantinedScripts, query }) => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          game: {
+            id: 'game-1', title: 'Remixable Game', description: null,
+            authorName: 'Author', authorId: 'author-1',
+            playCount: 0, likeCount: 0, avgRating: 0, ratingCount: 0,
+            ratingBreakdown: [], tags: [], cdnUrl: null,
+            createdAt: '2024-01-01', comments: [],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ projectId: 'project /?#', quarantinedScripts }),
+      });
+    const onClose = vi.fn();
+
+    // Exercise the real store so the API count must survive both boundaries.
+    render(<GameDetailModal gameId="game-1" onClose={onClose} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Fork' }));
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(`/editor/project%20%2F%3F%23${query}`);
+    });
+    expect(mockFetch).toHaveBeenCalledWith('/api/community/games/game-1/fork', { method: 'POST' });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('renders nothing if game fetch fails', async () => {

@@ -348,21 +348,48 @@ describe('communityStore', () => {
       expect(state.games[0].ratingCount).toBe(21);
     });
 
-    it('should fork a game and return project ID', async () => {
+    it('returns the forked project with no quarantine count for an older response', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: true,
         json: async () => ({ projectId: 'proj-123' }),
       } as Response);
 
       const { forkGame } = useCommunityStore.getState();
-      const projectId = await forkGame('game-1');
+      const result = await forkGame('game-1');
 
-      expect(projectId).toBe('proj-123');
+      expect(result).toEqual({ projectId: 'proj-123', quarantinedScripts: 0 });
       expect(fetch).toHaveBeenCalledWith(
         '/api/community/games/game-1/fork',
         expect.objectContaining({ method: 'POST' })
       );
     });
+
+    it.each([0, 1, 7])('preserves a valid quarantine count of %s after forking', async (quarantinedScripts) => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ projectId: 'proj-123', quarantinedScripts }),
+      } as Response);
+
+      await expect(useCommunityStore.getState().forkGame('game-1')).resolves.toEqual({
+        projectId: 'proj-123',
+        quarantinedScripts,
+      });
+    });
+
+    it.each([-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '3', '3&other=value', null, {}])(
+      'ignores an invalid quarantine count of %j',
+      async (quarantinedScripts) => {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          json: async () => ({ projectId: 'proj-123', quarantinedScripts }),
+        } as Response);
+
+        await expect(useCommunityStore.getState().forkGame('game-1')).resolves.toEqual({
+          projectId: 'proj-123',
+          quarantinedScripts: 0,
+        });
+      },
+    );
 
     it('should handle fork error', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
