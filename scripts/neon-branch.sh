@@ -40,9 +40,17 @@
 #       before the caller has masked it.
 #       Prints: branch_id=<id> / branch_name=<name>
 #   delete <branch_id>
+#       Deletes the branch and waits for the deletion's operations to finish,
+#       so a create issued right after it is not refused for a branch Neon is
+#       still counting.
 #   prune <name-prefix> <retention-days>
 #       Deletes branches whose name starts with <name-prefix> and which are
-#       older than <retention-days>. Housekeeping only.
+#       older than <retention-days>. Housekeeping only. Waits like delete.
+#   list <name-prefix>
+#       Prints id<TAB>name<TAB>created_at for every branch whose name starts
+#       with <name-prefix>, OLDEST FIRST, and nothing at all when none match.
+#       An empty prefix lists the whole project. Read-only: this is the audit
+#       view scripts/preview-db-branch.sh reclaims capacity from (#10015).
 #
 # ENVIRONMENT
 #   NEON_API_KEY      (required)
@@ -65,13 +73,17 @@
 #   2   missing NEON_API_KEY / NEON_PROJECT_ID
 #   3   Neon API error (non-2xx, unparseable body, or a missing expected field)
 #   4   a branch-creation operation did not finish inside the poll timeout
+#   5   Neon refused to CREATE because the project's branch allowance is full
+#       (body code BRANCHES_LIMIT_EXCEEDED). Distinct from 3 so a caller can
+#       reclaim capacity and retry instead of grepping a message (#10015).
 #   64  usage error
 set -uo pipefail
 
 NEON_API_BASE='https://console.neon.tech/api/v2'
 USAGE='usage: neon-branch.sh create <name> [--endpoint] [--uri-out <path>]
        neon-branch.sh delete <branch_id>
-       neon-branch.sh prune <name-prefix> <retention-days>'
+       neon-branch.sh prune <name-prefix> <retention-days>
+       neon-branch.sh list <name-prefix>'
 
 command -v jq >/dev/null 2>&1 || { echo "::error::neon-branch.sh requires jq"; exit 3; }
 
@@ -89,7 +101,8 @@ if [ -z "$NEON_API_KEY" ] || [ -z "$NEON_PROJECT_ID" ]; then
   exit 2
 fi
 
-# Perform one Neon API call. Echoes the response body on 2xx; returns 3 otherwise.
+# Perform one Neon API call. Echoes the response body on 2xx; returns 3
+# otherwise, or 5 when the error body names BRANCHES_LIMIT_EXCEEDED.
 # The body goes to a temp file via -o and ONLY the status code reaches stdout, so
 # curl's own diagnostics can never be spliced into the payload (which would let a
 # transport failure masquerade as a valid response).
@@ -128,6 +141,12 @@ neon_api() {
       excerpt="$(sed -E 's#postgres(ql)?://[^"[:space:]]*#postgres://REDACTED#g' <<<"${payload:0:300}")"
       echo "::error::Neon API ${method} ${path} failed with status '${status:-none}'." >&2
       echo "::error::${excerpt}" >&2
+      # A full branch allowance is the one failure a caller can do something
+      # about (delete a branch, retry), so it gets its own code. Neon names it
+      # in the body: {"code":"BRANCHES_LIMIT_EXCEEDED",...} on a 422 (#10015).
+      if [ "$(jq -r '.code // empty' <<<"$payload" 2>/dev/null)" = "BRANCHES_LIMIT_EXCEEDED" ]; then
+        return 5
+      fi
       return 3
       ;;
   esac
@@ -287,12 +306,14 @@ cmd_create() {
   fi
 
   local resp
-  resp="$(neon_api POST "/projects/${NEON_PROJECT_ID}/branches" "$body")" || exit 3
+  # Propagate the API's own code: 5 (allowance full) is what the preview
+  # policy reclaims-and-retries on; everything else stays 3.
+  resp="$(neon_api POST "/projects/${NEON_PROJECT_ID}/branches" "$body")" || exit $?
 
   local branch_id
   branch_id="$(jq -r '.branch.id // empty' <<<"$resp" 2>/dev/null)"
   if [ -z "$branch_id" ]; then
-    echo "::error::Neon create-branch response carried no branch.id — refusing to continue without a snapshot."
+    echo "::error::Neon create-branch response carried no branch.id — refusing to continue without a snapshot." >&2
     exit 3
   fi
 
@@ -319,9 +340,14 @@ cmd_create() {
 }
 
 cmd_delete() {
-  local branch_id="${1:-}"
+  local branch_id="${1:-}" resp
   [ -n "$branch_id" ] || { echo "::error::$USAGE"; exit 64; }
-  neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${branch_id}" >/dev/null || exit 3
+  resp="$(neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${branch_id}")" || exit 3
+  # Deleting is asynchronous like creating: the 200 carries `operations`
+  # (delete_timeline, suspend_compute) that may still be running, and until
+  # they finish the branch can still count against the allowance a caller is
+  # about to retry a create against (#10015). Wait, exactly as create does.
+  neon_wait_for_operations "$resp" || exit $?
   echo "deleted=${branch_id}"
 }
 
@@ -335,10 +361,12 @@ cmd_prune() {
   local resp cutoff stale
   resp="$(neon_api GET "/projects/${NEON_PROJECT_ID}/branches")" || exit 3
   cutoff=$(( $(date -u +%s) - days * 86400 ))
+  # Neon emits second-precision timestamps; fractional seconds are tolerated
+  # so a format change cannot silently turn every branch into "not stale".
   stale="$(jq -r --arg p "$prefix" --argjson c "$cutoff" '
       (.branches // [])
       | map(select((.name // "") | startswith($p)))
-      | map(select(((.created_at // "1970-01-01T00:00:00Z") | fromdateiso8601) < $c))
+      | map(select(((.created_at // "1970-01-01T00:00:00Z") | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < $c))
       | .[].id
     ' <<<"$resp" 2>/dev/null)"
 
@@ -347,23 +375,52 @@ cmd_prune() {
     return 0
   fi
 
-  local n=0 id
+  local n=0 id resp_del
   while IFS= read -r id; do
     [ -n "$id" ] || continue
-    if neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${id}" >/dev/null; then
+    if resp_del="$(neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${id}")"; then
+      # Same asynchrony as cmd_delete; a caller that creates right after a
+      # prune (the preview job replacing its own branch) must not race it.
+      neon_wait_for_operations "$resp_del" || echo "::warning::deletion of ${id} was accepted but its operations had not finished when polling stopped" >&2
       echo "pruned_branch=${id}"
       n=$(( n + 1 ))
     else
       # Housekeeping must never fail a deploy that already succeeded.
-      echo "::warning::could not delete stale snapshot branch ${id}"
+      echo "::warning::could not delete stale snapshot branch ${id}" >&2
     fi
   done <<<"$stale"
   echo "pruned=${n}"
+}
+
+cmd_list() {
+  [ $# -eq 1 ] || { echo "::error::$USAGE"; exit 64; }
+  local prefix="$1" resp
+  resp="$(neon_api GET "/projects/${NEON_PROJECT_ID}/branches")" || exit 3
+  # Oldest first: the preview policy evicts the FIRST row it may, so the order
+  # is part of the contract. Prints nothing when nothing matches; a failed
+  # list is the exit 3 above, never an empty success.
+  #
+  # `tr -d '\r'`: jq.exe on Windows opens stdout in text mode and terminates
+  # every line with CRLF (the same quirk scripts/check-openapi-route-sync.sh
+  # normalises). A row ending in "Z\r" is not the TSV promised above -- the
+  # consumer's date parse fails on it and that row is silently never evicted --
+  # so the CR is stripped at the one point rows leave this script. pipefail
+  # keeps a jq failure visible through the pipe.
+  jq -r --arg p "$prefix" '
+      (.branches // [])
+      | map(select((.name // "") | startswith($p)))
+      | sort_by(.created_at // "")
+      | .[]
+      | [.id, (.name // ""), (.created_at // "")]
+      | @tsv
+    ' <<<"$resp" 2>/dev/null | tr -d '\r' \
+    || { echo "::error::Neon list-branches response could not be parsed." >&2; exit 3; }
 }
 
 case "${1:-}" in
   create) shift; cmd_create "$@" ;;
   delete) shift; cmd_delete "$@" ;;
   prune)  shift; cmd_prune  "$@" ;;
+  list)   shift; cmd_list   "$@" ;;
   *) echo "::error::$USAGE"; exit 64 ;;
 esac

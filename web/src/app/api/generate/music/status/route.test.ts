@@ -4,20 +4,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { SunoClient } from '@/lib/generate/sunoClient';
+import { MUSIC_SYNC_TERMINAL_MESSAGE } from '@/lib/generate/pollProviderStatus';
 import type { User } from '@/lib/db/schema';
-import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 vi.mock('@/lib/auth/api-auth');
-vi.mock('@/lib/keys/resolver', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
-  return { ...mod, resolveApiKey: vi.fn() };
-});
-vi.mock('@/lib/generate/sunoClient', () => ({
-  SunoClient: vi.fn(() => ({
-    getStatus: vi.fn(),
-  })),
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 59, resetAt: Date.now() + 60000 }),
+  rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
+}));
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 59, resetAt: Date.now() + 60000 }),
+  aggregateGenerationRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 900000 }),
 }));
 
 function makeRequest(jobId?: string): NextRequest {
@@ -27,6 +24,9 @@ function makeRequest(jobId?: string): NextRequest {
   return new NextRequest(url);
 }
 
+// #9522: music routes to ElevenLabs `/v1/music`, which returns audio inline, so
+// there is no async task to poll. This endpoint is retained for the client
+// contract and reports a single terminal state on the first poll.
 describe('GET /api/generate/music/status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -34,7 +34,6 @@ describe('GET /api/generate/music/status', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User },
     });
-    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -54,143 +53,16 @@ describe('GET /api/generate/music/status', () => {
     expect(data.error).toBe('jobId query parameter required');
   });
 
-  it('returns 402 when API key resolution fails', async () => {
-    vi.mocked(resolveApiKey).mockRejectedValue(
-      new ApiKeyError('NO_KEY_CONFIGURED', 'No Suno key available')
-    );
-
-    const res = await GET(makeRequest('job-123'));
-    expect(res.status).toBe(402);
-    const data = await res.json();
-    expect(data.code).toBe('NO_KEY_CONFIGURED');
-  });
-
-  it('returns completed status for completed/succeeded task', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        this.getStatus = vi.fn().mockResolvedValue({
-          status: 'completed',
-          progress: 100,
-          audioUrl: 'https://cdn.suno.ai/song.mp3',
-          durationSeconds: 120,
-        });
-      } as unknown as typeof SunoClient
-    );
-
+  it('returns a terminal failed state (matching pollProviderStatus) on the first poll', async () => {
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.status).toBe('completed');
-    expect(data.resultUrl).toBe('https://cdn.suno.ai/song.mp3');
-    expect(data.durationSeconds).toBe(120);
-    expect(data.error).toBeUndefined();
-  });
-
-  it('returns failed status for failed task', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        this.getStatus = vi.fn().mockResolvedValue({
-          status: 'failed',
-          progress: 0,
-        });
-      } as unknown as typeof SunoClient
-    );
-
-    const res = await GET(makeRequest('job-123'));
-    const data = await res.json();
+    expect(data.jobId).toBe('job-123');
     expect(data.status).toBe('failed');
-    expect(data.error).toBe(withRetryGuidance('Music generation failed'));
-  });
-
-  it('maps success-with-no-audio to failed (so the poller refunds, not hangs)', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        // Suno reports success but produced no audio URL. Mapping this to
-        // `completed` hands the client a completed job with no resultUrl, which
-        // throws an uncaught "No result URL" in useGenerationPolling — the job then
-        // sticks in `downloading` for the full poll cap before refunding with a
-        // generic timeout (#8757). The route must surface it as `failed` so the
-        // poller refunds immediately with a meaningful error.
-        this.getStatus = vi.fn().mockResolvedValue({
-          status: 'completed',
-          progress: 100,
-          audioUrl: undefined,
-        });
-      } as unknown as typeof SunoClient
-    );
-
-    const res = await GET(makeRequest('job-123'));
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.status).toBe('failed');
+    expect(data.progress).toBe(0);
     expect(data.resultUrl).toBeUndefined();
-    expect(data.error).toBe(withRetryGuidance('Music generation produced no audio'));
-  });
-
-  it('does not leak a resultUrl while still processing', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        // Suno can surface a partial audioUrl before completion; the route must gate
-        // resultUrl on completion so the client doesn't import a partial track.
-        this.getStatus = vi.fn().mockResolvedValue({
-          status: 'generating',
-          progress: 60,
-          audioUrl: 'https://cdn.suno.ai/partial.mp3',
-        });
-      } as unknown as typeof SunoClient
-    );
-
-    const res = await GET(makeRequest('job-123'));
-    const data = await res.json();
-    expect(data.status).toBe('processing');
-    expect(data.resultUrl).toBeUndefined();
-    expect(data.error).toBeUndefined();
-  });
-
-  it('returns processing status for generating task', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        this.getStatus = vi.fn().mockResolvedValue({
-          status: 'generating',
-          progress: 60,
-        });
-      } as unknown as typeof SunoClient
-    );
-
-    const res = await GET(makeRequest('job-123'));
-    const data = await res.json();
-    expect(data.status).toBe('processing');
-  });
-
-  it('returns pending status for unknown status values', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        this.getStatus = vi.fn().mockResolvedValue({
-          status: 'queued',
-          progress: 0,
-        });
-      } as unknown as typeof SunoClient
-    );
-
-    const res = await GET(makeRequest('job-123'));
-    const data = await res.json();
-    expect(data.status).toBe('pending');
-  });
-
-  it('returns 500 when provider throws', async () => {
-    vi.mocked(SunoClient).mockImplementation(
-      function (this: InstanceType<typeof SunoClient>) {
-        this.getStatus = vi.fn().mockRejectedValue(new Error('Suno API down'));
-      } as unknown as typeof SunoClient
-    );
-
-    const res = await GET(makeRequest('job-123'));
-    expect(res.status).toBe(500);
-    const data = await res.json();
-    // The provider's own text must NOT come back: the generate clients fold
-    // the upstream RESPONSE BODY into the thrown error, and on the platform
-    // path the credential in play is the platform's (#9736).
-    expect(data.error).not.toContain('Suno API down');
-    expect(data.error).toBe('Could not read the Music generation status. Please try again.');
+    expect(data.error).toBe(MUSIC_SYNC_TERMINAL_MESSAGE);
+    // No provider name leaks in the terminal message.
+    expect(JSON.stringify(data)).not.toMatch(/suno/i);
   });
 });

@@ -652,27 +652,26 @@ describe('generationHandlers', () => {
     });
   });
 
-  describe('generate_music', () => {
-    // #9117: music is declared unavailable in code (UNAVAILABLE_CAPABILITIES),
-    // so the tool answers with the user-facing alternative and never calls the
-    // route. The sync/async import paths below the gate return with #9522.
-    it('returns the unavailable reason without calling the route while music is declared unavailable', async () => {
-      const { result } = await invoke('generate_music', {
+  describe('generate_music - now offered via ElevenLabs (#9522)', () => {
+    // Music is no longer in UNAVAILABLE_CAPABILITIES, so the tool reaches the
+    // route (which now resolves ElevenLabs audio inline) instead of refusing.
+    it('reaches the route and imports the inline audio, no longer refused', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64music', provider: 'elevenlabs' }),
+      });
+      const { result, store } = await invoke('generate_music', {
         prompt: 'epic battle theme',
         entityId: 'ent-1',
       });
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/not available yet/i);
-      expect(result.error).not.toMatch(/#\d+|PLATFORM_|Suno/);
-      expect(mockFetch).not.toHaveBeenCalled();
-      expect(mockAddJob).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(mockFetch).toHaveBeenCalledWith('/api/generate/music', expect.anything());
+      expect(store.importAudio).toHaveBeenCalledWith('base64music', expect.stringContaining('music-'));
     });
 
-    it('still rejects malformed arguments ahead of the gate, with the validation message', async () => {
+    it('still rejects malformed arguments with the validation message', async () => {
       const { result } = await invoke('generate_music', { prompt: '' });
       expect(result.success).toBe(false);
-      // The VALIDATION error, not the gate's reason: proves parseArgs runs first.
-      expect(result.error).not.toMatch(/not available yet/i);
       expect(result.error).toMatch(/prompt|argument|invalid/i);
       expect(mockFetch).not.toHaveBeenCalled();
     });

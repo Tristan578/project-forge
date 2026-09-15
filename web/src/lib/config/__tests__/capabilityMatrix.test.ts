@@ -389,15 +389,18 @@ describe('docs/capability-matrix.md', () => {
     }
   });
 
-  // Facts verified on 2026-09-05 (#9720). Pinned so the matrix cannot quietly
-  // claim otherwise before the tracking issue closes: flipping one means
-  // editing this test in the same change, with the evidence.
-  it('marks music unavailable through every non-bridge entry point until #9522 closes', () => {
+  // #9522 moved `music` from Suno (no public API, permanently unprovisionable)
+  // to ElevenLabs — the same provider that already serves `sfx` and `voice`.
+  // `music` left UNAVAILABLE_CAPABILITIES, so it now follows PLATFORM_ELEVENLABS_KEY
+  // exactly like those two: unset in production means `unavailable (#9117)` at
+  // every non-bridge entry point, and a BYOK ElevenLabs key enables all three.
+  // Pinned so the matrix cannot quietly regress music to a #9522 dead-end again.
+  it('marks music unavailable (#9117) like the other ElevenLabs capabilities', () => {
     const music = rows.find((r) => r.kind === 'generation' && r.key === 'music');
     expect(music).toBeDefined();
     for (const column of ENTRY_POINT_COLUMNS) {
       if (column === 'External MCP') continue; // governed by the bridge allowlist below
-      expect(music!.cells[column], `music / ${column}`).toMatch(/^unavailable \(.*#9522.*\)$/);
+      expect(music!.cells[column], `music / ${column}`).toBe('unavailable (#9117)');
     }
   });
 
