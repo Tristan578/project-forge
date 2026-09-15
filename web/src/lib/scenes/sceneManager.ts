@@ -108,7 +108,13 @@ function isValidSceneEntry(value: unknown): value is SceneEntry {
 function isValidProjectScenes(value: unknown): value is ProjectScenes {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<ProjectScenes>;
-  if (typeof candidate.version !== 'string') return false;
+  // `version` must be present but its TYPE is not load-bearing anywhere in
+  // this file — requiring it to be specifically a string (rather than
+  // matching loadProjectScenes's existing `if (parsed.version && ...)`
+  // truthiness check below) would make a legacy project with a numeric
+  // version pass loadProjectScenes but fail every later saveProjectScenes,
+  // turning it read-only the moment this validator shipped.
+  if (!candidate.version) return false;
   if (typeof candidate.activeSceneId !== 'string') return false;
   if (!Array.isArray(candidate.scenes) || candidate.scenes.length === 0) return false;
   if (!candidate.scenes.every(isValidSceneEntry)) return false;

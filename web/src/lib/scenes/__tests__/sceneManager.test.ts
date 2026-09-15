@@ -123,6 +123,16 @@ describe('saveProjectScenes — atomic write', () => {
     expect(loadProjectScenes()).toEqual(good);
   });
 
+  it('accepts a legacy project whose version is not a string, matching loadProjectScenes\'s own truthy check', () => {
+    // #9813 review finding: loadProjectScenes only ever required `version` to
+    // be truthy. Requiring it to be a string here specifically would let a
+    // legacy project with a numeric version load fine and then fail every
+    // later save, making it silently read-only.
+    const legacy = { ...makeProject('Legacy'), version: 1 } as unknown as ProjectScenes;
+    expect(() => saveProjectScenes(legacy)).not.toThrow();
+    expect(loadProjectScenes().version).toBe(1);
+  });
+
   it('refuses a payload that cannot be serialized, leaving the prior value intact', () => {
     const good = makeProject('Level A');
     saveProjectScenes(good);
