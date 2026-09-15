@@ -206,9 +206,23 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     // scene on screen and unchanged, so a failed switch must not lock its saves
     // behind `sceneLoadError` — the failure is returned to the assistant below,
     // parity with the store's own `switchScene` (#10056).
-    const accepted = result.sceneToLoad
-      ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
-      : ctx.store.newScene();
+    let accepted: boolean;
+    try {
+      accepted = result.sceneToLoad
+        ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
+        : ctx.store.newScene();
+    } catch (error) {
+      // `loadScene`/`newScene` roll back their OWN state (audio, prefab
+      // registry) before rethrowing, but not this handler's captured
+      // `project` — without persisting it here, a thrown dispatch error
+      // skips both `saveProjectScenes` calls below and silently discards the
+      // outgoing scene's unsaved work, parity with the store's `switchScene`.
+      saveProjectScenes(project, ctx.store.projectId);
+      return {
+        success: false,
+        error: `The scene switch failed unexpectedly (${error instanceof Error ? error.message : String(error)}). The current scene is unchanged.`,
+      };
+    }
     if (accepted === false) {
       saveProjectScenes(project, ctx.store.projectId);
       return { success: false, error: 'The engine rejected the scene switch. The current scene is unchanged.' };

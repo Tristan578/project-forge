@@ -741,6 +741,41 @@ describe('sceneSlice', () => {
       expect(store.getState().activeSceneId).toBe(before);
     });
 
+    // Sentry: `loadScene`/`newScene` roll back their OWN state before
+    // rethrowing a dispatch error, but `switchScene` previously let that
+    // exception propagate straight past its `saveProjectScenes` calls —
+    // silently losing the outgoing scene's captured work, and surfacing as an
+    // unhandled rejection at `SceneBrowser.tsx`'s bare `void switchScene(...)`.
+    it('persists the outgoing scene when the engine dispatch throws instead of losing it (Sentry)', async () => {
+      store.getState().createNewScene('Second');
+      const before = store.getState().activeSceneId;
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      setSceneDispatcher((command, payload) => {
+        mockDispatch(command, payload);
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          window.dispatchEvent(
+            new CustomEvent('forge:scene-exported', {
+              detail: { json: JSON.stringify(sceneFixture('Live')) },
+            })
+          );
+        }
+        if (command === 'load_scene') {
+          throw new Error('engine unreachable');
+        }
+      });
+
+      await expect(store.getState().switchScene(target!.id)).resolves.toBeUndefined();
+
+      // The switch itself did not go through...
+      expect(store.getState().activeSceneId).toBe(before);
+      expect(persisted().activeSceneId).toBe(before);
+      // ...but the outgoing scene's freshly captured data was NOT discarded.
+      const outgoing = persisted().scenes.find((s) => s.id === before);
+      expect(outgoing?.data?.metadata?.name).toBe('Live');
+    });
+
     it('duplicateScene adds a copy', async () => {
       store.getState().createNewScene('Original');
       const source = store.getState().scenes.find((s) => s.name === 'Original');

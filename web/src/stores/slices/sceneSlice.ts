@@ -974,9 +974,25 @@ export const createSceneSlice: StateCreator<
     }
     const result = switchSceneIn(project, sceneId);
     if ('error' in result) return;
-    const accepted = result.sceneToLoad
-      ? get().loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
-      : get().newScene();
+    let accepted: boolean;
+    try {
+      accepted = result.sceneToLoad
+        ? get().loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
+        : get().newScene();
+    } catch (error) {
+      // `loadScene`/`newScene` already rolled back their OWN state (audio,
+      // prefab registry) before rethrowing — see `dispatchSceneLoad`'s catch.
+      // What they cannot roll back is this function's own outgoing capture:
+      // without this, a thrown dispatch error skips straight past both
+      // `saveProjectScenes` calls below and the scene captured at the top of
+      // this function — the user's unsaved work in the OUTGOING scene — is
+      // silently lost, and `SceneBrowser.tsx` awaits this with a bare `void`,
+      // so the exception would otherwise become an unhandled rejection too.
+      console.error('[Scenes] Switch scene dispatch threw; persisting the outgoing scene and cancelling the switch:', error);
+      saveProjectScenes(project, get().projectId);
+      showError('The scene could not be opened, so the switch was cancelled. You are still on the current scene, which is unchanged.');
+      return;
+    }
     if (!accepted) {
       // Retain the outgoing capture without relabelling the unchanged engine
       // scene as the rejected target. `rejectionStrandsEditor: false` above is

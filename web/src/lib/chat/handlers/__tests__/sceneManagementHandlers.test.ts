@@ -672,6 +672,29 @@ describe('switch_scene', () => {
     expect(store.newScene).toHaveBeenCalled();
     expect(store.loadScene).not.toHaveBeenCalled();
   });
+
+  // Sentry: `store.loadScene` rolls back its OWN state (audio, prefab
+  // registry) before rethrowing a dispatch error, but this handler previously
+  // let that exception propagate straight past its `saveProjectScenes` call —
+  // silently losing the outgoing scene's just-captured data, parity with the
+  // same bug fixed in the store's own `switchScene`.
+  it('persists the outgoing scene when the engine dispatch throws instead of losing it (Sentry)', async () => {
+    const sceneData = { formatVersion: 1, sceneName: 'Level 2', entities: [] };
+    mockSwitchScene.mockReturnValue({ project: { ...baseProject, activeSceneId: 'scene_2' }, sceneToLoad: sceneData });
+
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' },
+      { loadScene: vi.fn(() => { throw new Error('engine unreachable'); }) }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('unexpectedly');
+    expect(store.loadScene).toHaveBeenCalled();
+    // The pre-switch (outgoing) project is persisted rather than discarded.
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
+  });
 });
 
 // ---------------------------------------------------------------------------
