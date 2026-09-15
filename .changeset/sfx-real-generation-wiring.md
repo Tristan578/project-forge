@@ -2,11 +2,6 @@
 "web": patch
 ---
 
-Wire the game-creation asset step to real sound-effect generation. When a plan's
-asset step is a sound, the orchestrator now calls the existing authenticated
-ElevenLabs SFX path and validates that the returned audio is non-empty and
-decodable before the step counts as done — a provider error, zero bytes, or an
-undecodable response now degrades to the plan's placeholder instead of reporting
-a fabricated success. Asset types without an adapter yet (models, textures,
-sprites, music, voice) are explicitly marked pending and resolve to their
-placeholder rather than a made-up asset id.
+Stop game-creation asset steps from reporting completion without a delivered asset. Asset generation now reports that it is unavailable, stops required steps, and skips optional steps with an explanation. Suggested fallback identifiers are not presented as attached assets.
+
+The pipeline does not call a separate paid sound-generation route while artifact delivery and reservation-aware billing are incomplete. This does not add playable audio generation to game creation; that integration remains pending.
