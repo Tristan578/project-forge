@@ -764,16 +764,30 @@ impl Plugin for SelectionPlugin {
         app.init_resource::<crate::core::system_timing::SystemTimingBuffer>()
             .init_resource::<observability_bridge::SystemTimingScratch>()
             .add_systems(First, observability_bridge::apply_system_timing_capture_request)
+            // `.after(ModeRestoreSet)`: `apply_mode_change_requests` (in that
+            // set) is the system that mutates `EngineMode`, and it carries no
+            // ordering relationship to these two run_if(in_play_mode) brackets
+            // on its own — an unconstrained mode flip landing between them in
+            // the same frame would let `begin` see Play (recording a start)
+            // and `end` see the new Edit (its run_if false, so it never
+            // consumes that start). The stale start then survives to a LATER
+            // frame's `end`, which mistakes it for that frame's own begin and
+            // records an elapsed spanning many frames instead of the intended
+            // single-frame window. Ordering after `ModeRestoreSet` means both
+            // brackets observe the SAME already-settled mode for this frame, so
+            // they can never split across a transition (#9880).
             .add_systems(
                 Update,
                 observability_bridge::begin_entity_sync_timing
                     .before(scripts::emit_play_tick_system)
+                    .after(ModeRestoreSet)
                     .run_if(in_play_mode),
             )
             .add_systems(
                 Update,
                 observability_bridge::end_entity_sync_timing
                     .after(scripts::emit_play_tick_system)
+                    .after(ModeRestoreSet)
                     .run_if(in_play_mode),
             )
             .add_systems(
