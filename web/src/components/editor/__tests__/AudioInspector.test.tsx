@@ -130,6 +130,37 @@ describe('AudioInspector', () => {
     expect(pitch).toHaveValue('1.5');
   });
 
+  it('forwards a slider change to setAudio for the migrated Volume and Pitch sliders', () => {
+    // The migration routes onChange through the shared SliderInput composite
+    // (onChange={(e) => onChange(Number(e.target.value))}) and SliderRowWithTerm's
+    // onChange={onChange} pass-through. Firing a real change event proves that
+    // path still reaches setAudio with the parsed numeric value — a regression
+    // that dropped/mis-wired the forwarding (e.g. to formatValue) would leave the
+    // accessible-name test above green while breaking every edit.
+    const setAudio = vi.fn();
+    mockEditorStore({
+      setAudio,
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 0.5,
+          pitch: 1.5,
+          loopAudio: false,
+          spatial: false,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '0.75' } });
+    expect(setAudio).toHaveBeenCalledWith('ent-1', { volume: 0.75 });
+    fireEvent.change(screen.getByLabelText('Pitch'), { target: { value: '2' } });
+    expect(setAudio).toHaveBeenCalledWith('ent-1', { pitch: 2 });
+  });
+
   it('reads the selected entity, not whichever entity reported audio last', () => {
     // The store used to keep one component for the whole scene, so selecting a
     // silent entity showed the other entity's sound and editing it wrote to the

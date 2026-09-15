@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { Vec3Input } from '../Vec3Input';
 
 describe('Vec3Input', () => {
@@ -13,6 +13,18 @@ describe('Vec3Input', () => {
   it('displays label text', () => {
     render(<Vec3Input label="Scale" value={[1, 1, 1]} onChange={() => {}} />);
     expect(screen.getByText('Scale')).not.toBeNull();
+  });
+
+  it('exposes the axis inputs as a group named by the label', () => {
+    // The outer div carries aria-labelledby, but without role="group" a plain
+    // <div> is ARIA role "generic", which the spec forbids from taking an
+    // author-supplied name — the label would be inert to assistive tech. Pin the
+    // group role so the three axis inputs announce their shared "Scale" label.
+    render(<Vec3Input label="Scale" value={[1, 2, 3]} onChange={() => {}} />);
+    const group = screen.getByRole('group', { name: 'Scale' });
+    expect(within(group).getByLabelText('Scale X')).not.toBeNull();
+    expect(within(group).getByLabelText('Scale Y')).not.toBeNull();
+    expect(within(group).getByLabelText('Scale Z')).not.toBeNull();
   });
 
   it('calls onChange when an axis value changes', () => {

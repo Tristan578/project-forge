@@ -117,7 +117,7 @@ export function Vec3Input({
   }, [value, defaultValue, onReset]);
 
   return (
-    <div className={cn('space-y-1', className)} aria-labelledby={`${id}-label`}>
+    <div className={cn('space-y-1', className)} role="group" aria-labelledby={`${id}-label`}>
       <div className="flex items-center justify-between">
         <span
           id={`${id}-label`}

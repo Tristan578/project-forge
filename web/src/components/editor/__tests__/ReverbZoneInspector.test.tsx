@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, within } from '@/test/utils/componentTestUtils';
 import { ReverbZoneInspector } from '../ReverbZoneInspector';
 import { useEditorStore } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -142,6 +142,20 @@ describe('ReverbZoneInspector', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
     expect(screen.getByText('Size')).toBeInTheDocument();
+  });
+
+  it('exposes the three Size axis inputs as one named group', () => {
+    // The shared Vec3Input composite wraps X/Y/Z under a labelled group so the
+    // "Size" label is announced once for the trio rather than being inert on a
+    // role="generic" div (which the ARIA spec forbids from taking an author name).
+    // getByRole('group', { name: 'Size' }) resolves only through role="group" +
+    // aria-labelledby, so dropping either fails here.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    const group = screen.getByRole('group', { name: 'Size' });
+    expect(within(group).getByLabelText('Size X')).toHaveAttribute('type', 'number');
+    expect(within(group).getByLabelText('Size Y')).toHaveAttribute('type', 'number');
+    expect(within(group).getByLabelText('Size Z')).toHaveAttribute('type', 'number');
   });
 
   it('shows Radius input for sphere shape', () => {
