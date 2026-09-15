@@ -1,21 +1,21 @@
 # Command Reference
 
-Complete reference for all 354 MCP commands available in SpawnForge.
+Complete reference for all 359 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
 
 ## Categories
 
-- [Scene](#scene) (26 commands)
+- [Scene](#scene) (30 commands)
 - [Materials](#materials) (11 commands)
 - [Lighting](#lighting) (2 commands)
 - [Environment](#environment) (5 commands)
 - [Rendering](#rendering) (4 commands)
 - [Editor](#editor) (7 commands)
-- [Camera](#camera) (3 commands)
+- [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
-- [Query](#query) (15 commands)
+- [Query](#query) (16 commands)
 - [Runtime](#runtime) (12 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
@@ -38,7 +38,7 @@ Complete reference for all 354 MCP commands available in SpawnForge.
 - [Publishing](#publishing) (8 commands)
 - [Sprite](#sprite) (8 commands)
 - [Sprite_animation](#sprite_animation) (6 commands)
-- [Physics2d](#physics2d) (8 commands)
+- [Physics2d](#physics2d) (10 commands)
 - [Tilemap](#tilemap) (10 commands)
 - [Skeleton2d](#skeleton2d) (13 commands)
 - [Modeling](#modeling) (6 commands)
@@ -636,6 +636,92 @@ Set the default transition configuration used when switching scenes
 {
   "command": "set_default_transition",
   "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `validate_scene`
+
+Validate a serialized .forge SceneFile with the engine decoder without applying or saving it. Internal checkpoint preflight.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `json` | string | Yes | Complete serialized .forge SceneFile JSON |
+
+**Example:**
+```json
+{
+  "command": "validate_scene",
+  "params": {
+    "json": "my_json"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `create_checkpoint`
+
+Save a named recovery checkpoint of the whole project (a restorable snapshot of every scene)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `label` | string | No | Optional label for the checkpoint; defaults to a timestamp |
+
+**Example:**
+```json
+{
+  "command": "create_checkpoint",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `restore_checkpoint`
+
+Restore a recovery checkpoint by ID, replacing the active project with its snapshot
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `checkpointId` | string | Yes | ID of the checkpoint to restore |
+
+**Example:**
+```json
+{
+  "command": "restore_checkpoint",
+  "params": {
+    "checkpointId": "my_checkpointId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `delete_checkpoint`
+
+Delete a saved recovery checkpoint by ID (missing IDs are a no-op)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `checkpointId` | string | Yes | ID of the checkpoint to delete |
+
+**Example:**
+```json
+{
+  "command": "delete_checkpoint",
+  "params": {
+    "checkpointId": "my_checkpointId"
+  }
 }
 ```
 
@@ -1378,6 +1464,22 @@ Scope: `scene:write` | Token cost: 0
 
 ---
 
+### `get_camera_2d`
+
+Query the scene's 2D camera settings
+
+**Example:**
+```json
+{
+  "command": "get_camera_2d",
+  "params": {}
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
 ## History
 
 ### `undo`
@@ -1666,6 +1768,22 @@ Query current game state during play mode. Returns entity names, visibility, and
 ```json
 {
   "command": "query_play_state",
+  "params": {}
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `list_checkpoints`
+
+List saved recovery checkpoints for the current project, newest first
+
+**Example:**
+```json
+{
+  "command": "list_checkpoints",
   "params": {}
 }
 ```
@@ -7161,6 +7279,44 @@ Cast a ray in the 2D physics world
     "directionX": 1,
     "directionY": 1
   }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `get_joint_2d`
+
+Query the 2D joint attached to an entity
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entityId` | string | Yes | Entity ID whose 2D joint to read |
+
+**Example:**
+```json
+{
+  "command": "get_joint_2d",
+  "params": {
+    "entityId": "entity_1"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `list_joints_2d`
+
+List every 2D joint in the scene
+
+**Example:**
+```json
+{
+  "command": "list_joints_2d",
+  "params": {}
 }
 ```
 

@@ -3,12 +3,14 @@
  * [D2] All executors use shared makeStepError helper.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ExecutorContext } from '../types';
 import type { EditorState } from '@/stores/editorStore';
 import { EXECUTOR_REGISTRY } from '../executors/index';
 import { buildDefaultGroundDescriptor } from '../worldGeometry';
 import { jumpForceToApexHeight } from '@/lib/ai/physicsFeel';
+import { attachFixtureValidator } from '@/lib/scenes/__tests__/sceneFixture';
+import { setSceneValidator } from '@/lib/scenes/sceneValidation';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -177,6 +179,11 @@ beforeEach(() => {
   vi.resetModules();
   // scene_create persists through lib/scenes/sceneManager, which is localStorage-backed.
   localStorage.clear();
+  attachFixtureValidator();
+});
+
+afterEach(() => {
+  setSceneValidator(null);
 });
 
 // ---------------------------------------------------------------------------

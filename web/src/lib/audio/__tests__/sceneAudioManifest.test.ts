@@ -161,6 +161,26 @@ describe('staging', () => {
     expect(takeStagedSceneAudio()).toEqual({});
   });
 
+  it.each(['load', 'new'] as const)('does not resurrect consumed audio when a %s request rolls back', (operation) => {
+    stageSceneAudio(scene([{ entityId: 'previous', audioData: FULL_AUDIO }]));
+    const rollback = operation === 'load'
+      ? stageSceneAudio(scene([{ entityId: 'incoming', audioData: FULL_AUDIO }]))
+      : clearStagedSceneAudio();
+    expect(takeStagedSceneAudio()).toEqual(operation === 'load' ? { incoming: FULL_AUDIO } : {});
+    rollback();
+    expect(takeStagedSceneAudio()).toEqual({});
+  });
+
+  it.each(['load', 'new'] as const)('preserves a newer staging when a %s request rolls back', (operation) => {
+    stageSceneAudio(scene([{ entityId: 'previous', audioData: FULL_AUDIO }]));
+    const rollback = operation === 'load'
+      ? stageSceneAudio(scene([{ entityId: 'incoming', audioData: FULL_AUDIO }]))
+      : clearStagedSceneAudio();
+    stageSceneAudio(scene([{ entityId: 'newer', audioData: FULL_AUDIO }]));
+    rollback();
+    expect(takeStagedSceneAudio()).toEqual({ newer: FULL_AUDIO });
+  });
+
   it('replaces a stash the engine never confirmed', () => {
     stageSceneAudio(scene([{ entityId: 'old', audioData: FULL_AUDIO }]));
     stageSceneAudio(scene([{ entityId: 'new', audioData: FULL_AUDIO }]));
