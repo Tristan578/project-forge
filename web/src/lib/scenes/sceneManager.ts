@@ -28,11 +28,39 @@ export interface ProjectScenes {
   scenes: SceneEntry[];
 }
 
+/**
+ * A named recovery point — a deep, immutable snapshot of the whole
+ * {@link ProjectScenes} taken at a moment the creator (or the AI acting on
+ * their behalf) chose. Restoring one replaces the active project with the
+ * snapshot through the same atomic {@link saveProjectScenes} path, so a
+ * restore can never leave a half-written project behind (scene.FR-3.OP-02).
+ */
+export interface SceneCheckpoint {
+  id: string;
+  label: string;
+  createdAt: string;
+  snapshot: ProjectScenes;
+}
+
 const SCENES_STORAGE_KEY = 'forge-project-scenes';
+const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints';
+
+/**
+ * Upper bound on stored checkpoints. Each snapshot is a full copy of every
+ * scene's entity/environment/postProcessing trees, so an unbounded list would
+ * march straight into the browser's ~5–10 MB localStorage quota. The newest
+ * checkpoint is always retained; the oldest is evicted first.
+ */
+export const MAX_CHECKPOINTS = 10;
 
 /** Generate a unique scene ID */
 function generateSceneId(): string {
   return `scene_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Generate a unique checkpoint ID */
+function generateCheckpointId(): string {
+  return `ckpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** Create initial project with one empty scene */
@@ -66,9 +94,46 @@ export function loadProjectScenes(): ProjectScenes {
   return createInitialProject();
 }
 
-/** Save project scenes to localStorage */
+/**
+ * Save project scenes to localStorage atomically (scene.FR-3.OP-02).
+ *
+ * The entire payload is serialized and validated to round-trip BEFORE a single
+ * `setItem` write. If serialization or validation fails, the function throws
+ * having touched nothing, so the last valid project is preserved rather than
+ * overwritten with a partial or corrupt scene. `localStorage.setItem` is itself
+ * all-or-nothing, so a quota error or interruption during the write leaves the
+ * previously stored value intact — this is the only write to the key, never an
+ * incremental one.
+ */
 export function saveProjectScenes(project: ProjectScenes): void {
-  localStorage.setItem(SCENES_STORAGE_KEY, JSON.stringify(project));
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(project);
+  } catch {
+    throw new Error('Refusing to save project: payload did not serialize cleanly');
+  }
+
+  // Validate the payload parses back into a structurally valid project. A save
+  // that cannot be read back must never replace the last good one.
+  let roundTrip: ProjectScenes;
+  try {
+    roundTrip = JSON.parse(serialized) as ProjectScenes;
+  } catch {
+    throw new Error('Refusing to save project: payload did not round-trip');
+  }
+  if (
+    !roundTrip ||
+    typeof roundTrip.version !== 'string' ||
+    typeof roundTrip.activeSceneId !== 'string' ||
+    !Array.isArray(roundTrip.scenes) ||
+    roundTrip.scenes.length === 0
+  ) {
+    throw new Error('Refusing to save project: payload failed validation');
+  }
+
+  // Single, all-or-nothing write. On quota/interruption this throws having
+  // written nothing, so the prior value remains the last valid project.
+  localStorage.setItem(SCENES_STORAGE_KEY, serialized);
 }
 
 /** Create a new empty scene */
@@ -222,4 +287,98 @@ export function importSingleScene(sceneData: SceneFileData): ProjectScenes {
 /** Export all scenes for file save or cloud */
 export function exportAllScenes(project: ProjectScenes): ProjectScenes {
   return JSON.parse(JSON.stringify(project));
+}
+
+// ---------------------------------------------------------------------------
+// Recovery checkpoints (scene.FR-3.OP-02)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the stored checkpoints, newest first. A corrupt or missing checkpoint
+ * store is treated as "no checkpoints" — it must never take down the editor or
+ * the active project.
+ */
+export function listCheckpoints(): SceneCheckpoint[] {
+  try {
+    const stored = localStorage.getItem(CHECKPOINTS_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(
+        (c): c is SceneCheckpoint =>
+          !!c && typeof c.id === 'string' && !!c.snapshot && Array.isArray(c.snapshot.scenes)
+      );
+    }
+  } catch { /* ignore corrupt checkpoint store */ }
+  return [];
+}
+
+/**
+ * Persist the checkpoint list under quota pressure without ever corrupting the
+ * active project — checkpoints live under their own key, so a failed write here
+ * leaves `forge-project-scenes` untouched. The list is written newest-first and
+ * capped to {@link MAX_CHECKPOINTS}; if the write still exceeds quota the oldest
+ * entries are evicted one at a time and retried. The newest checkpoint (index 0)
+ * is never dropped. If even a single checkpoint cannot fit, the error is
+ * surfaced with the prior store left as-is.
+ */
+function persistCheckpoints(checkpoints: SceneCheckpoint[]): SceneCheckpoint[] {
+  let candidate = checkpoints.slice(0, MAX_CHECKPOINTS);
+  for (;;) {
+    try {
+      localStorage.setItem(CHECKPOINTS_STORAGE_KEY, JSON.stringify(candidate));
+      return candidate;
+    } catch (err) {
+      if (candidate.length <= 1) {
+        throw err instanceof Error ? err : new Error('Failed to persist checkpoint');
+      }
+      // Drop the oldest (tail) and retry — never the checkpoint just created.
+      candidate = candidate.slice(0, candidate.length - 1);
+    }
+  }
+}
+
+/**
+ * Capture a named recovery checkpoint from the given project. The snapshot is a
+ * deep clone, so later edits to the live project never mutate a stored
+ * checkpoint. Does not touch the active project's storage key.
+ */
+export function createCheckpoint(
+  project: ProjectScenes,
+  label?: string
+): { checkpoint: SceneCheckpoint; checkpoints: SceneCheckpoint[] } {
+  const snapshot = JSON.parse(JSON.stringify(project)) as ProjectScenes;
+  const checkpoint: SceneCheckpoint = {
+    id: generateCheckpointId(),
+    label: label?.trim() || `Checkpoint ${new Date().toISOString()}`,
+    createdAt: new Date().toISOString(),
+    snapshot,
+  };
+  // Newest first, then persist (with eviction under quota pressure).
+  const checkpoints = persistCheckpoints([checkpoint, ...listCheckpoints()]);
+  return { checkpoint, checkpoints };
+}
+
+/**
+ * Restore a checkpoint by ID, replacing the active project with a deep clone of
+ * its snapshot through the atomic {@link saveProjectScenes} path. Restoring an
+ * older checkpoint after newer saves is fully supported — the snapshot is
+ * self-contained and does not depend on current state.
+ */
+export function restoreCheckpoint(
+  checkpointId: string
+): { project: ProjectScenes } | { error: string } {
+  const found = listCheckpoints().find((c) => c.id === checkpointId);
+  if (!found) return { error: 'Checkpoint not found' };
+  const restored = JSON.parse(JSON.stringify(found.snapshot)) as ProjectScenes;
+  // Same atomic write everything else uses; throws rather than half-write.
+  saveProjectScenes(restored);
+  return { project: restored };
+}
+
+/** Delete a checkpoint by ID. Missing IDs are a no-op. */
+export function deleteCheckpoint(checkpointId: string): SceneCheckpoint[] {
+  const remaining = listCheckpoints().filter((c) => c.id !== checkpointId);
+  localStorage.setItem(CHECKPOINTS_STORAGE_KEY, JSON.stringify(remaining));
+  return remaining;
 }
