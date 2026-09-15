@@ -93,8 +93,8 @@ const BEARER = (key: string): Record<string, string> => ({ Authorization: `Beare
 /**
  * One credit-free, authenticated GET per provider. Each entry cites the vendor
  * page that documents the endpoint and header, so the contract pinned by the
- * tests is the provider's, not ours (lesson 14). `null` = not probeable:
- * Suno has no API, Hyper3D is BYOK-only and never served by a platform key.
+ * tests is the provider's, not ours (lesson 14). `null` means this verifier
+ * has no credit-free probe for the provider (currently Hyper3D).
  */
 export const PROVIDER_PROBES: Record<PlatformKeyProvider, Probe | null> = {
   anthropic: {

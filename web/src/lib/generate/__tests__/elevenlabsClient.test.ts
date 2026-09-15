@@ -442,10 +442,24 @@ describe('ElevenLabsClient', () => {
       );
     });
 
+    it('rejects an empty successful audio response', async () => {
+      vi.mocked(fetch).mockResolvedValue(new Response(new Uint8Array(), { status: 200 }));
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      await expect(client.generateMusic({ prompt: 'calm ambient' })).rejects.toThrow('Music generation produced no audio');
+    });
+
+    it.each([NaN, Infinity, -Infinity])('uses the default duration for non-finite milliseconds %s', async (musicLengthMs) => {
+      vi.mocked(fetch).mockResolvedValue(new Response(new Uint8Array([1])));
+      const client = new ElevenLabsClient({ apiKey: mockApiKey });
+      const result = await client.generateMusic({ prompt: 'calm ambient', musicLengthMs });
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).music_length_ms).toBe(30000);
+      expect(result.durationSeconds).toBe(30);
+    });
+
     it('forwards a pre-aborted composed signal to fetch', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: true,
-        arrayBuffer: () => Promise.resolve(new Uint8Array([]).buffer),
+        arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
       } as Response);
 
       const controller = new AbortController();

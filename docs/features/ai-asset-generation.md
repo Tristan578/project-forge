@@ -4,7 +4,7 @@ Five generation dialogs that create 3D models, textures, sound effects, voice li
 
 ## Overview
 
-AI Asset Generation lets you describe what you want in plain language and receive a game-ready asset a few seconds later. Generated assets are added to your **Asset Panel** automatically and can be placed in the scene like any other asset. Each generation type uses tokens from your account balance; the cost is shown in the dialog before you submit.
+AI Asset Generation lets you describe what you want in plain language. When generation finishes, the asset is added to your **Asset Panel** automatically and can be placed in the scene like any other asset. Platform-key generation uses tokens from your account balance; the cost is shown in the dialog before you submit. Generation with your own provider key is billed by that provider.
 
 ## Accessing the Generation Dialogs
 
@@ -68,7 +68,7 @@ Token cost: 40 tokens.
 
 ### Music Track
 
-Generates a background music loop from a description, using ElevenLabs (the same provider as sound effects and voice — a single ElevenLabs key covers all three). The audio is returned inline and added to your Asset Panel immediately.
+Generates a background music track from a description, using ElevenLabs (the same provider as sound effects and voice — a single ElevenLabs key covers all three). When generation finishes, the audio is returned inline and added to your Asset Panel.
 
 | Option | Description |
 |---|---|

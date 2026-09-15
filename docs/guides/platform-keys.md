@@ -44,7 +44,9 @@ list does the degraded entry carry `configurationOnly: true`, keeping that
 expected state out of overall health and synthetic-monitor paging.
 
 For the currently deferred asset providers, an operator may declare
-`model3d,texture,sfx,voice,sprite,bg_removal`. This repository does not set the
+`model3d,texture,sfx,voice,music,sprite,bg_removal`. Music shares the ElevenLabs
+key after #9522 and must be included while that key is intentionally absent.
+This repository does not set the
 deployment value automatically. When provisioning a capability, remove its ID
 from the declaration in the same deployment. For example, provisioning Meshy
 requires removing both `model3d` and `texture`. A later missing Meshy key then
