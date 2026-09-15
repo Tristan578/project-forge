@@ -12,7 +12,9 @@
 
 import type { AsyncHandler } from '../asyncChannelRouter';
 
+/** HTTP transport and published-game identity required by the leaderboard channel. */
 export interface LeaderboardChannelDeps {
+  /** Fetch JSON, rejecting failed HTTP responses and honoring the supplied abort signal. */
   fetchJson: (url: string, init?: RequestInit) => Promise<unknown>;
   /** Clerk id of the published game's owner, or null when there is no published identity. */
   userId: string | null;
@@ -28,6 +30,14 @@ interface LeaderboardEntry {
   createdAt: string;
 }
 
+/**
+ * Create the score-submission and leaderboard-read handler.
+ * Missing published identity is refused before any request; editor test-play
+ * must not write to a published leaderboard. A published script-worker host is
+ * still required to make these calls available in games (#9856).
+ * @param deps JSON transport and published owner/slug, or null identity in the editor.
+ * @returns An async channel handler that submits scores or reads top entries.
+ */
 export function createLeaderboardHandler(deps: LeaderboardChannelDeps): AsyncHandler {
   return async (method: string, args: Record<string, unknown>, _reportProgress, signal: AbortSignal) => {
     const { userId, slug } = deps;
