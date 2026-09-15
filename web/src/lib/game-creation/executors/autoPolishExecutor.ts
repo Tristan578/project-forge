@@ -4,7 +4,13 @@ import { makeStepError, successResult, failResult } from './shared';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
 import { resolveCameraEntityId } from '../cameraResolution';
-import { waitForEngineFrame, sendCommands, type EngineCommand } from './engineDispatch';
+import {
+  waitForEngineFrame,
+  sendCommands,
+  observeTransformEffect,
+  SPAWN_TRANSFORM_OPERATION,
+  type EngineCommand,
+} from './engineDispatch';
 import { PHYSICS_ROLE_PROFILES } from '../physicsRoles';
 import { COLLIDER_FOR_SHAPE } from '../entityShape';
 import { buildDefaultGroundDescriptor } from '../worldGeometry';
@@ -229,6 +235,38 @@ export const autoPolishExecutor: ExecutorDefinition = {
         return failResult(
           makeStepError('ABORTED', 'Executor was aborted mid-repair', this.userFacingErrorMessage),
         );
+      }
+
+      // CONFIRMED path (#9899): the ground's `update_transform` scale above is a
+      // deferred command, and an accepted dispatch is NOT an applied resize — it
+      // lands a frame later inside `apply_pending_transforms`, which drops any
+      // update matching no entity yet. A ground plane still at 1x1x1 gets a
+      // half-metre collider the player falls through everywhere but the origin
+      // (the exact repair this branch exists to make), so when the context can
+      // query the engine, prove the scale reached the engine before building the
+      // collider from it — rather than trusting acceptance plus a frame wait.
+      if (ctx.observeEntity) {
+        const effect = await observeTransformEffect({
+          operationId: SPAWN_TRANSFORM_OPERATION,
+          entityId: groundEntityId,
+          field: 'scale',
+          expected: groundDescriptor.scale,
+          observe: ctx.observeEntity,
+          signal: ctx.signal,
+        });
+        if (effect.status !== 'applied') {
+          return failResult(
+            makeStepError(
+              effect.status === 'cancelled' ? 'ABORTED' : 'EFFECT_TIMED_OUT',
+              effect.status === 'cancelled'
+                ? 'Ground-plane resize cancelled before the engine confirmed it'
+                : `Repaired ground plane was not confirmed at its requested scale (operation ${effect.operationId})`,
+              this.userFacingErrorMessage,
+              effect.status === 'timed-out',
+              { effect },
+            ),
+          );
+        }
       }
 
       // The `geometry` profile — the one `worldBuildExecutor`'s ground, walls

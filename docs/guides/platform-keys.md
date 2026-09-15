@@ -24,9 +24,9 @@ three more layers keep it from reaching that point:
 
 | Layer | Where | Effect |
 |---|---|---|
-| Declared unavailable | `UNAVAILABLE_CAPABILITIES` in `web/src/lib/config/providers.ts` | The capability is refused everywhere regardless of keys. Today: `music` (#9522). |
+| Declared unavailable | `UNAVAILABLE_CAPABILITIES` in `web/src/lib/config/providers.ts` | The capability is refused everywhere regardless of keys. Today: none — the map is empty. `music` was the last entry until #9522 moved it to ElevenLabs; the machinery stays wired for the next unprovisionable capability. |
 | `/api/capabilities` | `web/src/app/api/capabilities/route.ts` | Reports `available:false` per capability; `unprovisionable:true`, a user-facing `hint` and the tracking `issue` for declared ones. A signed-in user's BYOK key counts. Always `Cache-Control: private`. |
-| Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; the `generate_music` chat tool; `forge.ai.generateMusic` | Each shows the reason and refuses to submit. The dialog gate blocks on a successful per-user `available:false` response; loading and failed fetches stay enabled. Auth changes and successful BYOK saves/removals immediately refresh mounted consumers, bypassing the browser cache and discarding older in-flight responses. |
+| Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; a declared capability's chat tool and its `forge.ai` wrapper (until #9522 this was `music`'s `generate_music` / `forge.ai.generateMusic`) | Each shows the reason and refuses to submit. The dialog gate blocks on a successful per-user `available:false` response; loading and failed fetches stay enabled. Auth changes and successful BYOK saves/removals immediately refresh mounted consumers, bypassing the browser cache and discarding older in-flight responses. |
 | Route gate | `capability:` option on `createGenerationHandler` (step 1a) | 503 `SERVICE_UNAVAILABLE` right after authentication — before rate limits, validation, key resolution or any deduction. |
 
 The health probe (`/api/health` → AI Providers) grades the same table this
@@ -44,7 +44,9 @@ list does the degraded entry carry `configurationOnly: true`, keeping that
 expected state out of overall health and synthetic-monitor paging.
 
 For the currently deferred asset providers, an operator may declare
-`model3d,texture,sfx,voice,sprite,bg_removal`. This repository does not set the
+`model3d,texture,sfx,voice,music,sprite,bg_removal`. Music shares the ElevenLabs
+key after #9522 and must be included while that key is intentionally absent.
+This repository does not set the
 deployment value automatically. When provisioning a capability, remove its ID
 from the declaration in the same deployment. For example, provisioning Meshy
 requires removing both `model3d` and `texture`. A later missing Meshy key then
@@ -65,8 +67,7 @@ to mint" columns are this runbook's; keep them in step when the tables change.
 |---|---|---|---|---|---|
 | `chat`, `embedding`, `image` | Vercel AI Gateway | gateway | `AI_GATEWAY_API_KEY` | **Gateway** — already set in production | Vercel dashboard → AI Gateway |
 | `model3d`, `texture` (also skybox) | Meshy | platform-key | `PLATFORM_MESHY_KEY` | **Platform key** (owner) | https://www.meshy.ai/settings/api — shown once, prefix `msy_` |
-| `sfx`, `voice` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key | https://elevenlabs.io/app/settings/api-keys |
-| `music` | (Suno → ElevenLabs) | unavailable | — | **Unavailable** until #9522 lands; then covered by `PLATFORM_ELEVENLABS_KEY` | n/a — Suno has no public API |
+| `sfx`, `voice`, `music` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key; the one key covers all three | https://elevenlabs.io/app/settings/api-keys |
 | `sprite` (and pixel art) | Replicate or OpenAI, per operation | platform-key | `PLATFORM_REPLICATE_KEY` or `PLATFORM_OPENAI_KEY` | Pixel-art sprites, sprite sheets and tilesets use Replicate. Other single-sprite styles use OpenAI. Either enables the aggregate capability; the dialog gates each selected operation independently. Provision both to support every operation. OpenAI and Replicate are not currently supported by user key setup; unavailable operations do not offer a Settings link. | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
 | `bg_removal` | remove.bg | platform-key | `PLATFORM_REMOVEBG_KEY` | **Platform key** (owner) | https://www.remove.bg/dashboard#api-key |
 
@@ -166,7 +167,7 @@ Record each as a comment on #9117 with the deployment SHA.
 
 ## Related
 
-- #9522 — replace Suno with ElevenLabs Music (unblocks `music`)
+- #9522 — replaced Suno with ElevenLabs Music (landed; `music` now served by `PLATFORM_ELEVENLABS_KEY`)
 - #9523 — route more capabilities through `AI_GATEWAY_API_KEY`
 - #9719 — health probe must stop reporting green on key presence alone
 - `docs/features/ai-asset-generation.md` — user-facing feature reference

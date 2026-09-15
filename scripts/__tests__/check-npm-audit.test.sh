@@ -3205,6 +3205,7 @@ OUTPUTS_EOF
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
+            scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
@@ -3383,7 +3384,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=622
+readonly SELF_EXEC_EXPECTED_DROP=625
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3726,6 +3727,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             .claude/skills/testing/scripts/ratchet-coverage.sh scripts/__tests__/ratchet-coverage.test.sh \
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
+            scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
       - name: Run lockfile gate test suite
@@ -3774,6 +3776,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/db-migration-guard.test.sh
       - name: Run Neon branch-helper test suite
         run: bash scripts/__tests__/neon-branch.test.sh
+      - name: Run preview-database branch-policy test suite
+        run: bash scripts/__tests__/preview-db-branch.test.sh
       - name: Run ci-gate path-filter test suite
         run: bash scripts/__tests__/ci-gate-path-filters.test.sh
       - name: Run CI diff-range resolver test suite

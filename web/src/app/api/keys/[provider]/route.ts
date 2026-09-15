@@ -7,7 +7,7 @@ import { storeProviderKey, deleteProviderKey } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
 import { requireOneOf } from '@/lib/apiValidation';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { BYOK_PROVIDERS } from '@/lib/config/providers';
+import { BYOK_PROVIDERS, REMOVABLE_BYOK_PROVIDERS } from '@/lib/config/providers';
 import { z } from 'zod';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
@@ -71,7 +71,10 @@ async function DELETE_impl(
   if (!stepUp.ok) return stepUp.response;
 
   const { provider } = await params;
-  const providerResult = requireOneOf(provider, 'Provider', BYOK_PROVIDERS);
+  // Retired providers (Suno, #9522) can no longer be ADDED but a stored key
+  // must stay removable — accept the wider REMOVABLE list here so a user can
+  // clear a stale credential from ApiKeyManager's "no longer offered" row.
+  const providerResult = requireOneOf(provider, 'Provider', REMOVABLE_BYOK_PROVIDERS);
   if (!providerResult.ok) return providerResult.response;
 
   try {
