@@ -2,39 +2,10 @@
 
 import { useCallback, useId } from 'react';
 import { HelpCircle } from 'lucide-react';
-import { SliderInput, Vec3Input } from '@spawnforge/ui';
+import { SliderInput, Vec3Input, NumberField } from '@spawnforge/ui';
 import { useEditorStore, type ReverbZoneData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
-
-interface NumberInputRowProps {
-  label: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  onChange: (v: number) => void;
-}
-
-function NumberInputRow({ label, value, min, max, step = 0.1, onChange }: NumberInputRowProps) {
-  const id = useId();
-  return (
-    <div className="flex items-center gap-2">
-      <label htmlFor={id} className="w-20 shrink-0 text-xs text-zinc-400">{label}</label>
-      <input
-        id={id}
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-          focus:ring-1 focus:ring-blue-500"
-      />
-    </div>
-  );
-}
 
 export function ReverbZoneInspector({ entityId }: { entityId: string }) {
   const fieldId = useId();
@@ -153,7 +124,7 @@ export function ReverbZoneInspector({ entityId }: { entityId: string }) {
               onChange={handleSizeChange}
             />
           ) : (
-            <NumberInputRow
+            <NumberField
               label="Radius"
               value={reverbZone.shape.radius}
               min={0.1}
@@ -214,7 +185,7 @@ export function ReverbZoneInspector({ entityId }: { entityId: string }) {
           />
 
           {/* Priority */}
-          <NumberInputRow
+          <NumberField
             label="Priority"
             value={reverbZone.priority}
             step={1}

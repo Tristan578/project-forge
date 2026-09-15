@@ -50,6 +50,7 @@ export { ThemeImportExport } from './composites/ThemeImportExport';
 export { SettingsPanel, type SettingsPanelProps } from './composites/SettingsPanel';
 export { Vec3Input, type Vec3InputProps } from './composites/Vec3Input';
 export { SliderInput, type SliderInputProps } from './composites/SliderInput';
+export { NumberField, type NumberFieldProps } from './composites/NumberField';
 export { ColorPicker, type ColorPickerProps } from './composites/ColorPicker';
 export { TreeView, type TreeViewProps, type TreeNode } from './composites/TreeView';
 export { PropertyGrid, type PropertyGridProps, type PropertyGridItem } from './composites/PropertyGrid';
