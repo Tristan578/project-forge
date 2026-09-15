@@ -1,122 +1,107 @@
-# Observatory — repository capability inventory scanner (core)
+# Observatory repository inventory
 
-> Status: **proposed tooling, first slice.** This directory establishes the
-> mechanism and the mapping-rule schema. It covers **two** domains end-to-end to
-> prove the approach; every other domain in the epic is an explicit
-> `notYetCovered` entry, not a silent omission. CI drift enforcement is
-> deliberately **not** wired here — that requires the full domain set to avoid
-> false positives and is tracked by a follow-up child issue.
+This internal tool inventories tracked source files. The initial rules cover
+`web/src/stores/`, `web/src/lib/workspace/`, and `mcp-server/manifest/`.
+Other areas remain explicitly uncovered under [#9752](https://github.com/Tristan578/project-forge/issues/9752).
 
-The scanner answers one question deterministically: **is every git-tracked file
-accounted for?** It takes `git ls-files -z` as the denominator and resolves each
-tracked file into exactly one of four buckets.
+File attribution does not establish that a feature works, has runtime evidence,
+or meets its acceptance criteria.
+
+## Accounting
+
+The CLI uses `git ls-files -z`, including staged paths and excluding untracked
+files. Every unique path belongs to one bucket:
 
 | Bucket | Meaning |
 | --- | --- |
-| `owned` | A capability's primary attribution. Counted once. |
-| `excluded` | A reasoned exclusion: `generated`, `vendored`, or `binary` — each with a required reason string. |
-| `unmapped` | Inside a covered scope but matched by no rule. **A gap** — this is drift. |
-| `notYetCovered` | Outside every covered scope. An explicit, expected gap for this slice. |
+| `owned` | Attributed to one capability. |
+| `excluded` | Matched by a generated, vendored, or binary exclusion with a nonblank reason. |
+| `unmapped` | Inside a covered scope without an ownership or exclusion rule. |
+| `notYetCovered` | Outside all covered scopes. |
 
-`owned + excluded + unmapped + notYetCovered === tracked` always holds
-(`accounting.reconciles`). Secondary/cross-links never affect the denominator.
+The bucket counts sum to the tracked-file count. Secondary links never add to
+that denominator. A reconciled count proves complete classification, not complete
+capability coverage.
 
-## Artifacts
+## Run and validate
 
-Running the scanner produces two derived (uncommitted) files:
+Install dependencies at the repository root with `npm ci`, then:
 
-- `inventory.json` — machine-readable: capability id, domain, primary owner
-  artifact, secondary links, confidence, planned requirements, exclusions, gaps,
-  aliases, and the accounting summary. No timestamps, so two runs on the same
-  commit tree are byte-identical.
-- `unmapped-report.md` — human-readable: the coverage scope (covered vs
-  not-yet-covered domains), the accounting table, every exclusion with its
-  reason, in-scope gaps, extracted (candidate) mappings needing review, and a
-  by-directory summary of what is not yet covered.
-
-Both are git-ignored; a CI sync gate for them is deferred to a child issue.
-
-## Running
-
-From `tools/observatory/` (bins resolve from the repo-root install):
-
-```bash
-npm run observatory:scan            # writes inventory.json + unmapped-report.md here
-OBSERVATORY_OUT_DIR=/tmp npm run observatory:scan   # redirect the outputs
-npm test                            # vitest fixtures
+```sh
+cd tools/observatory
+npm run observatory:scan
+npm test
+npm run typecheck
 ```
 
-Or from the repo root:
+The scanner writes `inventory.json` and `unmapped-report.md` in this directory.
+Both are ignored by this package's committed `.gitignore`. Set
+`OBSERVATORY_OUT_DIR` to an existing directory to redirect them. A Git, input-file,
+or output-write error exits unsuccessfully. Reported inventory gaps are data;
+the CLI does not yet enforce a repository-wide drift policy.
 
-```bash
-npx vitest run tools/observatory/__tests__/scan.test.ts
+From the repository root, CI runs:
+
+```sh
 npx tsc --noEmit -p tools/observatory/tsconfig.json
+npx vitest run --config tools/observatory/vitest.config.ts
 ```
 
-## Mapping-rule schema
+The Observatory Tests job runs for scanner, CI, or dependency changes and is
+required by CI Success. Unit and CLI tests are enforced separately from the
+deferred inventory-drift policy.
 
-Rules live in `capabilityRules.ts`. The scanner core and its types live in
-`scan.ts`.
+## Rules
 
-### CapabilityRule
+`capabilityRules.ts` defines the coverage scopes, ownership rules, exclusions,
+planned capabilities, and domain labels.
 
 ```ts
-{
-  capabilityId: string;      // stable ID, e.g. "shell-stores.chat"
-  domain: string;            // e.g. "shell-stores" | "mcp"
+interface CapabilityRule {
+  capabilityId: string;
+  domain: string;
   confidence: 'reviewed' | 'extracted';
-  own: string[];             // globs whose files this capability OWNS (primary)
-  primaryOwner?: string;     // the representative artifact (must be an owned file)
-  crossLink?: string[];      // globs of files owned elsewhere that also link here
+  own: string[];
+  primaryOwner?: string;
+  crossLink?: string[];
 }
 ```
 
-- **Order is precedence.** The first rule whose `own` globs match a file becomes
-  that file's single owner. Put specific capabilities before directory
-  catch-alls.
-- **`reviewed`** means a human asserted the mapping is truth. **`extracted`** is
-  a candidate (e.g. a directory sweep) still to be split — extracted capabilities
-  are listed in `unmapped-report.md` so they stay visible for review.
-- Importing a file or declaring a command is **not** proof of functional or
-  telemetry coverage. A wildcard `own` is a denominator-accounting device, not a
-  claim of completeness.
+- Declaration order determines ownership: the first matching `own` rule wins.
+  Other matching capabilities receive secondary links. Explicit `crossLink`
+  patterns add links to files owned elsewhere.
+- Ownership takes precedence over exclusions. Exclusions require a nonblank
+  reason even if they match no current file.
+- A declared `primaryOwner` must be owned by that capability. Missing or
+  incorrectly attributed representatives produce structural gaps.
+- `reviewed` and `extracted` are declared mapping-confidence labels.
+  Directory catch-alls can establish accounting while remaining extracted
+  candidates; they do not prove functional completeness.
+- Planned capabilities represent requirements before implementation. They do
+  not need an artifact merely to appear in the inventory.
 
-### Exclusions
+`aliases.json` maps prior capability IDs to current IDs. Valid chains resolve
+to their terminal target. Missing targets, cycles, and conflicting targets
+produce diagnostics. The exported `resolveCapabilityId` throws on cyclic or
+ambiguous resolution instead of returning an arbitrary ID.
 
-`generated` / `vendored` / `binary`, each with a mandatory `reason`. Exclusions
-are checked **after** ownership (`OWN > EXCLUDE`), so a broad exclusion glob can
-never silently swallow a file an explicit rule maps.
+## Artifacts
 
-### Planned capabilities
+`inventory.json` contains the schema version, coverage scopes, accounting,
+capabilities, exclusions, uncovered paths, structural gaps, and aliases.
+`unmapped-report.md` summarizes those findings for review, including missing
+or incorrectly attributed primary owners and alias problems.
 
-`PLANNED_CAPABILITIES` declares capabilities that must exist before any code
-does. They own no files and are excused from the `capability-without-artifact`
-gap. Contrast a **removed** primary owner (a declared `primaryOwner` absent from
-the tracked set), which **is** a `missing-primary-owner` gap.
+Reports render filenames and configuration strings as literal text so unusual
+names cannot introduce Markdown headings or table columns. Output ordering is
+stable and contains no timestamps; identical inputs produce identical artifacts.
 
-### Aliases
+To add a domain, update its path scopes, ordered ownership rules, reasoned
+exclusions, planned requirements, and coverage labels together, then run the
+tests and inspect both artifacts.
 
-`aliases.json` keeps capability IDs stable across renames and moves:
-`{ from, to }` maps a prior ID to its current one. Every `to` must resolve to a
-declared capability, or the scan emits a `broken-alias` gap.
+## Remaining work
 
-## Extending coverage to a new domain
-
-1. Add the domain's path prefix(es) to `COVERED_SCOPES`.
-2. Add reviewed `CapabilityRule`s for it (specific rules first; a domain
-   catch-all last if you need 100% accounting immediately, at `extracted`
-   confidence).
-3. Add any reasoned exclusions and planned capabilities.
-4. Move the domain from `COVERAGE_SCOPE.notYetCovered` to `.covered`.
-5. Run `npm test` — the fixtures assert the accounting invariants the mechanism
-   depends on, independent of your new rules.
-
-## Out of scope for this slice (stated, not implied)
-
-- **Dynamic/runtime dependency edges** (calls / emits / consumes / persists /
-  serves). This slice is **static file mapping only**; typed dependency edges are
-  a planned capability (`mcp.dependency-edges`), not delivered here.
-- **CI drift enforcement.** Deferred to a child issue.
-- **The full 394-operation-family registry** described in the issue's execution
-  addendum. This is the first of several child slices; it does **not** close the
-  parent epic.
+Dynamic dependency edges, the complete operation-family registry, other domain
+mappings, and repository-wide inventory-drift enforcement remain outside this
+initial slice. They remain part of #9752.

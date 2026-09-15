@@ -294,7 +294,180 @@ describe('real ruleset — the two covered domains reconcile with no in-scope ga
     const second = buildUnmappedReport(result, COVERAGE_SCOPE);
     expect(second).toBe(first);
     expect(first).toContain('## Coverage scope');
-    expect(first).toContain('shell-stores');
-    expect(first).toContain('engine-core');
+    expect(first).toContain('shell\\-stores');
+    expect(first).toContain('engine\\-core');
+  });
+});
+
+
+describe('scan — ownership and primary artifacts', () => {
+  it('deduplicates overlapping ownership and explicit links while preserving OWN over EXCLUDE', () => {
+    const fixture = loadScenario('shared-helper');
+    const result = scan({
+      ...fixture,
+      rules: [...fixture.rules, {
+        ...fixture.rules[1],
+        own: ['app/shared/**'],
+        crossLink: ['app/shared/helper.ts', 'app/featureA/index.ts'],
+      }],
+      exclusions: [{ category: 'generated', reason: 'Broad exclusion must not override ownership.', patterns: ['app/**'] }],
+    });
+    expect(findCapability(result, 'feat.a')?.members).toContain('app/shared/helper.ts');
+    expect(findCapability(result, 'feat.b')?.secondaryLinks).toEqual([
+      'app/featureA/index.ts', 'app/shared/helper.ts',
+    ]);
+    expect(findCapability(result, 'feat.a')?.secondaryLinks).toEqual([]);
+    expect(result.accounting).toEqual({
+      trackedTotal: 4, ownedTotal: 4, excludedTotal: 0,
+      unmappedTotal: 0, notYetCoveredTotal: 0, reconciles: true,
+    });
+  });
+
+  it.each([
+    ['app/other.ts', 'owned', 'other'],
+    ['app/free.ts', 'unmapped', null],
+    ['app/generated.ts', 'excluded', null],
+    ['outside/free.ts', 'notYetCovered', null],
+  ] as const)('reports tracked primary %s classified as %s instead of owned', (primaryOwner, bucket, actualOwner) => {
+    const result = scan({
+      files: ['app/main.ts', 'app/other.ts', 'app/free.ts', 'app/generated.ts', 'outside/free.ts'],
+      rules: [
+        { capabilityId: 'subject', domain: 'demo', confidence: 'reviewed', own: ['app/main.ts'], primaryOwner },
+        { capabilityId: 'other', domain: 'demo', confidence: 'reviewed', own: ['app/other.ts'] },
+      ],
+      exclusions: [{ category: 'generated', reason: 'Generated fixture.', patterns: ['app/generated.ts'] }],
+      coveredScopes: ['app/'],
+    });
+    expect(result.gaps).toContainEqual({
+      type: 'primary-owner-not-owned', capabilityId: 'subject', path: primaryOwner, bucket, actualOwner,
+    });
+    expect(findCapability(result, 'subject')?.members).toEqual(['app/main.ts']);
+    expect(result.accounting.reconciles).toBe(true);
+  });
+});
+
+describe('scan — alias graph validity', () => {
+  it('follows valid multi-hop aliases to their terminal capability', () => {
+    const fixture = loadScenario('renamed-file');
+    const target = fixture.expected.resolveTo as string;
+    const aliases = [{ from: 'old', to: 'intermediate' }, { from: 'intermediate', to: target }];
+    const result = scan({ ...fixture, aliases });
+    expect(result.gaps).toEqual([]);
+    expect(resolveCapabilityId(aliases, 'old')).toBe(target);
+    expect(resolveCapabilityId(aliases, 'unaliased')).toBe('unaliased');
+  });
+
+  it('reports the missing terminal target rather than a valid intermediate alias', () => {
+    const fixture = loadScenario('renamed-file');
+    const result = scan({ ...fixture, aliases: [
+      { from: 'old', to: 'intermediate' }, { from: 'intermediate', to: 'missing' },
+    ] });
+    expect(result.gaps).toEqual([
+      { type: 'broken-alias', from: 'intermediate', to: 'missing' },
+      { type: 'broken-alias', from: 'old', to: 'missing' },
+    ]);
+  });
+
+  it.each([
+    [{ from: 'a', to: 'a' }],
+    [{ from: 'prefix', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'b' }],
+  ])('reports a cycle once and refuses to resolve an invalid table', (...aliases) => {
+    const result = scan({ ...loadScenario('renamed-file'), aliases });
+    const cycle = aliases.length === 1 ? ['a', 'a'] : ['b', 'c', 'b'];
+    expect(result.gaps).toEqual([{ type: 'alias-cycle', cycle }]);
+    expect(resolveCapabilityId.bind(null, aliases, aliases[0].from)).toThrow(/alias-cycle/);
+    expect(() => resolveCapabilityId(aliases, 'unrelated')).toThrow(/Invalid capability alias table/);
+    expect(scan({ ...loadScenario('renamed-file'), aliases: [...aliases].reverse() }).gaps).toEqual(result.gaps);
+  });
+
+  it('reports conflicting duplicate sources instead of silently choosing the last target', () => {
+    const fixture = loadScenario('renamed-file');
+    const aliases = [{ from: 'old', to: 'one' }, { from: 'old', to: 'two' }];
+    const result = scan({ ...fixture, aliases });
+    expect(result.gaps).toEqual([{ type: 'ambiguous-alias', from: 'old', targets: ['one', 'two'] }]);
+    expect(() => resolveCapabilityId(aliases, 'old')).toThrow(/ambiguous-alias/);
+    expect(scan({ ...fixture, aliases: [...aliases].reverse() })).toEqual(result);
+  });
+
+  it('allows repeated identical mappings because they have one unambiguous target', () => {
+    const fixture = loadScenario('renamed-file');
+    const target = fixture.expected.resolveTo as string;
+    const aliases = [{ from: 'old', to: target }, { from: 'old', to: target }];
+    expect(scan({ ...fixture, aliases }).gaps).toEqual([]);
+    expect(resolveCapabilityId(aliases, 'old')).toBe(target);
+  });
+});
+
+describe('scan — justified exclusions are mandatory', () => {
+  it.each([undefined, null, '', ' \t\r\n', 12])('rejects an invalid exclusion reason before processing files', (reason) => {
+    const exclusion = { category: 'generated', patterns: ['never-matches/**'], reason } as unknown as NonNullable<ScanConfig['exclusions']>[number];
+    expect(() => scan({
+      files: [], rules: [], exclusions: [exclusion], coveredScopes: [],
+    })).toThrow('Exclusion rule 1 requires a non-empty string reason.');
+  });
+});
+
+describe('artifact contracts', () => {
+  it('serializes every inventory bucket, attribution, diagnostic and alias with the schema version', () => {
+    const result = scan({
+      files: ['src/main.ts', 'src/shared.ts', 'src/linked.ts', 'src/generated.ts', 'src/unmapped.ts', 'future/feature.ts'],
+      rules: [
+        { capabilityId: 'cap.core', domain: 'core', confidence: 'reviewed', own: ['src/main.ts', 'src/shared.ts'], primaryOwner: 'src/main.ts' },
+        { capabilityId: 'cap.links', domain: 'links', confidence: 'extracted', own: ['src/linked.ts', 'src/shared.ts'], crossLink: ['src/main.ts'] },
+      ],
+      exclusions: [{ category: 'generated', reason: 'Generated mirror.', patterns: ['src/generated.ts'] }],
+      planned: [{ capabilityId: 'cap.future', domain: 'future', requirement: 'Deliver the future feature.', confidence: 'reviewed' }],
+      aliases: [{ from: 'old.core', to: 'cap.core' }],
+      coveredScopes: ['src/'],
+    });
+    expect(buildInventoryJson(result)).toEqual({
+      schemaVersion: 1,
+      coveredScopes: ['src/'],
+      accounting: {
+        trackedTotal: 6, ownedTotal: 3, excludedTotal: 1,
+        unmappedTotal: 1, notYetCoveredTotal: 1, reconciles: true,
+      },
+      capabilities: [
+        { capabilityId: 'cap.core', domain: 'core', confidence: 'reviewed', planned: false, requirement: null,
+          primaryOwner: 'src/main.ts', members: ['src/main.ts', 'src/shared.ts'], secondaryLinks: [] },
+        { capabilityId: 'cap.future', domain: 'future', confidence: 'reviewed', planned: true, requirement: 'Deliver the future feature.',
+          primaryOwner: null, members: [], secondaryLinks: [] },
+        { capabilityId: 'cap.links', domain: 'links', confidence: 'extracted', planned: false, requirement: null,
+          primaryOwner: 'src/linked.ts', members: ['src/linked.ts'], secondaryLinks: ['src/main.ts', 'src/shared.ts'] },
+      ],
+      exclusions: [{ path: 'src/generated.ts', category: 'generated', reason: 'Generated mirror.' }],
+      unmapped: ['src/unmapped.ts'],
+      notYetCovered: ['future/feature.ts'],
+      gaps: [{ type: 'unmapped-in-covered-scope', path: 'src/unmapped.ts' }],
+      aliases: [{ from: 'old.core', to: 'cap.core' }],
+    });
+  });
+
+  it('renders every structural gap with a reference and repair in the human report', () => {
+    const result = scan({
+      files: ['src/owned.ts', 'src/free.ts'],
+      rules: [
+        { capabilityId: 'owner', domain: 'demo', confidence: 'reviewed', own: ['src/owned.ts'] },
+        { capabilityId: 'foreign', domain: 'demo', confidence: 'reviewed', own: [], primaryOwner: 'src/owned.ts' },
+        { capabilityId: 'removed', domain: 'demo', confidence: 'reviewed', own: [], primaryOwner: 'src/missing.ts' },
+      ],
+      aliases: [
+        { from: 'broken', to: 'absent' },
+        { from: 'cycle', to: 'cycle' },
+        { from: 'ambiguous', to: 'owner' }, { from: 'ambiguous', to: 'foreign' },
+      ],
+      coveredScopes: ['src/'],
+    });
+    const report = buildUnmappedReport(result, { covered: [], notYetCovered: [] });
+    const structural = report.split('## Structural gaps\n')[1].split('\n## ')[0];
+    for (const label of ['Unmapped file', 'Missing primary owner', 'Primary owner not owned',
+      'Capability without artifact', 'Broken alias', 'Alias cycle', 'Ambiguous alias']) {
+      expect(structural).toContain(label);
+    }
+    expect(structural).toContain('src/missing\\.ts');
+    expect(structural).toContain('belongs to owner');
+    expect(structural).toContain('Terminal target absent');
+    expect(structural).toContain('Conflicting targets: foreign, owner');
+    expect(structural.split('\n').filter(line => line.startsWith('| '))).toHaveLength(result.gaps.length + 2);
   });
 });

@@ -3,8 +3,12 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
-    "types": ["node"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
@@ -13,5 +17,10 @@
     "allowImportingTsExtensions": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["scan.ts", "capabilityRules.ts", "__tests__/**/*.ts"]
+  "include": [
+    "scan.ts",
+    "capabilityRules.ts",
+    "__tests__/**/*.ts",
+    "vitest.config.ts"
+  ]
 }
