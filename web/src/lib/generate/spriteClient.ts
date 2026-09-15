@@ -47,6 +47,22 @@ export interface TilesetParams {
 export interface GenerationResult {
   taskId: string;
   status: string;
+  /**
+   * The finished, displayable image for a SYNCHRONOUSLY completed generation
+   * (the DALL-E path — `status === 'completed'`). It may be a base64 `data:`
+   * URL (after background removal, up to several MB for a 1024x1024 PNG) or a
+   * provider image URL.
+   *
+   * It is delivered to the client in the POST response BODY and imported
+   * directly. It must NEVER be threaded through `taskId`/`jobId` and the
+   * status-poll query string: `useGenerationPolling` fetches
+   * `…/status?jobId=<jobId>`, and a base64 payload there corrupts (`+` decodes
+   * to a space under `application/x-www-form-urlencoded` parsing) and blows the
+   * request-line / header size limit Node and proxies enforce (#9734). `taskId`
+   * therefore stays a short provider identifier even when background removal
+   * produced a large data URL.
+   */
+  resultUrl?: string;
 }
 
 function requireProviderArtifact(value: unknown, artifact: string): string {
@@ -112,16 +128,27 @@ export class SpriteClient {
         key: params.removeBackgroundKey,
         signal: params.signal,
       });
+      // `taskId` stays the SHORT DALL-E URL; the transparent PNG — a base64
+      // `data:` URL that can reach several MB — rides ONLY in `resultUrl`, which
+      // the route hands the client in the POST response body. Putting it in
+      // `taskId` would make it the `jobId`, and a multi-MB base64 payload in the
+      // status-poll query string corrupts and exceeds request-line limits
+      // (#9734).
       return {
-        taskId: resultUrl,
+        taskId: imageUrl,
         status: 'completed',
+        resultUrl,
       };
     }
 
-    // Return the URL directly as taskId for synchronous completion
+    // Synchronous completion: the finished image is the DALL-E URL itself.
+    // Carried in `resultUrl` (response body) so the client imports it directly
+    // rather than round-tripping even a short provider URL — which can itself
+    // contain `+`/`/`/`=` — through the status-poll query string.
     return {
       taskId: imageUrl,
       status: 'completed',
+      resultUrl: imageUrl,
     };
   }
 

@@ -8,6 +8,7 @@ import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey, resolveByokOrPlatformKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { refundTokens } from '@/lib/tokens/service';
+import { captureException } from '@/lib/monitoring/sentry-server';
 import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
@@ -229,6 +230,73 @@ describe('POST /api/generate/sprite', () => {
       expect(lastGenerateSprite).toHaveBeenCalledWith(
         expect.objectContaining({ removeBackground: true, removeBackgroundKey: undefined }),
       );
+    });
+
+    // The catch branch around resolveByokOrPlatformKey (route.ts) must degrade
+    // to "no background removal" rather than sink a sprite the user paid for.
+    // Without this test the branch was unexercised (review #9734, test/medium).
+    it('degrades to no background removal when the remove.bg key lookup throws, without failing the paid sprite', async () => {
+      vi.mocked(resolveByokOrPlatformKey).mockRejectedValue(new Error('db down'));
+
+      const res = await POST(
+        makeRequest({ prompt: 'a hero', style: 'hand-drawn', provider: 'dalle3', removeBackground: true }),
+      );
+
+      // The sprite still succeeds…
+      expect(res.status).toBe(201);
+      // …with the key forwarded as undefined (generateSprite then no-ops the
+      // background removal and returns the sprite unchanged)…
+      expect(lastGenerateSprite).toHaveBeenCalledWith(
+        expect.objectContaining({ removeBackground: true, removeBackgroundKey: undefined }),
+      );
+      // …and the lookup failure is reported with the route/action metadata.
+      expect(captureException).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ route: '/api/generate/sprite', action: 'resolve_removebg_key' }),
+      );
+    });
+  });
+
+  // Synchronous DALL-E completion contract (#9734): the finished image is
+  // delivered in the response BODY as `resultUrl`, and the jobId is a short,
+  // opaque, non-pollable id — NEVER the (possibly multi-MB base64) image, which
+  // would corrupt and exceed request-line limits once threaded through the
+  // status-poll query string.
+  describe('synchronous DALL-E completion (#9734)', () => {
+    const BASE64_IMAGE = `data:image/png;base64,${'A'.repeat(4096)}`;
+
+    beforeEach(() => {
+      vi.mocked(SpriteClient).mockImplementation(
+        function (this: InstanceType<typeof SpriteClient>) {
+          const gen = vi.fn().mockResolvedValue({
+            taskId: 'https://oaidalleapi.example.com/short-signed.png',
+            status: 'completed',
+            resultUrl: BASE64_IMAGE,
+            provider: 'dalle3',
+          });
+          this.generateSprite = gen;
+          this.generateSpriteSheet = vi.fn();
+          lastGenerateSprite = gen;
+        } as unknown as typeof SpriteClient,
+      );
+    });
+
+    it('returns the image in resultUrl and a jobId that carries no base64 payload', async () => {
+      const res = await POST(
+        makeRequest({ prompt: 'a hero', style: 'hand-drawn', provider: 'dalle3', removeBackground: true }),
+      );
+      expect(res.status).toBe(201);
+      const data = await res.json();
+
+      expect(data.status).toBe('completed');
+      // The image rides in the body…
+      expect(data.resultUrl).toBe(BASE64_IMAGE);
+      // …and the jobId is short and free of the base64 payload, so it can never
+      // corrupt or overflow the /status?jobId= query string.
+      expect(data.jobId).not.toContain('data:');
+      expect(data.jobId).not.toContain('base64');
+      expect(data.jobId.length).toBeLessThan(128);
+      expect(data.jobId.startsWith('dalle3-sync:')).toBe(true);
     });
   });
 });

@@ -31,6 +31,9 @@ describe('SpriteClient', () => {
 
       expect(result.taskId).toBe('https://image.url');
       expect(result.status).toBe('completed');
+      // The finished image also rides in `resultUrl` (delivered in the POST
+      // response body), so the route never has to embed it in the jobId (#9734).
+      expect(result.resultUrl).toBe('https://image.url');
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining('openai.com'),
         expect.objectContaining({
@@ -287,8 +290,14 @@ describe('SpriteClient', () => {
           headers: expect.objectContaining({ 'X-Api-Key': mockApiKey }),
         }),
       );
-      // The transparent result replaces the raw DALL-E URL.
-      expect(result.taskId).toContain('data:image/png;base64,');
+      // The transparent PNG (a base64 data URL, potentially multi-MB) rides ONLY
+      // in `resultUrl`, delivered in the POST response body. `taskId` stays the
+      // SHORT DALL-E URL so it never becomes a base64 `jobId` in the status-poll
+      // query string, where it would corrupt and exceed request-line limits
+      // (#9734).
+      expect(result.resultUrl).toContain('data:image/png;base64,');
+      expect(result.taskId).toBe('https://image.url/sprite.png');
+      expect(result.taskId).not.toContain('data:');
       expect(result.status).toBe('completed');
     });
 

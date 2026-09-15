@@ -1770,4 +1770,95 @@ describe('useGenerationPolling', () => {
       vi.useFakeTimers();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Synchronous DALL-E sprite (#9734): the finished image arrives inline on the
+  // job as `resultUrl`; it is imported directly, and the status round-trip that
+  // would corrupt/overflow a base64 payload in the `?jobId=` query string is
+  // skipped entirely.
+  // ---------------------------------------------------------------------------
+  describe('inline synchronous result (#9734)', () => {
+    it('imports the inline resultUrl without ever hitting the status route', async () => {
+      const BASE64 = `data:image/png;base64,${'A'.repeat(2048)}`;
+      mockJobs['sync1'] = makeJob('sync1', {
+        type: 'sprite',
+        status: 'pending',
+        resultUrl: BASE64,
+        autoPlace: true,
+        targetEntityId: 'ent-sync',
+        prompt: 'a hero',
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:image/png;base64,SYNC';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['sprite'], { type: 'image/png' })),
+      } as Response));
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      // The poller NEVER contacts the status route — the base64 image would
+      // corrupt/overflow the query string. Any fetch it made was the direct
+      // download of the inline image.
+      for (const call of fetchSpy.mock.calls) {
+        const url = typeof call[0] === 'string' ? call[0] : (call[0] as Request).url;
+        expect(url).not.toContain('/status');
+        expect(url).not.toContain('jobId=');
+      }
+      // The download targeted the inline data URL, and the sprite was imported.
+      expect(fetchSpy).toHaveBeenCalledWith(BASE64);
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,SYNC',
+        'TestAsset',
+        'ent-sync',
+        'base_color',
+      );
+      expect(mockUpdateJob).toHaveBeenCalledWith('sync1', expect.objectContaining({
+        status: 'completed',
+        resultUrl: BASE64,
+      }));
+
+      globalThis.FileReader = origFileReader;
+      fetchSpy.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // jobId encoding (#9734): the status route reads jobId via
+  // searchParams.get(), which url-decodes, so the poller must encodeURIComponent
+  // it — a raw '+' would otherwise decode to a space.
+  // ---------------------------------------------------------------------------
+  describe('jobId query encoding (#9734)', () => {
+    it('percent-encodes reserved characters in the jobId before polling', async () => {
+      mockJobs['enc'] = makeJob('enc', {
+        type: 'model',
+        jobId: 'pred+id/x=y',
+        status: 'processing',
+      });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        mockFetchResponse({ jobId: 'pred+id/x=y', status: 'processing', progress: 10 }),
+      );
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      const url = fetchSpy.mock.calls[0][0] as string;
+      // Encoded: '+' -> %2B, '/' -> %2F, '=' -> %3D. A raw '+' would decode to a
+      // space on the status route and corrupt the id.
+      expect(url).toContain('jobId=pred%2Bid%2Fx%3Dy');
+      expect(url).not.toContain('jobId=pred+id/x=y');
+      fetchSpy.mockRestore();
+    });
+  });
 });
