@@ -837,7 +837,7 @@
     },
     {
       "name": "list_checkpoints",
-      "category": "scene",
+      "category": "query",
       "requiredScope": "scene:read"
     },
     {
@@ -1784,6 +1784,11 @@
       "name": "validate_project_security",
       "category": "security",
       "requiredScope": "security:read"
+    },
+    {
+      "name": "validate_scene",
+      "category": "scene",
+      "requiredScope": "scene:read"
     },
     {
       "name": "validate_wgsl",

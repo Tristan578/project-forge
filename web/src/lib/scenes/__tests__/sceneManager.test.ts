@@ -8,6 +8,8 @@
  * that the in-app AI path drives these same functions.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { attachFixtureValidator, sceneFixture } from './sceneFixture';
+import { setSceneValidator } from '../sceneValidation';
 import {
   createInitialProject,
   loadProjectScenes,
@@ -21,7 +23,7 @@ import {
 } from '../sceneManager';
 
 const SCENES_STORAGE_KEY = 'forge-project-scenes';
-const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints';
+const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints:v2';
 
 function makeProject(activeName: string, sceneCount = 1): ProjectScenes {
   const scenes = Array.from({ length: sceneCount }, (_, i) => ({
@@ -30,7 +32,7 @@ function makeProject(activeName: string, sceneCount = 1): ProjectScenes {
     isStartScene: i === 0,
     data:
       i === 0
-        ? { formatVersion: 3, sceneName: activeName, entities: [{ id: 'e1', tag: activeName }] }
+        ? sceneFixture(activeName)
         : null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -39,10 +41,12 @@ function makeProject(activeName: string, sceneCount = 1): ProjectScenes {
 }
 
 beforeEach(() => {
+  attachFixtureValidator();
   localStorage.clear();
 });
 
 afterEach(() => {
+  setSceneValidator(null);
   vi.restoreAllMocks();
   localStorage.clear();
 });
@@ -162,6 +166,9 @@ describe('checkpoints — create/list/restore round-trip', () => {
 
     const restored = restoreCheckpoint(checkpoint.id);
     expect('project' in restored && restored.project).toEqual(v1);
+    // Reading a recovery point cannot replace storage before engine confirmation.
+    expect(loadProjectScenes()).not.toEqual(v1);
+    if ('project' in restored) saveProjectScenes(restored.project);
     expect(loadProjectScenes()).toEqual(v1);
   });
 
@@ -181,6 +188,9 @@ describe('checkpoints — create/list/restore round-trip', () => {
     // Restoring the very first checkpoint brings back its snapshot exactly.
     const restored = restoreCheckpoint(first.id);
     expect('project' in restored && restored.project).toEqual(v1);
+    // Reading a recovery point cannot replace storage before engine confirmation.
+    expect(loadProjectScenes()).not.toEqual(v1);
+    if ('project' in restored) saveProjectScenes(restored.project);
     expect(loadProjectScenes()).toEqual(v1);
   });
 
@@ -189,7 +199,7 @@ describe('checkpoints — create/list/restore round-trip', () => {
     createCheckpoint(project, 'snap');
     // Mutate the source object AFTER the checkpoint was taken.
     project.scenes[0].name = 'MUTATED';
-    (project.scenes[0].data as { sceneName: string }).sceneName = 'MUTATED';
+    project.scenes[0].data!.metadata!.name = 'MUTATED';
     expect(listCheckpoints()[0].snapshot.scenes[0].name).toBe('Snapshot source');
   });
 
@@ -305,4 +315,97 @@ describe('createInitialProject', () => {
     expect(() => saveProjectScenes(project)).not.toThrow();
     expect(loadProjectScenes()).toEqual(project);
   });
+});
+
+describe('checkpoint validation and identity', () => {
+  it.each([
+    ['missing scene metadata', (project: ProjectScenes) => { delete project.scenes[0].data!.metadata; }],
+    ['invalid entities', (project: ProjectScenes) => { project.scenes[0].data!.entities = [null]; }],
+    ['unsupported version', (project: ProjectScenes) => { project.scenes[0].data!.formatVersion = 99; }],
+    ['invalid timestamp', (project: ProjectScenes) => { project.scenes[0].updatedAt = 'not-a-date'; }],
+  ])('rejects %s before replacing or evicting any saved data', (_name, damage) => {
+    const good = makeProject('Good');
+    saveProjectScenes(good);
+    createCheckpoint(good, 'Keep');
+    const priorProject = localStorage.getItem(SCENES_STORAGE_KEY);
+    const priorCheckpoints = localStorage.getItem(CHECKPOINTS_STORAGE_KEY);
+    const damaged = makeProject('Damaged');
+    damage(damaged);
+    const writes = vi.spyOn(Storage.prototype, 'setItem');
+    expect(() => saveProjectScenes(damaged)).toThrow(/validation/i);
+    expect(() => createCheckpoint(damaged)).toThrow(/validation/i);
+    expect(writes).not.toHaveBeenCalled();
+    expect(localStorage.getItem(SCENES_STORAGE_KEY)).toBe(priorProject);
+    expect(localStorage.getItem(CHECKPOINTS_STORAGE_KEY)).toBe(priorCheckpoints);
+  });
+
+  it('filters invalid labels and timestamps rather than rendering unsafe records', () => {
+    const good = createCheckpoint(makeProject('Good'), 'Good').checkpoint;
+    localStorage.setItem(CHECKPOINTS_STORAGE_KEY, JSON.stringify([
+      good, { ...good, id: 'bad-label', label: {} }, { ...good, id: 'bad-time', createdAt: 'invalid' },
+    ]));
+    expect(listCheckpoints().map((cp) => cp.id)).toEqual([good.id]);
+  });
+
+  it('migrates numeric legacy project version 1 to the writable 1.0 container', () => {
+    const project = makeProject('Legacy');
+    localStorage.setItem(SCENES_STORAGE_KEY, JSON.stringify({ ...project, version: 1 }));
+    expect(loadProjectScenes()).toEqual(project);
+    expect(() => saveProjectScenes(loadProjectScenes())).not.toThrow();
+  });
+
+  it('does not import old anonymous checkpoint records into any project namespace', () => {
+    localStorage.setItem('forge-project-scene-checkpoints', JSON.stringify([{ id: 'legacy', snapshot: makeProject('Other') }]));
+    expect(listCheckpoints()).toEqual([]);
+    expect(listCheckpoints('A')).toEqual([]);
+  });
+
+  it('does not evict any old checkpoints when the incoming label is invalid', () => {
+    createCheckpoint(makeProject('Keep'), 'Keep');
+    const before = localStorage.getItem(CHECKPOINTS_STORAGE_KEY);
+    expect(() => createCheckpoint(makeProject('Bad'), {} as string)).toThrow(/label/i);
+    expect(localStorage.getItem(CHECKPOINTS_STORAGE_KEY)).toBe(before);
+  });
+
+  it('does not retry or evict entries for non-quota storage failures', () => {
+    createCheckpoint(makeProject('Keep'), 'Keep');
+    const before = localStorage.getItem(CHECKPOINTS_STORAGE_KEY);
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Disabled'); });
+    expect(() => createCheckpoint(makeProject('New'))).toThrow('Disabled');
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(CHECKPOINTS_STORAGE_KEY)).toBe(before);
+  });
+  it('reads stored scenes before the engine is attached without replacing them with an initial project', () => {
+    const project = makeProject('Saved before startup');
+    saveProjectScenes(project);
+    createCheckpoint(project, 'Keep');
+    const before = localStorage.getItem(SCENES_STORAGE_KEY);
+    setSceneValidator(null);
+    expect(loadProjectScenes()).toEqual(project);
+    expect(listCheckpoints().map((cp) => cp.label)).toEqual(['Keep']);
+    expect(localStorage.getItem(SCENES_STORAGE_KEY)).toBe(before);
+  });
+
+  it('normalizes the known legacy empty-scene shape without requiring an engine', () => {
+    const project = makeProject('Empty legacy');
+    const raw = JSON.stringify({ ...project, scenes: [{ ...project.scenes[0], data: { formatVersion: 3, sceneName: 'Empty legacy', entities: [] } }] });
+    localStorage.setItem(SCENES_STORAGE_KEY, raw);
+    setSceneValidator(null);
+    expect(loadProjectScenes().scenes[0].data).toEqual(sceneFixture('Empty legacy'));
+    expect(localStorage.getItem(SCENES_STORAGE_KEY)).toBe(raw);
+    attachFixtureValidator();
+    expect(() => saveProjectScenes(loadProjectScenes())).not.toThrow();
+  });
+
+  it.each([
+    { formatVersion: 3, sceneName: 'Legacy entities', entities: [{ id: 'must-not-disappear' }] },
+    { formatVersion: 99, sceneName: 'Future', entities: [] },
+  ])('preserves unsupported saved data instead of treating it as absent: %j', (data) => {
+    const project = makeProject('Preserve');
+    const raw = JSON.stringify({ ...project, scenes: [{ ...project.scenes[0], data }] });
+    localStorage.setItem(SCENES_STORAGE_KEY, raw);
+    expect(() => loadProjectScenes()).toThrow(/preserved/);
+    expect(localStorage.getItem(SCENES_STORAGE_KEY)).toBe(raw);
+  });
+
 });

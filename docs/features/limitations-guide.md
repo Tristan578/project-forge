@@ -8,15 +8,15 @@ relatedFiles:
 
 # Known Limitations & Workarounds
 
-SpawnForge is feature-complete for most game creation workflows. This guide covers the few areas with genuine constraints and how to work around them.
+SpawnForge has implemented feature areas with different levels of verification and completeness. This guide describes known gaps and available workarounds.
 
-## What's Fully Working
+## Implemented feature areas
 
-These features are complete, tested, and production-ready:
+These areas have implementations; the capability matrix records their current workflow status.
 
 - **2D Engine**: Sprites, tilemaps, 2D physics (Rapier2D), joints, sprite animation, camera
 - **3D Engine**: PBR materials, skeletal animation, physics (Rapier3D), particles, terrain, CSG, LOD
-- **AI Creation**: 358 MCP commands, natural language chat, compound actions, asset generation (3D models, textures, sound effects, voice; music generation is not available yet, see limitation 6)
+- **AI Creation**: 359 MCP commands, natural language chat, compound actions, asset generation (3D models, textures, sound effects, voice; music generation is not available yet, see limitation 6)
 - **Audio**: Spatial audio, bus mixer, reverb zones, adaptive music, snapshots
 - **Scripting**: TypeScript + visual scripting with 73 node types
 - **Export**: HTML5 bundles, cloud publishing, mobile touch controls

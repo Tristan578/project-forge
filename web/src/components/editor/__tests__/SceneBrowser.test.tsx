@@ -32,7 +32,7 @@ const mockDuplicateScene = vi.fn(async () => {});
 // scene.FR-3.OP-02 checkpoint actions.
 const mockCreateCheckpoint = vi.fn(async () => ({ id: 'ckpt_1', label: 'cp', createdAt: 't', snapshot: {} }));
 const mockListCheckpoints = vi.fn(() => [] as Array<{ id: string; label: string; createdAt: string; snapshot: unknown }>);
-const mockRestoreCheckpoint = vi.fn(() => true);
+const mockRestoreCheckpoint = vi.fn(async () => true);
 const mockDeleteCheckpoint = vi.fn(() => []);
 
 function buildState(overrides: {
@@ -72,6 +72,8 @@ describe('SceneBrowser', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRestoreCheckpoint.mockReset().mockResolvedValue(true);
+    mockListCheckpoints.mockReturnValue([]);
     setupStore();
   });
 
@@ -236,39 +238,49 @@ describe('SceneBrowser', () => {
     expect(mockListCheckpoints.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('restores a checkpoint after confirmation', () => {
+  it('restores a checkpoint after confirmation', async () => {
     mockListCheckpoints.mockReturnValue([
       { id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} },
     ]);
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
     fireEvent.click(screen.getByLabelText('Restore pre-change'));
+    expect(screen.getByLabelText('Confirm restore pre-change')).toHaveAccessibleDescription(
+      'Restoring this checkpoint replaces all scenes in the current project and discards newer unsaved work.'
+    );
+    expect(mockRestoreCheckpoint).not.toHaveBeenCalled();
     // A confirm step guards the destructive restore.
-    fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
+    });
     expect(mockRestoreCheckpoint).toHaveBeenCalledWith('cp1');
     mockListCheckpoints.mockReturnValue([]);
   });
 
-  it('logs, rather than silently treating it as a success, when the store reports the restore failed', () => {
-    // #9813 review finding: the return value used to be ignored entirely, so
-    // a checkpoint deleted from another tab (or an engine that rejected the
-    // scene load) still closed the confirm dialog and refreshed as if the
-    // restore had landed. There is no dedicated error banner in this
-    // component (createCheckpoint failures follow the same console-only
-    // convention), so a log is the observable signal here.
-    mockRestoreCheckpoint.mockReturnValueOnce(false);
-    mockListCheckpoints.mockReturnValue([
-      { id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} },
-    ]);
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('shows an actionable error when checkpoint restore fails', async () => {
+    mockRestoreCheckpoint.mockResolvedValueOnce(false);
+    mockListCheckpoints.mockReturnValue([{ id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} }]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Restore pre-change'));
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('previous save is intact');
+    expect(mockRestoreCheckpoint).toHaveBeenCalledWith('cp1');
+    mockListCheckpoints.mockReturnValue([]);
+  });
+
+  it('keeps recovery controls busy until the async engine confirmation finishes', async () => {
+    let finish!: (success: boolean) => void;
+    mockRestoreCheckpoint.mockImplementationOnce(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    mockListCheckpoints.mockReturnValue([{ id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} }]);
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
     fireEvent.click(screen.getByLabelText('Restore pre-change'));
     fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
-    expect(mockRestoreCheckpoint).toHaveBeenCalledWith('cp1');
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to restore checkpoint'),
-      'cp1'
-    );
-    errorSpy.mockRestore();
+    expect(screen.getByLabelText('Save checkpoint')).toBeDisabled();
+    expect(screen.getByLabelText('Add new scene')).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting');
+    await act(async () => finish(true));
+    expect(screen.getByLabelText('Save checkpoint')).not.toBeDisabled();
     mockListCheckpoints.mockReturnValue([]);
   });
 

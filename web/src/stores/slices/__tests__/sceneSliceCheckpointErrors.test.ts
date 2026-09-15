@@ -1,123 +1,157 @@
 // @vitest-environment jsdom
-/**
- * scene.FR-3.OP-02 — checkpoint error handling (#9813 review findings).
- *
- * Recovery checkpoints share the same `localStorage.setItem` path as the
- * rest of the scene manager, so a quota or storage error there must degrade
- * gracefully — a caught error and a defined return value — rather than
- * throw through a Zustand action or leave an async chat-tool call rejected.
- * Each test below reproduces one of the review findings on PR #10050:
- *  - `deleteCheckpoint`'s unguarded `localStorage.setItem` (sceneManager.ts)
- *    is now caught at both call sites (this file covers the store action;
- *    `sceneManagementHandlers.test.ts` covers the AI handler).
- *  - `createCheckpoint`'s fold-in `saveProjectScenes` call used to run
- *    outside its own try block and could reject the async action.
- *  - `restoreCheckpoint` used to report success even when the engine
- *    rejected the scene load, leaving the live viewport out of sync with
- *    what storage says is now active.
- */
+/** Recovery must confirm engine application before replacing a valid save. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
-import {
-  saveProjectScenes,
-  loadProjectScenes,
-  createCheckpoint,
-  type ProjectScenes,
-  type SceneCheckpoint,
-} from '@/lib/scenes/sceneManager';
-import { captureActiveScene } from '@/lib/scenes/captureScene';
+import { saveProjectScenes, loadProjectScenes, createCheckpoint, listCheckpoints } from '@/lib/scenes/sceneManager';
+import { attachCheckpointEngine, projectFixture, sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 
-vi.mock('@/lib/scenes/captureScene', () => ({
-  captureActiveScene: vi.fn(async () => ({ status: 'unavailable' as const })),
-}));
-
-/** A project whose active scene has real `data`, so restoring it actually
- *  reaches `loadScene` instead of falling through to `newScene()`. */
-function makeProject(activeName: string): ProjectScenes {
-  return {
-    version: '1.0',
-    activeSceneId: 'scene_1',
-    scenes: [
-      {
-        id: 'scene_1',
-        name: activeName,
-        isStartScene: true,
-        data: { formatVersion: 3, sceneName: activeName, entities: [{ id: 'e1' }] },
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:00.000Z',
-      },
-    ],
-  };
-}
-
-describe('sceneSlice checkpoint actions survive a broken localStorage', () => {
+describe('checkpoint recovery transaction', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
-  let setItemSpy: ReturnType<typeof vi.spyOn> | undefined;
-
+  let engine: ReturnType<typeof attachCheckpointEngine>;
   beforeEach(() => {
     localStorage.clear();
-    saveProjectScenes(makeProject('Main'));
     store = createSceneTestStore().store;
-    setSceneDispatcher(() => undefined);
-    vi.mocked(captureActiveScene).mockResolvedValue({ status: 'unavailable' });
+    engine = attachCheckpointEngine(sceneFixture('Unsaved live work'));
+    saveProjectScenes(projectFixture('Previous save'));
   });
-
   afterEach(() => {
-    setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
-    setItemSpy?.mockRestore();
-    vi.clearAllMocks();
+    setSceneDispatcher(null);
+    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
-  it('createCheckpoint catches a quota error raised while folding the captured scene in, not just the checkpoint write itself', async () => {
-    vi.mocked(captureActiveScene).mockResolvedValueOnce({
-      status: 'captured',
-      data: { formatVersion: 3, sceneName: 'Main', entities: [] },
-    });
-    setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('quota exceeded', 'QuotaExceededError');
-    });
-
-    await expect(store.getState().createCheckpoint('quota-test')).resolves.toBeNull();
+  it('preserves the active save when checkpoint storage exceeds quota', async () => {
+    const before = localStorage.getItem('forge-project-scenes');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+    await expect(store.getState().createCheckpoint('Before changes')).resolves.toBeNull();
+    expect(localStorage.getItem('forge-project-scenes')).toBe(before);
+    expect(store.getState().checkpointError).toContain('Full');
   });
 
-  it('restoreCheckpoint catches a storage error from the underlying atomic save instead of throwing', () => {
-    const { checkpoint } = createCheckpoint(loadProjectScenes());
-    setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('quota exceeded', 'QuotaExceededError');
-    });
-
-    let ok: boolean | undefined;
-    expect(() => {
-      ok = store.getState().restoreCheckpoint(checkpoint.id);
-    }).not.toThrow();
-    expect(ok).toBe(false);
+  it('does not persist or claim success on the synchronous queued response', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    const pending = store.getState().restoreCheckpoint(cp.id);
+    expect(loadProjectScenes().scenes[0].name).toBe('Previous save');
+    expect(store.getState().checkpointBusy).toBe(true);
+    await expect(pending).resolves.toBe(true);
+    expect(loadProjectScenes().scenes[0].name).toBe('Recovered');
+    expect(engine.getScene().metadata?.name).toBe('Recovered');
   });
 
-  it('restoreCheckpoint reports failure, without throwing, when the engine rejects the scene load', () => {
-    const { checkpoint } = createCheckpoint(loadProjectScenes());
-    setSceneDispatcher(() => ({ success: false, error: 'Scene JSON too large' }));
-
-    const ok = store.getState().restoreCheckpoint(checkpoint.id);
-
-    expect(ok).toBe(false);
-    // Storage was still restored — only the live viewport is stale, which is
-    // exactly the state the review flagged as silently reported as success.
-    expect(loadProjectScenes()).toEqual(checkpoint.snapshot);
+  it('preserves live state without a needless rollback load after an explicit rejection', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('reject');
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    expect(loadProjectScenes().scenes[0].name).toBe('Previous save');
+    expect(engine.getScene().metadata?.name).toBe('Unsaved live work');
+    expect(engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene')).toHaveLength(1);
   });
 
-  it('deleteCheckpoint catches a storage error instead of throwing through the Trash2 handler', () => {
-    const { checkpoint } = createCheckpoint(loadProjectScenes());
-    setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('storage disabled');
-    });
+  it('times out a queued load that never applies and restores the prior live scene', async () => {
+    vi.useFakeTimers();
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('silent');
+    const pending = store.getState().restoreCheckpoint(cp.id);
+    await vi.advanceTimersByTimeAsync(10000);
+    await expect(pending).resolves.toBe(false);
+    expect(loadProjectScenes().scenes[0].name).toBe('Previous save');
+    expect(engine.getScene().metadata?.name).toBe('Unsaved live work');
+  });
 
-    let remaining: SceneCheckpoint[] = [];
-    expect(() => {
-      remaining = store.getState().deleteCheckpoint(checkpoint.id);
-    }).not.toThrow();
-    // The write failed, so the checkpoint the caller asked to delete is
-    // still there — the action degrades to "unchanged", never a crash.
-    expect(remaining.map((c) => c.id)).toContain(checkpoint.id);
+  it('rejects an acknowledged load whose readback contains a different scene', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('wrong');
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    expect(loadProjectScenes().scenes[0].name).toBe('Previous save');
+    expect(engine.getScene().metadata?.name).toBe('Unsaved live work');
+  });
+
+  it('rolls back live work if saving the confirmed restore fails', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    expect(loadProjectScenes().scenes[0].name).toBe('Previous save');
+    expect(engine.getScene().metadata?.name).toBe('Unsaved live work');
+    expect(store.getState().activeSceneId).toBeNull();
+  });
+
+  it('refuses creation and restore when no engine is attached, including null active scene data', async () => {
+    const project = projectFixture('Empty');
+    project.scenes[0].data = null;
+    const cp = createCheckpoint(project).checkpoint;
+    setSceneDispatcher(null);
+    await expect(store.getState().createCheckpoint()).resolves.toBeNull();
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    expect(localStorage.getItem('forge-project-scenes')).toContain('Previous save');
+  });
+
+  it('restores null scene data as a confirmed empty scene', async () => {
+    const project = projectFixture('Empty');
+    project.scenes[0].data = null;
+    const cp = createCheckpoint(project).checkpoint;
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(true);
+    expect(engine.getScene().entities).toEqual([]);
+    expect(engine.getScene().metadata?.name).toBe('Empty');
+  });
+
+  it('does not roll back over a newer same-project scene load', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('silent');
+    const pending = store.getState().restoreCheckpoint(cp.id);
+    await Promise.resolve();
+    await Promise.resolve();
+    store.getState().loadScene(JSON.stringify(sceneFixture('Newer user load')));
+    await expect(pending).resolves.toBe(false);
+    expect(engine.getScene().metadata?.name).toBe('Newer user load');
+    expect(engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene')).toHaveLength(2);
+    expect(loadProjectScenes().scenes[0].name).toBe('Previous save');
+  });
+
+  it('does not attach an export to the project opened while capture was pending', async () => {
+    store.getState().setProjectId('A');
+    const pending = store.getState().createCheckpoint('A only');
+    store.getState().setProjectId('B');
+    await expect(pending).resolves.toBeNull();
+    expect(listCheckpoints('A')).toEqual([]);
+    expect(listCheckpoints('B')).toEqual([]);
+  });
+
+  it('detects an A to B to A navigation during capture', async () => {
+    store.getState().setProjectId('A');
+    const pending = store.getState().createCheckpoint();
+    store.getState().setProjectId('B');
+    store.getState().setProjectId('A');
+    await expect(pending).resolves.toBeNull();
+    expect(listCheckpoints('A')).toEqual([]);
+  });
+
+  it('prevents a second checkpoint operation while recovery is pending', async () => {
+    const pending = store.getState().createCheckpoint('First');
+    await expect(store.getState().createCheckpoint('Second')).resolves.toBeNull();
+    expect(await pending).not.toBeNull();
+    expect(listCheckpoints().map((cp) => cp.label)).toEqual(['First']);
+  });
+
+  it('does not mix saved scenes or checkpoints across projects', async () => {
+    saveProjectScenes(projectFixture('Other project'), 'B');
+    store.getState().setProjectId('A');
+    const cp = await store.getState().createCheckpoint('Only A');
+    expect(cp?.projectId).toBe('A');
+    expect(cp?.snapshot.scenes).toHaveLength(1);
+    expect(cp?.snapshot.scenes[0].data?.metadata?.name).toBe('Unsaved live work');
+    store.getState().setProjectId('B');
+    expect(store.getState().listCheckpoints()).toEqual([]);
+    await expect(store.getState().restoreCheckpoint(cp!.id)).resolves.toBe(false);
+    store.getState().deleteCheckpoint(cp!.id);
+    expect(listCheckpoints('A')).toHaveLength(1);
+    expect(loadProjectScenes('B').scenes[0].name).toBe('Other project');
+  });
+
+  it('reports delete failures while preserving the recovery point', () => {
+    const cp = createCheckpoint(projectFixture('Recoverable')).checkpoint;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage disabled'); });
+    expect(store.getState().deleteCheckpoint(cp.id).map((entry) => entry.id)).toContain(cp.id);
+    expect(store.getState().checkpointError).toContain('Storage disabled');
   });
 });

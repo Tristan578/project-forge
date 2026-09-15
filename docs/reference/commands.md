@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 358 MCP commands available in SpawnForge.
+Complete reference for all 359 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -15,7 +15,7 @@ Complete reference for all 358 MCP commands available in SpawnForge.
 - [Editor](#editor) (7 commands)
 - [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
-- [Query](#query) (15 commands)
+- [Query](#query) (16 commands)
 - [Runtime](#runtime) (12 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
@@ -643,6 +643,28 @@ Scope: `scene:write` | Token cost: 0
 
 ---
 
+### `validate_scene`
+
+Validate a serialized .forge SceneFile with the engine decoder without applying or saving it. Internal checkpoint preflight.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `json` | string | Yes | Complete serialized .forge SceneFile JSON |
+
+**Example:**
+```json
+{
+  "command": "validate_scene",
+  "params": {
+    "json": "my_json"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
 ### `create_checkpoint`
 
 Save a named recovery checkpoint of the whole project (a restorable snapshot of every scene)
@@ -660,22 +682,6 @@ Save a named recovery checkpoint of the whole project (a restorable snapshot of 
 ```
 
 Scope: `scene:write` | Token cost: 0
-
----
-
-### `list_checkpoints`
-
-List saved recovery checkpoints for the current project, newest first
-
-**Example:**
-```json
-{
-  "command": "list_checkpoints",
-  "params": {}
-}
-```
-
-Scope: `scene:read` | Token cost: 0
 
 ---
 
@@ -1762,6 +1768,22 @@ Query current game state during play mode. Returns entity names, visibility, and
 ```json
 {
   "command": "query_play_state",
+  "params": {}
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `list_checkpoints`
+
+List saved recovery checkpoints for the current project, newest first
+
+**Example:**
+```json
+{
+  "command": "list_checkpoints",
   "params": {}
 }
 ```

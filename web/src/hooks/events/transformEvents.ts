@@ -14,6 +14,7 @@ import { applyWhenPrimary } from './primaryGate';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
 import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
+import { CHECKPOINT_EXPORT_PREFIX, SCENE_LOADED_EVENT } from '@/lib/scenes/checkpointRecovery';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
 
@@ -188,6 +189,10 @@ export function handleTransformEvent(
       // below is "the scene was exported", not "my request was answered", so
       // none of them may depend on it.
       const { json, name, requestId } = payload;
+      if (requestId?.startsWith(CHECKPOINT_EXPORT_PREFIX)) {
+        window.dispatchEvent(new CustomEvent<SceneExportedDetail>(SCENE_EXPORTED_EVENT, { detail: payload }));
+        return true;
+      }
       const state = useEditorStore.getState();
 
       // Cache for periodic IndexedDB auto-save
@@ -251,6 +256,7 @@ export function handleTransformEvent(
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context
+      window.dispatchEvent(new CustomEvent(SCENE_LOADED_EVENT));
       return true;
     }
 

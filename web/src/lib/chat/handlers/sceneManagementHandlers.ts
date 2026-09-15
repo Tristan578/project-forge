@@ -112,9 +112,9 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ name: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { createScene, loadProjectScenes, saveProjectScenes } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     const result = createScene(project, p.data.name);
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
@@ -130,7 +130,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const failure = captureFailure(capture, 'switch scenes');
     if (failure) return failure;
 
-    let project = loadProjectScenes();
+    let project = loadProjectScenes(ctx.store.projectId);
     if (capture.status === 'captured') project = saveCurrentSceneData(project, capture.data);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
@@ -139,7 +139,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const result = switchScene(project, targetId);
     if ('error' in result) return { success: false, error: result.error };
 
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
@@ -160,7 +160,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const failure = captureFailure(capture, 'duplicate the scene');
     if (failure) return failure;
 
-    let project = loadProjectScenes();
+    let project = loadProjectScenes(ctx.store.projectId);
     if (capture.status === 'captured') project = saveCurrentSceneData(project, capture.data);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
@@ -169,7 +169,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const result = duplicateScene(project, targetId, p.data.name);
     if ('error' in result) return { success: false, error: result.error };
 
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
@@ -181,7 +181,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { deleteScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
@@ -189,7 +189,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const result = deleteScene(project, targetId);
     if (result.error) return { success: false, error: result.error };
 
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
@@ -201,13 +201,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ sceneId: z.string().min(1), name: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { renameScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
     const updated = renameScene(project, targetId, p.data.name);
-    saveProjectScenes(updated);
+    saveProjectScenes(updated, ctx.store.projectId);
     ctx.store.setScenes(
       updated.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       updated.activeSceneId
@@ -219,13 +219,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { setStartScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
     const updated = setStartScene(project, targetId);
-    saveProjectScenes(updated);
+    saveProjectScenes(updated, ctx.store.projectId);
     ctx.store.setScenes(
       updated.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       updated.activeSceneId
@@ -233,9 +233,9 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { message: 'Start scene updated' } };
   },
 
-  list_scenes: async (_args, _ctx): Promise<ExecutionResult> => {
+  list_scenes: async (_args, ctx): Promise<ExecutionResult> => {
     const { loadProjectScenes } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     return {
       success: true,
       result: {
@@ -259,58 +259,24 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   // identical state — every manual checkpoint operation has an AI equal (F2).
   // -------------------------------------------------------------------------
 
-  create_checkpoint: async (args, _ctx): Promise<ExecutionResult> => {
+  create_checkpoint: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ label: z.string().optional() }), args);
     if (p.error) return p.error;
-    const { createCheckpoint, loadProjectScenes, saveProjectScenes, saveCurrentSceneData } =
-      await import('@/lib/scenes/sceneManager');
-    // Capture the live scene first so the checkpoint reflects on-screen work,
-    // mirroring switch/duplicate. A failed capture aborts rather than snapshot
-    // a stale scene.
-    const capture = await captureBeforeMutating();
-    const failure = captureFailure(capture, 'create a checkpoint');
-    if (failure) return failure;
-
-    let project = loadProjectScenes();
-    if (capture.status === 'captured') {
-      project = saveCurrentSceneData(project, capture.data);
-    }
-    try {
-      // Fold the captured live scene into the active project too, so the
-      // checkpoint and the on-disk project agree. Kept inside the try: this
-      // is the same `localStorage.setItem` path `saveProjectScenes` always
-      // uses, so a quota error here must return a failed `ExecutionResult`
-      // like one from `createCheckpoint` below, not an unhandled rejection.
-      if (capture.status === 'captured') saveProjectScenes(project);
-      const { checkpoint, checkpoints } = createCheckpoint(project, p.data.label);
-      return {
-        success: true,
-        result: {
-          checkpointId: checkpoint.id,
-          label: checkpoint.label,
-          count: checkpoints.length,
-          message: `Created checkpoint "${checkpoint.label}"`,
-        },
-      };
-    } catch (err) {
-      return {
-        success: false,
-        error: `Could not create checkpoint: ${err instanceof Error ? err.message : 'storage error'}`,
-      };
-    }
+    const checkpoint = await ctx.store.createCheckpoint(p.data.label);
+    if (!checkpoint) return { success: false, error: 'The checkpoint could not be captured or saved. Check the Scene Browser error and retry after the engine is ready.' };
+    return {
+      success: true,
+      result: { checkpointId: checkpoint.id, label: checkpoint.label, count: ctx.store.listCheckpoints().length, message: `Created checkpoint "${checkpoint.label}"` },
+    };
   },
 
-  list_checkpoints: async (_args, _ctx): Promise<ExecutionResult> => {
-    const { listCheckpoints } = await import('@/lib/scenes/sceneManager');
-    const checkpoints = listCheckpoints();
+  list_checkpoints: async (_args, ctx): Promise<ExecutionResult> => {
+    const checkpoints = ctx.store.listCheckpoints();
     return {
       success: true,
       result: {
         checkpoints: checkpoints.map((c) => ({
-          id: c.id,
-          label: c.label,
-          createdAt: c.createdAt,
-          sceneCount: c.snapshot.scenes.length,
+          id: c.id, label: c.label, createdAt: c.createdAt, sceneCount: c.snapshot.scenes.length,
         })),
         count: checkpoints.length,
       },
@@ -320,62 +286,20 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   restore_checkpoint: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ checkpointId: z.string().min(1) }), args);
     if (p.error) return p.error;
-    const { restoreCheckpoint } = await import('@/lib/scenes/sceneManager');
-    let result: Awaited<ReturnType<typeof restoreCheckpoint>>;
-    try {
-      result = restoreCheckpoint(p.data.checkpointId);
-    } catch (err) {
-      return {
-        success: false,
-        error: `Could not restore checkpoint: ${err instanceof Error ? err.message : 'storage error'}`,
-      };
-    }
-    if ('error' in result) return { success: false, error: result.error };
-
-    const project = result.project;
-    ctx.store.setScenes(
-      project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
-      project.activeSceneId
-    );
-    const active = project.scenes.find((s) => s.id === project.activeSceneId);
-    let loaded = true;
-    if (active?.data) {
-      loaded = ctx.store.loadScene(JSON.stringify(active.data));
-    } else {
-      ctx.store.newScene();
-    }
-    if (!loaded) {
-      return {
-        success: false,
-        error: 'Checkpoint was restored to storage but the engine rejected the scene load.',
-      };
-    }
-    return {
-      success: true,
-      result: { message: 'Restored checkpoint', activeSceneId: project.activeSceneId },
-    };
+    const restored = await ctx.store.restoreCheckpoint(p.data.checkpointId);
+    return restored
+      ? { success: true, result: { message: 'Restored checkpoint' } }
+      : { success: false, error: 'The checkpoint restore failed. The previous save is intact; check the Scene Browser error before editing.' };
   },
 
-  delete_checkpoint: async (args, _ctx): Promise<ExecutionResult> => {
+  delete_checkpoint: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ checkpointId: z.string().min(1) }), args);
     if (p.error) return p.error;
-    // Same sceneManager function the manual Scene Browser delete button calls
-    // (`deleteCheckpoint`). Missing IDs are a no-op that returns the current
-    // list, so the AI and manual paths converge on identical stored state.
-    const { deleteCheckpoint } = await import('@/lib/scenes/sceneManager');
-    let remaining: ReturnType<typeof deleteCheckpoint>;
-    try {
-      remaining = deleteCheckpoint(p.data.checkpointId);
-    } catch (err) {
-      return {
-        success: false,
-        error: `Could not delete checkpoint: ${err instanceof Error ? err.message : 'storage error'}`,
-      };
+    const remaining = ctx.store.deleteCheckpoint(p.data.checkpointId);
+    if (remaining.some((checkpoint) => checkpoint.id === p.data.checkpointId)) {
+      return { success: false, error: 'The checkpoint could not be deleted. Wait for any recovery operation to finish and try again.' };
     }
-    return {
-      success: true,
-      result: { message: 'Deleted checkpoint', count: remaining.length },
-    };
+    return { success: true, result: { message: 'Deleted checkpoint', count: remaining.length } };
   },
 
   load_scene_with_transition: async (args, ctx): Promise<ExecutionResult> => {

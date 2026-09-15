@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { Button } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import { X, Plus, Trash2, Copy, CheckCircle2, Save, RotateCcw } from 'lucide-react';
 import type { SceneCheckpoint } from '@/lib/scenes/sceneManager';
@@ -12,6 +13,9 @@ interface SceneBrowserProps {
 
 export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   const scenes = useEditorStore((s) => s.scenes);
+  const projectId = useEditorStore((s) => s.projectId);
+  const checkpointBusy = useEditorStore((s) => s.checkpointBusy);
+  const checkpointError = useEditorStore((s) => s.checkpointError);
   const activeSceneId = useEditorStore((s) => s.activeSceneId);
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const switchScene = useEditorStore((s) => s.switchScene);
@@ -27,7 +31,9 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   // Switching and duplicating now read the live scene back out of the engine
   // first, so both are async. A second click while one is in flight would
   // capture a scene that is already halfway through being replaced.
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const busy = localBusy || checkpointBusy;
+  const [actionError, setActionError] = useState<string | null>(null);
   const [checkpoints, setCheckpoints] = useState<SceneCheckpoint[]>([]);
   const [restoreConfirmId, setRestoreConfirmId] = useState<string | null>(null);
   // Deleting a checkpoint permanently destroys a declared recovery point with
@@ -39,21 +45,31 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   // (which would trigger a cascading render). `wasOpen` records the previous
   // `isOpen` so the read fires only on the closed→open transition.
   const [wasOpen, setWasOpen] = useState(false);
+  const [previousProjectId, setPreviousProjectId] = useState(projectId);
 
   const refreshCheckpoints = useCallback(() => {
     setCheckpoints(listCheckpoints());
   }, [listCheckpoints]);
 
-  if (isOpen !== wasOpen) {
+  if (isOpen !== wasOpen || previousProjectId !== projectId) {
     setWasOpen(isOpen);
+    setPreviousProjectId(projectId);
+    setRestoreConfirmId(null);
+    setDeleteCheckpointConfirmId(null);
+    setActionError(null);
     if (isOpen) setCheckpoints(listCheckpoints());
   }
 
   const handleCreateCheckpoint = useCallback(() => {
     if (busy) return;
     setBusy(true);
+    setActionError(null);
     void createCheckpoint()
-      .then(() => refreshCheckpoints())
+      .then((checkpoint) => {
+        if (!checkpoint) setActionError('The checkpoint was not saved. Wait for the engine to finish loading, then try again.');
+        refreshCheckpoints();
+      })
+      .catch(() => setActionError('The checkpoint could not be saved. Try again.'))
       .finally(() => setBusy(false));
   }, [busy, createCheckpoint, refreshCheckpoints]);
 
@@ -61,31 +77,31 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
     (checkpointId: string) => {
       if (busy) return;
       setBusy(true);
-      // restoreCheckpoint no longer throws (it catches storage errors) and
-      // now reports whether the restore actually landed — a missing
-      // checkpoint (e.g. deleted from another tab) or an engine that
-      // rejected the scene load both return false. Logged rather than
-      // silently treated as a success; refreshCheckpoints() below still
-      // re-reads the real list either way, so a vanished checkpoint drops
-      // out of view even without a dedicated error banner.
-      const restored = restoreCheckpoint(checkpointId);
-      if (!restored) {
-        console.error('[Scenes] Failed to restore checkpoint', checkpointId);
-      }
-      setRestoreConfirmId(null);
-      refreshCheckpoints();
-      setBusy(false);
+      setActionError(null);
+      void restoreCheckpoint(checkpointId)
+        .then((restored) => {
+          if (!restored) setActionError('The checkpoint was not restored. The previous save is intact; review the error before editing.');
+          setRestoreConfirmId(null);
+          refreshCheckpoints();
+        })
+        .catch(() => setActionError('The checkpoint could not be restored. Reload the project before editing.'))
+        .finally(() => setBusy(false));
     },
     [busy, restoreCheckpoint, refreshCheckpoints]
   );
 
   const handleDeleteCheckpoint = useCallback(
     (checkpointId: string) => {
-      deleteCheckpoint(checkpointId);
+      if (busy) return;
+      setActionError(null);
+      const remaining = deleteCheckpoint(checkpointId);
+      if (remaining.some((checkpoint) => checkpoint.id === checkpointId)) {
+        setActionError('The checkpoint was not deleted. Try again after any recovery operation finishes.');
+      }
       setDeleteCheckpointConfirmId(null);
       refreshCheckpoints();
     },
-    [deleteCheckpoint, refreshCheckpoints]
+    [busy, deleteCheckpoint, refreshCheckpoints]
   );
 
   const entityCount = Object.keys(sceneGraph.nodes).length;
@@ -100,8 +116,8 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   );
 
   const handleAdd = useCallback(() => {
-    createNewScene();
-  }, [createNewScene]);
+    if (!busy) createNewScene();
+  }, [busy, createNewScene]);
 
   const handleDuplicate = useCallback(
     (sceneId: string, e: React.MouseEvent) => {
@@ -121,10 +137,11 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   const handleDeleteConfirm = useCallback(
     (sceneId: string, e: React.MouseEvent) => {
       e.stopPropagation();
+      if (busy) return;
       deleteScene(sceneId);
       setDeleteConfirmId(null);
     },
-    [deleteScene]
+    [busy, deleteScene]
   );
 
   const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
@@ -167,6 +184,13 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
             <X size={14} />
           </button>
         </div>
+
+        {(checkpointError || actionError) && (
+          <p role="alert" className="mx-4 mt-3 rounded border border-[var(--sf-destructive)] bg-[var(--sf-bg-surface)] p-2 text-xs text-[var(--sf-text)]">
+            {checkpointError || actionError}
+          </p>
+        )}
+        {busy && <p role="status" className="px-4 pt-2 text-xs text-[var(--sf-text-secondary)]">Waiting for the scene operation to finish…</p>}
 
         {/* Scene list */}
         <div
@@ -257,99 +281,84 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
         </div>
 
         {/* Checkpoints */}
-        <div className="border-t border-zinc-700 px-4 py-3">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-zinc-300">Recovery checkpoints</h3>
-            <button
+        <div className="border-t border-[var(--sf-border)] px-4 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold text-[var(--sf-text)]">Recovery checkpoints</h3>
+            <Button size="sm" variant="outline"
               onClick={handleCreateCheckpoint}
               disabled={busy}
-              className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 disabled:opacity-50"
               aria-label="Save checkpoint"
-              title="Snapshot the whole project so you can restore it later"
+              title="Save a recovery point for this project in this browser"
             >
-              <Save size={11} />
+              <Save size={14} aria-hidden="true" />
               Save checkpoint
-            </button>
+            </Button>
           </div>
           {checkpoints.length === 0 ? (
-            <p className="py-2 text-center text-xs text-zinc-500">
+            <p className="py-2 text-center text-xs text-[var(--sf-text-secondary)]">
               No checkpoints yet. Save one before a risky change.
             </p>
           ) : (
-            <ul role="list" aria-label="Checkpoints" className="flex max-h-32 flex-col gap-1 overflow-y-auto">
+            <ul role="list" aria-label="Checkpoints" className="flex max-h-64 flex-col gap-2 overflow-y-auto">
               {checkpoints.map((cp) => {
                 const isRestoreConfirming = restoreConfirmId === cp.id;
                 const isDeleteConfirming = deleteCheckpointConfirmId === cp.id;
                 return (
-                  <li
-                    key={cp.id}
-                    className="group flex items-center gap-2 rounded px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    <span className="min-w-0 flex-1 truncate" title={cp.label}>
-                      {cp.label}
-                    </span>
-                    {isRestoreConfirming ? (
-                      <span className="flex items-center gap-1">
-                        <span className="text-amber-400">Restore?</span>
-                        <button
-                          onClick={() => handleRestoreCheckpoint(cp.id)}
-                          disabled={busy}
-                          className="rounded px-1.5 py-0.5 text-amber-400 hover:bg-amber-900/40 disabled:opacity-50"
-                          aria-label={`Confirm restore ${cp.label}`}
-                        >
-                          Yes
-                        </button>
-                        <button
-                          onClick={() => setRestoreConfirmId(null)}
-                          className="rounded px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700"
-                          aria-label="Cancel restore"
-                        >
-                          No
-                        </button>
-                      </span>
-                    ) : isDeleteConfirming ? (
-                      <span className="flex items-center gap-1">
-                        <span className="text-red-400">Delete?</span>
-                        <button
-                          onClick={() => handleDeleteCheckpoint(cp.id)}
-                          className="rounded px-1.5 py-0.5 text-red-400 hover:bg-red-900/40"
-                          aria-label={`Confirm delete checkpoint ${cp.label}`}
-                        >
-                          Yes
-                        </button>
-                        <button
-                          onClick={() => setDeleteCheckpointConfirmId(null)}
-                          className="rounded px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700"
-                          aria-label="Cancel delete checkpoint"
-                        >
-                          No
-                        </button>
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => {
-                            setDeleteCheckpointConfirmId(null);
-                            setRestoreConfirmId(cp.id);
-                          }}
-                          className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-amber-400"
-                          aria-label={`Restore ${cp.label}`}
-                          title="Restore this checkpoint"
-                        >
-                          <RotateCcw size={11} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setRestoreConfirmId(null);
-                            setDeleteCheckpointConfirmId(cp.id);
-                          }}
-                          className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-red-400"
-                          aria-label={`Delete checkpoint ${cp.label}`}
-                          title="Delete checkpoint"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </span>
+                  <li key={cp.id} className="rounded bg-[var(--sf-bg-surface)] p-2 text-xs text-[var(--sf-text)]">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate" title={cp.label}>{cp.label}</span>
+                      {!isRestoreConfirming && !isDeleteConfirming && (
+                        <span className="flex items-center gap-1">
+                          <Button size="sm" variant="ghost" className="min-w-8 px-2" disabled={busy}
+                            onClick={() => {
+                              setDeleteCheckpointConfirmId(null);
+                              setRestoreConfirmId(cp.id);
+                            }}
+                            aria-label={`Restore ${cp.label}`}
+                            title="Restore this checkpoint"
+                          ><RotateCcw size={14} aria-hidden="true" /></Button>
+                          <Button size="sm" variant="ghost" className="min-w-8 px-2" disabled={busy}
+                            onClick={() => {
+                              setRestoreConfirmId(null);
+                              setDeleteCheckpointConfirmId(cp.id);
+                            }}
+                            aria-label={`Delete checkpoint ${cp.label}`}
+                            title="Delete checkpoint"
+                          ><Trash2 size={14} aria-hidden="true" /></Button>
+                        </span>
+                      )}
+                    </div>
+                    {isRestoreConfirming && (
+                      <div className="mt-2 space-y-2">
+                        <p id="checkpoint-restore-warning">
+                          Restoring this checkpoint replaces all scenes in the current project and discards newer unsaved work.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="destructive" disabled={busy}
+                            onClick={() => handleRestoreCheckpoint(cp.id)}
+                            aria-label={`Confirm restore ${cp.label}`}
+                            aria-describedby="checkpoint-restore-warning"
+                          >Restore checkpoint</Button>
+                          <Button size="sm" variant="outline" disabled={busy}
+                            onClick={() => setRestoreConfirmId(null)} aria-label="Cancel restore"
+                          >Cancel</Button>
+                        </div>
+                      </div>
+                    )}
+                    {isDeleteConfirming && (
+                      <div className="mt-2 space-y-2">
+                        <p id="checkpoint-delete-warning">Permanently delete this recovery checkpoint? This cannot be undone.</p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="destructive" disabled={busy}
+                            onClick={() => handleDeleteCheckpoint(cp.id)}
+                            aria-label={`Confirm delete checkpoint ${cp.label}`}
+                            aria-describedby="checkpoint-delete-warning"
+                          >Delete checkpoint</Button>
+                          <Button size="sm" variant="outline" disabled={busy}
+                            onClick={() => setDeleteCheckpointConfirmId(null)} aria-label="Cancel delete checkpoint"
+                          >Cancel</Button>
+                        </div>
+                      </div>
                     )}
                   </li>
                 );
@@ -362,6 +371,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
         <div className="border-t border-zinc-700 px-4 py-3">
           <button
             onClick={handleAdd}
+            disabled={busy}
             className="flex w-full items-center justify-center gap-1.5 rounded bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
             aria-label="Add new scene"
           >

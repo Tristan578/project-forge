@@ -12187,6 +12187,27 @@
       "visibility": "public"
     },
     {
+      "name": "validate_scene",
+      "description": "Validate a serialized .forge SceneFile with the engine decoder without applying or saving it. Internal checkpoint preflight.",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "json": {
+            "type": "string",
+            "description": "Complete serialized .forge SceneFile JSON"
+          }
+        },
+        "required": [
+          "json"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
       "name": "create_checkpoint",
       "description": "Save a named recovery checkpoint of the whole project (a restorable snapshot of every scene)",
       "category": "scene",
@@ -12207,7 +12228,7 @@
     {
       "name": "list_checkpoints",
       "description": "List saved recovery checkpoints for the current project, newest first",
-      "category": "scene",
+      "category": "query",
       "parameters": {
         "type": "object",
         "properties": {}

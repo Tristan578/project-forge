@@ -393,7 +393,7 @@ describe('create_scene', () => {
 
     expect(mockLoadProjectScenes).toHaveBeenCalled();
     expect(mockCreateScene).toHaveBeenCalledWith(baseProject, 'Boss Fight');
-    expect(mockSaveProjectScenes).toHaveBeenCalledWith(updatedProject);
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(updatedProject, undefined);
     expect(store.setScenes).toHaveBeenCalledWith(
       updatedProject.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       updatedProject.activeSceneId
@@ -708,190 +708,62 @@ describe('list_scenes', () => {
 //  sceneCheckpointParity.test.ts against the REAL sceneManager)
 // ---------------------------------------------------------------------------
 
-describe('create_checkpoint', () => {
-  it('snapshots the loaded project and returns the checkpoint id', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {
-      label: 'before boss fight',
+describe('checkpoint shared-action wiring', () => {
+  it('passes a checkpoint label to the same action the Scene Browser uses', async () => {
+    const checkpoint = { id: 'cp', label: 'Before', createdAt: '2026-01-01T00:00:00Z', projectId: null, snapshot: baseProject };
+    const createCheckpoint = vi.fn().mockResolvedValue(checkpoint);
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', { label: 'Before' }, {
+      createCheckpoint, listCheckpoints: () => [checkpoint],
     });
     expect(result.success).toBe(true);
-    expect(mockCreateCheckpoint).toHaveBeenCalledWith(baseProject, 'before boss fight');
-    expect((result.result as Record<string, unknown>).checkpointId).toBe('ckpt_1');
-  });
-
-  it('aborts without snapshotting when the live scene cannot be captured', async () => {
-    mockCaptureActiveScene.mockResolvedValueOnce({ status: 'failed', reason: 'engine busy' });
-    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {});
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('create a checkpoint');
+    expect(createCheckpoint).toHaveBeenCalledWith('Before');
+    expect(result.result).toMatchObject({ checkpointId: 'cp', count: 1 });
     expect(mockCreateCheckpoint).not.toHaveBeenCalled();
   });
 
-  it('folds a captured live scene into the project before snapshotting', async () => {
-    const liveScene = { formatVersion: 3, sceneName: 'Live', entities: [{ id: 'e9' }] };
-    mockCaptureActiveScene.mockResolvedValueOnce({ status: 'captured', data: liveScene });
-    const foldedProject = { ...baseProject, folded: true };
-    mockSaveCurrentSceneData.mockReturnValueOnce(foldedProject);
-    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {});
-    expect(result.success).toBe(true);
-    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, liveScene);
-    // The folded project is both persisted and snapshotted.
-    expect(mockSaveProjectScenes).toHaveBeenCalledWith(foldedProject);
-    expect(mockCreateCheckpoint).toHaveBeenCalledWith(foldedProject, undefined);
-  });
-
-  it('surfaces a storage failure instead of reporting a phantom success', async () => {
-    mockCreateCheckpoint.mockImplementationOnce(() => {
-      throw new Error('Quota exceeded');
-    });
-    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {});
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Quota exceeded');
-  });
-
-  it('surfaces a storage failure from folding the captured scene in, not only from the checkpoint write', async () => {
-    // #9813 review finding: `saveProjectScenes(project)` — the fold-in write —
-    // used to run outside the try block, so a quota error there rejected the
-    // async handler instead of returning a graceful ExecutionResult.
-    const liveScene = { formatVersion: 3, sceneName: 'Live', entities: [{ id: 'e9' }] };
-    mockCaptureActiveScene.mockResolvedValueOnce({ status: 'captured', data: liveScene });
-    mockSaveProjectScenes.mockImplementationOnce(() => {
-      throw new Error('Quota exceeded');
-    });
-    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {});
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Quota exceeded');
-    expect(mockCreateCheckpoint).not.toHaveBeenCalled();
-  });
-});
-
-describe('list_checkpoints', () => {
-  it('returns a lightweight view of the stored checkpoints', async () => {
-    mockListCheckpoints.mockReturnValueOnce([
-      { id: 'c1', label: 'one', createdAt: 't1', snapshot: { scenes: [{}, {}] } },
-      { id: 'c2', label: 'two', createdAt: 't2', snapshot: { scenes: [{}] } },
-    ]);
-    const { result } = await invokeHandler(sceneManagementHandlers, 'list_checkpoints');
-    expect(result.success).toBe(true);
-    const payload = result.result as { checkpoints: Array<Record<string, unknown>>; count: number };
-    expect(payload.count).toBe(2);
-    expect(payload.checkpoints[0]).toEqual({ id: 'c1', label: 'one', createdAt: 't1', sceneCount: 2 });
-  });
-});
-
-describe('restore_checkpoint', () => {
-  it('restores the snapshot and re-mirrors scenes into the store', async () => {
-    const restoredProject = {
-      version: '1.0',
-      activeSceneId: 'scene_1',
-      scenes: [
-        { id: 'scene_1', name: 'Main', isStartScene: true, data: { formatVersion: 3, sceneName: 'Main', entities: [] } },
-      ],
-    };
-    mockRestoreCheckpoint.mockReturnValueOnce({ project: restoredProject });
-    const { result, store } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
-      checkpointId: 'ckpt_1',
-    });
-    expect(result.success).toBe(true);
-    expect(mockRestoreCheckpoint).toHaveBeenCalledWith('ckpt_1');
-    expect(store.setScenes).toHaveBeenCalledWith(
-      [{ id: 'scene_1', name: 'Main', isStartScene: true }],
-      'scene_1'
-    );
-    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(restoredProject.scenes[0].data));
-  });
-
-  it('calls newScene when the active scene has no data', async () => {
-    const restoredProject = {
-      version: '1.0',
-      activeSceneId: 'scene_1',
-      scenes: [{ id: 'scene_1', name: 'Main', isStartScene: true, data: null }],
-    };
-    mockRestoreCheckpoint.mockReturnValueOnce({ project: restoredProject });
-    const { result, store } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
-      checkpointId: 'ckpt_1',
-    });
-    expect(result.success).toBe(true);
-    expect(store.newScene).toHaveBeenCalled();
-    expect(store.loadScene).not.toHaveBeenCalled();
-  });
-
-  it('returns a failure when the checkpoint is not found', async () => {
-    mockRestoreCheckpoint.mockReturnValueOnce({ error: 'Checkpoint not found' });
-    const { result, store } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
-      checkpointId: 'nope',
+  it('reports an unsuccessful capture or persistence operation', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {}, {
+      createCheckpoint: vi.fn().mockResolvedValue(null),
     });
     expect(result.success).toBe(false);
-    expect(result.error).toBe('Checkpoint not found');
-    expect(store.setScenes).not.toHaveBeenCalled();
+    expect(result.error).toContain('could not be captured or saved');
   });
 
-  it('rejects a missing checkpointId', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {});
-    expect(result.success).toBe(false);
-    expect(result.error).toBeDefined();
+  it('waits for the shared restore action before reporting success', async () => {
+    let finish!: (value: boolean) => void;
+    const restoreCheckpoint = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const pending = invokeHandler(sceneManagementHandlers, 'restore_checkpoint', { checkpointId: 'cp' }, { restoreCheckpoint });
+    expect(restoreCheckpoint).toHaveBeenCalledWith('cp');
+    finish(true);
+    expect((await pending).result.success).toBe(true);
     expect(mockRestoreCheckpoint).not.toHaveBeenCalled();
   });
 
-  it('surfaces a storage error from the underlying atomic save instead of an unhandled rejection', async () => {
-    mockRestoreCheckpoint.mockImplementationOnce(() => {
-      throw new Error('Quota exceeded');
-    });
-    const { result } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
-      checkpointId: 'ckpt_1',
+  it('does not report a failed engine restore as successful', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', { checkpointId: 'cp' }, {
+      restoreCheckpoint: vi.fn().mockResolvedValue(false),
     });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Quota exceeded');
+    expect(result.error).toContain('previous save is intact');
   });
 
-  it('reports failure when the engine rejects the restored scene load, instead of a phantom success', async () => {
-    // #9813 review finding: the handler always returned success once storage
-    // was restored, even when `loadScene`'s engine round trip failed — so the
-    // caller had no way to know the live viewport was still the old scene.
-    const restoredProject = {
-      version: '1.0',
-      activeSceneId: 'scene_1',
-      scenes: [
-        { id: 'scene_1', name: 'Main', isStartScene: true, data: { formatVersion: 3, sceneName: 'Main', entities: [] } },
-      ],
-    };
-    mockRestoreCheckpoint.mockReturnValueOnce({ project: restoredProject });
-    const { result, store } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
-      checkpointId: 'ckpt_1',
-    }, { loadScene: vi.fn(() => false) });
-    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(restoredProject.scenes[0].data));
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('rejected the scene load');
+  it.each(['restore_checkpoint', 'delete_checkpoint'])('rejects missing IDs for %s', async (command) => {
+    expect((await invokeHandler(sceneManagementHandlers, command, {})).result.success).toBe(false);
   });
-});
 
-describe('delete_checkpoint', () => {
-  it('deletes the checkpoint and reports the remaining count', async () => {
-    mockDeleteCheckpoint.mockReturnValueOnce([{ id: 'ckpt_2', label: 'keep', createdAt: 't', snapshot: baseProject }]);
-    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', {
-      checkpointId: 'ckpt_1',
+  it('lists lightweight checkpoint metadata from the shared action', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'list_checkpoints', {}, {
+      listCheckpoints: () => [{ id: 'cp', label: 'Before', createdAt: 'time', snapshot: baseProject }],
     });
-    expect(result.success).toBe(true);
-    expect(mockDeleteCheckpoint).toHaveBeenCalledWith('ckpt_1');
-    expect((result.result as { count: number }).count).toBe(1);
+    expect(result.result).toEqual({ checkpoints: [{ id: 'cp', label: 'Before', createdAt: 'time', sceneCount: 2 }], count: 1 });
   });
 
-  it('rejects a missing checkpointId', async () => {
-    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', {});
-    expect(result.success).toBe(false);
-    expect(mockDeleteCheckpoint).not.toHaveBeenCalled();
-  });
-
-  it('surfaces a storage error instead of an unhandled rejection', async () => {
-    // #9813 review finding: `deleteCheckpoint`'s unguarded `localStorage.setItem`
-    // (sceneManager.ts) is now caught here, matching every other checkpoint handler.
-    mockDeleteCheckpoint.mockImplementationOnce(() => {
-      throw new Error('Storage disabled');
-    });
-    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', {
-      checkpointId: 'ckpt_1',
+  it('reports failed deletes when the shared action retains the checkpoint', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', { checkpointId: 'cp' }, {
+      deleteCheckpoint: () => [{ id: 'cp' }],
     });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Storage disabled');
+    expect(result.error).toContain('could not be deleted');
   });
 });
 

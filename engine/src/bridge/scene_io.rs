@@ -4,12 +4,6 @@
 // one `#[cfg(not(feature = "runtime"))]` system below, so the constants carry
 // the same gate — a `runtime` build never parses a scene, a glTF blob, or a
 // texture blob handed in from the shell.
-/// Maximum size of a scene JSON payload in bytes (50 MB).
-#[cfg(not(feature = "runtime"))]
-pub const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024;
-/// Maximum number of entities permitted in a loaded scene.
-#[cfg(not(feature = "runtime"))]
-pub const MAX_SCENE_ENTITIES: usize = 10_000;
 /// Maximum byte length of a glTF base64 payload (~50 MB decoded, 1.33× overhead).
 #[cfg(not(feature = "runtime"))]
 pub const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
@@ -350,36 +344,13 @@ pub(super) fn apply_scene_load(
     };
 
     // Guard against pathologically large scene payloads that could cause OOM during deser.
-    if request.json.len() > MAX_SCENE_JSON_BYTES {
-        tracing::error!(
-            "Scene load rejected: JSON payload {} bytes exceeds 50MB limit",
-            request.json.len()
-        );
-        return;
-    }
-
-    let scene_file: scene_file::SceneFile = match serde_json::from_str(&request.json) {
-        Ok(sf) => sf,
-        Err(e) => {
-            tracing::error!("Failed to deserialize scene file: {}", e);
+    let scene_file = match scene_file::parse_scene_file(&request.json) {
+        Ok(scene) => scene,
+        Err(error) => {
+            tracing::error!("Scene load rejected: {}", error);
             return;
         }
     };
-
-    if scene_file.format_version > 3 {
-        tracing::error!("Unsupported scene format version: {}", scene_file.format_version);
-        return;
-    }
-
-    // Cap entity count to prevent runaway scene loading.
-    if scene_file.entities.len() > MAX_SCENE_ENTITIES {
-        tracing::error!(
-            "Scene load rejected: {} entities exceeds limit of {}",
-            scene_file.entities.len(),
-            MAX_SCENE_ENTITIES
-        );
-        return;
-    }
 
     // 1. Despawn all existing entities
     for entity in existing_entities.iter() {
