@@ -4,6 +4,7 @@
  */
 
 import { CURRENT_FORMAT_VERSION } from '../sceneFile';
+import type { PrefabInstance } from '../prefabs/prefabInstance';
 
 export interface SceneFileData {
   formatVersion: number;
@@ -11,6 +12,13 @@ export interface SceneFileData {
   entities: unknown[];
   environment?: unknown;
   postProcessing?: unknown;
+  /**
+   * Linked prefab instances active in this scene, persisted so their stable
+   * ids, source-prefab links and per-field overrides survive save/reopen with
+   * zero silent data loss (scene.FR-1 N1). Optional so every pre-existing scene
+   * file remains valid with no migration.
+   */
+  prefabInstances?: PrefabInstance[];
 }
 
 export interface SceneEntry {
@@ -222,4 +230,27 @@ export function importSingleScene(sceneData: SceneFileData): ProjectScenes {
 /** Export all scenes for file save or cloud */
 export function exportAllScenes(project: ProjectScenes): ProjectScenes {
   return JSON.parse(JSON.stringify(project));
+}
+
+/**
+ * Write the prefab-instance registry into a scene's file data (returns a NEW
+ * object; the input is not mutated). This is the save side of the round-trip
+ * that keeps instance overrides and stable ids with the scene rather than only
+ * in the local prefab store, so a scene copied or reopened elsewhere still
+ * carries them (scene.FR-1 N1).
+ */
+export function writePrefabInstances(
+  sceneData: SceneFileData,
+  instances: PrefabInstance[],
+): SceneFileData {
+  return { ...sceneData, prefabInstances: instances.map((i) => ({ ...i, overrides: { ...i.overrides } })) };
+}
+
+/**
+ * Read the prefab-instance registry back out of a scene's file data. Returns an
+ * empty array for a legacy scene that predates the field, so callers never have
+ * to guard for its absence.
+ */
+export function readPrefabInstances(sceneData: SceneFileData | null | undefined): PrefabInstance[] {
+  return sceneData?.prefabInstances ?? [];
 }

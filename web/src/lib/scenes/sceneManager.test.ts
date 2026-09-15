@@ -16,8 +16,11 @@ import {
   importSingleScene,
   loadProjectScenes,
   saveProjectScenes,
+  writePrefabInstances,
+  readPrefabInstances,
   type SceneFileData,
 } from './sceneManager';
+import type { PrefabInstance } from '../prefabs/prefabInstance';
 
 // Mock localStorage
 let storage: Record<string, string> = {};
@@ -280,6 +283,38 @@ describe('sceneManager', () => {
       expect(getSceneCount(project)).toBe(1);
       const { project: withTwo } = createScene(project, 'Level 2');
       expect(getSceneCount(withTwo)).toBe(2);
+    });
+  });
+
+  describe('Prefab-instance persistence (scene.FR-1 N1)', () => {
+    const baseScene: SceneFileData = { formatVersion: 1, sceneName: 'Main', entities: [] };
+    const instances: PrefabInstance[] = [
+      { instanceId: 'pfi_a', prefabId: 'prefab_src', overrides: { name: 'Kept', entityType: 'sphere' } },
+      { instanceId: 'pfi_b', prefabId: 'prefab_src', overrides: {}, entityId: 'ent_2' },
+    ];
+
+    it('writePrefabInstances does not mutate the input scene', () => {
+      const written = writePrefabInstances(baseScene, instances);
+      expect(baseScene.prefabInstances).toBeUndefined();
+      expect(written.prefabInstances).toHaveLength(2);
+    });
+
+    it('save -> reopen preserves stable ids, links and overrides with zero loss', () => {
+      const written = writePrefabInstances(baseScene, instances);
+      // Simulate a full save/reopen: serialize to the project file and parse back.
+      const reopened = JSON.parse(JSON.stringify(written)) as SceneFileData;
+      const restored = readPrefabInstances(reopened);
+
+      expect(restored).toHaveLength(2);
+      expect(restored[0].instanceId).toBe('pfi_a'); // stable id preserved
+      expect(restored[0].prefabId).toBe('prefab_src'); // source link preserved
+      expect(restored[0].overrides).toEqual({ name: 'Kept', entityType: 'sphere' }); // overrides intact
+      expect(restored[1].entityId).toBe('ent_2'); // entity binding preserved
+    });
+
+    it('readPrefabInstances returns [] for a legacy scene without the field', () => {
+      expect(readPrefabInstances(baseScene)).toEqual([]);
+      expect(readPrefabInstances(null)).toEqual([]);
     });
   });
 });

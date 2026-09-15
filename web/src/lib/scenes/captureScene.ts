@@ -15,6 +15,8 @@
  * must refuse rather than overwrite a saved scene with a guess.
  */
 import type { SceneFileData } from './sceneManager';
+import { writePrefabInstances } from './sceneManager';
+import type { PrefabInstance } from '../prefabs/prefabInstance';
 
 /** Window event the bridge emits in answer to an `export_scene` command. */
 export const SCENE_EXPORTED_EVENT = 'forge:scene-exported';
@@ -87,4 +89,21 @@ export function captureActiveScene(
 
     if (!requestExport()) settle({ status: 'unavailable' });
   });
+}
+
+/**
+ * Fold the current prefab-instance registry into a capture result before it is
+ * persisted. The engine export does not know about linked instances (they live
+ * in the prefab store, not the ECS), so persisting them with the scene has to
+ * happen on the way out of capture — here — rather than inside the engine
+ * round trip. Only a successful capture carries a scene to attach to; every
+ * other status is returned untouched so the "abort rather than overwrite"
+ * contract above is preserved (scene.FR-1 N1).
+ */
+export function attachPrefabInstances(
+  capture: SceneCapture,
+  instances: PrefabInstance[],
+): SceneCapture {
+  if (capture.status !== 'captured') return capture;
+  return { status: 'captured', data: writePrefabInstances(capture.data, instances) };
 }
