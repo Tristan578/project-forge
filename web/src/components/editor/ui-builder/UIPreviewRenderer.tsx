@@ -1,6 +1,7 @@
 'use client';
 
 import type { UIScreen, UIWidget } from '@/stores/uiBuilderStore';
+import { widgetPositionCSS } from './widgetRenderer';
 
 interface UIPreviewRendererProps {
   screen: UIScreen;
@@ -18,12 +19,15 @@ export function UIPreviewRenderer({
   const renderWidget = (widget: UIWidget) => {
     const isSelected = editorMode && widget.id === selectedWidgetId;
 
+    // Resolve anchor + constraints into responsive position/size CSS. This is
+    // the SAME contract the exported runtime uses (uiRuntime.ts), so the editor
+    // preview and a played/exported game render identically.
+    const { layoutTransform, ...layout } = widgetPositionCSS(widget);
+    const styleTransform = `rotate(${widget.style.rotation}deg) scaleX(${widget.style.scaleX}) scaleY(${widget.style.scaleY})`;
+    const combinedTransform = [layoutTransform, styleTransform].filter(Boolean).join(' ');
+
     const style: React.CSSProperties = {
-      position: 'absolute',
-      left: `${widget.x}%`,
-      top: `${widget.y}%`,
-      width: `${widget.width}%`,
-      height: `${widget.height}%`,
+      ...layout,
       backgroundColor: widget.style.backgroundColor || undefined,
       borderWidth: widget.style.borderWidth,
       borderColor: widget.style.borderColor,
@@ -37,7 +41,7 @@ export function UIPreviewRenderer({
       fontWeight: widget.style.fontWeight,
       textAlign: widget.style.textAlign,
       lineHeight: widget.style.lineHeight,
-      transform: `rotate(${widget.style.rotation}deg) scaleX(${widget.style.scaleX}) scaleY(${widget.style.scaleY})`,
+      transform: combinedTransform,
       transformOrigin: 'top left',
       display: widget.visible ? 'block' : 'none',
       overflow: widget.style.overflow,

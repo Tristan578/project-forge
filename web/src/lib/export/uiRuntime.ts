@@ -109,22 +109,81 @@ export function generateUIRuntimeCode(uiData: string): string {
     return el;
   }
 
+  // Anchor + constraint resolution. Mirrors widgetRenderer.ts's
+  // widgetPositionCSS so an exported/played game renders identically to the
+  // in-editor preview: 9-point anchors, fixed pixel offsets folded into
+  // calc(), and pixel min/max size bounds so screens adapt from 360px mobile
+  // to desktop without clipping core actions.
+  function finiteOr(v, fallback) {
+    var n = typeof v === 'number' ? v : Number(v);
+    return isFinite(n) ? n : fallback;
+  }
+  function boundOrNull(v) {
+    if (v === null || v === undefined) return null;
+    var n = typeof v === 'number' ? v : Number(v);
+    if (!isFinite(n)) return null;
+    return Math.max(0, n);
+  }
+  function normConstraints(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+      offsetX: finiteOr(raw.offsetX, 0),
+      offsetY: finiteOr(raw.offsetY, 0),
+      minWidth: boundOrNull(raw.minWidth),
+      maxWidth: boundOrNull(raw.maxWidth),
+      minHeight: boundOrNull(raw.minHeight),
+      maxHeight: boundOrNull(raw.maxHeight),
+    };
+  }
+  function hFactor(anchor) {
+    if (anchor === 'top_center' || anchor === 'center' || anchor === 'bottom_center') return 0.5;
+    if (anchor === 'top_right' || anchor === 'center_right' || anchor === 'bottom_right') return 1;
+    return 0;
+  }
+  function vFactor(anchor) {
+    if (anchor === 'center_left' || anchor === 'center' || anchor === 'center_right') return 0.5;
+    if (anchor === 'bottom_left' || anchor === 'bottom_center' || anchor === 'bottom_right') return 1;
+    return 0;
+  }
+  function calcPct(pct, px) {
+    if (px === 0 || !isFinite(px)) return pct + '%';
+    var sign = px >= 0 ? '+' : '-';
+    return 'calc(' + pct + '% ' + sign + ' ' + Math.abs(px) + 'px)';
+  }
+
   function applyPosition(el, widget) {
-    const anchor = widget.anchor || 'top_left';
+    var anchor = widget.anchor || 'top_left';
+    var c = normConstraints(widget.constraints);
     el.style.width = widget.width + '%';
     el.style.height = widget.height + '%';
-
-    if (anchor === 'top_left') {
-      el.style.left = widget.x + '%';
-      el.style.top = widget.y + '%';
-    } else if (anchor === 'center') {
-      el.style.left = widget.x + '%';
-      el.style.top = widget.y + '%';
-      el.style.transform = 'translate(-50%, -50%)';
-    } else if (anchor === 'top_right') {
-      el.style.right = (100 - widget.x) + '%';
-      el.style.top = widget.y + '%';
+    if (c) {
+      if (c.minWidth !== null) el.style.minWidth = c.minWidth + 'px';
+      if (c.maxWidth !== null) el.style.maxWidth = c.maxWidth + 'px';
+      if (c.minHeight !== null) el.style.minHeight = c.minHeight + 'px';
+      if (c.maxHeight !== null) el.style.maxHeight = c.maxHeight + 'px';
     }
+
+    var offX = c ? c.offsetX : 0;
+    var offY = c ? c.offsetY : 0;
+    var kx = hFactor(anchor);
+    var ky = vFactor(anchor);
+    var transforms = [];
+
+    if (kx === 1) {
+      el.style.right = calcPct(100 - widget.x, -offX);
+    } else {
+      el.style.left = calcPct(widget.x, offX);
+      if (kx === 0.5) transforms.push('translateX(-50%)');
+    }
+
+    if (ky === 1) {
+      el.style.bottom = calcPct(100 - widget.y, -offY);
+    } else {
+      el.style.top = calcPct(widget.y, offY);
+      if (ky === 0.5) transforms.push('translateY(-50%)');
+    }
+
+    if (transforms.length > 0) el.style.transform = transforms.join(' ');
   }
 
   function applyStyle(el, style) {
