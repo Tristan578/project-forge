@@ -87,6 +87,42 @@ describe('saveProjectScenes — atomic write', () => {
     expect(loadProjectScenes()).toEqual(good);
   });
 
+  it('rejects a payload whose activeSceneId names no scene', () => {
+    // #9813 review finding: the round-trip check only proved the JSON shape
+    // parsed, not that activeSceneId pointed at a real entry — a dangling id
+    // replaced the last valid project and stranded its saved scene behind an
+    // active scene nothing could find.
+    const good = makeProject('Level A');
+    saveProjectScenes(good);
+
+    const dangling: ProjectScenes = { ...makeProject('Level B'), activeSceneId: 'missing' };
+    expect(() => saveProjectScenes(dangling)).toThrow(/validation/i);
+    expect(loadProjectScenes()).toEqual(good);
+  });
+
+  it('rejects a payload with a malformed or duplicate-id scene entry', () => {
+    const good = makeProject('Level A');
+    saveProjectScenes(good);
+
+    const missingName = {
+      ...makeProject('Level B'),
+      scenes: [{ id: 'scene_1', isStartScene: true, data: null, createdAt: '', updatedAt: '' }],
+    } as unknown as ProjectScenes;
+    expect(() => saveProjectScenes(missingName)).toThrow(/validation/i);
+
+    const duplicateIds: ProjectScenes = {
+      version: '1.0',
+      activeSceneId: 'scene_1',
+      scenes: [
+        { id: 'scene_1', name: 'A', isStartScene: true, data: null, createdAt: '', updatedAt: '' },
+        { id: 'scene_1', name: 'B', isStartScene: false, data: null, createdAt: '', updatedAt: '' },
+      ],
+    };
+    expect(() => saveProjectScenes(duplicateIds)).toThrow(/validation/i);
+
+    expect(loadProjectScenes()).toEqual(good);
+  });
+
   it('refuses a payload that cannot be serialized, leaving the prior value intact', () => {
     const good = makeProject('Level A');
     saveProjectScenes(good);
@@ -171,6 +207,27 @@ describe('checkpoints — create/list/restore round-trip', () => {
     const remaining = deleteCheckpoint(a.id);
     expect(remaining.map((c) => c.id)).toEqual([b.id]);
     expect(listCheckpoints().map((c) => c.id)).toEqual([b.id]);
+  });
+
+  it('listCheckpoints drops a checkpoint whose snapshot has a dangling activeSceneId, not just a missing scenes array', () => {
+    // #9813 review finding: the old filter only checked
+    // `Array.isArray(snapshot.scenes)`, so a damaged snapshot with a real
+    // array but an activeSceneId pointing nowhere still reached
+    // restoreCheckpoint and could replace the active project with it.
+    const good = createCheckpoint(makeProject('Good'), 'good').checkpoint;
+    const stored = JSON.parse(localStorage.getItem(CHECKPOINTS_STORAGE_KEY)!) as Array<
+      Record<string, unknown>
+    >;
+    stored.push({
+      id: 'ckpt_damaged',
+      label: 'damaged',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      snapshot: { ...makeProject('Damaged'), activeSceneId: 'nowhere' },
+    });
+    localStorage.setItem(CHECKPOINTS_STORAGE_KEY, JSON.stringify(stored));
+
+    const list = listCheckpoints();
+    expect(list.map((c) => c.id)).toEqual([good.id]);
   });
 });
 

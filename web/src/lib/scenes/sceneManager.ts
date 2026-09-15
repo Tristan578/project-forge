@@ -80,6 +80,44 @@ export function createInitialProject(): ProjectScenes {
   };
 }
 
+/** Structural shape of a single scene entry, loose enough to accept every
+ *  variant the functions in this file produce but tight enough to reject a
+ *  damaged one. */
+function isValidSceneEntry(value: unknown): value is SceneEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Partial<SceneEntry>;
+  return (
+    typeof entry.id === 'string' &&
+    entry.id.length > 0 &&
+    typeof entry.name === 'string' &&
+    typeof entry.isStartScene === 'boolean' &&
+    (entry.data === null || (typeof entry.data === 'object' && entry.data !== null))
+  );
+}
+
+/**
+ * Structural validation shared by every path that persists a
+ * {@link ProjectScenes} — the atomic active-project save below and
+ * {@link listCheckpoints}. Round-tripping through JSON only proves the shape
+ * parses, not that it is internally coherent: a payload can have an
+ * `activeSceneId` that names no scene, duplicate scene ids, or a malformed
+ * entry and still pass a shallow `Array.isArray` check. Any of those would
+ * silently strand a previously saved project behind an active scene nothing
+ * can find, so this is the gate both persistence paths share.
+ */
+function isValidProjectScenes(value: unknown): value is ProjectScenes {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<ProjectScenes>;
+  if (typeof candidate.version !== 'string') return false;
+  if (typeof candidate.activeSceneId !== 'string') return false;
+  if (!Array.isArray(candidate.scenes) || candidate.scenes.length === 0) return false;
+  if (!candidate.scenes.every(isValidSceneEntry)) return false;
+  const ids = new Set(candidate.scenes.map((s) => s.id));
+  if (ids.size !== candidate.scenes.length) return false; // duplicate scene ids
+  if (!ids.has(candidate.activeSceneId)) return false; // activeSceneId names no scene
+  return true;
+}
+
 /** Load project scenes from localStorage */
 export function loadProjectScenes(): ProjectScenes {
   try {
@@ -114,20 +152,16 @@ export function saveProjectScenes(project: ProjectScenes): void {
   }
 
   // Validate the payload parses back into a structurally valid project. A save
-  // that cannot be read back must never replace the last good one.
-  let roundTrip: ProjectScenes;
+  // that cannot be read back — or whose activeSceneId names no scene, or
+  // whose scenes are malformed or duplicate-id'd — must never replace the
+  // last good one.
+  let roundTrip: unknown;
   try {
-    roundTrip = JSON.parse(serialized) as ProjectScenes;
+    roundTrip = JSON.parse(serialized);
   } catch {
     throw new Error('Refusing to save project: payload did not round-trip');
   }
-  if (
-    !roundTrip ||
-    typeof roundTrip.version !== 'string' ||
-    typeof roundTrip.activeSceneId !== 'string' ||
-    !Array.isArray(roundTrip.scenes) ||
-    roundTrip.scenes.length === 0
-  ) {
+  if (!isValidProjectScenes(roundTrip)) {
     throw new Error('Refusing to save project: payload failed validation');
   }
 
@@ -296,7 +330,11 @@ export function exportAllScenes(project: ProjectScenes): ProjectScenes {
 /**
  * Read the stored checkpoints, newest first. A corrupt or missing checkpoint
  * store is treated as "no checkpoints" — it must never take down the editor or
- * the active project.
+ * the active project. Each snapshot is run through the same
+ * {@link isValidProjectScenes} gate `saveProjectScenes` uses, so a damaged
+ * checkpoint (a dangling `activeSceneId`, a malformed scene entry) is dropped
+ * here rather than reaching {@link restoreCheckpoint} and replacing the active
+ * project with something `switchScene`/`getActiveScene` cannot resolve.
  */
 export function listCheckpoints(): SceneCheckpoint[] {
   try {
@@ -306,7 +344,7 @@ export function listCheckpoints(): SceneCheckpoint[] {
     if (Array.isArray(parsed)) {
       return parsed.filter(
         (c): c is SceneCheckpoint =>
-          !!c && typeof c.id === 'string' && !!c.snapshot && Array.isArray(c.snapshot.scenes)
+          !!c && typeof c.id === 'string' && isValidProjectScenes(c.snapshot)
       );
     }
   } catch { /* ignore corrupt checkpoint store */ }
