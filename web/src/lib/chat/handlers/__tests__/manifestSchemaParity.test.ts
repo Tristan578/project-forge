@@ -48,7 +48,8 @@ const PINNED_CATEGORIES = [
 
 /** Exact command count per pinned category, so shrinking one silently fails loudly. */
 const PINNED_CATEGORY_COUNTS: Record<(typeof PINNED_CATEGORIES)[number], number> = {
-  tilemap: 10,
+  // 10 -> 11: set_tile_collision_shape, per-tile collision shape authoring (#9814).
+  tilemap: 11,
   sprite: 8,
   sprite_animation: 6,
   // 8 -> 10: get_joint_2d and list_joints_2d, the engine reads that had

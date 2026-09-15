@@ -11,7 +11,7 @@
  */
 
 /** Total commands in `mcp-server/manifest/commands.json`. */
-export const MCP_COMMAND_COUNT = 354;
+export const MCP_COMMAND_COUNT = 355;
 
 /** Distinct categories those commands are grouped into. */
 export const MCP_CATEGORY_COUNT = 41;
