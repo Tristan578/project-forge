@@ -224,8 +224,12 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
     // mirror here would lose the second of two edits queued before its update.
     if (!dispatchCommand) throw new Error('The engine is not ready. Try again after it finishes loading.');
     const response = dispatchCommand('set_tile_collision_shape', { entityId, layer: layerIndex, x, y, shape });
-    if (!response?.success) {
-      throw new Error(response?.error ?? 'The engine did not accept the shape change. Please try again.');
+    // Only an explicit `success: false` is a rejection — see the dispatcher
+    // contract documented in editorStore.ts. `undefined`/`void` (every test
+    // double, and any dispatcher that doesn't report per-command status) must
+    // not be treated as a failure.
+    if (response?.success === false) {
+      throw new Error(response.error ?? 'The engine did not accept the shape change. Please try again.');
     }
     return 'queued';
   },

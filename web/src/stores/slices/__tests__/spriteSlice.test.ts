@@ -766,15 +766,24 @@ describe('spriteSlice', () => {
         expect(mockDispatch).toHaveBeenCalledTimes(1);
       });
 
-      it.each([
-        { response: undefined, error: /did not accept/ },
-        { response: { success: false, error: 'Engine unavailable' }, error: /Engine unavailable/ },
-      ])('preserves metadata when dispatch does not accept the edit ($response)', ({ response, error }) => {
+      it('preserves metadata when dispatch explicitly rejects the edit', () => {
         const previous = seed();
         store.getState().applyTilemapFromEngine('e1', previous);
-        mockDispatch.mockReturnValue(response);
+        mockDispatch.mockReturnValue({ success: false, error: 'Engine unavailable' });
 
-        expect(() => store.getState().setTileCollisionShape('e1', 0, 2, 0, 'full')).toThrow(error);
+        expect(() => store.getState().setTileCollisionShape('e1', 0, 2, 0, 'full')).toThrow(/Engine unavailable/);
+        expect(store.getState().tilemaps.e1).toBe(previous);
+      });
+
+      it('treats an undefined dispatch response as success, per the dispatcher contract', () => {
+        // Only an explicit `success: false` is a rejection (editorStore.ts).
+        // `undefined` is what every mock dispatcher, and any dispatcher that
+        // doesn't report per-command status, returns — it must queue, not throw.
+        const previous = seed();
+        store.getState().applyTilemapFromEngine('e1', previous);
+        mockDispatch.mockReturnValue(undefined);
+
+        expect(store.getState().setTileCollisionShape('e1', 0, 2, 0, 'full')).toBe('queued');
         expect(store.getState().tilemaps.e1).toBe(previous);
       });
 
