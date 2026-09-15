@@ -273,14 +273,22 @@ describe('sceneSlice.loadTemplate', () => {
       expect(loadPrefabInstances()).toEqual(STALE);
     });
 
-    it('restores the previous registry when the engine acknowledges but never applies', async () => {
+    it('does NOT roll back the registry on a timeout, only on an explicit rejection (Sentry)', async () => {
+      // Unlike an explicit `success: false`, a timeout means the engine never
+      // actually told us the load failed — it may still land moments later.
+      // Rolling back here would desync the prefab registry from a template
+      // that goes on to apply after the timeout: the entities that then
+      // appear are the template's, but the registry would describe the
+      // scene that just left. Leaving the eagerly-installed (cleared) state
+      // in place is correct in that case, and merely stale in the genuine-
+      // hang case where the engine truly never applies it.
       savePrefabInstancesToStorage(STALE);
       setSceneDispatcher(silentDispatcher());
 
       const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
 
-      expect(result.success).toBe(false);
-      expect(loadPrefabInstances()).toEqual(STALE);
+      expect(result.success).toBe(false); // still reported as a failure to the caller
+      expect(loadPrefabInstances()).toEqual([]); // but the registry stays as the template installed it
     });
   });
 });

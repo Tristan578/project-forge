@@ -554,7 +554,17 @@ export const createSceneSlice: StateCreator<
     }
 
     if (!(await applied)) {
-      rollbackPrefabState(snapshot);
+      // Deliberately NOT rolled back (Sentry, scene.FR-1 N1): unlike the
+      // branch above, the engine never told us this load failed — `applied`
+      // timed out waiting for `sceneGraph` to change, but `abandon()` only
+      // stops THIS function listening; it does not cancel whatever the engine
+      // is still doing. If the load lands moments later (a slow WASM tick,
+      // not a real rejection), the entities that then appear are the
+      // TEMPLATE's, and rolling back here would leave the prefab registry
+      // describing the scene that just left — the exact desync this guards
+      // against, just with the roles reversed. Leaving the eagerly-installed
+      // state in place is correct in that case and merely stale-but-harmless
+      // (no instantiated entities reference it yet) in the genuine-hang case.
       return {
         success: false,
         error: `Template "${templateId}" was sent to the engine but no entities appeared. The scene was not changed.`,
