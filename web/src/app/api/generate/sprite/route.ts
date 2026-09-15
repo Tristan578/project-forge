@@ -10,6 +10,8 @@ import { SpriteClient } from '@/lib/generate/spriteClient';
 import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS, resolveSpriteProvider, spriteTokenCost } from '@/lib/config/providers';
 import type { SpriteStyle } from '@/lib/config/providers';
 import type { SpriteSize } from '@/lib/config/providers';
+import { resolveByokOrPlatformKey } from '@/lib/keys/resolver';
+import { captureException } from '@/lib/monitoring/sentry-server';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 
 type SpriteProvider = 'dalle3' | 'sdxl';
@@ -88,12 +90,33 @@ const POST_impl = createGenerationHandler<
   },
   execute: async (params, apiKey, ctx) => {
     const client = new SpriteClient(apiKey, params.provider);
+
+    // Background removal (#9734) needs the remove.bg key, NOT the sprite
+    // provider key `apiKey`, so it is resolved separately with the same
+    // BYOK-then-platform precedence (PLATFORM_REMOVEBG_KEY). Only the DALL-E
+    // path is synchronous — SDXL returns a pending prediction id with no
+    // resolved URL to post to remove.bg inline — so the lookup is skipped for
+    // it. Resolution never charges and yields `null` when no key exists, in
+    // which case `generateSprite` returns the sprite unchanged rather than
+    // failing the generation the user paid for. A lookup error must not sink a
+    // successful sprite either, so it degrades to "no background removal".
+    let removeBackgroundKey: string | undefined;
+    if (params.removeBackground && params.provider === 'dalle3') {
+      try {
+        removeBackgroundKey =
+          (await resolveByokOrPlatformKey(ctx.userId, 'removebg')) ?? undefined;
+      } catch (err) {
+        captureException(err, { route: '/api/generate/sprite', action: 'resolve_removebg_key' });
+      }
+    }
+
     const result = await client.generateSprite({
       prompt: params.prompt,
       style: params.style,
       size: params.size,
       provider: params.provider,
       removeBackground: params.removeBackground,
+      removeBackgroundKey,
       signal: ctx.abortSignal,
     });
 

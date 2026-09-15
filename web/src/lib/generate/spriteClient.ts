@@ -14,6 +14,18 @@ export interface SpriteGenerateParams {
   size: '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
   provider?: 'auto' | 'dalle3' | 'sdxl';
   removeBackground?: boolean;
+  /**
+   * The remove.bg API key (platform PLATFORM_REMOVEBG_KEY or the user's BYOK
+   * key), resolved by the route with the same BYOK-then-platform precedence
+   * every generate route uses. Required to honour `removeBackground` — the
+   * client is constructed with the SPRITE provider's key (OpenAI / Replicate),
+   * which is not the remove.bg key, so background removal cannot reuse
+   * `this.apiKey`. Only the synchronous DALL-E path consumes it (#9734); the
+   * SDXL path returns a pending prediction id and has no resolved image URL to
+   * post to remove.bg inline. When absent, `removeBackground` is a no-op and the
+   * original sprite is returned unchanged rather than failing a paid generation.
+   */
+  removeBackgroundKey?: string;
   signal?: AbortSignal;
 }
 
@@ -86,6 +98,26 @@ export class SpriteClient {
 
     const data = await response.json();
     const imageUrl = requireProviderArtifact(data?.data?.[0]?.url, 'image URL');
+
+    // Background removal (#9734). DALL-E completes synchronously, so the image
+    // URL is in hand here — the one place a resolved URL exists before the
+    // client hands control back. Gated on both the flag AND a resolved
+    // remove.bg key: a deployment (or user) with no remove.bg key still gets a
+    // sprite rather than a failed, refunded generation. A remove.bg FAILURE, by
+    // contrast, propagates — the caller asked for a transparent sprite and did
+    // not get one, so `createGenerationHandler` refunds and reports it rather
+    // than silently shipping the background.
+    if (params.removeBackground && params.removeBackgroundKey) {
+      const { resultUrl } = await this.removeBackground(imageUrl, {
+        key: params.removeBackgroundKey,
+        signal: params.signal,
+      });
+      return {
+        taskId: resultUrl,
+        status: 'completed',
+      };
+    }
+
     // Return the URL directly as taskId for synchronous completion
     return {
       taskId: imageUrl,
@@ -216,11 +248,19 @@ export class SpriteClient {
     };
   }
 
-  async removeBackground(imageUrl: string, opts?: { signal?: AbortSignal }): Promise<{ resultUrl: string }> {
+  async removeBackground(
+    imageUrl: string,
+    opts?: { signal?: AbortSignal; key?: string },
+  ): Promise<{ resultUrl: string }> {
+    // remove.bg uses its OWN key, distinct from the sprite provider key this
+    // client is constructed with. `generateSprite` chains here with the key the
+    // route resolved (#9734); direct callers of this method (provider
+    // 'removebg') fall back to `this.apiKey`.
+    const apiKey = opts?.key ?? this.apiKey;
     const response = await fetch('https://api.remove.bg/v1.0/removebg', {
       method: 'POST',
       headers: {
-        'X-Api-Key': this.apiKey,
+        'X-Api-Key': apiKey,
       },
       body: JSON.stringify({
         image_url: imageUrl,
@@ -278,15 +318,15 @@ export class SpriteClient {
   }
 
   private async blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        resolve(result);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    // Runtime-agnostic (#9734). `FileReader` is a browser/worker API absent from
+    // the Node request runtime this client actually runs in — it only ever
+    // "worked" under jsdom in tests, and would have thrown the first time
+    // `generateSprite` chained background removal server-side. `Blob.arrayBuffer`
+    // + `Buffer` produces the same `data:<mime>;base64,...` URL in both.
+    const arrayBuffer = await blob.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const mimeType = blob.type || 'image/png';
+    return `data:${mimeType};base64,${base64}`;
   }
 
   async getReplicateStatus(predictionId: string, opts?: { signal?: AbortSignal }): Promise<{ status: string; output?: string[] }> {
