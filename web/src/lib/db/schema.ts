@@ -289,6 +289,10 @@ export const publishedGames = pgTable(
     status: publishStatusEnum('status').notNull().default('processing'),
     version: integer('version').notNull().default(1),
     cdnUrl: text('cdn_url'),
+    // Private immutable R2 snapshot; NULL when optional storage is unavailable.
+    cdnBundleKey: text('cdn_bundle_key'),
+    // Publication-time fallback, independent of later editor saves.
+    publishedSceneData: jsonb('published_scene_data'),
     thumbnail: text('thumbnail'),
     playCount: integer('play_count').notNull().default(0),
     // Distinct reporters SINCE THE LAST MODERATOR REVIEW (one row per reporter

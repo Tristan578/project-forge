@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, projects, gameForks, users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { PROJECT_LIMITS } from '@/lib/projects/limits';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { isPublishedSceneData } from '@/lib/storage/publishedGameStorage';
+import { quarantineRemixedScripts } from '@/lib/security/remixSanitizer';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,23 +33,38 @@ async function POST_impl(
       .where(eq(publishedGames.id, gameId))
       .limit(1));
 
-    if (!game) {
+    if (!game || game.status !== 'published') {
       return NextResponse.json({ error: 'Game not found' }, { status: 404 });
     }
 
-    // Fetch the original project to get scene data
-    const [originalProject] = await queryWithResilience(() => getDb()
-      .select()
-      .from(projects)
-      .where(eq(projects.id, game.projectId))
-      .limit(1));
-
-    if (!originalProject) {
-      return NextResponse.json(
-        { error: 'Original project not found' },
-        { status: 404 }
-      );
+    // New publications copy their saved revision. Looking up the live project
+    // would expose changes the creator has not published yet.
+    let sourceScene: unknown = game.publishedSceneData;
+    let entityCount = 0;
+    let formatVersion = 1;
+    if (sourceScene == null) {
+      const [originalProject] = await queryWithResilience(() => getDb()
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, game.projectId), eq(projects.userId, game.userId)))
+        .limit(1));
+      if (!originalProject) {
+        return NextResponse.json({ error: 'Original project not found' }, { status: 404 });
+      }
+      sourceScene = originalProject.sceneData;
+      entityCount = originalProject.entityCount;
+      formatVersion = originalProject.formatVersion;
+    } else if (isPublishedSceneData(sourceScene)) {
+      entityCount = Array.isArray(sourceScene.entities) ? sourceScene.entities.length : 0;
+      if (typeof sourceScene.formatVersion === 'number' &&
+          Number.isSafeInteger(sourceScene.formatVersion) && sourceScene.formatVersion > 0) {
+        formatVersion = sourceScene.formatVersion;
+      }
     }
+    if (!isPublishedSceneData(sourceScene)) {
+      throw new Error('Invalid publication snapshot');
+    }
+    const { sceneData, quarantined } = quarantineRemixedScripts(sourceScene);
 
     // Check project limit for user's tier
     const [user] = await queryWithResilience(() => getDb()
@@ -84,9 +101,9 @@ async function POST_impl(
       .values({
         userId: mid.userId!,
         name: `${game.title} (Fork)`,
-        sceneData: originalProject.sceneData,
-        entityCount: originalProject.entityCount,
-        formatVersion: originalProject.formatVersion,
+        sceneData,
+        entityCount,
+        formatVersion,
       })
       .returning());
 
@@ -97,7 +114,7 @@ async function POST_impl(
       userId: mid.userId!,
     }));
 
-    return NextResponse.json({ projectId: newProject.id }, { status: 201 });
+    return NextResponse.json({ projectId: newProject.id, quarantinedScripts: quarantined }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/community/games/[id]/fork' });
     return redactedJson({ error: 'Failed to fork game' }, { status: 500 });
