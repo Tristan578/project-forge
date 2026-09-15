@@ -28,7 +28,26 @@
  * contract regardless of which delivery path fires.
  */
 
-import type { SceneGraph, GameComponentData, WinConditionData } from '@/stores/slices/types';
+import type { SceneGraph, GameComponentData, WinConditionData, CompletionMode } from '@/stores/slices/types';
+
+/**
+ * Whether a completion mode demands at least one satisfiable win condition.
+ *
+ * Only `endless`, `sandbox` and `narrative` are exempt. EVERYTHING else returns
+ * true — that deliberately includes `undefined` (a legacy scene written before
+ * the field existed) and any unexpected string that a hand-edited or older
+ * `.forge` file might carry. The pre-play gate therefore stays fail-CLOSED by
+ * default: absence of the field, or a value we do not recognise, is treated as
+ * `win`, never as "no win condition needed". The mode is never inferred from
+ * entity names (issue #9901).
+ */
+function requiresWinCondition(completionMode: CompletionMode | undefined): boolean {
+  return (
+    completionMode !== 'endless' &&
+    completionMode !== 'sandbox' &&
+    completionMode !== 'narrative'
+  );
+}
 
 /**
  * Neutralize a scene-supplied identifier before interpolating it into a message
@@ -166,10 +185,19 @@ function evaluateCondition(
  * Validate whether the given scene can be won. A scene is winnable when at
  * least one of its win conditions is satisfiable; the report lists every reason
  * the others (or all) fail so the message back to the user is specific.
+ *
+ * `completionMode` (issue #9901) makes the "no win condition" requirement
+ * intentional rather than universal: a `sandbox`/`endless`/`narrative` scene
+ * with no win condition is winnable (it was never trying to be won), while a
+ * `win`-mode scene — and every legacy scene, where the argument is omitted and
+ * defaults to `win` — still fails with `NO_WIN_CONDITION`. A win condition that
+ * IS present is validated in EVERY mode: a malformed goal never passes just
+ * because the mode does not require a win.
  */
 export function validateWinnability(
   sceneGraph: SceneGraph,
   allGameComponents: Record<string, GameComponentData[]>,
+  completionMode: CompletionMode = 'win',
 ): WinnabilityReport {
   const graph: SceneGraph = sceneGraph ?? { nodes: {}, rootIds: [] };
   const winConditions: Array<{ entityId: string; data: WinConditionData }> = [];
@@ -189,6 +217,12 @@ export function validateWinnability(
   }
 
   if (winConditions.length === 0) {
+    // A sandbox/endless/narrative game is COMPLETE without a win condition —
+    // the creator chose that. Only win-mode (and legacy, defaulted) scenes are
+    // blocked here.
+    if (!requiresWinCondition(completionMode)) {
+      return { winnable: true, issues: [] };
+    }
     return {
       winnable: false,
       issues: [{
