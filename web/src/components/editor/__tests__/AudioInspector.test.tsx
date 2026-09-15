@@ -401,14 +401,58 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
     expect(screen.getByRole('img', { name: /Waveform, trim/ })).toBeInTheDocument();
   });
 
+  // A clip field commits on blur or Enter, not on every keystroke, so drive the
+  // real commit gesture: type, then blur.
+  function commitField(el: HTMLInputElement, value: string) {
+    fireEvent.change(el, { target: { value } });
+    fireEvent.blur(el);
+  }
+
   it('applies a valid manual trim to the clip document', () => {
     mockWithClip();
     render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
-    fireEvent.change(end, { target: { value: '0.5' } });
+    commitField(end, '0.5');
     expect(end.value).toBe('0.5');
-    // No validation error surfaced for a valid edit.
+    // No validation error surfaced for a valid edit, and the commit was recorded.
     expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeEnabled();
+  });
+
+  it('does not commit a clip edit until blur or Enter, keeping keystrokes out of history and validation', () => {
+    mockWithClip();
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const gain = screen.getByLabelText('Gain') as HTMLInputElement;
+    const undo = screen.getByRole('button', { name: 'Undo clip edit' });
+    // Transiently invalid keystrokes — a lone "-", then a value below MIN_GAIN_DB
+    // (-60) — must neither push an undo entry nor raise the assertive alert while
+    // still being typed. (Under the old per-keystroke commit both would fire.)
+    fireEvent.change(gain, { target: { value: '-' } });
+    fireEvent.change(gain, { target: { value: '-70' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(undo).toBeDisabled();
+    expect(gain.value).toBe('-70'); // shown as typed, but not yet committed
+
+    // Correcting to a valid value and blurring records exactly one entry.
+    commitField(gain, '-6');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(gain.value).toBe('-6');
+    expect(undo).toBeEnabled();
+    fireEvent.click(undo);
+    expect(gain.value).toBe('0');
+    expect(undo).toBeDisabled();
+  });
+
+  it('commits a clip edit on Enter', () => {
+    mockWithClip();
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const end = screen.getByLabelText('Trim end') as HTMLInputElement;
+    const undo = screen.getByRole('button', { name: 'Undo clip edit' });
+    fireEvent.change(end, { target: { value: '0.5' } });
+    expect(undo).toBeDisabled(); // typing alone does not commit
+    fireEvent.keyDown(end, { key: 'Enter' });
+    expect(end.value).toBe('0.5');
+    expect(undo).toBeEnabled();
   });
 
   it('rejects trim end <= start, showing a validation error and leaving the prior clip', () => {
@@ -417,10 +461,10 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
     const start = screen.getByLabelText('Trim start') as HTMLInputElement;
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
     // Establish a valid window 0.6–1.0.
-    fireEvent.change(start, { target: { value: '0.6' } });
+    commitField(start, '0.6');
     expect(start.value).toBe('0.6');
     // Now push trim end before start → invalid.
-    fireEvent.change(end, { target: { value: '0.3' } });
+    commitField(end, '0.3');
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent(/Trim end must be after trim start/);
     // The prior clip is intact: end reverts to the last valid value, start held.
@@ -434,8 +478,8 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
     render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
     const gain = screen.getByLabelText('Gain') as HTMLInputElement;
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
-    fireEvent.change(end, { target: { value: '0.5' } });
-    fireEvent.change(gain, { target: { value: '-6' } });
+    commitField(end, '0.5');
+    commitField(gain, '-6');
     expect(gain.value).toBe('-6');
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
@@ -448,12 +492,46 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
     mockWithClip();
     render(<StrictMode><ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} /></StrictMode>);
     const gain = screen.getByLabelText('Gain') as HTMLInputElement;
-    fireEvent.change(gain, { target: { value: '-6' } });
-    fireEvent.change(gain, { target: { value: '-12' } });
+    commitField(gain, '-6');
+    commitField(gain, '-12');
     fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
     expect(gain.value).toBe('-6');
     fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
     expect(gain.value).toBe('0');
     expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
   });
+  it('commits Enter followed by blur once and preserves redo on untouched controls', () => {
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const gain = screen.getByLabelText('Gain');
+    const undo = screen.getByRole('button', { name: 'Undo clip edit' });
+    const redo = screen.getByRole('button', { name: 'Redo clip edit' });
+    fireEvent.change(gain, { target: { value: '-6' } });
+    fireEvent.keyDown(gain, { key: 'Enter' });
+    fireEvent.keyDown(gain, { key: 'Enter' });
+    fireEvent.blur(gain);
+    fireEvent.click(undo);
+    expect(gain).toHaveValue(0);
+    expect(undo).toBeDisabled();
+    expect(redo).toBeEnabled();
+
+    fireEvent.focus(gain);
+    fireEvent.blur(gain);
+    fireEvent.keyDown(screen.getByLabelText('Trim end'), { key: 'Enter' });
+    expect(undo).toBeDisabled();
+    expect(redo).toBeEnabled();
+    fireEvent.click(redo);
+    expect(gain).toHaveValue(-6);
+  });
+
+  it('Escape discards a draft and the following blur does not create an undo entry', () => {
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const gain = screen.getByLabelText('Gain');
+    fireEvent.change(gain, { target: { value: '-70' } });
+    fireEvent.keyDown(gain, { key: 'Escape' });
+    expect(gain).toHaveValue(0);
+    fireEvent.blur(gain);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
+  });
+
 });

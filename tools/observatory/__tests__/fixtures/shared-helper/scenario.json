@@ -1,0 +1,39 @@
+{
+  "description": "A helper file matched by two capabilities' rules. It must be OWNED by exactly one (counted once in the denominator) and appear as a secondary/cross-link on the other, proving no double counting.",
+  "coveredScopes": ["app/"],
+  "files": [
+    "app/featureA/index.ts",
+    "app/featureA/index.test.ts",
+    "app/featureB/index.ts",
+    "app/shared/helper.ts"
+  ],
+  "rules": [
+    {
+      "capabilityId": "feat.a",
+      "domain": "demo",
+      "confidence": "reviewed",
+      "primaryOwner": "app/featureA/index.ts",
+      "own": ["app/featureA/**", "app/shared/helper.ts"],
+      "crossLink": ["app/shared/helper.ts"]
+    },
+    {
+      "capabilityId": "feat.b",
+      "domain": "demo",
+      "confidence": "reviewed",
+      "primaryOwner": "app/featureB/index.ts",
+      "own": ["app/featureB/**", "app/shared/helper.ts"],
+      "crossLink": ["app/featureA/index.ts"]
+    }
+  ],
+  "expected": {
+    "trackedTotal": 4,
+    "ownedTotal": 4,
+    "excludedTotal": 0,
+    "unmappedTotal": 0,
+    "notYetCoveredTotal": 0,
+    "sharedFile": "app/shared/helper.ts",
+    "sharedFileOwner": "feat.a",
+    "sharedFileSecondaryLinkOn": "feat.b",
+    "gapCount": 0
+  }
+}
