@@ -279,7 +279,7 @@ describe('SceneToolbar', () => {
         screen.getByRole('button', { name: /load scene/i }).click();
       });
 
-      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}');
+      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
       expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
     });
 
@@ -293,7 +293,7 @@ describe('SceneToolbar', () => {
         screen.getByRole('button', { name: /load scene/i }).click();
       });
 
-      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}');
+      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
       expect(vi.mocked(showError)).not.toHaveBeenCalled();
     });
 

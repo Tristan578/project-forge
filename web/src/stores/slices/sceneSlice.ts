@@ -40,6 +40,7 @@ import {
 } from '@/lib/prefabs/prefabStore';
 import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import { showError } from '@/lib/toast';
 import {
   buildTemplateSceneFile,
   buildTemplateGameComponents,
@@ -147,8 +148,18 @@ export interface SceneSlice {
    * yet", which is the normal cold-open path. {@link sceneLoadError} is the
    * field that distinguishes a rejection, and only the rejection branches set
    * it. A `true` return clears it.
+   *
+   * `rejectionStrandsEditor` says what a REJECTION means for this caller, and
+   * defaults to `true`. `true` is the primitive's safe default and the
+   * cold-open case: a rejection leaves no trustworthy scene on screen, so it
+   * sets {@link sceneLoadError} and every save path locks down. A caller that
+   * is loading a scene OVER an intact outgoing scene — a scene switch, a file
+   * import, an auto-save restore — passes `false`: the rejected INCOMING scene
+   * never displaced the outgoing one, so the editor is not stranded, the
+   * `false` return still tells the caller to surface its own error, and saving
+   * of the still-live outgoing scene stays enabled (#10056).
    */
-  loadScene: (json: string) => boolean;
+  loadScene: (json: string, opts?: { rejectionStrandsEditor?: boolean }) => boolean;
   /**
    * Return false when no engine is available or it rejects the new scene.
    * A successful new scene clears {@link sceneLoadError}: an empty scene the
@@ -516,7 +527,15 @@ export const createSceneSlice: StateCreator<
     // as `null` depending on how the payload is marshalled.
     if (dispatchCommand) dispatchCommand('export_scene', requestId ? { requestId } : {});
   },
-  loadScene: (json) => {
+  loadScene: (json, opts) => {
+    // Whether a REJECTION should strand the editor. Default `true` keeps the
+    // cold-open contract and every direct caller that has no trustworthy scene
+    // to fall back on; a caller loading over an intact outgoing scene passes
+    // `false` so its rejection surfaces a toast without locking saving (#10056).
+    const strandOnReject = opts?.rejectionStrandsEditor ?? true;
+    const rejectEditor = (reason: string) => {
+      if (strandOnReject) set({ sceneLoadError: { reason, at: Date.now() } });
+    };
     // The engine reveals a loaded scene's audio one selection at a time
     // (`emit_audio_on_selection`), and SCENE_LOADED carries only a name — so
     // this JSON is the only chance to know what the scene sounds like. Staged
@@ -540,7 +559,7 @@ export const createSceneSlice: StateCreator<
     // desync it from what is actually rendered.
     const snapshot = restorePrefabInstances(json);
     if (!snapshot) {
-      set({ sceneLoadError: { reason: PREFAB_LOAD_REJECTION, at: Date.now() } });
+      rejectEditor(PREFAB_LOAD_REJECTION);
       return false;
     }
     let accepted: boolean;
@@ -555,12 +574,7 @@ export const createSceneSlice: StateCreator<
       // into the boolean contract — callers that need to distinguish it
       // (`restoreCheckpoint`'s own recovery flow) rely on exactly this.
       rollbackPrefabState(snapshot);
-      set({
-        sceneLoadError: {
-          reason: `${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`,
-          at: Date.now(),
-        },
-      });
+      rejectEditor(`${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
     if (!accepted) {
@@ -572,7 +586,7 @@ export const createSceneSlice: StateCreator<
       // and the next save would persist the wrong instances onto the scene
       // that is actually still active.
       rollbackPrefabState(snapshot);
-      set({ sceneLoadError: { reason: ENGINE_LOAD_REJECTION, at: Date.now() } });
+      rejectEditor(ENGINE_LOAD_REJECTION);
       return false;
     }
     // A rejected request must not invalidate an unrelated recovery operation.
@@ -902,12 +916,18 @@ export const createSceneSlice: StateCreator<
     const result = switchSceneIn(project, sceneId);
     if ('error' in result) return;
     const accepted = result.sceneToLoad
-      ? get().loadScene(JSON.stringify(result.sceneToLoad))
+      ? get().loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
       : get().newScene();
     if (!accepted) {
       // Retain the outgoing capture without relabelling the unchanged engine
-      // scene as the rejected target.
+      // scene as the rejected target. `rejectionStrandsEditor: false` above is
+      // what makes this safe: the outgoing scene is still on screen and still
+      // this project's, so its saves must stay enabled — a rejected TARGET is a
+      // failed navigation, not a corrupted editor (#10056). Surface it as a
+      // toast (the Scene Browser has no other channel) rather than the save-
+      // locking banner `sceneLoadError` would raise.
       saveProjectScenes(project, get().projectId);
+      showError('The scene could not be opened, so the switch was cancelled. You are still on the current scene, which is unchanged.');
       return;
     }
     saveProjectScenes(result.project, get().projectId);

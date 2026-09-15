@@ -92,7 +92,12 @@ export function AutoSaveRecovery() {
     // Deleting the backup on that path would permanently lose the very work
     // this banner exists to protect (PF-587), so surface the failure and keep
     // both the auto-save entry and the banner so the user can try again.
-    if (loadScene(entry.sceneJson) === false) {
+    //
+    // `rejectionStrandsEditor: false`: the scene the engine already holds is
+    // untouched when the restore is rejected, so this must not raise the
+    // save-locking `sceneLoadError` banner over a working editor — the toast
+    // below is the whole report and the current scene stays savable (#10056).
+    if (loadScene(entry.sceneJson, { rejectionStrandsEditor: false }) === false) {
       showError('The saved scene could not be restored. Its data may be invalid or the engine is not ready — try again.');
       return;
     }

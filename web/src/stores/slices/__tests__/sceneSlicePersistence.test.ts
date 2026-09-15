@@ -321,4 +321,75 @@ describe('sceneSlice scene persistence', () => {
       expect(store.getState().checkpointError).toContain('No checkpoint was saved');
     });
   });
+
+  /**
+   * #10056 (the save-lockout regression). A rejected switch TARGET must not be
+   * mistaken for a stranded editor. The engine declines the incoming scene, the
+   * OUTGOING scene stays on screen and stays this project's — so `sceneLoadError`
+   * must NOT be set, and every save path (`saveScene`, `createCheckpoint`, the
+   * autosave ticker, cloud save, another switch) must stay open. Before the fix
+   * `loadScene` set the flag on the engine-refusal branch unconditionally, so a
+   * single refused switch left the user's still-live, unsaved scene permanently
+   * unsavable with no exit that did not destroy it.
+   */
+  describe('a rejected switch target does not strand the outgoing scene (#10056)', () => {
+    /**
+     * Answers `validate_scene`/`export_scene` as the bridge does — echoing the
+     * `requestId` so the checkpoint capture, which correlates on it, resolves —
+     * but REFUSES every `load_scene`.
+     */
+    function refusingIncomingLoadDispatcher() {
+      const calls: Array<{ command: string; payload: unknown }> = [];
+      const dispatch = (command: string, payload: unknown): { success: boolean; error?: string } | void => {
+        calls.push({ command, payload });
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'load_scene') return { success: false, error: 'Scene JSON too large' };
+        if (command === 'export_scene') {
+          const { requestId } = (payload ?? {}) as { requestId?: string };
+          window.dispatchEvent(
+            new CustomEvent(SCENE_EXPORTED_EVENT, {
+              detail: { json: JSON.stringify(LIVE_SCENE), name: LIVE_SCENE.metadata?.name, requestId },
+            })
+          );
+        }
+        return { success: true };
+      };
+      return { dispatch, calls };
+    }
+
+    it('keeps the outgoing scene active, unflagged, and fully savable', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { dispatch, calls } = refusingIncomingLoadDispatcher();
+      setSceneDispatcher(dispatch);
+
+      const outgoingId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second')!;
+      // Give the target real data so the switch dispatches `load_scene` (the
+      // rejection branch under test) rather than falling through to `newScene`.
+      const seeded = loadProjectScenes();
+      seeded.scenes.find((s) => s.id === target.id)!.data = LIVE_SCENE;
+      saveProjectScenes(seeded);
+
+      await store.getState().switchScene(target.id);
+
+      // The incoming scene was refused, so scene A is still active and trustworthy.
+      expect(loadProjectScenes().activeSceneId).toBe(outgoingId);
+      expect(store.getState().activeSceneId).not.toBe(target.id);
+      // The regression: a refused switch used to raise `sceneLoadError`, which
+      // gates every save path below.
+      expect(store.getState().sceneLoadError).toBeNull();
+
+      // Saving the still-live outgoing scene must still reach the engine.
+      calls.length = 0;
+      store.getState().saveScene('req_after_failed_switch');
+      expect(calls.filter((c) => c.command === 'export_scene')).toHaveLength(1);
+
+      // And a checkpoint of it must still be recordable, not refused.
+      const checkpoint = await store.getState().createCheckpoint('safety net');
+      expect(checkpoint).not.toBeNull();
+      expect(store.getState().checkpointError).toBeNull();
+      error.mockRestore();
+    });
+  });
 });

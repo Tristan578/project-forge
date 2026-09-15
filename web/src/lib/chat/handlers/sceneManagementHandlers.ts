@@ -67,7 +67,10 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   load_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ json: z.string().min(1) }), args);
     if (p.error) return p.error;
-    if (ctx.store.loadScene(p.data.json) === false) {
+    // The scene currently on screen is untouched when the load is rejected, so
+    // this must not strand the editor: the failure is reported back to the
+    // assistant below and saving of the current scene stays enabled (#10056).
+    if (ctx.store.loadScene(p.data.json, { rejectionStrandsEditor: false }) === false) {
       return { success: false, error: 'The scene was not loaded. Check its prefab metadata and engine readiness, then try again.' };
     }
     return { success: true, result: { message: 'Scene load triggered' } };
@@ -196,8 +199,12 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const result = switchScene(project, targetId);
     if ('error' in result) return { success: false, error: result.error };
 
+    // `rejectionStrandsEditor: false`: a rejected TARGET leaves the OUTGOING
+    // scene on screen and unchanged, so a failed switch must not lock its saves
+    // behind `sceneLoadError` — the failure is returned to the assistant below,
+    // parity with the store's own `switchScene` (#10056).
     const accepted = result.sceneToLoad
-      ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad))
+      ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
       : ctx.store.newScene();
     if (accepted === false) {
       saveProjectScenes(project, ctx.store.projectId);

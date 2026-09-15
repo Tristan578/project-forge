@@ -181,7 +181,8 @@ describe('load_scene', () => {
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json });
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toBe('Scene load triggered');
-    expect(store.loadScene).toHaveBeenCalledWith(json);
+    // Loading over an intact current scene must not strand the editor (#10056).
+    expect(store.loadScene).toHaveBeenCalledWith(json, { rejectionStrandsEditor: false });
   });
 
   it('returns failure when json parameter is missing', async () => {
@@ -505,7 +506,8 @@ describe('switch_scene', () => {
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toContain('Switched');
     expect(mockSwitchScene).toHaveBeenCalledWith(baseProject, 'scene_2');
-    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData));
+    // A rejected switch target must not strand the outgoing scene (#10056).
+    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData), { rejectionStrandsEditor: false });
     expect(store.setScenes).toHaveBeenCalled();
   });
 

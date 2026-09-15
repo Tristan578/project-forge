@@ -110,6 +110,19 @@ describe('TemplateGallery', () => {
     expect(mockOnClose).toHaveBeenCalled();
   });
 
+  // #10056: the blank-project branch fired GAME_CREATED and closed the dialog
+  // no matter what `newScene()` returned, reporting a blank project the engine
+  // never accepted — the same false success the template branch already guards.
+  it('keeps the gallery open and skips GAME_CREATED when the engine refuses a new scene', () => {
+    mockNewScene.mockReturnValueOnce(false);
+    render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+    fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+    expect(mockNewScene).toHaveBeenCalled();
+    expect(mockOnClose).not.toHaveBeenCalled();
+    expect(mockTrackEvent).not.toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, expect.anything());
+    expect(screen.getByRole('alert')).toHaveTextContent('The engine did not accept a new scene. Please try again.');
+  });
+
   it('has role="dialog" on the modal', () => {
     render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
     expect(screen.getByRole('dialog')).toBeInTheDocument();

@@ -82,8 +82,15 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
 
   const handleSelectTemplate = async (templateId: string | null) => {
     if (templateId === null) {
-      // Blank project
-      newScene();
+      // Blank project. `newScene()` returns false when the engine refuses to
+      // clear the scene; firing GAME_CREATED and closing regardless reports a
+      // blank project the engine never accepted — the same false success the
+      // template branch below already guards (#10056). Stay open and say what
+      // went wrong instead.
+      if (newScene() === false) {
+        setError('The engine did not accept a new scene. Please try again.');
+        return;
+      }
       trackEvent(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
       onClose();
       return;

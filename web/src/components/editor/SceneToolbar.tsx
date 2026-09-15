@@ -129,7 +129,10 @@ export function SceneToolbar() {
 
   const handleLoad = useCallback(async () => {
     const json = await openSceneFilePicker();
-    if (json && loadScene(json) === false) {
+    // The scene currently on screen stays on screen if the import is rejected,
+    // so this must not strand the editor: the toast below is the whole report
+    // and saving of the current scene stays enabled (#10056).
+    if (json && loadScene(json, { rejectionStrandsEditor: false }) === false) {
       // Parity with the AI/MCP `load_scene` handler, which surfaces the same
       // rejection: without this the scene silently vanishes into a no-op when
       // its embedded prefab graph is rejected or the engine is not ready.

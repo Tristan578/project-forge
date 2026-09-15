@@ -204,7 +204,9 @@ describe('AutoSaveRecovery', () => {
 
       // The load was attempted but rejected — the backup and the banner must
       // survive so the user gets another chance, and the failure is surfaced.
-      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}');
+      // `rejectionStrandsEditor: false`: a restore over the intact current scene
+      // must not raise the save-locking banner (#10056).
+      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}', { rejectionStrandsEditor: false });
       expect(vi.mocked(deleteAutoSaveEntry)).not.toHaveBeenCalled();
       expect(setSceneName).not.toHaveBeenCalled();
       expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
