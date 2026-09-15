@@ -14,7 +14,6 @@ import {
   switchScene as switchSceneIn,
   saveCurrentSceneData,
   readPrefabInstances,
-  readPrefabDefinitions,
   type ProjectScenes,
   type SceneFileData,
 } from '@/lib/scenes/sceneManager';
@@ -24,6 +23,7 @@ import {
   savePrefabInstancesToStorage,
   mergeImportedPrefabDefinitions,
   loadPrefabs,
+  getBuiltInPrefabs,
   savePrefabsToStorage,
   type Prefab,
 } from '@/lib/prefabs/prefabStore';
@@ -69,8 +69,10 @@ export interface SceneSlice {
    * debounced autosave, the chat tool) can omit it.
    */
   saveScene: (requestId?: string) => void;
-  loadScene: (json: string) => void;
-  newScene: () => void;
+  /** Return false when validation or engine dispatch rejects the load. */
+  loadScene: (json: string) => boolean;
+  /** Return false when no engine is available or it rejects the new scene. */
+  newScene: () => boolean;
   setSceneName: (name: string) => void;
   setSceneModified: (modified: boolean) => void;
   setAutoSaveEnabled: (enabled: boolean) => void;
@@ -274,14 +276,22 @@ interface PrefabRestoreSnapshot {
  * NOT part of the rejected dispatch and would otherwise permanently install a
  * foreign scene's definitions even though the engine never loaded it.
  */
-function restorePrefabInstances(json: string): PrefabRestoreSnapshot {
+function restorePrefabInstances(json: string): PrefabRestoreSnapshot | null {
   const snapshot: PrefabRestoreSnapshot = { instances: loadPrefabInstances(), prefabs: loadPrefabs() };
   try {
     const parsed = JSON.parse(json) as SceneFileData;
-    mergeImportedPrefabDefinitions(readPrefabDefinitions(parsed));
-    savePrefabInstancesToStorage(readPrefabInstances(parsed));
+    if (parsed.prefabDefinitions !== undefined && !Array.isArray(parsed.prefabDefinitions)) {
+      throw new Error('Invalid prefab definitions');
+    }
+    if (!mergeImportedPrefabDefinitions(parsed.prefabDefinitions ?? [])) {
+      throw new Error('Invalid prefab dependency graph');
+    }
+    const availableIds = new Set([...loadPrefabs(), ...getBuiltInPrefabs()].map((prefab) => prefab.id));
+    // Deleted and otherwise missing sources cannot become dangling scene links.
+    savePrefabInstancesToStorage(readPrefabInstances(parsed).filter((instance) => availableIds.has(instance.prefabId)));
   } catch {
-    savePrefabInstancesToStorage([]);
+    rollbackPrefabState(snapshot);
+    return null;
   }
   return snapshot;
 }
@@ -336,6 +346,10 @@ export const createSceneSlice: StateCreator<
       // dispatcher the engine never loads, so mutating the store here would
       // desync it from what is actually rendered.
       const snapshot = restorePrefabInstances(json);
+      if (!snapshot) {
+        clearStagedSceneAudio();
+        return false;
+      }
       // A rejected load never emits SCENE_LOADED, so a stash left armed here
       // waits for the NEXT scene's SCENE_LOADED and attaches this scene's
       // sounds to it. `new_scene` already clears for the same reason; a
@@ -351,8 +365,11 @@ export const createSceneSlice: StateCreator<
         // and the next save would persist the wrong instances onto the scene
         // that is actually still active.
         rollbackPrefabState(snapshot);
+        return false;
       }
+      return true;
     }
+    return false;
   },
   newScene: () => {
     // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
@@ -363,7 +380,7 @@ export const createSceneSlice: StateCreator<
       // registry, is unchanged. Clearing here (as the dispatched path below
       // does) would describe a scene that never actually went empty
       // (scene.FR-1 N1 BUG-4).
-      return;
+      return false;
     }
     const previousInstances = loadPrefabInstances();
     // The new scene has no linked instances of its own — leaving the outgoing
@@ -380,7 +397,9 @@ export const createSceneSlice: StateCreator<
       // unchanged, so its registry must come back rather than stay cleared
       // out from under it (scene.FR-1 N1 BUG-4).
       savePrefabInstancesToStorage(previousInstances);
+      return false;
     }
+    return true;
   },
   setSceneName: (name) => set({ sceneName: name }),
   setSceneModified: (modified) => set({ sceneModified: modified }),
@@ -519,6 +538,11 @@ export const createSceneSlice: StateCreator<
     // `prefabInstances`, so this clears the registry outright; any failure
     // path below restores exactly what the outgoing scene had.
     const snapshot = restorePrefabInstances(sceneJson);
+    if (!snapshot) {
+      abandon();
+      clearStagedSceneAudio();
+      return { success: false, error: 'The template contains invalid prefab metadata.' };
+    }
     const response = dispatchCommand('load_scene', { json: sceneJson });
     if (response && response.success === false) {
       abandon();
@@ -593,17 +617,17 @@ export const createSceneSlice: StateCreator<
     }
     const result = switchSceneIn(project, sceneId);
     if ('error' in result) return;
+    const accepted = result.sceneToLoad
+      ? get().loadScene(JSON.stringify(result.sceneToLoad))
+      : get().newScene();
+    if (!accepted) {
+      // Retain the outgoing capture without relabelling the unchanged engine
+      // scene as the rejected target.
+      saveProjectScenes(project);
+      return;
+    }
     saveProjectScenes(result.project);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
-    if (result.sceneToLoad) {
-      // `loadScene` restores the incoming scene's prefab-instance registry.
-      get().loadScene(JSON.stringify(result.sceneToLoad));
-    } else {
-      // An unsaved scene carries no instances — reset the registry so the
-      // outgoing scene's instances do not bleed into it.
-      savePrefabInstancesToStorage([]);
-      get().newScene();
-    }
   },
   createNewScene: (name) => {
     const { project } = createSceneIn(loadProjectScenes(), name ?? 'New Scene');

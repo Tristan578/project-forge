@@ -47,12 +47,16 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   load_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ json: z.string().min(1) }), args);
     if (p.error) return p.error;
-    ctx.store.loadScene(p.data.json);
+    if (ctx.store.loadScene(p.data.json) === false) {
+      return { success: false, error: 'The scene was not loaded. Check its prefab metadata and engine readiness, then try again.' };
+    }
     return { success: true, result: { message: 'Scene load triggered' } };
   },
 
   new_scene: async (_args, ctx): Promise<ExecutionResult> => {
-    ctx.store.newScene();
+    if (ctx.store.newScene() === false) {
+      return { success: false, error: 'The engine did not accept a new scene. The current scene is unchanged.' };
+    }
     return { success: true, result: { message: 'New scene created' } };
   },
 
@@ -154,16 +158,18 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const result = switchScene(project, targetId);
     if ('error' in result) return { success: false, error: result.error };
 
+    const accepted = result.sceneToLoad
+      ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad))
+      : ctx.store.newScene();
+    if (accepted === false) {
+      saveProjectScenes(project);
+      return { success: false, error: 'The engine rejected the scene switch. The current scene is unchanged.' };
+    }
     saveProjectScenes(result.project);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
     );
-    if (result.sceneToLoad) {
-      ctx.store.loadScene(JSON.stringify(result.sceneToLoad));
-    } else {
-      ctx.store.newScene();
-    }
     return { success: true, result: { message: `Switched to scene` } };
   },
 

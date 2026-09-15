@@ -1,9 +1,4 @@
-/**
- * Tests for PrefabLibraryPanel — the MANUAL half of the scene.FR-1 prefab
- * instance parity. Asserts each control drives the shared `prefabStore`
- * contract and that a cyclic-reference rejection surfaces its error (matching
- * the AI path in prefabInstanceHandlers.test.ts).
- *
+/** Read-only prefab inspection and unavailable scene controls.
  * @vitest-environment jsdom
  */
 
@@ -67,53 +62,19 @@ describe('PrefabLibraryPanel (manual FR-1 control)', () => {
     expect(screen.getByText(/No prefabs yet/)).toBeInTheDocument();
   });
 
-  it('creates a linked instance through the shared store contract (OP-01)', () => {
-    mockCreatePrefabInstance.mockReturnValue({ ok: true, value: { instanceId: 'i1', prefabId: 'p1', overrides: {} } });
+  it('disables every unavailable scene action without mutating the library or showing success', () => {
     render(<PrefabLibraryPanel />);
-    fireEvent.click(screen.getByTitle(/Register a linked instance/));
-    expect(mockCreatePrefabInstance).toHaveBeenCalledWith('p1');
-    expect(mockShowSuccess).toHaveBeenCalled();
-  });
-
-  it('reports the create as library bookkeeping, not a scene placement (ineffective-success guard)', () => {
-    // createPrefabInstance is called with no entityId, so nothing is spawned in
-    // the scene. The toast must say so — a regression to "Created ... in the
-    // scene" copy (a success message for an operation with no in-scene effect)
-    // fails here, matching #9811's acceptance rule.
-    mockCreatePrefabInstance.mockReturnValue({ ok: true, value: { instanceId: 'i1', prefabId: 'p1', overrides: {} } });
-    render(<PrefabLibraryPanel />);
-    fireEvent.click(screen.getByTitle(/Register a linked instance/));
-    const msg = mockShowSuccess.mock.calls[0][0] as string;
-    expect(msg).toContain('prefab library');
-    expect(msg).not.toMatch(/in the scene|placed|spawned/i);
-  });
-
-  it('surfaces a store error when instance creation fails', () => {
-    mockCreatePrefabInstance.mockReturnValue({ ok: false, error: 'Prefab not found: p1' });
-    render(<PrefabLibraryPanel />);
-    fireEvent.click(screen.getByTitle(/Register a linked instance/));
-    expect(mockShowError).toHaveBeenCalledWith('Prefab not found: p1');
-  });
-
-  it('rejects a cyclic nest with the offending chain shown (OP-02)', () => {
-    mockAddNestedPrefab.mockReturnValue({ ok: false, error: 'Cyclic prefab reference rejected: p1 -> p2 -> p1', cycle: ['p1', 'p2', 'p1'] });
-    render(<PrefabLibraryPanel />);
-    fireEvent.change(screen.getByLabelText('Child prefab to nest'), { target: { value: 'p2' } });
-    fireEvent.click(screen.getByText('Nest'));
-    expect(mockAddNestedPrefab).toHaveBeenCalledWith('p1', 'p2');
-    expect(mockShowError).toHaveBeenCalledWith('Cyclic prefab reference rejected: p1 -> p2 -> p1');
-  });
-
-  it('resolves the prefab onto its instances (OP-04)', () => {
-    mockApplyPrefabToInstances.mockReturnValue({ ok: true, value: [{ instanceId: 'i1', snapshot: {} }] });
-    render(<PrefabLibraryPanel />);
-    fireEvent.click(screen.getByTitle(/Resolve how the source prefab/));
-    expect(mockApplyPrefabToInstances).toHaveBeenCalledWith('p1');
-    // Copy names the resolve, not an in-scene apply — `applyPrefabToInstances`
-    // returns resolved snapshots and writes nothing to a scene entity.
-    const msg = mockShowSuccess.mock.calls[0][0] as string;
-    expect(msg).toContain('Resolved 1 linked instance');
-    expect(msg).not.toMatch(/in the scene|applied to the scene/i);
+    for (const name of ['Add Linked Instance', 'Nest', 'Apply to Instances']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAccessibleDescription(/not available yet/);
+      fireEvent.click(button);
+    }
+    expect(mockCreatePrefabInstance).not.toHaveBeenCalled();
+    expect(mockAddNestedPrefab).not.toHaveBeenCalled();
+    expect(mockApplyPrefabToInstances).not.toHaveBeenCalled();
+    expect(mockShowSuccess).not.toHaveBeenCalled();
+    expect(screen.getByText(/independent copies/)).toBeInTheDocument();
   });
 
   it('lists linked instances with their overridden fields (OP-03 inspection)', () => {
@@ -141,8 +102,17 @@ describe('PrefabLibraryPanel (manual FR-1 control)', () => {
     });
 
     expect(mockListAllPrefabs).toHaveBeenCalledTimes(2);
-    // Appears in both the source-prefab select and the nest-a-child select.
+    // The source picker refreshes without remounting.
     expect(screen.getAllByRole('option', { name: /Explosive Barrel/ }).length).toBeGreaterThan(0);
+  });
+
+  it('selects a remaining source when the selected prefab is deleted externally', () => {
+    render(<PrefabLibraryPanel />);
+    fireEvent.change(screen.getByLabelText('Source prefab'), { target: { value: 'p2' } });
+    mockListAllPrefabs.mockReturnValue([PREFABS[0]]);
+    act(() => externalChangeListeners.forEach((listener) => listener()));
+    expect(screen.getByLabelText('Source prefab')).toHaveValue('p1');
+    expect(mockGetPrefabInstances).toHaveBeenLastCalledWith('p1');
   });
 
   it('unsubscribes on unmount', () => {

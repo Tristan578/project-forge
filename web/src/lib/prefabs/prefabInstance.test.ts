@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   createInstance,
   resolveInstance,
@@ -34,9 +34,13 @@ function makePrefab(id: string, snapshot: PrefabSnapshot): Prefab {
 }
 
 describe('createInstance (OP-01)', () => {
+  afterEach(() => vi.restoreAllMocks());
   it('generates a stable, unique instanceId and links the source prefab', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.5).mockReturnValueOnce(0.25);
     const a = createInstance('prefab_1');
     const b = createInstance('prefab_1');
+    expect([a.instanceId, b.instanceId]).toEqual(['pfi_1000_i', 'pfi_1000_9']);
     expect(a.instanceId).toMatch(/^pfi_\d+_[a-z0-9]+$/);
     expect(a.instanceId).not.toBe(b.instanceId);
     expect(a.prefabId).toBe('prefab_1');

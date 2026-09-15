@@ -10,6 +10,7 @@ import type { GameCameraData, EntityType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
 import { buildStoreComponent, ENGINE_COMPONENT_TYPES, ENGINE_COMPONENT_CATALOG } from '@/lib/engine/gameComponentWire';
 import { NUMERIC_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
+import { LINKED_PREFAB_UNAVAILABLE_REASON } from '@/lib/prefabs/prefabAvailability';
 
 // Derived, not hand-listed: the hand-written list had silently fallen one type
 // behind the engine (it omitted `dialogue_trigger`), so the AI was told that type
@@ -309,60 +310,32 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     return prefab ? { success: true, result: prefab } : { success: false, error: 'Prefab not found' };
   },
 
-  // -------------------------------------------------------------------------
-  // Nested / linked prefab INSTANCES (scene.FR-1 OP-01 .. OP-04)
-  //
-  // These AI commands are deliberately thin: each delegates to the SAME
-  // `prefabStore` instance functions the manual `PrefabLibraryPanel` control
-  // calls, so the two entry points share one validated operation/data contract
-  // (F2). The store returns a discriminated `{ ok }` result; the handler maps it
-  // onto the `{ success }` execution result and surfaces the cyclic-reference
-  // chain on rejection so the AI path recovers with an actionable explanation
-  // exactly as the manual path does (F3).
-  // -------------------------------------------------------------------------
-
-  // Overrides are a loose bag of snapshot fields; unknown keys are dropped by
-  // `createInstance`/`sanitizeOverrides` in the store, so no field enum is
-  // duplicated here.
+  // Keep compatibility with saved tool calls, but never report a registry-only
+  // mutation as successful scene editing. Engine integration remains on #9811.
   create_prefab_instance: async (args, _ctx) => {
-    const { createPrefabInstance } = await import('@/lib/prefabs/prefabStore');
     const p = parseArgs(z.object({
       prefabId: z.string().min(1),
       overrides: z.record(z.string(), z.unknown()).optional(),
       entityId: z.string().min(1).optional(),
     }), args);
     if (p.error) return p.error;
-    const res = createPrefabInstance(p.data.prefabId, p.data.overrides, p.data.entityId);
-    return res.ok
-      ? { success: true, result: { instance: res.value, message: `Created linked instance of "${p.data.prefabId}"` } }
-      : { success: false, error: res.error };
+    return { success: false, error: LINKED_PREFAB_UNAVAILABLE_REASON, result: { code: 'unavailable' } };
   },
 
   nest_prefab: async (args, _ctx) => {
-    const { addNestedPrefab } = await import('@/lib/prefabs/prefabStore');
     const p = parseArgs(z.object({
       parentPrefabId: z.string().min(1),
       childPrefabId: z.string().min(1),
       overrides: z.record(z.string(), z.unknown()).optional(),
     }), args);
     if (p.error) return p.error;
-    const res = addNestedPrefab(p.data.parentPrefabId, p.data.childPrefabId, p.data.overrides);
-    if (res.ok) {
-      return { success: true, result: { prefab: res.value, message: `Nested "${p.data.childPrefabId}" inside "${p.data.parentPrefabId}"` } };
-    }
-    // A cyclic reference carries the offending chain; hand it back so the caller
-    // can explain the rejection rather than only reporting a bare failure.
-    return { success: false, error: res.error, result: res.cycle ? { cycle: res.cycle } : undefined };
+    return { success: false, error: LINKED_PREFAB_UNAVAILABLE_REASON, result: { code: 'unavailable' } };
   },
 
   apply_prefab_to_instances: async (args, _ctx) => {
-    const { applyPrefabToInstances } = await import('@/lib/prefabs/prefabStore');
     const p = parseArgs(z.object({ prefabId: z.string().min(1) }), args);
     if (p.error) return p.error;
-    const res = applyPrefabToInstances(p.data.prefabId);
-    return res.ok
-      ? { success: true, result: { applied: res.value, count: res.value.length, message: `Propagated "${p.data.prefabId}" to ${res.value.length} instance(s)` } }
-      : { success: false, error: res.error };
+    return { success: false, error: LINKED_PREFAB_UNAVAILABLE_REASON, result: { code: 'unavailable' } };
   },
 
   list_prefab_instances: async (args, _ctx) => {
@@ -383,7 +356,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       entityId: i.entityId,
       overriddenFields: getOverriddenFields(i),
     }));
-    return { success: true, result: { instances } };
+    return { success: true, result: { instances, scope: 'editor_metadata', message: 'Saved link metadata only; these records do not verify scene placement or propagation.' } };
   },
 
   export_game: async (args, ctx) => {

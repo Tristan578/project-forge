@@ -690,7 +690,7 @@
     },
     {
       "name": "set_custom_wgsl_source",
-      "description": "Set the scene-global custom WGSL shader source code. All entities with shaderType='custom_wgsl' use this code. WebGPU only \u2014 WebGL2 falls back to standard PBR. The userCode is a WGSL function body receiving base_color, world_pos, world_normal, uv, time, user_params_0..3, user_color and must return vec4<f32>.",
+      "description": "Set the scene-global custom WGSL shader source code. All entities with shaderType='custom_wgsl' use this code. WebGPU only — WebGL2 falls back to standard PBR. The userCode is a WGSL function body receiving base_color, world_pos, world_normal, uv, time, user_params_0..3, user_color and must return vec4<f32>.",
       "category": "materials",
       "parameters": {
         "type": "object",
@@ -1616,7 +1616,7 @@
     },
     {
       "name": "play",
-      "description": "Enter play mode \u2014 starts game simulation, snapshots scene state",
+      "description": "Enter play mode — starts game simulation, snapshots scene state",
       "category": "runtime",
       "parameters": {
         "type": "object",
@@ -1629,7 +1629,7 @@
     },
     {
       "name": "stop",
-      "description": "Stop play mode \u2014 restores scene to pre-play state",
+      "description": "Stop play mode — restores scene to pre-play state",
       "category": "runtime",
       "parameters": {
         "type": "object",
@@ -1642,7 +1642,7 @@
     },
     {
       "name": "pause",
-      "description": "Pause play mode \u2014 freezes simulation",
+      "description": "Pause play mode — freezes simulation",
       "category": "runtime",
       "parameters": {
         "type": "object",
@@ -4626,7 +4626,7 @@
             },
             "minItems": 2,
             "maxItems": 2,
-            "description": "Sculpt center [x, z] in WORLD space \u2014 the engine subtracts the terrain entity's transform to find the brush cell, so an offset terrain sculpts where you clicked, not where it would have been at the origin"
+            "description": "Sculpt center [x, z] in WORLD space — the engine subtracts the terrain entity's transform to find the brush cell, so an offset terrain sculpts where you clicked, not where it would have been at the origin"
           },
           "radius": {
             "type": "number",
@@ -4977,22 +4977,22 @@
     },
     {
       "name": "create_prefab_instance",
-      "description": "Create a linked instance of a source prefab with optional per-field overrides (inherited fields follow the source)",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
       "category": "prefab",
       "parameters": {
         "type": "object",
         "properties": {
           "prefabId": {
             "type": "string",
-            "description": "Source prefab ID to link to"
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
           },
           "overrides": {
             "type": "object",
-            "description": "Snapshot fields this instance overrides; everything else is inherited live from the source"
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
           },
           "entityId": {
             "type": "string",
-            "description": "Scene entity to bind the instance to (optional)"
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
           }
         },
         "required": [
@@ -5002,26 +5002,26 @@
       "tokenCost": 0,
       "requiredScope": "scene:write",
       "destructive": false,
-      "visibility": "public"
+      "visibility": "internal"
     },
     {
       "name": "nest_prefab",
-      "description": "Nest a child prefab inside a parent prefab; rejects a cyclic reference with the offending chain and no mutation",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
       "category": "prefab",
       "parameters": {
         "type": "object",
         "properties": {
           "parentPrefabId": {
             "type": "string",
-            "description": "User prefab to nest into"
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
           },
           "childPrefabId": {
             "type": "string",
-            "description": "Prefab to nest as a linked child"
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
           },
           "overrides": {
             "type": "object",
-            "description": "Per-field overrides for the nested child (optional)"
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
           }
         },
         "required": [
@@ -5032,18 +5032,18 @@
       "tokenCost": 0,
       "requiredScope": "scene:write",
       "destructive": false,
-      "visibility": "public"
+      "visibility": "internal"
     },
     {
       "name": "apply_prefab_to_instances",
-      "description": "Propagate a source prefab onto all of its linked instances; non-overridden fields follow the source, overridden fields are preserved",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
       "category": "prefab",
       "parameters": {
         "type": "object",
         "properties": {
           "prefabId": {
             "type": "string",
-            "description": "Source prefab whose instances to update"
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
           }
         },
         "required": [
@@ -5053,11 +5053,11 @@
       "tokenCost": 0,
       "requiredScope": "scene:write",
       "destructive": false,
-      "visibility": "public"
+      "visibility": "internal"
     },
     {
       "name": "list_prefab_instances",
-      "description": "List the linked instances of a source prefab with the fields each one overrides",
+      "description": "Inspect saved editor link metadata for a prefab by ID or name, including overridden field names. Records do not verify scene entity placement or propagation. This read is not advertised to the in-app chat model.",
       "category": "prefab",
       "parameters": {
         "type": "object",
@@ -6720,7 +6720,7 @@
               "medium",
               "high"
             ],
-            "description": "Maximum mechanic complexity to include (default: high \u2014 includes all)"
+            "description": "Maximum mechanic complexity to include (default: high — includes all)"
           },
           "trendingOnly": {
             "type": "boolean",
@@ -11857,11 +11857,11 @@
           },
           "minScore": {
             "type": "number",
-            "description": "Optional minimum score bound \u2014 submissions below this are rejected with 400"
+            "description": "Optional minimum score bound — submissions below this are rejected with 400"
           },
           "maxScore": {
             "type": "number",
-            "description": "Optional maximum score bound \u2014 submissions above this are rejected with 400 (useful for anti-cheat)"
+            "description": "Optional maximum score bound — submissions above this are rejected with 400 (useful for anti-cheat)"
           }
         },
         "required": [
@@ -11969,7 +11969,7 @@
     },
     {
       "name": "build_world",
-      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size \u2014 use sparingly.",
+      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size — use sparingly.",
       "category": "world_building",
       "parameters": {
         "type": "object",
@@ -12120,7 +12120,7 @@
         "properties": {
           "gameDescription": {
             "type": "string",
-            "description": "Natural language description of the game \u2014 genre, progression feel, player goals. Used to select and tune the economy. Example: 'A fast-paced roguelike where players collect souls and unlock meta-upgrades between runs.'"
+            "description": "Natural language description of the game — genre, progression feel, player goals. Used to select and tune the economy. Example: 'A fast-paced roguelike where players collect souls and unlock meta-upgrades between runs.'"
           },
           "preset": {
             "type": "string",
@@ -12160,7 +12160,7 @@
           },
           "duration": {
             "type": "number",
-            "description": "Desired total duration in seconds (1\u201360, default 10)"
+            "description": "Desired total duration in seconds (1–60, default 10)"
           }
         },
         "required": [

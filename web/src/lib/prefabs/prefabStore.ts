@@ -1,8 +1,11 @@
+/** Persist prefab definitions and editor link metadata; engine integration is tracked in #9811. */
 import type { MaterialData, LightData, PhysicsData, ScriptData, AudioData, ParticleData } from '@/stores/editorStore';
 import {
   createInstance,
   resolveInstance,
   wouldCreateCycle,
+  detectCycle,
+  sanitizeInstanceRecord,
   isOverrideMapWithinSizeLimit,
   MAX_OVERRIDE_MAP_BYTES,
   type PrefabInstance,
@@ -224,14 +227,15 @@ function collectPrefabDefinitionClosure(startIds: Iterable<string>): Prefab[] {
   const userPrefabs = loadPrefabs();
   const byId = new Map(userPrefabs.map((p) => [p.id, p] as const));
   const collected = new Map<string, Prefab>();
-  const visit = (id: string): void => {
-    if (collected.has(id)) return;
+  const pending = Array.from(startIds).reverse();
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (collected.has(id)) continue;
     const prefab = byId.get(id);
-    if (!prefab) return;
+    if (!prefab) continue;
     collected.set(id, prefab);
-    for (const child of prefab.children ?? []) visit(child.prefabId);
-  };
-  for (const id of startIds) visit(id);
+    for (const child of [...(prefab.children ?? [])].reverse()) pending.push(child.prefabId);
+  }
   return Array.from(collected.values());
 }
 
@@ -259,30 +263,23 @@ export function exportPrefab(id: string): string | null {
 const MAX_IMPORTED_CHILDREN = 200;
 
 /**
- * Validate and sanitize the `children` array out of an imported prefab's JSON.
- * Untrusted input (a file from disk, or another user's export), so every field
- * is checked rather than trusted — same posture as `sanitizeInstanceRecord`
- * for scene-file `prefabInstances`. A malformed entry is dropped, not the
- * whole import, since a partially-nested prefab is still useful; the flat
- * `snapshot` this prefab was created from is never affected either way.
+ * Validate every nested edge without changing its stable id. Reading a saved
+ * scene must preserve identity; only an explicit prefab import remints edges.
+ * Reject the definition when its child array is malformed or over the limit.
  */
-function sanitizeImportedChildren(raw: unknown): PrefabChildRef[] {
-  if (!Array.isArray(raw)) return [];
+function sanitizeImportedChildren(raw: unknown): PrefabChildRef[] | null {
+  if (!Array.isArray(raw) || raw.length > MAX_IMPORTED_CHILDREN) return null;
   const out: PrefabChildRef[] = [];
+  const ids = new Set<string>();
   for (const entry of raw) {
-    if (out.length >= MAX_IMPORTED_CHILDREN) break;
-    if (typeof entry !== 'object' || entry === null) continue;
-    const candidate = entry as Record<string, unknown>;
-    if (typeof candidate.prefabId !== 'string' || candidate.prefabId.length === 0) continue;
-    const overrides =
-      typeof candidate.overrides === 'object' && candidate.overrides !== null && !Array.isArray(candidate.overrides)
-        ? (candidate.overrides as PrefabOverrideMap)
-        : undefined;
-    if (overrides && !isOverrideMapWithinSizeLimit(overrides)) continue;
-    // Mint a fresh instanceId rather than trust the imported one — instanceIds
-    // are meant to be unique per nesting edge within THIS library, and a
-    // reimported file could otherwise collide with an id already in use.
-    out.push(createInstance(candidate.prefabId, overrides));
+    const instance = sanitizeInstanceRecord(entry);
+    if (!instance || ids.has(instance.instanceId)) return null;
+    ids.add(instance.instanceId);
+    out.push({
+      instanceId: instance.instanceId,
+      prefabId: instance.prefabId,
+      ...(Object.keys(instance.overrides).length ? { overrides: instance.overrides } : {}),
+    });
   }
   return out;
 }
@@ -335,7 +332,12 @@ export function sanitizePrefabDefinition(raw: unknown): Prefab | null {
   if (candidate.createdAt !== undefined && typeof candidate.createdAt !== 'string') return null;
   if (candidate.updatedAt !== undefined && typeof candidate.updatedAt !== 'string') return null;
 
+  // Bound raw input before dropping fields, including unknown fields.
+  try {
+    if (new Blob([JSON.stringify(candidate)]).size > MAX_PREFAB_DEFINITION_BYTES) return null;
+  } catch { return null; }
   const children = candidate.children !== undefined ? sanitizeImportedChildren(candidate.children) : undefined;
+  if (children === null) return null;
   const now = new Date().toISOString();
   const definition: Prefab = {
     id: candidate.id,
@@ -357,31 +359,43 @@ export function sanitizePrefabDefinition(raw: unknown): Prefab | null {
 }
 
 /**
- * Import prefab from JSON string, including nested `children` when present
- * (scene.FR-1 N1) — a flat `savePrefab` would otherwise silently discard them,
- * flattening any nested prefab on export/reimport round-trip — and, when the
- * export embedded them, the transitive `nestedDefinitions` those children
- * need to resolve locally ("nested imports contain dangling children").
+ * Import a prefab and its dependency definitions atomically. The imported root
+ * and its nesting edges receive fresh ids; references back to the old root are
+ * remapped before validating the complete graph. Invalid or cyclic input makes
+ * no storage writes and returns null.
  */
 export function importPrefab(json: string): Prefab | null {
   try {
-    const data = JSON.parse(json);
-    if (!data.name || !data.snapshot) return null;
-    if (Array.isArray(data.nestedDefinitions)) {
-      mergeImportedPrefabDefinitions(data.nestedDefinitions);
+    if (new Blob([json]).size > MAX_PREFAB_DEFINITION_BYTES * MAX_MERGED_DEFINITIONS) return null;
+    const data: unknown = JSON.parse(json);
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) return null;
+    const raw = data as Record<string, unknown>;
+    const id = `prefab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const { nestedDefinitions: rawDependencies, ...rootDefinition } = raw;
+    const parsed = sanitizePrefabDefinition({ ...rootDefinition, id });
+    if (!parsed) return null;
+    if (rawDependencies !== undefined && !Array.isArray(rawDependencies)) return null;
+    const dependencies = rawDependencies ?? [];
+    if (dependencies.length > MAX_MERGED_DEFINITIONS) return null;
+    const remapChildren = (prefab: Prefab): Prefab => ({
+      ...prefab,
+      ...(prefab.children ? {
+        children: prefab.children.map((child) => ({
+          ...createInstance(child.prefabId === raw.id ? id : child.prefabId, child.overrides),
+        })),
+      } : {}),
+    });
+    const created = remapChildren(parsed);
+    const sanitizedDependencies: Prefab[] = [];
+    for (const dependency of dependencies) {
+      const definition = sanitizePrefabDefinition(dependency);
+      if (!definition || definition.id === raw.id) return null;
+      sanitizedDependencies.push(remapChildren(definition));
     }
-    const created = savePrefab(data.name, data.category || 'imported', data.description || '', data.snapshot);
-    const children = sanitizeImportedChildren(data.children);
-    if (children.length > 0) {
-      const prefabs = loadPrefabs();
-      const idx = prefabs.findIndex((p) => p.id === created.id);
-      if (idx !== -1) {
-        prefabs[idx] = { ...prefabs[idx], children };
-        savePrefabsToStorage(prefabs);
-        created.children = children;
-      }
-    }
-    return created;
+    const proposed = prepareImportedDefinitions([...sanitizedDependencies, created]);
+    if (!proposed) return null;
+    savePrefabsToStorage(proposed);
+    return proposed.find((prefab) => prefab.id === id) ?? null;
   } catch { return null; }
 }
 
@@ -429,8 +443,8 @@ export function getPrefabInstances(prefabId: string): PrefabInstance[] {
 }
 
 /**
- * Create and persist a linked instance of a source prefab (OP-01). Rejects when
- * the source prefab does not exist rather than persisting a dangling link.
+ * Create and persist link metadata. This internal foundation does not spawn
+ * or bind an engine entity. Rejects missing sources and oversized overrides.
  */
 export function createPrefabInstance(
   prefabId: string,
@@ -439,11 +453,8 @@ export function createPrefabInstance(
 ): PrefabInstanceOpResult<PrefabInstance> {
   const source = getPrefab(prefabId);
   if (!source) return { ok: false, error: `Prefab not found: ${prefabId}` };
-  // Rejected explicitly (SEC) rather than silently truncated: both the manual
-  // "Create Instance" control and the `create_prefab_instance` chat command
-  // reach this, and an oversized override reaching `localStorage`
-  // serialization on every future save is exactly the resource-exhaustion
-  // vector the bound exists to prevent.
+  // Bound persisted metadata even though user-facing mutation entry points
+  // remain unavailable until engine integration is implemented.
   if (!isOverrideMapWithinSizeLimit(overrides)) {
     return { ok: false, error: `Overrides exceed the ${MAX_OVERRIDE_MAP_BYTES}-byte size limit` };
   }
@@ -463,12 +474,6 @@ export function deletePrefabInstance(instanceId: string): boolean {
   return true;
 }
 
-/** The prefab ids a prefab directly nests — the nesting graph edge set. */
-function getChildPrefabIds(prefabId: string): string[] {
-  const prefab = getPrefab(prefabId);
-  return (prefab?.children ?? []).map((c) => c.prefabId);
-}
-
 /**
  * Nest a child prefab inside a parent prefab (OP-02). Rejects — with the
  * offending chain and WITHOUT mutating anything — when the edge would close a
@@ -481,18 +486,19 @@ export function addNestedPrefab(
 ): PrefabInstanceOpResult<Prefab> {
   const child = getPrefab(childPrefabId);
   if (!child) return { ok: false, error: `Child prefab not found: ${childPrefabId}` };
-  // SEC: same resource-exhaustion bound as `createPrefabInstance` — this is the
-  // other public entry point (manual "Nest Prefab" control + `nest_prefab` chat
-  // command) that lets a caller attach an override map.
+  // Internal callers and imported metadata still need the same size bound.
   if (!isOverrideMapWithinSizeLimit(overrides)) {
     return { ok: false, error: `Overrides exceed the ${MAX_OVERRIDE_MAP_BYTES}-byte size limit` };
   }
 
   // Only user prefabs are persistable; built-ins are frozen definitions.
   const userPrefabs = loadPrefabs();
-  const idx = userPrefabs.findIndex((p) => p.id === parentPrefabId);
+  const parentSource = [...userPrefabs, ...getBuiltInPrefabs()].find(
+    (prefab) => prefab.id === parentPrefabId || prefab.name === parentPrefabId,
+  );
+  const idx = userPrefabs.findIndex((p) => p.id === parentSource?.id);
   if (idx === -1) {
-    return getPrefab(parentPrefabId)
+    return parentSource
       ? { ok: false, error: `Cannot nest into a built-in prefab: ${parentPrefabId}` }
       : { ok: false, error: `Parent prefab not found: ${parentPrefabId}` };
   }
@@ -500,7 +506,14 @@ export function addNestedPrefab(
   // Canonical `child.id`, not the raw (possibly name) input — `getChildPrefabIds`
   // below returns canonical ids from stored `children`, and mixing a name into
   // the same walk could hide a cycle that only manifests via the canonical id.
-  const cycle: CycleCheckResult = wouldCreateCycle(parentPrefabId, child.id, getChildPrefabIds);
+  const adjacency = new Map([...userPrefabs, ...getBuiltInPrefabs()].map(
+    (prefab) => [prefab.id, (prefab.children ?? []).map((entry) => entry.prefabId)] as const,
+  ));
+  const cycle: CycleCheckResult = wouldCreateCycle(
+    userPrefabs[idx].id,
+    child.id,
+    (id) => adjacency.get(id) ?? [],
+  );
   if (cycle.hasCycle) {
     return {
       ok: false,
@@ -523,18 +536,16 @@ export function addNestedPrefab(
 }
 
 /**
- * Propagate the current source prefab onto all of its linked instances (OP-04)
- * — the operation behind the manual "Apply to Instances" control and the
- * equivalent AI command. Returns one resolved snapshot per instance: every
- * non-overridden field reflects the source, every overridden field is
- * preserved. Instances keep their durable override sets untouched.
+ * Compute resolved snapshots for saved links to a source. Returns data only:
+ * no viewport entities are changed. Non-overridden fields reflect the current
+ * source; explicit override fields remain unchanged.
  */
 export function applyPrefabToInstances(
   prefabId: string,
 ): PrefabInstanceOpResult<Array<{ instanceId: string; snapshot: PrefabSnapshot }>> {
   const source = getPrefab(prefabId);
   if (!source) return { ok: false, error: `Prefab not found: ${prefabId}` };
-  const resolved = getPrefabInstances(prefabId).map((instance) => ({
+  const resolved = getPrefabInstances(source.id).map((instance) => ({
     instanceId: instance.instanceId,
     snapshot: resolveInstance(instance, source),
   }));
@@ -571,36 +582,57 @@ export function collectTransitivePrefabDefinitions(instances: PrefabInstance[]):
 const MAX_MERGED_DEFINITIONS = 500;
 
 /**
- * Merge prefab definitions embedded in a loaded scene (or an imported
- * prefab's `nestedDefinitions`) into the local prefab library, adding only
- * those whose id is not already present AND not tombstoned by an explicit
- * `deletePrefab` (scene.FR-1 N1 — "deleted prefabs resurrect on scene load").
- * A local definition — whether pre-existing or since edited — always wins:
- * this never overwrites, so merging can only ADD prefabs to the library,
- * never silently revert one the user has since changed or deleted.
- *
- * Accepts `unknown[]` rather than `Prefab[]`: every caller's input is
- * untrusted (a scene file, an imported prefab's JSON), and every entry goes
- * through `sanitizePrefabDefinition` here rather than trusting the caller to
- * have validated shape — this is the one write path every such entry point
- * shares (scene.FR-1 N1 SEC).
+ * Build the complete proposed library before writing anything. Existing and
+ * built-in ids win. Explicit deletions also remove incoming references to the
+ * deleted id. Missing references and cycles reject the entire proposed merge.
  */
-export function mergeImportedPrefabDefinitions(definitions: unknown[]): void {
-  if (definitions.length === 0) return;
+function prepareImportedDefinitions(definitions: unknown[]): Prefab[] | null {
+  if (definitions.length > MAX_MERGED_DEFINITIONS + 1) return null;
   const existing = loadPrefabs();
-  const existingIds = new Set(existing.map((p) => p.id));
+  const builtIns = getBuiltInPrefabs();
+  const existingIds = new Set([...existing, ...builtIns].map((prefab) => prefab.id));
   const deletedIds = loadDeletedPrefabIds();
-  const toAdd: Prefab[] = [];
+  const additions: Prefab[] = [];
   for (const raw of definitions) {
-    if (toAdd.length >= MAX_MERGED_DEFINITIONS) break;
-    const def = sanitizePrefabDefinition(raw);
-    if (!def) continue;
-    if (existingIds.has(def.id) || deletedIds.has(def.id)) continue;
-    existingIds.add(def.id);
-    toAdd.push(def);
+    const definition = sanitizePrefabDefinition(raw);
+    if (!definition) return null;
+    if (existingIds.has(definition.id) || deletedIds.has(definition.id)) continue;
+    existingIds.add(definition.id);
+    additions.push({
+      ...definition,
+      ...(definition.children ? {
+        children: definition.children.filter((child) => !deletedIds.has(child.prefabId)),
+      } : {}),
+    });
   }
-  if (toAdd.length === 0) return;
-  savePrefabsToStorage([...existing, ...toAdd]);
+  const proposed = [...existing, ...additions];
+  const adjacency = new Map([...builtIns, ...proposed].map(
+    (prefab) => [prefab.id, (prefab.children ?? []).map((child) => child.prefabId)] as const,
+  ));
+  for (const children of adjacency.values()) {
+    if (children.some((id) => !adjacency.has(id))) return null;
+  }
+  // A synthetic root checks every connected component in a single DFS.
+  let graphRoot = '__prefab_graph_root__';
+  while (adjacency.has(graphRoot)) graphRoot += '_';
+  if (detectCycle(graphRoot, (id) => id === graphRoot ? Array.from(adjacency.keys()) : adjacency.get(id) ?? []).hasCycle) {
+    return null;
+  }
+  return proposed;
+}
+
+/**
+ * Merge a scene's embedded definitions without overwriting local definitions
+ * or resurrecting deleted ids. Returns false for invalid, missing-target, or
+ * cyclic graphs; rejection makes no writes. A valid merge writes once.
+ */
+export function mergeImportedPrefabDefinitions(definitions: unknown[]): boolean {
+  if (definitions.length === 0) return true;
+  if (definitions.length > MAX_MERGED_DEFINITIONS) return false;
+  const proposed = prepareImportedDefinitions(definitions);
+  if (!proposed) return false;
+  savePrefabsToStorage(proposed);
+  return true;
 }
 
 // ===========================================================================
@@ -615,13 +647,19 @@ export function mergeImportedPrefabDefinitions(definitions: unknown[]): void {
 // save was REQUESTED, not whatever is active when the answer happens to land.
 // ===========================================================================
 
-const stagedInstancesByRequestId = new Map<string, PrefabInstance[]>();
+/** Editor metadata captured together before an asynchronous engine export. */
+export interface PrefabExportSnapshot {
+  instances: PrefabInstance[];
+  definitions: Prefab[];
+}
+
+const stagedInstancesByRequestId = new Map<string, PrefabExportSnapshot>();
 
 /**
  * Bound on how many pending export requests may have a snapshot staged at
  * once (scene.FR-1 N1 — "failed exports leak instance snapshots"). A
  * successfully-answered export is always consumed by
- * `takeStagedPrefabInstancesForExport` inside the `SCENE_EXPORTED` handler,
+ * `takeStagedPrefabDataForExport` inside the `SCENE_EXPORTED` handler,
  * and every caller that owns a timeout/abort path (`exportEngine.ts`) also
  * calls `discardStagedPrefabInstancesForExport` on every exit — but an entry
  * whose caller forgets that, or whose answer never arrives and is never
@@ -639,7 +677,10 @@ export function stagePrefabInstancesForExport(requestId: string, instances: Pref
     const oldestKey = stagedInstancesByRequestId.keys().next().value;
     if (oldestKey !== undefined) stagedInstancesByRequestId.delete(oldestKey);
   }
-  stagedInstancesByRequestId.set(requestId, instances);
+  stagedInstancesByRequestId.set(requestId, JSON.parse(JSON.stringify({
+    instances,
+    definitions: collectTransitivePrefabDefinitions(instances),
+  })) as PrefabExportSnapshot);
 }
 
 /**
@@ -649,6 +690,14 @@ export function stagePrefabInstancesForExport(requestId: string, instances: Pref
  * (autosave, chat `save_scene`, a pre-PF-1103 engine) that never staged one.
  */
 export function takeStagedPrefabInstancesForExport(requestId: string | undefined): PrefabInstance[] | undefined {
+  if (requestId === undefined) return undefined;
+  const staged = stagedInstancesByRequestId.get(requestId);
+  stagedInstancesByRequestId.delete(requestId);
+  return staged?.instances;
+}
+
+/** Consume the complete editor snapshot, including definitions captured at request time. */
+export function takeStagedPrefabDataForExport(requestId: string | undefined): PrefabExportSnapshot | undefined {
   if (requestId === undefined) return undefined;
   const staged = stagedInstancesByRequestId.get(requestId);
   stagedInstancesByRequestId.delete(requestId);

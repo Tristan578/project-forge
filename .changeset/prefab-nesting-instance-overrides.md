@@ -1,5 +1,7 @@
 ---
-"web": minor
+"web": patch
 ---
 
-Add nested/linked prefab instances with per-field override tracking. A source prefab can now be instantiated as a linked instance that inherits its fields live, while any field you override stays put when the source changes; prefabs can also nest other prefabs, and a cyclic reference is rejected with the offending chain before anything is written. The new Prefabs tab in the Assets panel lets you create instances, nest a prefab, resolve a source prefab onto its instances (preserving overrides), and inspect which fields each instance overrides. The three mutating operations are also offered to the in-app AI through the `create_prefab_instance`, `nest_prefab`, and `apply_prefab_to_instances` commands, which share one validated contract with the manual controls. Override inspection — `list_prefab_instances` — runs on the same shared contract but is reachable through the manual panel and an external MCP client only, not the in-app chat model, which is offered write-scoped and `query`-category commands only (the same reason the pre-existing `list_prefabs`/`get_prefab` reads are not offered to chat). Instances persist with the scene, keeping their stable ids and overrides across save and reopen.
+Preserve saved prefab link metadata and its source definitions during scene changes, saves, recovery, and game export. Reject cyclic or incomplete imported graphs before writing them, retain stable nesting ids on scene reopen, and keep rejected scene switches attached to the original scene.
+
+The Prefabs panel can inspect saved links and overridden field names. Linked scene placement, nested entity creation, and propagation are unavailable; their controls are disabled and compatibility commands return explicit errors. Existing flat prefab copies remain available. This change does not complete the linked prefab engine workflow tracked in #9811.
