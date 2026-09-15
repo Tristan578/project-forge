@@ -108,6 +108,45 @@ describe('checkpoint recovery transaction', () => {
     expect(loadProjectScenes().scenes[0].name).toBe('Previous save');
   });
 
+  it('keeps recovery active when a competing scene load is explicitly rejected', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    const pending = store.getState().restoreCheckpoint(cp.id);
+    engine.setMode('reject');
+    expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected scene')))).toBe(false);
+    await expect(pending).resolves.toBe(true);
+    expect(engine.getScene().metadata?.name).toBe('Recovered');
+    expect(loadProjectScenes().scenes[0].name).toBe('Recovered');
+    expect(store.getState().checkpointError).toBeNull();
+  });
+
+  it.each(['createNewScene', 'deleteScene', 'duplicateScene', 'switchScene'] as const)(
+    '%s leaves scene storage and the browser mirror unchanged while disconnected', async (action) => {
+    store.getState().createNewScene('Second');
+    const second = store.getState().scenes.find((scene) => scene.name === 'Second')!;
+    const before = localStorage.getItem('forge-project-scenes');
+    const scenes = store.getState().scenes;
+    const activeId = store.getState().activeSceneId;
+    setSceneDispatcher(null);
+    await expect((async () => store.getState()[action](second.id))()).resolves.toBeUndefined();
+    expect(localStorage.getItem('forge-project-scenes')).toBe(before);
+    expect(store.getState().scenes).toBe(scenes);
+    expect(store.getState().activeSceneId).toBe(activeId);
+  });
+
+  it.each(['switchScene', 'duplicateScene'] as const)(
+    'preserves storage when the engine disconnects during %s capture', async (action) => {
+      store.getState().createNewScene('Second');
+      const second = store.getState().scenes.find((scene) => scene.name === 'Second')!;
+      const before = localStorage.getItem('forge-project-scenes');
+      const scenes = store.getState().scenes;
+      const pending = store.getState()[action](second.id);
+      setSceneDispatcher(null);
+      await expect(pending).resolves.toBeUndefined();
+      expect(localStorage.getItem('forge-project-scenes')).toBe(before);
+      expect(store.getState().scenes).toBe(scenes);
+    },
+  );
+
   it('does not attach an export to the project opened while capture was pending', async () => {
     store.getState().setProjectId('A');
     const pending = store.getState().createCheckpoint('A only');

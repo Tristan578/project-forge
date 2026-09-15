@@ -303,15 +303,20 @@ export const createSceneSlice: StateCreator<
     if (dispatchCommand) dispatchCommand('export_scene', requestId ? { requestId } : {});
   },
   loadScene: (json) => {
+    if (!dispatchSceneLoad(json)) return false;
+    // A rejected request must not invalidate an unrelated recovery operation.
     set({ sceneOperationRevision: get().sceneOperationRevision + 1 });
-    return dispatchSceneLoad(json);
+    return true;
   },
   newScene: () => {
-    set({ sceneOperationRevision: get().sceneOperationRevision + 1 });
+    if (!dispatchCommand) return;
     // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
     // rejected would otherwise be adopted by this empty scene.
     clearStagedSceneAudio();
-    if (dispatchCommand) dispatchCommand('new_scene', {});
+    const response = dispatchCommand('new_scene', {});
+    if (response?.success !== false) {
+      set({ sceneOperationRevision: get().sceneOperationRevision + 1 });
+    }
   },
   setSceneName: (name) => set({ sceneName: name }),
   setSceneModified: (modified) => set({ sceneModified: modified }),
@@ -513,6 +518,7 @@ export const createSceneSlice: StateCreator<
   switchScene: async (sceneId) => {
     if (!dispatchCommand) return;
     const captured = await captureActiveScene(requestSceneExport);
+    if (!dispatchCommand) return;
     const project = withCapturedScene(loadProjectScenes(get().projectId), captured);
     if (!project) {
       console.error(
@@ -532,18 +538,22 @@ export const createSceneSlice: StateCreator<
     }
   },
   createNewScene: (name) => {
+    if (!dispatchCommand) return;
     const { project } = createSceneIn(loadProjectScenes(get().projectId), name ?? 'New Scene');
     saveProjectScenes(project, get().projectId);
     get().setScenes(toSceneList(project), project.activeSceneId);
   },
   deleteScene: (sceneId) => {
+    if (!dispatchCommand) return;
     const result = deleteSceneIn(loadProjectScenes(get().projectId), sceneId);
     if (result.error) return;
     saveProjectScenes(result.project, get().projectId);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
   duplicateScene: async (sceneId) => {
+    if (!dispatchCommand) return;
     const captured = await captureActiveScene(requestSceneExport);
+    if (!dispatchCommand) return;
     const project = withCapturedScene(loadProjectScenes(get().projectId), captured);
     if (!project) {
       console.error(
