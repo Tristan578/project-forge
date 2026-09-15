@@ -115,6 +115,23 @@ describe('buildContentSecurityPolicy (#8612, #8634)', () => {
       expect(POSTHOG_ORIGINS).toEqual([POSTHOG_API_ORIGIN, POSTHOG_ASSET_ORIGIN]);
     });
 
+    it('excludes the retired Suno origin from connect-src (#9522)', () => {
+      // #9522 moved music generation off Suno onto ElevenLabs and removed
+      // `https://studio-api.suno.ai` from connect-src. Pin the removal so a
+      // future edit that reintroduces the exact host — or any sibling
+      // `*.suno.ai` origin — fails CI instead of shipping a stale third-party
+      // source that SEC-2 relies on connect-src staying tight to exclude.
+      for (const allowUnsafeEval of [true, false]) {
+        const connect = sources(buildContentSecurityPolicy({ allowUnsafeEval }), 'connect-src');
+        expect(connect).not.toContain('https://studio-api.suno.ai');
+        // Whole-token scan: no source may carry a suno.ai origin at all.
+        expect(connect.filter((s) => s.includes('suno.ai'))).toEqual([]);
+        // The origin music generation now talks to must remain allowlisted,
+        // so the assertion above cannot pass merely by an empty connect-src.
+        expect(connect).toContain('https://api.elevenlabs.io');
+      }
+    });
+
     it('derives the deployment Clerk host for every Clerk network directive (#9058)', () => {
       const host = 'clerk.second-production.example';
       const csp = buildContentSecurityPolicy({

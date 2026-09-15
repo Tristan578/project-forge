@@ -1,0 +1,29 @@
+{
+  "observationId": "obs:01J9LATENCY000000000001",
+  "metric": "latency",
+  "environment": "production",
+  "window": {
+    "label": "24h",
+    "start": "2026-09-13T00:00:00Z",
+    "end": "2026-09-14T00:00:00Z"
+  },
+  "evidence": {
+    "capabilityId": "cap:generate.gdd@1"
+  },
+  "source": "latency-monitor",
+  "releaseSha": "a1b2c3d4",
+  "observedAt": "2026-09-13T23:00:00Z",
+  "ingestedAt": "2026-09-13T23:05:00Z",
+  "confidence": "verified",
+  "applicability": "applicable",
+  "formulaVersion": "latency@1",
+  "sampleSize": 100,
+  "latencyDistribution": {
+    "p50Ms": 820,
+    "p95Ms": 1900,
+    "p99Ms": 4200,
+    "budgetMs": 5000,
+    "withinBudget": 95,
+    "eligible": 100
+  }
+}

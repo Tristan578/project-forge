@@ -106,8 +106,11 @@ describe('GET /api/health', () => {
     expect(ai?.status).toBe('degraded');
     expect(ai?.summary).toContain('3D Model Generation');
     expect(ai?.summary).not.toContain('PLATFORM_');
-    // Music is declared unavailable (#9522), not unconfigured: never listed here.
-    expect(ai?.summary).not.toContain('Music');
+    // #9522: music now routes to ElevenLabs, so with no PLATFORM_ELEVENLABS_KEY
+    // it is unconfigured on the platform path like its sibling sfx/voice
+    // capabilities and IS listed here — by its user-facing label, and (since
+    // ElevenLabs is a BYOK provider) under the "your own API key" clause.
+    expect(ai?.summary).toContain('Music Generation');
     expect(ai?.details).toBeUndefined();
   });
 

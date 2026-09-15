@@ -4,7 +4,7 @@ import { users, providerKeys } from '../db/schema';
 import type { Provider } from '../db/schema';
 import { decryptProviderKey } from './encryption';
 import { deductTokens } from '../tokens/service';
-import { PLATFORM_KEY_ENV } from '../config/providers';
+import { PLATFORM_KEY_ENV, getPlatformKeyEnvVar, type RetiredByokProvider } from '../config/providers';
 import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
 
 export interface ResolvedKey {
@@ -25,18 +25,28 @@ export class ApiKeyError extends Error {
 }
 
 /**
- * Completeness guard: every DB `Provider` must have a platform env var in the
- * shared table. Purely a type assertion — erased at compile time — so adding a
- * provider to the DB enum without adding its key here fails `tsc` rather than
- * throwing `undefined` into `process.env[...]` at runtime.
+ * Completeness guard: every DB `Provider` EXCEPT the retired ones must have a
+ * platform env var in the shared table. Purely a type assertion — erased at
+ * compile time — so adding a provider to the DB enum without adding its key
+ * here fails `tsc` rather than throwing `undefined` into `process.env[...]` at
+ * runtime. Retired providers (Suno, #9522) intentionally have no platform key:
+ * the DB enum keeps the historical value but nothing resolves it on the
+ * platform path anymore, so they are excluded from the completeness check.
  */
-const PLATFORM_KEY_ENV_BY_PROVIDER = PLATFORM_KEY_ENV satisfies Record<Provider, string>;
+const _PLATFORM_KEY_ENV_COMPLETE = PLATFORM_KEY_ENV satisfies Record<
+  Exclude<Provider, RetiredByokProvider>,
+  string
+>;
+void _PLATFORM_KEY_ENV_COMPLETE;
 
 function getPlatformKey(provider: Provider): string {
-  const envVar = PLATFORM_KEY_ENV_BY_PROVIDER[provider];
-  const key = process.env[envVar];
+  // getPlatformKeyEnvVar returns null for a retired/keyless provider (Suno):
+  // its platform path is gone, so resolving one throws the same "not
+  // configured" error a genuinely-unset key would.
+  const envVar = getPlatformKeyEnvVar(provider);
+  const key = envVar ? process.env[envVar] : undefined;
   if (!key) {
-    throw new Error(`Platform key not configured: ${envVar}`);
+    throw new Error(`Platform key not configured: ${envVar ?? provider}`);
   }
   return key;
 }

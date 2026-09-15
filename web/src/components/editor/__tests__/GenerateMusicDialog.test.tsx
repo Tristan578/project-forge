@@ -79,11 +79,11 @@ describe('GenerateMusicDialog', () => {
   const importAudio = vi.fn();
   const setAudio = vi.fn();
 
-  function setupStore(balance = 1000, primaryName = '') {
+  function setupStore(balance: number | null = 1000, primaryName = '') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useUserStore).mockImplementation((selector: any) => {
       const state = {
-        tokenBalance: { total: balance, monthlyRemaining: balance, addon: 0 },
+        tokenBalance: balance === null ? null : { total: balance, monthlyRemaining: balance, addon: 0 },
       };
       return typeof selector === 'function' ? selector(state) : state;
     });
@@ -193,8 +193,8 @@ describe('GenerateMusicDialog', () => {
       vi.unstubAllGlobals();
     });
 
-    function generate(entityId?: string) {
-      setupStore(1000, 'AudioEntity');
+    function generate(entityId?: string, balance: number | null = 1000) {
+      setupStore(balance, 'AudioEntity');
       render(<GenerateMusicDialog isOpen={true} onClose={mockOnClose} entityId={entityId} />);
       fireEvent.change(screen.getByPlaceholderText('Upbeat chiptune adventure music'), {
         target: { value: 'tense dungeon theme' },
@@ -215,16 +215,38 @@ describe('GenerateMusicDialog', () => {
       expect(trackJob).not.toHaveBeenCalled();
     });
 
+    it.each([0, null])('lets a user with platform balance %s submit through the BYOK path', async (balance) => {
+      respondWith({ audioBase64: 'AAAA', provider: 'elevenlabs' });
+      generate('entity-1', balance);
+
+      await waitFor(() => expect(importAudio).toHaveBeenCalledTimes(1));
+      expect(fetch).toHaveBeenCalledWith('/api/generate/music', expect.objectContaining({ method: 'POST' }));
+      expect(screen.getByText('Platform token cost:')).toBeInTheDocument();
+      expect(screen.getByText(/billed by ElevenLabs/)).toBeInTheDocument();
+    });
+
+    it('reports the server balance refusal without importing audio', async () => {
+      respondWith({ error: 'Insufficient tokens. Need 80, have 0.', code: 'INSUFFICIENT_TOKENS' }, false);
+      generate('entity-1', 0);
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Insufficient tokens. Need 80, have 0.'));
+      expect(importAudio).not.toHaveBeenCalled();
+      expect(trackJob).not.toHaveBeenCalled();
+      expect(mockOnClose).not.toHaveBeenCalled();
+    });
+
     it('registers the async job so something eventually polls for the track', async () => {
-      respondWith({ jobId: 'suno-42', provider: 'suno', usageId: 'usage-9' });
+      // The route resolves inline now (#9522), but the dialog still handles the
+      // async jobId shape defensively — pinned here so that branch cannot rot.
+      respondWith({ jobId: 'job-42', provider: 'elevenlabs', usageId: 'usage-9' });
       generate('entity-1');
 
       await waitFor(() => expect(trackJob).toHaveBeenCalledTimes(1));
       expect(trackJob).toHaveBeenCalledWith(
         expect.objectContaining({
-          providerJobId: 'suno-42',
+          providerJobId: 'job-42',
           type: 'music',
-          provider: 'suno',
+          provider: 'elevenlabs',
           usageId: 'usage-9',
           autoPlace: true,
           targetEntityId: 'entity-1',
