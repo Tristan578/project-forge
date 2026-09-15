@@ -4,7 +4,14 @@ import { users, providerKeys } from '../db/schema';
 import type { Provider } from '../db/schema';
 import { decryptProviderKey } from './encryption';
 import { deductTokens } from '../tokens/service';
-import { PLATFORM_KEY_ENV, getPlatformKeyEnvVar, type RetiredByokProvider } from '../config/providers';
+import {
+  PLATFORM_KEY_ENV,
+  getPlatformKeyEnvVar,
+  GATEWAY_KEY_ENV,
+  isGatewayRoutedCapability,
+  type ProviderCapability,
+  type RetiredByokProvider,
+} from '../config/providers';
 import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
 
 export interface ResolvedKey {
@@ -39,11 +46,25 @@ const _PLATFORM_KEY_ENV_COMPLETE = PLATFORM_KEY_ENV satisfies Record<
 >;
 void _PLATFORM_KEY_ENV_COMPLETE;
 
-function getPlatformKey(provider: Provider): string {
+function getPlatformKey(provider: Provider, capability?: ProviderCapability): string {
+  // A gateway-routed capability (image/embedding, #9523) resolves the single
+  // AI_GATEWAY_API_KEY instead of the provider's PLATFORM_* var, and never
+  // falls back to it: the gateway is production's intended path, so a direct
+  // key present but the gateway key absent must still fail rather than silently
+  // route around the gateway. `isGatewayRoutedCapability` reads
+  // GATEWAY_CAPABILITIES — the same list the verify script and the
+  // vercel-gateway backend read — so key resolution and route reporting cannot
+  // disagree. Only the platform path is affected; the BYOK check in
+  // resolveApiKey runs first and is keyed on the provider, so a user's own
+  // OpenAI key still wins.
+  //
   // getPlatformKeyEnvVar returns null for a retired/keyless provider (Suno):
   // its platform path is gone, so resolving one throws the same "not
   // configured" error a genuinely-unset key would.
-  const envVar = getPlatformKeyEnvVar(provider);
+  const envVar =
+    capability && isGatewayRoutedCapability(capability)
+      ? GATEWAY_KEY_ENV.vercelGateway
+      : getPlatformKeyEnvVar(provider);
   const key = envVar ? process.env[envVar] : undefined;
   if (!key) {
     throw new Error(`Platform key not configured: ${envVar ?? provider}`);
@@ -62,13 +83,22 @@ function getPlatformKey(provider: Provider): string {
  *    charged for a call that can't run (#8597).
  * 3. No key available (starter tier, zero balance, or unconfigured platform
  *    key) → throw with guidance.
+ *
+ * `capability` is optional and affects only the platform path: when it is a
+ * gateway-routed capability (image/embedding, #9523) the platform key resolves
+ * to AI_GATEWAY_API_KEY rather than the provider's PLATFORM_* var. BYOK
+ * precedence, tier gating, token deduction and the ResolvedKey shape are
+ * identical on both routes — the gateway changes only WHICH platform secret is
+ * read, so token accounting and the circuit breaker (both keyed on `provider`)
+ * behave the same. Existing 5-arg callers omit it and keep the direct route.
  */
 export async function resolveApiKey(
   userId: string,
   provider: Provider,
   tokenCost: number,
   operation: string,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  capability?: ProviderCapability
 ): Promise<ResolvedKey> {
   // 1. Check for BYOK key
   const [byokKey] = await queryWithResilience(() =>
@@ -119,7 +149,7 @@ export async function resolveApiKey(
   // happened after deductTokens, the user would be charged for a call that can
   // never run and never gets refunded — silent token loss (#8597). Validate the
   // key is present first so a missing key fails before any balance changes.
-  const platformKey = getPlatformKey(provider);
+  const platformKey = getPlatformKey(provider, capability);
 
   const deduction = await deductTokens(userId, operation, tokenCost, provider, metadata);
   if (!deduction.success) {

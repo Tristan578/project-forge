@@ -304,6 +304,96 @@ describe('resolveApiKey - platform key', () => {
 });
 
 // ---------------------------------------------------------------------------
+// resolveApiKey — gateway-routed capability (#9523)
+// ---------------------------------------------------------------------------
+
+describe('resolveApiKey - gateway-routed capability (#9523)', () => {
+  const remaining = { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null };
+
+  beforeEach(() => {
+    resetMocks();
+    delete process.env['PLATFORM_OPENAI_KEY'];
+    process.env['AI_GATEWAY_API_KEY'] = 'gw-secret';
+  });
+
+  afterEach(() => {
+    delete process.env['AI_GATEWAY_API_KEY'];
+    delete process.env['PLATFORM_OPENAI_KEY'];
+    delete process.env['PLATFORM_REPLICATE_KEY'];
+  });
+
+  it.each(['image', 'embedding'] as const)(
+    'resolves AI_GATEWAY_API_KEY for %s with no PLATFORM_OPENAI_KEY set',
+    async (capability) => {
+      wireDb([], [makeUser({ tier: 'pro' })]);
+      mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw' });
+      const result = await resolveApiKey('user-1', 'openai', 20, `${capability}_generation`, undefined, capability);
+      expect(result.type).toBe('platform');
+      expect(result.key).toBe('gw-secret');
+      expect(result.metered).toBe(true);
+      expect(result.usageId).toBe('u-gw');
+    },
+  );
+
+  it('does NOT throw "Platform key not configured" for a gateway capability when its old PLATFORM_* var is absent', async () => {
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw2' });
+    await expect(
+      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
+    ).resolves.toMatchObject({ type: 'platform', key: 'gw-secret' });
+  });
+
+  it('deducts tokens against the capability provider, identically to the direct path', async () => {
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw3' });
+    const meta = { size: '1024x1024' };
+    await resolveApiKey('user-1', 'openai', 20, 'image_generation', meta, 'image');
+    // Accounting is keyed on the capability's provider, not the gateway — the
+    // circuit breaker and usage ledger behave identically to the direct route.
+    expect(mockDeductTokens).toHaveBeenCalledWith('user-1', 'image_generation', 20, 'openai', meta);
+  });
+
+  it('throws, and never falls back to PLATFORM_OPENAI_KEY, when AI_GATEWAY_API_KEY is absent', async () => {
+    delete process.env['AI_GATEWAY_API_KEY'];
+    process.env['PLATFORM_OPENAI_KEY'] = 'sk-openai-direct';
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-leak' });
+    await expect(
+      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
+    ).rejects.toThrow('Platform key not configured: AI_GATEWAY_API_KEY');
+    // Key resolves before any deduction (#8597): a missing gateway key costs nothing.
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('lets a user BYOK key take precedence over gateway routing', async () => {
+    wireDb([{ userId: 'user-1', provider: 'openai', encryptedKey: 'enc-openai', iv: 'iv-o' }]);
+    const result = await resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image');
+    expect(result.type).toBe('byok');
+    expect(result.key).toBe('decrypted:enc-openai');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('leaves a non-gateway capability (sprite → replicate) requiring its PLATFORM_* var, unaffected by the gateway key', async () => {
+    // AI_GATEWAY_API_KEY is set by beforeEach, but sprite is direct-routed.
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-sprite' });
+    await expect(
+      resolveApiKey('user-1', 'replicate', 10, 'sprite_generation', undefined, 'sprite'),
+    ).rejects.toThrow('Platform key not configured: PLATFORM_REPLICATE_KEY');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('leaves the direct path unchanged when no capability is supplied', async () => {
+    // The existing 5-arg call shape (chat/decompose/status routes) never routes
+    // to the gateway: with no PLATFORM_OPENAI_KEY it throws the OpenAI-key error.
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    await expect(
+      resolveApiKey('user-1', 'openai', 20, 'image_generation'),
+    ).rejects.toThrow('Platform key not configured: PLATFORM_OPENAI_KEY');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // storeProviderKey
 // ---------------------------------------------------------------------------
 

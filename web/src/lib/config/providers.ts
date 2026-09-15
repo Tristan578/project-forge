@@ -278,6 +278,22 @@ export interface CapabilityUnavailability {
 export const GATEWAY_CAPABILITIES = ['chat', 'embedding', 'image'] as const satisfies readonly ProviderCapability[];
 
 /**
+ * Whether a capability is routed through the Vercel AI Gateway rather than a
+ * direct provider key (#9523). The single predicate behind gateway routing:
+ * `lib/keys/resolver.ts` resolves `AI_GATEWAY_API_KEY` for these instead of the
+ * capability provider's `PLATFORM_*` var (BYOK still wins), the `vercel-gateway`
+ * backend advertises them, and `verify-platform-generation.ts` grades them on
+ * the gateway key — three readers of ONE list, so the resolver and the verifier
+ * cannot disagree about which capabilities the gateway owns. `image` and
+ * `embedding` are OpenAI-compatible on the gateway under the same model names,
+ * per the owner's 2026-09-05 decision; `sprite`/`voice`/`sfx`/`music` and the
+ * Meshy/remove.bg capabilities stay on their direct keys.
+ */
+export function isGatewayRoutedCapability(capability: ProviderCapability): boolean {
+  return (GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability);
+}
+
+/**
  * Capabilities that must be refused everywhere — `/api/capabilities`, the
  * generation dialogs, and `createGenerationHandler` — regardless of which
  * keys are set, because no key can make them work. Declared in code, not in
