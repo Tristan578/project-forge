@@ -111,12 +111,12 @@ export interface SceneSlice {
   /**
    * Apply a built-in game template to the live scene.
    *
-   * Resolves only once the entities are actually in `sceneGraph`, so a caller
-   * that reports success is reporting something that happened. `load_scene` is
-   * queued and applied a frame later, and `apply_scene_load` returns silently
-   * on a payload it cannot deserialize — a resolved promise on its own proves
-   * nothing, which is what let the gallery and the chat handler both claim a
-   * success the stub never achieved.
+   * Resolves with success only after a fresh graph contains the expected
+   * entities and their scripts/gameplay components have been attached. Rejected
+   * or superseded requests resolve with failure. A timeout also resolves with
+   * failure but does not cancel an accepted engine load: the scene may appear
+   * later without script/gameplay setup. Callers must show the returned error
+   * and offer a retry after the engine responds.
    */
   loadTemplate: (templateId: string, options?: { timeoutMs?: number }) => Promise<TemplateLoadResult>;
   /**
