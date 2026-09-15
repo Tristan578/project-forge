@@ -127,6 +127,21 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
     s().setTrackMuted('ghost', true);
     expect(s().arrangement.tracks[0].muted).toBe(false);
   });
+
+  it('renames a track, trims whitespace, and ignores an unknown id or an empty name', () => {
+    const t1 = s().addTrack('Original');
+    expect(s().arrangement.tracks[0].name).toBe('Original');
+    s().renameTrack(t1, '  Lead Synth  ');
+    expect(s().arrangement.tracks[0].name).toBe('Lead Synth');
+    // Unknown track: no throw, no mutation.
+    s().renameTrack('ghost', 'Nope');
+    expect(s().arrangement.tracks[0].name).toBe('Lead Synth');
+    // Empty / whitespace-only name: no-op, keeps the prior name.
+    s().renameTrack(t1, '   ');
+    expect(s().arrangement.tracks[0].name).toBe('Lead Synth');
+    s().renameTrack(t1, '');
+    expect(s().arrangement.tracks[0].name).toBe('Lead Synth');
+  });
 });
 
 describe('music.FR-2.OP-02 — trim, loop points, boundaries', () => {
