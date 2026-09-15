@@ -34,6 +34,22 @@ export function handlePerformanceEvent(
       return true;
     }
 
+    case 'SYSTEM_TIMINGS': {
+      // Per-frame CPU cost attributed to coarse system groups
+      // (performance.FR-1.OP-01/OP-04). A group ABSENT from `perGroupMs` was
+      // not measured this frame and must stay unavailable downstream — the
+      // handler forwards the payload verbatim, never coercing a gap to 0.
+      const timingPayload = data as {
+        frameIndex: number;
+        perGroupMs: Partial<Record<'scripting' | 'bridge' | 'physics' | 'rendering', number>>;
+      };
+      usePerformanceStore.getState().pushSystemTimingFrame({
+        frameIndex: timingPayload.frameIndex,
+        perGroupMs: timingPayload.perGroupMs ?? {},
+      });
+      return true;
+    }
+
     case 'LOD_CHANGED': {
       const lodPayload = data as {
         entityId: string;

@@ -11,12 +11,14 @@ vi.mock('@/stores/editorStore', () => ({
 
 const mockUpdateStats = vi.fn();
 const mockSetLodLevel = vi.fn();
+const mockPushSystemTimingFrame = vi.fn();
 
 vi.mock('@/stores/performanceStore', () => ({
   usePerformanceStore: {
     getState: vi.fn(() => ({
       updateStats: mockUpdateStats,
       setLodLevel: mockSetLodLevel,
+      pushSystemTimingFrame: mockPushSystemTimingFrame,
     })),
   },
 }));
@@ -30,6 +32,7 @@ describe('handlePerformanceEvent', () => {
     mockSetGet = createMockSetGet();
     mockUpdateStats.mockClear();
     mockSetLodLevel.mockClear();
+    mockPushSystemTimingFrame.mockClear();
   });
 
   it('returns false for unknown event types', () => {
@@ -98,4 +101,40 @@ describe('handlePerformanceEvent', () => {
       memoryUsage: 0,
     });
   });
+
+  it('SYSTEM_TIMINGS: forwards a per-frame system-group snapshot to the store', () => {
+    const payload = {
+      frameIndex: 7,
+      perGroupMs: { scripting: 1.5, bridge: 0.5, physics: 2.25 },
+    };
+
+    const result = handlePerformanceEvent('SYSTEM_TIMINGS', payload as never, mockSetGet.set, mockSetGet.get);
+
+    expect(result).toBe(true);
+    expect(mockPushSystemTimingFrame).toHaveBeenCalledWith({
+      frameIndex: 7,
+      perGroupMs: { scripting: 1.5, bridge: 0.5, physics: 2.25 },
+    });
+  });
+
+  it('SYSTEM_TIMINGS: preserves an absent group as a gap, never coerced to 0', () => {
+    // Rendering omitted -> unavailable this slice (OP-02). The handler must
+    // forward the object as-is so the store can surface it as "unknown".
+    const payload = { frameIndex: 3, perGroupMs: { physics: 4 } };
+
+    handlePerformanceEvent('SYSTEM_TIMINGS', payload as never, mockSetGet.set, mockSetGet.get);
+
+    const forwarded = mockPushSystemTimingFrame.mock.calls[0][0];
+    expect(forwarded.perGroupMs).toEqual({ physics: 4 });
+    expect(forwarded.perGroupMs).not.toHaveProperty('rendering');
+    expect('rendering' in forwarded.perGroupMs).toBe(false);
+  });
+
+  it('SYSTEM_TIMINGS: tolerates a missing perGroupMs payload', () => {
+    const payload = { frameIndex: 1 };
+    const result = handlePerformanceEvent('SYSTEM_TIMINGS', payload as never, mockSetGet.set, mockSetGet.get);
+    expect(result).toBe(true);
+    expect(mockPushSystemTimingFrame).toHaveBeenCalledWith({ frameIndex: 1, perGroupMs: {} });
+  });
+
 });
