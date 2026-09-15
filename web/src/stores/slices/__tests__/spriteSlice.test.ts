@@ -746,10 +746,11 @@ describe('spriteSlice', () => {
         origin: 'TopLeft',
       });
 
-      it('updates the store optimistically and dispatches the engine command', () => {
+      it('updates the store optimistically, dispatches, and returns true', () => {
         store.getState().setTilemapData('e1', seed());
-        store.getState().setTileCollisionShape('e1', 0, 2, 0, 'halfTop');
+        const wrote = store.getState().setTileCollisionShape('e1', 0, 2, 0, 'halfTop');
 
+        expect(wrote).toBe(true);
         expect(store.getState().tilemaps.e1.layers[0].collisionShapes).toEqual([
           'none', 'none', 'halfTop', 'none',
         ]);
@@ -758,17 +759,19 @@ describe('spriteSlice', () => {
         });
       });
 
-      it('is a no-op with no dispatch when the entity has no tilemap', () => {
-        store.getState().setTileCollisionShape('missing', 0, 0, 0, 'full');
+      it('returns false with no dispatch when the entity has no tilemap', () => {
+        const wrote = store.getState().setTileCollisionShape('missing', 0, 0, 0, 'full');
+        expect(wrote).toBe(false);
         expect(mockDispatch).not.toHaveBeenCalledWith(
           'set_tile_collision_shape',
           expect.anything(),
         );
       });
 
-      it('is a no-op for an out-of-range cell (no corruption, no dispatch)', () => {
+      it('returns false for an out-of-range cell (no corruption, no dispatch)', () => {
         store.getState().setTilemapData('e1', seed());
-        store.getState().setTileCollisionShape('e1', 0, 9, 0, 'full');
+        const wrote = store.getState().setTileCollisionShape('e1', 0, 9, 0, 'full');
+        expect(wrote).toBe(false);
         expect(store.getState().tilemaps.e1.layers[0].collisionShapes).toBeUndefined();
         expect(mockDispatch).not.toHaveBeenCalledWith(
           'set_tile_collision_shape',

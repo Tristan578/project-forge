@@ -1030,6 +1030,68 @@ describe('scriptWorker', () => {
     );
   });
 
+  it('forge.tilemap.getCollisionShape reads authored shapes, defaults, and nulls (OP-04)', async () => {
+    const handler = await setupWorker();
+    // Distinct prefixes so each assertion pins WHICH call produced the value —
+    // several calls return 'none'/'null', and a bare message match would let one
+    // path stand in for another.
+    const code = `function onStart() {
+      forge.log("authored=" + forge.tilemap.getCollisionShape("tm1", 2, 0, 0));
+      forge.log("cellDefault=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 0));
+      forge.log("noArray=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 1));
+      forge.log("oobCoord=" + forge.tilemap.getCollisionShape("tm1", 9, 9, 0));
+      forge.log("oobLayer=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 5));
+      forge.log("noTilemap=" + forge.tilemap.getCollisionShape("nope", 0, 0, 0));
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      {
+        tilemapStates: {
+          tm1: {
+            tileSize: [32, 32],
+            mapSize: [3, 3],
+            layers: [
+              // Layer 0 carries a shapes array; idx 2 (x=2,y=0) is authored full.
+              { tiles: [0, 1, 2, 3, 4, 5, 6, 7, 8], collisionShapes: ['none', 'none', 'full', 'none', 'none', 'none', 'none', 'none', 'none'] },
+              // Layer 1 has no collisionShapes array at all → every cell 'none'.
+              { tiles: [0, 1, 2, 3, 4, 5, 6, 7, 8] },
+            ],
+            origin: 'TopLeft' as const,
+          },
+        },
+      }
+    ));
+
+    const logged = (msg: string) =>
+      expect(mockPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'log', message: msg })
+      );
+    logged('authored=full');       // authored cell returns its shape
+    logged('cellDefault=none');    // array present, cell defaults to 'none'
+    logged('noArray=none');        // layer with no shapes array → 'none'
+    logged('oobCoord=null');       // (9,9) outside the 3x3 map → null
+    logged('oobLayer=null');       // layer index 5 unknown → null
+    logged('noTilemap=null');      // unknown tilemap → null
+  });
+
+  it('forge.tilemap.setCollisionShape pushes set_tile_collision_shape with floored coords (OP-04)', async () => {
+    const handler = await setupWorker();
+    // Arg order is (tilemapId, x, y, shape, layer); each of x/y/layer floors
+    // through the same tileInt path setTile uses.
+    const code = `function onStart() {
+      forge.tilemap.setCollisionShape("tm1", 1.9, 2.4, "halfTop", 0.7);
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    // Asserted whole, like the setTile dispatch test: the payload IS the
+    // behaviour, and a wrong axis or an unfloored value would ship silently.
+    expect(pushedCommands()).toEqual([
+      { cmd: 'set_tile_collision_shape', entityId: 'tm1', layer: 0, x: 1, y: 2, shape: 'halfTop' },
+    ]);
+  });
+
   it('forge.tilemap.setTile and fillRect push real engine commands', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {
@@ -1331,6 +1393,9 @@ describe('scriptWorker', () => {
     ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", -1, 0)'],
     ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", -1, 0, 2, 2, 1)'],
     ['fillRect', 'w', 'forge.tilemap.fillRect("tm1", 0, 0, -2, 2, 1)'],
+    ['setCollisionShape', 'x', 'forge.tilemap.setCollisionShape("tm1", -1, 0, "full")'],
+    ['setCollisionShape', 'y', 'forge.tilemap.setCollisionShape("tm1", 0, -2, "full")'],
+    ['setCollisionShape', 'layer', 'forge.tilemap.setCollisionShape("tm1", 0, 0, "full", -1)'],
   ])('forge.tilemap.%s rejects a negative %s and pushes nothing', async (_api, param, call) => {
     const handler = await setupWorker();
     const code = `function onStart() { ${call}; }`;
@@ -1349,6 +1414,8 @@ describe('scriptWorker', () => {
   it.each([
     ['NaN', 'forge.tilemap.setTile("tm1", 0/0, 0, 5)'],
     ['Infinity', 'forge.tilemap.fillRect("tm1", 0, 0, 1/0, 1, 5)'],
+    ['NaN via setCollisionShape', 'forge.tilemap.setCollisionShape("tm1", 0/0, 0, "full")'],
+    ['Infinity via setCollisionShape', 'forge.tilemap.setCollisionShape("tm1", 0, 1/0, "full")'],
   ])('forge.tilemap rejects a non-finite coordinate (%s) and pushes nothing', async (_label, call) => {
     const handler = await setupWorker();
     const code = `function onStart() { ${call}; }`;
@@ -1375,6 +1442,9 @@ describe('scriptWorker', () => {
     ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", TOO_BIG, 0)'],
     ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", TOO_BIG, 0, 2, 2, 1)'],
     ['fillRect', 'layer', 'forge.tilemap.fillRect("tm1", 0, 0, 2, 2, 1, TOO_BIG)'],
+    ['setCollisionShape', 'x', 'forge.tilemap.setCollisionShape("tm1", TOO_BIG, 0, "full")'],
+    ['setCollisionShape', 'y', 'forge.tilemap.setCollisionShape("tm1", 0, TOO_BIG, "full")'],
+    ['setCollisionShape', 'layer', 'forge.tilemap.setCollisionShape("tm1", 0, 0, "full", TOO_BIG)'],
   ])('forge.tilemap.%s rejects a %s past TILE_FIELD_MAX and pushes nothing', async (_api, param, call) => {
     const handler = await setupWorker();
     const { TILE_FIELD_MAX } = await import('../scriptWorker');

@@ -42,11 +42,31 @@ export function TilemapInspector() {
   const [shapeX, setShapeX] = useState(0);
   const [shapeY, setShapeY] = useState(0);
   const [shapeValue, setShapeValue] = useState<CollisionShape>('full');
+  // Feedback for a rejected Apply. The X/Y `min`/`max` attributes are advisory
+  // HTML hints only — a value typed past `max` still reaches state and clicking
+  // Apply would otherwise no-op in the store with nothing shown. This mirrors
+  // the chat handler's actionable error so the manual and AI paths stay at
+  // parity for the same invalid input (OP-04 / #9814).
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   const handleApplyCollisionShape = useCallback(() => {
-    if (!primaryId) return;
-    setTileCollisionShape(primaryId, shapeLayer, shapeX, shapeY, shapeValue);
-  }, [primaryId, setTileCollisionShape, shapeLayer, shapeX, shapeY, shapeValue]);
+    if (!primaryId || !tilemapData) return;
+    const layerCount = tilemapData.layers.length;
+    const [mapW, mapH] = tilemapData.mapSize;
+    if (shapeLayer < 0 || shapeLayer >= layerCount) {
+      setApplyError(`Layer ${shapeLayer} out of range (tilemap has ${layerCount} layers)`);
+      return;
+    }
+    if (shapeX < 0 || shapeY < 0 || shapeX >= mapW || shapeY >= mapH) {
+      setApplyError(`Tile (${shapeX}, ${shapeY}) is outside the ${mapW}x${mapH} map`);
+      return;
+    }
+    const wrote = setTileCollisionShape(primaryId, shapeLayer, shapeX, shapeY, shapeValue);
+    // A refused write past the bounds checks above means the declared map is
+    // larger than the layer's own tile vector — still a no-op in the store, so
+    // say so rather than leave the click silent.
+    setApplyError(wrote ? null : `Tile (${shapeX}, ${shapeY}) could not be updated`);
+  }, [primaryId, tilemapData, setTileCollisionShape, shapeLayer, shapeX, shapeY, shapeValue]);
 
   const handleAddTilemap = useCallback(() => {
     if (!primaryId) return;
@@ -357,6 +377,11 @@ export function TilemapInspector() {
           >
             Apply Collision Shape
           </button>
+          {applyError && (
+            <p role="alert" aria-live="polite" className="text-xs text-red-400">
+              {applyError}
+            </p>
+          )}
         </div>
 
         {/* Grid & Collision Preview */}

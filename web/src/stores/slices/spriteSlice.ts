@@ -56,8 +56,13 @@ export interface SpriteSlice {
    * and re-emits `TILEMAP_CHANGED`. A no-op (nothing dispatched) when the entity
    * has no tilemap or the layer/coordinate is out of range, matching the
    * engine's own rejection so an invalid edit corrupts nothing.
+   *
+   * Returns `true` when a cell was actually written (mirroring
+   * `applyCollisionShapeToLayers`'s `changed` flag) and `false` for every
+   * refused edit, so a manual caller can surface the no-op to the user instead
+   * of the edit vanishing silently.
    */
-  setTileCollisionShape: (entityId: string, layerIndex: number, x: number, y: number, shape: CollisionShape) => void;
+  setTileCollisionShape: (entityId: string, layerIndex: number, x: number, y: number, shape: CollisionShape) => boolean;
   /**
    * State-only mirror of what the engine reports. `null` means the entity has
    * no tilemap (the engine's `Option<&TilemapData>` is `None`), so the entry is
@@ -203,11 +208,12 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
   },
   setTileCollisionShape: (entityId, layerIndex, x, y, shape) => {
     const tilemap = get().tilemaps[entityId];
-    if (!tilemap) return;
+    if (!tilemap) return false;
     const result = applyCollisionShapeToLayers(tilemap.layers, tilemap.mapSize, layerIndex, x, y, shape);
-    if (!result.changed) return;
+    if (!result.changed) return false;
     set(state => ({ tilemaps: { ...state.tilemaps, [entityId]: { ...tilemap, layers: result.layers } } }));
     if (dispatchCommand) dispatchCommand('set_tile_collision_shape', { entityId, layer: layerIndex, x, y, shape });
+    return true;
   },
   applyTilemapFromEngine: (entityId, data) => {
     set(state => {

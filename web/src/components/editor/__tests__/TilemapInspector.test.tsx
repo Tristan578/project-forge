@@ -68,6 +68,9 @@ describe('TilemapInspector', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: the store reports the cell was written. Individual tests that
+    // exercise the refused-write path override this with mockReturnValue(false).
+    mockSetTileCollisionShape.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -212,5 +215,65 @@ describe('TilemapInspector', () => {
     const values = Array.from(shapeSelect.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
     expect(values).not.toContain('wedge');
     expect(values).not.toContain('');
+  });
+
+  // OP-04: the X/Y inputs' min/max are advisory HTML hints; a value typed past
+  // the map bounds still reaches state, so Apply must surface the rejection
+  // instead of no-op'ing silently — parity with the chat handler's error.
+  it('shows an actionable error and does not dispatch when X is past the map width', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+
+    fireEvent.change(screen.getByLabelText('X'), { target: { value: '25' } });
+    fireEvent.change(screen.getByLabelText('Y'), { target: { value: '5' } });
+    fireEvent.click(screen.getByText('Apply Collision Shape'));
+
+    expect(mockSetTileCollisionShape).not.toHaveBeenCalled();
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Tile (25, 5) is outside the 20x15 map');
+    expect(alert).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('shows an actionable error and does not dispatch when Y is past the map height', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+
+    fireEvent.change(screen.getByLabelText('X'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Y'), { target: { value: '30' } });
+    fireEvent.click(screen.getByText('Apply Collision Shape'));
+
+    expect(mockSetTileCollisionShape).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Tile (3, 30) is outside the 20x15 map');
+  });
+
+  it('surfaces the store no-op when the write is refused (map larger than tiles)', () => {
+    mockSetTileCollisionShape.mockReturnValue(false);
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+
+    fireEvent.change(screen.getByLabelText('X'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Y'), { target: { value: '5' } });
+    fireEvent.click(screen.getByText('Apply Collision Shape'));
+
+    // Bounds pass, so the store IS called — and its `false` return (a cell it
+    // refused to write) is what drives the error, not the component's own guard.
+    expect(mockSetTileCollisionShape).toHaveBeenCalledWith('entity-1', 0, 3, 5, 'full');
+    expect(screen.getByRole('alert')).toHaveTextContent('Tile (3, 5) could not be updated');
+  });
+
+  it('clears a prior error after a subsequent valid Apply succeeds', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+
+    // First: an out-of-bounds click raises the error.
+    fireEvent.change(screen.getByLabelText('X'), { target: { value: '25' } });
+    fireEvent.click(screen.getByText('Apply Collision Shape'));
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+
+    // Then: an in-bounds click clears it (store default returns true).
+    fireEvent.change(screen.getByLabelText('X'), { target: { value: '3' } });
+    fireEvent.click(screen.getByText('Apply Collision Shape'));
+    expect(mockSetTileCollisionShape).toHaveBeenCalledWith('entity-1', 0, 3, 0, 'full');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
