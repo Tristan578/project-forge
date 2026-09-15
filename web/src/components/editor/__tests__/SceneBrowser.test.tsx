@@ -248,13 +248,30 @@ describe('SceneBrowser', () => {
     mockListCheckpoints.mockReturnValue([]);
   });
 
-  it('deletes a checkpoint', () => {
+  it('deletes a checkpoint after confirmation', () => {
     mockListCheckpoints.mockReturnValue([
       { id: 'cp1', label: 'scratch', createdAt: 't', snapshot: {} },
     ]);
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
     fireEvent.click(screen.getByLabelText('Delete checkpoint scratch'));
+    // A confirm step guards the irreversible checkpoint delete, matching scene
+    // delete and checkpoint restore. The first click only arms the gate.
+    expect(mockDeleteCheckpoint).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('Confirm delete checkpoint scratch'));
     expect(mockDeleteCheckpoint).toHaveBeenCalledWith('cp1');
+    mockListCheckpoints.mockReturnValue([]);
+  });
+
+  it('does not delete a checkpoint when the confirm is cancelled', () => {
+    mockListCheckpoints.mockReturnValue([
+      { id: 'cp1', label: 'scratch', createdAt: 't', snapshot: {} },
+    ]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Delete checkpoint scratch'));
+    fireEvent.click(screen.getByLabelText('Cancel delete checkpoint'));
+    expect(mockDeleteCheckpoint).not.toHaveBeenCalled();
+    // The delete control is back, so the safety net is still reachable.
+    expect(screen.getByLabelText('Delete checkpoint scratch')).toBeInTheDocument();
     mockListCheckpoints.mockReturnValue([]);
   });
 });

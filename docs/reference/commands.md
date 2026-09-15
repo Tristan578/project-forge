@@ -1,13 +1,13 @@
 # Command Reference
 
-Complete reference for all 357 MCP commands available in SpawnForge.
+Complete reference for all 358 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
 
 ## Categories
 
-- [Scene](#scene) (29 commands)
+- [Scene](#scene) (30 commands)
 - [Materials](#materials) (11 commands)
 - [Lighting](#lighting) (2 commands)
 - [Environment](#environment) (5 commands)
@@ -691,6 +691,28 @@ Restore a recovery checkpoint by ID, replacing the active project with its snaps
 ```json
 {
   "command": "restore_checkpoint",
+  "params": {
+    "checkpointId": "my_checkpointId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `delete_checkpoint`
+
+Delete a saved recovery checkpoint by ID (missing IDs are a no-op)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `checkpointId` | string | Yes | ID of the checkpoint to delete |
+
+**Example:**
+```json
+{
+  "command": "delete_checkpoint",
   "params": {
     "checkpointId": "my_checkpointId"
   }

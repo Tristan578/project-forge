@@ -12237,6 +12237,27 @@
       "requiredScope": "scene:write",
       "destructive": true,
       "visibility": "public"
+    },
+    {
+      "name": "delete_checkpoint",
+      "description": "Delete a saved recovery checkpoint by ID (missing IDs are a no-op)",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "checkpointId": {
+            "type": "string",
+            "description": "ID of the checkpoint to delete"
+          }
+        },
+        "required": [
+          "checkpointId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": true,
+      "visibility": "public"
     }
   ],
   "resources": [

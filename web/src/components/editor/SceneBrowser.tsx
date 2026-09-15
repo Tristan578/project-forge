@@ -30,6 +30,10 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   const [busy, setBusy] = useState(false);
   const [checkpoints, setCheckpoints] = useState<SceneCheckpoint[]>([]);
   const [restoreConfirmId, setRestoreConfirmId] = useState<string | null>(null);
+  // Deleting a checkpoint permanently destroys a declared recovery point with
+  // no undo, so it gets the same Yes/No gate as scene delete and checkpoint
+  // restore — a misclick must not throw the safety net away.
+  const [deleteCheckpointConfirmId, setDeleteCheckpointConfirmId] = useState<string | null>(null);
   // Re-read the checkpoint list from storage exactly when the browser opens,
   // using React's "adjust state while rendering" pattern rather than an effect
   // (which would trigger a cascading render). `wasOpen` records the previous
@@ -68,6 +72,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
   const handleDeleteCheckpoint = useCallback(
     (checkpointId: string) => {
       deleteCheckpoint(checkpointId);
+      setDeleteCheckpointConfirmId(null);
       refreshCheckpoints();
     },
     [deleteCheckpoint, refreshCheckpoints]
@@ -217,7 +222,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                     </button>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity [.scene-row:hover_&]:opacity-100">
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity [.scene-row:hover_&]:opacity-100">
                     <button
                       onClick={(e) => handleDuplicate(scene.id, e)}
                       className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
@@ -263,7 +268,8 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
           ) : (
             <ul role="list" aria-label="Checkpoints" className="flex max-h-32 flex-col gap-1 overflow-y-auto">
               {checkpoints.map((cp) => {
-                const isConfirming = restoreConfirmId === cp.id;
+                const isRestoreConfirming = restoreConfirmId === cp.id;
+                const isDeleteConfirming = deleteCheckpointConfirmId === cp.id;
                 return (
                   <li
                     key={cp.id}
@@ -272,7 +278,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                     <span className="min-w-0 flex-1 truncate" title={cp.label}>
                       {cp.label}
                     </span>
-                    {isConfirming ? (
+                    {isRestoreConfirming ? (
                       <span className="flex items-center gap-1">
                         <span className="text-amber-400">Restore?</span>
                         <button
@@ -291,10 +297,31 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                           No
                         </button>
                       </span>
-                    ) : (
-                      <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    ) : isDeleteConfirming ? (
+                      <span className="flex items-center gap-1">
+                        <span className="text-red-400">Delete?</span>
                         <button
-                          onClick={() => setRestoreConfirmId(cp.id)}
+                          onClick={() => handleDeleteCheckpoint(cp.id)}
+                          className="rounded px-1.5 py-0.5 text-red-400 hover:bg-red-900/40"
+                          aria-label={`Confirm delete checkpoint ${cp.label}`}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          onClick={() => setDeleteCheckpointConfirmId(null)}
+                          className="rounded px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700"
+                          aria-label="Cancel delete checkpoint"
+                        >
+                          No
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => {
+                            setDeleteCheckpointConfirmId(null);
+                            setRestoreConfirmId(cp.id);
+                          }}
                           className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-amber-400"
                           aria-label={`Restore ${cp.label}`}
                           title="Restore this checkpoint"
@@ -302,7 +329,10 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                           <RotateCcw size={11} />
                         </button>
                         <button
-                          onClick={() => handleDeleteCheckpoint(cp.id)}
+                          onClick={() => {
+                            setRestoreConfirmId(null);
+                            setDeleteCheckpointConfirmId(cp.id);
+                          }}
                           className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-red-400"
                           aria-label={`Delete checkpoint ${cp.label}`}
                           title="Delete checkpoint"

@@ -346,6 +346,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "delete_checkpoint",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "delete_cutscene",
       "category": "cutscene",
       "requiredScope": "scene:write"

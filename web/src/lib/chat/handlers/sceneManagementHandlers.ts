@@ -255,7 +255,8 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   //
   // These drive the exact same sceneManager functions the manual Scene Browser
   // controls use (`ctx.store.createCheckpoint` / `restoreCheckpoint` /
-  // `listCheckpoints`), so the AI and manual paths persist identical state.
+  // `listCheckpoints` / `deleteCheckpoint`), so the AI and manual paths persist
+  // identical state — every manual checkpoint operation has an AI equal (F2).
   // -------------------------------------------------------------------------
 
   create_checkpoint: async (args, _ctx): Promise<ExecutionResult> => {
@@ -334,6 +335,20 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     return {
       success: true,
       result: { message: 'Restored checkpoint', activeSceneId: project.activeSceneId },
+    };
+  },
+
+  delete_checkpoint: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ checkpointId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    // Same sceneManager function the manual Scene Browser delete button calls
+    // (`deleteCheckpoint`). Missing IDs are a no-op that returns the current
+    // list, so the AI and manual paths converge on identical stored state.
+    const { deleteCheckpoint } = await import('@/lib/scenes/sceneManager');
+    const remaining = deleteCheckpoint(p.data.checkpointId);
+    return {
+      success: true,
+      result: { message: 'Deleted checkpoint', count: remaining.length },
     };
   },
 

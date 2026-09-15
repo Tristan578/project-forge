@@ -530,8 +530,9 @@ export const createSceneSlice: StateCreator<
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
   // Recovery checkpoints (scene.FR-3.OP-02). The chat handlers
-  // (`create_checkpoint` / `restore_checkpoint` / `list_checkpoints`) drive the
-  // same sceneManager functions, so manual and AI paths persist identical state.
+  // (`create_checkpoint` / `restore_checkpoint` / `list_checkpoints` /
+  // `delete_checkpoint`) drive the same sceneManager functions, so manual and
+  // AI paths persist identical state.
   createCheckpoint: async (label) => {
     const captured = await captureActiveScene(requestSceneExport);
     const project = withCapturedScene(loadProjectScenes(), captured);

@@ -116,4 +116,49 @@ describe('checkpoint manual/AI parity (real persistence)', () => {
     // And the raw store agrees with what the AI handler reported.
     expect(listCheckpoints().map((c) => c.label).sort()).toEqual(labels.sort());
   });
+
+  it('AI delete and manual delete operate on the same checkpoint store (F2 parity)', async () => {
+    seedProject('shared');
+    // Create three checkpoints through the AI path.
+    const a = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', { label: 'A' });
+    const b = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', { label: 'B' });
+    await invokeHandler(sceneManagementHandlers, 'create_checkpoint', { label: 'C' });
+    const aId = (a.result.result as { checkpointId: string }).checkpointId;
+    const bId = (b.result.result as { checkpointId: string }).checkpointId;
+
+    // The AI delete_checkpoint handler removes B; the count it reports and the
+    // manual store's list both agree B is gone. If the handler used a different
+    // store than the Scene Browser button, these would diverge.
+    const del = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', {
+      checkpointId: bId,
+    });
+    expect(del.result.success).toBe(true);
+    expect((del.result.result as { count: number }).count).toBe(2);
+
+    const { store } = createSceneTestStore();
+    expect(store.getState().listCheckpoints().map((c) => c.label).sort()).toEqual(['A', 'C']);
+
+    // The manual delete path (the deleteCheckpoint action the Trash2 button
+    // calls) removes A the same way, and the AI list handler sees the result —
+    // one implementation, driven from both sides.
+    const remaining = store.getState().deleteCheckpoint(aId);
+    expect(remaining.map((c) => c.label)).toEqual(['C']);
+    const aiList = await invokeHandler(sceneManagementHandlers, 'list_checkpoints');
+    const labels = (aiList.result.result as { checkpoints: Array<{ label: string }> }).checkpoints.map(
+      (c) => c.label
+    );
+    expect(labels).toEqual(['C']);
+    expect(listCheckpoints().map((c) => c.label)).toEqual(['C']);
+  });
+
+  it('AI delete_checkpoint is a no-op on an unknown ID, like the manual path', async () => {
+    seedProject('shared');
+    await invokeHandler(sceneManagementHandlers, 'create_checkpoint', { label: 'keep' });
+    const del = await invokeHandler(sceneManagementHandlers, 'delete_checkpoint', {
+      checkpointId: 'ckpt_does_not_exist',
+    });
+    expect(del.result.success).toBe(true);
+    expect((del.result.result as { count: number }).count).toBe(1);
+    expect(listCheckpoints().map((c) => c.label)).toEqual(['keep']);
+  });
 });
