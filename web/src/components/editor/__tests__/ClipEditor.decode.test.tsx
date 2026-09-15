@@ -162,4 +162,53 @@ describe('ClipEditor decoded source bounds', () => {
     expect(trimEnd).toHaveValue(2.25); // 18 samples at the decoded 8 Hz rate.
   });
 
+  it('normalizes a blur edit that snaps back to the initial stored value', async () => {
+    const source = mockDeferredDecode();
+    render(<ClipEditor assetId={asset.id} asset={asset} />);
+    await waitFor(() => expect(source.decode).toHaveBeenCalledOnce());
+    await act(async () => source.resolveDecode());
+    const end = screen.getByLabelText('Trim end');
+    expect(end).toHaveValue(4);
+
+    fireEvent.change(end, { target: { value: '4.01' } });
+    expect(end).toHaveValue(4.01);
+    fireEvent.blur(end);
+
+    expect(end).toHaveValue(4);
+    expect(screen.getByLabelText('Loop end')).toHaveValue(4);
+    expect(screen.getByRole('img')).toHaveAccessibleName('Waveform, trim 0.00 to 4.00 seconds of 4.00 second source');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('normalizes an unchanged sample snap on Enter without a second history entry on blur', async () => {
+    const source = mockDeferredDecode();
+    render(<ClipEditor assetId={asset.id} asset={asset} />);
+    await waitFor(() => expect(source.decode).toHaveBeenCalledOnce());
+    await act(async () => source.resolveDecode());
+    const end = screen.getByLabelText('Trim end');
+    fireEvent.change(end, { target: { value: '2.31' } });
+    fireEvent.blur(end);
+    expect(end).toHaveValue(2.25);
+
+    fireEvent.change(end, { target: { value: '2.26' } });
+    fireEvent.keyDown(end, { key: 'Enter' });
+    expect(end).toHaveValue(2.25);
+    fireEvent.blur(end);
+    expect(end).toHaveValue(2.25);
+    expect(screen.getByLabelText('Loop end')).toHaveValue(2.25);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    // Each accepted command keeps its existing undo entry, even when the
+    // snapped document is unchanged. Enter followed by blur must commit once.
+    const undo = screen.getByRole('button', { name: 'Undo clip edit' });
+    fireEvent.click(undo);
+    expect(end).toHaveValue(2.25);
+    expect(undo).toBeEnabled();
+    fireEvent.click(undo);
+    expect(end).toHaveValue(4);
+    expect(undo).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Redo clip edit' }));
+    expect(end).toHaveValue(2.25);
+  });
+
 });
