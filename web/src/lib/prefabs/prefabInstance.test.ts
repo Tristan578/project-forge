@@ -8,7 +8,6 @@ import {
   getOverriddenFields,
   detectCycle,
   wouldCreateCycle,
-  type PrefabInstance,
 } from './prefabInstance';
 import type { Prefab, PrefabSnapshot } from './prefabStore';
 
@@ -66,7 +65,6 @@ describe('resolveInstance + applyPrefabUpdate (OP-04 propagation)', () => {
   });
 
   it('propagates a source change to un-overridden fields while the override stays intact', () => {
-    const prefab = makePrefab('p', makeSnapshot({ name: 'Base', entityType: 'cube' }));
     const inst = setOverride(createInstance('p'), 'name', 'Kept');
 
     // Source prefab updated: entityType changed, name changed.
