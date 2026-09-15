@@ -1,9 +1,13 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useId, useState } from 'react';
+import { Button, Input, Select } from '@spawnforge/ui';
 import { Plus, Trash2, Eye, EyeOff, Shield } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { TILE_COLLISION_SHAPES } from '@/stores/slices/types';
+import type { CollisionShape } from '@/stores/slices/types';
+import { getCollisionShapeFromLayers, isCollisionShape } from '@/lib/tilemap/collisionShapes';
 
 interface _TilemapLayer {
   name: string;
@@ -11,6 +15,16 @@ interface _TilemapLayer {
   opacity: number;
   isCollision: boolean;
 }
+
+/** Human-readable labels for the collision-shape picker, keyed by wire value. */
+const COLLISION_SHAPE_LABELS: Record<CollisionShape, string> = {
+  none: 'None',
+  full: 'Full cell',
+  halfTop: 'Half — Top',
+  halfBottom: 'Half — Bottom',
+  slopeLeft: 'Slope — Left',
+  slopeRight: 'Slope — Right',
+};
 
 export function TilemapInspector() {
   const primaryId = useEditorStore((s) => s.primaryId);
@@ -20,7 +34,29 @@ export function TilemapInspector() {
 
   const setTilemapData = useEditorStore((s) => s.setTilemapData);
   const removeTilemapData = useEditorStore((s) => s.removeTilemapData);
+  const setTileCollisionShape = useEditorStore((s) => s.setTileCollisionShape);
   const { confirm, ConfirmDialogPortal } = useConfirmDialog();
+
+  // Per-tile collision-shape authoring (OP-04). A single cell is targeted by
+  // layer + (x, y); Apply dispatches `set_tile_collision_shape` through the
+  // shared store action, so the edit is undoable and mirrored back.
+  const [shapeLayer, setShapeLayer] = useState(0);
+  const [shapeX, setShapeX] = useState('0');
+  const [shapeY, setShapeY] = useState('0');
+  const [shapeValue, setShapeValue] = useState<CollisionShape>('full');
+
+  const shapeFieldId = useId();
+  const [shapeFeedback, setShapeFeedback] = useState<{ entityId: string; message: string; error: boolean } | null>(null);
+
+  const handleApplyCollisionShape = useCallback(() => {
+    if (!primaryId || !shapeX.trim() || !shapeY.trim()) return;
+    try {
+      setTileCollisionShape(primaryId, shapeLayer, Number(shapeX), Number(shapeY), shapeValue);
+      setShapeFeedback({ entityId: primaryId, message: 'Shape change requested. The authored value updates when the engine confirms it.', error: false });
+    } catch (error) {
+      setShapeFeedback({ entityId: primaryId, message: error instanceof Error ? error.message : 'Could not change the stored shape. Please try again.', error: true });
+    }
+  }, [primaryId, setTileCollisionShape, shapeLayer, shapeX, shapeY, shapeValue]);
 
   const handleAddTilemap = useCallback(() => {
     if (!primaryId) return;
@@ -99,6 +135,10 @@ export function TilemapInspector() {
   }
 
   const tilesetEntries = Object.entries(tilesets);
+  const storedShape = shapeX.trim() && shapeY.trim()
+    ? getCollisionShapeFromLayers(tilemapData.layers, tilemapData.mapSize, shapeLayer, Number(shapeX), Number(shapeY))
+    : null;
+  const validShapeCell = storedShape !== null;
 
   return (
     <div className="border-t border-zinc-800 pt-4">
@@ -111,6 +151,7 @@ export function TilemapInspector() {
         <div className="space-y-2">
           <label className="text-xs text-zinc-400">Tileset</label>
           <select
+            aria-label="Tileset"
             value={tilemapData.tilesetAssetId}
             onChange={(e) => handleUpdateTileset(e.target.value)}
             className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
@@ -271,6 +312,85 @@ export function TilemapInspector() {
             ))}
           </div>
         </div>
+
+        {/* Stored shape authoring; runtime collider generation remains unavailable. */}
+        <section
+          className="space-y-2 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] p-3 text-[var(--sf-text)]"
+          aria-labelledby={`${shapeFieldId}-title`}
+        >
+          <h4 id={`${shapeFieldId}-title`} className="text-xs font-medium">Tile Collision Shape</h4>
+          <p id={`${shapeFieldId}-availability`} className="text-xs text-[var(--sf-text-secondary)]">
+            Authoring only. These stored shapes do not affect play physics yet.
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label htmlFor={`${shapeFieldId}-layer`} className="text-xs">Layer</label>
+              <Select
+                className="min-h-[44px] sm:min-h-0"
+                id={`${shapeFieldId}-layer`}
+                value={shapeLayer}
+                onChange={(event) => setShapeLayer(Number(event.target.value))}
+                options={tilemapData.layers.map((layer, index) => ({
+                  value: String(index),
+                  label: layer.name || `Layer ${index + 1}`,
+                }))}
+              />
+            </div>
+            <div>
+              <label htmlFor={`${shapeFieldId}-x`} className="text-xs">X</label>
+              <Input
+                className="min-h-[44px] sm:min-h-0"
+                id={`${shapeFieldId}-x`}
+                type="number"
+                value={shapeX}
+                onChange={(event) => setShapeX(event.target.value)}
+                min={0}
+                step={1}
+                max={Math.max(0, tilemapData.mapSize[0] - 1)}
+              />
+            </div>
+            <div>
+              <label htmlFor={`${shapeFieldId}-y`} className="text-xs">Y</label>
+              <Input
+                className="min-h-[44px] sm:min-h-0"
+                id={`${shapeFieldId}-y`}
+                type="number"
+                value={shapeY}
+                onChange={(event) => setShapeY(event.target.value)}
+                min={0}
+                step={1}
+                max={Math.max(0, tilemapData.mapSize[1] - 1)}
+              />
+            </div>
+          </div>
+          <Select
+            className="min-h-[44px] sm:min-h-0"
+            aria-label="Collision shape"
+            value={shapeValue}
+            onChange={(event) => {
+              if (isCollisionShape(event.target.value)) setShapeValue(event.target.value);
+            }}
+            options={TILE_COLLISION_SHAPES.map((shape) => ({ value: shape, label: COLLISION_SHAPE_LABELS[shape] }))}
+          />
+          <p className="text-xs text-[var(--sf-text-secondary)]">
+            {validShapeCell ? `Authored shape: ${COLLISION_SHAPE_LABELS[storedShape]}` : 'Choose a valid layer and whole-number tile coordinates.'}
+          </p>
+          <Button
+            type="button"
+            onClick={handleApplyCollisionShape}
+            disabled={!validShapeCell}
+            aria-describedby={`${shapeFieldId}-availability`}
+            size="sm"
+            className="w-full"
+          >
+            Apply Collision Shape
+          </Button>
+          {shapeFeedback?.entityId === primaryId && (
+            <p role={shapeFeedback.error ? 'alert' : 'status'} className="text-xs text-[var(--sf-text-secondary)]">
+              {shapeFeedback.message}
+            </p>
+          )}
+        </section>
 
         {/* Grid & Collision Preview */}
         <div className="space-y-2">

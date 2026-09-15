@@ -95,7 +95,7 @@ export const SCRIPT_ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
   // Tilemap — the engine's own names. `set_tile`/`clear_tiles`/`resize_tilemap`
   // used to sit here and none of the three has ever been an engine command
   // (PF-1181).
-  'paint_tile', 'erase_tile', 'fill_tiles',
+  'paint_tile', 'erase_tile', 'fill_tiles', 'set_tile_collision_shape',
   // Skeletal 2D
   'create_skeleton2d', 'add_bone2d', 'remove_bone2d', 'update_bone2d',
   'set_skeleton2d_skin', 'play_skeletal_animation2d',

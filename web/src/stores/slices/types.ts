@@ -322,12 +322,42 @@ export interface TilesetData {
   tiles: TileMetadata[];
 }
 
+/**
+ * Every collision shape, in picker order. This tuple is the single source of
+ * truth for the shape vocabulary: `CollisionShape` is derived from it, and the
+ * `set_tile_collision_shape` chat handler builds its Zod enum from it, so the
+ * command validation and the type cannot drift.
+ */
+export const TILE_COLLISION_SHAPES = [
+  'none',
+  'full',
+  'halfTop',
+  'halfBottom',
+  'slopeLeft',
+  'slopeRight',
+] as const;
+
+/**
+ * The collision silhouette of a single tile. Mirrors the engine's
+ * `CollisionShape` enum (`engine/src/core/tilemap.rs`); the wire strings are the
+ * single vocabulary shared by the `set_tile_collision_shape` engine command,
+ * its chat handler and the `forge.tilemap` script API.
+ */
+export type CollisionShape = (typeof TILE_COLLISION_SHAPES)[number];
+
 export interface TilemapLayer {
   name: string;
   tiles: (number | null)[];
   visible: boolean;
   opacity: number;
   isCollision: boolean;
+  /**
+   * Per-cell collision shape, parallel to `tiles`. Legacy scenes may omit this
+   * field; Rust serialization can emit an empty array. Both mean no shapes
+   * have been authored, and missing cell entries read as `none`. This metadata
+   * does not generate runtime colliders yet (#9814).
+   */
+  collisionShapes?: CollisionShape[];
 }
 
 export interface TilemapData {
@@ -353,6 +383,10 @@ export interface InputBinding {
   positiveKeys?: string[];     // For axis: positive direction keys
   negativeKeys?: string[];     // For axis: negative direction keys
   deadZone?: number;
+  // Local-player slot this binding belongs to (0 = the primary player). Absent
+  // means player 0, so a single-player scene's bindings and every caller that
+  // predates two-player support behave exactly as before (physics.FR-1.OP-04).
+  player?: number;
 }
 
 // Input preset names
