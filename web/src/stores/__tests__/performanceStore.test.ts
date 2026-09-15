@@ -34,8 +34,24 @@ describe('performanceStore', () => {
       },
       warnings: [],
       lodLevels: {},
+      manifest: null,
+      capturedReport: null,
     });
   });
+
+  const sampleManifest = {
+    schemaVersion: 1,
+    buildSha: 'abc12345',
+    fixtureChecksum: 'deadbeef',
+    os: 'macOS',
+    browserVersion: 'Chrome 140',
+    gpuDriver: 'unknown' as const,
+    backend: 'webgpu' as const,
+    viewport: { width: 1920, height: 1080, devicePixelRatio: 2 },
+    deviceMemory: 8,
+    cacheState: 'cold' as const,
+    sampleCount: 5,
+  };
 
   describe('Initial State', () => {
     it('should initialize with default stats', () => {
@@ -366,6 +382,114 @@ describe('performanceStore', () => {
       const state = usePerformanceStore.getState();
       // 500,001 > (500,000 * 1)
       expect(state.warnings).toContain('Triangle count approaching budget limit');
+    });
+  });
+
+  // Measurement manifest — operation performance.FR-3.OP-01 (#9904)
+  describe('setManifest (performance.FR-3.OP-01)', () => {
+    it('should initialize with a null manifest and no captured report', () => {
+      const state = usePerformanceStore.getState();
+      expect(state.manifest).toBeNull();
+      expect(state.capturedReport).toBeNull();
+    });
+
+    it('should set the manifest wholesale', () => {
+      usePerformanceStore.getState().setManifest(sampleManifest);
+      expect(usePerformanceStore.getState().manifest).toEqual(sampleManifest);
+    });
+  });
+
+  describe('updateManifest (performance.FR-3.OP-01)', () => {
+    it('should merge fields into an existing manifest without mutating unrelated state', () => {
+      const { setManifest, updateManifest } = usePerformanceStore.getState();
+      setManifest(sampleManifest);
+
+      const statsBefore = usePerformanceStore.getState().stats;
+      const budgetBefore = usePerformanceStore.getState().budget;
+
+      updateManifest({ cacheState: 'warm', sampleCount: 12 });
+
+      const state = usePerformanceStore.getState();
+      expect(state.manifest?.cacheState).toBe('warm');
+      expect(state.manifest?.sampleCount).toBe(12);
+      // Unrelated manifest fields untouched
+      expect(state.manifest?.backend).toBe('webgpu');
+      expect(state.manifest?.buildSha).toBe('abc12345');
+      // Unrelated store state untouched (same references)
+      expect(state.stats).toBe(statsBefore);
+      expect(state.budget).toBe(budgetBefore);
+    });
+
+    it('should not mutate the previous manifest object (immutability)', () => {
+      const { setManifest, updateManifest } = usePerformanceStore.getState();
+      setManifest(sampleManifest);
+      const first = usePerformanceStore.getState().manifest;
+
+      updateManifest({ sampleCount: 99 });
+      const second = usePerformanceStore.getState().manifest;
+
+      expect(second).not.toBe(first);
+      expect(first?.sampleCount).toBe(5); // original snapshot unchanged
+      expect(second?.sampleCount).toBe(99);
+    });
+
+    it('should create a complete versioned manifest when updated before capture', () => {
+      usePerformanceStore.getState().updateManifest({ backend: 'webgl2', sampleCount: 3 });
+      const state = usePerformanceStore.getState();
+      expect(state.manifest?.backend).toBe('webgl2');
+      expect(state.manifest?.sampleCount).toBe(3);
+      expect(state.manifest?.schemaVersion).toBe(1);
+      expect(state.manifest?.fixtureChecksum).toBe('unknown');
+      expect(state.manifest?.gpuDriver).toBe('unknown');
+      expect(state.manifest?.cacheState).toBe('unknown');
+      expect(Object.keys(state.manifest ?? {}).sort()).toEqual([
+        'backend', 'browserVersion', 'buildSha', 'cacheState', 'deviceMemory',
+        'fixtureChecksum', 'gpuDriver', 'os', 'sampleCount', 'schemaVersion', 'viewport',
+      ]);
+    });
+  });
+
+  describe('captureReport (performance.FR-3.OP-01)', () => {
+    it('should store the captured report and adopt its manifest', () => {
+      const report = {
+        stats: {
+          fps: 58,
+          frameTime: 17.2,
+          triangleCount: 12_000,
+          drawCalls: 40,
+          entityCount: 30,
+          memoryUsage: 128.5,
+          wasmHeapSize: 0,
+          gpuMemory: 0,
+        },
+        manifest: sampleManifest,
+        capturedAt: 1_700_000_000_000,
+      };
+
+      usePerformanceStore.getState().captureReport(report);
+
+      const state = usePerformanceStore.getState();
+      expect(state.capturedReport).toEqual(report);
+      expect(state.manifest).toEqual(sampleManifest);
+    });
+
+    it('should preserve unknown manifest fields as unknown, never as zero', () => {
+      const unknownManifest = {
+        ...sampleManifest,
+        deviceMemory: 'unknown' as const,
+        gpuDriver: 'unknown' as const,
+        backend: 'unknown' as const,
+      };
+      usePerformanceStore.getState().captureReport({
+        stats: usePerformanceStore.getState().stats,
+        manifest: unknownManifest,
+        capturedAt: 1,
+      });
+
+      const state = usePerformanceStore.getState();
+      expect(state.manifest?.deviceMemory).toBe('unknown');
+      expect(state.manifest?.deviceMemory).not.toBe(0);
+      expect(state.manifest?.backend).toBe('unknown');
     });
   });
 });

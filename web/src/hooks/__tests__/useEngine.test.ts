@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import {
   useEngine,
+  getActiveEngineBackend,
   resetEngine,
   recoverEngine,
   fetchWasmManifest,
@@ -123,6 +124,23 @@ describe('useEngine', () => {
     const { result } = renderHook(() => useEngine('forge-canvas'));
     expect(result.current.isReady).toBe(false);
     expect(result.current.error).toBeNull();
+  });
+
+  it('does not report the default backend when no engine is ready', () => {
+    expect(getActiveEngineBackend()).toBe('unknown');
+    resetEngine();
+    expect(getActiveEngineBackend()).toBe('unknown');
+  });
+
+  it('does not report a backend after loading fails', async () => {
+    window.__SKIP_ENGINE = true;
+    try {
+      const { result } = renderHook(() => useEngine('forge-canvas'));
+      await waitFor(() => expect(result.current.error).not.toBeNull());
+      expect(getActiveEngineBackend()).toBe('unknown');
+    } finally {
+      delete window.__SKIP_ENGINE;
+    }
   });
 
   it('returns a cleanup function from the loading useEffect', () => {
