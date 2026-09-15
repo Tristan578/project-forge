@@ -47,10 +47,43 @@ interface ClipNumberFieldProps {
   unit?: string;
   invalid?: boolean;
   disabled?: boolean;
-  onCommit: (v: number) => void;
+  /** Returns the accepted canonical value, or null when validation rejects it. */
+  onCommit: (v: number) => number | null;
 }
 
 function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invalid, disabled, onCommit }: ClipNumberFieldProps) {
+  const format = useCallback(
+    (v: number) => (!disabled && Number.isFinite(v) ? String(Number(v.toFixed(4))) : ''),
+    [disabled],
+  );
+  // The visible text is uncommitted local state: typing updates only the text,
+  // never the clip document. A committed value — an accepted edit, undo/redo, or
+  // a late decode — flows back through `value` and refreshes the field. This
+  // keeps every intermediate keystroke, including transiently invalid ones like a
+  // lone "-" while starting a negative gain, out of the undo history and away
+  // from the assertive validation alert until the edit is deliberately committed
+  // on blur or Enter.
+  const [text, setText] = useState(() => format(value));
+  const committedRef = useRef({ value, disabled });
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    if (!Object.is(committedRef.current.value, value) || committedRef.current.disabled !== disabled) {
+      committedRef.current = { value, disabled };
+      dirtyRef.current = false;
+      setText(format(value));
+    }
+  }, [value, disabled, format]);
+
+  const commit = useCallback(() => {
+    if (!dirtyRef.current || disabled) return;
+    dirtyRef.current = false;
+    const acceptedValue = onCommit(parseFloat(text));
+    // Use the command's canonical value immediately: `value` is stale until
+    // the parent re-renders, and snapping can accept an edit without changing
+    // that prop at all. A rejected edit returns to the unchanged stored value.
+    setText(format(acceptedValue ?? value));
+  }, [onCommit, text, value, disabled, format]);
+
   return (
     <div className="flex items-center gap-2">
       <label htmlFor={id} className="w-24 shrink-0 text-xs text-[var(--sf-text-secondary)]">
@@ -59,14 +92,29 @@ function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invali
       <Input
         id={id}
         type="number"
-        value={!disabled && Number.isFinite(value) ? Number(value.toFixed(4)) : ''}
+        value={text}
         min={min}
         max={max}
         step={step}
         disabled={disabled}
         error={invalid}
         aria-invalid={invalid ? true : undefined}
-        onChange={(e) => onCommit(parseFloat(e.target.value))}
+        onChange={(e) => {
+          dirtyRef.current = true;
+          setText(e.target.value);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            dirtyRef.current = false;
+            setText(format(value));
+          }
+        }}
         className={cn('min-w-0 flex-1 px-2 text-xs', invalid && 'ring-1 ring-[var(--sf-destructive)]')}
       />
       {unit && <span className="w-6 text-right text-[10px] text-[var(--sf-text-secondary)]">{unit}</span>}
@@ -171,7 +219,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
     };
   }, [asset, assetId]);
 
-  const apply = useCallback((result: CommandResult) => {
+  const apply = useCallback((result: CommandResult): AudioClipDocument | null => {
     if (result.ok) {
       historyRef.current.push(doc, result.data);
       setDoc(result.data);
@@ -182,6 +230,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
     } else {
       setErrors(result.errors);
     }
+    return result.ok ? result.data : null;
   }, [doc]);
 
   const onUndo = useCallback(() => {
@@ -303,7 +352,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
         max={bounds.durationSec}
         invalid={fieldInvalid('trimStartSec')}
         disabled={!boundsKnown}
-        onCommit={(v) => apply(setTrim(doc, { startSec: v, endSec: doc.trimEndSec }, bounds))}
+        onCommit={(v) => apply(setTrim(doc, { startSec: v, endSec: doc.trimEndSec }, bounds))?.trimStartSec ?? null}
       />
       <ClipNumberField
         id="clip-trim-end"
@@ -314,7 +363,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
         max={bounds.durationSec}
         invalid={fieldInvalid('trimEndSec')}
         disabled={!boundsKnown}
-        onCommit={(v) => apply(setTrim(doc, { startSec: doc.trimStartSec, endSec: v }, bounds))}
+        onCommit={(v) => apply(setTrim(doc, { startSec: doc.trimStartSec, endSec: v }, bounds))?.trimEndSec ?? null}
       />
       <ClipNumberField
         id="clip-gain"
@@ -326,7 +375,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
         max={MAX_GAIN_DB}
         invalid={fieldInvalid('gainDb')}
         disabled={!boundsKnown}
-        onCommit={(v) => apply(setGain(doc, { gainDb: v }))}
+        onCommit={(v) => apply(setGain(doc, { gainDb: v }))?.gainDb ?? null}
       />
       <ClipNumberField
         id="clip-fade-in"
@@ -337,7 +386,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
         max={windowLen}
         invalid={fieldInvalid('fadeInSec')}
         disabled={!boundsKnown}
-        onCommit={(v) => apply(setFade(doc, { fadeInSec: v, fadeOutSec: doc.fadeOutSec }, bounds))}
+        onCommit={(v) => apply(setFade(doc, { fadeInSec: v, fadeOutSec: doc.fadeOutSec }, bounds))?.fadeInSec ?? null}
       />
       <ClipNumberField
         id="clip-fade-out"
@@ -348,7 +397,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
         max={windowLen}
         invalid={fieldInvalid('fadeOutSec')}
         disabled={!boundsKnown}
-        onCommit={(v) => apply(setFade(doc, { fadeInSec: doc.fadeInSec, fadeOutSec: v }, bounds))}
+        onCommit={(v) => apply(setFade(doc, { fadeInSec: doc.fadeInSec, fadeOutSec: v }, bounds))?.fadeOutSec ?? null}
       />
       <ClipNumberField
         id="clip-loop-start"
@@ -359,7 +408,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
         max={doc.trimEndSec}
         invalid={fieldInvalid('loopStartSec')}
         disabled={!boundsKnown}
-        onCommit={(v) => apply(setLoop(doc, { loopStartSec: v, loopEndSec: doc.loopEndSec }, bounds))}
+        onCommit={(v) => apply(setLoop(doc, { loopStartSec: v, loopEndSec: doc.loopEndSec }, bounds))?.loopStartSec ?? null}
       />
       <ClipNumberField
         id="clip-loop-end"
@@ -370,7 +419,7 @@ export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
         max={doc.trimEndSec}
         invalid={fieldInvalid('loopEndSec')}
         disabled={!boundsKnown}
-        onCommit={(v) => apply(setLoop(doc, { loopStartSec: doc.loopStartSec, loopEndSec: v }, bounds))}
+        onCommit={(v) => apply(setLoop(doc, { loopStartSec: doc.loopStartSec, loopEndSec: v }, bounds))?.loopEndSec ?? null}
       />
 
       {errors.length > 0 && (

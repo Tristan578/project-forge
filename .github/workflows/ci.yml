@@ -67,6 +67,7 @@ jobs:
       needs-ghaw: ${{ steps.changes.outputs.ghaw }}
       needs-api: ${{ steps.changes.outputs.api }}
       needs-skills: ${{ steps.changes.outputs.skills }}
+      needs-observatory: ${{ steps.changes.outputs.observatory }}
       needs-any-code: ${{ steps.changes.outputs.any-code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,7 +78,7 @@ jobs:
       # push carries before/after, and workflow_dispatch has to merge-base
       # against the default branch. Extracted to a script because the failure
       # posture is the load-bearing part — an unresolvable range MUST fail the
-      # job, since an empty CHANGED sets all fourteen filters false, skips every
+      # job, since an empty CHANGED sets every path filter false, skips every
       # path-gated gate, and check-ci-success.sh tolerates legitimate skips.
       # That combination would render a green "CI Success" over a CI run that
       # executed nothing. Tested by scripts/__tests__/resolve-ci-diff-range.test.sh.
@@ -101,7 +102,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false
+          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
 
           # docs/capability-matrix.md is prose, but its ONLY gate is a web unit
           # test (web/src/lib/config/__tests__/capabilityMatrix.test.ts): the
@@ -226,6 +227,9 @@ jobs:
           # PR still runs the gate even when no route.ts changed.
           echo "$CHANGED" | grep -qE '^web/src/app/api/|^docs/api/openapi\.json$|^docs/api/openapi-internal-routes\.json$|^scripts/check-openapi-route-sync\.sh$|^scripts/__tests__/check-openapi-route-sync\.test\.sh$' && api=true
 
+          # Observatory unit/type checks stay independent of the heavy app/engine fan-out.
+          echo "$CHANGED" | grep -q '^tools/observatory/' && observatory=true
+
           any_code=false
           if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
             any_code=true
@@ -246,12 +250,13 @@ jobs:
             echo "ghaw=$ghaw"
             echo "api=$api"
             echo "skills=$skills"
+            echo "observatory=$observatory"
             echo "any-code=$any_code"
           } >> "$GITHUB_OUTPUT"
 
           echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills any-code=$any_code"
-          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ]; then
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills observatory=$observatory any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ] && [ "$observatory" = "false" ]; then
             echo "No relevant changes — downstream jobs will be skipped"
           fi
 
@@ -273,6 +278,33 @@ jobs:
     secrets: inherit
 
   # ---- CI-only checks ----
+
+  # Unit/type validation only; inventory-drift enforcement remains separate.
+  observatory-tests:
+    name: Observatory Tests
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-observatory == 'true' || needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-deps == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck Observatory
+        run: npx tsc --noEmit -p tools/observatory/tsconfig.json
+
+      - name: Test Observatory
+        run: npx vitest run --config tools/observatory/vitest.config.ts
 
   command-parity:
     name: MCP Command Parity
@@ -2186,6 +2218,7 @@ jobs:
       - ci-gate
       - quality-gates
       - command-parity
+      - observatory-tests
       - build-nextjs
       - docs-internal-gate
       - design-internal-gate

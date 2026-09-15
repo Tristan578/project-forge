@@ -28,7 +28,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { cachedGenerate } from './responseCache';
-import { runGenerationAgent, isGenerationAgentEnabled } from './generationAgent';
+import { runGenerationAgent, isGenerationAgentEnabled, GenerationTimeoutError } from './generationAgent';
 import {
   API_MAX_DURATION_STANDARD_GEN_S,
   deriveGenerationStepTimeoutMs,
@@ -190,7 +190,7 @@ export interface GenerationHandlerConfig<TParams, TResult> {
     tokenCost: number;
     /**
      * Abort signal wired to the generation agent's per-step wall-clock deadline.
-     * Only present when the USE_GENERATION_AGENT flag is on (otherwise undefined).
+     * Present when USE_GENERATION_AGENT or enforceRequestDeadline is enabled.
      * Routes SHOULD forward it to their provider client / `fetch` so a hung call
      * aborts deterministically before the function `maxDuration`. Optional and
      * additive: existing routes that ignore it are unaffected.
@@ -221,6 +221,13 @@ export interface GenerationHandlerConfig<TParams, TResult> {
    * derived against their real budget.
    */
   maxDurationSeconds?: number;
+
+  /**
+   * Always enforce the route budget, including time spent before the provider
+   * call, with the configured refund buffer reserved. Use for synchronous
+   * providers that can otherwise outlive the host when the agent flag is off.
+   */
+  enforceRequestDeadline?: boolean;
 
   /**
    * Durable server-side callback config (PF-906, #8816). When set AND QStash is
@@ -284,6 +291,7 @@ export function createGenerationHandler<TParams, TResult>(
     cacheKeyParams,
     cacheTtlSeconds,
     maxDurationSeconds = API_MAX_DURATION_STANDARD_GEN_S,
+    enforceRequestDeadline = false,
     asyncJob,
   } = config;
 
@@ -353,13 +361,18 @@ export function createGenerationHandler<TParams, TResult>(
     params: TParams,
     apiKey: string,
     ctx: { userId: string; tier: string; usageId: string | undefined; tokenCost: number },
+    requestDeadlineAt: number,
   ): Promise<TResult> => {
-    if (!useAgent) {
+    if (!useAgent && !enforceRequestDeadline) {
       return execute(params, apiKey, ctx);
+    }
+    const remainingMs = enforceRequestDeadline ? requestDeadlineAt - Date.now() : stepTimeoutMs;
+    if (remainingMs <= 0) {
+      return Promise.reject(new GenerationTimeoutError(stepTimeoutMs));
     }
     return runGenerationAgent<TResult>({
       step: ({ signal }) => execute(params, apiKey, { ...ctx, abortSignal: signal }),
-      timeoutMs: stepTimeoutMs,
+      timeoutMs: remainingMs,
     });
   };
 
@@ -372,6 +385,7 @@ export function createGenerationHandler<TParams, TResult>(
   // on every pre-generation rejection. The wrapper fails open and returns the
   // response by identity.
   return withGenerationMetrics(route, async (request: NextRequest, mctx): Promise<NextResponse> => {
+    const requestDeadlineAt = Date.now() + stepTimeoutMs;
     // 1. Authenticate
     const authResult = await authenticateRequest();
     if (!authResult.ok) {
@@ -562,7 +576,7 @@ export function createGenerationHandler<TParams, TResult>(
             if (usageId !== undefined) mctx.tokenCost = tokenCost;
 
             try {
-              const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
+              const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
               cacheMiss = { result: generated, usageId };
               return generated;
             } catch (err) {
@@ -655,7 +669,7 @@ export function createGenerationHandler<TParams, TResult>(
     }
 
     try {
-      const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost });
+      const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
       // Run the durable publish post-response (see cached path). Same asyncJob +
       // QStash gate so the dormant/non-async path never touches `after()`.
       const durableSubmission = asyncJob !== undefined && isQstashConfigured();

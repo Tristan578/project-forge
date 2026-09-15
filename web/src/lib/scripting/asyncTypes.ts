@@ -1,10 +1,10 @@
 // Async Channel Protocol — shared type definitions for worker ↔ main thread communication.
 // See: docs/plans/2026-03-09-async-channel-protocol-design.md
 
-export type AsyncChannel = 'physics' | 'audio' | 'ai' | 'asset' | 'animation' | 'multiplayer';
+export type AsyncChannel = 'physics' | 'audio' | 'ai' | 'asset' | 'animation' | 'multiplayer' | 'leaderboard';
 
 export const ASYNC_CHANNELS: readonly AsyncChannel[] = [
-  'physics', 'audio', 'ai', 'asset', 'animation', 'multiplayer',
+  'physics', 'audio', 'ai', 'asset', 'animation', 'multiplayer', 'leaderboard',
 ] as const;
 
 export interface AsyncRequest {
@@ -40,6 +40,10 @@ export const CHANNEL_CONFIGS: Record<AsyncChannel, ChannelConfig> = {
   ai:          { maxConcurrent: 3,  timeoutMs: 120_000, supportsProgress: true,  playModeOnly: false },
   asset:       { maxConcurrent: 4,  timeoutMs: 30_000,  supportsProgress: true,  playModeOnly: false },
   multiplayer: { maxConcurrent: 16, timeoutMs: 10_000,  supportsProgress: false, playModeOnly: true },
+  // Score submission and board reads are network round-trips gated to a live
+  // play session, mirroring multiplayer's shape. No progress: both calls are a
+  // single request, not a long-running generation.
+  leaderboard: { maxConcurrent: 8,  timeoutMs: 10_000,  supportsProgress: false, playModeOnly: true },
 };
 
 export const CHANNEL_ALLOWED_METHODS: Record<AsyncChannel, Set<string>> = {
@@ -49,4 +53,5 @@ export const CHANNEL_ALLOWED_METHODS: Record<AsyncChannel, Set<string>> = {
   ai:          new Set(['generateTexture', 'generateModel', 'generateSound', 'generateVoice', 'generateMusic']),
   asset:       new Set(['loadImage', 'loadModel']),
   multiplayer: new Set(['connect', 'disconnect', 'send', 'broadcast', 'getPlayers', 'onMessage']),
+  leaderboard: new Set(['submit', 'getTop']),
 };

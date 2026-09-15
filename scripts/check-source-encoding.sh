@@ -23,9 +23,37 @@
 # BINARY, so it can vanish from `git grep -I`, be skipped by linters, and fail
 # to render in code review.
 #
-# TAB and LF are legitimate. Nothing else in the C0 range is typed on purpose,
-# and anything genuinely needed is written as an escape (`\0`, `\t`) -- which is
+# TAB and LF are permitted. CR is also permitted in non-shell source files;
+# shell sources reject CR because it breaks execution. Other C0 bytes
+# are written as an escape (`\0`, `\t`) -- which is
 # what makes it reviewable. Hence no allowlist.
+#
+# WHY THIS GATE, AND NOT THE OTHER TWO OPTIONS (#9987)
+#
+# The run:-block backslash-n scan below was one of three directions #9987
+# weighed for stopping "verification steps that cannot fail". Recorded here so
+# the next person hitting this class does not re-derive the tradeoff:
+#
+#   (2) Extend this gate (implemented). The narrow mechanical win. The
+#       corruption is a single byte-exact signature, this gate already walks
+#       every tracked source file, so the marginal cost is one workflow-scoped
+#       pass -- and it runs in CI on every push with no human discipline
+#       required, which is exactly the property the ad-hoc yaml.safe_load / grep
+#       checks that let the bug through lacked. It lands regardless of the rest.
+#   (1) A general verify-* shell helper library (assert_no_literal_backslash_n,
+#       assert_yaml_step_command, ...). NOT done here. It is the broader fix and
+#       worth doing, but a larger surface (new library plus migrating the ad-hoc
+#       checks onto it) and, crucially, it only ever helps a check someone
+#       remembers to call -- it does not run unbidden in CI. Kept to its own
+#       change so this enforceable floor ships small and reviewable.
+#   (3) A lessons-learned entry with a Bash-command trigger in
+#       inject-lessons-learned.sh. NOT done here. It is cheap and complementary,
+#       but it WARNS a human before an action rather than failing an artifact,
+#       so it can never be the gate; and lessons 1 and 11 already carry the
+#       reasoning. Additive to an executable check, not a substitute for one.
+#
+# Net: (2) is the enforceable CI floor and belongs in the repo; (1) and (3) are
+# broader/advisory and are deferred to their own changes. Full framing: #9987.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +89,14 @@ fi
 
 scanned=0
 bad=0
+bad_run=0
+
+# Conservative additional heuristic for collapsed shell continuations in plain
+# workflow step run values. This does not parse all YAML or shell syntax:
+# quoted/anchored/flow YAML values are explicitly unexamined, and quoted shell
+# text (including command substitutions inside it) and heredoc bodies are opaque.
+# The current tree and focused mutation fixtures must remain clean.
+command -v perl >/dev/null 2>&1 || { echo "::error::check-source-encoding requires perl" >&2; exit 1; }
 
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -80,16 +116,189 @@ while IFS= read -r f; do
     while (/($re)/g) {
       printf("%s:%d:%d: control byte 0x%02X\n", $ARGV, $., pos($_), ord($1));
     }
-  ' "$f" 2>/dev/null)"
+  ' "$f")" || { echo "::error::control-byte scanner failed for $f" >&2; exit 1; }
   if [ -n "$hits" ]; then
     printf '%s\n' "$hits" >&2
     bad=1
   fi
+
+  # Additional bounded heuristic for supported workflow run text. Opaque
+  # YAML values and shell quoting are excluded, not claimed as validated.
+  case "$f" in
+    */.github/workflows/*.yml|*/.github/workflows/*.yaml|.github/workflows/*.yml|.github/workflows/*.yaml)
+      run_hits="$(perl -e '
+        # This is a conservative lexer, not a YAML or shell parser. Only plain
+        # step run keys and literal/folded scalars are examined. Quotes,
+        # comments, heredocs and opaque YAML scalars are not shell evidence.
+        my ($steps, $step, $block, $opaque) = (-1, -1, -1, -1);
+        my ($quote, $shell_opaque) = ("", 0);
+        my $body_indent;
+        my $folded = 0;
+        my $yaml_quote = "";
+        my $plain_run_continuation = 0;
+        my @heredocs;
+        my ($checked, $excluded) = (0, 0);
+        sub exclude {
+          my ($reason) = @_;
+          ++$excluded;
+          print STDERR "$ARGV:$.: unexamined run text: $reason\n";
+        }
+        sub reset_shell { $quote = ""; $shell_opaque = 0; @heredocs = (); }
+        sub scan_shell {
+          my ($line, $offset) = @_;
+          return if $shell_opaque;
+          if (@heredocs) {
+            my $body = $line;
+            $body =~ s/^\t+// if $heredocs[0][1];
+            shift @heredocs if $body eq $heredocs[0][0];
+            return;
+          }
+          for (my $i = 0; $i < length($line); ++$i) {
+            my $c = substr($line, $i, 1);
+            if ($quote ne "") {
+              if ($c eq "\\" && $quote ne chr(39)) { ++$i; next; }
+              $quote = "" if $c eq $quote;
+              next;
+            }
+            # A shell comment starts at a word boundary, not in foo#bar.
+            if ($c eq "#" && ($i == 0 || substr($line, $i-1, 1) =~ /[\s;|&()]/)) {
+              if ($folded) { exclude("folded scalar comment; remainder not examined"); $shell_opaque = 1; }
+              last;
+            }
+            if ($c eq chr(39) || $c eq "\"" || $c eq chr(96)) { $quote = $c; next; }
+            if (substr($line, $i, 2) eq "<<") {
+              # Here-strings are ordinary shell words, not heredocs.
+              if (substr($line, $i, 3) eq "<<<") { $i += 2; next; }
+              pos($line) = $i;
+              if ($line =~ /\G<<(-?)[ \t]*(?:\x27([^\x27]+)\x27|"([^"]+)"|([A-Za-z_][A-Za-z_0-9]*))(?=[ \t;|&)]|$)/gc) {
+                push @heredocs, [defined($2) ? $2 : defined($3) ? $3 : $4, $1 eq "-"];
+                $i = pos($line) - 1;
+                next;
+              }
+              exclude("unsupported heredoc delimiter; remainder of this run not examined");
+              $shell_opaque = 1;
+              return;
+            }
+            if ($c eq "\\") {
+              if ($i > 0 && substr($line, $i-1, 1) =~ /[ \t]/ && substr($line, $i+1, 1) eq "n") {
+                printf("%s:%d:%d: suspicious unquoted literal backslash-n in run text\n", $ARGV, $., $offset + $i + 1);
+              }
+              ++$i; # Escaped quote/backslash cannot change lexical state.
+            }
+          }
+        }
+        sub close_yaml_quote {
+          my ($text) = @_;
+          for (my $i = 0; $i < length($text); ++$i) {
+            my $c = substr($text, $i, 1);
+            if ($yaml_quote eq "\"" && $c eq "\\") { ++$i; next; }
+            if ($c eq $yaml_quote) {
+              if ($yaml_quote eq chr(39) && substr($text, $i+1, 1) eq chr(39)) { ++$i; next; }
+              $yaml_quote = "";
+              last;
+            }
+          }
+        }
+        while (my $l = <>) {
+          chomp $l;
+          $l =~ s/\r$//;
+          if ($yaml_quote ne "") { close_yaml_quote($l); next; }
+          my ($lead) = $l =~ /^([ ]*)/;
+          my $indent = length $lead;
+          if ($block >= 0) {
+            if ($l =~ /^[ \t]*$/ || $indent > $block) {
+              # YAML strips the common body indentation. Keep relative
+              # indentation so only exact heredoc terminators close a body.
+              if (!defined $body_indent && $l !~ /^[ \t]*$/) { $body_indent = $indent; }
+              my $cut = defined($body_indent) ? $body_indent : 0;
+              scan_shell(substr($l, $cut), $cut);
+              next;
+            }
+            $block = -1;
+          }
+          if ($opaque >= 0) {
+            if ($l =~ /^[ \t]*$/ || $indent > $opaque) {
+              if ($plain_run_continuation && $l !~ /^[ \t]*$/) {
+                exclude("multiline plain run continuation; folding not examined");
+                $plain_run_continuation = 0;
+              }
+              next;
+            }
+            $opaque = -1;
+            $plain_run_continuation = 0;
+          }
+          next if $l =~ /^[ \t]*(?:#.*)?$/;
+          if ($steps >= 0 && $indent <= $steps && $l !~ /^[ ]*-/) { $steps = -1; $step = -1; }
+          if ($l =~ /^([ ]*)steps:[ \t]*(?:#.*)?$/) {
+            $steps = length($1); $step = -1; next;
+          }
+          if ($steps >= 0 && $l =~ /^([ ]*)-[ \t]+/) {
+            my $candidate = length($1);
+            $step = $candidate if $step < 0;
+          }
+          my ($key, $value);
+          if ($steps >= 0 && $step >= 0) {
+            if ($l =~ /^([ ]*)-[ ]+run:[ \t]*(.*)$/ && length($1) == $step) {
+              $key = index($l, "run:"); $value = $2;
+            } elsif ($l =~ /^([ ]*)run:[ \t]*(.*)$/ && length($1) == $step + 2) {
+              $key = length($1); $value = $2;
+            }
+          }
+          if (defined $value) {
+            reset_shell();
+            $folded = 0;
+            if ($value =~ /^[|>](?:[+-]?[1-9]?|[1-9][+-]?)[ \t]*(?:#.*)?$/) {
+              $block = $key;
+              $folded = substr($value, 0, 1) eq ">";
+              $body_indent = undef;
+              ++$checked;
+              next;
+            }
+            if ($value eq "" || $value =~ /^[\x27"!&*{\[]/) {
+              exclude("quoted, empty, tagged, anchored or flow YAML value");
+              $opaque = $key;
+            } else {
+              ++$checked;
+              scan_shell($value, length($l) - length($value));
+              # Multiline plain YAML values require folding; do not guess.
+              $opaque = $key;
+              $plain_run_continuation = 1;
+            }
+          } elsif ($l =~ /(?:^|[ {,])(?:\x27run\x27|"run"|run)[ \t]*:/) {
+            exclude("run key outside the supported plain step mapping");
+          }
+          # Quoted YAML data may span physical lines regardless of apparent
+          # run/steps text inside it. Do not interpret that text as mappings.
+          if ($l =~ /:[ \t]*([\x27"])/) {
+            $yaml_quote = $1;
+            close_yaml_quote(substr($l, $+[0]));
+          }
+          # Any other block scalar is opaque YAML data. A run-looking line
+          # inside env values, descriptions or embedded documents is not a step.
+          if ($l =~ /:[ \t]*[|>](?:[+-]?[1-9]?|[1-9][+-]?)[ \t]*(?:#.*)?$/) {
+            $opaque = $indent;
+          }
+        }
+        print STDERR "$ARGV: examined $checked supported run value(s); $excluded unexamined form(s). Heuristic only; not full YAML/shell validation.\n";
+      ' "$f")" || { echo "::error::workflow scanner failed for $f" >&2; exit 1; }
+      if [ -n "$run_hits" ]; then
+        printf '%s\n' "$run_hits" >&2
+        bad_run=1
+      fi
+      ;;
+  esac
 done <<< "$files"
 
 if [ "$bad" -ne 0 ]; then
   echo "::error::check-source-encoding: control bytes found in tracked source (see above). These are invisible in normal output and survive lint, typecheck and tests. Write the character as a source escape instead of embedding the raw byte." >&2
+fi
+
+if [ "$bad_run" -ne 0 ]; then
+  printf '%s\n' "::error::check-source-encoding: suspicious unquoted literal backslash-n in supported run text (see above). Review for a collapsed shell continuation; use a real continuation or quote intentional literal text. This heuristic does not validate all YAML or shell forms." >&2
+fi
+
+if [ "$bad" -ne 0 ] || [ "$bad_run" -ne 0 ]; then
   exit 1
 fi
 
-echo "check-source-encoding: ${scanned} file(s) scanned, no control bytes outside TAB/LF"
+echo "check-source-encoding: ${scanned} file(s) scanned, no prohibited control bytes, no suspicious unquoted backslash-n in examined run text (unsupported forms reported separately)"
