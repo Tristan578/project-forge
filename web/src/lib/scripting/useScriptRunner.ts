@@ -10,6 +10,7 @@ import {
   createAssetHandler,
   createAudioHandler,
   createAnimationHandler,
+  createLeaderboardHandler,
 } from '@/lib/scripting/channels';
 import type { AsyncRequest } from '@/lib/scripting/asyncTypes';
 import { showError } from '@/lib/toast';
@@ -192,6 +193,12 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       router.register('multiplayer', async () => {
         throw new Error('Multiplayer is not yet available. This feature will be enabled in a future update.');
       });
+      // Leaderboard channel. The editor's test-play session carries no
+      // published-game identity — the editor store holds no clerk id or slug —
+      // and must never submit test scores to a real published board, so both
+      // are null here and the handler rejects with a clear reason. A published
+      // play host that runs the worker would supply the real userId/slug.
+      router.register('leaderboard', createLeaderboardHandler({ fetchJson, userId: null, slug: null }));
 
       routerRef.current = router;
 
@@ -472,6 +479,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         // The stale-previous-session case this used to guard is closed by the
         // stop and unmount clears below (PF-1214, review finding #8).
         groundedStates: getGroundedStates(),
+        // Localization: bundles + source/preview locale drive forge.i18n in the
+        // worker. previewLocale mirrors the editor's own text-preview locale.
+        locales: store.locales,
+        sourceLocale: store.sourceLocale,
+        previewLocale: store.previewLocale,
       });
 
       // Send scene info to worker

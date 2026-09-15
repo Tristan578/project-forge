@@ -2368,4 +2368,196 @@ describe('scriptWorker', () => {
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'set_skeleton2d_skin', entityId: 'e1', skinName: 'warrior' }));
     expect(cmds).toContainEqual(expect.objectContaining({ cmd: 'play_skeletal_animation2d', entityId: 'e1', animationName: 'walk' }));
   });
+
+  // ─── forge.i18n (synchronous, resolved against init locale bundles) ──────
+
+  const jaBundle = {
+    ja: { locale: 'ja', translations: { 'ui.start': 'スタート' } },
+    fr: { locale: 'fr', translations: { 'ui.start': 'Commencer' } },
+  };
+
+  it('forge.i18n.t returns the translation for the active (preview) locale', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() { forge.log('t:' + forge.i18n.t('ui.start', 'Start')); }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
+      locales: jaBundle,
+      sourceLocale: 'en',
+      previewLocale: 'ja',
+    }));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 't:スタート' }),
+    );
+  });
+
+  it('forge.i18n.t falls back to the default text when no translation exists', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() { forge.log('t:' + forge.i18n.t('ui.missing', 'Fallback')); }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
+      locales: jaBundle,
+      sourceLocale: 'en',
+      previewLocale: 'ja',
+    }));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 't:Fallback' }),
+    );
+  });
+
+  it('forge.i18n.t falls back to default text when no bundle exists for the active locale', async () => {
+    const handler = await setupWorker();
+    // No previewLocale → activeLocale is the source locale 'en', which has no bundle.
+    const code = `function onStart() { forge.log('t:' + forge.i18n.t('ui.start', 'Start')); }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
+      locales: jaBundle,
+      sourceLocale: 'en',
+      previewLocale: null,
+    }));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 't:Start' }),
+    );
+  });
+
+  it('forge.i18n.getLocale / setLocale round-trips and re-resolves t', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.log('loc0:' + forge.i18n.getLocale());
+      forge.i18n.setLocale('fr');
+      forge.log('loc1:' + forge.i18n.getLocale());
+      forge.log('t:' + forge.i18n.t('ui.start', 'Start'));
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
+      locales: jaBundle,
+      sourceLocale: 'en',
+      previewLocale: 'ja',
+    }));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'loc0:ja' }));
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'loc1:fr' }));
+    // After switching to 'fr', t resolves against the fr bundle.
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 't:Commencer' }));
+  });
+
+  it('forge.i18n.getAvailableLocales lists every stored bundle', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() { forge.log('locales:' + forge.i18n.getAvailableLocales().sort().join(',')); }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
+      locales: jaBundle,
+      sourceLocale: 'en',
+      previewLocale: 'ja',
+    }));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'locales:fr,ja' }),
+    );
+  });
+
+  it('forge.i18n.getLocale defaults to the source locale when no preview locale is set', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() { forge.log('loc:' + forge.i18n.getLocale()); }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }], {
+      locales: {},
+      sourceLocale: 'de',
+      previewLocale: null,
+    }));
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'loc:de' }),
+    );
+  });
+
+  // ─── forge.leaderboard (async — routes through the 'leaderboard' channel) ─
+
+  it('forge.leaderboard.submit posts an async_request on the leaderboard channel', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.leaderboard.submit('hs', 'Ada', 4200, { level: 7 });
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    const asyncMsg = mockPostMessage.mock.calls.find(
+      (c) => (c[0] as Record<string, unknown>)?.type === 'async_request',
+    );
+    expect(asyncMsg).toBeDefined();
+    const msg = asyncMsg![0] as Record<string, unknown>;
+    expect(msg.channel).toBe('leaderboard');
+    expect(msg.method).toBe('submit');
+    expect(msg.args).toEqual({ name: 'hs', playerName: 'Ada', score: 4200, metadata: { level: 7 } });
+  });
+
+  it('forge.leaderboard.submit resolves with the rank from the channel response', async () => {
+    const handler = await setupWorker();
+    const code = `async function onStart() {
+      const r = await forge.leaderboard.submit('hs', 'Ada', 4200);
+      forge.log('submitted:' + JSON.stringify(r));
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    const asyncMsg = mockPostMessage.mock.calls.find(
+      (c) => (c[0] as Record<string, unknown>)?.type === 'async_request',
+    );
+    const requestId = (asyncMsg![0] as Record<string, unknown>).requestId as string;
+
+    await handler({
+      data: {
+        type: 'tick',
+        dt: 0.016,
+        elapsed: 0.016,
+        entities: {},
+        asyncResponses: [{ requestId, status: 'ok', data: { rank: 3 } }],
+      },
+    });
+    // Flush the awaited microtask chain (real timers in this suite).
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'submitted:{"rank":3}' }),
+    );
+  });
+
+  it('forge.leaderboard.getTop posts an async_request and resolves with the entries', async () => {
+    const handler = await setupWorker();
+    const code = `async function onStart() {
+      const rows = await forge.leaderboard.getTop('hs', 5);
+      forge.log('top:' + JSON.stringify(rows));
+    }`;
+
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
+
+    const asyncMsg = mockPostMessage.mock.calls.find(
+      (c) => (c[0] as Record<string, unknown>)?.type === 'async_request',
+    );
+    const msg = asyncMsg![0] as Record<string, unknown>;
+    expect(msg.channel).toBe('leaderboard');
+    expect(msg.method).toBe('getTop');
+    expect(msg.args).toEqual({ name: 'hs', limit: 5 });
+
+    const requestId = msg.requestId as string;
+    const entries = [{ rank: 1, playerName: 'Ada', score: 9000, metadata: null, createdAt: 'x' }];
+    await handler({
+      data: {
+        type: 'tick',
+        dt: 0.016,
+        elapsed: 0.016,
+        entities: {},
+        asyncResponses: [{ requestId, status: 'ok', data: entries }],
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'log', message: 'top:' + JSON.stringify(entries) }),
+    );
+  });
 });

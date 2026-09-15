@@ -127,6 +127,15 @@ describe('saveProjectScenes — atomic write', () => {
     expect(loadProjectScenes()).toEqual(good);
   });
 
+  it('normalizes a stored numeric legacy version before the next save', () => {
+    const legacy = { ...makeProject('Legacy'), version: 1 };
+    localStorage.setItem('forge_project_scenes', JSON.stringify(legacy));
+    const loaded = loadProjectScenes();
+    expect(loaded.version).toBe('1.0');
+    expect(() => saveProjectScenes(loaded)).not.toThrow();
+    expect(loadProjectScenes()).toEqual(loaded);
+  });
+
   it('refuses a payload that cannot be serialized, leaving the prior value intact', () => {
     const good = makeProject('Level A');
     saveProjectScenes(good);

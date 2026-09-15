@@ -170,15 +170,15 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
       onClick={onClose}
     >
       <div
-        className="relative flex w-96 flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
+        className="relative flex w-96 flex-col rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
-          <h2 className="text-sm font-semibold text-zinc-200">Scenes</h2>
+        <div className="flex items-center justify-between border-b border-[var(--sf-border)] px-4 py-3">
+          <h2 className="text-sm font-semibold text-[var(--sf-text)]">Scenes</h2>
           <button
             onClick={onClose}
-            className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+            className="flex h-6 w-6 items-center justify-center rounded text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
             aria-label="Close scene browser"
           >
             <X size={14} />
@@ -199,7 +199,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
           className="flex max-h-80 flex-col gap-1 overflow-y-auto p-2"
         >
           {scenes.length === 0 && (
-            <p className="py-6 text-center text-xs text-zinc-400">No scenes yet. Create one below.</p>
+            <p className="py-6 text-center text-xs text-[var(--sf-text-secondary)]">No scenes yet. Create one below.</p>
           )}
           {scenes.map((scene) => {
             const isActive = scene.id === activeSceneId;
@@ -214,14 +214,14 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                 tabIndex={0}
                 onClick={() => handleSwitch(scene.id)}
                 onKeyDown={(e) => handleKeyDown(e, scene.id)}
-                className={`group flex cursor-pointer items-center gap-2 rounded px-3 py-2 text-sm transition-colors outline-none focus-visible:ring-1 focus-visible:ring-blue-500 ${
+                className={`group flex cursor-pointer items-center gap-2 rounded px-3 py-2 text-sm transition-colors outline-none focus-visible:ring-1 focus-visible:ring-[var(--sf-accent)] ${
                   isActive
-                    ? 'bg-blue-600/20 text-zinc-100'
-                    : 'text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100'
+                    ? 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text)]'
+                    : 'text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]'
                 }`}
               >
                 {/* Active indicator */}
-                <span className={`shrink-0 ${isActive ? 'text-blue-400' : 'text-transparent'}`} aria-hidden="true">
+                <span className={`shrink-0 ${isActive ? 'text-[var(--sf-accent)]' : 'text-transparent'}`} aria-hidden="true">
                   <CheckCircle2 size={13} />
                 </span>
 
@@ -229,27 +229,27 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                 <div className="min-w-0 flex-1">
                   <span className="truncate font-medium">{scene.name}</span>
                   {scene.isStartScene && (
-                    <span className="ml-2 rounded bg-zinc-700 px-1 py-0.5 text-xs text-zinc-400">start</span>
+                    <span className="ml-2 rounded bg-[var(--sf-bg-elevated)] px-1 py-0.5 text-xs text-[var(--sf-text-secondary)]">start</span>
                   )}
                   {isActive && (
-                    <span className="ml-2 text-xs text-zinc-400">{count} {count === 1 ? 'entity' : 'entities'}</span>
+                    <span className="ml-2 text-xs text-[var(--sf-text-secondary)]">{count} {count === 1 ? 'entity' : 'entities'}</span>
                   )}
                 </div>
 
                 {/* Actions */}
                 {isConfirming ? (
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <span className="text-xs text-red-400">Delete?</span>
+                    <span className="text-xs text-[var(--sf-text)]">Delete?</span>
                     <button
                       onClick={(e) => handleDeleteConfirm(scene.id, e)}
-                      className="rounded px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-900/40"
+                      className="rounded px-1.5 py-0.5 text-xs text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]"
                       aria-label={`Confirm delete ${scene.name}`}
                     >
                       Yes
                     </button>
                     <button
                       onClick={handleDeleteCancel}
-                      className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-700"
+                      className="rounded px-1.5 py-0.5 text-xs text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-elevated)]"
                       aria-label="Cancel delete"
                     >
                       No
@@ -259,7 +259,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity [.scene-row:hover_&]:opacity-100">
                     <button
                       onClick={(e) => handleDuplicate(scene.id, e)}
-                      className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+                      className="flex h-5 w-5 items-center justify-center rounded text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text-secondary)]"
                       aria-label={`Duplicate ${scene.name}`}
                       title="Duplicate scene"
                     >
@@ -267,7 +267,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                     </button>
                     <button
                       onClick={(e) => handleDeleteRequest(scene.id, e)}
-                      className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-red-400"
+                      className="flex h-5 w-5 items-center justify-center rounded text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
                       aria-label={`Delete ${scene.name}`}
                       title="Delete scene"
                     >
@@ -309,7 +309,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                       <span className="min-w-0 flex-1 truncate" title={cp.label}>{cp.label}</span>
                       {!isRestoreConfirming && !isDeleteConfirming && (
                         <span className="flex items-center gap-1">
-                          <Button size="sm" variant="ghost" className="min-w-8 px-2" disabled={busy}
+                          <Button size="sm" variant="ghost" className="min-w-[44px] px-2 sm:min-w-8" disabled={busy}
                             onClick={() => {
                               setDeleteCheckpointConfirmId(null);
                               setRestoreConfirmId(cp.id);
@@ -317,7 +317,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                             aria-label={`Restore ${cp.label}`}
                             title="Restore this checkpoint"
                           ><RotateCcw size={14} aria-hidden="true" /></Button>
-                          <Button size="sm" variant="ghost" className="min-w-8 px-2" disabled={busy}
+                          <Button size="sm" variant="ghost" className="min-w-[44px] px-2 sm:min-w-8" disabled={busy}
                             onClick={() => {
                               setRestoreConfirmId(null);
                               setDeleteCheckpointConfirmId(cp.id);
@@ -331,10 +331,10 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                     {isRestoreConfirming && (
                       <div className="mt-2 space-y-2">
                         <p id="checkpoint-restore-warning">
-                          Restoring this checkpoint replaces all scenes in the current project and discards newer unsaved work.
+                          Restoring this checkpoint replaces all scenes in the current project and discards newer unsaved work. Save a new checkpoint first if you want to keep your current work.
                         </p>
                         <div className="flex flex-wrap gap-2">
-                          <Button size="sm" variant="destructive" disabled={busy}
+                          <Button size="sm" variant="outline" disabled={busy}
                             onClick={() => handleRestoreCheckpoint(cp.id)}
                             aria-label={`Confirm restore ${cp.label}`}
                             aria-describedby="checkpoint-restore-warning"
@@ -349,7 +349,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                       <div className="mt-2 space-y-2">
                         <p id="checkpoint-delete-warning">Permanently delete this recovery checkpoint? This cannot be undone.</p>
                         <div className="flex flex-wrap gap-2">
-                          <Button size="sm" variant="destructive" disabled={busy}
+                          <Button size="sm" variant="outline" disabled={busy}
                             onClick={() => handleDeleteCheckpoint(cp.id)}
                             aria-label={`Confirm delete checkpoint ${cp.label}`}
                             aria-describedby="checkpoint-delete-warning"
@@ -368,11 +368,11 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-zinc-700 px-4 py-3">
+        <div className="border-t border-[var(--sf-border)] px-4 py-3">
           <button
             onClick={handleAdd}
             disabled={busy}
-            className="flex w-full items-center justify-center gap-1.5 rounded bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+            className="flex w-full items-center justify-center gap-1.5 rounded bg-[var(--sf-bg-elevated)] px-3 py-1.5 text-xs text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
             aria-label="Add new scene"
           >
             <Plus size={12} />

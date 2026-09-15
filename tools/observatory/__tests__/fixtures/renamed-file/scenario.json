@@ -1,0 +1,25 @@
+{
+  "description": "A file was renamed (lib/oldName.ts -> lib/newName.ts) and its capability ID namespace changed (lib.legacy -> lib.current). The alias table must keep identity stable: resolving the old ID yields the current one, and no broken-alias gap is produced.",
+  "coveredScopes": ["lib/"],
+  "files": ["lib/newName.ts", "lib/newName.test.ts"],
+  "rules": [
+    {
+      "capabilityId": "lib.current",
+      "domain": "lib",
+      "confidence": "reviewed",
+      "primaryOwner": "lib/newName.ts",
+      "own": ["lib/newName.ts", "lib/newName.test.ts"]
+    }
+  ],
+  "aliases": [{ "from": "lib.legacy", "to": "lib.current" }],
+  "expected": {
+    "trackedTotal": 2,
+    "ownedTotal": 2,
+    "excludedTotal": 0,
+    "unmappedTotal": 0,
+    "notYetCoveredTotal": 0,
+    "resolveFrom": "lib.legacy",
+    "resolveTo": "lib.current",
+    "gapCount": 0
+  }
+}

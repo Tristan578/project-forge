@@ -245,7 +245,7 @@ describe('SceneBrowser', () => {
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
     fireEvent.click(screen.getByLabelText('Restore pre-change'));
     expect(screen.getByLabelText('Confirm restore pre-change')).toHaveAccessibleDescription(
-      'Restoring this checkpoint replaces all scenes in the current project and discards newer unsaved work.'
+      'Restoring this checkpoint replaces all scenes in the current project and discards newer unsaved work. Save a new checkpoint first if you want to keep your current work.'
     );
     expect(mockRestoreCheckpoint).not.toHaveBeenCalled();
     // A confirm step guards the destructive restore.
