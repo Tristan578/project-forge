@@ -352,6 +352,46 @@ describe('add_ui_widget', () => {
     });
     expect(mockUpdateWidgetStyle).toHaveBeenCalledWith('s1', 'widget_1', style);
   });
+
+  // ui.FR-1.OP-01 — AI parity for layout constraints
+  it('normalizes a partial constraints payload into the full store shape', async () => {
+    await invokeHandler(uiBuilderHandlers, 'add_ui_widget', {
+      screenId: 's1',
+      type: 'button',
+      anchor: 'bottom_center',
+      constraints: { minWidth: 120, minHeight: 44 },
+    });
+    expect(mockUpdateWidget).toHaveBeenCalledWith('s1', 'widget_1', {
+      anchor: 'bottom_center',
+      constraints: {
+        offsetX: 0,
+        offsetY: 0,
+        minWidth: 120,
+        maxWidth: null,
+        minHeight: 44,
+        maxHeight: null,
+      },
+    });
+  });
+
+  it('rejects constraints whose minWidth exceeds maxWidth (actionable error, no mutation)', async () => {
+    const { result } = await invokeHandler(uiBuilderHandlers, 'add_ui_widget', {
+      screenId: 's1',
+      type: 'button',
+      constraints: { minWidth: 300, maxWidth: 100 },
+    });
+    expect(result.success).toBe(false);
+    expect(mockUpdateWidget).not.toHaveBeenCalled();
+  });
+
+  it('rejects a negative size bound', async () => {
+    const { result } = await invokeHandler(uiBuilderHandlers, 'add_ui_widget', {
+      screenId: 's1',
+      type: 'button',
+      constraints: { minWidth: -10 },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 // ===========================================================================
@@ -399,6 +439,46 @@ describe('update_ui_widget', () => {
       screenId: 's1',
       widgetId: 'w1',
     });
+    expect(mockUpdateWidget).not.toHaveBeenCalled();
+  });
+
+  // ui.FR-1.OP-01 — AI parity for layout constraints
+  it('updates constraints alongside anchor via the shared updateWidget contract', async () => {
+    await invokeHandler(uiBuilderHandlers, 'update_ui_widget', {
+      screenId: 's1',
+      widgetId: 'w1',
+      anchor: 'top_right',
+      constraints: { offsetX: -16, offsetY: 16 },
+    });
+    expect(mockUpdateWidget).toHaveBeenCalledWith('s1', 'w1', {
+      anchor: 'top_right',
+      constraints: {
+        offsetX: -16,
+        offsetY: 16,
+        minWidth: null,
+        maxWidth: null,
+        minHeight: null,
+        maxHeight: null,
+      },
+    });
+  });
+
+  it('clears constraints back to null when passed constraints: null', async () => {
+    await invokeHandler(uiBuilderHandlers, 'update_ui_widget', {
+      screenId: 's1',
+      widgetId: 'w1',
+      constraints: null,
+    });
+    expect(mockUpdateWidget).toHaveBeenCalledWith('s1', 'w1', { constraints: null });
+  });
+
+  it('rejects an invalid min/max height pair without mutating', async () => {
+    const { result } = await invokeHandler(uiBuilderHandlers, 'update_ui_widget', {
+      screenId: 's1',
+      widgetId: 'w1',
+      constraints: { minHeight: 200, maxHeight: 50 },
+    });
+    expect(result.success).toBe(false);
     expect(mockUpdateWidget).not.toHaveBeenCalled();
   });
 });

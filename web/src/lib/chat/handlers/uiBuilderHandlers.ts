@@ -10,6 +10,44 @@ import { parseArgs } from './types';
 const zScreenPreset = z.enum(['blank', 'hud', 'main_menu', 'pause_menu', 'game_over', 'inventory', 'dialog']);
 const zWidgetType = z.enum(['text', 'image', 'button', 'progress_bar', 'panel', 'grid', 'scroll_view', 'slider', 'toggle', 'minimap']);
 
+/**
+ * Responsive layout constraints (ui.FR-1.OP-01). Mirrors the manual property
+ * panel so the in-app AI path writes the SAME validated data contract: pixel
+ * offsets from the anchor and non-negative pixel size bounds. A `min > max`
+ * pair is rejected with an actionable error rather than silently producing a
+ * collapsed/empty widget.
+ */
+const zBound = z.number().min(0, 'size bounds must be >= 0 px').nullable().optional();
+const zConstraints = z
+  .object({
+    offsetX: z.number().optional(),
+    offsetY: z.number().optional(),
+    minWidth: zBound,
+    maxWidth: zBound,
+    minHeight: zBound,
+    maxHeight: zBound,
+  })
+  .refine(
+    (c) => c.minWidth == null || c.maxWidth == null || c.minWidth <= c.maxWidth,
+    { message: 'minWidth cannot exceed maxWidth' }
+  )
+  .refine(
+    (c) => c.minHeight == null || c.maxHeight == null || c.minHeight <= c.maxHeight,
+    { message: 'minHeight cannot exceed maxHeight' }
+  );
+
+/** Fill a partial constraints payload into a complete, store-shaped object. */
+function fullConstraints(c: z.infer<typeof zConstraints>) {
+  return {
+    offsetX: c.offsetX ?? 0,
+    offsetY: c.offsetY ?? 0,
+    minWidth: c.minWidth ?? null,
+    maxWidth: c.maxWidth ?? null,
+    minHeight: c.minHeight ?? null,
+    maxHeight: c.maxHeight ?? null,
+  };
+}
+
 export const uiBuilderHandlers: Record<string, ToolHandler> = {
   create_ui_screen: async (args, _ctx) => {
     const p = parseArgs(z.object({
@@ -90,6 +128,7 @@ export const uiBuilderHandlers: Record<string, ToolHandler> = {
       width: z.number().optional(),
       height: z.number().optional(),
       anchor: z.string().optional(),
+      constraints: zConstraints.optional(),
       parentWidgetId: z.string().optional(),
       config: z.record(z.string(), z.unknown()).optional(),
       style: z.record(z.string(), z.unknown()).optional(),
@@ -107,6 +146,7 @@ export const uiBuilderHandlers: Record<string, ToolHandler> = {
     if (p.data.width) updates.width = p.data.width;
     if (p.data.height) updates.height = p.data.height;
     if (p.data.anchor) updates.anchor = p.data.anchor;
+    if (p.data.constraints) updates.constraints = fullConstraints(p.data.constraints);
     if (p.data.parentWidgetId) updates.parentWidgetId = p.data.parentWidgetId;
     if (p.data.config) updates.config = p.data.config;
     if (p.data.style) uiStore.updateWidgetStyle(p.data.screenId, widgetId, p.data.style as Record<string, unknown>);
@@ -124,6 +164,7 @@ export const uiBuilderHandlers: Record<string, ToolHandler> = {
       width: z.number().optional(),
       height: z.number().optional(),
       anchor: z.string().optional(),
+      constraints: zConstraints.nullable().optional(),
       visible: z.boolean().optional(),
       config: z.record(z.string(), z.unknown()).optional(),
       style: z.record(z.string(), z.unknown()).optional(),
@@ -134,6 +175,11 @@ export const uiBuilderHandlers: Record<string, ToolHandler> = {
     const updates: Record<string, unknown> = {};
     for (const key of ['name', 'x', 'y', 'width', 'height', 'anchor', 'visible', 'config'] as const) {
       if (p.data[key] !== undefined) updates[key] = p.data[key];
+    }
+    // `constraints: null` clears them (back to pure percentage/anchor); an object
+    // is normalized into the full store shape.
+    if (p.data.constraints !== undefined) {
+      updates.constraints = p.data.constraints === null ? null : fullConstraints(p.data.constraints);
     }
     if (Object.keys(updates).length > 0) uiStore.updateWidget(p.data.screenId, p.data.widgetId, updates);
     if (p.data.style) uiStore.updateWidgetStyle(p.data.screenId, p.data.widgetId, p.data.style as Record<string, unknown>);
