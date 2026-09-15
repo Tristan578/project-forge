@@ -110,7 +110,7 @@ describe('saveProjectScenes — atomic write', () => {
 
     const missingName = {
       ...makeProject('Level B'),
-      scenes: [{ id: 'scene_1', isStartScene: true, data: null, createdAt: '', updatedAt: '' }],
+      scenes: [{ id: 'scene_1', isStartScene: true, data: null, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
     } as unknown as ProjectScenes;
     expect(() => saveProjectScenes(missingName)).toThrow(/validation/i);
 
@@ -129,9 +129,11 @@ describe('saveProjectScenes — atomic write', () => {
 
   it('normalizes a stored numeric legacy version before the next save', () => {
     const legacy = { ...makeProject('Legacy'), version: 1 };
-    localStorage.setItem('forge_project_scenes', JSON.stringify(legacy));
+    const originalBytes = JSON.stringify(legacy);
+    localStorage.setItem(SCENES_STORAGE_KEY, originalBytes);
     const loaded = loadProjectScenes();
-    expect(loaded.version).toBe('1.0');
+    expect(loaded).toEqual({ ...legacy, version: '1.0' });
+    expect(localStorage.getItem(SCENES_STORAGE_KEY)).toBe(originalBytes);
     expect(() => saveProjectScenes(loaded)).not.toThrow();
     expect(loadProjectScenes()).toEqual(loaded);
   });
@@ -238,6 +240,7 @@ describe('checkpoints — create/list/restore round-trip', () => {
       Record<string, unknown>
     >;
     stored.push({
+      ...good,
       id: 'ckpt_damaged',
       label: 'damaged',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -245,8 +248,10 @@ describe('checkpoints — create/list/restore round-trip', () => {
     });
     localStorage.setItem(CHECKPOINTS_STORAGE_KEY, JSON.stringify(stored));
 
+    const savedBytes = localStorage.getItem(CHECKPOINTS_STORAGE_KEY);
     const list = listCheckpoints();
     expect(list.map((c) => c.id)).toEqual([good.id]);
+    expect(localStorage.getItem(CHECKPOINTS_STORAGE_KEY)).toBe(savedBytes);
   });
 });
 

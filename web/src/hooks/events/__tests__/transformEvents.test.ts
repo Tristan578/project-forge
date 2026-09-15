@@ -20,8 +20,11 @@ vi.mock('@/lib/audio/entityAudioGraph', () => ({
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
-import { releaseEntityAudio } from '@/lib/audio/entityAudioGraph';
+import { releaseEntityAudio, resetEntityAudioGraphForScene } from '@/lib/audio/entityAudioGraph';
 import { handleTransformEvent } from '../transformEvents';
+import * as autoSave from '@/lib/storage/autoSave';
+import { CHECKPOINT_EXPORT_PREFIX, SCENE_LOADED_EVENT } from '@/lib/scenes/checkpointRecovery';
+import { SCENE_EXPORTED_EVENT } from '@/lib/engine/sceneExportWire';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import {
   readEntityObservation,
@@ -632,6 +635,33 @@ describe('handleTransformEvent', () => {
   });
 
   describe('SCENE_EXPORTED', () => {
+    it('forwards checkpoint exports without overwriting recovery or autosave state', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as unknown as StoreState);
+      localStorage.setItem('forge:autosave', 'previous autosave');
+      sessionStorage.setItem('forge:scene-last-json', 'previous recovery');
+      const storageWrite = vi.spyOn(Storage.prototype, 'setItem');
+      const cacheWrite = vi.spyOn(autoSave, 'setLastExportedScene');
+      const receive = vi.fn();
+      window.addEventListener(SCENE_EXPORTED_EVENT, receive);
+      const payload = { json: '{"entities":[]}', name: 'Recovery candidate', requestId: CHECKPOINT_EXPORT_PREFIX + 'capture-42' };
+      try {
+        expect(handleTransformEvent('SCENE_EXPORTED', payload, mockSetGet.set, mockSetGet.get)).toBe(true);
+        expect(receive).toHaveBeenCalledTimes(1);
+        expect(receive).toHaveBeenCalledWith(expect.objectContaining({ detail: payload }));
+        expect(storageWrite).not.toHaveBeenCalled();
+        expect(cacheWrite).not.toHaveBeenCalled();
+        expect(useEditorStore.setState).not.toHaveBeenCalled();
+        expect(localStorage.getItem('forge:autosave')).toBe('previous autosave');
+        expect(sessionStorage.getItem('forge:scene-last-json')).toBe('previous recovery');
+      } finally {
+        window.removeEventListener(SCENE_EXPORTED_EVENT, receive);
+        storageWrite.mockRestore();
+        cacheWrite.mockRestore();
+        localStorage.clear();
+        sessionStorage.clear();
+      }
+    });
+
     it('dispatches forge:scene-exported DOM event', () => {
       const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
@@ -824,6 +854,31 @@ describe('handleTransformEvent', () => {
   describe('SCENE_LOADED', () => {
     beforeEach(() => {
       clearStagedSceneAudio();
+    });
+
+    it('notifies checkpoint recovery only after scene metadata and audio are adopted', () => {
+      stageSceneAudio(JSON.stringify({
+        entities: [{ entityId: 'speaker', audioData: { assetId: 'incoming-audio', bus: 'music' } }],
+      }));
+      const receive = vi.fn(() => ({
+        stateWrites: [...vi.mocked(useEditorStore.setState).mock.calls],
+        audioReset: vi.mocked(resetEntityAudioGraphForScene).mock.calls.length,
+      }));
+      window.addEventListener(SCENE_LOADED_EVENT, receive);
+      try {
+        expect(handleTransformEvent('SCENE_LOADED', { name: 'Confirmed scene' }, mockSetGet.set, mockSetGet.get)).toBe(true);
+        expect(receive).toHaveBeenCalledTimes(1);
+        expect(receive.mock.results[0].value).toEqual({
+          stateWrites: [[expect.objectContaining({
+            sceneName: 'Confirmed scene',
+            sceneModified: false,
+            entityAudio: { speaker: expect.objectContaining({ assetId: 'incoming-audio', bus: 'music' }) },
+          })]],
+          audioReset: 1,
+        });
+      } finally {
+        window.removeEventListener(SCENE_LOADED_EVENT, receive);
+      }
     });
 
     it('resets scene state via setState', () => {
