@@ -530,8 +530,10 @@ describe('switch_scene', () => {
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toContain('Switched');
     expect(mockSwitchScene).toHaveBeenCalledWith(baseProject, 'scene_2');
-    // A rejected switch target must not strand the outgoing scene (#10056).
-    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData), { rejectionStrandsEditor: false });
+    // A rejected switch target must not strand the outgoing scene (#10056),
+    // but a THROWN dispatch must (`strandOnThrow: true`) so saving locks over
+    // a viewport the throw may have wrecked (#10079).
+    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData), { rejectionStrandsEditor: false, strandOnThrow: true });
     expect(store.setScenes).toHaveBeenCalled();
   });
 
@@ -690,8 +692,16 @@ describe('switch_scene', () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('unexpectedly');
-    expect(store.loadScene).toHaveBeenCalled();
+    // The message must tell the user to reload rather than claim the scene is
+    // unchanged: a thrown dispatch can have wrecked the viewport, and the real
+    // store's `loadScene` sets `sceneLoadError(ENGINE_LOAD_THREW)` before
+    // rethrowing so saving is already locked (#10079).
+    expect(result.error).toContain('Reload the editor');
+    expect(result.error).not.toContain('unchanged');
+    expect(store.loadScene).toHaveBeenCalledWith(
+      JSON.stringify(sceneData),
+      { rejectionStrandsEditor: false, strandOnThrow: true },
+    );
     // The pre-switch (outgoing) project is persisted rather than discarded.
     expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
   });
