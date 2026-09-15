@@ -1,10 +1,11 @@
 import { type HTMLAttributes, type ReactNode } from "react";
 export type InlineAlertVariant = "warning" | "error" | "info";
-export interface InlineAlertProps extends HTMLAttributes<HTMLDivElement> {
+export interface InlineAlertProps extends Omit<HTMLAttributes<HTMLDivElement>, "role"> {
     /**
      * Severity of the notice. Drives both colour tokens and the ARIA role:
      * `error` is assertive (`role="alert"`); `warning` and `info` are polite
-     * (`role="status"`).
+     * (`role="status"`). `role` itself is not a prop — it is always derived
+     * from `variant` and cannot be overridden.
      */
     variant?: InlineAlertVariant;
     children: ReactNode;

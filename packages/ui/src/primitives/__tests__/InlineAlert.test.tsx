@@ -44,9 +44,14 @@ describe('InlineAlert', () => {
 
   it('derives the role from variant even when a role prop is passed', () => {
     // The severity contract is authoritative; a caller cannot downgrade an
-    // error to a polite status by spreading a role.
+    // error to a polite status by spreading a role. `role` is intentionally
+    // not part of InlineAlertProps (#9726 review), so a caller can only get
+    // one in here by widening the type — exercise that runtime guarantee via
+    // an untyped spread rather than a direct prop, matching how a JS caller
+    // (or one with an `any`-typed value) would actually hit this path.
+    const overrides = { role: 'status' } as Record<string, string>;
     render(
-      <InlineAlert variant="error" role="status">
+      <InlineAlert variant="error" {...overrides}>
         Enforced
       </InlineAlert>,
     );
