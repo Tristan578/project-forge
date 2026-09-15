@@ -13,8 +13,8 @@
     "@spawnforge/ui": "file:./vendored/spawnforge-ui",
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
@@ -23,8 +23,8 @@
     "@storybook/react": "^10.6.0",
     "@storybook/react-vite": "^10.6.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "chromatic": "^18.7.2",
+    "chromatic": "^18.8.1",
     "storybook": "^10.4.6",
-    "vite": "^8.2.2"
+    "vite": "^8.3.0"
   }
 }
