@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Button } from '@spawnforge/ui';
 import type { HealthReport, ServiceHealth } from '@/lib/monitoring/healthChecks';
 import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
 import { ServiceStatusCard } from './ServiceStatusCard';
@@ -66,18 +67,22 @@ function fromWireReport(wire: WireReport): HealthReport {
   };
 }
 
+// The status-colour semantic (PF-1068 / #9108) lives in
+// `packages/ui/src/tokens/` as verified foreground/background PAIRS — the whole
+// point of the token is that its contrast is proven once (themes.test.ts) rather
+// than re-derived at each raw literal. The banner puts normal-weight copy (the
+// `environment • version` sub-line) on the background, so both halves must clear
+// AA 4.5:1; the tokens do (healthy 5.02, degraded 10.95, down 6.47, unknown 7.73).
 function overallBannerClass(overall: HealthReport['overall']): string {
   switch (overall) {
     case 'healthy':
-      // green-700, not green-600: white on #16a34a is ~3.6:1, under the 4.5:1
-      // WCAG AA minimum for this text size. #15803d clears it at ~4.8:1.
-      return 'bg-green-700 text-white';
+      return 'bg-[var(--sf-status-healthy-bg)] text-[var(--sf-status-healthy-fg)]';
     case 'degraded':
-      return 'bg-yellow-500 text-black';
+      return 'bg-[var(--sf-status-degraded-bg)] text-[var(--sf-status-degraded-fg)]';
     case 'down':
-      return 'bg-red-600 text-white';
+      return 'bg-[var(--sf-status-down-bg)] text-[var(--sf-status-down-fg)]';
     default:
-      return 'bg-zinc-600 text-white';
+      return 'bg-[var(--sf-status-unknown-bg)] text-[var(--sf-status-unknown-fg)]';
   }
 }
 
@@ -149,22 +154,22 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
     // "Unknown Status" here would be worse than saying nothing, because this
     // page is what people trust during a real incident.
     return (
-      <div className="min-h-screen bg-zinc-900 text-zinc-100">
-        <div className="bg-zinc-700 px-4 py-6 text-center text-white">
+      <div className="min-h-screen bg-[var(--sf-bg-app)] text-[var(--sf-text)]">
+        <div className="bg-[var(--sf-bg-elevated)] px-4 py-6 text-center text-[var(--sf-text)]">
           <h1 className="text-2xl font-bold">Checking Service Status</h1>
         </div>
         <div className="mx-auto max-w-5xl px-4 py-6">
-          <p role="status" aria-live="polite" className="text-center text-sm text-zinc-400">
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-center text-sm text-[var(--sf-text-secondary)]"
+          >
             Loading the latest service status&hellip;
           </p>
           <div className="mt-6 text-center">
-            <button
-              onClick={() => void fetchReport()}
-              disabled={refreshing}
-              className="rounded-md bg-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
+            <Button variant="outline" size="sm" onClick={() => void fetchReport()} disabled={refreshing}>
               Retry
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -172,7 +177,7 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-900 text-zinc-100">
+    <div className="min-h-screen bg-[var(--sf-bg-app)] text-[var(--sf-text)]">
       {/* Overall status banner */}
       {/*
         The 30s poll swaps this banner's text without any user action, so it has
@@ -197,22 +202,18 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
         {/* Header row */}
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-zinc-100">Service Status</h2>
-            <p className="mt-0.5 text-sm text-zinc-400">
+            <h2 className="text-lg font-semibold text-[var(--sf-text)]">Service Status</h2>
+            <p className="mt-0.5 text-sm text-[var(--sf-text-secondary)]">
               Last updated: {new Date(report.timestamp).toLocaleString()}
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-zinc-400">
+            <span className="text-sm text-[var(--sf-text-secondary)]">
               {refreshing ? 'Refreshing...' : `Refreshes in ${secondsUntilRefresh}s`}
             </span>
-            <button
-              onClick={() => void fetchReport()}
-              disabled={refreshing}
-              className="rounded-md bg-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
+            <Button variant="outline" size="sm" onClick={() => void fetchReport()} disabled={refreshing}>
               Refresh
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -227,7 +228,7 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
         </div>
 
         {/* Footer */}
-        <p className="mt-8 text-center text-xs text-zinc-400">
+        <p className="mt-8 text-center text-xs text-[var(--sf-text-secondary)]">
           SpawnForge Health Dashboard &bull; Auto-refreshes every 30 seconds
         </p>
       </div>
