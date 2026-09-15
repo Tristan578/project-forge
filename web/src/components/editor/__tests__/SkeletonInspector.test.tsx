@@ -747,21 +747,57 @@ describe('SkeletonInspector', () => {
     expect(Object.keys(payload.skins.default.attachments)).toHaveLength(0);
   });
 
-  it('closes the open draft when the attachment being edited is deleted', () => {
+  it('closes the open draft when deleting the attachment being edited is confirmed', async () => {
     // The `meshDraft?.original === name` branch: deleting the attachment whose
-    // draft is open must clear that draft, not leave a stale editor pointing at
-    // a slot that no longer exists.
+    // draft is open discards those unsaved edits, so — like switching targets
+    // or adding a new attachment — it is gated behind the same confirm dialog
+    // rather than clearing silently (#9732).
+    mockConfirm.mockResolvedValueOnce(true);
     setupStore({ skeleton: skeletonWithMesh });
     render(<SkeletonInspector entityId="entity-1" />);
     fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
     expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Delete mesh attachment cloak'));
-    expect(mockSetSkeleton2d).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(mockSetSkeleton2d).toHaveBeenCalledTimes(1);
+    });
+    expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
     const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
     expect(payload.skins.default.attachments).not.toHaveProperty('cloak');
     // The draft editor (its "Mesh: cloak" header) is gone; the list entry
     // "cloak (2 verts)" is derived from the mocked store and is unaffected here.
-    expect(screen.queryByText('Mesh: cloak')).not.toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Mesh: cloak')).not.toBeInTheDocument();
+    });
+  });
+
+  it('keeps the open draft and does not delete when the discard is declined', async () => {
+    // A declined confirm must leave both the attachment and the draft intact —
+    // the destructive delete never reaches the store (#9732).
+    mockConfirm.mockResolvedValueOnce(false);
+    setupStore({ skeleton: skeletonWithMesh });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Delete mesh attachment cloak'));
+    await vi.waitFor(() => {
+      expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
+    });
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+    expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+  });
+
+  it('deletes an attachment with no confirmation when no draft is open for it', () => {
+    // Deleting an attachment that is not the currently open draft (or when no
+    // draft is open at all) must not prompt — there is nothing of that draft's
+    // to discard.
+    setupStore({ skeleton: skeletonWithMesh });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Delete mesh attachment cloak'));
+    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(mockSetSkeleton2d).toHaveBeenCalledTimes(1);
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.skins.default.attachments).not.toHaveProperty('cloak');
   });
 
   it('shows the duplicate-name error and opens no draft when the name already exists', () => {
