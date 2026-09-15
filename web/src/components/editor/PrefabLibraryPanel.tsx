@@ -227,7 +227,7 @@ export function PrefabLibraryPanel() {
         </span>
         {instances.length === 0 ? (
           <p className="text-[10px] text-zinc-500">
-            No linked instances yet — use Create Instance above.
+            No linked instances yet — use Add Linked Instance above.
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
