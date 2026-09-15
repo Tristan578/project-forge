@@ -129,6 +129,8 @@ describe('POST /api/generate/pacing — gateway vs. direct backend selection (#9
     expect(createGatewayMock).not.toHaveBeenCalled();
     const model = generateText.mock.calls[0][0].model as { __backend: string };
     expect(model.__backend).toBe('anthropic');
+    // The analytics label must match the backend that actually served the call.
+    expect(captureAiGeneration.mock.calls[0][0].provider).toBe('anthropic');
   });
 
   it('uses the AI SDK gateway client when the resolved key is AI_GATEWAY_API_KEY', async () => {
@@ -142,5 +144,8 @@ describe('POST /api/generate/pacing — gateway vs. direct backend selection (#9
     // Gateway model ids are namespaced ('anthropic/<model>'), never the bare
     // canonical id a direct Anthropic client expects.
     expect(model.__model).toBe('anthropic/claude-haiku-4-5');
+    // Gateway-routed generations must be labeled 'gateway' in $ai_generation,
+    // not the hardcoded 'anthropic' (#9523 delta review).
+    expect(captureAiGeneration.mock.calls[0][0].provider).toBe('gateway');
   });
 });

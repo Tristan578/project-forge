@@ -116,7 +116,8 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
     // See localize/route.ts: the 'chat' capability's platform path resolves
     // AI_GATEWAY_API_KEY (#9523), which needs the SDK's gateway client and
     // gateway-format model id, not a direct `createAnthropic` client.
-    const languageModel: LanguageModel = isGatewayApiKey(apiKey)
+    const usingGateway = isGatewayApiKey(apiKey);
+    const languageModel: LanguageModel = usingGateway
       ? createGateway({ apiKey })(vercelGatewayBackend.resolveModelId(AI_MODEL_FAST))
       : createAnthropic({ apiKey })(AI_MODEL_FAST);
     const startedAt = Date.now();
@@ -136,7 +137,7 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
       consented,
       traceId: usageId ?? crypto.randomUUID(),
       model: AI_MODEL_FAST,
-      provider: 'anthropic',
+      provider: usingGateway ? 'gateway' : 'anthropic',
       inputTokens: aiResult.usage?.inputTokens,
       outputTokens: aiResult.usage?.outputTokens,
       latencySeconds: (Date.now() - startedAt) / 1000,

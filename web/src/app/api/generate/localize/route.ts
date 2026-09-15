@@ -130,7 +130,8 @@ const POST_impl = createGenerationHandler<
     // needs the SDK's gateway client and the gateway's `anthropic/<model>`
     // naming (`vercelGatewayBackend.resolveModelId`, the same table the
     // `/api/chat` gateway path and `verify-platform-generation.ts` use).
-    const languageModel: LanguageModel = isGatewayApiKey(apiKey)
+    const usingGateway = isGatewayApiKey(apiKey);
+    const languageModel: LanguageModel = usingGateway
       ? createGateway({ apiKey })(vercelGatewayBackend.resolveModelId(AI_MODEL_FAST))
       : createAnthropic({ apiKey })(AI_MODEL_FAST);
     const result: Record<string, LocaleBundle> = {};
@@ -161,7 +162,7 @@ const POST_impl = createGenerationHandler<
           consented,
           traceId: aiTraceId,
           model: AI_MODEL_FAST,
-          provider: 'anthropic',
+          provider: usingGateway ? 'gateway' : 'anthropic',
           inputTokens: usage?.inputTokens,
           outputTokens: usage?.outputTokens,
           latencySeconds: (Date.now() - startedAt) / 1000,
