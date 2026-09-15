@@ -313,7 +313,7 @@ cmd_create() {
   local branch_id
   branch_id="$(jq -r '.branch.id // empty' <<<"$resp" 2>/dev/null)"
   if [ -z "$branch_id" ]; then
-    echo "::error::Neon create-branch response carried no branch.id — refusing to continue without a snapshot."
+    echo "::error::Neon create-branch response carried no branch.id — refusing to continue without a snapshot." >&2
     exit 3
   fi
 
@@ -381,12 +381,12 @@ cmd_prune() {
     if resp_del="$(neon_api DELETE "/projects/${NEON_PROJECT_ID}/branches/${id}")"; then
       # Same asynchrony as cmd_delete; a caller that creates right after a
       # prune (the preview job replacing its own branch) must not race it.
-      neon_wait_for_operations "$resp_del" || echo "::warning::deletion of ${id} was accepted but its operations had not finished when polling stopped"
+      neon_wait_for_operations "$resp_del" || echo "::warning::deletion of ${id} was accepted but its operations had not finished when polling stopped" >&2
       echo "pruned_branch=${id}"
       n=$(( n + 1 ))
     else
       # Housekeeping must never fail a deploy that already succeeded.
-      echo "::warning::could not delete stale snapshot branch ${id}"
+      echo "::warning::could not delete stale snapshot branch ${id}" >&2
     fi
   done <<<"$stale"
   echo "pruned=${n}"
