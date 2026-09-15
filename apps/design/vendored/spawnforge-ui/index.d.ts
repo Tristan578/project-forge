@@ -23,6 +23,7 @@ export { Avatar, type AvatarProps } from './primitives/Avatar';
 export { Progress, type ProgressProps } from './primitives/Progress';
 export { Skeleton, type SkeletonProps } from './primitives/Skeleton';
 export { Toast, type ToastProps, type ToastVariant } from './primitives/Toast';
+export { InlineAlert, type InlineAlertProps, type InlineAlertVariant, } from './primitives/InlineAlert';
 export { ThemeAmbient } from './effects/ThemeAmbient';
 export { ThemeImportExport } from './composites/ThemeImportExport';
 export { SettingsPanel, type SettingsPanelProps } from './composites/SettingsPanel';
