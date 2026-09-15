@@ -5,6 +5,8 @@ import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
 import { saveProjectScenes, loadProjectScenes, createCheckpoint, listCheckpoints } from '@/lib/scenes/sceneManager';
 import { attachCheckpointEngine, projectFixture, sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
+import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
+import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
 
 describe('checkpoint recovery transaction', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -27,6 +29,36 @@ describe('checkpoint recovery transaction', () => {
     await expect(store.getState().createCheckpoint('Before changes')).resolves.toBeNull();
     expect(localStorage.getItem('forge-project-scenes')).toBe(before);
     expect(store.getState().checkpointError).toContain('Full');
+  });
+
+  it('captures the live prefab registry into a checkpoint and reinstalls it on restore (scene.FR-1 N1 / #10056)', async () => {
+    // Without the fold in `createCheckpoint`, the checkpoint records the engine
+    // export alone — no `prefabInstances` — and restore silently discards every
+    // linked instance. Without the registry install in `restoreCheckpoint`, the
+    // outgoing (empty) registry stays installed over the restored checkpoint and
+    // the next save folds it onto the wrong scene. A built-in source keeps the
+    // instance resolvable without seeding the local library. `name` is a
+    // whitelisted override field, so it survives the sanitize round trip.
+    const seeded: PrefabInstance[] = [
+      { instanceId: 'inst_1', prefabId: 'builtin_physics_crate', overrides: { name: 'Crate A' } },
+    ];
+    savePrefabInstancesToStorage(seeded);
+
+    const checkpoint = await store.getState().createCheckpoint('With prefab links');
+    expect(checkpoint).not.toBeNull();
+
+    // The checkpoint's stored scene carries the linked instances (createCheckpoint fold).
+    const stored = listCheckpoints().find((c) => c.id === checkpoint!.id)!;
+    expect(stored.snapshot.scenes[0].data?.prefabInstances).toEqual(seeded);
+
+    // Loading a different scene empties the live registry (the BUG-1 setup).
+    expect(store.getState().loadScene(JSON.stringify(sceneFixture('Other scene')))).toBe(true);
+    expect(loadPrefabInstances()).toEqual([]);
+
+    // Restore reinstalls the checkpoint's registry rather than leaving the
+    // emptied one over the restored scene.
+    await expect(store.getState().restoreCheckpoint(checkpoint!.id)).resolves.toBe(true);
+    expect(loadPrefabInstances()).toEqual(seeded);
   });
 
   it('does not persist or claim success on the synchronous queued response', async () => {

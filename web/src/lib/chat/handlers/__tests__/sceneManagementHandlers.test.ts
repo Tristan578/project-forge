@@ -538,6 +538,29 @@ describe('switch_scene', () => {
     });
   });
 
+  it('refuses to switch after a rejected scene load, without capturing or persisting (#10056)', async () => {
+    // A rejected load leaves the engine holding a non-project scene. Capturing
+    // and folding it would `saveCurrentSceneData` that scene over the OUTGOING
+    // scene's stored data — the exact overwrite the store's own `switchScene`
+    // refuses. The AI path must refuse at parity, and must not even ask the
+    // engine to export. Nothing else in this suite would catch a missing guard.
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' },
+      { sceneLoadError: { reason: 'This scene could not be opened: the engine refused to load it.', at: 1 } }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be opened');
+    expect(result.error).toContain('left untouched');
+    expect(mockCaptureActiveScene).not.toHaveBeenCalled();
+    expect(mockSaveCurrentSceneData).not.toHaveBeenCalled();
+    expect(mockSwitchScene).not.toHaveBeenCalled();
+    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
+    expect(store.loadScene).not.toHaveBeenCalled();
+  });
+
   it('refuses to switch when the live scene could not be read', async () => {
     mockCaptureActiveScene.mockResolvedValue({
       status: 'failed',
@@ -636,6 +659,26 @@ describe('duplicate_scene', () => {
       ...live,
       prefabInstances: seeded,
     });
+  });
+
+  it('refuses to duplicate after a rejected scene load, without capturing or persisting (#10056)', async () => {
+    // Parity with `switch_scene` and the store's own `duplicateScene`: a rejected
+    // load means the engine scene is not this project's, so capturing and folding
+    // it would overwrite the outgoing scene's stored data and copy from stale data.
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'duplicate_scene',
+      { sceneId: 'scene_1' },
+      { sceneLoadError: { reason: 'This scene could not be opened: the engine refused to load it.', at: 1 } }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be opened');
+    expect(result.error).toContain('left untouched');
+    expect(mockCaptureActiveScene).not.toHaveBeenCalled();
+    expect(mockSaveCurrentSceneData).not.toHaveBeenCalled();
+    expect(mockDuplicateScene).not.toHaveBeenCalled();
+    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
   });
 
   it('refuses to duplicate when the live scene could not be read', async () => {

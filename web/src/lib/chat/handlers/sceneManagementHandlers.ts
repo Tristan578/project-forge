@@ -163,6 +163,15 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   switch_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
     if (p.error) return p.error;
+    // A rejected scene load leaves the engine holding something that is NOT
+    // this project's scene. Capturing here would export that non-project scene
+    // and `saveCurrentSceneData` it over the OUTGOING scene's stored data — the
+    // exact overwrite the store's own `switchScene` refuses (sceneSlice.ts) and
+    // that `export_scene` above refuses too. Refuse before `captureBeforeMutating`
+    // so the manual and AI paths stay at parity (#10056).
+    if (ctx.store.sceneLoadError) {
+      return { success: false, error: `${ctx.store.sceneLoadError.reason} The scene was not switched and your saved project was left untouched.` };
+    }
     const { switchScene, loadProjectScenes, saveProjectScenes, getSceneByName, saveCurrentSceneData } = await import('@/lib/scenes/sceneManager');
     const capture = await captureBeforeMutating();
     const failure = captureFailure(capture, 'switch scenes');
@@ -196,6 +205,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   duplicate_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ sceneId: z.string().min(1), name: z.string().optional() }), args);
     if (p.error) return p.error;
+    // Same refusal as `switch_scene` and the store's own `duplicateScene`: a
+    // rejected load means the engine scene is not this project's, so capturing
+    // and folding it here would overwrite the outgoing scene's stored data and
+    // copy from stale data (#10056).
+    if (ctx.store.sceneLoadError) {
+      return { success: false, error: `${ctx.store.sceneLoadError.reason} The scene was not duplicated and your saved project was left untouched.` };
+    }
     const { duplicateScene, loadProjectScenes, saveProjectScenes, getSceneByName, saveCurrentSceneData } = await import('@/lib/scenes/sceneManager');
     const capture = await captureBeforeMutating();
     const failure = captureFailure(capture, 'duplicate the scene');

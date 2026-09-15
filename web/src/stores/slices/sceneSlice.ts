@@ -15,6 +15,8 @@ import {
   saveCurrentSceneData,
   readPrefabInstances,
   readPrefabDefinitions,
+  writePrefabInstances,
+  writePrefabDefinitions,
   createCheckpoint as createCheckpointIn,
   listCheckpoints as listCheckpointsIn,
   restoreCheckpoint as restoreCheckpointIn,
@@ -30,6 +32,7 @@ import {
   loadPrefabInstances,
   savePrefabInstancesToStorage,
   mergeImportedPrefabDefinitions,
+  collectTransitivePrefabDefinitions,
   loadPrefabs,
   getBuiltInPrefabs,
   savePrefabsToStorage,
@@ -360,6 +363,27 @@ function withCapturedScene(project: ProjectScenes, capture: SceneCapture): Proje
 function withPrefabInstances(capture: SceneCapture): SceneCapture {
   const instances = loadPrefabInstances();
   return instances.length ? attachPrefabInstances(capture, instances) : capture;
+}
+
+/**
+ * Fold the live prefab-instance registry AND the definitions it transitively
+ * links into a captured checkpoint scene (scene.FR-1 N1). A checkpoint is a
+ * recovery snapshot: without this the engine export it records carries no
+ * `prefabInstances`/`prefabDefinitions` at all, so restoring it would silently
+ * discard every linked instance and override — and, because the local library
+ * may have changed since, embedding the definitions is what lets
+ * `restorePrefabInstances` re-resolve those links on restore rather than drop
+ * them as dangling. Empty registry is left un-attached so instance-free
+ * checkpoints stay byte-identical; `writePrefabDefinitions` also no-ops on an
+ * empty definition set.
+ */
+function withCheckpointPrefabData(scene: SceneFileData): SceneFileData {
+  const instances = loadPrefabInstances();
+  if (!instances.length) return scene;
+  return writePrefabDefinitions(
+    writePrefabInstances(scene, instances),
+    collectTransitivePrefabDefinitions(instances),
+  );
 }
 
 /** The prefab-store state a scene-load mutates, snapshotted so it can be rolled back. */
@@ -938,7 +962,10 @@ export const createSceneSlice: StateCreator<
     const isCurrent = () => get().projectId === projectId && get().projectRevision === projectRevision && get().sceneOperationRevision === sceneOperationRevision && get().activeSceneId === activeSceneId;
     set({ checkpointBusy: true, checkpointError: null });
     try {
-      const captured = await captureCheckpointScene(requestSceneExport);
+      // Fold the live prefab registry into the captured scene so the checkpoint
+      // records the linked instances/definitions the engine export omits
+      // (scene.FR-1 N1) — otherwise restoring silently discards them.
+      const captured = withCheckpointPrefabData(await captureCheckpointScene(requestSceneExport));
       if (!isCurrent()) throw new Error('The project or scene changed while capturing. Try again in the intended scene.');
       const project = saveCurrentSceneData(loadProjectScenes(projectId), captured);
       // A checkpoint is independent of the active save. Failure must not alter
@@ -961,6 +988,9 @@ export const createSceneSlice: StateCreator<
     set({ checkpointBusy: true, checkpointError: null, autoSaveEnabled: false });
     let prior: Awaited<ReturnType<typeof captureCheckpointScene>> | undefined;
     let attempted = false;
+    // The checkpoint's linked prefab registry is installed eagerly (like
+    // `loadScene`), so it must be rolled back if the restore does not complete.
+    let prefabSnapshot: PrefabRestoreSnapshot | null = null;
     try {
       const result = restoreCheckpointIn(checkpointId, projectId);
       if ('error' in result) throw new Error(result.error);
@@ -971,7 +1001,19 @@ export const createSceneSlice: StateCreator<
       prior = await captureCheckpointScene(requestSceneExport);
       if (!isCurrent()) throw new Error('The project changed while restoring. Try again in the intended project.');
       const active = result.project.scenes.find((scene) => scene.id === result.project.activeSceneId)!;
-      await applyCheckpointScene(active.data ?? emptySceneFile(active.name), (json) => {
+      const activeData = active.data ?? emptySceneFile(active.name);
+      // Install the checkpoint's linked prefab registry (and merge its embedded
+      // definitions) BEFORE the load, exactly as `loadScene` does — the engine
+      // scene carries none of this, so without it the OUTGOING scene's registry
+      // stays installed over the restored checkpoint and the next save folds
+      // those foreign instances onto it (scene.FR-1 N1 / #10056). The `prefabSnapshot`
+      // is this caller's rollback handle, mirroring `loadScene`'s
+      // `restorePrefabInstances`/`rollbackPrefabState` pairing.
+      prefabSnapshot = restorePrefabInstances(JSON.stringify(activeData));
+      if (!prefabSnapshot) {
+        throw new Error("The checkpoint's prefab data is invalid or its prefab references form a cycle. The checkpoint was not restored.");
+      }
+      await applyCheckpointScene(activeData, (json) => {
         attempted = true;
         const accepted = dispatchSceneLoad(json);
         attempted = accepted;
@@ -984,6 +1026,12 @@ export const createSceneSlice: StateCreator<
       return true;
     } catch (error) {
       let message = (error instanceof Error || error instanceof DOMException) ? error.message : 'The checkpoint could not be restored.';
+      // The registry was installed eagerly. If the restore did not complete,
+      // put the OUTGOING scene's registry AND library back before recovering
+      // its scene — otherwise the prefab store would keep the checkpoint's
+      // instances over a viewport that is being rolled back to the prior scene
+      // (scene.FR-1 N1). No-op when nothing was installed yet.
+      if (prefabSnapshot) rollbackPrefabState(prefabSnapshot);
       if (attempted && prior && isCurrent()) {
         try {
           await applyCheckpointScene(prior, dispatchSceneLoad, requestSceneExport, isCurrent);
