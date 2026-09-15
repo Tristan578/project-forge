@@ -61,7 +61,17 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
     (checkpointId: string) => {
       if (busy) return;
       setBusy(true);
-      restoreCheckpoint(checkpointId);
+      // restoreCheckpoint no longer throws (it catches storage errors) and
+      // now reports whether the restore actually landed — a missing
+      // checkpoint (e.g. deleted from another tab) or an engine that
+      // rejected the scene load both return false. Logged rather than
+      // silently treated as a success; refreshCheckpoints() below still
+      // re-reads the real list either way, so a vanished checkpoint drops
+      // out of view even without a dedicated error banner.
+      const restored = restoreCheckpoint(checkpointId);
+      if (!restored) {
+        console.error('[Scenes] Failed to restore checkpoint', checkpointId);
+      }
       setRestoreConfirmId(null);
       refreshCheckpoints();
       setBusy(false);

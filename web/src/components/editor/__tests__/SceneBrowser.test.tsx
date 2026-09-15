@@ -248,6 +248,30 @@ describe('SceneBrowser', () => {
     mockListCheckpoints.mockReturnValue([]);
   });
 
+  it('logs, rather than silently treating it as a success, when the store reports the restore failed', () => {
+    // #9813 review finding: the return value used to be ignored entirely, so
+    // a checkpoint deleted from another tab (or an engine that rejected the
+    // scene load) still closed the confirm dialog and refreshed as if the
+    // restore had landed. There is no dedicated error banner in this
+    // component (createCheckpoint failures follow the same console-only
+    // convention), so a log is the observable signal here.
+    mockRestoreCheckpoint.mockReturnValueOnce(false);
+    mockListCheckpoints.mockReturnValue([
+      { id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} },
+    ]);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Restore pre-change'));
+    fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
+    expect(mockRestoreCheckpoint).toHaveBeenCalledWith('cp1');
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to restore checkpoint'),
+      'cp1'
+    );
+    errorSpy.mockRestore();
+    mockListCheckpoints.mockReturnValue([]);
+  });
+
   it('deletes a checkpoint after confirmation', () => {
     mockListCheckpoints.mockReturnValue([
       { id: 'cp1', label: 'scratch', createdAt: 't', snapshot: {} },
