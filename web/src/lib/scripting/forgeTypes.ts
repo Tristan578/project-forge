@@ -75,10 +75,10 @@ declare namespace forge {
     /**
      * Check if an action is currently pressed.
      *
-     * `player` selects a local-player slot for two-player games (0 = the
-     * primary player, the default). `isPressed('jump', 1)` reads the second
-     * player's map; omitting it, or passing 0, is the single-player behaviour
-     * every existing script already has (physics.FR-1.OP-04).
+     * player selects a local-player slot for two-player games (0 = the primary
+     * player, the default). Passing 1 reads the second player's map; omitting
+     * it, or passing 0, is the single-player behaviour every existing script
+     * already has (physics.FR-1.OP-04).
      */
     function isPressed(action: string, player?: number): boolean;
     /** Check if an action was just pressed this frame (optional local-player slot). */
