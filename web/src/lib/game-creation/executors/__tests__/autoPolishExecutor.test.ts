@@ -1,7 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { autoPolishExecutor } from '../autoPolishExecutor';
-import type { ExecutorContext } from '../../types';
+import type { ExecutorContext, ObservedEntity } from '../../types';
 import { buildDefaultGroundDescriptor } from '../../worldGeometry';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const FEEL_DIRECTIVE = {
   mood: 'adventurous',
@@ -291,6 +295,100 @@ describe('autoPolishExecutor', () => {
     expect(
       vi.mocked(ctx.dispatchCommand).mock.calls.map((c: unknown[]) => c[0]),
     ).toEqual(['spawn_entity']);
+  });
+
+  /**
+   * The transform half of #9899 for the repaired ground plane. The ground's
+   * `update_transform` scale is a deferred command, and an accepted resize is
+   * NOT an applied one — a ground left at 1x1x1 gets a half-metre collider the
+   * player falls through everywhere but the origin, the exact repair this branch
+   * makes. When the context can query the engine, the scale must be CONFIRMED
+   * before the collider is built from it.
+   *
+   * A context WITHOUT `observeEntity` (every ground test above) keeps the legacy
+   * frame-wait path, which is why none of them had to change.
+   */
+  describe('confirmed ground-plane resize (#9899)', () => {
+    const GROUND_SCALE = buildDefaultGroundDescriptor('3d').scale as [number, number, number];
+
+    function observedAt(id: string, scale: [number, number, number]): ObservedEntity {
+      return { entityId: id, transform: { position: [0, -0.5, 0], rotation: [0, 0, 0], scale } };
+    }
+
+    it('confirms the ground reached its descriptor scale before building its collider', async () => {
+      const observeEntity = vi.fn((id: string) => observedAt(id, GROUND_SCALE));
+      const ctx = makeCtx({
+        resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+        observeEntity,
+      } as never);
+
+      const result = await autoPolishExecutor.execute({
+        projectType: '3d',
+        feelDirective: FEEL_DIRECTIVE,
+      }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.output?.fixesApplied).toContain('Added ground plane');
+      // The collider-building update_physics still ran AFTER the confirmed size.
+      const calls = vi.mocked(ctx.dispatchCommand).mock.calls;
+      expect(calls.map((c: unknown[]) => c[0])).toEqual([
+        'spawn_entity', 'update_transform', 'toggle_physics', 'update_physics',
+      ]);
+      // The engine was queried for the exact id the spawn minted.
+      const groundId = (calls[0][1] as Record<string, unknown>)['id'] as string;
+      expect(observeEntity).toHaveBeenCalledWith(groundId);
+    });
+
+    it('fails with EFFECT_TIMED_OUT and never builds the collider when the resize is dropped', async () => {
+      vi.useFakeTimers();
+      // The engine keeps reporting the unsized cube — the resize never landed.
+      const observeEntity = vi.fn((id: string) => observedAt(id, [1, 1, 1]));
+      const ctx = makeCtx({
+        resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+        observeEntity,
+      } as never);
+
+      const pending = autoPolishExecutor.execute({
+        projectType: '3d',
+        feelDirective: FEEL_DIRECTIVE,
+      }, ctx);
+      await vi.advanceTimersByTimeAsync(6_000); // past the 5s observation deadline
+      const result = await pending;
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+      const effect = (result.error?.details as { effect?: { status?: string; operationId?: string } }).effect;
+      expect(effect?.status).toBe('timed-out');
+      expect(effect?.operationId).toBe('ai.FR-1.OP-01');
+      // update_physics must NOT have run: a collider built from an unconfirmed
+      // scale is the false success this check exists to prevent.
+      const dispatched = vi.mocked(ctx.dispatchCommand).mock.calls.map((c: unknown[]) => c[0]);
+      expect(dispatched).not.toContain('update_physics');
+    });
+
+    it('reports a cancellation during confirmation as an aborted step', async () => {
+      const controller = new AbortController();
+      // Abort mid-observation: the first query aborts the run and returns the
+      // unsized cube, so the next poll sees the abort and reports cancelled —
+      // reachable only past the up-front abort checks, inside the observation.
+      const observeEntity = vi.fn((id: string) => {
+        controller.abort();
+        return observedAt(id, [1, 1, 1]);
+      });
+      const ctx = makeCtx({
+        resolveStepOutput: vi.fn().mockReturnValue({ issues: ['no_ground_plane'] }),
+        observeEntity,
+        signal: controller.signal,
+      } as never);
+
+      const result = await autoPolishExecutor.execute({
+        projectType: '3d',
+        feelDirective: FEEL_DIRECTIVE,
+      }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ABORTED');
+    });
   });
 
   it('configures camera as thirdPersonFollow in 3D when no_camera_on_player', async () => {

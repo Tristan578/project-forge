@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 import { MeshyClient } from '@/lib/generate/meshyClient';
-import { SunoClient } from '@/lib/generate/sunoClient';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { PixelArtClient } from '@/lib/generate/pixelArtClient';
@@ -33,21 +32,6 @@ describe('generate clients SSRF guards', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ origin: 'https://api.meshy.ai', pathname: '/openapi/v2/text-to-texture/safe_texture-id' }),
-      expect.any(Object),
-    );
-  });
-
-  it('anchors Suno status URLs to api.suno.ai', async () => {
-    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({ status: 'running', progress: 42 }),
-    } as Response);
-
-    const client = new SunoClient({ apiKey: 'key' });
-    await client.getStatus('safe_task-id');
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.objectContaining({ origin: 'https://api.suno.ai', pathname: '/v1/generation/safe_task-id' }),
       expect.any(Object),
     );
   });

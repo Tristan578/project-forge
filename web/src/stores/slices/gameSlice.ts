@@ -273,7 +273,10 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
     if (readWinnabilityState) {
       try {
         const { sceneGraph, allGameComponents } = readWinnabilityState();
-        const report = validateWinnability(sceneGraph, allGameComponents);
+        // Respect the scene's authored completion mode: a sandbox/endless/
+        // narrative scene is not blocked for lacking a win condition. Absent
+        // (legacy) => 'win' via the validator default.
+        const report = validateWinnability(sceneGraph, allGameComponents, sceneGraph.completionMode);
         if (!report.winnable) {
           surfaceWinnabilityMessage(formatWinnabilityMessage(report));
           return;

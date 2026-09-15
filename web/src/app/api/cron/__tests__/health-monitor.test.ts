@@ -144,7 +144,11 @@ describe('GET /api/cron/health-monitor', () => {
     const { PLATFORM_KEY_ENV } = await import('@/lib/config/providers');
     for (const key of Object.values(PLATFORM_KEY_ENV)) vi.stubEnv(key, '');
     vi.stubEnv('AI_GATEWAY_API_KEY', 'gw');
-    vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', 'sfx,voice,sprite,bg_removal');
+    // music joined the ElevenLabs audio capabilities in #9522 — with no
+    // PLATFORM_ELEVENLABS_KEY it is unconfigured on the platform path exactly
+    // like sfx/voice, so the expected-baseline must name it or the gap reads as
+    // a real degradation before meshy is ever touched.
+    vi.stubEnv('HEALTH_EXPECTED_UNCONFIGURED_CAPABILITIES', 'sfx,voice,music,sprite,bg_removal');
     vi.stubEnv('PLATFORM_MESHY_KEY', 'provisioned');
     const { GET } = await import('@/app/api/cron/health-monitor/route');
     const setReport = async () => {

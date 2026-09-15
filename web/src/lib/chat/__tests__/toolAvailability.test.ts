@@ -4,7 +4,7 @@
  * refuses 503 before doing anything) and wasted tokens on every orchestrated
  * build. `getChatTools()` and the agent tool set share `isCommandAvailable`.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getChatTools, getCommandNames, getCommandDef } from '../tools';
 import {
   COMMAND_CAPABILITY,
@@ -14,12 +14,34 @@ import {
 } from '@/lib/config/providers';
 
 describe('chat tool availability (#9117)', () => {
-  it('withholds generate_music while music is declared unavailable', () => {
-    expect(getCapabilityUnavailability('music')).not.toBeNull();
+  it('offers generate_music now that music routes to ElevenLabs (#9522)', () => {
+    expect(getCapabilityUnavailability('music')).toBeNull();
     const names = getChatTools().map((t) => t.name);
-    expect(names).not.toContain('generate_music');
-    // The command still exists in the manifest — it is withheld, not deleted.
-    expect(getCommandNames()).toContain('generate_music');
+    expect(names).toContain('generate_music');
+  });
+
+  it('withholds a command whose capability is declared unavailable (#9117)', async () => {
+    // UNAVAILABLE_CAPABILITIES is empty after #9522, so exercise the withholding
+    // filter by declaring generate_music unavailable — getChatTools() must drop
+    // it (the route would refuse it) while keeping it in the manifest.
+    vi.resetModules();
+    vi.doMock('@/lib/config/providers', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/config/providers')>();
+      return {
+        ...actual,
+        isCommandAvailable: (name: string) => name !== 'generate_music',
+      };
+    });
+    try {
+      const tools = await import('../tools');
+      const names = tools.getChatTools().map((t) => t.name);
+      expect(names).not.toContain('generate_music');
+      // The command still exists in the manifest — it is withheld, not deleted.
+      expect(tools.getCommandNames()).toContain('generate_music');
+    } finally {
+      vi.doUnmock('@/lib/config/providers');
+      vi.resetModules();
+    }
   });
 
   it('still offers the generation commands whose capabilities are available', () => {
@@ -70,8 +92,10 @@ describe('chat tool availability (#9117)', () => {
     expect(unclassified).toEqual([]);
   });
 
-  it('treats commands that spend no capability as always available', () => {
+  it('treats a command with no capability, and one with an offered capability, as available', () => {
+    // spawn_entity spends no capability; generate_music spends `music`, which
+    // #9522 made available (ElevenLabs). Both are therefore available.
     expect(isCommandAvailable('spawn_entity')).toBe(true);
-    expect(isCommandAvailable('generate_music')).toBe(false);
+    expect(isCommandAvailable('generate_music')).toBe(true);
   });
 });

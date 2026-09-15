@@ -23,6 +23,10 @@ import { useEditorStore } from '@/stores/editorStore';
 import { releaseEntityAudio } from '@/lib/audio/entityAudioGraph';
 import { handleTransformEvent } from '../transformEvents';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import {
+  readEntityObservation,
+  clearEntityObservations,
+} from '@/lib/game-creation/engineObservation';
 
 describe('handleTransformEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -43,6 +47,27 @@ describe('handleTransformEvent', () => {
       mockSetGet.get
     );
     expect(result).toBe(false);
+  });
+
+  // #9899: the answer to a `get_entity_details` query lands here and feeds the
+  // confirmed-effect cache the orchestrator's `observeEntity` reads.
+  describe('QUERY_ENTITY_DETAILS', () => {
+    beforeEach(() => clearEntityObservations());
+
+    it('records the queried entity into the observation cache and consumes the event', () => {
+      const result = handleTransformEvent(
+        'QUERY_ENTITY_DETAILS',
+        { entityId: 'crate-1', position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(readEntityObservation('crate-1')).toEqual({
+        entityId: 'crate-1',
+        transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+    });
   });
 
   describe('SELECTION_CHANGED', () => {
@@ -823,6 +848,24 @@ describe('handleTransformEvent', () => {
         // Nothing staged — a new_scene, or a load whose JSON declared no audio.
         // The outgoing scene's ids are meaningless either way.
         entityAudio: {},
+        // completionMode gating (idea.FR-1.OP-04 / #9901): SCENE_LOADED is the
+        // scene-replacement boundary, so it must clear a leftover mode rather
+        // than let setFullGraph's preserve-across-rebuilds fallback carry the
+        // OUTGOING scene's mode into the incoming one.
+        sceneGraph: { completionMode: undefined },
+      });
+    });
+
+    it('clears a leftover completionMode so the incoming scene starts from the legacy default', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        sceneGraph: { nodes: {}, rootIds: [], completionMode: 'sandbox' },
+      } as unknown as StoreState);
+
+      handleTransformEvent('SCENE_LOADED', { name: 'NextScene' }, mockSetGet.set, mockSetGet.get);
+
+      expect(vi.mocked(useEditorStore.setState).mock.calls[0][0]).toMatchObject({
+        sceneGraph: { completionMode: undefined },
       });
     });
 

@@ -293,6 +293,115 @@ describe('validateWinnability', () => {
   });
 });
 
+describe('completionMode gating (idea.FR-1.OP-04)', () => {
+  describe('non-win modes skip the NO_WIN_CONDITION requirement', () => {
+    it.each(['endless', 'sandbox', 'narrative'] as const)(
+      'is winnable in %s mode with no win condition at all',
+      (mode) => {
+        // A sandbox/endless/narrative scene with a player and a valid
+        // interaction but no win condition must PLAY — this is the whole point
+        // of intentional completion modes.
+        const report = validateWinnability(
+          graph(['player', 'goal']),
+          { player: [player] },
+          mode,
+        );
+        expect(report.winnable).toBe(true);
+        expect(report.issues).toHaveLength(0);
+      },
+    );
+
+    it('is winnable in sandbox mode for an entirely empty scene', () => {
+      const report = validateWinnability(graph([]), {}, 'sandbox');
+      expect(report.winnable).toBe(true);
+      expect(report.issues).toHaveLength(0);
+    });
+  });
+
+  describe('win mode (and legacy default) still require a win condition', () => {
+    it('flags NO_WIN_CONDITION when completionMode is explicitly "win"', () => {
+      const report = validateWinnability(
+        graph(['player', 'goal']),
+        { player: [player] },
+        'win',
+      );
+      expect(report.winnable).toBe(false);
+      expect(report.issues[0].code).toBe('NO_WIN_CONDITION');
+    });
+
+    it('treats a legacy scene (undefined mode) exactly like explicit "win"', () => {
+      const legacy = validateWinnability(graph(['player', 'goal']), { player: [player] });
+      const explicitWin = validateWinnability(
+        graph(['player', 'goal']),
+        { player: [player] },
+        'win',
+      );
+      expect(legacy).toEqual(explicitWin);
+      expect(legacy.winnable).toBe(false);
+      expect(legacy.issues[0].code).toBe('NO_WIN_CONDITION');
+    });
+
+    it('fails a win-mode scene whose only goal points at a missing entity', () => {
+      const report = validateWinnability(
+        graph(['player']),
+        { player: [player], wc: [reachGoal('ghost')] },
+        'win',
+      );
+      expect(report.winnable).toBe(false);
+      expect(report.issues.map(i => i.code)).toContain('GOAL_TARGET_MISSING');
+    });
+
+    it('treats an unexpected/garbage mode as "win" (fail-closed)', () => {
+      const report = validateWinnability(
+        graph(['player', 'goal']),
+        { player: [player] },
+        'campaign' as never,
+      );
+      expect(report.winnable).toBe(false);
+      expect(report.issues[0].code).toBe('NO_WIN_CONDITION');
+    });
+  });
+
+  describe('present win conditions are validated regardless of mode', () => {
+    it('flags a malformed win condition even in sandbox mode', () => {
+      // Product decision (idea.FR-1.OP-04): a win condition that IS present is
+      // still fully validated in non-win modes — a broken reachGoal must not be
+      // silently ignored just because the mode does not require a win.
+      const report = validateWinnability(
+        graph(['player']),
+        { player: [player], wc: [reachGoal('ghost')] },
+        'sandbox',
+      );
+      expect(report.winnable).toBe(false);
+      expect(report.issues.map(i => i.code)).toContain('GOAL_TARGET_MISSING');
+    });
+
+    it('passes sandbox mode when a present win condition is well-formed', () => {
+      const report = validateWinnability(
+        graph(['player', 'goal']),
+        { player: [player], wc: [reachGoal('goal')] },
+        'sandbox',
+      );
+      expect(report.winnable).toBe(true);
+      expect(report.issues).toHaveLength(0);
+    });
+
+    it('still flags an unrecognized conditionType in endless mode', () => {
+      const bogus: GameComponentData = {
+        type: 'winCondition',
+        winCondition: { conditionType: 'bogus' as 'score', targetScore: 10, targetEntityId: 'goal' },
+      };
+      const report = validateWinnability(
+        graph(['player', 'goal']),
+        { player: [player], wc: [bogus] },
+        'endless',
+      );
+      expect(report.winnable).toBe(false);
+      expect(report.issues.map(i => i.code)).toContain('UNKNOWN_WIN_CONDITION');
+    });
+  });
+});
+
 describe('formatWinnabilityMessage', () => {
   it('returns an empty string when winnable', () => {
     expect(formatWinnabilityMessage({ winnable: true, issues: [] })).toBe('');

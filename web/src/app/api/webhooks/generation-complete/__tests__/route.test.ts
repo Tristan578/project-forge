@@ -34,7 +34,7 @@ vi.mock('@/lib/keys/resolver', () => ({
 }));
 
 vi.mock('@/lib/config/providers', () => ({
-  DB_PROVIDER: { model3d: 'meshy', texture: 'meshy', music: 'suno', sprite: 'replicate' },
+  DB_PROVIDER: { model3d: 'meshy', texture: 'meshy', music: 'elevenlabs', sprite: 'replicate' },
 }));
 
 vi.mock('@/lib/tokens/service', () => ({
