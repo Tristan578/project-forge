@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -74,4 +74,56 @@ for (const [name, broken] of [
 test('workflow runs the regression suite and requests the validated sample size', () => {
   assert.match(workflow, /^\s+run: node --test scripts\/__tests__\/lighthouse-delta\.test\.mjs$/m);
   assert.equal((workflow.match(/--numberOfRuns=3/g) ?? []).length, 2);
+});
+
+test('workflow archives both real LHCI output directories before comparison', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'forge-lighthouse-archive-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const stepNames = [
+    'Collect baseline Lighthouse runs (effects off)',
+    'Collect effects-on Lighthouse runs',
+  ];
+  const directories = ['.lhci-baseline', '.lhci-effects'];
+  for (const [index, name] of stepNames.entries()) {
+    const marker = `      - name: ${name}\n`;
+    const start = workflow.indexOf(marker);
+    assert.notEqual(start, -1, `Missing collection step: ${name}`);
+    const end = workflow.indexOf('\n      - ', start + marker.length);
+    assert.notEqual(end, -1, `Missing step after ${name}`);
+    const step = workflow.slice(start, end);
+    const runStart = step.indexOf('        run: |\n');
+    assert.notEqual(runStart, -1, `Missing run block in ${name}`);
+    const run = step.slice(runStart + '        run: |\n'.length)
+      .replace(/^          /gm, '').split('\n').filter(line => !line.trim().startsWith('#')).join('\n');
+    // collect has no outputDir option. The real collector always
+    // writes .lighthouseci and clears prior reports on its next invocation.
+    assert.doesNotMatch(run, /--outputDir/);
+    assert.match(run, /lhci collect \\\n/);
+    assert.match(run, /--numberOfRuns=3/);
+    const archive = run.match(/^node --input-type=module -e "([^"]+)"$/m);
+    assert.ok(archive, `Missing archive command in ${name}`);
+    assert.ok(run.indexOf(archive[0]) > run.indexOf('--settings.chromeFlags='));
+
+    // Model the collector's documented output, then execute the archive code
+    // taken directly from this step instead of restating the move in the test.
+    const collected = join(cwd, '.lighthouseci');
+    mkdirSync(collected);
+    const sample = reports(...Array(3).fill(index === 0 ? 0.9 : 0.85));
+    sample.forEach((report, i) => writeFileSync(join(collected, `lhr-${i}.json`), report));
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', archive[1]], {
+      cwd, encoding: 'utf8', timeout: 10000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(collected), false);
+    assert.equal(readFileSync(join(cwd, directories[index], 'lhr-0.json'), 'utf8'), sample[0]);
+  }
+  // Both collections must remain independently available to the real gate.
+  const result = spawnSync(process.execPath, ['--input-type=module'], {
+    cwd, input: source, encoding: 'utf8', timeout: 10000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Baseline \(effects off\): 90\.0/);
+  assert.match(result.stdout, /Effects on: 85\.0/);
 });

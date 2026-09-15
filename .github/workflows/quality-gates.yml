@@ -695,8 +695,9 @@ jobs:
           lhci collect \
             --url=http://localhost:3000 \
             --numberOfRuns=3 \
-            --outputDir=.lhci-baseline \
             --settings.chromeFlags="--headless --no-sandbox --disable-gpu"
+          # collect writes .lighthouseci; preserve it before the next collection clears it.
+          node --input-type=module -e "import { renameSync } from 'node:fs'; renameSync('.lighthouseci', '.lhci-baseline');"
 
       - name: Stop baseline server
         run: kill $(lsof -t -i:3000) 2>/dev/null || true
@@ -729,8 +730,8 @@ jobs:
           lhci collect \
             --url=http://localhost:3001 \
             --numberOfRuns=3 \
-            --outputDir=.lhci-effects \
             --settings.chromeFlags="--headless --no-sandbox --disable-gpu"
+          node --input-type=module -e "import { renameSync } from 'node:fs'; renameSync('.lighthouseci', '.lhci-effects');"
 
       - name: Debug Lighthouse output dirs
         if: always()
