@@ -4,6 +4,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@/test/utils/componentTestUtils';
 import { AudioInspector } from '../AudioInspector';
+import { ClipEditor } from '../ClipEditor';
+import { StrictMode } from 'react';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -338,4 +340,120 @@ describe('AudioInspector music gate (#9117)', () => {
       expect(btn).toHaveTextContent('Starter');
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// Clip editing (#9903, operation audio.FR-1.OP-02): manual trim/fade/gain/loop
+// with validation and undo. `source.type: 'upload'` so no Web Audio decode runs
+// under jsdom — the numeric controls are exercised directly.
+// ---------------------------------------------------------------------------
+
+const AUDIO_ASSET = {
+  id: 'aud-1',
+  name: 'Beep',
+  kind: 'audio' as const,
+  fileSize: 1024,
+  source: { type: 'upload' as const, filename: 'beep.wav' },
+};
+
+function mockWithClip() {
+  mockEditorStore({
+    entityAudio: {
+      'ent-1': {
+        assetId: 'aud-1',
+        volume: 1.0,
+        pitch: 1.0,
+        loopAudio: false,
+        spatial: false,
+        maxDistance: 50,
+        refDistance: 1,
+        rolloffFactor: 1,
+        autoplay: false,
+      },
+    },
+    assetRegistry: { 'aud-1': AUDIO_ASSET },
+    audioBuses: [{ name: 'master', volume: 1 }, { name: 'sfx', volume: 1 }],
+  });
+}
+
+describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  it('does not offer clip edits in the inspector before persistence and playback are connected (#9936)', () => {
+    mockWithClip();
+    render(<AudioInspector />);
+    expect(screen.queryByLabelText('Trim start')).not.toBeInTheDocument();
+    expect(screen.getByText('Preview')).toBeInTheDocument();
+  });
+
+  it('renders accessible clip controls and a labelled waveform when a source asset is attached', () => {
+    mockWithClip();
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    expect(screen.getByText('Clip Editing')).toBeInTheDocument();
+    expect(screen.getByLabelText('Trim start')).toBeInTheDocument();
+    expect(screen.getByLabelText('Trim end')).toBeInTheDocument();
+    expect(screen.getByLabelText('Gain')).toBeInTheDocument();
+    expect(screen.getByLabelText('Fade in')).toBeInTheDocument();
+    expect(screen.getByLabelText('Fade out')).toBeInTheDocument();
+    expect(screen.getByLabelText('Loop start')).toBeInTheDocument();
+    expect(screen.getByLabelText('Loop end')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Waveform, trim/ })).toBeInTheDocument();
+  });
+
+  it('applies a valid manual trim to the clip document', () => {
+    mockWithClip();
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const end = screen.getByLabelText('Trim end') as HTMLInputElement;
+    fireEvent.change(end, { target: { value: '0.5' } });
+    expect(end.value).toBe('0.5');
+    // No validation error surfaced for a valid edit.
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('rejects trim end <= start, showing a validation error and leaving the prior clip', () => {
+    mockWithClip();
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const start = screen.getByLabelText('Trim start') as HTMLInputElement;
+    const end = screen.getByLabelText('Trim end') as HTMLInputElement;
+    // Establish a valid window 0.6–1.0.
+    fireEvent.change(start, { target: { value: '0.6' } });
+    expect(start.value).toBe('0.6');
+    // Now push trim end before start → invalid.
+    fireEvent.change(end, { target: { value: '0.3' } });
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/Trim end must be after trim start/);
+    // The prior clip is intact: end reverts to the last valid value, start held.
+    expect(end.value).toBe('1');
+    expect(start.value).toBe('0.6');
+    expect(end).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('undo restores the prior gain without touching trim', () => {
+    mockWithClip();
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const gain = screen.getByLabelText('Gain') as HTMLInputElement;
+    const end = screen.getByLabelText('Trim end') as HTMLInputElement;
+    fireEvent.change(end, { target: { value: '0.5' } });
+    fireEvent.change(gain, { target: { value: '-6' } });
+    expect(gain.value).toBe('-6');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
+    // The gain edit is undone; the earlier trim survives.
+    expect(gain.value).toBe('0');
+    expect(end.value).toBe('0.5');
+  });
+
+  it('records one undo entry per edit under StrictMode', () => {
+    mockWithClip();
+    render(<StrictMode><ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} /></StrictMode>);
+    const gain = screen.getByLabelText('Gain') as HTMLInputElement;
+    fireEvent.change(gain, { target: { value: '-6' } });
+    fireEvent.change(gain, { target: { value: '-12' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
+    expect(gain.value).toBe('-6');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
+    expect(gain.value).toBe('0');
+    expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
+  });
 });
