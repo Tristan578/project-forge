@@ -6,6 +6,7 @@ import {
   createFakeEngineDispatcher,
 } from '@/stores/slices/__tests__/sceneSliceTestStore';
 import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
+import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
 
 // ---------------------------------------------------------------------------
 // Module mocks for dynamic imports inside the handlers
@@ -1024,5 +1025,40 @@ describe('list_doc_topics', () => {
     const { result } = await invokeHandler(sceneManagementHandlers, 'list_doc_topics');
     expect(result.success).toBe(true);
     expect(((result.result as Record<string, unknown>).message as string)).toContain('MCP server');
+  });
+});
+
+describe('validate_scene', () => {
+  afterEach(() => setSceneValidator(null));
+
+  it('validates the complete scene without loading or saving it', async () => {
+    const scene = emptySceneFile('Validation only');
+    const validate = vi.fn(() => true);
+    setSceneValidator(validate);
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(scene) });
+    expect(result).toEqual({ success: true, result: { valid: true } });
+    expect(validate).toHaveBeenCalledWith(JSON.stringify(scene));
+    expect(store.loadScene).not.toHaveBeenCalled();
+    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
+  });
+
+  it.each(['{broken', '{}', JSON.stringify({ formatVersion: 99 })])('rejects invalid scene JSON %s', async (json) => {
+    const validate = vi.fn(() => true);
+    setSceneValidator(validate);
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json });
+    expect(result.success).toBe(false);
+    expect(validate).not.toHaveBeenCalled();
+    expect(store.loadScene).not.toHaveBeenCalled();
+  });
+
+  it.each([null, () => false, () => { throw new Error('decoder unavailable'); }])('fails when the attached decoder cannot validate', async (validate) => {
+    setSceneValidator(validate);
+    const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(emptySceneFile('Refused')) });
+    expect(result.success).toBe(false);
+  });
+
+  it('requires the JSON argument', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', {});
+    expect(result.success).toBe(false);
   });
 });

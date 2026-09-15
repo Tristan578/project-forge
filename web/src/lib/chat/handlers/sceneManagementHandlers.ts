@@ -8,6 +8,7 @@ import type { ToolHandler, ExecutionResult, InputBinding } from './types';
 import { parseArgs } from './types';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
+import { isValidSceneFile } from '@/lib/scenes/sceneValidation';
 
 /**
  * Read the live scene back out of the engine before a mutation moves off it
@@ -25,6 +26,19 @@ function captureFailure(capture: SceneCapture, action: string): ExecutionResult 
 }
 
 export const sceneManagementHandlers: Record<string, ToolHandler> = {
+  validate_scene: async (args): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ json: z.string().min(1).max(50 * 1024 * 1024) }), args);
+    if (p.error) return p.error;
+    try {
+      if (isValidSceneFile(JSON.parse(p.data.json))) {
+        return { success: true, result: { valid: true } };
+      }
+    } catch {
+      return { success: false, error: 'Scene JSON is malformed.' };
+    }
+    return { success: false, error: 'Scene validation failed or the engine is unavailable.' };
+  },
+
   export_scene: async (_args, ctx): Promise<ExecutionResult> => {
     ctx.store.saveScene();
     return { success: true, result: { message: 'Scene export triggered' } };
