@@ -170,8 +170,9 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   const neonSql = getNeonSql();
 
   // Read IDs of dependent records before the transaction.
-  // These reads are outside the transaction intentionally: the neon-http
-  // sql.transaction() API only accepts DML statements (no SELECT inside txn).
+  // The neon-http transaction is a non-interactive batch: application code
+  // cannot consume a SELECT result inside it to construct later statements.
+  // Read these IDs first so all dependent DELETE statements can be assembled.
   const userGames = await queryWithResilience(() =>
     getDb()
       .select({ id: publishedGames.id })
@@ -353,8 +354,9 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   // half-fails because object storage hiccuped is strictly worse than an
   // orphan — the user's data is already gone from the DB and there is nothing
   // useful for the caller to retry. Failures are logged with their keys so an
-  // operator can reconcile them (keys stay enumerable by the assets/{userId}/
-  // prefix).
+  // operator can reconcile them. Marketplace keys use assets/{internalUserUUID}/;
+  // publication keys use games/{ClerkID}/{slug}/{revision}/bundle.json.
+  // Both object families can have .status.json sidecars under the same prefixes.
   await deleteUserStorageObjects(userId, [...withStatusSidecars(gameKeys), ...storageKeys], assetReadTruncated);
 }
 
@@ -388,11 +390,9 @@ async function deleteUserStorageObjects(
       captureMessage(message, 'error');
     }
 
-    // Defensive second net. The row cap above is sized so this call site can
-    // never overflow the sweep's own key ceiling, so in production the read cap
-    // is what fires. This branch exists so that changing R2_KEYS_PER_ASSET (or
-    // the key shape) without re-deriving the row cap degrades to a loud report
-    // rather than a silent drop.
+    // The marketplace row cap bounds asset keys alone. Adding publication keys
+    // and their sidecars can exceed the combined sweep ceiling. Report any
+    // skipped tail for reconciliation under both owner-specific prefixes.
     if (sweep.truncated) {
       const message = `Account deletion R2 sweep truncated at ${MAX_R2_SWEEP_KEYS} keys for user ${userId}; remaining marketplace and published-game objects need reconciliation`;
       console.error(message);

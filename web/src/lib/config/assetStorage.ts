@@ -25,6 +25,8 @@ export type AssetStorageEnvKey = keyof typeof ASSET_STORAGE_ENV;
  * Explicit true/false takes precedence; an unset or unrecognized value uses
  * bucket presence as the default. This does not enable public bucket access or
  * CDN delivery. A failed storage operation leaves the Postgres path available.
+ *
+ * @returns Whether optional R2 publication writes/reads are enabled by PUBLISH_TO_R2 or, by default, ASSET_BUCKET_NAME. Does not verify credentials or bucket privacy.
  */
 export function isPublishToR2Enabled(): boolean {
   const raw = (process.env.PUBLISH_TO_R2 ?? '').trim().toLowerCase();

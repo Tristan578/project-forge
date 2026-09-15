@@ -1,5 +1,10 @@
+/**
+ * Commit publication metadata, the immutable Postgres scene snapshot, and tags
+ * in one non-interactive SQL statement. Object upload/cleanup is owned by callers.
+ */
 import { getNeonSql, queryWithResilience } from '@/lib/db/client';
 
+/** Validated write input. Database identities are UUIDs; bundleKey carries the separate Clerk-owned R2 key. */
 export interface PublicationCommit {
   userId: string;
   projectId: string;
@@ -8,12 +13,14 @@ export interface PublicationCommit {
   description: string | null;
   thumbnail: string | null;
   gameUrl: string;
+  /** Zero for a new slug; otherwise the version observed before uploading the candidate. */
   expectedVersion: number;
   bundleKey: string | null;
   sceneData: unknown;
   tags: string[];
 }
 
+/** Public response metadata from the committed row; omits the scene snapshot and private R2 key. */
 export interface CommittedPublication {
   id: string;
   userId: string;
@@ -32,6 +39,10 @@ export interface CommittedPublication {
  * An optimistic version guard makes a concurrent loser return no row instead
  * of overwriting the winner or publishing a bundle with the wrong version.
  * This single SQL statement works with neon-http's non-interactive driver.
+ *
+ * @param input Validated publication data; userId/projectId are internal database UUIDs. expectedVersion is zero for creation or the observed version for an update.
+ * @returns Committed publication metadata, or null when the version/moderation guard prevents a write.
+ * @throws On serialization or database failure. The statement is attempted once: a lost response may follow a commit, so callers must reconcile storage references before cleanup.
  */
 export async function commitPublication(input: PublicationCommit): Promise<CommittedPublication | null> {
   const query = getNeonSql();

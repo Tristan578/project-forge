@@ -120,7 +120,14 @@ async function withR2Deadline<T>(
   }
 }
 
-/** Write a private object without deriving or advertising a public CDN URL. */
+/** Write a private object without deriving or advertising a public CDN URL.
+ *
+ * @param key Exact destination key already validated by the caller.
+ * @param body Bytes to write to the configured private assets bucket.
+ * @param contentType MIME type recorded with the object.
+ * @returns Resolves after creation; an existing key is never overwritten and no CDN URL is generated.
+ * @throws On configuration, conditional-write, transport, or three-second deadline failure.
+ */
 export async function putPrivateObjectToR2(
   key: string,
   body: Buffer,
@@ -136,7 +143,12 @@ export async function putPrivateObjectToR2(
   ));
 }
 
-/** Read a small JSON object through authenticated S3 access within three seconds. */
+/** Read a small JSON object through authenticated S3 access within three seconds.
+ *
+ * @param key Exact object key already validated for ownership by the caller.
+ * @returns The complete response body as text; JSON parsing belongs to the caller.
+ * @throws On configuration, missing/unreadable object, transport, or three-second deadline failure.
+ */
 export async function getObjectFromR2(key: string): Promise<string> {
   return withR2Deadline(async (abortSignal) => {
     const response = await getR2Client().send(
