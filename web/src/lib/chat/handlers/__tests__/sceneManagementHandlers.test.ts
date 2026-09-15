@@ -33,6 +33,13 @@ vi.mock('@/lib/scenes/sceneManager', () => ({
   setStartScene: (...args: unknown[]) => mockSetStartScene(...args),
   getSceneByName: (...args: unknown[]) => mockGetSceneByName(...args),
   saveCurrentSceneData: (...args: unknown[]) => mockSaveCurrentSceneData(...args),
+  // scene.FR-1 N1: `loadTemplate`'s `restorePrefabInstances` reads a loaded
+  // scene's embedded prefab data through these. A template's own `sceneJson`
+  // never carries either field, so a real (unmocked) call would already
+  // return `[]` here — these are trivial passthroughs matching that, not
+  // stand-ins for seeded behavior the way `mockLoadPrefabInstances` below is.
+  readPrefabInstances: (data: { prefabInstances?: unknown[] } | null | undefined) => data?.prefabInstances ?? [],
+  readPrefabDefinitions: (data: { prefabDefinitions?: unknown[] } | null | undefined) => data?.prefabDefinitions ?? [],
 }));
 
 // PF-1100: switching and duplicating first read the live scene back out of the
@@ -60,6 +67,16 @@ vi.mock('@/lib/scenes/captureScene', () => ({
 const mockLoadPrefabInstances = vi.fn();
 vi.mock('@/lib/prefabs/prefabStore', () => ({
   loadPrefabInstances: (...args: unknown[]) => mockLoadPrefabInstances(...args),
+  // scene.FR-1 N1: `loadTemplate` also runs through `restorePrefabInstances`,
+  // which reads/writes the prefab LIBRARY (not just the instance registry
+  // `mockLoadPrefabInstances` above covers) to merge a loaded scene's
+  // embedded definitions. No test here seeds or asserts prefab-library state,
+  // so inert stand-ins are enough — `sceneSliceLoadTemplate.test.ts` covers
+  // the real behavior against the real store.
+  loadPrefabs: () => [],
+  savePrefabsToStorage: () => {},
+  savePrefabInstancesToStorage: () => {},
+  mergeImportedPrefabDefinitions: () => {},
 }));
 
 const mockTemplateRegistry = [
