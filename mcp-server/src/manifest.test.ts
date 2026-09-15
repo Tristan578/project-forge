@@ -73,6 +73,7 @@ const EXPECTED_DESTRUCTIVE_COMMANDS = [
   'create_scene_from_description',
   'delete_asset',
   'delete_audio_bus',
+  'delete_checkpoint',
   'delete_cutscene',
   'delete_entities',
   'delete_leaderboard',

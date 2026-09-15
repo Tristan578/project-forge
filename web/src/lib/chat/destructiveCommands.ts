@@ -24,6 +24,7 @@ export const DESTRUCTIVE_COMMANDS: ReadonlySet<string> = new Set([
   'create_scene_from_description',
   'delete_asset',
   'delete_audio_bus',
+  'delete_checkpoint',
   'delete_cutscene',
   'delete_entities',
   'delete_leaderboard',
