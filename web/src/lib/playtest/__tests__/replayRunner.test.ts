@@ -41,18 +41,25 @@ function moveRightTrace(ticks: number): InputTrace {
 /**
  * Deterministic fake 2D runtime.
  *
- * The player starts at x=0; holding KeyD advances it +0.1 world units per
- * frame. A collectible sits at x=1.0 and is "collected" (removed from the
- * observed entities) the first frame the player reaches it — exactly the
- * despawn-on-collect the real engine performs. `bound` models whether the
- * `move_right` action is still bound to a key: when false (the negative case,
- * binding removed) the action resolves to no keys and nothing moves.
+ * The player starts at x=0; holding KeyD advances it +0.1 and holding KeyA
+ * retreats it -0.1 world units per frame. A collectible sits at x=1.0 and is
+ * "collected" (removed from the observed entities) the first frame the player
+ * reaches it — exactly the despawn-on-collect the real engine performs. `bound`
+ * models whether the movement actions are still bound to a key: when false (the
+ * negative case, binding removed) every action resolves to no keys and nothing
+ * moves. `move_right` binds KeyD and `move_left` binds KeyA so a trace that
+ * switches actions across ticks exercises key diffing in both directions.
+ *
+ * `pressLog` / `releaseLog` record every `pressKeys` / `releaseKeys` call in
+ * order, so a test can assert a held key is pressed once (not re-pressed each
+ * tick it stays down) and released exactly when its action ends.
  */
 function makeFakeEngine(options: { bound: boolean }) {
   const held = new Set<string>();
   let playerX = 0;
   let collectiblePresent = true;
   const pressLog: string[][] = [];
+  const releaseLog: string[][] = [];
 
   const snapshot = (): ReplayObservation => {
     const entities: ReplayObservation['entities'] = {
@@ -63,17 +70,23 @@ function makeFakeEngine(options: { bound: boolean }) {
   };
 
   const env: ReplayEnvironment = {
-    resolveKeys: (actionName) =>
-      options.bound && actionName === 'move_right' ? ['KeyD'] : [],
+    resolveKeys: (actionName) => {
+      if (!options.bound) return [];
+      if (actionName === 'move_right') return ['KeyD'];
+      if (actionName === 'move_left') return ['KeyA'];
+      return [];
+    },
     pressKeys: (codes) => {
       pressLog.push(codes);
       for (const c of codes) held.add(c);
     },
     releaseKeys: (codes) => {
+      releaseLog.push(codes);
       for (const c of codes) held.delete(c);
     },
     advanceFrame: async () => {
       if (held.has('KeyD')) playerX += 0.1;
+      if (held.has('KeyA')) playerX -= 0.1;
       if (collectiblePresent && playerX >= 1) collectiblePresent = false;
     },
     observe: snapshot,
@@ -81,7 +94,7 @@ function makeFakeEngine(options: { bound: boolean }) {
     collectibleEntityIds: [COLLECTIBLE],
   };
 
-  return { env, pressLog, getPlayerX: () => playerX };
+  return { env, pressLog, releaseLog, getPlayerX: () => playerX };
 }
 
 describe('replayInputTrace — simulated success path', () => {
@@ -193,5 +206,89 @@ describe('replayInputTrace — negative case (dead input)', () => {
     );
     expect('verdict' in session).toBe(false);
     expect(session).toHaveProperty('outcome');
+  });
+});
+
+describe('replayInputTrace — frame-to-frame key diffing', () => {
+  it('presses a held key once and releases it once when its action ends mid-trace', async () => {
+    // move_right held for ticks 0–9, then explicitly released (pressed:false)
+    // for ticks 10–19. The action ENDS mid-trace, so the runner must release
+    // KeyD once at tick 10 and never re-press it while it stays held on 1–9.
+    const trace: InputTrace = {
+      version: INPUT_TRACE_VERSION,
+      fixtureId: 'diff-2d-replay',
+      actionNames: ['move_right'],
+      durationMs: 20 * 16,
+      frames: Array.from({ length: 20 }, (_, tick) => ({
+        tick,
+        actions: { move_right: { pressed: tick < 10 } },
+      })),
+    };
+    const { env, pressLog, releaseLog, getPlayerX } = makeFakeEngine({ bound: true });
+    await replayInputTrace(trace, env);
+
+    // Pressed exactly once (tick 0) and HELD across ticks 1–9 — not re-pressed
+    // per tick. A reversed toRelease/toPress computation would press every tick.
+    expect(pressLog).toEqual([['KeyD']]);
+    // Released exactly once, when the action ends at tick 10 — this is the
+    // in-loop diff release, NOT the finally-block cleanup (held is already empty
+    // by the time the loop ends), unlike the advanceFrame-failure test above.
+    expect(releaseLog).toEqual([['KeyD']]);
+    // Moved for the 10 held ticks only (10 × 0.1), then came to rest.
+    expect(getPlayerX()).toBeCloseTo(1.0, 5);
+  });
+
+  it('releases a held key on a tick that has no frame at all (frame gap)', async () => {
+    // Frames exist only for ticks 0 and 5; ticks 1–4 have NO frame, so
+    // framesByTick.get returns undefined and the active set defaults to empty.
+    // The runner must release KeyD across the gap and re-press it at tick 5.
+    const trace: InputTrace = {
+      version: INPUT_TRACE_VERSION,
+      fixtureId: 'gap-2d-replay',
+      actionNames: ['move_right'],
+      durationMs: 6 * 16,
+      frames: [
+        { tick: 0, actions: { move_right: { pressed: true } } },
+        { tick: 5, actions: { move_right: { pressed: true } } },
+      ],
+    };
+    const { env, pressLog, releaseLog } = makeFakeEngine({ bound: true });
+    await replayInputTrace(trace, env);
+
+    // Pressed at tick 0, released across the gap (tick 1), re-pressed at tick 5.
+    expect(pressLog).toEqual([['KeyD'], ['KeyD']]);
+    // First release is the frame-gap release; the trailing release is the
+    // finally-block cleanup for the key still held after the last frame.
+    expect(releaseLog[0]).toEqual(['KeyD']);
+    expect(releaseLog).toContainEqual(['KeyD']);
+  });
+
+  it('diffs keys in both directions when the pressed action switches across ticks', async () => {
+    // move_right (KeyD) for ticks 0–1, then move_left (KeyA) for ticks 2–3. On
+    // the switch the runner must release the ended action's key and press the
+    // new one — holding both would cancel movement out.
+    const trace: InputTrace = {
+      version: INPUT_TRACE_VERSION,
+      fixtureId: 'switch-2d-replay',
+      actionNames: ['move_right', 'move_left'],
+      durationMs: 4 * 16,
+      frames: [
+        { tick: 0, actions: { move_right: { pressed: true } } },
+        { tick: 1, actions: { move_right: { pressed: true } } },
+        { tick: 2, actions: { move_left: { pressed: true } } },
+        { tick: 3, actions: { move_left: { pressed: true } } },
+      ],
+    };
+    const { env, pressLog, releaseLog } = makeFakeEngine({ bound: true });
+    await replayInputTrace(trace, env);
+
+    // KeyD pressed once (held 0–1), then KeyA pressed once (held 2–3): a held
+    // key is never re-pressed per tick, and each action's key is pressed only
+    // when it begins.
+    expect(pressLog).toEqual([['KeyD'], ['KeyA']]);
+    // KeyD released at the switch (tick 2, before KeyA is pressed); KeyA
+    // released by the finally-block cleanup after the last frame.
+    expect(releaseLog[0]).toEqual(['KeyD']);
+    expect(releaseLog).toContainEqual(['KeyA']);
   });
 });
