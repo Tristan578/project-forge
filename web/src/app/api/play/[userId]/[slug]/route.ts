@@ -6,6 +6,9 @@ import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { extractRequestId } from '@/lib/logging/requestContext';
+import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
+import { readPublishedGameBundle } from '@/lib/storage/publishedGameStorage';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +25,7 @@ async function GET_impl(
   if (limited) return limited;
 
   try {
+    const requestId = extractRequestId(req.headers);
     const { userId: clerkId, slug } = await params;
 
     // Look up the user by their Clerk ID
@@ -58,18 +62,47 @@ async function GET_impl(
       );
     }
 
-    // Fetch the project scene data
-    const [project] = await queryWithResilience(() => getDb()
-      .select({ sceneData: projects.sceneData })
-      .from(projects)
-      .where(eq(projects.id, game.projectId))
-      .limit(1));
+    // Resolve the scene data. When this game was mirrored to R2 on publish
+    // (cdn_bundle_key set) and the mirror is enabled, read the bundle from
+    // object storage FIRST — that is the CDN-backed fast path (#7580). Any read
+    // failure (missing object, transport error, malformed JSON) is logged to
+    // Sentry and falls through to the existing Postgres-served sceneData, which
+    // remains the source of truth. The remix path is deliberately untouched: it
+    // still reads projects.sceneData directly and quarantines scripts.
+    let sceneData: unknown;
+    let servedFromR2 = false;
 
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Game data not found' },
-        { status: 404 }
-      );
+    if (game.cdnBundleKey && isPublishToR2Enabled()) {
+      try {
+        const bundle = await readPublishedGameBundle(clerkId, slug);
+        sceneData = bundle.sceneData;
+        servedFromR2 = true;
+      } catch (err) {
+        captureException(err, {
+          route: '/api/play/[userId]/[slug]',
+          stage: 'r2-bundle-read',
+          requestId,
+          userId: clerkId,
+          slug,
+        });
+      }
+    }
+
+    if (!servedFromR2) {
+      // Fetch the project scene data (Postgres fallback / default path)
+      const [project] = await queryWithResilience(() => getDb()
+        .select({ sceneData: projects.sceneData })
+        .from(projects)
+        .where(eq(projects.id, game.projectId))
+        .limit(1));
+
+      if (!project) {
+        return NextResponse.json(
+          { error: 'Game data not found' },
+          { status: 404 }
+        );
+      }
+      sceneData = project.sceneData;
     }
 
     // Increment play count (fire-and-forget)
@@ -87,7 +120,7 @@ async function GET_impl(
         slug: game.slug,
         version: game.version,
         creatorName: user.displayName || 'Unknown Creator',
-        sceneData: project.sceneData,
+        sceneData,
       },
     });
     // Short TTL: game data changes when creators republish; stale-while-revalidate

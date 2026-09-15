@@ -402,6 +402,38 @@ describe('R2 storage client', () => {
     });
   });
 
+  describe('getObjectFromR2', () => {
+    it('returns the object body as a string', async () => {
+      mockSend.mockResolvedValue({
+        Body: { transformToString: vi.fn().mockResolvedValue('{"sceneData":{}}') },
+      });
+      const { getObjectFromR2 } = await import('../r2');
+
+      const body = await getObjectFromR2('games/u/g/bundle.json');
+      expect(body).toBe('{"sceneData":{}}');
+      const command = mockSend.mock.calls[0][0] as { args: { Bucket: string; Key: string } };
+      expect(command.args.Bucket).toBe('test-bucket');
+      expect(command.args.Key).toBe('games/u/g/bundle.json');
+    });
+
+    it('throws when the response has no readable body', async () => {
+      mockSend.mockResolvedValue({ Body: undefined });
+      const { getObjectFromR2 } = await import('../r2');
+
+      await expect(getObjectFromR2('games/u/g/bundle.json')).rejects.toThrow(
+        'no readable body',
+      );
+    });
+
+    it('propagates a NoSuchKey error from R2', async () => {
+      const err = Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
+      mockSend.mockRejectedValue(err);
+      const { getObjectFromR2 } = await import('../r2');
+
+      await expect(getObjectFromR2('games/u/missing/bundle.json')).rejects.toThrow('NoSuchKey');
+    });
+  });
+
   describe('getSignedDownloadUrl', () => {
     it('generates a signed URL', async () => {
       const { getSignedDownloadUrl } = await import('../r2');

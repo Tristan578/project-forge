@@ -289,6 +289,12 @@ export const publishedGames = pgTable(
     status: publishStatusEnum('status').notNull().default('processing'),
     version: integer('version').notNull().default(1),
     cdnUrl: text('cdn_url'),
+    // R2 object key of the published-game bundle written on publish (#7580):
+    // `games/{clerkId}/{slug}/bundle.json`. NULL means the game was never
+    // mirrored to object storage (PUBLISH_TO_R2 off, or the mirror write failed
+    // and the publish fell open to Postgres). When set, /play reads the bundle
+    // from R2 first and falls back to `projects.sceneData` on any read failure.
+    cdnBundleKey: text('cdn_bundle_key'),
     thumbnail: text('thumbnail'),
     playCount: integer('play_count').notNull().default(0),
     // Distinct reporters SINCE THE LAST MODERATOR REVIEW (one row per reporter

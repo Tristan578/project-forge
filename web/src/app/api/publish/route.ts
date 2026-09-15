@@ -12,6 +12,8 @@ import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
+import { writePublishedGameBundle } from '@/lib/storage/publishedGameStorage';
 
 const publishSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -236,6 +238,34 @@ async function POST_impl(request: NextRequest) {
 
   const gameUrl = `/play/${clerkId}/${slug}`;
 
+  // Mirror the published game's scene data to R2 (object storage) so the player
+  // page can be served from CDN-backed storage instead of a live Postgres read
+  // (#7580). This is FAIL-OPEN: any R2 error is logged and swallowed, the row
+  // keeps `cdn_bundle_key` NULL, and /play serves projects.sceneData exactly as
+  // before. R2 availability must never block a publish. The bundle key uses the
+  // creator's clerkId — the same identifier the /play URL and the read path use
+  // — so the write here and the read there derive an identical key.
+  const r2Enabled = isPublishToR2Enabled();
+  async function mirrorBundleToR2(
+    version: number,
+  ): Promise<{ key: string; url: string } | null> {
+    if (!r2Enabled) return null;
+    try {
+      return await writePublishedGameBundle(clerkId, slug, project.sceneData, {
+        version,
+        publishedAt: new Date().toISOString(),
+        slug,
+        userId: clerkId,
+      });
+    } catch (err) {
+      captureException(err, { route: '/api/publish', stage: 'r2-bundle-write', slug });
+      reqLogAuth.warn('R2 bundle mirror failed; serving published game from Postgres', {
+        slug,
+      });
+      return null;
+    }
+  }
+
   // Validate tags — lenient filter: non-array becomes [], non-string entries dropped
   const validTags: string[] = Array.isArray(body.tags)
     ? (body.tags as unknown[])
@@ -248,13 +278,22 @@ async function POST_impl(request: NextRequest) {
     // Update existing publication (republish)
     const gameDbId = existingSlug[0].id;
     const newVersion = existingSlug[0].version + 1;
+    // A fresh bundle for the new version. On failure `bundle` is null, so the
+    // row drops back to the Postgres-served /play URL and clears any stale key
+    // — /play must never point at a bundle carrying the previous version's
+    // scene data.
+    const bundle = await mirrorBundleToR2(newVersion);
+    // cdnUrl becomes the CDN bundle URL only when the mirror succeeded, which
+    // is exactly when CDN_URL is configured (uploadToR2 throws otherwise);
+    // otherwise it stays the internal /play route.
     await queryWithResilience(() => getDb().update(publishedGames)
       .set({
         title: title,
         description: description ?? null,
         status: 'published',
         version: newVersion,
-        cdnUrl: gameUrl,
+        cdnUrl: bundle?.url ?? gameUrl,
+        cdnBundleKey: bundle?.key ?? null,
         thumbnail,
         updatedAt: new Date(),
       })
@@ -281,6 +320,7 @@ async function POST_impl(request: NextRequest) {
   // Create new publication — use onConflictDoUpdate to handle concurrent
   // publishes with the same slug atomically (PF-212: TOCTOU fix).
   // The unique index uq_published_games_slug(userId, slug) prevents duplicates.
+  const bundle = await mirrorBundleToR2(1);
   const [publication] = await queryWithResilience(() => getDb().insert(publishedGames)
     .values({
       userId: user.id,
@@ -289,7 +329,8 @@ async function POST_impl(request: NextRequest) {
       title: title,
       description: description ?? null,
       status: 'published',
-      cdnUrl: gameUrl,
+      cdnUrl: bundle?.url ?? gameUrl,
+      cdnBundleKey: bundle?.key ?? null,
       thumbnail,
     })
     .onConflictDoUpdate({
@@ -299,7 +340,8 @@ async function POST_impl(request: NextRequest) {
         title: title,
         description: description ?? null,
         status: 'published',
-        cdnUrl: gameUrl,
+        cdnUrl: bundle?.url ?? gameUrl,
+        cdnBundleKey: bundle?.key ?? null,
         thumbnail,
         version: sql`${publishedGames.version} + 1`,
         updatedAt: new Date(),

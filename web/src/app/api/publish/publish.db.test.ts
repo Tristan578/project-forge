@@ -64,7 +64,19 @@ vi.mock('@/lib/api/middleware', () => ({
   }),
 }));
 
-vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
+const captureExceptionSpy = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: captureExceptionSpy }));
+
+// The R2 transport is mocked at the storage-module boundary so these tests
+// exercise the publish route's mirror wiring (key/manifest passed, row columns
+// written, fail-open) against real Postgres, with no network. The existing
+// moderation-hold suite below never triggers it — PUBLISH_TO_R2 is unset there
+// and defaults off without an ASSET_BUCKET_NAME.
+const writeBundleSpy = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/storage/publishedGameStorage', () => ({
+  writePublishedGameBundle: (...args: unknown[]) => writeBundleSpy(...args),
+  readPublishedGameBundle: vi.fn(),
+}));
 
 import { POST } from './route';
 
@@ -378,5 +390,139 @@ describe('POST /api/publish — moderation hold against real Postgres', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].status).toBe('published');
     });
+  });
+});
+
+/**
+ * R2 bundle mirroring on publish (#7580).
+ *
+ * Proves the actual COLUMN STATE the publish route writes — the sibling mock
+ * suite's `.where()` is a passthrough that cannot see stored values, the same
+ * reason the moderation-hold proof lives here (see this file's header). The R2
+ * transport is mocked at the storage-module boundary so no network is touched;
+ * the assertions are on the row and on the arguments the route hands the mirror.
+ */
+describe('POST /api/publish — R2 bundle mirroring against real Postgres', () => {
+  beforeAll(async () => {
+    harnessRef.current = await createTestHarness();
+  });
+
+  afterAll(async () => {
+    await harnessRef.current?.close();
+  });
+
+  beforeEach(async () => {
+    await harness().truncateAll();
+    writeBundleSpy.mockReset();
+    captureExceptionSpy.mockReset();
+    delete process.env.PUBLISH_TO_R2;
+  });
+
+  afterAll(() => {
+    delete process.env.PUBLISH_TO_R2;
+  });
+
+  async function cdnColumns(ownerId: string): Promise<QueryRow[]> {
+    return harness().neonSql`
+      SELECT slug, cdn_url, cdn_bundle_key
+      FROM published_games WHERE user_id = ${ownerId}::uuid ORDER BY slug
+    `;
+  }
+
+  it('mirrors the bundle and stores its R2 key + CDN url on the row when enabled', async () => {
+    process.env.PUBLISH_TO_R2 = 'true';
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+
+    const key = `games/${owner.clerkId}/my-awesome-game/bundle.json`;
+    const url = `https://cdn.test/${key}`;
+    writeBundleSpy.mockResolvedValue({ key, url });
+
+    const res = await publish(owner, validBody({ projectId, slug: 'my-awesome-game' }));
+
+    expect(res.status).toBe(200);
+    expect(res.json.publication?.status).toBe('published');
+
+    // The route passed the creator's clerkId, the slug, the scene data and a
+    // manifest carrying the version/slug/userId — not an adjacent shape.
+    expect(writeBundleSpy).toHaveBeenCalledTimes(1);
+    const [userIdArg, slugArg, , manifestArg] = writeBundleSpy.mock.calls[0] as [
+      string,
+      string,
+      unknown,
+      { version: number; slug: string; userId: string; publishedAt: string },
+    ];
+    expect(userIdArg).toBe(owner.clerkId);
+    expect(slugArg).toBe('my-awesome-game');
+    expect(manifestArg).toMatchObject({
+      version: 1,
+      slug: 'my-awesome-game',
+      userId: owner.clerkId,
+    });
+    expect(typeof manifestArg.publishedAt).toBe('string');
+
+    // The decisive assertion: the object key is persisted, and cdn_url becomes
+    // the CDN bundle url (the mirror returned one, i.e. CDN_URL was set).
+    const rows = await cdnColumns(owner.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cdn_bundle_key).toBe(key);
+    expect(rows[0].cdn_url).toBe(url);
+  });
+
+  it('keeps cdn_url at /play and cdn_bundle_key NULL when PUBLISH_TO_R2 is off', async () => {
+    process.env.PUBLISH_TO_R2 = 'false';
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+
+    const res = await publish(owner, validBody({ projectId, slug: 'no-mirror' }));
+
+    expect(res.status).toBe(200);
+    expect(writeBundleSpy).not.toHaveBeenCalled();
+
+    const rows = await cdnColumns(owner.id);
+    expect(rows[0].cdn_url).toBe(`/play/${owner.clerkId}/no-mirror`);
+    expect(rows[0].cdn_bundle_key).toBeNull();
+  });
+
+  it('publishes fail-open when the mirror throws: 200, key NULL, /play url, Sentry logged', async () => {
+    process.env.PUBLISH_TO_R2 = 'true';
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    writeBundleSpy.mockRejectedValue(new Error('R2 unavailable'));
+
+    const res = await publish(owner, validBody({ projectId, slug: 'r2-down' }));
+
+    // R2 availability must never block a publish.
+    expect(res.status).toBe(200);
+    expect(res.json.publication?.status).toBe('published');
+    expect(captureExceptionSpy).toHaveBeenCalled();
+
+    const rows = await cdnColumns(owner.id);
+    expect(rows[0].cdn_bundle_key).toBeNull();
+    expect(rows[0].cdn_url).toBe(`/play/${owner.clerkId}/r2-down`);
+  });
+
+  it('clears a stale bundle key when a republish mirror fails', async () => {
+    // A republish whose mirror fails must not leave /play pointed at the
+    // previous version's bundle — the key drops back to NULL so /play serves
+    // fresh Postgres scene data.
+    process.env.PUBLISH_TO_R2 = 'true';
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+
+    const key = `games/${owner.clerkId}/again/bundle.json`;
+    writeBundleSpy.mockResolvedValueOnce({ key, url: `https://cdn.test/${key}` });
+    const first = await publish(owner, validBody({ projectId, slug: 'again' }));
+    expect(first.status).toBe(200);
+    expect((await cdnColumns(owner.id))[0].cdn_bundle_key).toBe(key);
+
+    writeBundleSpy.mockRejectedValueOnce(new Error('R2 unavailable'));
+    const second = await publish(owner, validBody({ projectId, slug: 'again' }));
+    expect(second.status).toBe(200);
+    expect(second.json.publication?.version).toBe(2);
+
+    const rows = await cdnColumns(owner.id);
+    expect(rows[0].cdn_bundle_key).toBeNull();
+    expect(rows[0].cdn_url).toBe(`/play/${owner.clerkId}/again`);
   });
 });
