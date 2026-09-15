@@ -102,9 +102,10 @@ mk() {
     --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" \
     --arg bvt "$bvt" --arg pp "$pp" '
     {
-      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true" } },
+      "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true", "needs-observatory": "false" } },
       "quality-gates":        { result: $qg },
       "command-parity":       { result: "success" },
+      "observatory-tests":    { result: "success" },
       "build-nextjs":         { result: "success" },
       "docs-internal-gate":   { result: "success" },
       "design-internal-gate": { result: $dig },
@@ -942,6 +943,40 @@ if [ "${res%%|*}" = "0" ]; then pass "both unconditional jobs succeeding still e
 # pass every fixture while shipping a dead gate. Pin the load-bearing bytes of
 # ci.yml / quality-gates.yml here (same pattern as check-native-bindings.test.sh).
 echo ""
+# Observatory: each trigger must independently require a successful gate.
+for trigger in needs-observatory needs-ci needs-deps; do
+  for state in skipped absent failure cancelled; do
+    needs="$(mk false false success success | jq -c --arg trigger "$trigger" --arg state "$state" '
+      ."ci-gate".outputs[$trigger] = "true" |
+      if $state == "absent" then del(."observatory-tests")
+      else ."observatory-tests".result = $state end')"
+    res="$(run_verify "$needs")"
+    rc="${res%%|*}"; out="${res#*|}"
+    if [ "$rc" = "1" ] && grep -q 'observatory-tests' <<<"$out"; then
+      pass "Observatory $state fails when only $trigger fires"
+    else
+      fail "Observatory $state should fail via $trigger: $res"
+    fi
+  done
+  needs="$(mk false false success success | jq -c --arg trigger "$trigger" '."ci-gate".outputs[$trigger] = "true"')"
+  res="$(run_verify "$needs")"
+  if [ "${res%%|*}" = "0" ]; then
+    pass "Observatory success passes when only $trigger fires"
+  else
+    fail "successful Observatory gate rejected via $trigger: $res"
+  fi
+done
+needs="$(mk false false success success | jq -c '."observatory-tests".result = "skipped"')"
+res="$(run_verify "$needs")"
+if [ "${res%%|*}" = "0" ]; then pass "Observatory legitimate skip passes"; else fail "Observatory legitimate skip rejected: $res"; fi
+needs="$(mk false false success success | jq -c 'del(."ci-gate".outputs."needs-observatory")')"
+res="$(run_verify "$needs")"
+if [ "${res%%|*}" = "1" ] && grep -q 'needs-observatory.*missing' <<<"$res"; then
+  pass "missing Observatory trigger fails closed"
+else
+  fail "missing Observatory trigger was not reported: $res"
+fi
+
 echo "--- structural assertions against the real workflow files ---"
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
@@ -955,6 +990,36 @@ QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 # install; npm run has no install path at all.
 UI_TEST_CMD='cd packages/ui && npm test'
 if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
+  obs_block="$(awk '
+    /^  observatory-tests:/ {f=1; next}
+    f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ {exit}
+    f {print}
+  ' "$CI_YML" | grep -v '^[[:space:]]*#')"
+  obs_runs="$(grep -E "^[[:space:]]*['\"]?run['\"]?:" <<<"$obs_block")"
+  obs_expected_runs="$(cat <<'RUNS'
+        run: npm ci
+        run: npx tsc --noEmit -p tools/observatory/tsconfig.json
+        run: npx vitest run --config tools/observatory/vitest.config.ts
+RUNS
+)"
+  if [ "$obs_runs" = "$obs_expected_runs" ]; then
+    pass "Observatory runs installation, typecheck and unit tests as exact executable steps"
+  else
+    fail "Observatory executable commands changed or were removed: $obs_runs"
+  fi
+  obs_if="$(grep -E '^    if:' <<<"$obs_block")"
+  obs_expected_if="    if: \${{ needs.ci-gate.outputs.needs-observatory == 'true' || needs.ci-gate.outputs.needs-ci == 'true' || needs.ci-gate.outputs.needs-deps == 'true' }}"
+  if [ "$obs_if" = "$obs_expected_if" ]; then
+    pass "Observatory job uses all three OR trigger arms"
+  else
+    fail "Observatory job condition drifted: $obs_if"
+  fi
+  if grep -qE "continue-on-error|^        ['\"]?if['\"]?:" <<<"$obs_block"; then
+    fail "Observatory steps must not mask failures or conditionally skip required work"
+  else
+    pass "Observatory steps cannot skip or mask their required checks"
+  fi
+
   dig_block="$(awk -v j="  design-internal-gate:" '$0==j{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && $0!=j{exit}' "$CI_YML")"
   if [ -n "$dig_block" ]; then
     pass "ci.yml has a design-internal-gate job"
@@ -1289,7 +1354,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   # longer gates the job is decorative. Whole expression, on the `if:` line only,
   # comments stripped — so `!= 'true'` inversion and trailing-comment survival
   # both fail (the three vectors documented at the quality-gates pin).
-  for pair in "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web"; do
+  for pair in "observatory-tests:needs-observatory:needs-ci:needs-deps" "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web"; do
     pj="${pair%%:*}"; ptrigs="${pair#*:}"
     pblk="$(awk -v j="  $pj:" '$0==j{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && $0!=j{exit}' "$CI_YML")"
     pif="$(grep -v '^[[:space:]]*#' <<<"$pblk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"

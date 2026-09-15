@@ -1,12 +1,15 @@
 import type { NextConfig } from 'next';
 import { assertClerkPublishableKeyShape } from './lib/clerk';
 
-// Fail the build on a configured-but-unusable Clerk publishable key (#9044).
-// A MISSING key is fine and stays fine — local checkouts and CI build without
-// one. A key that is PRESENT but cannot work is always a paste error, and the
-// old behaviour treated it as "Clerk is not set up here": docs.spawnforge.ai
-// shipped with every sign-in dead and no signal anywhere. Checked here rather
-// than at runtime so the deploy goes red instead of the live site.
+// Fail the build on a Clerk configuration that cannot work. A MISSING pair is
+// fine and stays fine — local checkouts and CI build without Clerk. What fails:
+// a PRESENT-but-unusable publishable key (#9044, a paste error), and a set
+// CLERK_SECRET_KEY with an ABSENT publishable key (#9721) — the half-configured
+// state that shipped docs.spawnforge.ai with sign-in dead and "Missing
+// publishableKey" on every request. Both were once treated as "Clerk is not set
+// up here". Checked here rather than at runtime so the deploy goes red instead
+// of the live site. Reads NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY
+// from process.env by default.
 assertClerkPublishableKeyShape();
 
 // Defense-in-depth: INCLUDE_INTERNAL requires IS_INTERNAL_DOCS_BUILD

@@ -1,0 +1,28 @@
+{
+  "description": "A newly added route inside a covered scope with no matching rule must surface as an unmapped in-scope GAP (visible), never silently excluded.",
+  "coveredScopes": ["api/routes/"],
+  "files": [
+    "api/routes/existing.ts",
+    "api/routes/existing.test.ts",
+    "api/routes/brandNew.ts"
+  ],
+  "rules": [
+    {
+      "capabilityId": "api.existing",
+      "domain": "api",
+      "confidence": "reviewed",
+      "primaryOwner": "api/routes/existing.ts",
+      "own": ["api/routes/existing.ts", "api/routes/existing.test.ts"]
+    }
+  ],
+  "expected": {
+    "trackedTotal": 3,
+    "ownedTotal": 2,
+    "excludedTotal": 0,
+    "unmappedTotal": 1,
+    "notYetCoveredTotal": 0,
+    "unmappedIncludes": "api/routes/brandNew.ts",
+    "gapType": "unmapped-in-covered-scope",
+    "gapPath": "api/routes/brandNew.ts"
+  }
+}

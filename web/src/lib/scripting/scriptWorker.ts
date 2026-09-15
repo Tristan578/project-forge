@@ -6,6 +6,7 @@ import { injectLoopGuards } from './loopGuards';
 import { SHADOWED_GLOBALS } from './sandboxGlobals';
 import { revokeNetworkGlobalsIfWorker } from './revokeNetworkGlobals';
 import { MAX_COMMAND_PAYLOAD_CONTAINERS } from '../engine/commandPayloadGuard';
+import type { LocaleBundle } from '@/lib/i18n/gameLocalization';
 
 // Hard-revoke network/storage globals from this worker's scope BEFORE any user
 // script is compiled or run. Parameter shadowing (SHADOWED_GLOBALS) only hides
@@ -106,6 +107,14 @@ let sharedState: Record<string, unknown> = {};
 // Touch capability is sent from the main thread in the 'init' message.
 // Workers cannot safely access navigator.maxTouchPoints (it may not exist).
 let isTouchDeviceFlag = false;
+// Localization bundles sent from the main thread in the 'init' message, keyed
+// by BCP-47 locale code. `forge.i18n` resolves against `activeLocale`, which
+// starts at the project's preview locale (falling back to its source locale)
+// and can be switched at runtime via `forge.i18n.setLocale`. Module-level so
+// setLocale in one script is observed by getLocale/t in every other script and
+// persists for the whole play session.
+let localeBundles: Record<string, LocaleBundle> = {};
+let activeLocale = 'en';
 const audioPlayingState = new Map<string, boolean>();
 let scripts: ScriptInstance[] = [];
 let spawnCounter = 0;
@@ -1147,6 +1156,38 @@ function buildForgeApi(scriptEntityId: string) {
       },
     },
 
+    // --- Leaderboard (async — published-game score submission / reads) ---
+    // Routed through the 'leaderboard' async channel. The handler
+    // (leaderboardChannel.ts) rejects with a clear reason when there is no
+    // published-game identity (e.g. in-editor test play), so a script's catch
+    // block sees that message rather than a silent no-op.
+    leaderboard: {
+      submit: (
+        name: string,
+        playerName: string,
+        score: number,
+        metadata?: Record<string, unknown>,
+      ) => asyncRequest('leaderboard', 'submit', { name, playerName, score, metadata }),
+      getTop: (name: string, limit?: number) =>
+        asyncRequest('leaderboard', 'getTop', { name, limit }),
+    },
+
+    // --- Internationalization (synchronous — resolved against locale bundles) ---
+    // No engine command and no worker-boundary round-trip: bundles are shipped
+    // in the 'init' message and resolved in-worker, so `t` is a plain string
+    // lookup usable in tight per-frame code.
+    i18n: {
+      t: (stringId: string, defaultText: string): string => {
+        const translated = localeBundles[activeLocale]?.translations?.[stringId];
+        return typeof translated === 'string' ? translated : defaultText;
+      },
+      setLocale: (locale: string): void => {
+        activeLocale = locale;
+      },
+      getLocale: (): string => activeLocale,
+      getAvailableLocales: (): string[] => Object.keys(localeBundles),
+    },
+
     // --- Sprite animation control ---
     sprite: {
       playAnimation: (eid: string, clipName: string) => {
@@ -1450,6 +1491,15 @@ self.onmessage = (e: MessageEvent) => {
       prevEntityStates = {};
       // Main thread passes touch capability so the worker doesn't need navigator access
       isTouchDeviceFlag = typeof msg.isTouchDevice === 'boolean' ? msg.isTouchDevice : false;
+      // Localization bundles + the locale forge.i18n should resolve against.
+      // previewLocale wins when set (matches the editor's own resolveString),
+      // else the project source locale, else 'en'.
+      localeBundles = (msg.locales as Record<string, LocaleBundle>) || {};
+      {
+        const src = typeof msg.sourceLocale === 'string' && msg.sourceLocale ? msg.sourceLocale : 'en';
+        activeLocale =
+          typeof msg.previewLocale === 'string' && msg.previewLocale ? msg.previewLocale : src;
+      }
       uiElements.clear();
       uiDirty = false;
 
