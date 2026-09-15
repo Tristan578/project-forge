@@ -3,7 +3,8 @@ import {
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_INTERACTION_MS,
 } from '../constants';
-import fixture from '../fixtures/minimal-2d-replay-fixture.json';
+import FX, { type ReplayFixture as Fixture } from '../fixtures/minimal-2d-replay-fixture';
+import type { useEditorStore } from '@/stores/editorStore';
 
 /**
  * #9902 (qa.FR-1.OP-01 / qa.FR-1.OP-03) — record/replay against the REAL engine.
@@ -11,7 +12,7 @@ import fixture from '../fixtures/minimal-2d-replay-fixture.json';
  * Builds the minimal 2D fixture through real engine commands, enters Play, and
  * replays a bounded 120-tick input trace through the REAL runtime input path via
  * `window.__FORGE_REPLAY` (the same `replay_input_trace` runner the manual
- * Replay button and the AI path invoke). It then asserts on OBSERVED engine
+ * Replay button invokes; AI registration is pending #10007). It asserts on engine
  * state: the player entity moved, and exactly one collectible was collected
  * (its `destroy_on_collect` despawn). This is the real-boundary evidence the
  * mocked unit tests (`src/lib/playtest/__tests__/*`) cannot provide.
@@ -26,28 +27,10 @@ import fixture from '../fixtures/minimal-2d-replay-fixture.json';
  * --grep @engine-replay`); PROMOTING it into the required `@engine-smoke` gate,
  * on a runtime pinned frame rate, is owned by the child issue that carries
  * qa.FR-1.OP-01/OP-03 forward (see the PR body). Recording, manual/AI parity,
- * and the dead-input negative case are proven deterministically in the unit
- * suites; this spec proves the replay reaches the real engine.
+ * source-label equivalence and the dead-input negative case use fake engines
+ * in unit suites. This authored spec is not runtime evidence until it passes
+ * against a live engine.
  */
-
-interface FixtureEntity {
-  id: string;
-  name: string;
-  entityType: string;
-  position: [number, number, number];
-  scale: [number, number, number];
-  physics2d: { bodyType: string; colliderShape: string; isSensor?: boolean };
-  gameComponents: Array<Record<string, unknown>>;
-}
-
-interface Fixture {
-  fixtureId: string;
-  inputBindings: Array<Record<string, unknown>>;
-  entities: FixtureEntity[];
-  replay: { actionNames: string[]; holdActions: string[]; ticks: number };
-}
-
-const FX = fixture as unknown as Fixture;
 
 /** The bounded trace a "hold move_right for 120 ticks" recording produces. */
 function holdTrace() {
@@ -79,23 +62,18 @@ test.describe('Runtime input replay @engine @engine-replay', () => {
 
     // --- Build the fixture scene through REAL engine commands ---------------
     const ids = await page.evaluate((fx: Fixture) => {
-      const store = (window as unknown as { __EDITOR_STORE: { getState: () => Record<string, (...args: unknown[]) => unknown> } }).__EDITOR_STORE;
+      const store = window.__EDITOR_STORE as typeof useEditorStore;
       const state = store.getState();
+      state.setProjectType(fx.projectType);
       const spawned: Record<string, string> = {};
       for (const entity of fx.entities) {
-        const id = state.spawnEntity(entity.entityType, entity.name, entity.position) as
-          | string
-          | undefined;
+        const id = state.spawnEntity(entity.entityType, entity.name, entity.position);
         if (!id) throw new Error(`spawnEntity failed for ${entity.name}`);
         spawned[entity.id] = id;
         state.updateTransform(id, 'scale', entity.scale);
         state.setPhysics2d(
           id,
-          {
-            bodyType: entity.physics2d.bodyType,
-            colliderShape: entity.physics2d.colliderShape,
-            isSensor: entity.physics2d.isSensor ?? false,
-          },
+          entity.physics2d,
           true,
         );
         for (const component of entity.gameComponents) {
@@ -118,16 +96,17 @@ test.describe('Runtime input replay @engine @engine-replay', () => {
     await playBtn.click();
     await page.waitForFunction(
       () =>
-        (window as unknown as { __EDITOR_STORE: { getState: () => { engineMode: string } } }).__EDITOR_STORE.getState()
+        (window.__EDITOR_STORE as typeof useEditorStore).getState()
           .engineMode === 'play',
+      undefined,
       { timeout: E2E_TIMEOUT_INTERACTION_MS },
     );
 
     // --- Replay the bounded trace through the real runtime runner ----------
     const outcome = await page.evaluate(
       async ({ trace, playerEntityId, collectibleEntityIds }) => {
-        const replay = (window as unknown as { __FORGE_REPLAY: NonNullable<Window['__FORGE_REPLAY']> })
-          .__FORGE_REPLAY;
+        const replay = window.__FORGE_REPLAY;
+        if (!replay) throw new Error('Replay test hook is unavailable');
         return replay(trace, { playerEntityId, collectibleEntityIds });
       },
       {

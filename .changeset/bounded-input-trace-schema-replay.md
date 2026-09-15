@@ -2,10 +2,8 @@
 "web": minor
 ---
 
-Add a bounded input-trace record/replay for playtesting. You can now record the
-inputs you make while playing a game into a typed, size-bounded trace (capped at
-120 ticks / 30 seconds) and replay them back through the real engine to verify
-the game responds — the player moves and collectibles are collected. Manual
-Record/Replay controls live in the Playtest panel, and the in-app AI uses the
-exact same replay command with identical validation. This runtime replay is kept
-distinct from the existing heuristic AI Playtest rating.
+Add an experimental input-trace recorder and replay runner, capped at 120 ticks
+and 30 seconds, with manual controls in the Playtest panel. The runner reports
+observed movement and collectible disappearance separately from the heuristic
+AI Playtest rating. Live-engine verification and AI command registration remain
+tracked by #10007; the shared runner's unit tests do not establish either.

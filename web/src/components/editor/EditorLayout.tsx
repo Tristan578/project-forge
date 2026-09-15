@@ -615,8 +615,7 @@ export function EditorLayout() {
       // — the same typed command the AI path dispatches — and returns the
       // JSON-serializable observed-state outcome. Same build-time gate as the
       // hooks above; never attached in a normal production build.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__FORGE_REPLAY = async (
+      window.__FORGE_REPLAY = async (
         trace: unknown,
         config: { playerEntityId: string; collectibleEntityIds: string[] },
       ) => {

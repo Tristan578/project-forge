@@ -150,25 +150,29 @@ export async function replayInputTrace(
 
   const held = new Set<string>();
   let ticksReplayed = 0;
-  for (let tick = 0; tick <= lastTick; tick += 1) {
-    const frame = framesByTick.get(tick);
-    const active = frame ? keysForFrame(frame, env) : new Set<string>();
+  try {
+    for (let tick = 0; tick <= lastTick; tick += 1) {
+      const frame = framesByTick.get(tick);
+      const active = frame ? keysForFrame(frame, env) : new Set<string>();
 
-    const toRelease = [...held].filter((code) => !active.has(code));
-    const toPress = [...active].filter((code) => !held.has(code));
-    if (toRelease.length > 0) await env.releaseKeys(toRelease);
-    if (toPress.length > 0) await env.pressKeys(toPress);
-    for (const code of toRelease) held.delete(code);
-    for (const code of toPress) held.add(code);
+      const toRelease = [...held].filter((code) => !active.has(code));
+      const toPress = [...active].filter((code) => !held.has(code));
+      if (toRelease.length > 0) await env.releaseKeys(toRelease);
+      for (const code of toRelease) held.delete(code);
+      for (const code of toPress) held.add(code);
+      if (toPress.length > 0) await env.pressKeys(toPress);
 
-    await env.advanceFrame();
-    ticksReplayed += 1;
+      await env.advanceFrame();
+      ticksReplayed += 1;
+    }
+  } finally {
+    // A failed frame/input operation must not leave synthetic keys held.
+    if (held.size > 0) await env.releaseKeys([...held]);
+    held.clear();
   }
 
   // Release everything and let the runtime settle so the final observation
   // reflects a resting state, not a mid-input frame.
-  if (held.size > 0) await env.releaseKeys([...held]);
-  held.clear();
   await env.advanceFrame();
   await env.advanceFrame();
 

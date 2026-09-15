@@ -2,10 +2,10 @@
  * #9902 (qa.FR-1.OP-01 / qa.FR-1.OP-03) — runtime replay runner.
  *
  * Drives `replayInputTrace` / `invokeReplay` against a DETERMINISTIC fake engine
- * boundary (a stand-in for the real WASM runtime — the real-engine evidence
- * lives in `e2e/engine/inputReplay.spec.ts`). Proves:
- *   - manual and AI invocations route to the SAME typed command;
- *   - a real replay moves the entity and collects exactly one item -> passed;
+ * boundary. The separate `e2e/engine/inputReplay.spec.ts` requires a live-engine
+ * run before its assertions can count as runtime evidence. These tests prove:
+ *   - manual and AI source labels use the same runner contract;
+ *   - simulated movement and collection produce a passed verdict;
  *   - the dead-input negative case FAILS the outcome assertion and is NOT a
  *     heuristic `gameplayBot` rating.
  */
@@ -84,7 +84,16 @@ function makeFakeEngine(options: { bound: boolean }) {
   return { env, pressLog, getPlayerX: () => playerX };
 }
 
-describe('replayInputTrace — real success path', () => {
+describe('replayInputTrace — simulated success path', () => {
+  it('releases injected keys if advancing a frame fails', async () => {
+    const { env } = makeFakeEngine({ bound: true });
+    const released: string[][] = [];
+    env.releaseKeys = (keys) => { released.push(keys); };
+    env.advanceFrame = async () => { throw new Error('engine stopped'); };
+    await expect(replayInputTrace(moveRightTrace(20), env)).rejects.toThrow('engine stopped');
+    expect(released).toEqual([['KeyD']]);
+  });
+
   it('moves the entity and collects exactly one item (verdict passed)', async () => {
     const { env, getPlayerX } = makeFakeEngine({ bound: true });
     const outcome = await replayInputTrace(moveRightTrace(20), env);

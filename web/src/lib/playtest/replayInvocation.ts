@@ -1,23 +1,21 @@
 /**
  * Shared replay invocation surface (#9902).
  *
- * The manual Replay button and the in-app AI replay call MUST route to the same
- * typed command with the same validation. This is the one funnel: both pass
- * through `invokeReplay`, which runs the identical `replayInputTrace` runner and
- * stamps the identical `command`. The only difference recorded is `source`, for
- * evidence/telemetry — never behaviour. A trace that is invalid from the UI is
- * invalid from AI, with the same `InputTraceValidationError`.
+ * The manual Replay button uses this invocation function. It also accepts an
+ * AI source label for future registration, but no chat command currently calls
+ * it; that integration is tracked in #10007. Unit tests cover the shared runner
+ * contract and do not establish an available AI product entry point.
  *
  * `createDomKeyboardEnvironment` builds the REAL runtime boundary used in the
  * browser: named actions resolve to key codes through the scene's input
  * bindings, presses dispatch DOM `KeyboardEvent`s on the same channel a human's
  * keystrokes travel (which the engine's `capture_input` reads via winit /
- * Bevy `ButtonInput`), frames advance on `requestAnimationFrame`, and state is
+ * Bevy `ButtonInput`), frames advance when the play-tick bus reports them, and state is
  * observed from the play-tick bus.
  */
 
 import type { InputBinding } from '@/stores/slices/types';
-import { getLatestPlayTick } from './playTickBus';
+import { getLatestPlayTick, subscribePlayTick } from './playTickBus';
 import type { InputTrace } from './inputTrace';
 import {
   replayInputTrace,
@@ -38,10 +36,8 @@ export interface ReplayInvocationResult {
 }
 
 /**
- * Run a replay from either the manual UI or the AI path. Both callers reach the
- * engine through exactly this function, so they cannot diverge in command name
- * or validation. Throws `InputTraceValidationError` on an invalid trace, before
- * the runner touches the engine.
+ * Run a replay with a caller-provided source label. Throws
+ * `InputTraceValidationError` on an invalid trace before touching the engine.
  */
 export async function invokeReplay(
   source: ReplaySource,
@@ -74,34 +70,38 @@ export function buildActionKeyResolver(
   };
 }
 
-/** How long to wait for one engine frame when advancing via rAF. */
-const FRAME_FALLBACK_MS = 32;
+/** Bound a stalled or stopped runtime instead of hanging a replay indefinitely. */
+const PLAY_TICK_TIMEOUT_MS = 2_000;
 
-function nextAnimationFrame(): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof requestAnimationFrame === 'function') {
-      // Resolve on the SECOND frame: the first schedules the keyboard state the
-      // engine reads, the second lets `capture_input` and the character system
-      // run against it before the caller observes.
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    } else {
-      setTimeout(resolve, FRAME_FALLBACK_MS);
-    }
+function nextPlayTick(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const unsubscribe = subscribePlayTick(() => {
+      clearTimeout(timeout);
+      unsubscribe();
+      resolve();
+    });
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      reject(new Error('Replay stopped: no engine play tick received.'));
+    }, PLAY_TICK_TIMEOUT_MS);
   });
 }
 
 /** Dispatch a keyboard event carrying a `code` on the real input channel. */
 function dispatchKey(type: 'keydown' | 'keyup', code: string): void {
-  if (typeof window === 'undefined' || typeof KeyboardEvent === 'undefined') return;
+  const canvas = typeof document === 'undefined' ? null : document.getElementById('forge-canvas');
+  if (!canvas || typeof HTMLCanvasElement === 'undefined' || !(canvas instanceof HTMLCanvasElement)) {
+    throw new Error('Replay requires the active engine canvas.');
+  }
   const event = new KeyboardEvent(type, {
     code,
     key: code,
     bubbles: true,
     cancelable: true,
   });
-  // The engine's winit listeners are on the window; dispatch there so a
-  // synthetic key reaches the same handler a real keystroke does.
-  window.dispatchEvent(event);
+  // winit registers keyboard listeners on its canvas. Events sent to window
+  // cannot travel down the DOM tree to those listeners.
+  canvas.dispatchEvent(event);
 }
 
 /**
@@ -136,7 +136,7 @@ export function createDomKeyboardEnvironment(config: {
     releaseKeys: (codes) => {
       for (const code of codes) dispatchKey('keyup', code);
     },
-    advanceFrame: nextAnimationFrame,
+    advanceFrame: nextPlayTick,
     observe,
     playerEntityId: config.playerEntityId,
     collectibleEntityIds: config.collectibleEntityIds,

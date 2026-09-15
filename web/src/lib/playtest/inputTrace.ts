@@ -18,7 +18,7 @@
  */
 
 import { z } from 'zod';
-import { subscribePlayTick, type PlayTickSnapshot } from './playTickBus';
+import { getLatestPlayTick, subscribePlayTick, type PlayTickSnapshot } from './playTickBus';
 
 /** Hard cap on recorded ticks. A trace may reference ticks `[0, 120)`. */
 export const MAX_TRACE_TICKS = 120;
@@ -173,9 +173,8 @@ function activeActionsFromInput(
  * Subscribes to the play-tick bus on `start` and appends one frame per engine
  * tick, STOPPING itself the instant either bound is reached — 120 recorded
  * frames or 30 s of elapsed wall-clock — so the cap is enforced during capture,
- * not merely validated afterward. A frame with no active action is skipped (it
- * carries no information and would waste a tick slot), while its tick index is
- * still consumed, so the tick numbers stay aligned with real engine frames.
+ * not merely validated afterward. Input-free frames are retained so replay
+ * preserves trailing idle time as well as active input.
  */
 export class InputTraceRecorder {
   private readonly fixtureId: string;
@@ -183,9 +182,10 @@ export class InputTraceRecorder {
   private frames: InputTraceFrame[] = [];
   private tickCounter = 0;
   private lastElapsedMs = 0;
+  private startElapsedMs = 0;
   private unsubscribe: (() => void) | null = null;
 
-  constructor(fixtureId: string, actionNames: string[]) {
+  constructor(fixtureId: string, actionNames: string[], private readonly onComplete?: (trace: InputTrace) => void) {
     this.fixtureId = fixtureId;
     this.actionNames = [...actionNames];
   }
@@ -196,26 +196,27 @@ export class InputTraceRecorder {
     this.frames = [];
     this.tickCounter = 0;
     this.lastElapsedMs = 0;
+    this.startElapsedMs = getLatestPlayTick()?.elapsedMs ?? 0;
     this.unsubscribe = subscribePlayTick((snapshot) => this.onTick(snapshot));
   }
 
   private onTick(snapshot: PlayTickSnapshot): void {
+    const elapsedMs = Math.max(0, snapshot.elapsedMs - this.startElapsedMs);
     // Enforce BOTH caps at capture time. Reaching either stops recording so a
     // long or runaway play session can never grow the trace past the bound.
     if (
       this.tickCounter >= MAX_TRACE_TICKS ||
-      snapshot.elapsedMs > MAX_TRACE_DURATION_MS
+      elapsedMs > MAX_TRACE_DURATION_MS
     ) {
       this.stop();
       return;
     }
     const tick = this.tickCounter;
     this.tickCounter += 1;
-    this.lastElapsedMs = Math.min(snapshot.elapsedMs, MAX_TRACE_DURATION_MS);
+    this.lastElapsedMs = Math.min(elapsedMs, MAX_TRACE_DURATION_MS);
     const actions = activeActionsFromInput(snapshot);
-    if (Object.keys(actions).length > 0) {
-      this.frames.push({ tick, actions });
-    }
+    this.frames.push({ tick, actions });
+    if (this.tickCounter === MAX_TRACE_TICKS) this.stop();
   }
 
   /** True while capturing. */
@@ -234,16 +235,25 @@ export class InputTraceRecorder {
    * violated a bound surfaces here rather than at replay time.
    */
   stop(): InputTrace {
+    const wasRecording = this.unsubscribe !== null;
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = null;
     }
-    return parseInputTrace({
+    const trace = parseInputTrace({
       version: INPUT_TRACE_VERSION,
       fixtureId: this.fixtureId,
       actionNames: this.actionNames,
       durationMs: this.lastElapsedMs,
       frames: this.frames,
     });
+    if (wasRecording) this.onComplete?.(trace);
+    return trace;
+  }
+
+  /** Release the subscription without delivering a result to an unmounted owner. */
+  cancel(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
   }
 }

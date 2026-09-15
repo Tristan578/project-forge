@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Play, PlayCircle, AlertTriangle, CheckCircle, XCircle, Info, Loader2, Circle, Repeat } from 'lucide-react';
 import {
   BOT_STRATEGIES,
@@ -204,20 +204,42 @@ function RuntimeReplaySection() {
 
   const toggleRecord = useCallback(() => {
     setError(null);
-    if (recorderRef.current?.isRecording()) {
-      const trace = recorderRef.current.stop();
-      traceRef.current = trace;
+    try {
+      if (recorderRef.current?.isRecording()) {
+        recorderRef.current.stop();
+        return;
+      }
+      const recorder = new InputTraceRecorder(sceneName || 'current-scene', actionNames, (trace) => {
+        traceRef.current = trace;
+        recorderRef.current = null;
+        setHasTrace(true);
+        setIsRecording(false);
+      });
+      recorder.start();
+      recorderRef.current = recorder;
+      setIsRecording(true);
+      setOutcome(null);
+    } catch (e) {
+      recorderRef.current?.cancel();
       recorderRef.current = null;
-      setHasTrace(true);
       setIsRecording(false);
-      return;
+      setError(e instanceof Error ? e.message : String(e));
     }
-    const recorder = new InputTraceRecorder(sceneName ?? 'current-scene', actionNames);
-    recorder.start();
-    recorderRef.current = recorder;
-    setIsRecording(true);
-    setOutcome(null);
   }, [actionNames, sceneName]);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    return () => {
+      recorderRef.current?.cancel();
+      recorderRef.current = null;
+    };
+  }, [isPlaying]);
+
+  const [previousMode, setPreviousMode] = useState(engineMode);
+  if (previousMode !== engineMode) {
+    setPreviousMode(engineMode);
+    setIsRecording(false);
+  }
 
   const runReplay = useCallback(async () => {
     const trace = traceRef.current;
@@ -257,7 +279,7 @@ function RuntimeReplaySection() {
       <div className="flex gap-2">
         <button
           onClick={toggleRecord}
-          disabled={!isPlaying}
+          disabled={!isPlaying || isReplaying}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
           aria-label={isRecording ? 'Stop recording input' : 'Record input'}
           aria-pressed={isRecording}
@@ -267,7 +289,7 @@ function RuntimeReplaySection() {
         </button>
         <button
           onClick={runReplay}
-          disabled={!isPlaying || !hasTrace || isRecording || isReplaying}
+          disabled={!isPlaying || !primaryId || !hasTrace || isRecording || isReplaying}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
           aria-label="Replay recorded input"
         >

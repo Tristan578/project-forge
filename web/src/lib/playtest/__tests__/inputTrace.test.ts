@@ -148,7 +148,7 @@ describe('InputTraceRecorder', () => {
     expect(trace.frames[0].actions.move_horizontal.axis).toBe(1);
   });
 
-  it('skips input-free ticks but keeps tick indices aligned to engine frames', () => {
+  it('preserves input-free ticks so replay keeps their duration', () => {
     const recorder = new InputTraceRecorder('fx', ['move_right']);
     recorder.start();
     publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: 16 });
@@ -158,9 +158,9 @@ describe('InputTraceRecorder', () => {
       elapsedMs: 32,
     });
     const trace = recorder.stop();
-    expect(trace.frames).toHaveLength(1);
-    // Tick 0 was consumed by the input-free frame, so the recorded frame is tick 1.
-    expect(trace.frames[0].tick).toBe(1);
+    expect(trace.frames).toHaveLength(2);
+    expect(trace.frames[0]).toEqual({ tick: 0, actions: {} });
+    expect(trace.frames[1].tick).toBe(1);
   });
 
   it('stops capturing at the 120-tick bound', () => {
@@ -177,6 +177,41 @@ describe('InputTraceRecorder', () => {
     expect(recorder.ticksCaptured()).toBe(MAX_TRACE_TICKS);
     const trace = recorder.stop();
     expect(trace.frames.length).toBeLessThanOrEqual(MAX_TRACE_TICKS);
+  });
+
+  it('measures duration from recording start in an already running play session', () => {
+    publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: 45_000 });
+    const recorder = new InputTraceRecorder('fx', ['move_right']);
+    recorder.start();
+    publishPlayTick({ entities: {}, inputState: { pressed: { move_right: true }, axes: {} }, elapsedMs: 45_016 });
+    expect(recorder.isRecording()).toBe(true);
+    const trace = recorder.stop();
+    expect(trace.durationMs).toBe(16);
+    expect(trace.frames).toHaveLength(1);
+  });
+
+  it('delivers the completed trace exactly once when the tick cap is reached', () => {
+    const completed: InputTrace[] = [];
+    const recorder = new InputTraceRecorder('fx', [], (trace) => completed.push(trace));
+    recorder.start();
+    for (let tick = 1; tick <= MAX_TRACE_TICKS; tick++) {
+      publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: tick * 16 });
+    }
+    expect(recorder.isRecording()).toBe(false);
+    expect(completed).toHaveLength(1);
+    expect(completed[0].frames).toHaveLength(MAX_TRACE_TICKS);
+    recorder.stop();
+    expect(completed).toHaveLength(1);
+  });
+
+  it('cancels its subscription without calling an unmounted owner', () => {
+    const completed: InputTrace[] = [];
+    const recorder = new InputTraceRecorder('fx', [], (trace) => completed.push(trace));
+    recorder.start();
+    recorder.cancel();
+    publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: 16 });
+    expect(recorder.ticksCaptured()).toBe(0);
+    expect(completed).toEqual([]);
   });
 
   it('stops capturing once elapsed wall-clock passes the 30-second bound', () => {
