@@ -281,6 +281,130 @@ else
   fi
 fi
 
+# --- all4 mode: the four-variant key (#9525) ----------------------------------
+# cd.yml's build-wasm reuses a content-addressed cache covering all FOUR engine
+# variants, not just the WebGL2 editor binary. The four are built from the SAME
+# engine tree + fork + bindgen version and differ only by cargo feature flags,
+# so the key's hash body is identical to the webgl2 key's and only the prefix
+# distinguishes them. The prefix MUST distinguish them: actions/cache segments a
+# cache by (key, hash(paths)), so a four-path save and the single-path restore
+# engine-smoke does would otherwise be two versions of one key and the restore
+# would silently miss.
+echo ""
+echo "=== all4 mode identifies the four-variant set with the same tree hash ==="
+REPO4="$(make_repo)"
+key4_in() { ( cd "$1" && bash "$SCRIPT" all4 2>/dev/null ); }
+ALL4_KEY="$(key4_in "$REPO4")"
+WEBGL2_KEY="$(key_in "$REPO4")"
+
+if [[ "$ALL4_KEY" =~ ^engine-wasm-all4-[0-9a-f]{40}-[0-9a-f]{40}-wb[0-9.]+$ ]]; then
+  pass "all4 key has the expected shape (distinct prefix + two tree hashes + bindgen version)"
+else
+  fail "unexpected all4 key shape: '$ALL4_KEY'"
+fi
+
+if [ "${ALL4_KEY#engine-wasm-all4-}" = "${WEBGL2_KEY#engine-wasm-webgl2-}" ]; then
+  pass "all4 and webgl2 keys share the identical tree-hash body (they differ only by prefix)"
+else
+  fail "all4 body '${ALL4_KEY#engine-wasm-all4-}' != webgl2 body '${WEBGL2_KEY#engine-wasm-webgl2-}' — the two entries stopped describing the same source"
+fi
+
+if [ "$ALL4_KEY" != "$WEBGL2_KEY" ]; then
+  pass "all4 and webgl2 keys are distinct (the four-path entry cannot collide with the single-path webgl2 entry)"
+else
+  fail "all4 and webgl2 produced the same key — a four-path save would make engine-smoke's single-path restore silently miss"
+fi
+
+printf 'unrelated all4 edit\n' >> "$REPO4/README.md"
+commit_in "$REPO4" "unrelated edit"
+if [ "$(key4_in "$REPO4")" = "$ALL4_KEY" ]; then
+  pass "an unrelated commit leaves the all4 key unchanged (reuse holds for the four-variant set)"
+else
+  fail "an unrelated commit changed the all4 key — every reuse would miss"
+fi
+
+printf 'fn added() {}\n' >> "$REPO4/engine/src/lib.rs"
+commit_in "$REPO4" "engine change"
+if [ "$(key4_in "$REPO4")" != "$ALL4_KEY" ]; then
+  pass "an engine/ change changes the all4 key (build-wasm rebuilds all four rather than reusing a stale set)"
+else
+  fail "an engine/ change did NOT change the all4 key — build-wasm would reuse a stale four-variant set"
+fi
+rm -rf "$REPO4"
+
+# An unknown mode must fail loudly rather than emit a degenerate key — the case
+# guard runs before any tree is resolved, so this holds in any directory.
+if bash "$SCRIPT" bogus >/dev/null 2>&1; then
+  fail "an unknown mode still produced a key rather than exiting non-zero"
+else
+  pass "an unknown mode exits non-zero rather than emitting a degenerate key"
+fi
+
+# --- build-wasm reuses the content-addressed cache for ALL FOUR variants -------
+# The ticket replaces build-wasm's broken same-SHA `download-artifact` reuse
+# (no run-id/github-token, `continue-on-error` masking every failure) with a
+# content-addressed cache covering all four variants, and adds a completeness
+# gate so a partial restored/built set cannot reach the CDN.
+echo ""
+echo "=== cd.yml build-wasm reuses the content-addressed cache for all 4 variants (#9525) ==="
+if [ ! -f "$CD_YML" ]; then
+  fail "cd.yml not found at $CD_YML"
+else
+  buildwasm="$(awk '/^  build-wasm:/{f=1} f && /^  [a-z][a-z0-9-]*:$/ && !/^  build-wasm:/{exit} f' "$CD_YML")"
+  if [ -z "$buildwasm" ]; then
+    fail "could not extract the build-wasm job from cd.yml"
+  else
+    # 1. The four-variant key comes from the shared script's all4 mode — not an
+    #    inline reimplementation, and not the webgl2-only default.
+    if grep -qE 'engine-wasm-cache-key\.sh[[:space:]]+all4' <<<"$buildwasm"; then
+      pass "build-wasm derives the 4-variant key from scripts/engine-wasm-cache-key.sh all4"
+    else
+      fail "build-wasm does not call 'engine-wasm-cache-key.sh all4' — the four-variant reuse would drift from the shared key or fall back to webgl2 only"
+    fi
+
+    # 2. The cache entry (restore AND save) lists all four variant directories.
+    #    Anchored to a BARE path line so pkg-webgl2 is not conflated with
+    #    pkg-webgl2-runtime, nor with the inline `path: engine/pkg-webgl2` of the
+    #    separate single-path webgl2 save, nor with the trailing-slash upload
+    #    paths.
+    for v in pkg-webgl2 pkg-webgpu pkg-webgl2-runtime pkg-webgpu-runtime; do
+      n="$(grep -cE "^[[:space:]]+engine/${v}$" <<<"$buildwasm" || true)"
+      if [ "$n" -ge 2 ]; then
+        pass "build-wasm's all4 cache covers engine/${v} on $n bare path lines (restore + save)"
+      else
+        fail "build-wasm's all4 cache lists engine/${v} on only $n bare path line(s) (expected restore + save) — a variant absent from the entry is rebuilt every run or reused stale"
+      fi
+    done
+
+    # 3. The completeness gate exists and asserts EXACTLY four variants.
+    if grep -q 'Verify all 4 WASM variants' <<<"$buildwasm"; then
+      pass "build-wasm has the 4-variant completeness assertion step"
+    else
+      fail "build-wasm has no '4 WASM variants' completeness step — a partial restored/built set could reach the CDN"
+    fi
+    if grep -qE '\-ne 4' <<<"$buildwasm"; then
+      pass "the completeness step fails unless exactly 4 variants are verified"
+    else
+      fail "the completeness step does not assert a count of exactly 4"
+    fi
+
+    # 4. The broken same-SHA reuse step and its silent mask are gone.
+    if grep -q 'Try downloading WASM from CI' <<<"$buildwasm"; then
+      fail "build-wasm still contains the same-SHA 'download-artifact' reuse step this ticket replaces"
+    else
+      pass "build-wasm no longer contains the same-SHA download-artifact reuse step"
+    fi
+    # Anchored to a real YAML key (`^\s*continue-on-error:`) so the word inside
+    # the explanatory comments above the restore step is not counted — a comment
+    # describing the removed mask is not the mask.
+    if grep -qE '^[[:space:]]*continue-on-error:' <<<"$buildwasm"; then
+      fail "build-wasm still has a continue-on-error: step field — a reuse failure could be masked as success (the exact bug #9525 fixes)"
+    else
+      pass "build-wasm has no continue-on-error: step field (a reuse failure surfaces as a red step)"
+    fi
+  fi
+fi
+
 echo ""
 echo "  PASS=$PASS FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
