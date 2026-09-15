@@ -272,9 +272,18 @@ export function buildPhysicsFromPartial(partialPhysics: Record<string, unknown>)
 
 /**
  * Infer entity type from SceneNode components.
+ *
+ * Component names are the engine's wire vocabulary, emitted by
+ * `detect_components` in `engine/src/core/scene_graph.rs`. `TerrainEnabled` is
+ * checked first because a terrain surface also carries `Mesh3d`, and a bare
+ * `Mesh3d` match would misclassify it. There is deliberately no `'Sprite'` /
+ * `'SpriteData'` branch: that wire contract emits neither string, so such a
+ * branch is dead — a node classifies through the shared `'unknown'` fallback
+ * instead (see PF-1162 / #9263).
  */
 export function inferEntityType(node: SceneNode): string {
   const components = node.components || [];
+  if (components.includes('TerrainEnabled')) return 'terrain';
   if (components.includes('PointLight')) return 'point_light';
   if (components.includes('DirectionalLight')) return 'directional_light';
   if (components.includes('SpotLight')) return 'spot_light';
