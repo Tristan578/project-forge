@@ -302,6 +302,26 @@ function dispatchSceneLoad(json: string): boolean {
   }
 }
 
+/**
+ * `dispatchSceneLoad`, plus the same arrangement sync `loadScene`/`newScene`
+ * get. `restoreCheckpoint`'s primary restore calls `dispatchSceneLoad`
+ * directly rather than through `get().loadScene()`, so it needs this
+ * explicitly too — a checkpoint never captures the arrangement, so this
+ * clears whatever the scene being replaced left behind (#10058).
+ *
+ * Deliberately NOT used for `restoreCheckpoint`'s own rollback (restoring
+ * `prior` on failure): `prior` is the scene that was already active — and
+ * whose arrangement is still correctly sitting in the store, untouched —
+ * before the restore attempt began, so re-syncing there would read "this
+ * scene has none" and wipe out the very arrangement the rollback is putting
+ * the user back onto.
+ */
+function dispatchSceneLoadAndSyncArrangement(json: string): boolean {
+  const accepted = dispatchSceneLoad(json);
+  if (accepted) syncArrangementFromLoadedScene(json);
+  return accepted;
+}
+
 export const createSceneSlice: StateCreator<
   SceneSlice & TemplateApplyDeps,
   [],
@@ -547,6 +567,11 @@ export const createSceneSlice: StateCreator<
       };
     }
 
+    // A template never carries its own arrangement, but the arrangement store
+    // from whatever scene was active before this template loaded is still
+    // sitting there — clear it the same way `loadScene` does (#10058).
+    syncArrangementFromLoadedScene(sceneJson);
+
     // Only now that the entities exist can anything be attached to them.
     // Scripts and game components go through the store's own actions rather
     // than riding inside the scene JSON: the engine only re-emits either one
@@ -687,7 +712,7 @@ export const createSceneSlice: StateCreator<
       const active = result.project.scenes.find((scene) => scene.id === result.project.activeSceneId)!;
       await applyCheckpointScene(active.data ?? emptySceneFile(active.name), (json) => {
         attempted = true;
-        const accepted = dispatchSceneLoad(json);
+        const accepted = dispatchSceneLoadAndSyncArrangement(json);
         attempted = accepted;
         return accepted;
       }, requestSceneExport, isCurrent);
@@ -700,6 +725,13 @@ export const createSceneSlice: StateCreator<
       let message = (error instanceof Error || error instanceof DOMException) ? error.message : 'The checkpoint could not be restored.';
       if (attempted && prior && isCurrent()) {
         try {
+          // Plain `dispatchSceneLoad`, deliberately not the arrangement-syncing
+          // variant: `prior` is the scene that was ALREADY active (and whose
+          // arrangement is still sitting in the store, untouched) before this
+          // restore attempt began, so re-syncing here would incorrectly clear
+          // it — a checkpoint capture never carries an arrangement, so the
+          // sync would read as "this scene has none" and wipe out the very
+          // arrangement the rollback is putting the user back onto.
           await applyCheckpointScene(prior, dispatchSceneLoad, requestSceneExport, isCurrent);
           set({ sceneName: before.sceneName, sceneModified: before.sceneModified });
         } catch {

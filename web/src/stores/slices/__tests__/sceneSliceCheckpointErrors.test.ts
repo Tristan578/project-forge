@@ -5,6 +5,7 @@ import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
 import { saveProjectScenes, loadProjectScenes, createCheckpoint, listCheckpoints } from '@/lib/scenes/sceneManager';
 import { attachCheckpointEngine, projectFixture, sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 
 describe('checkpoint recovery transaction', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -46,6 +47,34 @@ describe('checkpoint recovery transaction', () => {
     expect(loadProjectScenes().scenes[0].name).toBe('Previous save');
     expect(engine.getScene().metadata?.name).toBe('Unsaved live work');
     expect(engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene')).toHaveLength(1);
+  });
+
+  // #10058: a checkpoint capture never carries a music arrangement, so a
+  // successful restore used to leave whatever arrangement the scene being
+  // REPLACED had — stale tracks/clips from before the restore.
+  it('clears a stale music arrangement on a successful checkpoint restore', async () => {
+    useMusicArrangementStore.getState().addTrack('Stale');
+    expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(true);
+
+    expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
+  });
+
+  // The rollback in the case above must NOT run the same clear: `prior` is
+  // the scene that was already active — and whose arrangement is still
+  // correctly in the store — before the restore attempt, so re-syncing on
+  // rollback would incorrectly wipe it out.
+  it('does not clear the live music arrangement when a rejected restore rolls back', async () => {
+    useMusicArrangementStore.getState().addTrack('Live');
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('reject');
+
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+
+    expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+    expect(useMusicArrangementStore.getState().arrangement.tracks[0].name).toBe('Live');
   });
 
   it('times out a queued load that never applies and restores the prior live scene', async () => {
