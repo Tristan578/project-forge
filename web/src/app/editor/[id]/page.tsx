@@ -10,6 +10,7 @@ const EditorLayout = dynamic(
   { ssr: false, loading: () => (<div className="flex h-full items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading editor...</div></div>) }
 );
 import { useEditorStore } from '@/stores/editorStore';
+import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 import { EditorErrorBoundary } from '@/components/editor/EditorErrorBoundary';
 import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
@@ -60,6 +61,9 @@ function EditorPageContent() {
           setLastCloudSave(project.updatedAt);
         }
         loadScene(JSON.stringify(project.sceneData));
+        // Restore the music arrangement persisted alongside the scene (#9854).
+        // The engine ignores the extra key; this is the only reader of it.
+        useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(project.sceneData));
         setLoading(false);
       } catch (err) {
         console.error('Failed to fetch project:', err);
