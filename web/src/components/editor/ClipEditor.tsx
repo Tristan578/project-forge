@@ -51,6 +51,34 @@ interface ClipNumberFieldProps {
 }
 
 function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invalid, disabled, onCommit }: ClipNumberFieldProps) {
+  const format = useCallback(
+    (v: number) => (!disabled && Number.isFinite(v) ? String(Number(v.toFixed(4))) : ''),
+    [disabled],
+  );
+  // The visible text is uncommitted local state: typing updates only the text,
+  // never the clip document. A committed value — an accepted edit, undo/redo, or
+  // a late decode — flows back through `value` and refreshes the field. This
+  // keeps every intermediate keystroke, including transiently invalid ones like a
+  // lone "-" while starting a negative gain, out of the undo history and away
+  // from the assertive validation alert until the edit is deliberately committed
+  // on blur or Enter.
+  const [text, setText] = useState(() => format(value));
+  const committedRef = useRef(value);
+  useEffect(() => {
+    if (!Object.is(committedRef.current, value)) {
+      committedRef.current = value;
+      setText(format(value));
+    }
+  }, [value, format]);
+
+  const commit = useCallback(() => {
+    onCommit(parseFloat(text));
+    // On reject the committed `value` is unchanged and the effect above does not
+    // fire, so drop the rejected intermediate text back to the last committed
+    // value here; on accept the effect refreshes it to the new value.
+    setText(format(value));
+  }, [onCommit, text, value, format]);
+
   return (
     <div className="flex items-center gap-2">
       <label htmlFor={id} className="w-24 shrink-0 text-xs text-[var(--sf-text-secondary)]">
@@ -59,14 +87,21 @@ function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invali
       <Input
         id={id}
         type="number"
-        value={!disabled && Number.isFinite(value) ? Number(value.toFixed(4)) : ''}
+        value={text}
         min={min}
         max={max}
         step={step}
         disabled={disabled}
         error={invalid}
         aria-invalid={invalid ? true : undefined}
-        onChange={(e) => onCommit(parseFloat(e.target.value))}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          }
+        }}
         className={cn('min-w-0 flex-1 px-2 text-xs', invalid && 'ring-1 ring-[var(--sf-destructive)]')}
       />
       {unit && <span className="w-6 text-right text-[10px] text-[var(--sf-text-secondary)]">{unit}</span>}
