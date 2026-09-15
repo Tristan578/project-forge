@@ -52,7 +52,17 @@ export interface ReimportFieldChange {
   preservedFields: string[];
 }
 
-export type ReimportRejection = 'missing-source' | 'incompatible-source';
+/**
+ * Why a reimport was rejected. The pure functions in this module only ever emit
+ * `missing-source` / `incompatible-source`; `unknown-prefab` and
+ * `read-only-prefab` are raised by the prefabStore wrappers that resolve a
+ * prefab id before delegating here, so the reason vocabulary stays shared.
+ */
+export type ReimportRejection =
+  | 'missing-source'
+  | 'incompatible-source'
+  | 'unknown-prefab'
+  | 'read-only-prefab';
 
 export interface ReimportPreview {
   ok: boolean;
