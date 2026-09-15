@@ -1611,6 +1611,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "set_tile_collision_shape",
+      "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "set_tilemap_layer",
       "category": "tilemap",
       "requiredScope": "scene:write"

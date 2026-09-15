@@ -542,6 +542,65 @@ describe('scriptWorker', () => {
     );
   });
 
+  // OP-04: forge.input resolves per-local-player state via the optional slot.
+  it('forge.input(action, player) resolves each local player independently (physics.FR-1.OP-04)', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      // Both players name "attack"; only player 1 is pressing it this frame.
+      forge.log("p0:" + (forge.input.isPressed("attack", 0) ? "on" : "off"));
+      forge.log("p1:" + (forge.input.isPressed("attack", 1) ? "on" : "off"));
+      forge.log("default:" + (forge.input.isPressed("attack") ? "on" : "off"));
+      forge.log("axis0:" + forge.input.getAxis("move", 0).toString());
+      forge.log("axis1:" + forge.input.getAxis("move", 1).toString());
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      {
+        inputState: {
+          // Player 0 (primary): not attacking, steering right.
+          pressed: { attack: false },
+          justPressed: {},
+          justReleased: {},
+          axes: { move: 1 },
+          players: {
+            // Player 1 (second local player): attacking, steering left.
+            '1': {
+              pressed: { attack: true },
+              justPressed: {},
+              justReleased: {},
+              axes: { move: -1 },
+            },
+          },
+        },
+      }
+    ));
+
+    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log').map((c) => c[0].message);
+    expect(logs).toContain('p0:off');
+    expect(logs).toContain('p1:on');
+    expect(logs).toContain('default:off'); // no player arg == player 0
+    expect(logs).toContain('axis0:1');
+    expect(logs).toContain('axis1:-1');
+  });
+
+  it('forge.input for an unreported player slot reads as all-off, not a crash (physics.FR-1.OP-04)', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.log("p2:" + (forge.input.isPressed("attack", 2) ? "on" : "off"));
+      forge.log("axis2:" + forge.input.getAxis("move", 2).toString());
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      { inputState: { pressed: { attack: true }, justPressed: {}, justReleased: {}, axes: { move: 1 } } }
+    ));
+
+    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log').map((c) => c[0].message);
+    expect(logs).toContain('p2:off');
+    expect(logs).toContain('axis2:0');
+  });
+
   // ─── Forge Physics API ──────────────────────────────────────────
 
   it('forge.physics.applyForce and applyImpulse push correct commands', async () => {
@@ -1030,6 +1089,121 @@ describe('scriptWorker', () => {
     );
   });
 
+  it('queues a shape edit while reads wait for the next engine snapshot', async () => {
+    const handler = await setupWorker();
+    const tilemap = {
+      tileSize: [16, 16], mapSize: [2, 1], origin: 'TopLeft',
+      layers: [{ tiles: [1, 2], collisionShapes: ['halfTop', 'none'] }],
+    };
+    const source = `function onStart() {
+      forge.tilemap.setCollisionShape("tm1", 0.8, 0.2, "full", 0.9);
+      forge.log(String(forge.tilemap.getCollisionShape("tm1", 0, 0)));
+    }
+    function onUpdate() { forge.log(String(forge.tilemap.getCollisionShape("tm1", 0, 0))); }`;
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source }],
+      { tilemapStates: { tm1: tilemap } },
+    ));
+
+    expect(pushedCommands()).toEqual([
+      { cmd: 'set_tile_collision_shape', entityId: 'tm1', layer: 0, x: 0, y: 0, shape: 'full' },
+    ]);
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'halfTop' }));
+
+    await handler({ data: {
+      type: 'tick', dt: 0.016,
+      tilemapStates: { tm1: { ...tilemap, layers: [{ tiles: [1, 2], collisionShapes: ['full', 'none'] }] } },
+    } });
+
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'log', message: 'full' }));
+  });
+
+  it('reads absent shapes as none and invalid or missing cells as null', async () => {
+    const handler = await setupWorker();
+    const source = `function onStart() {
+      forge.log(JSON.stringify([
+        forge.tilemap.getCollisionShape("tm1", 0, 0),
+        forge.tilemap.getCollisionShape("tm1", 0.5, 0),
+        forge.tilemap.getCollisionShape("tm1", NaN, 0),
+        forge.tilemap.getCollisionShape("tm1", 2, 0),
+        forge.tilemap.getCollisionShape("tm1", 0, 0, 9),
+        forge.tilemap.getCollisionShape("__proto__", 0, 0)
+      ]));
+    }`;
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source }],
+      { tilemapStates: { tm1: { tileSize: [16, 16], mapSize: [2, 1], layers: [{ tiles: [1] }], origin: 'TopLeft' } } },
+    ));
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'log', message: '["none",null,null,null,null,null]',
+    }));
+    expect(pushedCommands()).toEqual([]);
+  });
+
+  it.each([
+    { call: 'forge.tilemap.setCollisionShape("tm1", 0, 0, "wedge")', error: 'unknown collision shape' },
+    { call: 'forge.tilemap.setCollisionShape("tm1", NaN, 0, "full")', error: 'finite number' },
+    { call: 'forge.tilemap.setCollisionShape("tm1", 0x100000000, 0, "full")', error: 'must be <=' },
+    { call: 'forge.tilemap.setCollisionShape("tm1", -1, 0, "full")', error: 'must be >=' },
+    { call: 'forge.tilemap.setCollisionShape("tm1", 3, 0, "full")', error: 'cell is unavailable' },
+    { call: 'forge.tilemap.setCollisionShape("missing", 0, 0, "full")', error: 'cell is unavailable' },
+  ])('rejects an invalid script shape request: $call', async ({ call, error }) => {
+    const handler = await setupWorker();
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: `function onStart() { ${call}; }` }],
+      { tilemapStates: { tm1: { tileSize: [16, 16], mapSize: [1, 1], layers: [{ tiles: [1] }], origin: 'TopLeft' } } },
+    ));
+    expect(pushedCommands()).toEqual([]);
+    expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'error', message: expect.stringContaining(error),
+    }));
+  });
+
+  it('forge.tilemap.getCollisionShape reads authored shapes, defaults, and nulls (OP-04)', async () => {
+    const handler = await setupWorker();
+    // Distinct prefixes so each assertion pins WHICH call produced the value —
+    // several calls return 'none'/'null', and a bare message match would let one
+    // path stand in for another.
+    const code = `function onStart() {
+      forge.log("authored=" + forge.tilemap.getCollisionShape("tm1", 2, 0, 0));
+      forge.log("cellDefault=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 0));
+      forge.log("noArray=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 1));
+      forge.log("oobCoord=" + forge.tilemap.getCollisionShape("tm1", 9, 9, 0));
+      forge.log("oobLayer=" + forge.tilemap.getCollisionShape("tm1", 0, 0, 5));
+      forge.log("noTilemap=" + forge.tilemap.getCollisionShape("nope", 0, 0, 0));
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      {
+        tilemapStates: {
+          tm1: {
+            tileSize: [32, 32],
+            mapSize: [3, 3],
+            layers: [
+              // Layer 0 carries a shapes array; idx 2 (x=2,y=0) is authored full.
+              { tiles: [0, 1, 2, 3, 4, 5, 6, 7, 8], collisionShapes: ['none', 'none', 'full', 'none', 'none', 'none', 'none', 'none', 'none'] },
+              // Layer 1 has no collisionShapes array at all → every cell 'none'.
+              { tiles: [0, 1, 2, 3, 4, 5, 6, 7, 8] },
+            ],
+            origin: 'TopLeft' as const,
+          },
+        },
+      }
+    ));
+
+    const logged = (msg: string) =>
+      expect(mockPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'log', message: msg })
+      );
+    logged('authored=full');       // authored cell returns its shape
+    logged('cellDefault=none');    // array present, cell defaults to 'none'
+    logged('noArray=none');        // layer with no shapes array → 'none'
+    logged('oobCoord=null');       // (9,9) outside the 3x3 map → null
+    logged('oobLayer=null');       // layer index 5 unknown → null
+    logged('noTilemap=null');      // unknown tilemap → null
+  });
+
   it('forge.tilemap.setTile and fillRect push real engine commands', async () => {
     const handler = await setupWorker();
     const code = `function onStart() {
@@ -1329,6 +1503,9 @@ describe('scriptWorker', () => {
     ['setTile', 'layer', 'forge.tilemap.setTile("tm1", 0, 0, 5, -1)'],
     ['setTile', 'tileId', 'forge.tilemap.setTile("tm1", 0, 0, -5)'],
     ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", -1, 0)'],
+    ['setCollisionShape', 'layer', 'forge.tilemap.setCollisionShape("tm1", 0, 0, "full", -1)'],
+    ['setCollisionShape', 'y', 'forge.tilemap.setCollisionShape("tm1", 0, -2, "full")'],
+    ['setCollisionShape', 'x', 'forge.tilemap.setCollisionShape("tm1", -1, 0, "full")'],
     ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", -1, 0, 2, 2, 1)'],
     ['fillRect', 'w', 'forge.tilemap.fillRect("tm1", 0, 0, -2, 2, 1)'],
   ])('forge.tilemap.%s rejects a negative %s and pushes nothing', async (_api, param, call) => {
@@ -1348,6 +1525,8 @@ describe('scriptWorker', () => {
 
   it.each([
     ['NaN', 'forge.tilemap.setTile("tm1", 0/0, 0, 5)'],
+    ['Infinity via setCollisionShape', 'forge.tilemap.setCollisionShape("tm1", 0, 1/0, "full")'],
+    ['NaN via setCollisionShape', 'forge.tilemap.setCollisionShape("tm1", 0/0, 0, "full")'],
     ['Infinity', 'forge.tilemap.fillRect("tm1", 0, 0, 1/0, 1, 5)'],
   ])('forge.tilemap rejects a non-finite coordinate (%s) and pushes nothing', async (_label, call) => {
     const handler = await setupWorker();
@@ -1373,6 +1552,9 @@ describe('scriptWorker', () => {
     ['setTile', 'layer', 'forge.tilemap.setTile("tm1", 0, 0, 5, TOO_BIG)'],
     ['setTile', 'tileId', 'forge.tilemap.setTile("tm1", 0, 0, TOO_BIG)'],
     ['clearTile', 'x', 'forge.tilemap.clearTile("tm1", TOO_BIG, 0)'],
+    ['setCollisionShape', 'layer', 'forge.tilemap.setCollisionShape("tm1", 0, 0, "full", TOO_BIG)'],
+    ['setCollisionShape', 'y', 'forge.tilemap.setCollisionShape("tm1", 0, TOO_BIG, "full")'],
+    ['setCollisionShape', 'x', 'forge.tilemap.setCollisionShape("tm1", TOO_BIG, 0, "full")'],
     ['fillRect', 'x', 'forge.tilemap.fillRect("tm1", TOO_BIG, 0, 2, 2, 1)'],
     ['fillRect', 'layer', 'forge.tilemap.fillRect("tm1", 0, 0, 2, 2, 1, TOO_BIG)'],
   ])('forge.tilemap.%s rejects a %s past TILE_FIELD_MAX and pushes nothing', async (_api, param, call) => {

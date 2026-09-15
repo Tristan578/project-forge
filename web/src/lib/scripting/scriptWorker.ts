@@ -7,6 +7,7 @@ import { SHADOWED_GLOBALS } from './sandboxGlobals';
 import { revokeNetworkGlobalsIfWorker } from './revokeNetworkGlobals';
 import { MAX_COMMAND_PAYLOAD_CONTAINERS } from '../engine/commandPayloadGuard';
 import type { LocaleBundle } from '@/lib/i18n/gameLocalization';
+import { getCollisionShapeFromLayers, isCollisionShape, TILE_COLLISION_FIELD_MAX } from '@/lib/tilemap/collisionShapes';
 
 // Hard-revoke network/storage globals from this worker's scope BEFORE any user
 // script is compiled or run. Parameter shadowing (SHADOWED_GLOBALS) only hides
@@ -59,6 +60,16 @@ interface InputState {
   justPressed: Record<string, boolean>;
   justReleased: Record<string, boolean>;
   axes: Record<string, number>;
+  // Slots 1+ for local multiplayer (physics.FR-1.OP-04). Player 0 stays the
+  // flat maps above; each extra slot carries its own evaluated state, keyed by
+  // slot number. Absent for a single-player game, so `forge.input.isPressed`
+  // with no player reads exactly what it always did.
+  players?: Record<string, {
+    pressed: Record<string, boolean>;
+    justPressed: Record<string, boolean>;
+    justReleased: Record<string, boolean>;
+    axes: Record<string, number>;
+  }>;
 }
 
 interface EngineCommand {
@@ -80,7 +91,10 @@ interface UIElement {
 interface TilemapState {
   tileSize: [number, number];
   mapSize: [number, number];
-  layers: { tiles: (number | null)[] }[];
+  layers: {
+    tiles: (number | null)[];
+    collisionShapes?: ('none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight')[];
+  }[];
   origin: 'TopLeft' | 'Center';
 }
 
@@ -99,6 +113,26 @@ let pendingCommands: EngineCommand[] = [];
 let entityStates: Record<string, EntityState> = {};
 let entityInfos: Record<string, EntityInfo> = {};
 let currentInput: InputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+
+/** The maps forge.input reads for one local-player slot. */
+type InputSlotMaps = {
+  pressed: Record<string, boolean>;
+  justPressed: Record<string, boolean>;
+  justReleased: Record<string, boolean>;
+  axes: Record<string, number>;
+};
+
+/**
+ * Resolve the input maps for a local-player slot. 0 or undefined is the primary
+ * player — the flat top-level maps — so every existing single-player call reads
+ * exactly what it did before. A slot the engine did not report reads as all-off
+ * rather than throwing, so a script that names player 2 in a one-player session
+ * simply gets no input (physics.FR-1.OP-04).
+ */
+function slotInput(player?: number): InputSlotMaps {
+  if (!player) return currentInput;
+  return currentInput.players?.[String(player)] ?? { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+}
 const timeData = { delta: 0, elapsed: 0 };
 let sharedState: Record<string, unknown> = {};
 // Touch capability is sent from the main thread in the 'init' message.
@@ -218,7 +252,7 @@ export const TILEMAP_FILL_MAX_CELLS =
  * layer earlier, so a script author gets a named error instead of a command the
  * engine silently refuses (PF-1181).
  */
-export const TILE_FIELD_MAX = 0xffff_ffff;
+export const TILE_FIELD_MAX = TILE_COLLISION_FIELD_MAX;
 
 /**
  * Floor a tilemap integer argument, refusing anything the engine would drop.
@@ -485,10 +519,10 @@ function buildForgeApi(scriptEntityId: string) {
     },
 
     input: {
-      isPressed: (action: string) => !!currentInput.pressed[action],
-      justPressed: (action: string) => !!currentInput.justPressed[action],
-      justReleased: (action: string) => !!currentInput.justReleased[action],
-      getAxis: (action: string) => currentInput.axes[action] ?? 0,
+      isPressed: (action: string, player?: number) => !!slotInput(player).pressed[action],
+      justPressed: (action: string, player?: number) => !!slotInput(player).justPressed[action],
+      justReleased: (action: string, player?: number) => !!slotInput(player).justReleased[action],
+      getAxis: (action: string, player?: number) => slotInput(player).axes[action] ?? 0,
       isTouchDevice: () => {
         // Touch capability is derived from the main thread's init message.
         // Workers cannot reliably access navigator.maxTouchPoints — it may be
@@ -819,6 +853,34 @@ function buildForgeApi(scriptEntityId: string) {
           layer: tileInt(api, 'layer', layer),
           x: tileInt(api, 'x', x),
           y: tileInt(api, 'y', y),
+        });
+      },
+      // Read a cell's authored collision shape from the mirrored tilemap state.
+      // Pure JS, no command: `null` when the tilemap, layer or cell is unknown,
+      // and `'none'` for a layer that has no `collisionShapes` array yet.
+      getCollisionShape: (tilemapId: string, x: number, y: number, layer = 0): string | null => {
+        const tilemap = Object.hasOwn(tilemapStates, tilemapId) ? tilemapStates[tilemapId] : undefined;
+        return tilemap ? getCollisionShapeFromLayers(tilemap.layers, tilemap.mapSize, layer, x, y) : null;
+      },
+      // Queue an authoring request. Reads reflect the next engine-supplied
+      // snapshot; this API does not create runtime colliders (#9814).
+      setCollisionShape: (tilemapId: string, x: number, y: number, shape: string, layer = 0) => {
+        const api = 'forge.tilemap.setCollisionShape';
+        if (!isCollisionShape(shape)) throw new Error(`${api}: unknown collision shape`);
+        const tileLayer = tileInt(api, 'layer', layer);
+        const tileX = tileInt(api, 'x', x);
+        const tileY = tileInt(api, 'y', y);
+        const tilemap = Object.hasOwn(tilemapStates, tilemapId) ? tilemapStates[tilemapId] : undefined;
+        if (!tilemap || getCollisionShapeFromLayers(tilemap.layers, tilemap.mapSize, tileLayer, tileX, tileY) === null) {
+          throw new Error(`${api}: the tilemap, layer, or cell is unavailable`);
+        }
+        pendingCommands.push({
+          cmd: 'set_tile_collision_shape',
+          entityId: tilemapId,
+          layer: tileLayer,
+          x: tileX,
+          y: tileY,
+          shape,
         });
       },
       worldToTile: (tilemapId: string, worldX: number, worldY: number): [number, number] => {
