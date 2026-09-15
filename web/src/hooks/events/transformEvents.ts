@@ -13,6 +13,7 @@ import { castPayload, type SetFn, type GetFn } from './types';
 import { applyWhenPrimary } from './primaryGate';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
+import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
 
@@ -118,6 +119,21 @@ export function handleTransformEvent(
       return true;
     }
 
+    /**
+     * The answer to a `get_entity_details` query (#9899). Recorded into the
+     * confirmed-effect cache so the orchestrator's `observeEntity` can read the
+     * engine's REAL post-apply state for a spawn/transform. The engine emits
+     * this ONLY when the entity exists (engine/src/bridge/query.rs), so a miss
+     * is itself the "not yet" answer — nothing else here needs to change.
+     *
+     * `return true` consumes the event: no store handler downstream reads it,
+     * and it must not fall through to be logged as unhandled.
+     */
+    case 'QUERY_ENTITY_DETAILS': {
+      recordEntityObservation(data);
+      return true;
+    }
+
     case 'HISTORY_CHANGED': {
       const payload = castPayload<{ canUndo: boolean; canRedo: boolean; undoDescription: string | null; redoDescription: string | null }>(data);
       useEditorStore.getState().setHistoryState(
@@ -220,6 +236,18 @@ export function handleTransformEvent(
         // user clicks each entity in turn. Empty for `new_scene`, which is
         // correct — an empty scene has no audio.
         entityAudio: takeStagedSceneAudio(),
+        // completionMode (#9901) is frontend-only — the engine's
+        // SceneGraphData never carries it, so setFullGraph's fallback to the
+        // PREVIOUS mode (sceneGraphSlice.ts) exists precisely to survive an
+        // in-place incremental rebuild of the SAME scene. SCENE_LOADED is the
+        // one unambiguous "a different scene is replacing this one" boundary
+        // — new_scene and a real load both emit it — so it is the one place
+        // that must clear the mode explicitly rather than let it leak from
+        // whatever scene was open before. The SCENE_GRAPH_UPDATE that follows
+        // then starts from `undefined` and correctly stays there (legacy
+        // default) until the persisted-mode write path (child of #9901) has
+        // something to set.
+        sceneGraph: { ...useEditorStore.getState().sceneGraph, completionMode: undefined },
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context

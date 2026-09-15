@@ -295,6 +295,25 @@ export const BRIDGE_CACHE_TTL_MS = 60_000;
 export const DOCS_EMPTY_CACHE_TTL_MS = 30_000;
 
 // ---------------------------------------------------------------------------
+// Confirmed engine effects (#9899, operation family ai.FR-1.OP-01)
+// ---------------------------------------------------------------------------
+
+/**
+ * How long `observeEngineEffect` keeps querying the engine for a spawn/transform
+ * to appear before returning `timed-out`. The #9899 acceptance criteria pin the
+ * negative case to a 5-second observation deadline.
+ */
+export const ENGINE_EFFECT_OBSERVATION_DEADLINE_MS = 5_000;
+
+/**
+ * Gap between engine queries while observing a pending effect. Small enough that
+ * the confirmed half of the response lands promptly once the deferred command
+ * applies, but not so tight that it spins the event loop — each poll fires one
+ * `get_entity_details` and the engine needs a frame to answer it.
+ */
+export const ENGINE_EFFECT_POLL_INTERVAL_MS = 50;
+
+// ---------------------------------------------------------------------------
 // Circuit breaker timing
 // ---------------------------------------------------------------------------
 

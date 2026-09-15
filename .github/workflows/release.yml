@@ -63,7 +63,7 @@ jobs:
       # BEFORE trusting a local run: a stale local node_modules will happily
       # report a bump that CI does not perform.
       - name: Create or update Version Packages PR
-        uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           pr-title: "chore: version packages"
           commit-message: "chore: version packages"

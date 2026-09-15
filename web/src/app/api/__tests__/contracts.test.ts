@@ -194,7 +194,6 @@ vi.mock('bcryptjs', () => ({
 }));
 
 vi.mock('@/lib/generate/meshyClient', () => ({ MeshyClient: vi.fn() }));
-vi.mock('@/lib/generate/sunoClient', () => ({ SunoClient: vi.fn() }));
 vi.mock('@/lib/generate/spriteClient', () => ({ SpriteClient: vi.fn() }));
 
 // ---------------------------------------------------------------------------
@@ -1032,25 +1031,22 @@ describe('OpenAPI contract — real route responses', () => {
     ]);
   });
 
-  it('GET /api/generate/music/status 200 (completed) matches GenerationStatus + durationSeconds', async () => {
+  // #9522: music routes to ElevenLabs `/v1/music` (audio inline), so the status
+  // route is a defensive terminal — it returns `failed` on any poll, with no
+  // async provider to stub. The response still conforms to GenerationStatus.
+  it('GET /api/generate/music/status 200 (terminal failed) matches GenerationStatus', async () => {
     await authenticateAs();
-    await resolvePlatformKey();
-    const { SunoClient } = await import('@/lib/generate/sunoClient');
-    stubClient(SunoClient, {
-      getStatus: vi.fn().mockResolvedValue({
-        status: 'completed',
-        progress: 100,
-        audioUrl: 'https://cdn.example.com/track.mp3',
-        durationSeconds: 30,
-      }),
-    });
 
     const { GET } = await import('@/app/api/generate/music/status/route');
     const res = await GET(makeGetRequest('http://localhost/api/generate/music/status?jobId=job_1'));
 
     expect(res.status).toBe(200);
-    expectContract('get', '/api/generate/music/status', 200, await res.json(), [
-      'missing $.error',
+    const body = await res.json();
+    expect(body.status).toBe('failed');
+    // A failed status carries `error` and omits `resultUrl`/`durationSeconds`.
+    expectContract('get', '/api/generate/music/status', 200, body, [
+      'missing $.durationSeconds',
+      'missing $.resultUrl',
     ]);
   });
 

@@ -123,11 +123,33 @@ export const createSceneGraphSlice: StateCreator<
   // ---------------------------------------------------------------------------
 
   setFullGraph: (graph) => {
-    set({ sceneGraph: graph, nodeCount: Object.keys(graph.nodes).length });
+    // `completionMode` (#9901) is frontend-only: the engine's SceneGraphData
+    // has no such field, so every engine-driven rebuild (the
+    // SCENE_GRAPH_UPDATE handler in transformEvents.ts — the only production
+    // caller of this action) hands back a payload with the key entirely
+    // absent. Falling back to the previous value keeps an already-authored
+    // mode alive across an INCREMENTAL rebuild of the same scene, instead of
+    // silently reverting it to the `win` default on the next entity change.
+    //
+    // This fallback must never be the thing that decides a scene BOUNDARY,
+    // because it cannot tell "same scene, engine rebuilt the graph" apart
+    // from "different scene just replaced this one" — both arrive as the
+    // identical shape (no `completionMode` key). That distinction is made
+    // one layer up: the SCENE_LOADED handler in transformEvents.ts (the
+    // load_scene / new_scene boundary, emitted before the engine's first
+    // SCENE_GRAPH_UPDATE for the incoming scene) clears
+    // `sceneGraph.completionMode` explicitly, so `get().sceneGraph
+    // .completionMode` already reads `undefined` by the time this runs for
+    // the new scene. A genuine scene load that means to SET a mode still
+    // wins here too — pass `completionMode` explicitly on `graph` — that
+    // write path is the persistence migration tracked as a child of #9901.
+    const completionMode = graph.completionMode ?? get().sceneGraph.completionMode;
+    set({ sceneGraph: { ...graph, completionMode }, nodeCount: Object.keys(graph.nodes).length });
   },
 
   updateSceneGraph: (graph) => {
-    set({ sceneGraph: graph, nodeCount: Object.keys(graph.nodes).length });
+    const completionMode = graph.completionMode ?? get().sceneGraph.completionMode;
+    set({ sceneGraph: { ...graph, completionMode }, nodeCount: Object.keys(graph.nodes).length });
   },
 
   // ---------------------------------------------------------------------------
@@ -155,7 +177,10 @@ export const createSceneGraphSlice: StateCreator<
         ? [...sceneGraph.rootIds, node.entityId]
         : sceneGraph.rootIds;
 
-    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds }, nodeCount: Object.keys(newNodes).length });
+    set({
+      sceneGraph: { nodes: newNodes, rootIds: newRootIds, completionMode: sceneGraph.completionMode },
+      nodeCount: Object.keys(newNodes).length,
+    });
   },
 
   removeNode: (entityId) => {
@@ -178,7 +203,10 @@ export const createSceneGraphSlice: StateCreator<
     // Remove from rootIds if present
     const newRootIds = sceneGraph.rootIds.filter((id) => id !== entityId);
 
-    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds }, nodeCount: Object.keys(newNodes).length });
+    set({
+      sceneGraph: { nodes: newNodes, rootIds: newRootIds, completionMode: sceneGraph.completionMode },
+      nodeCount: Object.keys(newNodes).length,
+    });
   },
 
   updateNode: (entityId, changes) => {
@@ -228,7 +256,7 @@ export const createSceneGraphSlice: StateCreator<
       }
     }
 
-    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds } });
+    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds, completionMode: sceneGraph.completionMode } });
   },
 
   // ---------------------------------------------------------------------------
