@@ -1,3 +1,4 @@
+/** Isolate scanner unit, report, and CLI tests from application test suites. */
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 

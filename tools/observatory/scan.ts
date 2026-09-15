@@ -27,9 +27,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+/** Declared confidence in a file-to-capability mapping; not runtime validation. */
 export type Confidence = 'extracted' | 'reviewed';
+/** Reason category for a tracked file intentionally omitted from ownership. */
 export type ExclusionCategory = 'generated' | 'vendored' | 'binary';
 
+/** Ordered ownership and secondary-link patterns for one stable capability ID. */
 export interface CapabilityRule {
   capabilityId: string;
   domain: string;
@@ -50,6 +53,7 @@ export interface CapabilityRule {
   crossLink?: string[];
 }
 
+/** Patterns excluded from otherwise unowned files, with a nonblank justification. */
 export interface ExclusionRule {
   category: ExclusionCategory;
   /** Human-readable justification. Required — a category alone is not a reason. */
@@ -57,6 +61,7 @@ export interface ExclusionRule {
   patterns: string[];
 }
 
+/** A requirement recorded before its implementation artifacts are complete. */
 export interface PlannedCapability {
   capabilityId: string;
   domain: string;
@@ -65,21 +70,24 @@ export interface PlannedCapability {
   confidence: Confidence;
 }
 
+/** A directed rename from a prior capability ID to another ID in the alias chain. */
 export interface Alias {
   from: string;
   to: string;
 }
 
+/** Pure scanner inputs: tracked paths, ordered mappings, and explicit coverage scope. */
 export interface ScanConfig {
   files: string[];
   rules: CapabilityRule[];
   exclusions?: ExclusionRule[];
   planned?: PlannedCapability[];
   aliases?: Alias[];
-  /** Path prefixes this scan claims to cover; anything else is `notYetCovered`. */
+  /** Unowned, non-excluded paths outside these prefixes become `notYetCovered`. */
   coveredScopes: string[];
 }
 
+/** Normalized attribution and planning information for one capability. */
 export interface CapabilityRecord {
   capabilityId: string;
   domain: string;
@@ -91,12 +99,14 @@ export interface CapabilityRecord {
   secondaryLinks: string[];
 }
 
+/** One unowned tracked path matched by a reasoned exclusion rule. */
 export interface ExcludedFile {
   path: string;
   category: ExclusionCategory;
   reason: string;
 }
 
+/** A structural mapping problem reported for repair without dropping its tracked path. */
 export type Gap =
   | { type: 'unmapped-in-covered-scope'; path: string }
   | { type: 'missing-primary-owner'; capabilityId: string; path: string }
@@ -111,6 +121,7 @@ type AliasProblem =
 
 type AliasResolution = { ok: true; target: string } | { ok: false; problem: AliasProblem };
 
+/** Mutually exclusive file-bucket counts reconciled against unique tracked paths. */
 export interface Accounting {
   trackedTotal: number;
   ownedTotal: number;
@@ -121,6 +132,7 @@ export interface Accounting {
   reconciles: boolean;
 }
 
+/** Deterministically ordered attribution, diagnostics, and complete file accounting. */
 export interface ScanResult {
   capabilities: CapabilityRecord[];
   excluded: ExcludedFile[];
@@ -136,6 +148,8 @@ export interface ScanResult {
  * Convert a repo-relative glob to an anchored RegExp.
  * Supported tokens: `**` (zero or more path segments), `*` (within one
  * segment), and literal characters. All other regex metacharacters are escaped.
+ * @param glob Repository-relative path pattern; separators use forward slashes.
+ * @returns A whole-path matcher supporting literal text, `*`, and `**`.
  */
 export function globToRegExp(glob: string): RegExp {
   let re = '';
@@ -420,7 +434,7 @@ export const INVENTORY_SCHEMA_VERSION = 1 as const;
 
 /**
  * Build the normalized machine-readable inventory object. Contains no
- * timestamps so two runs on the same commit tree serialize byte-identically.
+ * timestamps so identical scan inputs serialize byte-identically.
  * @param result Completed scan with exact, unescaped tracked paths.
  * @returns Versioned machine-readable inventory data.
  */
@@ -438,6 +452,7 @@ export function buildInventoryJson(result: ScanResult): Record<string, unknown> 
   };
 }
 
+/** Human-readable domain labels explaining the current mapping scope. */
 export interface CoverageScope {
   covered: string[];
   notYetCovered: string[];
@@ -523,8 +538,8 @@ export function buildUnmappedReport(result: ScanResult, coverageScope: CoverageS
   for (const d of [...coverageScope.covered].sort(byString)) lines.push(`- ${reportLiteral(d)}`);
   lines.push('');
   lines.push(
-    'Domains **not yet covered** (explicit gap — tracked files here are reported as ' +
-      '`notYetCovered`, never silently dropped):',
+    'Domains **not yet covered** (explicit gap — unowned, non-excluded tracked ' +
+      'files here are reported as `notYetCovered`, never silently dropped):',
   );
   lines.push('');
   for (const d of [...coverageScope.notYetCovered].sort(byString)) lines.push(`- ${reportLiteral(d)}`);

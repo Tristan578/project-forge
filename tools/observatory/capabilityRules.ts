@@ -7,8 +7,8 @@
  *   - `mcp`          — the MCP command manifest (`mcp-server/manifest/`).
  *
  * Every other domain named in the epic is listed in {@link COVERAGE_SCOPE} as
- * NOT yet covered, so uncovered areas surface as an explicit `notYetCovered`
- * entry rather than a silent omission. Extending coverage = add a covered scope
+ * NOT yet covered. Unowned, non-excluded files there surface as explicit
+ * `notYetCovered` entries. Extending coverage = add a covered scope
  * here plus reviewed rules for it (see ./README.md).
  *
  * Confidence semantics:
@@ -19,7 +19,7 @@
 
 import type { CapabilityRule, ExclusionRule, PlannedCapability, CoverageScope } from './scan.ts';
 
-/** Path prefixes this slice claims to cover. Anything else is `notYetCovered`. */
+/** Unowned, non-excluded paths outside these prefixes become `notYetCovered`. */
 export const COVERED_SCOPES: string[] = [
   'web/src/stores/',
   'web/src/lib/workspace/',

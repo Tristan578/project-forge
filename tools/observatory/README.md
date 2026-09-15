@@ -17,7 +17,7 @@ files. Every unique path belongs to one bucket:
 | `owned` | Attributed to one capability. |
 | `excluded` | Matched by a generated, vendored, or binary exclusion with a nonblank reason. |
 | `unmapped` | Inside a covered scope without an ownership or exclusion rule. |
-| `notYetCovered` | Outside all covered scopes. |
+| `notYetCovered` | Unowned and non-excluded, outside all covered scopes. |
 
 The bucket counts sum to the tracked-file count. Secondary links never add to
 that denominator. A reconciled count proves complete classification, not complete
