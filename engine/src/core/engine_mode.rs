@@ -644,7 +644,7 @@ mod scene_round_trip_tests {
     use crate::core::skeletal_animation2d::{BoneKeyframe, EasingType2d, SkeletalAnimation2d};
     use crate::core::skeleton2d::{Bone2dDef, SkeletonData2d, SkeletonEnabled2d};
     use crate::core::sprite::{SpriteAnchor, SpriteData};
-    use crate::core::tilemap::{TilemapLayer, TilemapOrigin};
+    use crate::core::tilemap::{CollisionShape, TilemapLayer, TilemapOrigin};
     use std::collections::HashMap;
 
     // ---------------------------------------------------------------------
@@ -995,6 +995,17 @@ mod scene_round_trip_tests {
                 visible: false,
                 opacity: 0.65,
                 is_collision: true,
+                // Distinctive per-cell shapes so the mode-transition carry test
+                // proves collision authoring survives Play/Stop, not only the
+                // layer-level flag (OP-04).
+                collision_shapes: vec![
+                    CollisionShape::Full,
+                    CollisionShape::None,
+                    CollisionShape::HalfTop,
+                    CollisionShape::None,
+                    CollisionShape::SlopeLeft,
+                    CollisionShape::None,
+                ],
             }],
             origin: TilemapOrigin::Center,
         }
@@ -1279,6 +1290,18 @@ mod scene_round_trip_tests {
         assert!(tilemap.layers[0].is_collision);
         assert!(!tilemap.layers[0].visible);
         assert_eq!(tilemap.layers[0].tiles, vec![Some(7), None, Some(9), None, Some(11), None]);
+        assert_eq!(
+            tilemap.layers[0].collision_shapes,
+            vec![
+                CollisionShape::Full,
+                CollisionShape::None,
+                CollisionShape::HalfTop,
+                CollisionShape::None,
+                CollisionShape::SlopeLeft,
+                CollisionShape::None,
+            ],
+            "per-tile collision shapes must survive the Play/Stop round trip",
+        );
 
         let skeleton =
             get::<SkeletonData2d>(&mut world, "hero").expect("SkeletonData2d must be restored");

@@ -29,7 +29,9 @@ import type {
   FrameRect,
   SliceMode,
   Grid2dSettings,
+  CollisionShape,
 } from '@/stores/slices/types';
+import { TILE_COLLISION_SHAPES } from '@/stores/slices/types';
 import {
   MAX_IK_BONE_CHAIN_2D,
   collectSkeleton2dWarnings,
@@ -754,6 +756,58 @@ const tilemapHandlers: Record<string, ToolHandler> = {
       return { success: true, result: { message: `Set tile at (${x}, ${y}) in layer ${layerIndex}` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set tile' };
+    }
+  },
+
+  // In-app AI parity for OP-04: same validated contract as the manual picker.
+  // Validation (shape vocabulary, layer/coordinate bounds) matches the engine's
+  // `parse_set_tile_collision_shape` + `set_layer_collision_shape`, and the edit
+  // routes through the SAME store action the manual UI calls, so it is undoable
+  // and re-emitted identically.
+  set_tile_collision_shape: async (args, ctx): Promise<ExecutionResult> => {
+    try {
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          layerIndex: z.number().int().nonnegative().max(0xffff_ffff),
+          x: z.number().int().nonnegative().max(0xffff_ffff),
+          y: z.number().int().nonnegative().max(0xffff_ffff),
+          shape: z.enum([...TILE_COLLISION_SHAPES] as [CollisionShape, ...CollisionShape[]]),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, layerIndex, x, y, shape } = p.data;
+
+      const tilemap = ownEntry(ctx.store.tilemaps, entityId);
+      if (!tilemap) {
+        return { success: false, error: `No tilemap for entity ${entityId}` };
+      }
+      if (layerIndex >= tilemap.layers.length) {
+        return {
+          success: false,
+          error: `Layer ${layerIndex} out of range (tilemap has ${tilemap.layers.length} layers)`,
+        };
+      }
+      const [w, h] = tilemap.mapSize;
+      if (x >= w || y >= h) {
+        return { success: false, error: `Tile (${x}, ${y}) is outside the ${w}x${h} map` };
+      }
+
+      const status = ctx.store.setTileCollisionShape(entityId, layerIndex, x, y, shape);
+      return {
+        success: true,
+        result: {
+          status,
+          message: `Requested shape "${shape}" at (${x}, ${y}) in layer ${layerIndex}; awaiting the engine update. Stored shapes do not affect play physics yet.`,
+        },
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : 'Failed to set tile collision shape',
+      };
     }
   },
 
