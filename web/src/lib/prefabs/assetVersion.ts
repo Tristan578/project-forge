@@ -111,6 +111,13 @@ export interface ConflictResolution {
 
 /** Deterministic JSON serialization with recursively sorted object keys. */
 function stableStringify(value: unknown): string {
+  // `undefined` (an absent/removed field) must serialize to something distinct from
+  // `null` (an explicit null value) — JSON.stringify(undefined) is the JS value
+  // `undefined`, which previously fell through the `?? 'null'` fallback and collided
+  // with `null`, making fieldsDiffer() treat "field removed" as "field unchanged".
+  if (value === undefined) {
+    return 'undefined';
+  }
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value) ?? 'null';
   }

@@ -175,6 +175,23 @@ describe('scene.FR-2.OP-03 transactional reimport with override preservation', (
     expect(instances).toEqual(before);
   });
 
+  it('applyReimport deletes a field that was explicitly null once the next source removes it entirely (#9812)', () => {
+    // Regression: stableStringify() previously mapped both `null` and `undefined`
+    // to the string 'null', so fieldsDiffer(null, undefined) reported "unchanged"
+    // and a field explicitly set to null never got deleted when the source dropped it.
+    const withNullField = { ...baseSource, physics: null } as unknown as PrefabSnapshot;
+    const sourceWithoutField = { ...baseSource } as PrefabSnapshot; // physics key absent -> undefined
+    const version = createAssetVersion(withNullField);
+    const instance = makeInstance('i1', [], withNullField);
+    expect(instance.snapshot).toHaveProperty('physics', null);
+
+    const result = applyReimport(withNullField, sourceWithoutField, version, [instance]);
+    expect(result.ok).toBe(true);
+    expect(result.affectedInstanceIds).toContain('i1');
+    const updated = result.updatedInstances.find((i) => i.id === 'i1')!;
+    expect('physics' in (updated.snapshot as unknown as Record<string, unknown>)).toBe(false);
+  });
+
   it('bumpAssetVersion increments and refreshes hash while preserving createdAt and protected fields', () => {
     const v1 = createAssetVersion(baseSource, ['transform']);
     const v2 = bumpAssetVersion(v1, nextSource);
