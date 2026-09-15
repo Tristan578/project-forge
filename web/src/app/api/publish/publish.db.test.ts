@@ -36,6 +36,8 @@ import {
 
 vi.mock('server-only', () => ({}));
 
+import { queryWithResilience } from '@/lib/db/client';
+
 const harnessRef = vi.hoisted(() => ({ current: null as unknown as TestHarness }));
 function harness(): TestHarness {
   if (!harnessRef.current) throw new Error('harness not initialised');
@@ -47,6 +49,7 @@ const databaseFaults = vi.hoisted(() => ({
   failReferenceCheck: false,
   awaitingReferenceCheck: false,
   referenceCheckCount: 0,
+  commitAttempts: 0,
 }));
 
 vi.mock('@/lib/db/client', () => ({
@@ -54,6 +57,7 @@ vi.mock('@/lib/db/client', () => ({
   getNeonSql: () => async (strings: TemplateStringsArray, ...values: unknown[]) => {
     // Execute the real atomic SQL first. Losing the response must not undo the
     // committed row, snapshot, or tags as a pre-write rejection mock would.
+    databaseFaults.commitAttempts += 1;
     const rows = await harness().neonSql(strings, ...values);
     if (databaseFaults.loseNextCommitResponse) {
       databaseFaults.loseNextCommitResponse = false;
@@ -62,7 +66,7 @@ vi.mock('@/lib/db/client', () => ({
     }
     return rows;
   },
-  queryWithResilience: (fn: () => Promise<unknown>) => {
+  queryWithResilience: vi.fn((fn: () => Promise<unknown>, _options?: { maxAttempts?: number }) => {
     if (databaseFaults.awaitingReferenceCheck) {
       databaseFaults.awaitingReferenceCheck = false;
       databaseFaults.referenceCheckCount += 1;
@@ -71,7 +75,7 @@ vi.mock('@/lib/db/client', () => ({
       }
     }
     return fn();
-  },
+  }),
 }));
 
 // Whoever the middleware resolved; swapped per test.
@@ -439,6 +443,8 @@ describe('POST /api/publish — private snapshots against real Postgres', () => 
     databaseFaults.failReferenceCheck = false;
     databaseFaults.awaitingReferenceCheck = false;
     databaseFaults.referenceCheckCount = 0;
+    databaseFaults.commitAttempts = 0;
+    vi.mocked(queryWithResilience).mockClear();
     vi.stubEnv('PUBLISH_TO_R2', 'true');
     writeBundleSpy.mockImplementation(async (userId: string, slug: string) => ({
       key: `games/${userId}/${slug}/${randomUUID()}/bundle.json`,
@@ -539,6 +545,8 @@ describe('POST /api/publish — private snapshots against real Postgres', () => 
     await harness().neonSql`UPDATE projects SET scene_data = ${JSON.stringify(scene)}::jsonb WHERE id = ${projectId}::uuid`;
     writeBundleSpy.mockResolvedValueOnce({ key: candidateKey });
     databaseFaults.loseNextCommitResponse = true;
+    databaseFaults.commitAttempts = 0;
+    vi.mocked(queryWithResilience).mockClear();
 
     const res = await publish(owner, validBody({ projectId, title: 'Committed revision', tags: ['committed'] }));
 
@@ -551,6 +559,10 @@ describe('POST /api/publish — private snapshots against real Postgres', () => 
     ]);
     expect(await harness().neonSql`SELECT tag FROM game_tags`).toEqual([{ tag: 'committed' }]);
     expect(databaseFaults.referenceCheckCount).toBe(1);
+    expect(databaseFaults.commitAttempts).toBe(1);
+    // Replaying this version-guarded write after a lost response would return
+    // no row and make the route misidentify the committed object as a loser.
+    expect(queryWithResilience).toHaveBeenCalledWith(expect.any(Function), { maxAttempts: 1 });
     expect(deleteBundleSpy).not.toHaveBeenCalled();
     expect(captureExceptionSpy).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Database commit response lost' }),
