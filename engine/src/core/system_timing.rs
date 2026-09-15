@@ -403,4 +403,55 @@ mod tests {
         assert_eq!(buf.commit_frame(), None);
         assert_eq!(buf.len(), 1);
     }
+
+    /// Regression guard for #9880: a bracket run unconditionally around a
+    /// system that itself no-ops outside Play mode (like `emit_play_tick_system`
+    /// for the EntitySync group) still calls `record` every frame, manufacturing
+    /// a spurious `Some(tiny_ms)` in Edit mode instead of leaving the group
+    /// `None`. The fix is to gate the bracket itself with
+    /// `.run_if(in_play_mode)`, exactly as wired for the EntitySync bracket in
+    /// `bridge/mod.rs`. `bridge/` is wasm32-only and never compiles under
+    /// `cargo test --lib` (see module docs above), so this asserts the same
+    /// `run_if`-gated-bracket pattern natively against the real `in_play_mode`
+    /// condition and the real buffer, standing in for the bridge wiring.
+    #[test]
+    fn a_bracket_gated_on_in_play_mode_never_records_outside_play() {
+        use crate::core::engine_mode::{in_play_mode, EngineMode};
+
+        fn record_marker(mut buffer: ResMut<SystemTimingBuffer>) {
+            buffer.record(SystemGroup::EntitySync, 0.0);
+        }
+
+        let mut app = App::new();
+        app.insert_resource(EngineMode::Edit);
+        app.insert_resource(SystemTimingBuffer::new(8));
+        app.world_mut().resource_mut::<SystemTimingBuffer>().start_capture();
+        app.add_systems(Update, record_marker.run_if(in_play_mode));
+
+        app.update();
+        let frame = app
+            .world_mut()
+            .resource_mut::<SystemTimingBuffer>()
+            .commit_frame()
+            .expect("capturing, so a frame commits even with nothing recorded");
+        assert_eq!(
+            frame.group(SystemGroup::EntitySync),
+            None,
+            "a run_if(in_play_mode)-gated bracket must not record while the \
+             wrapped system is inert in Edit mode"
+        );
+
+        *app.world_mut().resource_mut::<EngineMode>() = EngineMode::Play;
+        app.update();
+        let frame = app
+            .world_mut()
+            .resource_mut::<SystemTimingBuffer>()
+            .commit_frame()
+            .unwrap();
+        assert_eq!(
+            frame.group(SystemGroup::EntitySync),
+            Some(0.0),
+            "the same bracket records once the engine is actually in Play mode"
+        );
+    }
 }

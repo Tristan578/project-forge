@@ -85,7 +85,7 @@ use crate::core::{
 // NOT editor-only: `apply_reverb_zone_commands` is registered in the
 // always-active block, so this import cannot ride the `runtime`-gated group
 // below. The set carries ordering only, never a run condition.
-use crate::core::engine_mode::{ModeRestoreSet, Physics2dWriteSet, ResyncDrainSet};
+use crate::core::engine_mode::{ModeRestoreSet, Physics2dWriteSet, ResyncDrainSet, in_play_mode};
 
 // Editor-only imports
 #[cfg(not(feature = "runtime"))]
@@ -743,7 +743,12 @@ impl Plugin for SelectionPlugin {
         // exactly what its anchor covers:
         //   - EntitySync   -> `emit_play_tick_system` (the per-frame entity-state
         //                     emit; Rust-side serialization only, NOT user-script
-        //                     CPU, which runs off-frame in the JS Worker).
+        //                     CPU, which runs off-frame in the JS Worker). Its
+        //                     own bracket is `run_if(in_play_mode)`: the wrapped
+        //                     system is a near-instant early return outside Play
+        //                     mode, so an unconditional bracket would still fire
+        //                     and record a fabricated near-zero value in Edit
+        //                     mode instead of leaving the group unmeasured.
         //   - TransformApply -> `apply_pending_transforms` (that one JS->engine
         //                     drain only, NOT every command drain).
         //   - Physics      -> Rapier's `PhysicsSet` in `PostUpdate`, which is the
@@ -762,12 +767,14 @@ impl Plugin for SelectionPlugin {
             .add_systems(
                 Update,
                 observability_bridge::begin_entity_sync_timing
-                    .before(scripts::emit_play_tick_system),
+                    .before(scripts::emit_play_tick_system)
+                    .run_if(in_play_mode),
             )
             .add_systems(
                 Update,
                 observability_bridge::end_entity_sync_timing
-                    .after(scripts::emit_play_tick_system),
+                    .after(scripts::emit_play_tick_system)
+                    .run_if(in_play_mode),
             )
             .add_systems(
                 Update,
