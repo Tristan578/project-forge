@@ -37,7 +37,7 @@ export default defineConfig({
         'src/app/**/page.tsx',
       ],
       // Ratcheted up per sprint — see docs/coverage-plan.md
-      // Tier-3 target: 75/65/70/77 (actual coverage ~76/67/70/78, leaving ~1-2pp headroom)
+      // The thresholds below are the enforced minimums; CI coverage reports show current measurements.
       thresholds: {
         statements: 83,
         branches: 75,
