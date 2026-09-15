@@ -979,4 +979,70 @@ describe('SkeletonInspector', () => {
       }),
     }));
   });
+
+  // --- Discard-guard on the Active Skin selector (#9732) ---
+  // Switching the active skin also drops an open, unapplied mesh draft, so it is
+  // gated by the same confirm dialog as Add/Edit rather than clearing silently.
+
+  const skeletonWithTwoSkins: SkeletonData2d = {
+    ...baseSkeleton,
+    skins: {
+      default: { name: 'default', attachments: {} },
+      alt: { name: 'alt', attachments: {} },
+    },
+    activeSkin: 'default',
+  };
+
+  it('switches the active skin without prompting when no draft is open', () => {
+    // Nothing to lose: the guard runs `open` synchronously, so the skin change
+    // reaches the store immediately and the confirm dialog is never shown.
+    setupStore({ skeleton: skeletonWithTwoSkins });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByLabelText('Active skin'), { target: { value: 'alt' } });
+    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(mockSetSkeleton2d).toHaveBeenCalledWith(
+      'entity-1',
+      expect.objectContaining({ activeSkin: 'alt' }),
+    );
+  });
+
+  it('keeps the open draft and does not switch skin when the discard is declined', async () => {
+    // Open a draft in the default skin, then pick a different skin. A declined
+    // confirm must leave the draft intact and never write the new activeSkin —
+    // the misclick the guard exists to catch.
+    mockConfirm.mockResolvedValueOnce(false);
+    setupStore({ skeleton: skeletonWithTwoSkins });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'belt' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    expect(screen.getByText('Mesh: belt')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Active skin'), { target: { value: 'alt' } });
+    await vi.waitFor(() => {
+      expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
+    });
+    // Draft still open, and no skin write happened.
+    expect(screen.getByText('Mesh: belt')).toBeInTheDocument();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+  });
+
+  it('switches the active skin and drops the draft when the discard is confirmed', async () => {
+    mockConfirm.mockResolvedValue(true);
+    setupStore({ skeleton: skeletonWithTwoSkins });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'belt' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    expect(screen.getByText('Mesh: belt')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Active skin'), { target: { value: 'alt' } });
+    await vi.waitFor(() => {
+      expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
+    });
+    expect(mockSetSkeleton2d).toHaveBeenCalledWith(
+      'entity-1',
+      expect.objectContaining({ activeSkin: 'alt' }),
+    );
+    // The draft editor is gone once the discard is accepted.
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Mesh: belt')).not.toBeInTheDocument();
+    });
+  });
 });

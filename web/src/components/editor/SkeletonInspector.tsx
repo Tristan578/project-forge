@@ -119,14 +119,6 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
     setSkeleton2d(entityId, { ...skeleton, bones });
   };
 
-  const handleSkinChange = (skinName: string) => {
-    setSelectedSkin(skinName);
-    setNewAttachmentError(null);
-    setMeshDraft(null);
-    setMeshError(null);
-    setSkeleton2d(entityId, { ...skeleton, activeSkin: skinName });
-  };
-
   // --- Mesh attachments (#9732) ---------------------------------------------
   // The manual, no-chat authoring path for the same vertex/weight data
   // `add_skeleton2d_mesh_attachment` writes. Edits round-trip through
@@ -162,6 +154,21 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
     }
     void confirm('Discard unsaved mesh edits?').then((ok) => {
       if (ok) open();
+    });
+  };
+
+  // Switching the active skin also throws away an open, unapplied mesh draft
+  // (its vertices/weights live only in local state until Apply), so route the
+  // discard through the same guard as Add/Edit rather than clearing it silently
+  // — a mis-clicked or exploratory skin change is exactly the loss the confirm
+  // dialog exists to prevent.
+  const handleSkinChange = (skinName: string) => {
+    guardDiscardThen(() => {
+      setSelectedSkin(skinName);
+      setNewAttachmentError(null);
+      setMeshDraft(null);
+      setMeshError(null);
+      setSkeleton2d(entityId, { ...skeleton, activeSkin: skinName });
     });
   };
 
@@ -489,6 +496,7 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
         <select
           value={selectedSkin}
           onChange={(e) => handleSkinChange(e.target.value)}
+          aria-label="Active skin"
           className="w-full px-2 py-1 bg-zinc-800 rounded text-sm"
         >
           {Object.keys(skeleton.skins).map(skinName => (
