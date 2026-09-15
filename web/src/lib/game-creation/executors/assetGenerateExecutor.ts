@@ -30,7 +30,7 @@ export const assetGenerateExecutor: ExecutorDefinition = {
   name: 'asset_generate',
   inputSchema,
   userFacingErrorMessage:
-    'Asset generation is not available in game creation yet. Add an existing asset or remove this step.',
+    'Asset generation is not available in game creation yet. Select Start Over to change your request. You can add assets manually in the editor.',
 
   async execute(
     input: Record<string, unknown>,
@@ -77,7 +77,6 @@ export const assetGenerateExecutor: ExecutorDefinition = {
         pending: true,
         assetType: type,
         fallbackAssetId: fallbackParsed.data,
-        warning: this.userFacingErrorMessage,
       },
     };
   },
