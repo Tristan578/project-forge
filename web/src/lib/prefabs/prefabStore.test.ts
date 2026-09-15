@@ -12,8 +12,13 @@ import {
   exportPrefab,
   importPrefab,
   getBuiltInPrefabs,
+  getPrefabAssetVersion,
+  getPrefabReferenceCrosswalk,
+  previewPrefabReimport,
+  reimportPrefab,
   type PrefabSnapshot,
 } from './prefabStore';
+import { hashSnapshot, type PrefabInstance } from './assetVersion';
 
 // Mock localStorage
 let storage: Record<string, string> = {};
@@ -300,5 +305,156 @@ describe('Edge Cases', () => {
   it('getPrefab returns undefined for nonexistent prefab', () => {
     const found = getPrefab('DoesNotExist');
     expect(found).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Asset version tracking + reimport (#9812 / scene.FR-2)
+// ---------------------------------------------------------------------------
+
+const richSnapshot: PrefabSnapshot = {
+  entityType: 'cube',
+  name: 'Crate',
+  transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  material: {
+    baseColor: [0.5, 0.3, 0.15, 1], metallic: 0, perceptualRoughness: 0.7, reflectance: 0.5,
+    emissive: [0, 0, 0, 1], emissiveExposureWeight: 0, alphaMode: 'opaque', alphaCutoff: 0.5,
+    doubleSided: false, unlit: false, uvOffset: [0, 0], uvScale: [1, 1], uvRotation: 0,
+    parallaxDepthScale: 0.1, parallaxMappingMethod: 'occlusion', maxParallaxLayerCount: 16,
+    parallaxReliefMaxSteps: 5, clearcoat: 0, clearcoatPerceptualRoughness: 0.5,
+    specularTransmission: 0, diffuseTransmission: 0, ior: 1.5, thickness: 0,
+    attenuationDistance: null, attenuationColor: [1, 1, 1],
+  },
+  script: { source: 'function onUpdate(dt) {}', enabled: true, template: 'noop' },
+};
+
+function nextSourceFrom(base: PrefabSnapshot): PrefabSnapshot {
+  return {
+    ...base,
+    material: { ...base.material!, baseColor: [0.1, 0.8, 0.2, 1] },
+    script: { source: 'function onUpdate(dt) { forge.rotate(entityId, 0, dt, 0); }', enabled: true, template: 'spin' },
+  };
+}
+
+describe('scene.FR-2.OP-01 asset version records', () => {
+  it('savePrefab initializes a version-1 record whose hash matches the snapshot', () => {
+    const prefab = savePrefab('Crate', 'Props', '', richSnapshot);
+    expect(prefab.assetVersion).toBeDefined();
+    expect(prefab.assetVersion!.versionNumber).toBe(1);
+    expect(prefab.assetVersion!.sourceHash).toBe(hashSnapshot(richSnapshot));
+  });
+
+  it('built-in prefabs carry a version-1 record with the sentinel date', () => {
+    const builtIn = getBuiltInPrefabs()[0];
+    expect(builtIn.assetVersion).toBeDefined();
+    expect(builtIn.assetVersion!.versionNumber).toBe(1);
+    expect(builtIn.assetVersion!.createdAt).toBe('2024-01-01T00:00:00Z');
+  });
+
+  it('updatePrefab bumps the version and refreshes the hash', () => {
+    const prefab = savePrefab('Crate', 'Props', '', richSnapshot);
+    const next = nextSourceFrom(richSnapshot);
+    expect(updatePrefab(prefab.id, next)).toBe(true);
+    const version = getPrefabAssetVersion(prefab.id)!;
+    expect(version.versionNumber).toBe(2);
+    expect(version.sourceHash).toBe(hashSnapshot(next));
+  });
+
+  it('getPrefabAssetVersion synthesizes a version for a legacy record without one', () => {
+    savePrefab('Legacy', 'Props', '', richSnapshot);
+    // Simulate a pre-versioning record persisted to storage.
+    const raw = loadPrefabs();
+    delete raw[0].assetVersion;
+    localStorage.setItem('forge-prefabs', JSON.stringify(raw));
+    const version = getPrefabAssetVersion(raw[0].id)!;
+    expect(version.versionNumber).toBe(1);
+    expect(version.sourceHash).toBe(hashSnapshot(richSnapshot));
+  });
+
+  it('getPrefabReferenceCrosswalk maps a prefab to its referencing instances', () => {
+    const prefab = savePrefab('Crate', 'Props', '', richSnapshot);
+    const instances: PrefabInstance[] = [
+      { id: 'i1', prefabId: prefab.id, snapshot: richSnapshot, overrides: [] },
+      { id: 'i2', prefabId: 'other', snapshot: richSnapshot, overrides: [] },
+    ];
+    const crosswalk = getPrefabReferenceCrosswalk(prefab.id, instances);
+    expect(crosswalk.instanceIds).toEqual(['i1']);
+    expect(crosswalk.referenceCount).toBe(1);
+  });
+});
+
+describe('scene.FR-2.OP-02 previewPrefabReimport', () => {
+  it('previews affected fields for a known prefab without persisting', () => {
+    const prefab = savePrefab('Crate', 'Props', '', richSnapshot);
+    const instances: PrefabInstance[] = [{ id: 'i1', prefabId: prefab.id, snapshot: richSnapshot, overrides: [] }];
+    const preview = previewPrefabReimport(prefab.id, nextSourceFrom(richSnapshot), instances);
+    expect(preview.ok).toBe(true);
+    expect(preview.affectedInstanceIds).toEqual(['i1']);
+    // storage version unchanged by a preview
+    expect(getPrefabAssetVersion(prefab.id)!.versionNumber).toBe(1);
+  });
+
+  it('reports unknown-prefab rather than throwing', () => {
+    const preview = previewPrefabReimport('does_not_exist', richSnapshot, []);
+    expect(preview.ok).toBe(false);
+    expect(preview.reason).toBe('unknown-prefab');
+  });
+});
+
+describe('scene.FR-2.OP-03 reimportPrefab transactional apply', () => {
+  it('replaces the source, bumps the version, and preserves protected/override fields', () => {
+    const prefab = savePrefab('Crate', 'Props', '', richSnapshot);
+    const next = nextSourceFrom(richSnapshot);
+    const instances: PrefabInstance[] = [
+      { id: 'i1', prefabId: prefab.id, snapshot: richSnapshot, overrides: [] },
+      { id: 'i2', prefabId: prefab.id, snapshot: richSnapshot, overrides: ['material'] },
+    ];
+    const result = reimportPrefab(prefab.id, next, instances);
+    expect(result.ok).toBe(true);
+    expect(result.version!.versionNumber).toBe(2);
+    expect(result.affectedInstanceIds).toEqual(['i1']);
+
+    // persisted: prefab source is now the re-read asset at version 2
+    const stored = getPrefab(prefab.id)!;
+    expect(stored.snapshot.material!.baseColor).toEqual([0.1, 0.8, 0.2, 1]);
+    expect(stored.assetVersion!.versionNumber).toBe(2);
+
+    const i1 = result.updatedInstances.find(i => i.id === 'i1')!;
+    expect(i1.snapshot.material!.baseColor).toEqual([0.1, 0.8, 0.2, 1]);
+    expect(i1.snapshot.script!.template).toBe('noop'); // script protected by default
+    const i2 = result.updatedInstances.find(i => i.id === 'i2')!;
+    expect(i2.snapshot.material!.baseColor).toEqual([0.5, 0.3, 0.15, 1]); // override preserved
+  });
+
+  it('rejects a missing source and leaves the persisted version untouched', () => {
+    const prefab = savePrefab('Crate', 'Props', '', richSnapshot);
+    const result = reimportPrefab(prefab.id, null, []);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('missing-source');
+    const stored = getPrefab(prefab.id)!;
+    expect(stored.assetVersion!.versionNumber).toBe(1);
+    expect(stored.snapshot.material!.baseColor).toEqual([0.5, 0.3, 0.15, 1]);
+  });
+
+  it('rejects an incompatible source and retains the prior playable version', () => {
+    const prefab = savePrefab('Crate', 'Props', '', richSnapshot);
+    const incompatible: PrefabSnapshot = { ...nextSourceFrom(richSnapshot), entityType: 'sphere' };
+    const result = reimportPrefab(prefab.id, incompatible, []);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('incompatible-source');
+    expect(getPrefab(prefab.id)!.assetVersion!.versionNumber).toBe(1);
+  });
+
+  it('rejects reimport of a read-only built-in prefab', () => {
+    const builtIn = getBuiltInPrefabs()[0];
+    const result = reimportPrefab(builtIn.id, builtIn.snapshot, []);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('read-only-prefab');
+  });
+
+  it('reports unknown-prefab for an id in neither storage nor built-ins', () => {
+    const result = reimportPrefab('does_not_exist', richSnapshot, []);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('unknown-prefab');
   });
 });
