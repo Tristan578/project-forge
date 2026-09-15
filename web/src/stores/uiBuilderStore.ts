@@ -6,6 +6,7 @@ import { getWidgetDefaults, DEFAULT_WIDGET_STYLE } from '@/components/editor/ui-
 export type {
   WidgetType,
   WidgetAnchor,
+  WidgetConstraints,
   WidgetStyle,
   DataBinding,
   BindingTransform,

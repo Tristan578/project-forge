@@ -6,9 +6,62 @@
 import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { parseArgs } from './types';
+import type { WidgetConstraints } from '@/stores/uiBuilderStore';
 
 const zScreenPreset = z.enum(['blank', 'hud', 'main_menu', 'pause_menu', 'game_over', 'inventory', 'dialog']);
 const zWidgetType = z.enum(['text', 'image', 'button', 'progress_bar', 'panel', 'grid', 'scroll_view', 'slider', 'toggle', 'minimap']);
+
+/**
+ * Responsive layout constraints (ui.FR-1.OP-01). Mirrors the manual property
+ * panel so the in-app AI path writes the SAME validated data contract: pixel
+ * offsets from the anchor and non-negative pixel size bounds. A `min > max`
+ * pair is accepted, exactly as the manual panel accepts it with a non-blocking
+ * warning — the documented "min wins at render" resolution (widgetRenderer's
+ * `clampSize`) then resolves it, so a state a human can author by hand is also
+ * reachable through AI rather than hard-rejected on one path only.
+ */
+const zBound = z.number().min(0, 'size bounds must be >= 0 px').nullable().optional();
+const zConstraints = z.object({
+  offsetX: z.number().optional(),
+  offsetY: z.number().optional(),
+  minWidth: zBound,
+  maxWidth: zBound,
+  minHeight: zBound,
+  maxHeight: zBound,
+});
+
+const EMPTY_CONSTRAINTS: WidgetConstraints = {
+  offsetX: 0,
+  offsetY: 0,
+  minWidth: null,
+  maxWidth: null,
+  minHeight: null,
+  maxHeight: null,
+};
+
+/**
+ * Merge a partial constraints payload onto the widget's CURRENT constraints
+ * (or the empty default when it has none), mirroring the manual property
+ * panel's `{ ...existing, [field]: value }` write. Fields the caller omits are
+ * PRESERVED rather than reset to 0/null — so an AI nudge that touches only an
+ * offset never silently wipes a previously-set min/max touch-target bound. A
+ * bound passed as explicit `null` still clears it (parity with a blank field in
+ * the manual panel).
+ */
+function mergeConstraints(
+  existing: WidgetConstraints | null | undefined,
+  partial: z.infer<typeof zConstraints>
+): WidgetConstraints {
+  const base = existing ?? EMPTY_CONSTRAINTS;
+  return {
+    offsetX: partial.offsetX ?? base.offsetX,
+    offsetY: partial.offsetY ?? base.offsetY,
+    minWidth: partial.minWidth !== undefined ? partial.minWidth : base.minWidth,
+    maxWidth: partial.maxWidth !== undefined ? partial.maxWidth : base.maxWidth,
+    minHeight: partial.minHeight !== undefined ? partial.minHeight : base.minHeight,
+    maxHeight: partial.maxHeight !== undefined ? partial.maxHeight : base.maxHeight,
+  };
+}
 
 export const uiBuilderHandlers: Record<string, ToolHandler> = {
   create_ui_screen: async (args, _ctx) => {
@@ -90,6 +143,7 @@ export const uiBuilderHandlers: Record<string, ToolHandler> = {
       width: z.number().optional(),
       height: z.number().optional(),
       anchor: z.string().optional(),
+      constraints: zConstraints.optional(),
       parentWidgetId: z.string().optional(),
       config: z.record(z.string(), z.unknown()).optional(),
       style: z.record(z.string(), z.unknown()).optional(),
@@ -107,6 +161,13 @@ export const uiBuilderHandlers: Record<string, ToolHandler> = {
     if (p.data.width) updates.width = p.data.width;
     if (p.data.height) updates.height = p.data.height;
     if (p.data.anchor) updates.anchor = p.data.anchor;
+    if (p.data.constraints) {
+      const screen = uiStore.screens.find(
+        (s) => s.id === p.data.screenId || s.name === p.data.screenId
+      );
+      const widget = screen?.widgets.find((w) => w.id === widgetId);
+      updates.constraints = mergeConstraints(widget?.constraints, p.data.constraints);
+    }
     if (p.data.parentWidgetId) updates.parentWidgetId = p.data.parentWidgetId;
     if (p.data.config) updates.config = p.data.config;
     if (p.data.style) uiStore.updateWidgetStyle(p.data.screenId, widgetId, p.data.style as Record<string, unknown>);
@@ -124,6 +185,7 @@ export const uiBuilderHandlers: Record<string, ToolHandler> = {
       width: z.number().optional(),
       height: z.number().optional(),
       anchor: z.string().optional(),
+      constraints: zConstraints.nullable().optional(),
       visible: z.boolean().optional(),
       config: z.record(z.string(), z.unknown()).optional(),
       style: z.record(z.string(), z.unknown()).optional(),
@@ -134,6 +196,22 @@ export const uiBuilderHandlers: Record<string, ToolHandler> = {
     const updates: Record<string, unknown> = {};
     for (const key of ['name', 'x', 'y', 'width', 'height', 'anchor', 'visible', 'config'] as const) {
       if (p.data[key] !== undefined) updates[key] = p.data[key];
+    }
+    // `constraints: null` clears them (back to pure percentage/anchor); an object
+    // is merged onto the widget's CURRENT constraints so omitted fields are
+    // preserved rather than reset — matching the manual property panel.
+    if (p.data.constraints !== undefined) {
+      if (p.data.constraints === null) {
+        updates.constraints = null;
+      } else {
+        const screen = uiStore.screens.find(
+          (s) => s.id === p.data.screenId || s.name === p.data.screenId
+        );
+        const widget = screen?.widgets.find(
+          (w) => w.id === p.data.widgetId || w.name === p.data.widgetId
+        );
+        updates.constraints = mergeConstraints(widget?.constraints, p.data.constraints);
+      }
     }
     if (Object.keys(updates).length > 0) uiStore.updateWidget(p.data.screenId, p.data.widgetId, updates);
     if (p.data.style) uiStore.updateWidgetStyle(p.data.screenId, p.data.widgetId, p.data.style as Record<string, unknown>);
