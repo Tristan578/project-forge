@@ -184,6 +184,73 @@ describe('assertClerkPublishableKeyShape', () => {
     expect(() => assertClerkPublishableKeyShape()).toThrow(/set but unusable/);
   });
 
+  // #9721. A present CLERK_SECRET_KEY with an ABSENT publishable key is the
+  // half-configured state that shipped docs.spawnforge.ai with dead sign-in and
+  // an error on every request: proxy.ts only passes through when the secret key
+  // is UNSET, so a set secret + absent publishable runs clerkMiddleware, which
+  // throws "Missing publishableKey". Absent-BOTH stays legitimate (#9044); this
+  // catches only the mismatched pair, and it is a distinct failure mode from the
+  // malformed-key check above — both must stay covered.
+  describe('half-configured Clerk — secret set, publishable absent (#9721)', () => {
+    const SECRET = 'sk_live_realsecretvalue';
+
+    it.each([
+      ['an unset publishable key', undefined],
+      ['an empty publishable key', ''],
+      ['a whitespace-only publishable key', '   '],
+    ])('throws for %s when CLERK_SECRET_KEY is set', (_label, pub) => {
+      expect(() => assertClerkPublishableKeyShape(pub, SECRET)).toThrow(
+        /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+      );
+    });
+
+    it('names both variables and references #9721 without echoing the secret', () => {
+      let message = '';
+      try {
+        assertClerkPublishableKeyShape(undefined, SECRET);
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain('CLERK_SECRET_KEY');
+      expect(message).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
+      expect(message).toContain('#9721');
+      // A publishable key is not a secret, but the secret key that triggered
+      // this most certainly is — it must never appear in build logs.
+      expect(message).not.toContain('realsecretvalue');
+    });
+
+    it('does not throw when both keys are configured', () => {
+      expect(() => assertClerkPublishableKeyShape(VALID_LIVE, SECRET)).not.toThrow();
+    });
+
+    it.each([
+      ['both keys absent — the supported no-Clerk state', undefined, undefined],
+      ['publishable absent, secret whitespace-only', undefined, '   '],
+    ])('does not throw for %s', (_label, pub, secret) => {
+      expect(() => assertClerkPublishableKeyShape(pub, secret)).not.toThrow();
+    });
+
+    it('leaves the valid-publishable, absent-secret case unchanged', () => {
+      expect(() => assertClerkPublishableKeyShape(VALID_LIVE, undefined)).not.toThrow();
+    });
+
+    it('still reports the malformed-key mode when the secret is also set', () => {
+      // The two failure modes are distinct: a PRESENT-but-broken publishable key
+      // fails as "set but unusable", not as the half-configured message.
+      expect(() => assertClerkPublishableKeyShape(PASTED_ASSIGNMENT, SECRET)).toThrow(
+        /set but unusable/
+      );
+    });
+
+    it('reads CLERK_SECRET_KEY from process.env when called with no arguments', () => {
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', '');
+      vi.stubEnv('CLERK_SECRET_KEY', SECRET);
+      expect(() => assertClerkPublishableKeyShape()).toThrow(
+        /CLERK_SECRET_KEY is set but NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is absent/
+      );
+    });
+  });
+
   it('is wired into the docs build, not just exported', () => {
     // A guard nobody calls is not a guard. next.config.ts is evaluated by
     // `next build`, so this is what makes a bad value a red deploy rather than
