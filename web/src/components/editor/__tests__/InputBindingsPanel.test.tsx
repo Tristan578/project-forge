@@ -34,6 +34,7 @@ describe('InputBindingsPanel', () => {
       const state = {
         inputBindings: defaultBindings,
         inputPreset: 'fps',
+        inputPresetByPlayer: { 0: 'fps' },
         engineMode: 'edit',
         setInputPreset: mockSetInputPreset,
         setInputBinding: mockSetInputBinding,
@@ -217,6 +218,39 @@ describe('InputBindingsPanel', () => {
       expect(mockSetInputBinding).toHaveBeenCalledWith(
         expect.objectContaining({ actionName: 'special', player: 1 }),
       );
+    });
+
+    it('shows player 2\'s applied preset in the dropdown, not a permanent blank', () => {
+      // Each slot's preset provenance lives in `inputPresetByPlayer`; the panel
+      // reads the selected slot's value so player 2 is inspectable, not blanked.
+      setupMock({
+        inputBindings: twoPlayerBindings,
+        inputPresetByPlayer: { 0: 'fps', 1: 'platformer' },
+      });
+      render(<InputBindingsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
+
+      const select = screen.getByRole('combobox', { name: /input preset/i }) as HTMLSelectElement;
+      expect(select.value).toBe('fps');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Player 2' }));
+      expect(select.value).toBe('platformer');
+    });
+
+    it('locks the player selector while a rebind capture is in flight', () => {
+      render(<InputBindingsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
+
+      const player2 = screen.getByRole('button', { name: 'Player 2' }) as HTMLButtonElement;
+      expect(player2.disabled).toBe(false);
+
+      // Arm a rebind on Player 1's Jump action.
+      fireEvent.click(screen.getByRole('button', { name: /rebind jump/i }));
+
+      // Switching slots mid-capture would silently retarget the keypress, so the
+      // selector is disabled until the capture completes or is cancelled.
+      expect(player2.disabled).toBe(true);
+      expect((screen.getByRole('button', { name: 'Player 1' }) as HTMLButtonElement).disabled).toBe(true);
     });
   });
 });

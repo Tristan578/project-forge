@@ -190,13 +190,19 @@ export function handleAudioEvent(
             player,
           };
         });
-      // Player 0 (top-level), then every extra slot the engine reported.
-      const bindings: InputBinding[] = convert(payload.actions, 0);
-      for (const [slot, pb] of Object.entries(payload.players ?? {})) {
-        bindings.push(...convert(pb.actions, Number(slot)));
-      }
+      // Player 0 (top-level), then every extra slot the engine reported. Each
+      // slot's preset is carried alongside its bindings so player 1+'s
+      // provenance survives to the store like player 0's, rather than being
+      // dropped on the floor.
       const preset = payload.preset as InputPreset;
-      useEditorStore.getState().setInputBindings(bindings, preset);
+      const bindings: InputBinding[] = convert(payload.actions, 0);
+      const presetByPlayer: Record<number, InputPreset> = { 0: preset };
+      for (const [slot, pb] of Object.entries(payload.players ?? {})) {
+        const player = Number(slot);
+        bindings.push(...convert(pb.actions, player));
+        presetByPlayer[player] = pb.preset as InputPreset;
+      }
+      useEditorStore.getState().setInputBindings(bindings, preset, presetByPlayer);
       return true;
     }
 

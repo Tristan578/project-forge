@@ -38,6 +38,7 @@ describe('scriptSlice', () => {
       expect(store.getState().scriptLogs).toEqual([]);
       expect(store.getState().inputBindings).toEqual([]);
       expect(store.getState().inputPreset).toBeNull();
+      expect(store.getState().inputPresetByPlayer).toEqual({});
     });
   });
 
@@ -254,11 +255,24 @@ describe('scriptSlice', () => {
     it('should set input preset', () => {
       store.getState().setInputPreset('fps');
       expect(store.getState().inputPreset).toBe('fps');
+      // Slot 0's provenance also lands in the per-player map.
+      expect(store.getState().inputPresetByPlayer).toEqual({ 0: 'fps' });
     });
 
     it('should dispatch set_input_preset with the player slot', () => {
       store.getState().setInputPreset('platformer');
       expect(mockDispatch).toHaveBeenCalledWith('set_input_preset', { preset: 'platformer', player: 0 });
+    });
+
+    it('records a non-primary slot preset without moving player 0\'s mirror', () => {
+      store.getState().setInputPreset('fps', 0);
+      store.getState().setInputPreset('racing', 1);
+
+      // Player 2's preset is now represented, not discarded...
+      expect(store.getState().inputPresetByPlayer).toEqual({ 0: 'fps', 1: 'racing' });
+      // ...and player 1's scalar mirror is untouched by the slot-1 write.
+      expect(store.getState().inputPreset).toBe('fps');
+      expect(mockDispatch).toHaveBeenCalledWith('set_input_preset', { preset: 'racing', player: 1 });
     });
 
     it('should set bindings and preset together', () => {
@@ -267,6 +281,20 @@ describe('scriptSlice', () => {
 
       expect(store.getState().inputBindings).toEqual(bindings);
       expect(store.getState().inputPreset).toBe('topdown');
+      // A scalar-only caller (single-player) still populates slot 0.
+      expect(store.getState().inputPresetByPlayer).toEqual({ 0: 'topdown' });
+    });
+
+    it('threads a per-player preset map through setInputBindings', () => {
+      const bindings = [
+        { actionName: 'jump', actionType: 'digital' as const, sources: ['Space'], player: 0 },
+        { actionName: 'jump', actionType: 'digital' as const, sources: ['Numpad0'], player: 1 },
+      ];
+      store.getState().setInputBindings(bindings, 'fps', { 0: 'fps', 1: 'platformer' });
+
+      expect(store.getState().inputBindings).toEqual(bindings);
+      expect(store.getState().inputPreset).toBe('fps');
+      expect(store.getState().inputPresetByPlayer).toEqual({ 0: 'fps', 1: 'platformer' });
     });
   });
 

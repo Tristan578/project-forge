@@ -22,7 +22,7 @@ function formatKeyCode(code: string): string {
 
 export function InputBindingsPanel() {
   const inputBindings = useEditorStore((s) => s.inputBindings);
-  const inputPreset = useEditorStore((s) => s.inputPreset);
+  const inputPresetByPlayer = useEditorStore((s) => s.inputPresetByPlayer);
   const engineMode = useEditorStore((s) => s.engineMode);
   const setInputPreset = useEditorStore((s) => s.setInputPreset);
   const setInputBinding = useEditorStore((s) => s.setInputBinding);
@@ -143,7 +143,13 @@ export function InputBindingsPanel() {
                   key={slot}
                   onClick={() => setSelectedPlayer(slot)}
                   aria-pressed={selectedPlayer === slot}
-                  className={`flex-1 rounded px-2 py-1 text-xs ${
+                  // A rebind capture resolves which action to rewrite against the
+                  // selected player at key-press time, so switching slots mid-capture
+                  // would silently retarget (or swallow) the keypress. Lock the
+                  // selector until the capture completes or is cancelled.
+                  disabled={rebindTarget !== null}
+                  title={rebindTarget !== null ? 'Finish or cancel the rebind first' : undefined}
+                  className={`flex-1 rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
                     selectedPlayer === slot
                       ? 'bg-blue-600 text-white'
                       : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
@@ -159,7 +165,7 @@ export function InputBindingsPanel() {
           <div>
             <label className="mb-1 block text-xs text-zinc-400">Preset</label>
             <select
-              value={selectedPlayer === 0 ? (inputPreset ?? '') : ''}
+              value={inputPresetByPlayer[selectedPlayer] ?? ''}
               onChange={(e) => handlePresetChange(e.target.value)}
               disabled={!isEditing}
               aria-label="Input preset"

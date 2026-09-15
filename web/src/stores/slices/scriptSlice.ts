@@ -11,6 +11,10 @@ export interface ScriptSlice {
   scriptLogs: ScriptLogEntry[];
   inputBindings: InputBinding[];
   inputPreset: InputPreset;
+  // Per-local-player preset provenance (physics.FR-1.OP-04). Keyed by slot, so
+  // player 1's applied preset survives the same way its bindings do; `inputPreset`
+  // stays the slot-0 mirror for callers that predate two-player support.
+  inputPresetByPlayer: Record<number, InputPreset>;
 
   setScript: (entityId: string, source: string, enabled: boolean, template?: string) => void;
   removeScript: (entityId: string) => void;
@@ -22,7 +26,11 @@ export interface ScriptSlice {
   setInputBinding: (binding: InputBinding) => void;
   removeInputBinding: (actionName: string, player?: number) => void;
   setInputPreset: (preset: 'fps' | 'platformer' | 'topdown' | 'racing', player?: number) => void;
-  setInputBindings: (bindings: InputBinding[], preset: InputPreset) => void;
+  setInputBindings: (
+    bindings: InputBinding[],
+    preset: InputPreset,
+    presetByPlayer?: Record<number, InputPreset>,
+  ) => void;
 }
 
 /** The local-player slot a binding belongs to (absent = player 0). */
@@ -52,6 +60,7 @@ export const createScriptSlice: StateCreator<
   scriptLogs: [],
   inputBindings: [],
   inputPreset: null,
+  inputPresetByPlayer: {},
 
   setScript: (entityId, source, enabled, template) => {
     set(state => ({ allScripts: { ...state.allScripts, [entityId]: { source, enabled, template } } }));
@@ -131,11 +140,21 @@ export const createScriptSlice: StateCreator<
   },
   setInputPreset: (preset, player) => {
     const slot = player ?? 0;
-    // `inputPreset` mirrors the primary player's provenance for the panel's
-    // preset dropdown; a preset applied to another slot still dispatches, but
-    // does not move player 0's mirror.
-    if (slot === 0) set({ inputPreset: preset });
+    // Every slot's applied preset lands in `inputPresetByPlayer` so the panel can
+    // show player 2's provenance, not just player 1's. `inputPreset` stays the
+    // slot-0 mirror for callers that predate two-player support.
+    set(state => ({
+      inputPresetByPlayer: { ...state.inputPresetByPlayer, [slot]: preset },
+      ...(slot === 0 ? { inputPreset: preset } : {}),
+    }));
     if (dispatchCommand) dispatchCommand('set_input_preset', { preset, player: slot });
   },
-  setInputBindings: (bindings, preset) => set({ inputBindings: bindings, inputPreset: preset }),
+  setInputBindings: (bindings, preset, presetByPlayer) => set({
+    inputBindings: bindings,
+    inputPreset: preset,
+    // The engine reports each slot's preset alongside its bindings; carry the
+    // whole map through so non-primary slots are represented. When a caller
+    // supplies only a scalar (single-player), slot 0 alone is recorded.
+    inputPresetByPlayer: presetByPlayer ?? { 0: preset },
+  }),
 });
