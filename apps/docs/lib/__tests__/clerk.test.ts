@@ -297,6 +297,7 @@ describe('assertClerkPublishableKeyShape', () => {
         message = (error as Error).message;
       }
       expect(message).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable');
+      expect(message).toContain('remove both NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY');
       expect(message).not.toContain('half-configured');
       expect(message).not.toContain(SECRET);
     });

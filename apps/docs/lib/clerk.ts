@@ -185,9 +185,9 @@ export function assertClerkPublishableKeyShape(
       `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable: ${problem}. ` +
         'Authentication would be silently dead on the deployed docs site (#9044). ' +
         'Fix the value in the Vercel project settings (or in .env.local for a ' +
-        'local build), or remove it entirely to build the docs with ' +
-        'authentication disabled — an ABSENT key is a supported state, an ' +
-        'unusable one is not.',
+        'local build). To build with authentication disabled, remove both ' +
+        'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY; leaving only ' +
+        'the secret key configured is not supported.',
     );
   }
 
