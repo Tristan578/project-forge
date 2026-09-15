@@ -4,7 +4,8 @@
  */
 
 import { CURRENT_FORMAT_VERSION } from '../sceneFile';
-import type { PrefabInstance } from '../prefabs/prefabInstance';
+import { sanitizeInstanceRecord, type PrefabInstance } from '../prefabs/prefabInstance';
+import type { Prefab } from '../prefabs/prefabStore';
 
 export interface SceneFileData {
   formatVersion: number;
@@ -19,7 +20,20 @@ export interface SceneFileData {
    * file remains valid with no migration.
    */
   prefabInstances?: PrefabInstance[];
+  /**
+   * The user-prefab DEFINITIONS `prefabInstances` (transitively) links to,
+   * embedded so the scene stays resolvable when opened somewhere that does not
+   * already have them in its local `forge-prefabs` library — another browser,
+   * or a remixed project under a different account (scene.FR-1 N1). Optional:
+   * every pre-existing scene file remains valid, and a scene with no user-
+   * prefab instances carries none. See `writePrefabDefinitions` /
+   * `readPrefabDefinitions` and `prefabStore.collectTransitivePrefabDefinitions`.
+   */
+  prefabDefinitions?: Prefab[];
 }
+
+/** Defense-in-depth cap on how many instance records one scene load accepts. */
+const MAX_PREFAB_INSTANCES_PER_SCENE = 5000;
 
 export interface SceneEntry {
   id: string;
@@ -250,7 +264,61 @@ export function writePrefabInstances(
  * Read the prefab-instance registry back out of a scene's file data. Returns an
  * empty array for a legacy scene that predates the field, so callers never have
  * to guard for its absence.
+ *
+ * SEC: a scene file is untrusted input (disk, a shared project, or a remixed
+ * project under a different account) — every record is validated and
+ * malformed/oversized ones are dropped rather than installed as-is
+ * (`sanitizeInstanceRecord`), and the array is capped so a crafted scene
+ * cannot install an unbounded registry.
  */
 export function readPrefabInstances(sceneData: SceneFileData | null | undefined): PrefabInstance[] {
-  return sceneData?.prefabInstances ?? [];
+  const raw = sceneData?.prefabInstances;
+  if (!Array.isArray(raw)) return [];
+  const out: PrefabInstance[] = [];
+  for (const entry of raw) {
+    if (out.length >= MAX_PREFAB_INSTANCES_PER_SCENE) break;
+    const sanitized = sanitizeInstanceRecord(entry);
+    if (sanitized) out.push(sanitized);
+  }
+  return out;
+}
+
+/** Cap on how many embedded prefab definitions one scene file's read accepts. */
+const MAX_PREFAB_DEFINITIONS_PER_SCENE = 500;
+
+/**
+ * Write the transitive user-prefab definitions `instances` links to into a
+ * scene's file data (returns a NEW object; the input is not mutated) — the
+ * portability counterpart to `writePrefabInstances` (scene.FR-1 N1). Callers
+ * pass `prefabStore.collectTransitivePrefabDefinitions(instances)`.
+ */
+export function writePrefabDefinitions(sceneData: SceneFileData, definitions: Prefab[]): SceneFileData {
+  return definitions.length === 0
+    ? sceneData
+    : { ...sceneData, prefabDefinitions: JSON.parse(JSON.stringify(definitions)) as Prefab[] };
+}
+
+/**
+ * Read the embedded prefab definitions back out of a scene's file data. SEC:
+ * same untrusted-input posture as `readPrefabInstances` — a malformed entry
+ * (missing `id`/`name`/`snapshot`) is dropped and the array is capped;
+ * `prefabStore.mergeImportedPrefabDefinitions` re-validates before persisting
+ * regardless, this only bounds what reaches that call.
+ */
+export function readPrefabDefinitions(sceneData: SceneFileData | null | undefined): Prefab[] {
+  const raw = sceneData?.prefabDefinitions;
+  if (!Array.isArray(raw)) return [];
+  const out: Prefab[] = [];
+  for (const entry of raw) {
+    if (out.length >= MAX_PREFAB_DEFINITIONS_PER_SCENE) break;
+    if (
+      entry && typeof entry === 'object' &&
+      typeof (entry as Prefab).id === 'string' &&
+      typeof (entry as Prefab).name === 'string' &&
+      (entry as Prefab).snapshot
+    ) {
+      out.push(entry as Prefab);
+    }
+  }
+  return out;
 }

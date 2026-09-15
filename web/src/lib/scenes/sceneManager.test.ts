@@ -18,9 +18,12 @@ import {
   saveProjectScenes,
   writePrefabInstances,
   readPrefabInstances,
+  writePrefabDefinitions,
+  readPrefabDefinitions,
   type SceneFileData,
 } from './sceneManager';
 import type { PrefabInstance } from '../prefabs/prefabInstance';
+import type { Prefab } from '../prefabs/prefabStore';
 
 // Mock localStorage
 let storage: Record<string, string> = {};
@@ -315,6 +318,69 @@ describe('sceneManager', () => {
     it('readPrefabInstances returns [] for a legacy scene without the field', () => {
       expect(readPrefabInstances(baseScene)).toEqual([]);
       expect(readPrefabInstances(null)).toEqual([]);
+    });
+
+    it('readPrefabInstances drops a malformed record rather than installing it (SEC)', () => {
+      const crafted = {
+        ...baseScene,
+        prefabInstances: [instances[0], { prefabId: 'missing-instanceId' }, 'garbage'],
+      } as unknown as SceneFileData;
+      const restored = readPrefabInstances(crafted);
+      expect(restored).toHaveLength(1);
+      expect(restored[0].instanceId).toBe('pfi_a');
+    });
+
+    it('readPrefabInstances caps an oversized array rather than installing it whole (SEC)', () => {
+      const many: PrefabInstance[] = Array.from({ length: 5010 }, (_, i) => ({
+        instanceId: `pfi_${i}`,
+        prefabId: 'src',
+        overrides: {},
+      }));
+      const crafted = { ...baseScene, prefabInstances: many };
+      expect(readPrefabInstances(crafted).length).toBe(5000);
+    });
+
+    it('readPrefabInstances returns [] when the field is not an array', () => {
+      // @ts-expect-error — deliberately malformed for the untrusted-input guard
+      expect(readPrefabInstances({ ...baseScene, prefabInstances: 'not-an-array' })).toEqual([]);
+    });
+  });
+
+  describe('Prefab-definition portability (scene.FR-1 N1)', () => {
+    const baseScene: SceneFileData = { formatVersion: 1, sceneName: 'Main', entities: [] };
+    const now = new Date().toISOString();
+    const def: Prefab = {
+      id: 'prefab_src', name: 'Source', category: 'cat', description: '',
+      snapshot: { entityType: 'cube', name: 'Source', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      createdAt: now, updatedAt: now,
+    };
+
+    it('writePrefabInstances does not mutate the input, and is a no-op for an empty list', () => {
+      const written = writePrefabDefinitions(baseScene, []);
+      expect(written).toBe(baseScene); // same reference — nothing to embed
+      expect(written.prefabDefinitions).toBeUndefined();
+    });
+
+    it('save -> reopen round-trips an embedded definition intact', () => {
+      const written = writePrefabDefinitions(baseScene, [def]);
+      expect(baseScene.prefabDefinitions).toBeUndefined(); // input untouched
+      const reopened = JSON.parse(JSON.stringify(written)) as SceneFileData;
+      const restored = readPrefabDefinitions(reopened);
+      expect(restored).toEqual([def]);
+    });
+
+    it('readPrefabDefinitions returns [] for a legacy scene without the field', () => {
+      expect(readPrefabDefinitions(baseScene)).toEqual([]);
+      expect(readPrefabDefinitions(null)).toEqual([]);
+    });
+
+    it('readPrefabDefinitions drops an entry missing id/name/snapshot (SEC)', () => {
+      const crafted = {
+        ...baseScene,
+        prefabDefinitions: [def, { name: 'NoId' }, { id: 'no-name-or-snapshot' }],
+      } as unknown as SceneFileData;
+      const restored = readPrefabDefinitions(crafted);
+      expect(restored).toEqual([def]);
     });
   });
 });

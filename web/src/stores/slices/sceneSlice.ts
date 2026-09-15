@@ -14,11 +14,17 @@ import {
   switchScene as switchSceneIn,
   saveCurrentSceneData,
   readPrefabInstances,
+  readPrefabDefinitions,
   type ProjectScenes,
   type SceneFileData,
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, attachPrefabInstances, type SceneCapture } from '@/lib/scenes/captureScene';
-import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
+import {
+  loadPrefabInstances,
+  savePrefabInstancesToStorage,
+  mergeImportedPrefabDefinitions,
+} from '@/lib/prefabs/prefabStore';
+import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import {
   buildTemplateSceneFile,
@@ -244,15 +250,28 @@ function withPrefabInstances(capture: SceneCapture): SceneCapture {
  * (scene.FR-1 N1) so `PrefabLibraryPanel` and the AI instance commands see the
  * instances the scene was saved with. The registry mirrors the ACTIVE scene, so
  * a scene with no instances (or unparseable JSON) resets it to empty rather than
- * carrying the previous scene's instances forward.
+ * carrying the previous scene's instances forward. Also merges any prefab
+ * DEFINITIONS the scene embedded (`readPrefabDefinitions`) into the local
+ * library first, so a linked instance from a portable scene (another browser,
+ * a remixed project) resolves instead of dangling.
+ *
+ * Returns the registry that was active BEFORE this call. `loadScene` installs
+ * this eagerly — before the engine confirms the load, for the same reason
+ * audio is staged early — so a caller whose dispatch then REJECTS can pass
+ * this back to `savePrefabInstancesToStorage` and put the previous scene's
+ * registry back rather than leave the rejected scene's registry installed
+ * over a scene that never actually changed (scene.FR-1 N1 BUG-2).
  */
-function restorePrefabInstances(json: string): void {
+function restorePrefabInstances(json: string): PrefabInstance[] {
+  const previous = loadPrefabInstances();
   try {
     const parsed = JSON.parse(json) as SceneFileData;
+    mergeImportedPrefabDefinitions(readPrefabDefinitions(parsed));
     savePrefabInstancesToStorage(readPrefabInstances(parsed));
   } catch {
     savePrefabInstancesToStorage([]);
   }
+  return previous;
 }
 
 export const createSceneSlice: StateCreator<
@@ -297,19 +316,31 @@ export const createSceneSlice: StateCreator<
       // before the engine load. Done alongside the dispatch for the same reason
       // audio is: with no dispatcher the engine never loads, so mutating the
       // registry here would desync it from what is actually rendered.
-      restorePrefabInstances(json);
+      const previousInstances = restorePrefabInstances(json);
       // A rejected load never emits SCENE_LOADED, so a stash left armed here
       // waits for the NEXT scene's SCENE_LOADED and attaches this scene's
       // sounds to it. `new_scene` already clears for the same reason; a
       // rejection is the other way the stash outlives its load.
       const response = dispatchCommand('load_scene', { json });
-      if (response && response.success === false) clearStagedSceneAudio();
+      if (response && response.success === false) {
+        clearStagedSceneAudio();
+        // The engine never adopted the incoming scene — the scene still on
+        // screen is the previous one, so its instance registry must come back
+        // rather than stay overwritten by the rejected scene's (scene.FR-1 N1
+        // BUG-2): the next save would otherwise persist the wrong instances
+        // onto the scene that is actually still active.
+        savePrefabInstancesToStorage(previousInstances);
+      }
     }
   },
   newScene: () => {
     // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
     // rejected would otherwise be adopted by this empty scene.
     clearStagedSceneAudio();
+    // The new scene has no linked instances of its own — leaving the outgoing
+    // scene's registry in place would attach its instances to this empty
+    // scene on the next save (scene.FR-1 N1 BUG-1).
+    savePrefabInstancesToStorage([]);
     if (dispatchCommand) dispatchCommand('new_scene', {});
   },
   setSceneName: (name) => set({ sceneName: name }),

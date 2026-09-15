@@ -18,8 +18,13 @@ import {
   loadPrefabInstances,
   addNestedPrefab,
   applyPrefabToInstances,
+  collectTransitivePrefabDefinitions,
+  mergeImportedPrefabDefinitions,
+  stagePrefabInstancesForExport,
+  takeStagedPrefabInstancesForExport,
   type PrefabSnapshot,
 } from './prefabStore';
+import { MAX_OVERRIDE_MAP_BYTES } from './prefabInstance';
 
 // Mock localStorage
 let storage: Record<string, string> = {};
@@ -405,5 +410,190 @@ describe('Nested / linked prefab instances', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain('built-in');
+  });
+
+  it('addNestedPrefab stores the canonical child id, even when nested by NAME', () => {
+    const parent = savePrefab('Parent', 'cat', '', mockSnapshot);
+    const child = savePrefab('ChildByName', 'cat', '', mockSnapshot);
+    const result = addNestedPrefab(parent.id, 'ChildByName'); // nested by name, not id
+    expect(result.ok).toBe(true);
+    const updated = getPrefab(parent.id);
+    // Must be the canonical prefab.id, NOT the raw "ChildByName" input, so this
+    // child ref stays consistent with createPrefabInstance's source.id and
+    // resolves even if the child prefab is later renamed.
+    expect(updated?.children?.[0].prefabId).toBe(child.id);
+    expect(updated?.children?.[0].prefabId).not.toBe('ChildByName');
+  });
+
+  it('createPrefabInstance rejects an overrides map over the byte size bound (SEC)', () => {
+    const source = savePrefab('Source', 'cat', '', mockSnapshot);
+    const huge = { script: { source: 'x'.repeat(MAX_OVERRIDE_MAP_BYTES + 1) } };
+    const result = createPrefabInstance(source.id, huge);
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('byte size limit') });
+    expect(loadPrefabInstances()).toHaveLength(0);
+  });
+
+  it('addNestedPrefab rejects an overrides map over the byte size bound (SEC)', () => {
+    const parent = savePrefab('Parent', 'cat', '', mockSnapshot);
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    const huge = { script: { source: 'x'.repeat(MAX_OVERRIDE_MAP_BYTES + 1) } };
+    const result = addNestedPrefab(parent.id, child.id, huge);
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('byte size limit') });
+    expect(getPrefab(parent.id)?.children ?? []).toHaveLength(0);
+  });
+});
+
+describe('deletePrefab cascades dangling references (scene.FR-1 N1)', () => {
+  it('removes scene-level instances still linked to the deleted source', () => {
+    const source = savePrefab('Source', 'cat', '', mockSnapshot);
+    const created = createPrefabInstance(source.id);
+    if (!created.ok) throw new Error('setup failed');
+    expect(loadPrefabInstances()).toHaveLength(1);
+
+    expect(deletePrefab(source.id)).toBe(true);
+    expect(loadPrefabInstances()).toHaveLength(0);
+  });
+
+  it('leaves instances linked to a DIFFERENT prefab untouched', () => {
+    const a = savePrefab('A', 'cat', '', mockSnapshot);
+    const b = savePrefab('B', 'cat', '', mockSnapshot);
+    createPrefabInstance(a.id);
+    createPrefabInstance(b.id);
+
+    deletePrefab(a.id);
+    const remaining = loadPrefabInstances();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].prefabId).toBe(b.id);
+  });
+
+  it('removes the deleted prefab from every parent that nests it', () => {
+    const parent = savePrefab('Parent', 'cat', '', mockSnapshot);
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    addNestedPrefab(parent.id, child.id);
+    expect(getPrefab(parent.id)?.children).toHaveLength(1);
+
+    deletePrefab(child.id);
+    expect(getPrefab(parent.id)?.children).toHaveLength(0);
+    expect(getPrefab(child.id)).toBeUndefined();
+  });
+});
+
+describe('importPrefab preserves nested children (export/reimport round-trip)', () => {
+  it('round-trips a nested prefab through export -> import without flattening it', () => {
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    const parent = savePrefab('Parent', 'cat', '', mockSnapshot);
+    const nested = addNestedPrefab(parent.id, child.id, { name: 'Overridden Child' });
+    expect(nested.ok).toBe(true);
+
+    const json = exportPrefab(parent.id);
+    expect(json).toBeTypeOf('string');
+    expect(JSON.parse(json!).children).toHaveLength(1);
+
+    storage = {};
+    const imported = importPrefab(json!);
+    expect(imported).toBeDefined();
+    expect(imported?.children).toHaveLength(1);
+    expect(imported?.children?.[0].prefabId).toBe(child.id);
+    expect(imported?.children?.[0].overrides).toEqual({ name: 'Overridden Child' });
+    // Persisted, not just returned in-memory.
+    expect(getPrefab(imported!.id)?.children).toHaveLength(1);
+  });
+
+  it('drops a malformed child entry rather than failing the whole import', () => {
+    const json = JSON.stringify({
+      name: 'HasBadChild',
+      snapshot: mockSnapshot,
+      children: [{ prefabId: 'ok_child' }, { notAPrefabId: true }, null, 'garbage'],
+    });
+    const imported = importPrefab(json);
+    expect(imported).toBeDefined();
+    expect(imported?.children).toHaveLength(1);
+    expect(imported?.children?.[0].prefabId).toBe('ok_child');
+  });
+
+  it('imports a prefab with no children exactly as before (no regression)', () => {
+    const json = JSON.stringify({ name: 'Flat', snapshot: mockSnapshot });
+    const imported = importPrefab(json);
+    expect(imported?.children).toBeUndefined();
+  });
+});
+
+describe('collectTransitivePrefabDefinitions / mergeImportedPrefabDefinitions (portability)', () => {
+  it('collects an instance source and its nested children, but not built-ins', () => {
+    const grandchild = savePrefab('Grandchild', 'cat', '', mockSnapshot);
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    addNestedPrefab(child.id, grandchild.id);
+    const source = savePrefab('Source', 'cat', '', mockSnapshot);
+    addNestedPrefab(source.id, child.id);
+    const builtIn = getBuiltInPrefabs()[0];
+
+    const created = createPrefabInstance(source.id);
+    if (!created.ok) throw new Error('setup failed');
+    createPrefabInstance(builtIn.id); // built-in source — must not be collected
+
+    const defs = collectTransitivePrefabDefinitions(loadPrefabInstances());
+    const ids = defs.map((d) => d.id).sort();
+    expect(ids).toEqual([child.id, grandchild.id, source.id].sort());
+    expect(ids).not.toContain(builtIn.id);
+  });
+
+  it('mergeImportedPrefabDefinitions adds a definition missing locally', () => {
+    const def = savePrefab('WillBeCleared', 'cat', '', mockSnapshot);
+    const exported = getPrefab(def.id)!;
+    storage = {}; // simulate opening on a browser with an empty library
+    expect(getPrefab(def.id)).toBeUndefined();
+
+    mergeImportedPrefabDefinitions([exported]);
+    expect(getPrefab(def.id)).toBeDefined();
+    expect(getPrefab(def.id)?.name).toBe('WillBeCleared');
+  });
+
+  it('mergeImportedPrefabDefinitions never overwrites an existing local definition', () => {
+    const local = savePrefab('Local', 'cat', '', mockSnapshot);
+    updatePrefab(local.id, { ...mockSnapshot, name: 'Locally Edited' });
+    const stale = { ...getPrefab(local.id)!, snapshot: { ...mockSnapshot, name: 'Stale Remote Copy' } };
+
+    mergeImportedPrefabDefinitions([stale]);
+    expect(getPrefab(local.id)?.snapshot.name).toBe('Locally Edited');
+  });
+
+  it('mergeImportedPrefabDefinitions is a no-op for an empty list', () => {
+    const before = loadPrefabs();
+    mergeImportedPrefabDefinitions([]);
+    expect(loadPrefabs()).toEqual(before);
+  });
+});
+
+describe('export-request staging (scene.FR-1 N1 race fix)', () => {
+  it('take-once returns the staged snapshot exactly once, then undefined', () => {
+    const source = savePrefab('Source', 'cat', '', mockSnapshot);
+    const created = createPrefabInstance(source.id);
+    if (!created.ok) throw new Error('setup failed');
+    const snapshot = loadPrefabInstances();
+
+    stagePrefabInstancesForExport('req-1', snapshot);
+    expect(takeStagedPrefabInstancesForExport('req-1')).toEqual(snapshot);
+    expect(takeStagedPrefabInstancesForExport('req-1')).toBeUndefined();
+  });
+
+  it('returns undefined for an unstaged or undefined requestId', () => {
+    expect(takeStagedPrefabInstancesForExport('never-staged')).toBeUndefined();
+    expect(takeStagedPrefabInstancesForExport(undefined)).toBeUndefined();
+  });
+
+  it('is unaffected by the LIVE registry changing after staging (the race this fixes)', () => {
+    const a = savePrefab('A', 'cat', '', mockSnapshot);
+    const b = savePrefab('B', 'cat', '', mockSnapshot);
+    createPrefabInstance(a.id);
+    const stagedAtRequestTime = loadPrefabInstances();
+    stagePrefabInstancesForExport('req-2', stagedAtRequestTime);
+
+    // Simulate a scene load overwriting the live registry before the export answers.
+    createPrefabInstance(b.id);
+    expect(loadPrefabInstances()).toHaveLength(2);
+
+    const taken = takeStagedPrefabInstancesForExport('req-2');
+    expect(taken).toHaveLength(1);
+    expect(taken?.[0].prefabId).toBe(a.id);
   });
 });

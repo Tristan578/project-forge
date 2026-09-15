@@ -4,6 +4,7 @@ import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
 import { loadProjectScenes } from '@/lib/scenes/sceneManager';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import { loadPrefabInstances, savePrefabInstancesToStorage, savePrefab, getPrefab } from '@/lib/prefabs/prefabStore';
 
 describe('sceneSlice', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -109,6 +110,73 @@ describe('sceneSlice', () => {
       );
 
       expect(takeStagedSceneAudio()).toEqual({});
+    });
+  });
+
+  // scene.FR-1 N1 BUG-1/BUG-2: the prefab-instance registry must mirror the
+  // ACTIVE scene, not silently carry the outgoing scene's instances forward.
+  describe('newScene / loadScene keep the prefab-instance registry in sync', () => {
+    it('newScene clears the registry so a fresh save does not attach old instances', () => {
+      savePrefabInstancesToStorage([{ instanceId: 'pfi_1', prefabId: 'src', overrides: {} }]);
+      store.getState().newScene();
+      expect(loadPrefabInstances()).toEqual([]);
+    });
+
+    it('loadScene installs the incoming scene\'s registry', () => {
+      savePrefabInstancesToStorage([{ instanceId: 'pfi_old', prefabId: 'old', overrides: {} }]);
+      store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabInstances: [{ instanceId: 'pfi_new', prefabId: 'new', overrides: {} }],
+        })
+      );
+      expect(loadPrefabInstances()).toEqual([{ instanceId: 'pfi_new', prefabId: 'new', overrides: {} }]);
+    });
+
+    it('restores the PREVIOUS registry when the engine rejects the load', () => {
+      // A rejected dispatch never emits SCENE_LOADED — the scene on screen is
+      // still the previous one, so its registry must come back rather than
+      // stay overwritten by the rejected scene's (scene.FR-1 N1 BUG-2): a
+      // later save would otherwise persist the wrong instances onto the scene
+      // that is actually still active.
+      const previous = [{ instanceId: 'pfi_prev', prefabId: 'prev', overrides: {} }];
+      savePrefabInstancesToStorage(previous);
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      store.getState().loadScene(
+        JSON.stringify({ entities: [], prefabInstances: [{ instanceId: 'pfi_bad', prefabId: 'bad', overrides: {} }] })
+      );
+
+      expect(loadPrefabInstances()).toEqual(previous);
+    });
+
+    it('merges a scene\'s embedded prefab definitions into the local library on load', () => {
+      expect(getPrefab('prefab_embedded')).toBeUndefined();
+      store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabInstances: [{ instanceId: 'pfi_1', prefabId: 'prefab_embedded', overrides: {} }],
+          prefabDefinitions: [{
+            id: 'prefab_embedded', name: 'Embedded', category: 'cat', description: '',
+            snapshot: { entityType: 'cube', name: 'Embedded', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          }],
+        })
+      );
+      expect(getPrefab('prefab_embedded')?.name).toBe('Embedded');
+    });
+
+    it('never overwrites a local prefab definition with an embedded one of the same id', () => {
+      const local = savePrefab('LocalName', 'cat', '', {
+        entityType: 'cube', name: 'LocalName', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+      store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabDefinitions: [{ ...local, name: 'RemoteStaleCopy' }],
+        })
+      );
+      expect(getPrefab(local.id)?.name).toBe('LocalName');
     });
   });
 

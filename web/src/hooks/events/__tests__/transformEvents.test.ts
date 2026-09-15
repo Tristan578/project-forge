@@ -27,6 +27,11 @@ import {
   readEntityObservation,
   clearEntityObservations,
 } from '@/lib/game-creation/engineObservation';
+import {
+  savePrefabInstancesToStorage,
+  stagePrefabInstancesForExport,
+  savePrefab,
+} from '@/lib/prefabs/prefabStore';
 
 describe('handleTransformEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -817,6 +822,136 @@ describe('handleTransformEvent', () => {
         value: origLocalStorage,
         writable: true,
         configurable: true,
+      });
+    });
+
+    // scene.FR-1 N1: linked prefab instances live in the prefab store, not the
+    // ECS, so the engine's raw export knows nothing about them. This is the
+    // single choke point every persistence consumer (autosave, panic
+    // recovery, and every `forge:scene-exported` DOM listener) goes through —
+    // folding here, once, means recovering ANY of them keeps the instances.
+    describe('prefab-instance fold (scene.FR-1 N1)', () => {
+      beforeEach(() => {
+        vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
+      });
+
+      it('folds the live registry into the JSON every downstream consumer receives', () => {
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_1', prefabId: 'src', overrides: { name: 'X' } }]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const detail = (call?.[0] as CustomEvent).detail as { json: string };
+        const parsed = JSON.parse(detail.json);
+        expect(parsed.prefabInstances).toEqual([{ instanceId: 'pfi_1', prefabId: 'src', overrides: { name: 'X' } }]);
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('leaves the JSON untouched when the registry is empty', () => {
+        savePrefabInstancesToStorage([]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+        const rawJson = '{"formatVersion":1,"sceneName":"S","entities":[]}';
+
+        handleTransformEvent('SCENE_EXPORTED', { json: rawJson, name: 'S' }, mockSetGet.set, mockSetGet.get);
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        expect((call?.[0] as CustomEvent).detail).toMatchObject({ json: rawJson });
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('embeds the transitive prefab DEFINITIONS the instances link to (portability)', () => {
+        const source = savePrefab('Source', 'cat', '', {
+          entityType: 'cube', name: 'Source', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        });
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_1', prefabId: source.id, overrides: {} }]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const parsed = JSON.parse((call?.[0] as CustomEvent).detail.json);
+        expect(parsed.prefabDefinitions).toHaveLength(1);
+        expect(parsed.prefabDefinitions[0].id).toBe(source.id);
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('prefers the registry STAGED at request time over the live one (race fix)', () => {
+        // The user requested this export while instance A was active, then
+        // (before the answer arrived) loaded a different scene, overwriting
+        // the LIVE registry with instance B. The fold must reflect A.
+        stagePrefabInstancesForExport('req-race', [{ instanceId: 'pfi_A', prefabId: 'a', overrides: {} }]);
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_B', prefabId: 'b', overrides: {} }]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S', requestId: 'req-race' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const parsed = JSON.parse((call?.[0] as CustomEvent).detail.json);
+        expect(parsed.prefabInstances).toEqual([{ instanceId: 'pfi_A', prefabId: 'a', overrides: {} }]);
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('falls back to the live registry for an uncorrelated export (nothing staged)', () => {
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_live', prefabId: 'live', overrides: {} }]);
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S' }, // no requestId
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const parsed = JSON.parse((call?.[0] as CustomEvent).detail.json);
+        expect(parsed.prefabInstances).toEqual([{ instanceId: 'pfi_live', prefabId: 'live', overrides: {} }]);
+
+        dispatchSpy.mockRestore();
+      });
+
+      it('take-once: a second export with the same requestId falls back to the live registry', () => {
+        stagePrefabInstancesForExport('req-once', [{ instanceId: 'pfi_A', prefabId: 'a', overrides: {} }]);
+        savePrefabInstancesToStorage([{ instanceId: 'pfi_B', prefabId: 'b', overrides: {} }]);
+
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S', requestId: 'req-once' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+
+        const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+        handleTransformEvent(
+          'SCENE_EXPORTED',
+          { json: '{"formatVersion":1,"sceneName":"S","entities":[]}', name: 'S', requestId: 'req-once' },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+        const call = dispatchSpy.mock.calls.find((c) => (c[0] as CustomEvent).type === 'forge:scene-exported');
+        const parsed = JSON.parse((call?.[0] as CustomEvent).detail.json);
+        expect(parsed.prefabInstances).toEqual([{ instanceId: 'pfi_B', prefabId: 'b', overrides: {} }]);
+
+        dispatchSpy.mockRestore();
       });
     });
   });

@@ -11,6 +11,7 @@ import { exportAsZip, type ZipExportOptions } from './zipExporter';
 import type { LoadingScreenConfig } from './loadingScreen';
 import type { ExportFormat, ExportPreset } from './presets';
 import type { CompressionConfig } from './textureCompression';
+import { stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
 
 export interface ExportOptions {
   title: string;
@@ -170,6 +171,19 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
         'Ensure the engine is loaded and the scene is ready before exporting.',
       ));
     }, 5000);
+
+    // Explicitly stage an EMPTY prefab-instance snapshot for this request
+    // (scene.FR-1 N1). The shared `SCENE_EXPORTED` fold in `transformEvents.ts`
+    // folds instances/definitions into every export by default, which is right
+    // for a `.forge` project save but wrong here: this scene JSON gets embedded
+    // verbatim into the PLAYED game bundle (`sceneData` below), and the prefab
+    // instance registry is an editor-only override-tracking concern the
+    // runtime never resolves (see prefabInstance.ts's "OUT OF SCOPE" note) —
+    // folding it in would bloat every exported game with the user's whole
+    // linked-prefab library for no runtime benefit. Staging `[]` (rather than
+    // leaving this requestId unstaged) opts out explicitly instead of relying
+    // on the live registry happening to be empty.
+    stagePrefabInstancesForExport(requestId, []);
 
     // Trigger export_scene command
     const store = useEditorStore.getState();

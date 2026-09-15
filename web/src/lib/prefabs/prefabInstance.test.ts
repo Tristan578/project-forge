@@ -8,6 +8,10 @@ import {
   getOverriddenFields,
   detectCycle,
   wouldCreateCycle,
+  isOverrideMapWithinSizeLimit,
+  overrideMapByteSize,
+  sanitizeInstanceRecord,
+  MAX_OVERRIDE_MAP_BYTES,
 } from './prefabInstance';
 import type { Prefab, PrefabSnapshot } from './prefabStore';
 
@@ -145,5 +149,69 @@ describe('wouldCreateCycle (OP-02 pre-commit guard)', () => {
   it('leaves the input graph unmutated after the check', () => {
     wouldCreateCycle('A', 'B', getChildren);
     expect(graph.A).toEqual([]);
+  });
+});
+
+describe('override size bound (SEC — resource exhaustion)', () => {
+  it('accepts a typical multi-field override', () => {
+    const overrides = { name: 'Custom', transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] } };
+    expect(isOverrideMapWithinSizeLimit(overrides)).toBe(true);
+  });
+
+  it('accepts undefined (no overrides at all)', () => {
+    expect(isOverrideMapWithinSizeLimit(undefined)).toBe(true);
+  });
+
+  it('rejects an override map over the byte bound', () => {
+    const huge = { script: { source: 'x'.repeat(MAX_OVERRIDE_MAP_BYTES + 1) } };
+    expect(overrideMapByteSize(huge)).toBeGreaterThan(MAX_OVERRIDE_MAP_BYTES);
+    expect(isOverrideMapWithinSizeLimit(huge)).toBe(false);
+  });
+
+  it('respects a custom bound', () => {
+    const overrides = { name: 'x'.repeat(100) };
+    expect(isOverrideMapWithinSizeLimit(overrides, 10)).toBe(false);
+    expect(isOverrideMapWithinSizeLimit(overrides, 10_000)).toBe(true);
+  });
+});
+
+describe('sanitizeInstanceRecord (SEC — untrusted scene-file input)', () => {
+  it('accepts a well-formed record', () => {
+    const raw = { instanceId: 'pfi_1', prefabId: 'prefab_1', overrides: { name: 'X' }, entityId: 'e1' };
+    expect(sanitizeInstanceRecord(raw)).toEqual(raw);
+  });
+
+  it('accepts a record with no overrides/entityId', () => {
+    const raw = { instanceId: 'pfi_1', prefabId: 'prefab_1' };
+    expect(sanitizeInstanceRecord(raw)).toEqual({ instanceId: 'pfi_1', prefabId: 'prefab_1', overrides: {} });
+  });
+
+  it('drops unknown override keys rather than rejecting the record', () => {
+    const raw = { instanceId: 'pfi_1', prefabId: 'prefab_1', overrides: { name: 'X', bogus: 'y' } };
+    expect(sanitizeInstanceRecord(raw)).toEqual({ instanceId: 'pfi_1', prefabId: 'prefab_1', overrides: { name: 'X' } });
+  });
+
+  it.each([
+    ['not an object', 'a string'],
+    ['null', null],
+    ['missing instanceId', { prefabId: 'p' }],
+    ['missing prefabId', { instanceId: 'i' }],
+    ['non-string instanceId', { instanceId: 42, prefabId: 'p' }],
+    ['empty instanceId', { instanceId: '', prefabId: 'p' }],
+    ['instanceId over the length bound', { instanceId: 'x'.repeat(201), prefabId: 'p' }],
+    ['non-string entityId', { instanceId: 'i', prefabId: 'p', entityId: 42 }],
+    ['overrides is an array', { instanceId: 'i', prefabId: 'p', overrides: [] }],
+    ['overrides is a string', { instanceId: 'i', prefabId: 'p', overrides: 'x' }],
+  ])('rejects: %s', (_label, raw) => {
+    expect(sanitizeInstanceRecord(raw)).toBeNull();
+  });
+
+  it('rejects a record whose overrides exceed the byte bound', () => {
+    const raw = {
+      instanceId: 'pfi_1',
+      prefabId: 'prefab_1',
+      overrides: { script: { source: 'x'.repeat(MAX_OVERRIDE_MAP_BYTES + 1) } },
+    };
+    expect(sanitizeInstanceRecord(raw)).toBeNull();
   });
 });

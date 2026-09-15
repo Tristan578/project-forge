@@ -85,11 +85,42 @@ function generateInstanceId(): string {
 }
 
 /**
+ * Bound on an override map's serialized size (bytes). Overrides reach cloning
+ * (`resolveInstance`) and `localStorage` serialization on every instance
+ * create/save, so an unbounded value — from a crafted `.forge` scene file or a
+ * public `nest_prefab`/`create_prefab_instance` chat command — is a resource-
+ * exhaustion vector (persistent quota pressure, ever-larger clone cost). 64KiB
+ * comfortably covers a legitimate multi-field override (transform + material +
+ * a short script snippet) while blocking pathological payloads.
+ */
+export const MAX_OVERRIDE_MAP_BYTES = 64 * 1024;
+
+/** Serialized byte size of an override map. */
+export function overrideMapByteSize(overrides: PrefabOverrideMap): number {
+  try {
+    return new Blob([JSON.stringify(overrides)]).size;
+  } catch {
+    // Circular or otherwise unstringifiable — treat as over any bound so the
+    // caller rejects rather than silently accepting unmeasurable data.
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/** Is this override map within the size bound (default `MAX_OVERRIDE_MAP_BYTES`)? */
+export function isOverrideMapWithinSizeLimit(
+  overrides: PrefabOverrideMap | undefined,
+  maxBytes: number = MAX_OVERRIDE_MAP_BYTES,
+): boolean {
+  if (!overrides) return true;
+  return overrideMapByteSize(overrides) <= maxBytes;
+}
+
+/**
  * Keep only override keys that name a real snapshot field. An override on an
  * unknown key can never resolve against the source and would otherwise sit in
  * the persisted instance forever as invisible dead data.
  */
-function sanitizeOverrides(overrides: PrefabOverrideMap | undefined): PrefabOverrideMap {
+export function sanitizeOverrides(overrides: PrefabOverrideMap | undefined): PrefabOverrideMap {
   const clean: PrefabOverrideMap = {};
   if (!overrides) return clean;
   for (const field of SNAPSHOT_FIELDS) {
@@ -98,6 +129,43 @@ function sanitizeOverrides(overrides: PrefabOverrideMap | undefined): PrefabOver
     }
   }
   return clean;
+}
+
+/** Reasonable upper bound on an id field read out of an untrusted scene file. */
+const MAX_ID_LENGTH = 200;
+
+function isBoundedString(value: unknown, maxLength: number = MAX_ID_LENGTH): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
+}
+
+/**
+ * Validate and sanitize ONE instance record read back out of a `.forge` scene
+ * file (scene.FR-1 N1 SEC-1). Scene files are untrusted input — they can come
+ * from a user's disk, a shared project, or a REMIXED project from a different
+ * user (SEC-2's cross-user boundary) — so this never trusts shape or size.
+ * Returns `null` (the whole record dropped) for a malformed id/entityId or an
+ * overrides map that exceeds `MAX_OVERRIDE_MAP_BYTES`; unknown override KEYS
+ * are silently dropped by `sanitizeOverrides` rather than invalidating the
+ * record, matching that function's existing "extra fields are inert" contract.
+ */
+export function sanitizeInstanceRecord(raw: unknown): PrefabInstance | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const candidate = raw as Record<string, unknown>;
+  if (!isBoundedString(candidate.instanceId)) return null;
+  if (!isBoundedString(candidate.prefabId)) return null;
+  if (candidate.entityId !== undefined && !isBoundedString(candidate.entityId)) return null;
+  const rawOverrides = candidate.overrides;
+  if (rawOverrides !== undefined && (typeof rawOverrides !== 'object' || rawOverrides === null || Array.isArray(rawOverrides))) {
+    return null;
+  }
+  const overrides = sanitizeOverrides(rawOverrides as PrefabOverrideMap | undefined);
+  if (!isOverrideMapWithinSizeLimit(overrides)) return null;
+  return {
+    instanceId: candidate.instanceId,
+    prefabId: candidate.prefabId,
+    overrides,
+    ...(candidate.entityId ? { entityId: candidate.entityId as string } : {}),
+  };
 }
 
 /**

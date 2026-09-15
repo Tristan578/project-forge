@@ -14,8 +14,34 @@ import { applyWhenPrimary } from './primaryGate';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
 import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
+import {
+  loadPrefabInstances,
+  takeStagedPrefabInstancesForExport,
+  collectTransitivePrefabDefinitions,
+} from '@/lib/prefabs/prefabStore';
+import { writePrefabInstances, writePrefabDefinitions, type SceneFileData } from '@/lib/scenes/sceneManager';
+import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
+
+/**
+ * Fold the prefab-instance registry (and its transitive definitions) into an
+ * exported scene JSON. Single choke point for EVERY consumer of `SCENE_EXPORTED`
+ * (scene.FR-1 N1) — see the call site for why this must run before any of them.
+ * Unparseable JSON passes through untouched rather than blocking the export on
+ * a fold that could not run, matching `readPrefabInstances`'s own fail-soft
+ * posture toward malformed data.
+ */
+function foldPrefabDataIntoSceneJson(json: string, instances: PrefabInstance[]): string {
+  try {
+    const data = JSON.parse(json) as SceneFileData;
+    const withInstances = writePrefabInstances(data, instances);
+    const withDefinitions = writePrefabDefinitions(withInstances, collectTransitivePrefabDefinitions(instances));
+    return JSON.stringify(withDefinitions);
+  } catch {
+    return json;
+  }
+}
 
 // Debounced auto-save: triggers export_scene command after inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -187,8 +213,21 @@ export function handleTransformEvent(
       // when the running engine binary predates the change — every side effect
       // below is "the scene was exported", not "my request was answered", so
       // none of them may depend on it.
-      const { json, name, requestId } = payload;
+      const { json: rawJson, name, requestId } = payload;
       const state = useEditorStore.getState();
+
+      // Fold prefab instances/definitions in HERE, before any consumer below
+      // sees the JSON (scene.FR-1 N1). The engine export knows nothing about
+      // linked instances — they live in the prefab store, not the ECS — so
+      // recovering any of these consumers (autosave, panic recovery) used to
+      // silently drop every instance and override. `takeStagedPrefabInstancesForExport`
+      // prefers the registry as it stood when THIS export was requested over
+      // the live one: a save in flight while the user loads a different scene
+      // must fold the instances that were active when it was requested, not
+      // whatever the registry now holds.
+      const stagedInstances = takeStagedPrefabInstancesForExport(requestId);
+      const instances = stagedInstances ?? loadPrefabInstances();
+      const json = instances.length ? foldPrefabDataIntoSceneJson(rawJson, instances) : rawJson;
 
       // Cache for periodic IndexedDB auto-save
       setLastExportedScene(json, name);
