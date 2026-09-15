@@ -85,8 +85,10 @@ let dispatchCommand: SpriteDispatcher | null = null;
 /**
  * Connect sprite actions to the engine transport, or detach it during teardown.
  * @param dispatcher Command transport, or null when the engine is unavailable.
- * Collision-shape edits require an explicit success response to report queuing;
- * older actions may accept a void response. Only engine events confirm edits.
+ * Every dispatched action, collision-shape edits included, treats an explicit
+ * `success: false` as the only rejection and a void/undefined response as
+ * accepted — consistent with editorStore.ts's dispatcher contract and the
+ * `setTileCollisionShape` implementation below. Only engine events confirm edits.
  * @returns Nothing; replaces the active transport for this slice.
  */
 export function setSpriteDispatcher(dispatcher: SpriteDispatcher | null): void {
