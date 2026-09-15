@@ -108,7 +108,9 @@ describe('command manifest', () => {
   it('every command count quoted in the docs equals the manifest', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const here = resolve(new URL('.', import.meta.url).pathname);
+    const { fileURLToPath } = await import('node:url');
+    // Decode file URLs before resolving filesystem paths, including Windows drives.
+    const here = fileURLToPath(new URL('.', import.meta.url));
     const docs = [resolve(here, '../README.md'), resolve(here, '../../docs/guides/mcp-server-setup.md')];
     let claims = 0;
     for (const file of docs) {
@@ -119,6 +121,19 @@ describe('command manifest', () => {
       }
     }
     expect(claims).toBeGreaterThan(0);
+  });
+
+  it('converts a file URL to a portable, space-decoded path (fileURLToPath)', async () => {
+    const { fileURLToPath } = await import('node:url');
+
+    // Resolve from this module so the fixture has a drive on Windows.
+    const spaced = fileURLToPath(new URL('./my%20repo/', import.meta.url));
+    expect(spaced).toContain('my repo');
+    expect(spaced).not.toContain('%20');
+
+    const here = fileURLToPath(new URL('.', import.meta.url));
+    expect(here).not.toMatch(/^\/[A-Za-z]:/);
+    expect(here).toMatch(/mcp-server/);
   });
 
   it('has a version field', () => {

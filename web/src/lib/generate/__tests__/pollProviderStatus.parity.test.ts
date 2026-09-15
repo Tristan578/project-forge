@@ -30,10 +30,6 @@ vi.mock('@/lib/generate/meshyClient', () => ({
     this.getTextureStatus = getTextureStatus;
   }),
 }));
-const getStatus = vi.fn();
-vi.mock('@/lib/generate/sunoClient', () => ({
-  SunoClient: vi.fn(function (this: Record<string, unknown>) { this.getStatus = getStatus; }),
-}));
 const getReplicateStatus = vi.fn();
 vi.mock('@/lib/generate/spriteClient', () => ({
   SpriteClient: vi.fn(function (this: Record<string, unknown>) { this.getReplicateStatus = getReplicateStatus; }),
@@ -53,7 +49,7 @@ vi.mock('@/lib/keys/resolver', () => ({
   },
 }));
 vi.mock('@/lib/config/providers', () => ({
-  DB_PROVIDER: { model3d: 'meshy', texture: 'meshy', music: 'suno', sprite: 'replicate' },
+  DB_PROVIDER: { model3d: 'meshy', texture: 'meshy', music: 'elevenlabs', sprite: 'replicate' },
 }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 
@@ -110,16 +106,11 @@ const SKYBOX_CASES = [
   { label: 'QUEUED → pending', resp: { status: 'QUEUED', progress: 0 } },
 ];
 
-// Suno music terminal cases (getStatus).
+// Music (#9522): ElevenLabs `/v1/music` returns audio inline, so there is no
+// provider status to poll — both the route and the poller return one fixed
+// terminal `failed` state on any input. A single case exercises that agreement.
 const MUSIC_CASES = [
-  { label: 'completed with audio → completed', resp: { status: 'completed', progress: 100, audioUrl: 'https://x/a.mp3' } },
-  { label: 'succeeded with audio → completed', resp: { status: 'succeeded', progress: 100, audioUrl: 'https://x/a.mp3' } },
-  { label: 'completed with no audio → failed (#8757)', resp: { status: 'completed', progress: 100 } },
-  { label: 'failed → failed', resp: { status: 'failed', progress: 0 } },
-  { label: 'error → failed', resp: { status: 'error', progress: 0 } },
-  { label: 'processing → processing', resp: { status: 'processing', progress: 10 } },
-  { label: 'generating → processing', resp: { status: 'generating', progress: 20 } },
-  { label: 'queued → pending', resp: { status: 'queued', progress: 0 } },
+  { label: 'synchronous provider → terminal failed', resp: {} },
 ];
 
 // Replicate SDXL terminal cases (getReplicateStatus) — shared shape across the
@@ -137,7 +128,7 @@ const SPECS: ParitySpec[] = [
   { type: 'model', routePath: '/api/generate/model/status', GET: modelGET, setResp: (r) => getTaskStatus.mockResolvedValue(r), cases: MODEL_CASES },
   { type: 'texture', routePath: '/api/generate/texture/status', GET: textureGET, setResp: (r) => getTextureStatus.mockResolvedValue(r), cases: TEXTURE_CASES },
   { type: 'skybox', routePath: '/api/generate/skybox/status', GET: skyboxGET, setResp: (r) => getTextureStatus.mockResolvedValue(r), cases: SKYBOX_CASES },
-  { type: 'music', routePath: '/api/generate/music/status', GET: musicGET, setResp: (r) => getStatus.mockResolvedValue(r), cases: MUSIC_CASES },
+  { type: 'music', routePath: '/api/generate/music/status', GET: musicGET, setResp: () => {}, cases: MUSIC_CASES },
   { type: 'sprite', routePath: '/api/generate/sprite/status', GET: spriteGET, setResp: (r) => getReplicateStatus.mockResolvedValue(r), cases: REPLICATE_CASES },
   { type: 'sprite_sheet', routePath: '/api/generate/sprite-sheet/status', GET: spriteSheetGET, setResp: (r) => getReplicateStatus.mockResolvedValue(r), cases: REPLICATE_CASES },
   { type: 'tileset', routePath: '/api/generate/tileset-gen/status', GET: tilesetGET, setResp: (r) => getReplicateStatus.mockResolvedValue(r), cases: REPLICATE_CASES },

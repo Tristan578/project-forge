@@ -168,3 +168,116 @@ describe('staging', () => {
     expect(takeStagedSceneAudio()).toEqual({ new: FULL_AUDIO });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Clip documents (trim/fade/gain/loop) — #9903, operation audio.FR-1.OP-02
+// ---------------------------------------------------------------------------
+
+import {
+  parseSceneClipDocuments,
+  readClipDocument,
+  serializeClipDocument,
+} from '../sceneAudioManifest';
+import {
+  AUDIO_CLIP_DOCUMENT_VERSION,
+  type AudioClipDocument,
+} from '../audioClipDocument';
+
+const FULL_CLIP: AudioClipDocument = {
+  version: AUDIO_CLIP_DOCUMENT_VERSION,
+  sourceAssetId: 'asset-1',
+  sourceHash: 'deadbeef',
+  trimStartSec: 0.25,
+  trimEndSec: 1.75,
+  gainDb: -6,
+  fadeInSec: 0.1,
+  fadeOutSec: 0.2,
+  loopStartSec: 0.5,
+  loopEndSec: 1.5,
+};
+
+describe('clip document persistence (audio.FR-1.OP-02)', () => {
+  it('round-trips a full clip document through serialize -> read unchanged', () => {
+    const restored = readClipDocument(serializeClipDocument(FULL_CLIP));
+    expect(restored).toEqual(FULL_CLIP);
+  });
+
+  it('reads clip documents out of a scene keyed by entity id', () => {
+    const clips = parseSceneClipDocuments(
+      scene([
+        { entityId: 'e1', audioData: { ...FULL_AUDIO, clip: serializeClipDocument(FULL_CLIP) } },
+        { entityId: 'e2', audioData: FULL_AUDIO },
+      ])
+    );
+    expect(clips).toEqual({ e1: FULL_CLIP });
+  });
+
+  it('leaves an OLD manifest (no clip key) unchanged — no clips, audio intact', () => {
+    // The backward-compat guarantee: a scene saved before clips existed reads
+    // back with zero clip documents and its AudioData untouched.
+    const oldScene = scene([{ entityId: 'e1', audioData: FULL_AUDIO }]);
+    expect(parseSceneClipDocuments(oldScene)).toEqual({});
+    expect(parseSceneAudio(oldScene)).toEqual({ e1: FULL_AUDIO });
+  });
+
+  it('drops a degenerate clip (missing/reversed window or no source) rather than fabricate one', () => {
+    expect(readClipDocument(null)).toBeNull();
+    expect(readClipDocument({ trimStartSec: 0, trimEndSec: 1 })).toBeNull(); // no source
+    expect(readClipDocument({ sourceAssetId: 'a', trimStartSec: 1, trimEndSec: 1 })).toBeNull(); // empty
+    expect(readClipDocument({ sourceAssetId: 'a', trimStartSec: 1, trimEndSec: 0.5 })).toBeNull(); // reversed
+    expect(readClipDocument({ sourceAssetId: 'a', trimStartSec: 0 })).toBeNull(); // no end
+  });
+
+  it('defaults optional numeric fields and coerces bad types safely', () => {
+    const clip = readClipDocument({
+      sourceAssetId: 'a',
+      trimStartSec: 0,
+      trimEndSec: 2,
+      gainDb: 'loud',
+      fadeInSec: undefined,
+      fadeOutSec: NaN,
+    });
+    expect(clip).toEqual({
+      version: AUDIO_CLIP_DOCUMENT_VERSION,
+      sourceAssetId: 'a',
+      sourceHash: '',
+      trimStartSec: 0,
+      trimEndSec: 2,
+      gainDb: 0,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      loopStartSec: 0,
+      loopEndSec: 2,
+    });
+  });
+
+  it('ignores a clip named __proto__ etc. via the same reserved-id guard', () => {
+    const clips = parseSceneClipDocuments(
+      scene([{ entityId: '__proto__', audioData: { clip: serializeClipDocument(FULL_CLIP) } }])
+    );
+    expect(clips).toEqual({});
+    expect(Object.getPrototypeOf(clips)).toBe(Object.prototype);
+  });
+
+  it.each([
+    { version: 999 },
+    { version: '1' },
+    { trimStartSec: -1 },
+    { gainDb: -61 },
+    { gainDb: 25 },
+    { fadeInSec: -0.1 },
+    { fadeOutSec: -0.1 },
+    { fadeInSec: 1.4 }, // Existing fade-out makes the combined fades too long.
+    { fadeOutSec: 1.5 },
+    { loopStartSec: 0 },
+    { loopEndSec: 2 },
+    { loopStartSec: 1.5 }, // Equal loop boundaries.
+    { loopEndSec: 0.4 }, // Reversed loop.
+  ])('rejects an invalid clip field %j without adopting the document', (patch) => {
+    expect(readClipDocument({ ...FULL_CLIP, ...patch })).toBeNull();
+    expect(parseSceneClipDocuments(scene([
+      { entityId: 'valid', audioData: { clip: FULL_CLIP } },
+      { entityId: 'invalid', audioData: { clip: { ...FULL_CLIP, ...patch } } },
+    ]))).toEqual({ valid: FULL_CLIP });
+  });
+});

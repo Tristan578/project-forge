@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { buildMeasurementManifest, type MeasurementManifest } from '@/lib/config/measurementManifest';
 
 export interface PerformanceStats {
   fps: number;
@@ -18,6 +19,19 @@ export interface PerformanceBudget {
   warningThreshold: number;
 }
 
+/**
+ * A manually-captured performance report: a snapshot of the live stats pinned
+ * to the {@link MeasurementManifest} identifying the machine and build it was
+ * taken on. Operation performance.FR-3.OP-01 (#9904). Fields the browser could
+ * not measure live on the manifest as `'unknown'`, never as a real zero.
+ */
+export interface CapturedPerformanceReport {
+  stats: PerformanceStats;
+  manifest: MeasurementManifest;
+  /** Epoch ms the report was captured. */
+  capturedAt: number;
+}
+
 interface PerformanceState {
   stats: PerformanceStats;
   isProfilerOpen: boolean;
@@ -26,6 +40,10 @@ interface PerformanceState {
   warnings: string[];
   /** Current LOD level per entity (entity_id -> lod_level) */
   lodLevels: Record<string, number>;
+  /** Manifest for the current measurement session, or null before capture. */
+  manifest: MeasurementManifest | null;
+  /** The most recently captured manual report (stats + manifest), or null. */
+  capturedReport: CapturedPerformanceReport | null;
 
   // Actions
   updateStats: (stats: Partial<PerformanceStats>) => void;
@@ -34,6 +52,12 @@ interface PerformanceState {
   addWarning: (warning: string) => void;
   clearWarnings: () => void;
   setLodLevel: (entityId: string, level: number) => void;
+  /** Replace the current manifest wholesale. */
+  setManifest: (manifest: MeasurementManifest) => void;
+  /** Merge fields into the current manifest (no-op-safe before one exists). */
+  updateManifest: (manifest: Partial<MeasurementManifest>) => void;
+  /** Store a captured report and adopt its manifest as the current one. */
+  captureReport: (report: CapturedPerformanceReport) => void;
 }
 
 const defaultStats: PerformanceStats = {
@@ -61,6 +85,8 @@ export const usePerformanceStore = create<PerformanceState>((set) => ({
   budget: defaultBudget,
   warnings: [],
   lodLevels: {},
+  manifest: null,
+  capturedReport: null,
 
   updateStats: (newStats) =>
     set((state) => {
@@ -100,4 +126,16 @@ export const usePerformanceStore = create<PerformanceState>((set) => ({
     set((state) => ({
       lodLevels: { ...state.lodLevels, [entityId]: level },
     })),
+
+  setManifest: (manifest) => set({ manifest }),
+
+  updateManifest: (manifestUpdate) =>
+    set((state) =>
+      // Seed every required field before applying a partial update.
+      state.manifest
+        ? { manifest: { ...state.manifest, ...manifestUpdate } }
+        : { manifest: { ...buildMeasurementManifest(), ...manifestUpdate } },
+    ),
+
+  captureReport: (report) => set({ capturedReport: report, manifest: report.manifest }),
 }));
