@@ -13,11 +13,15 @@ import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
 import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 import { SCENE_EXPORTED_EVENT, SCENE_CAPTURE_TIMEOUT_MS } from '@/lib/scenes/captureScene';
+import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 
 const LIVE_SCENE = {
-  formatVersion: 1,
-  sceneName: 'Level 1',
-  entities: [{ id: 'player' }, { id: 'goal' }],
+  ...sceneFixture('Level 1'),
+  entities: [{
+    entityId: 'player', entityType: 'cube', name: 'Player', visible: true,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
+    parentId: null, materialData: null, lightData: null, physicsData: null, physicsEnabled: false,
+  }],
 };
 
 /** A dispatcher that answers `export_scene` the way the engine bridge does. */
@@ -25,10 +29,11 @@ function answeringDispatcher() {
   const calls: Array<{ command: string; payload: unknown }> = [];
   const dispatch = (command: string, payload: unknown) => {
     calls.push({ command, payload });
+    if (command === 'validate_scene') return { success: true };
     if (command === 'export_scene') {
       window.dispatchEvent(
         new CustomEvent(SCENE_EXPORTED_EVENT, {
-          detail: { json: JSON.stringify(LIVE_SCENE), name: LIVE_SCENE.sceneName },
+          detail: { json: JSON.stringify(LIVE_SCENE), name: LIVE_SCENE.metadata?.name },
         })
       );
     }
@@ -101,9 +106,7 @@ describe('sceneSlice scene persistence', () => {
 
   it('refuses to switch when the engine never answers, rather than losing the scene', async () => {
     vi.useFakeTimers();
-    setSceneDispatcher(() => {
-      /* engine is wedged — the export request is never answered */
-    });
+    setSceneDispatcher((command) => command === 'validate_scene' ? { success: true } : undefined);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     store.getState().createNewScene('Second');
@@ -119,12 +122,13 @@ describe('sceneSlice scene persistence', () => {
     error.mockRestore();
   });
 
-  it('still switches when no engine is connected — there is no live scene to lose', async () => {
+  it('preserves the last saved project when no engine is connected', async () => {
+    setSceneDispatcher(answeringDispatcher().dispatch);
     store.getState().createNewScene('Second');
     const target = store.getState().scenes.find((s) => s.name === 'Second');
-
+    const before = localStorage.getItem('forge-project-scenes');
+    setSceneDispatcher(null);
     await store.getState().switchScene(target!.id);
-
-    expect(loadProjectScenes().activeSceneId).toBe(target!.id);
+    expect(localStorage.getItem('forge-project-scenes')).toBe(before);
   });
 });

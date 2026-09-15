@@ -1,13 +1,13 @@
 # Command Reference
 
-Complete reference for all 362 MCP commands available in SpawnForge.
+Complete reference for all 367 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
 
 ## Categories
 
-- [Scene](#scene) (26 commands)
+- [Scene](#scene) (30 commands)
 - [Materials](#materials) (11 commands)
 - [Lighting](#lighting) (2 commands)
 - [Environment](#environment) (5 commands)
@@ -15,7 +15,7 @@ Complete reference for all 362 MCP commands available in SpawnForge.
 - [Editor](#editor) (7 commands)
 - [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
-- [Query](#query) (15 commands)
+- [Query](#query) (16 commands)
 - [Runtime](#runtime) (12 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
@@ -636,6 +636,92 @@ Set the default transition configuration used when switching scenes
 {
   "command": "set_default_transition",
   "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `validate_scene`
+
+Validate a serialized .forge SceneFile with the engine decoder without applying or saving it. Internal checkpoint preflight.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `json` | string | Yes | Complete serialized .forge SceneFile JSON |
+
+**Example:**
+```json
+{
+  "command": "validate_scene",
+  "params": {
+    "json": "my_json"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `create_checkpoint`
+
+Save a named recovery checkpoint of the whole project (a restorable snapshot of every scene)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `label` | string | No | Optional label for the checkpoint; defaults to a timestamp |
+
+**Example:**
+```json
+{
+  "command": "create_checkpoint",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `restore_checkpoint`
+
+Restore a recovery checkpoint by ID, replacing the active project with its snapshot
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `checkpointId` | string | Yes | ID of the checkpoint to restore |
+
+**Example:**
+```json
+{
+  "command": "restore_checkpoint",
+  "params": {
+    "checkpointId": "my_checkpointId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `delete_checkpoint`
+
+Delete a saved recovery checkpoint by ID (missing IDs are a no-op)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `checkpointId` | string | Yes | ID of the checkpoint to delete |
+
+**Example:**
+```json
+{
+  "command": "delete_checkpoint",
+  "params": {
+    "checkpointId": "my_checkpointId"
+  }
 }
 ```
 
@@ -1682,6 +1768,22 @@ Query current game state during play mode. Returns entity names, visibility, and
 ```json
 {
   "command": "query_play_state",
+  "params": {}
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `list_checkpoints`
+
+List saved recovery checkpoints for the current project, newest first
+
+**Example:**
+```json
+{
+  "command": "list_checkpoints",
   "params": {}
 }
 ```

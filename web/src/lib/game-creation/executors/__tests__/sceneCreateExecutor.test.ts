@@ -1,7 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { sceneCreateExecutor } from '../sceneCreateExecutor';
 import type { ExecutorContext } from '../../types';
-import { loadProjectScenes } from '@/lib/scenes/sceneManager';
+import { loadProjectScenes, saveProjectScenes, createInitialProject } from '@/lib/scenes/sceneManager';
+import { attachFixtureValidator } from '@/lib/scenes/__tests__/sceneFixture';
+import { setSceneValidator } from '@/lib/scenes/sceneValidation';
 
 /**
  * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
@@ -32,6 +34,34 @@ function makeCtx(overrides: CtxOverrides = {}): ExecutorContext {
 describe('sceneCreateExecutor', () => {
   beforeEach(() => {
     localStorage.clear();
+    attachFixtureValidator();
+  });
+
+  afterEach(() => {
+    setSceneValidator(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('creates scenes only in the active project namespace', async () => {
+    const a = createInitialProject();
+    const b = createInitialProject();
+    a.scenes[0].name = 'Keep project A';
+    b.scenes[0].name = 'Keep project B';
+    saveProjectScenes(a, 'project-a');
+    saveProjectScenes(b, 'project-b');
+    const aBefore = JSON.stringify(loadProjectScenes('project-a'));
+    const ctx = makeCtx({ store: {
+      projectId: 'project-b', setScenes: vi.fn(), newScene: vi.fn(), sceneGraph: { nodes: {} },
+    } });
+
+    const result = await sceneCreateExecutor.execute({ name: 'New B scene' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(JSON.stringify(loadProjectScenes('project-a'))).toBe(aBefore);
+    const updated = loadProjectScenes('project-b');
+    expect(updated.scenes.map((scene) => scene.name)).toEqual(['Keep project B', 'New B scene']);
+    expect(updated.activeSceneId).toBe(updated.scenes[1].id);
+    expect(updated.scenes[1].data?.metadata?.name).toBe('New B scene');
   });
 
   it('has correct name', () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { attachFixtureValidator } from './__tests__/sceneFixture';
 import {
   createInitialProject,
   createScene,
@@ -22,6 +23,7 @@ import {
 // Mock localStorage
 let storage: Record<string, string> = {};
 beforeEach(() => {
+  attachFixtureValidator();
   storage = {};
   vi.stubGlobal('localStorage', {
     getItem: vi.fn((key: string) => storage[key] ?? null),
@@ -190,7 +192,7 @@ describe('sceneManager', () => {
       const result = switchScene(withTwo, sceneId);
       if ('error' in result) throw new Error(result.error);
       expect(result.project.activeSceneId).toBe(sceneId);
-      expect(result.sceneToLoad).toEqual(expect.objectContaining({ sceneName: 'Level 2' }));
+      expect(result.sceneToLoad).toEqual(expect.objectContaining({ metadata: expect.objectContaining({ name: 'Level 2' }) }));
     });
 
     it('switch to nonexistent scene returns error', () => {
