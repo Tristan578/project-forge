@@ -870,6 +870,8 @@ describe('SkeletonInspector', () => {
     render(<SkeletonInspector entityId="entity-1" />);
     fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
     expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Vertex 1 X'), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 weight'), { target: { value: '0.5' } });
     fireEvent.click(screen.getByLabelText('Edit mesh attachment belt'));
     await vi.waitFor(() => {
       expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
@@ -877,6 +879,21 @@ describe('SkeletonInspector', () => {
     // Target never switched: still editing cloak, never belt.
     expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
     expect(screen.queryByText('Mesh: belt')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Vertex 1 X')).toHaveValue(9);
+    expect(screen.getByLabelText('Vertex 1 influence 1 weight')).toHaveValue(0.5);
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    expect(mockSetSkeleton2d).toHaveBeenCalledWith('entity-1', expect.objectContaining({
+      skins: expect.objectContaining({
+        default: expect.objectContaining({
+          attachments: expect.objectContaining({
+            cloak: expect.objectContaining({
+              vertices: [[9, 1]],
+              weights: [{ bones: ['root'], weights: [0.5] }],
+            }),
+          }),
+        }),
+      }),
+    }));
   });
 
   it('switches the edit target when the discard is confirmed', async () => {
@@ -902,6 +919,8 @@ describe('SkeletonInspector', () => {
     render(<SkeletonInspector entityId="entity-1" />);
     fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
     expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Vertex 1 X'), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 weight'), { target: { value: '0.5' } });
     fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'sash' } });
     fireEvent.click(screen.getByLabelText('Add mesh attachment'));
     await vi.waitFor(() => {
@@ -909,5 +928,20 @@ describe('SkeletonInspector', () => {
     });
     expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
     expect(screen.queryByText('Mesh: sash')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Vertex 1 X')).toHaveValue(9);
+    expect(screen.getByLabelText('Vertex 1 influence 1 weight')).toHaveValue(0.5);
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    expect(mockSetSkeleton2d).toHaveBeenCalledWith('entity-1', expect.objectContaining({
+      skins: expect.objectContaining({
+        default: expect.objectContaining({
+          attachments: expect.objectContaining({
+            cloak: expect.objectContaining({
+              vertices: [[9, 1]],
+              weights: [{ bones: ['root'], weights: [0.5] }],
+            }),
+          }),
+        }),
+      }),
+    }));
   });
 });
