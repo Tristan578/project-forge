@@ -29,6 +29,7 @@ export interface GenerateVoiceParams {
   signal?: AbortSignal;
 }
 
+/** Music composition inputs, optional provider controls and caller cancellation. */
 export interface GenerateMusicParams {
   prompt: string;
   /** Track length in milliseconds. ElevenLabs accepts 3000–600000. */

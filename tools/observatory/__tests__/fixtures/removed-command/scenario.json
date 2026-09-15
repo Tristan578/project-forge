@@ -1,0 +1,31 @@
+{
+  "description": "A capability declares a primaryOwner artifact that has been removed from the tracked set. The scan must report a missing-primary-owner GAP with the file and capability IDs, not silently drop the capability.",
+  "coveredScopes": ["mcp/commands/"],
+  "files": ["mcp/commands/alpha.json"],
+  "rules": [
+    {
+      "capabilityId": "mcp.alpha",
+      "domain": "mcp",
+      "confidence": "reviewed",
+      "primaryOwner": "mcp/commands/alpha.json",
+      "own": ["mcp/commands/alpha.json"]
+    },
+    {
+      "capabilityId": "mcp.beta",
+      "domain": "mcp",
+      "confidence": "reviewed",
+      "primaryOwner": "mcp/commands/beta.json",
+      "own": ["mcp/commands/beta.json"]
+    }
+  ],
+  "expected": {
+    "trackedTotal": 1,
+    "ownedTotal": 1,
+    "excludedTotal": 0,
+    "unmappedTotal": 0,
+    "notYetCoveredTotal": 0,
+    "missingPrimaryOwnerCapability": "mcp.beta",
+    "missingPrimaryOwnerPath": "mcp/commands/beta.json",
+    "capabilityWithoutArtifact": "mcp.beta"
+  }
+}

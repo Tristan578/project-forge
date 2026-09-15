@@ -214,49 +214,29 @@ async function collectTemplateSources(): Promise<{ label: string; text: string }
 const TEMPLATE_SOURCES = await collectTemplateSources();
 
 /**
- * EVERY 2D STARTER GAME IS BROKEN AS SHIPPED. This is the measurement, not a
- * concession.
+ * THE 2D STARTERS ARE NOW REPAIRED, so this baseline is empty. It is kept — not
+ * deleted — because it is the debt ledger for the defect class this file exists
+ * to catch, and an empty ledger is the honest record that the debt is paid.
  *
- * Bringing the Template Gallery under the gate found that all six 2D templates
- * were written against an API that has never existed. The decisive one is
- * `forge.onUpdate(callback)`: the real contract is a bare top-level
- * `function onUpdate(dt)` which `scriptWorker` picks up with
- * `typeof onUpdate === 'function'`. There is no `forge.onUpdate`, so it is
- * `undefined`, so every one of these scripts throws a TypeError on its first
- * statement and no 2D template does anything at all in Play. The rest —
- * `forge.transform.*` (no such namespace), `forge.input.isKeyDown` (the real
- * one is `isPressed`, and it takes a bound ACTION, not a raw key), and
- * `forge.scene.getComponent` / `forge.material.*` / `forge.camera.screenToWorld`
- * (no equivalent exists anywhere) — is the same mistake repeated.
+ * Bringing the Template Gallery under the gate found all six 2D templates
+ * written against an API that never existed. The decisive one was calling the
+ * lifecycle hooks as members of `forge` (`forge.onUpdate(callback)`): the real
+ * contract is a bare top-level `function onUpdate(dt)` which `scriptWorker`
+ * picks up with `typeof onUpdate === 'function'`, so `forge.onUpdate` was
+ * `undefined` and every such script threw a TypeError on its first statement.
+ * The rest — a `transform` namespace, `input.isKeyDown`, `scene.getComponent`,
+ * a `material` namespace, `camera.screenToWorld` — was the same mistake
+ * repeated. Five of the six were repaired earlier; `2d-puzzle` was the last,
+ * repaired in #9815 by rewriting it as a keyboard-driven match-3 that uses only
+ * the declared surface and reaches a real `forge.game.win()`.
  *
- * NOT WAIVED BECAUSE IT IS ACCEPTABLE. Waived because repairing it is not a
- * name substitution: `isKeyDown('ArrowLeft')` needs input bindings each
- * template does not declare, and four of these symbols have no counterpart to
- * substitute in. That is a design change per template, tracked separately, and
- * guessing at it inside a PR about removing phantom methods is how the next
- * defect gets shipped.
- *
- * THE LIST MAY ONLY SHRINK. A symbol not named here fails the gate, so nothing
- * new can be added to a broken template, and `no baseline entry is stale`
- * below fails on any entry that has stopped matching — so a repair cannot be
- * made and then silently forgotten either.
- *
- * Repair is tracked at #9763, which carries the per-template measurement and
- * the three capabilities that would have to exist first.
+ * IF A TEMPLATE REGRESSES, add its known-broken symbols back here rather than
+ * leaving the gate red — but that is a debt entry, not a permission: the count
+ * test below pins the total, and `has no stale baseline entry` fails the moment
+ * an entry stops matching, so a baseline can neither grow quietly nor outlive
+ * the repair it was covering.
  */
-const TEMPLATE_BASELINE: Record<string, readonly string[]> = {
-  '2d-puzzle': [
-    'forge.camera.screenToWorld',
-    'forge.input.getMousePosition',
-    'forge.input.isMousePressed',
-    'forge.material.setBaseColor',
-    'forge.material.setEmissive',
-    'forge.onStart',
-    'forge.onUpdate',
-    'forge.scene.getComponent',
-    'forge.transform.getPosition',
-  ],
-};
+const TEMPLATE_BASELINE: Record<string, readonly string[]> = {};
 
 /** The template id a `TEMPLATE_REGISTRY[...]` label refers to. */
 function templateIdOf(label: string): string | null {
@@ -391,16 +371,16 @@ describe('forge API conformance', () => {
 
     /**
      * The count is pinned so the debt cannot grow quietly. A new broken symbol
-     * in an already-broken template would otherwise only need a one-line
-     * addition above, which is the path of least resistance and exactly what
-     * this is here to make visible.
+     * in a template would otherwise only need a one-line addition above, which
+     * is the path of least resistance and exactly what this is here to make
+     * visible. The baseline is empty now that every 2D starter is repaired
+     * (#9815 closed out the last, `2d-puzzle`); a non-empty baseline is a
+     * regression that must be justified by editing this assertion deliberately.
      */
-    it('baselines exactly the six 2D templates and no more', () => {
-      expect(Object.keys(TEMPLATE_BASELINE).sort()).toEqual([
-        '2d-puzzle',
-      ]);
+    it('baselines nothing — every shipped template resolves', () => {
+      expect(Object.keys(TEMPLATE_BASELINE)).toEqual([]);
       const total = Object.values(TEMPLATE_BASELINE).reduce((n, list) => n + list.length, 0);
-      expect(total).toBe(9);
+      expect(total).toBe(0);
     });
 
     it('calls functions and reads values, never the other way round', () => {

@@ -5,7 +5,7 @@
 # WHY THIS STEP IS TESTED
 # -----------------------
 # `ci-gate` decides, from a `git diff --name-only` list, which downstream jobs
-# run. Every one of its fourteen outputs is a grep against that list. A gate
+# run. Each output is a grep against that list. A gate
 # whose trigger does not fire is indistinguishable from a gate that passed:
 # GitHub renders a skipped required check as green, and `check-ci-success.sh`
 # deliberately tolerates a legitimate path-filter skip. So an under-scoped grep
@@ -92,11 +92,11 @@ assert_extraction_is_real() {
   for sentinel in 'web=true' 'engine=true' 'mcp=true' 'ci=true' 'docs=true' \
                   'design=true' 'hooks=true' 'deps=true' 'agentic=true' \
                   'onboarding=true' 'codex=true' 'ghaw=true' 'api=true' \
-                  'skills=true' 'any-code='; do
+                  'skills=true' 'observatory=true' 'any-code='; do
     grep -qF "$sentinel" "$STEP_BODY" || { echo "  FAIL: extracted body has no '$sentinel'"; missing=1; }
   done
   [ "$missing" -eq 0 ] || exit 1
-  pass "step body extracted from ci.yml ($body_lines lines, all 15 outputs present)"
+  pass "step body extracted from ci.yml ($body_lines lines, all 16 outputs present)"
 }
 
 # ---- Harness ----------------------------------------------------------------
@@ -208,6 +208,23 @@ assert_output "codex-config-only change does not set any-code" ".codex/config.to
 assert_output "SKILL.md-only change does not set any-code" ".claude/skills/kanban/SKILL.md" any-code false
 assert_output "web change DOES set any-code" "web/src/app/page.tsx" any-code true
 assert_output "docs copy DOES set any-code" "web/src/data/commands.json" any-code true
+
+# Observatory tools have their own lightweight unit/type gate.
+echo "--- Observatory filters ---"
+for path in tools/observatory/index.ts tools/observatory/tsconfig.json tools/observatory/vitest.config.ts tools/observatory/__tests__/scanner.test.ts; do
+  assert_output "Observatory path fires its gate" "$path" observatory true
+  assert_output "Observatory-only stays outside heavy fan-out" "$path" any-code false
+  assert_output "Observatory-only does not trigger CI-wide work" "$path" ci false
+done
+assert_output "Observatory package manifest still triggers dependency checks" "tools/observatory/package.json" deps true
+assert_output "near-miss directory does not fire Observatory" "tools/observatory-extra/index.ts" observatory false
+assert_output "nested lookalike does not fire Observatory" "other/tools/observatory/index.ts" observatory false
+assert_output "unrelated tool does not fire Observatory" "tools/agentic-sync/sync.mjs" observatory false
+assert_output "web-only does not fire Observatory output" "web/src/app/page.tsx" observatory false
+assert_output "empty diff leaves Observatory false" "" observatory false
+# The CI/deps arms run the job without falsely marking its own source changed.
+assert_output "workflow change triggers CI arm" ".github/workflows/ci.yml" ci true
+assert_output "root lockfile triggers dependencies arm" "package-lock.json" deps true
 
 # ---- Empty diff -------------------------------------------------------------
 echo "--- empty diff ---"

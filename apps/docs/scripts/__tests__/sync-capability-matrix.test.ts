@@ -87,3 +87,25 @@ describe('checkMatrixCopyOnDisk', () => {
     expect(checkMatrixCopyOnDisk()).toEqual({ passed: true });
   });
 });
+
+describe('capability-matrix source-line citations resolve to the symbol they name', () => {
+  // A citation like `channels/leaderboardChannel.ts:41` is only useful if the
+  // cited line actually holds the thing the sentence describes. The matrix once
+  // pointed at :31 — the closing brace of the unrelated `LeaderboardEntry`
+  // interface — while the prose described the channel routing handler, which
+  // starts at :41. A line-for-line sync check cannot catch that; this does (#9733).
+  it('the leaderboardChannel.ts citation points at createLeaderboardHandler', () => {
+    const repoRoot = path.dirname(path.dirname(CANONICAL_MATRIX_PATH));
+    const md = fs.readFileSync(CANONICAL_MATRIX_PATH, 'utf8');
+    const sourceLines = fs
+      .readFileSync(path.join(repoRoot, 'web/src/lib/scripting/channels/leaderboardChannel.ts'), 'utf8')
+      .split('\n');
+    const citedLineNumbers = [...md.matchAll(/leaderboardChannel\.ts:(\d+)/g)].map((m) => Number(m[1]));
+    // The matrix must actually cite the channel — a zero-match walk would pass vacuously.
+    expect(citedLineNumbers.length).toBeGreaterThan(0);
+    for (const lineNumber of citedLineNumbers) {
+      // Citations are 1-indexed; the array is 0-indexed.
+      expect(sourceLines[lineNumber - 1]).toContain('createLeaderboardHandler');
+    }
+  });
+});
