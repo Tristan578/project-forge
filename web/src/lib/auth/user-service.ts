@@ -173,11 +173,20 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   // sql.transaction() API only accepts DML statements (no SELECT inside txn).
   const userGames = await queryWithResilience(() =>
     getDb()
-      .select({ id: publishedGames.id })
+      .select({ id: publishedGames.id, cdnBundleKey: publishedGames.cdnBundleKey })
       .from(publishedGames)
       .where(eq(publishedGames.userId, userId))
   );
   const gameIds = userGames.map((g) => g.id);
+  // Published-game bundles mirrored to R2 on publish (#7580) are keyed off the
+  // creator's clerkId and versioned, so the exact object key can only come from
+  // the row itself — `cdn_bundle_key` is the authoritative pointer at the live
+  // bundle. Without sweeping these, every game bundle a deleted user published
+  // would be orphaned in R2 with no DB row left to reconcile against. NULL keys
+  // (R2 disabled at publish, or a failed mirror) have no object to remove.
+  const gameBundleKeys = userGames
+    .map((g) => g.cdnBundleKey)
+    .filter((key): key is string => typeof key === 'string' && key.length > 0);
 
   const userProjects = await queryWithResilience(() =>
     getDb()
@@ -241,7 +250,11 @@ export async function deleteUserAccount(userId: string): Promise<void> {
     const fileKey = resolveOwnedAssetKey(asset.assetFileUrl, userId, asset.id);
     if (fileKey) ownedKeys.push(fileKey);
   }
-  const storageKeys = withStatusSidecars(ownedKeys);
+  // Marketplace asset keys get their `.status.json` sidecars expanded (the
+  // asset post-processing Worker writes one beside each); published-game bundle
+  // keys do not — no Worker writes a sidecar for them — so they are appended
+  // as-is.
+  const storageKeys = [...withStatusSidecars(ownedKeys), ...gameBundleKeys];
 
   // Build the full list of DELETE statements in dependency order.
   // All statements are sent to Postgres in a single BEGIN/COMMIT batch.

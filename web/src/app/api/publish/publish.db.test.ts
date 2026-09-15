@@ -88,6 +88,17 @@ vi.mock('@/lib/storage/publishedGameStorage', () => ({
   readPublishedGameBundle: vi.fn(),
 }));
 
+// deleteManyFromR2 is the route's best-effort cleanup of a superseded version's
+// bundle on republish (#7580 review round 2). Spied so the tests can assert the
+// previous version's key is swept and nothing else in r2.ts is touched. It
+// never throws in production; the spy resolves an empty sweep by default.
+const deleteManyFromR2Spy = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ requested: 0, deleted: 0, failedKeys: [], errors: [], truncated: false }),
+);
+vi.mock('@/lib/storage/r2', () => ({
+  deleteManyFromR2: (...args: unknown[]) => deleteManyFromR2Spy(...args),
+}));
+
 import { POST } from './route';
 
 interface PublishResponse {
@@ -133,16 +144,19 @@ async function seedPublication(opts: {
   slug: string;
   status?: string;
   flagged?: boolean;
+  version?: number;
+  cdnBundleKey?: string | null;
 }): Promise<string> {
   const gameId = randomUUID();
   await harness().neonSql`
     INSERT INTO published_games
-      (id, user_id, project_id, slug, title, status, flagged_at, report_count)
+      (id, user_id, project_id, slug, title, status, flagged_at, report_count, version, cdn_bundle_key)
     VALUES (
       ${gameId}::uuid, ${opts.ownerId}::uuid, ${opts.projectId}::uuid,
       ${opts.slug}, 'Test Game', ${opts.status ?? 'flagged'}::publish_status,
       ${opts.flagged === false ? null : '2026-05-01T00:00:00.000Z'},
-      ${opts.flagged === false ? 0 : 3}
+      ${opts.flagged === false ? 0 : 3},
+      ${opts.version ?? 1}, ${opts.cdnBundleKey ?? null}
     )
   `;
   return gameId;
@@ -425,6 +439,14 @@ describe('POST /api/publish — R2 bundle mirroring against real Postgres', () =
     await harness().truncateAll();
     writeBundleSpy.mockReset();
     captureExceptionSpy.mockReset();
+    deleteManyFromR2Spy.mockClear();
+    deleteManyFromR2Spy.mockResolvedValue({
+      requested: 0,
+      deleted: 0,
+      failedKeys: [],
+      errors: [],
+      truncated: false,
+    });
     qwr.reset();
     delete process.env.PUBLISH_TO_R2;
   });
@@ -482,6 +504,8 @@ describe('POST /api/publish — R2 bundle mirroring against real Postgres', () =
     expect(rows).toHaveLength(1);
     expect(rows[0].cdn_bundle_key).toBe(key);
     expect(rows[0].cdn_url).toBe(`/play/${owner.clerkId}/my-awesome-game`);
+    // A first-time publish has no prior version to sweep.
+    expect(deleteManyFromR2Spy).not.toHaveBeenCalled();
   });
 
   it('stamps the DB-assigned version onto the manifest when the insert resolves via onConflictDoUpdate', async () => {
@@ -594,5 +618,97 @@ describe('POST /api/publish — R2 bundle mirroring against real Postgres', () =
     const rows = await cdnColumns(owner.id);
     expect(rows[0].cdn_bundle_key).toBeNull();
     expect(rows[0].cdn_url).toBe(`/play/${owner.clerkId}/again`);
+  });
+
+  it('does not repoint the row at the new version when the DB update throws after a successful mirror', async () => {
+    // #7580 review round 2, item 5. A republish writes the new version's R2
+    // bundle BEFORE the DB update commits. Versioned keys mean that write lands
+    // at v2/bundle.json — a DIFFERENT object from the live v1 — so when the DB
+    // update then throws and the publish 500s, the committed row is untouched:
+    // still version 1, still pointing at the intact v1 bundle. /play reads by
+    // the row's OWN version, so it keeps serving v1 and can never end up
+    // serving the uncommitted v2 content. The pre-round-2 non-versioned key
+    // (a single shared bundle.json) overwrote the live object in place here, so
+    // /play silently began serving the failed republish's bytes against the old
+    // version.
+    process.env.PUBLISH_TO_R2 = 'true';
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    const liveKey = `games/${owner.clerkId}/fragile/v1/bundle.json`;
+    await seedPublication({
+      ownerId: owner.id,
+      projectId,
+      slug: 'fragile',
+      status: 'published',
+      flagged: false,
+      version: 1,
+      cdnBundleKey: liveKey,
+    });
+
+    const newKey = `games/${owner.clerkId}/fragile/v2/bundle.json`;
+    writeBundleSpy.mockResolvedValue({ key: newKey, url: `https://cdn.test/${newKey}` });
+
+    // Throw on the republish UPDATE — the 4th wrapped query. Two existence
+    // SELECTs and the project SELECT precede it; the mirror write is the spy
+    // and is not wrapped in queryWithResilience, so it runs (and records its
+    // call) before this throw.
+    let wrapped = 0;
+    qwr.impl = async (fn: () => Promise<unknown>) => {
+      wrapped += 1;
+      if (wrapped === 4) throw new Error('DB update failed mid-republish');
+      return fn();
+    };
+
+    const res = await publish(owner, validBody({ projectId, slug: 'fragile' }));
+
+    // The publish surfaced the failure...
+    expect(res.status).toBe(500);
+    expect(captureExceptionSpy).toHaveBeenCalled();
+    // ...the mirror DID run, writing the NEW version's content to the v2 key...
+    expect(writeBundleSpy).toHaveBeenCalledTimes(1);
+    expect((writeBundleSpy.mock.calls[0][3] as { version: number }).version).toBe(2);
+    // ...but the committed row is exactly as seeded: version 1, still pointing
+    // at the v1 bundle. Because v2 is a distinct key, the v1 object was never
+    // overwritten — /play (keyed by row.version) still serves v1.
+    const rows = await cdnColumns(owner.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cdn_bundle_key).toBe(liveKey);
+    const versionRows = await harness().neonSql`
+      SELECT version FROM published_games WHERE user_id = ${owner.id}::uuid
+    `;
+    expect(versionRows[0].version).toBe(1);
+  });
+
+  it('sweeps the superseded version bundle from R2 after a successful republish', async () => {
+    // Versioned keys mean a republish writes a NEW object and leaves the old
+    // one behind. The route deletes the superseded version best-effort so R2
+    // does not accumulate one orphan per republish. deleteManyFromR2 never
+    // throws, so this can never fail a publish that already committed.
+    process.env.PUBLISH_TO_R2 = 'true';
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    const oldKey = `games/${owner.clerkId}/evolving/v1/bundle.json`;
+    await seedPublication({
+      ownerId: owner.id,
+      projectId,
+      slug: 'evolving',
+      status: 'published',
+      flagged: false,
+      version: 1,
+      cdnBundleKey: oldKey,
+    });
+
+    const newKey = `games/${owner.clerkId}/evolving/v2/bundle.json`;
+    writeBundleSpy.mockResolvedValue({ key: newKey, url: `https://cdn.test/${newKey}` });
+
+    const res = await publish(owner, validBody({ projectId, slug: 'evolving' }));
+    expect(res.status).toBe(200);
+    expect(res.json.publication?.version).toBe(2);
+
+    const rows = await cdnColumns(owner.id);
+    expect(rows[0].cdn_bundle_key).toBe(newKey);
+    // The v1 object — and only it — is swept.
+    expect(deleteManyFromR2Spy).toHaveBeenCalledTimes(1);
+    expect(deleteManyFromR2Spy).toHaveBeenCalledWith([oldKey]);
   });
 });

@@ -12,9 +12,21 @@
  * (which owns the `assets/{sellerId}/...` marketplace space) so the two key
  * schemes can never collide and neither route can address the other's objects.
  *
+ * VERSIONED KEYS (#7580 review round 2): every publish version gets its OWN
+ * immutable object at `games/{userId}/{slug}/v{version}/bundle.json`. Nothing is
+ * ever overwritten in place, so a republish can never mutate the bytes a
+ * still-committed row points at, and two concurrent writes can never clobber
+ * each other's content. The read path derives the key from the DB row's OWN
+ * `version`, so it can only ever fetch the object that matches the version the
+ * database claims: a bundle written by a later, not-yet-committed (or failed)
+ * republish lives at a different key and is invisible to the read. As a second
+ * wall the read re-checks the manifest's version/slug/userId against what was
+ * requested and rejects any mismatch as stale.
+ *
  * FAIL-OPEN CONTRACT: `writePublishedGameBundle` may throw (R2 unconfigured,
  * network) and `readPublishedGameBundle` may throw (missing object, malformed
- * JSON). Callers on the publish and play paths catch and fall back to Postgres;
+ * JSON, or a manifest that does not match the requested publication version).
+ * Callers on the publish and play paths catch and fall back to Postgres;
  * object storage is a cache in front of the database, never the source of
  * truth. See `src/app/api/publish/route.ts` and
  * `src/app/api/play/[userId]/[slug]/route.ts`.
@@ -33,7 +45,7 @@ export interface PublishedGameManifest {
   userId: string;
 }
 
-/** Shape stored at `games/{userId}/{slug}/bundle.json`. */
+/** Shape stored at `games/{userId}/{slug}/v{version}/bundle.json`. */
 export interface PublishedGameBundle {
   sceneData: unknown;
   manifest: PublishedGameManifest;
@@ -74,22 +86,52 @@ function assertSafeSegment(label: string, value: string): void {
 }
 
 /**
- * Deterministic R2 key for a published game's bundle:
- * `games/{userId}/{slug}/bundle.json`.
- *
- * Rejects any userId/slug that could escape the prefix or introduce encoding
- * ambiguity BEFORE returning a key (and therefore before any R2 call).
+ * Reject a version that is not a positive integer BEFORE it becomes a key
+ * segment. Publication versions start at 1 and only ever increment, so anything
+ * non-integer, zero, negative, or non-finite is a programming error, not a key
+ * we should mint (a `v{NaN}` / `vundefined` segment would silently split the
+ * key space and orphan objects).
  */
-export function buildPublishedGameKey(userId: string, slug: string): string {
-  assertSafeSegment('userId', userId);
-  assertSafeSegment('slug', slug);
-  return `games/${userId}/${slug}/bundle.json`;
+function assertSafeVersion(version: number): void {
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
+    throw new Error(
+      'Published game bundle key rejected: version must be a positive integer',
+    );
+  }
 }
 
 /**
- * Write a published game's bundle to R2. Returns the object key and the public
- * CDN URL (the latter only exists when `CDN_URL` is configured — `uploadToR2`
- * throws otherwise, which the publish route treats as "mirror unavailable").
+ * Deterministic R2 key for a specific version of a published game's bundle:
+ * `games/{userId}/{slug}/v{version}/bundle.json`.
+ *
+ * The `v{version}` segment is what makes each publication immutable: a
+ * republish writes a NEW object at a NEW key rather than overwriting the live
+ * one, so a failed or racing write can never corrupt the bytes an
+ * already-committed row points at (#7580 review round 2).
+ *
+ * Rejects any userId/slug that could escape the prefix or introduce encoding
+ * ambiguity, and any non-positive-integer version, BEFORE returning a key (and
+ * therefore before any R2 call).
+ */
+export function buildPublishedGameKey(
+  userId: string,
+  slug: string,
+  version: number,
+): string {
+  assertSafeSegment('userId', userId);
+  assertSafeSegment('slug', slug);
+  assertSafeVersion(version);
+  return `games/${userId}/${slug}/v${version}/bundle.json`;
+}
+
+/**
+ * Write a published game's bundle to R2 under its version-specific key. Returns
+ * the object key and the public CDN URL (the latter only exists when `CDN_URL`
+ * is configured — `uploadToR2` throws otherwise, which the publish route treats
+ * as "mirror unavailable").
+ *
+ * The key is derived from `manifest.version`, so the object and the version it
+ * declares can never disagree.
  *
  * Throws on unsafe key input (before any R2 call) and on any R2/upload failure.
  */
@@ -99,29 +141,50 @@ export async function writePublishedGameBundle(
   sceneData: unknown,
   manifest: PublishedGameManifest,
 ): Promise<{ key: string; url: string }> {
-  const key = buildPublishedGameKey(userId, slug);
+  const key = buildPublishedGameKey(userId, slug, manifest.version);
   const bundle: PublishedGameBundle = { sceneData, manifest };
   const body = Buffer.from(JSON.stringify(bundle), 'utf-8');
   return uploadToR2(key, body, 'application/json');
 }
 
 /**
- * Read a published game's bundle back from R2.
+ * Read a specific version of a published game's bundle back from R2.
+ *
+ * The caller passes the DB row's OWN `version`, so the key derived here can only
+ * address the object for the version the database currently claims — a bundle
+ * written by a later, uncommitted, or failed republish lives at a different key
+ * and is never returned. As a second wall the manifest is re-checked against the
+ * requested version/slug/userId.
  *
  * Throws when the object is missing, the read fails, the payload is not valid
- * JSON, or the parsed payload is not a well-formed bundle (no `sceneData`). A
- * throw is the fall-back signal for the play route — a malformed bundle must
- * never be served as if it were empty scene data.
+ * JSON, the parsed payload is not a well-formed bundle (no `sceneData`), or the
+ * manifest does not match the requested publication (version/slug/userId). Every
+ * throw is the fall-back signal for the play route — a missing OR stale OR
+ * malformed bundle must never be served as if it were the current scene data.
  */
 export async function readPublishedGameBundle(
   userId: string,
   slug: string,
+  version: number,
 ): Promise<PublishedGameBundle> {
-  const key = buildPublishedGameKey(userId, slug);
+  const key = buildPublishedGameKey(userId, slug, version);
   const raw = await getObjectFromR2(key);
   const parsed = JSON.parse(raw) as Partial<PublishedGameBundle>;
   if (parsed === null || typeof parsed !== 'object' || !('sceneData' in parsed)) {
     throw new Error(`Published game bundle at ${key} is malformed (no sceneData)`);
+  }
+  const manifest = (parsed as PublishedGameBundle).manifest;
+  if (
+    !manifest ||
+    typeof manifest !== 'object' ||
+    manifest.version !== version ||
+    manifest.slug !== slug ||
+    manifest.userId !== userId
+  ) {
+    throw new Error(
+      `Published game bundle at ${key} does not match the requested publication ` +
+        '(version/slug/userId mismatch) — treating as stale',
+    );
   }
   return parsed as PublishedGameBundle;
 }

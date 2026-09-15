@@ -64,17 +64,23 @@ async function GET_impl(
 
     // Resolve the scene data. When this game was mirrored to R2 on publish
     // (cdn_bundle_key set) and the mirror is enabled, read the bundle from
-    // object storage FIRST — that is the CDN-backed fast path (#7580). Any read
-    // failure (missing object, transport error, malformed JSON) is logged to
-    // Sentry and falls through to the existing Postgres-served sceneData, which
-    // remains the source of truth. The remix path is deliberately untouched: it
-    // still reads projects.sceneData directly and quarantines scripts.
+    // object storage FIRST — that is the CDN-backed fast path (#7580). The read
+    // is keyed by the DB row's OWN version (games/{userId}/{slug}/v{version}/…),
+    // so it can only fetch the object matching the version the database claims:
+    // a bundle from a later, uncommitted, or failed republish lives at a
+    // different key and is invisible here, and readPublishedGameBundle also
+    // re-checks the manifest against version/slug/userId. Any read failure
+    // (missing object, transport error, malformed JSON, or a stale/mismatched
+    // bundle) is logged to Sentry and falls through to the Postgres-served
+    // sceneData, which remains the source of truth. The remix path is
+    // deliberately untouched: it still reads projects.sceneData directly and
+    // quarantines scripts.
     let sceneData: unknown;
     let servedFromR2 = false;
 
     if (game.cdnBundleKey && isPublishToR2Enabled()) {
       try {
-        const bundle = await readPublishedGameBundle(clerkId, slug);
+        const bundle = await readPublishedGameBundle(clerkId, slug, game.version);
         sceneData = bundle.sceneData;
         servedFromR2 = true;
       } catch (err) {

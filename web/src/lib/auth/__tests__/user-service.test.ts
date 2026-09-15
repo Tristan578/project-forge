@@ -574,6 +574,75 @@ describe('deleteUserAccount', () => {
     expect(mockDeleteManyFromR2).not.toHaveBeenCalled();
   });
 
+  /**
+   * Published-game bundles mirrored to R2 on publish (#7580) are keyed off the
+   * creator's clerkId and versioned, so the live object key can only come from
+   * the row's own `cdn_bundle_key`. deleteUserAccount reads it from the FIRST
+   * select (published games) and must sweep it, or every game a deleted user
+   * published leaves an orphaned bundle in R2 with no DB row to reconcile
+   * against — the exact gap the round-1 review flagged (#7580 review round 2,
+   * items 3 & 6).
+   */
+  it('sweeps the R2 bundle keys of the user\'s published games', async () => {
+    let call = 0;
+    mockSelect.mockImplementation(() => {
+      call++;
+      // Call 1 = published games (id + cdn_bundle_key). A NULL key means the
+      // game was never mirrored — there is no object to remove.
+      if (call === 1) {
+        return buildSelectChain([
+          { id: 'game-1', cdnBundleKey: 'games/clerk_abc/space-run/v3/bundle.json' },
+          { id: 'game-2', cdnBundleKey: 'games/clerk_abc/maze/v1/bundle.json' },
+          { id: 'game-3', cdnBundleKey: null },
+        ] as never);
+      }
+      // Calls 2 (projects) and 3 (marketplace assets): none.
+      return buildSelectChain([]);
+    });
+
+    await deleteUserAccount('user-uuid-1');
+
+    expect(mockDeleteManyFromR2).toHaveBeenCalledTimes(1);
+    // Exactly the two non-null bundle keys, and no `.status.json` sidecars —
+    // no Worker writes a sidecar beside a game bundle.
+    expect(mockDeleteManyFromR2).toHaveBeenCalledWith([
+      'games/clerk_abc/space-run/v3/bundle.json',
+      'games/clerk_abc/maze/v1/bundle.json',
+    ]);
+  });
+
+  it('sweeps marketplace-asset keys AND published-game bundle keys together', async () => {
+    let call = 0;
+    mockSelect.mockImplementation(() => {
+      call++;
+      if (call === 1) {
+        return buildSelectChain([
+          { id: 'game-1', cdnBundleKey: 'games/clerk_abc/runner/v2/bundle.json' },
+        ] as never);
+      }
+      if (call === 3) {
+        return buildSelectChain([
+          {
+            id: 'asset-1',
+            previewUrl: null,
+            assetFileUrl: 'https://cdn.spawnforge.ai/assets/user-uuid-1/asset-1/file/model.glb',
+          },
+        ] as never);
+      }
+      return buildSelectChain([]);
+    });
+
+    await deleteUserAccount('user-uuid-1');
+
+    // Asset keys (each with their sidecar) come first, then the game bundle
+    // keys appended as-is.
+    expect(mockDeleteManyFromR2).toHaveBeenCalledWith([
+      'assets/user-uuid-1/asset-1/file/model.glb',
+      'assets/user-uuid-1/asset-1/file/model.glb.status.json',
+      'games/clerk_abc/runner/v2/bundle.json',
+    ]);
+  });
+
   it('skips keys outside the assets/{userId}/{assetId}/ prefix owned by this user', async () => {
     // previewUrl/assetFileUrl are seller-writable via the asset PATCH route, so
     // a departing seller must not be able to take another seller's object down.

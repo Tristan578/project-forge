@@ -14,6 +14,7 @@ import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { isPublishToR2Enabled } from '@/lib/config/assetStorage';
 import { writePublishedGameBundle } from '@/lib/storage/publishedGameStorage';
+import { deleteManyFromR2 } from '@/lib/storage/r2';
 
 const publishSchema = z.object({
   projectId: z.string().trim().min(1).max(100),
@@ -183,6 +184,7 @@ async function POST_impl(request: NextRequest) {
       slug: publishedGames.slug,
       version: publishedGames.version,
       flaggedAt: publishedGames.flaggedAt,
+      cdnBundleKey: publishedGames.cdnBundleKey,
     })
     .from(publishedGames)
     .where(and(
@@ -277,11 +279,16 @@ async function POST_impl(request: NextRequest) {
   if (existingSlug.length > 0) {
     // Update existing publication (republish)
     const gameDbId = existingSlug[0].id;
+    const previousBundleKey = existingSlug[0].cdnBundleKey;
     const newVersion = existingSlug[0].version + 1;
-    // A fresh bundle for the new version. On failure `bundle` is null, so the
-    // row drops back to the Postgres-served /play URL and clears any stale key
-    // — /play must never point at a bundle carrying the previous version's
-    // scene data.
+    // A fresh bundle for the new version, written to its OWN version-specific
+    // key (games/{userId}/{slug}/v{newVersion}/bundle.json). Because the key
+    // carries the version, this write NEVER overwrites the previous version's
+    // object — so even if the DB update below throws, the still-committed row
+    // keeps pointing (via its unchanged version) at the intact previous bundle
+    // and /play serves the right bytes (#7580 review round 2). On mirror
+    // failure `bundle` is null, so the row drops back to Postgres-served scene
+    // data and clears any stale key.
     const bundle = await mirrorBundleToR2(newVersion);
     // cdnUrl ALWAYS stays the stable internal /play route. Every consumer of
     // this column (the community gallery's Play button and share link, the
@@ -302,6 +309,19 @@ async function POST_impl(request: NextRequest) {
         updatedAt: new Date(),
       })
       .where(eq(publishedGames.id, gameDbId)));
+
+    // Best-effort cleanup of the version we just superseded. The DB update has
+    // committed, so nothing points at `previousBundleKey` any more: versioned
+    // keys mean each republish writes a NEW object, so without this every
+    // republish would leak the prior version's bundle in R2 forever.
+    // deleteManyFromR2 NEVER throws — an object-storage hiccup here must not
+    // fail a publish that already succeeded; a leftover object is recoverable.
+    // Skip when the key is unchanged (mirror failed AND there was no prior key)
+    // or when the new bundle reused the same key (it never does — the version
+    // changed), so we never delete the object we just wrote.
+    if (previousBundleKey && previousBundleKey !== bundle?.key) {
+      await deleteManyFromR2([previousBundleKey]);
+    }
 
     // Replace tags
     await queryWithResilience(() => getDb().delete(gameTags).where(eq(gameTags.gameId, gameDbId)));

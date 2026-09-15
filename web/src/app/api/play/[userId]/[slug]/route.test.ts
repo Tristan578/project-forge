@@ -206,7 +206,7 @@ describe('GET /api/play/[userId]/[slug]', () => {
     const gameChain = mockDbChain([{
       id: 'game-1', title: 'CDN Game', description: 'Fast!',
       slug: 'cdn-game', userId: 'db-user-1', status: 'published',
-      projectId: 'proj-1', version: 2, cdnBundleKey: 'games/clerk_1/cdn-game/bundle.json',
+      projectId: 'proj-1', version: 2, cdnBundleKey: 'games/clerk_1/cdn-game/v2/bundle.json',
     }]);
     // No project chain: if the route queried projects this would be undefined
     // and the test would surface it.
@@ -221,11 +221,56 @@ describe('GET /api/play/[userId]/[slug]', () => {
 
     expect(res.status).toBe(200);
     expect(data.game.sceneData).toEqual(bundleScene);
-    expect(readBundleMock).toHaveBeenCalledWith('clerk_1', 'cdn-game');
+    // The read is keyed by the DB row's OWN version, so the route passes
+    // game.version through — that is what pins the read to the object matching
+    // the version the database claims (#7580 review round 2).
+    expect(readBundleMock).toHaveBeenCalledWith('clerk_1', 'cdn-game', 2);
     // Two selects only (user + game). A third would mean it fell back to the
     // projects.sceneData query despite a successful R2 read.
     expect(select).toHaveBeenCalledTimes(2);
     expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to Postgres when the bundle is stale (manifest/version mismatch)', async () => {
+    // readPublishedGameBundle throws on a version/slug/userId mismatch (its unit
+    // tests pin that). At the route level that throw must be treated exactly
+    // like a missing object: log to Sentry and serve the Postgres scene data,
+    // never the stale bundle (#7580 review round 2, item 2).
+    isPublishToR2EnabledMock.mockReturnValue(true);
+    readBundleMock.mockRejectedValue(
+      new Error('bundle does not match the requested publication — treating as stale'),
+    );
+
+    const dbScene = { entities: [{ id: 'from-postgres-not-stale' }] };
+    const userChain = mockDbChain([{ id: 'db-user-1', displayName: 'GameMaker' }]);
+    const gameChain = mockDbChain([{
+      id: 'game-1', title: 'CDN Game', description: 'Fresh',
+      slug: 'cdn-game', userId: 'db-user-1', status: 'published',
+      projectId: 'proj-1', version: 5, cdnBundleKey: 'games/clerk_1/cdn-game/v5/bundle.json',
+    }]);
+    const projectChain = mockDbChain([{ sceneData: dbScene }]);
+    const select = vi.fn()
+      .mockReturnValueOnce(userChain)
+      .mockReturnValueOnce(gameChain)
+      .mockReturnValueOnce(projectChain);
+    const mockDb = { select, update: vi.fn().mockReturnValue(mockUpdateChain()) };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { GET } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/play/clerk_1/cdn-game');
+    const res = await GET(req, { params: Promise.resolve({ userId: 'clerk_1', slug: 'cdn-game' }) });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.game.sceneData).toEqual(dbScene);
+    // The stale bundle is rejected, the projects fallback query runs, and the
+    // mismatch is surfaced to Sentry under the same stage as any other R2 read
+    // failure.
+    expect(readBundleMock).toHaveBeenCalledWith('clerk_1', 'cdn-game', 5);
+    expect(select).toHaveBeenCalledTimes(3);
+    expect(captureExceptionMock).toHaveBeenCalledTimes(1);
+    const ctx = captureExceptionMock.mock.calls[0][1] as { stage?: string };
+    expect(ctx.stage).toBe('r2-bundle-read');
   });
 
   it('falls back to Postgres sceneData and logs to Sentry when the R2 read fails', async () => {
@@ -237,7 +282,7 @@ describe('GET /api/play/[userId]/[slug]', () => {
     const gameChain = mockDbChain([{
       id: 'game-1', title: 'CDN Game', description: 'Fallback',
       slug: 'cdn-game', userId: 'db-user-1', status: 'published',
-      projectId: 'proj-1', version: 2, cdnBundleKey: 'games/clerk_1/cdn-game/bundle.json',
+      projectId: 'proj-1', version: 2, cdnBundleKey: 'games/clerk_1/cdn-game/v2/bundle.json',
     }]);
     const projectChain = mockDbChain([{ sceneData: dbScene }]);
     const select = vi.fn()
