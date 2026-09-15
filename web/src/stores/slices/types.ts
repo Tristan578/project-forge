@@ -240,6 +240,17 @@ export interface SkinData2d {
   attachments: Record<string, AttachmentData2d>;
 }
 
+/**
+ * Per-vertex bone influences for a mesh attachment: `bones[i]` is skinned by
+ * `weights[i]`, read index-for-index by the engine's `skin_vertices_lbs`. The
+ * shape mirrors `VertexWeights` on the engine and `WireVertexWeights2d` on the
+ * wire.
+ */
+export interface VertexWeights2d {
+  bones: string[];
+  weights: number[];
+}
+
 export interface AttachmentData2d {
   type: 'sprite' | 'mesh';
   textureId: string;
@@ -249,6 +260,15 @@ export interface AttachmentData2d {
   vertices?: [number, number][];
   uvs?: [number, number][];
   triangles?: number[];
+  /**
+   * One entry per vertex for a `mesh` attachment. The store used to have no home
+   * for weights, so a mesh attachment authored anywhere but the raw
+   * `add_skeleton2d_mesh_attachment` command reached the engine unweighted and
+   * every vertex stayed at its bind position (#9732). The inspector's mesh
+   * editor and `parseSkeletonWire2d` now carry it so a round-trip preserves the
+   * skinning instead of silently flattening it.
+   */
+  weights?: VertexWeights2d[];
 }
 
 export interface IkConstraint2d {
