@@ -16,6 +16,7 @@ import { EditorErrorBoundary } from '@/components/editor/EditorErrorBoundary';
 import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
 import { EngineCrashOverlay } from '@/components/editor/EngineCrashOverlay';
 import { RemixQuarantineNotice } from '@/components/editor/RemixQuarantineNotice';
+import { SceneLoadErrorNotice } from '@/components/editor/SceneLoadErrorNotice';
 
 function EditorPageContent() {
   const params = useParams();
@@ -86,6 +87,13 @@ function EditorPageContent() {
       <WasmErrorBoundary>
         <EngineCrashOverlay />
         <RemixQuarantineNotice count={quarantinedScripts} />
+        {/* Renders only when a scene load was REJECTED. `loadScene`'s boolean is
+            deliberately still discarded above: it is also false on a healthy
+            cold open (no engine dispatcher yet), so the store's
+            `sceneLoadError` — set only on the rejection branches — is the one
+            fact that can be shown to the user without false positives
+            (#10056). */}
+        <SceneLoadErrorNotice />
         <EditorLayout />
       </WasmErrorBoundary>
     </EditorErrorBoundary>

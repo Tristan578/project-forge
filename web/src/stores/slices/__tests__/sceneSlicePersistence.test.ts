@@ -11,8 +11,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
-import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
+import { loadProjectScenes, saveProjectScenes, readPrefabInstances, readPrefabDefinitions } from '@/lib/scenes/sceneManager';
 import { SCENE_EXPORTED_EVENT, SCENE_CAPTURE_TIMEOUT_MS } from '@/lib/scenes/captureScene';
+import {
+  loadPrefabs,
+  loadPrefabInstances,
+  savePrefabsToStorage,
+  savePrefabInstancesToStorage,
+  type PrefabInstance,
+} from '@/lib/prefabs/prefabStore';
+import { foldExportedSceneJson } from '@/lib/prefabs/prefabSceneFold';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 
 const LIVE_SCENE = {
@@ -24,16 +32,31 @@ const LIVE_SCENE = {
   }],
 };
 
-/** A dispatcher that answers `export_scene` the way the engine bridge does. */
+/**
+ * A dispatcher that answers `export_scene` the way the engine bridge AND its
+ * `SCENE_EXPORTED` handler do together.
+ *
+ * The prefab fold is deliberately the real `foldExportedSceneJson` rather than
+ * a restatement of it: the store no longer folds the registry a second time on
+ * the way out of the capture (that second, later read is what let an instance
+ * reach `prefabInstances` while its definition stayed missing from
+ * `prefabDefinitions`), so a double that skipped the fold would be asserting
+ * against a pipeline production does not have.
+ */
 function answeringDispatcher() {
   const calls: Array<{ command: string; payload: unknown }> = [];
   const dispatch = (command: string, payload: unknown) => {
     calls.push({ command, payload });
     if (command === 'validate_scene') return { success: true };
     if (command === 'export_scene') {
+      const requestId = (payload as { requestId?: string } | undefined)?.requestId;
       window.dispatchEvent(
         new CustomEvent(SCENE_EXPORTED_EVENT, {
-          detail: { json: JSON.stringify(LIVE_SCENE), name: LIVE_SCENE.metadata?.name },
+          detail: {
+            json: foldExportedSceneJson(JSON.stringify(LIVE_SCENE), requestId),
+            name: LIVE_SCENE.metadata?.name,
+            requestId,
+          },
         })
       );
     }
@@ -122,6 +145,193 @@ describe('sceneSlice scene persistence', () => {
     error.mockRestore();
   });
 
+  it('keeps the current scene selected when no engine can accept the switch', async () => {
+    // Creating the target scene still needs an engine (scene.FR-3 hardening,
+    // #10050) — the case under test is the SWITCH finding no engine, so the
+    // dispatcher is cleared only after the target scene exists.
+    setSceneDispatcher(answeringDispatcher().dispatch);
+    store.getState().createNewScene('Second');
+    const target = store.getState().scenes.find((s) => s.name === 'Second');
+    const before = loadProjectScenes();
+    setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+    await store.getState().switchScene(target!.id);
+
+    expect(loadProjectScenes()).toEqual(before);
+    expect(store.getState().activeSceneId).toBe(before.activeSceneId);
+  });
+
+  // scene.FR-1 N1: linked prefab instances must survive save/reopen with zero
+  // silent data loss. These drive the REAL switch path end to end — not the
+  // isolated writePrefabInstances/readPrefabInstances helpers — because the bug
+  // this guards is exactly that the helpers were never wired into it.
+  describe('prefab-instance round-trip through the real switch path', () => {
+    const INSTANCE: PrefabInstance = {
+      instanceId: 'pfi_round',
+      prefabId: 'prefab_src',
+      overrides: { name: 'Overridden', entityType: 'sphere' },
+      entityId: 'ent_1',
+    };
+
+    beforeEach(() => {
+      // A portable saved link must have a real source definition.
+      savePrefabsToStorage([{
+        id: 'prefab_src', name: 'Source', category: 'test', description: '',
+        createdAt: '2026-09-15T00:00:00Z', updatedAt: '2026-09-15T00:00:00Z',
+        snapshot: { entityType: 'cube', name: 'Source', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      }]);
+    });
+
+    it('preserves links when switching to an unsaved scene is rejected', async () => {
+      const { dispatch } = answeringDispatcher();
+      setSceneDispatcher((command, payload) => {
+        if (command === 'new_scene') {
+          dispatch(command, payload);
+          return { success: false, error: 'Rejected' };
+        }
+        return dispatch(command, payload);
+      });
+      store.getState().createNewScene('Unsaved');
+      const target = store.getState().scenes.find((scene) => scene.name === 'Unsaved')!;
+      const project = loadProjectScenes();
+      project.scenes.find((scene) => scene.id === target.id)!.data = null;
+      saveProjectScenes(project);
+      savePrefabInstancesToStorage([INSTANCE]);
+
+      await store.getState().switchScene(target.id);
+
+      expect(loadPrefabInstances()).toEqual([INSTANCE]);
+      expect(loadProjectScenes().activeSceneId).toBe(project.activeSceneId);
+      expect(store.getState().activeSceneId).not.toBe(target.id);
+    });
+
+    it('does not restore an instance whose source was explicitly deleted', () => {
+      savePrefabInstancesToStorage([INSTANCE]);
+      store.getState().loadScene(JSON.stringify({ ...LIVE_SCENE, prefabInstances: [{ ...INSTANCE, prefabId: 'deleted' }] }));
+      // With no dispatcher there is no transition, so the old registry remains.
+      expect(loadPrefabInstances()).toEqual([INSTANCE]);
+      setSceneDispatcher(() => ({ success: true }));
+      store.getState().loadScene(JSON.stringify({ ...LIVE_SCENE, prefabInstances: [{ ...INSTANCE, prefabId: 'deleted' }] }));
+      expect(loadPrefabInstances()).toEqual([]);
+    });
+
+    it('writes the live registry into the outgoing scene and restores it on return', async () => {
+      const { dispatch } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+
+      const originalId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      // The user has built a linked prefab instance in the active (original) scene.
+      savePrefabInstancesToStorage([INSTANCE]);
+
+      // Switch away: the instance must be folded into the outgoing scene's file...
+      await store.getState().switchScene(target!.id);
+      const outgoing = loadProjectScenes().scenes.find((s) => s.id === originalId);
+      expect(readPrefabInstances(outgoing?.data)).toEqual([INSTANCE]);
+      // ...and the empty incoming scene must reset the live registry so its
+      // instances do not bleed across the scene boundary.
+      expect(loadPrefabInstances()).toEqual([]);
+
+      // Reopen the original scene: the registry must repopulate with the exact
+      // instance — stable id, source link, overrides and entity binding intact.
+      await store.getState().switchScene(originalId);
+      const restored = loadPrefabInstances();
+      expect(restored).toHaveLength(1);
+      expect(restored[0].instanceId).toBe('pfi_round');
+      expect(restored[0].prefabId).toBe('prefab_src');
+      expect(restored[0].overrides).toEqual({ name: 'Overridden', entityType: 'sphere' });
+      expect(restored[0].entityId).toBe('ent_1');
+    });
+
+    // #10056. The capture is an asynchronous round trip, and the store used to
+    // fold the prefab registry a SECOND time on the way out of it — a separate,
+    // later read of a registry that any scene load landing inside the window
+    // REPLACES wholesale (`restorePrefabInstances`). The outgoing scene's file
+    // then recorded the INCOMING scene's instances, paired against whatever
+    // definitions the other read collected. Staging at request time is what
+    // makes instances and definitions one snapshot taken before the ask.
+    it('persists the registry staged at request time, not one a mid-capture load installed', async () => {
+      const answers: Array<() => void> = [];
+      setSceneDispatcher((command, payload) => {
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          const requestId = (payload as { requestId?: string } | undefined)?.requestId;
+          answers.push(() => window.dispatchEvent(new CustomEvent(SCENE_EXPORTED_EVENT, {
+            detail: {
+              json: foldExportedSceneJson(JSON.stringify(LIVE_SCENE), requestId),
+              name: LIVE_SCENE.metadata?.name,
+              requestId,
+            },
+          })));
+        }
+        return undefined;
+      });
+
+      const originalId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second')!;
+      savePrefabInstancesToStorage([INSTANCE]);
+
+      const pending = store.getState().switchScene(target.id);
+      // Held rather than answered: this is the window a concurrent scene load
+      // lands in. Assert the request actually went out, so a switch that never
+      // exported cannot pass this test by inspecting nothing.
+      expect(answers).toHaveLength(1);
+      savePrefabsToStorage([
+        ...loadPrefabs(),
+        {
+          id: 'prefab_other', name: 'Other', category: 'test', description: '',
+          createdAt: '2026-09-15T00:00:00Z', updatedAt: '2026-09-15T00:00:00Z',
+          snapshot: { entityType: 'cube', name: 'Other', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+        },
+      ]);
+      savePrefabInstancesToStorage([{ instanceId: 'pfi_other', prefabId: 'prefab_other', overrides: {} }]);
+      answers[0]();
+      await pending;
+
+      const outgoing = loadProjectScenes().scenes.find((s) => s.id === originalId);
+      expect(readPrefabInstances(outgoing?.data)).toEqual([INSTANCE]);
+      // ...and every instance it did record resolves against the definitions
+      // written into the SAME file, which is the pairing the second read broke.
+      const definitionIds = new Set(readPrefabDefinitions(outgoing?.data).map((prefab) => prefab.id));
+      expect(definitionIds.has('prefab_src')).toBe(true);
+      expect(readPrefabInstances(outgoing?.data).map((i) => definitionIds.has(i.prefabId))).toEqual([true]);
+    });
+
+    it('carries the live registry into a duplicated scene', async () => {
+      const { dispatch } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+
+      const activeId = loadProjectScenes().activeSceneId;
+      savePrefabInstancesToStorage([INSTANCE]);
+
+      await store.getState().duplicateScene(activeId);
+
+      const copy = loadProjectScenes().scenes.find((s) => s.name.endsWith('Copy'));
+      expect(readPrefabInstances(copy?.data)).toEqual([INSTANCE]);
+    });
+
+    it('leaves an instance-free scene byte-identical (no empty prefabInstances field)', async () => {
+      const { dispatch } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+
+      const originalId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      // Registry is empty — deleting all instances must persist as "no instances",
+      // and the outgoing scene file must not gain a spurious prefabInstances key.
+      savePrefabInstancesToStorage([]);
+
+      await store.getState().switchScene(target!.id);
+      const outgoing = loadProjectScenes().scenes.find((s) => s.id === originalId);
+      expect(outgoing?.data).toEqual(LIVE_SCENE);
+      expect(outgoing?.data && 'prefabInstances' in outgoing.data).toBe(false);
+    });
+  });
+
   it('preserves the last saved project when no engine is connected', async () => {
     setSceneDispatcher(answeringDispatcher().dispatch);
     store.getState().createNewScene('Second');
@@ -130,5 +340,128 @@ describe('sceneSlice scene persistence', () => {
     setSceneDispatcher(null);
     await store.getState().switchScene(target!.id);
     expect(localStorage.getItem('forge-project-scenes')).toBe(before);
+  });
+
+  /**
+   * #10056. These two capture the LIVE engine scene and write it into stored
+   * project data. After a rejected load the engine is not holding this
+   * project's scene, so capturing would persist an empty scene over the
+   * outgoing one — the same data loss as the cloud-save path, one storage layer
+   * down. `captureActiveScene` also uses an un-prefixed request id, so its
+   * export would additionally tick autosave and the panic backup.
+   */
+  describe('refusing to capture a rejected scene (#10056)', () => {
+    /** Reject a load so `sceneLoadError` is set, then restore `dispatch`. */
+    function rejectALoad(restore: (command: string, payload: unknown) => unknown) {
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')))).toBe(false);
+      expect(store.getState().sceneLoadError).not.toBeNull();
+      setSceneDispatcher(restore as (command: string, payload: unknown) => void);
+    }
+
+    it('switchScene neither exports nor overwrites the outgoing scene', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { dispatch, calls } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+      const outgoingId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      rejectALoad(dispatch);
+      calls.length = 0;
+
+      await store.getState().switchScene(target!.id);
+
+      expect(calls.filter((c) => c.command === 'export_scene')).toHaveLength(0);
+      expect(loadProjectScenes().scenes.find((s) => s.id === outgoingId)?.data).not.toEqual(LIVE_SCENE);
+      // The switch did not happen either — a half-applied switch would be worse.
+      expect(loadProjectScenes().activeSceneId).toBe(outgoingId);
+      expect(error).toHaveBeenCalled();
+      error.mockRestore();
+    });
+
+    it('createCheckpoint refuses and reports why instead of recording an empty scene', async () => {
+      const { dispatch, calls } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+      rejectALoad(dispatch);
+      calls.length = 0;
+
+      const checkpoint = await store.getState().createCheckpoint('before refactor');
+
+      expect(checkpoint).toBeNull();
+      expect(calls.filter((c) => c.command === 'export_scene')).toHaveLength(0);
+      expect(store.getState().checkpointError).toContain('No checkpoint was saved');
+    });
+  });
+
+  /**
+   * #10056 (the save-lockout regression). A rejected switch TARGET must not be
+   * mistaken for a stranded editor. The engine declines the incoming scene, the
+   * OUTGOING scene stays on screen and stays this project's — so `sceneLoadError`
+   * must NOT be set, and every save path (`saveScene`, `createCheckpoint`, the
+   * autosave ticker, cloud save, another switch) must stay open. Before the fix
+   * `loadScene` set the flag on the engine-refusal branch unconditionally, so a
+   * single refused switch left the user's still-live, unsaved scene permanently
+   * unsavable with no exit that did not destroy it.
+   */
+  describe('a rejected switch target does not strand the outgoing scene (#10056)', () => {
+    /**
+     * Answers `validate_scene`/`export_scene` as the bridge does — echoing the
+     * `requestId` so the checkpoint capture, which correlates on it, resolves —
+     * but REFUSES every `load_scene`.
+     */
+    function refusingIncomingLoadDispatcher() {
+      const calls: Array<{ command: string; payload: unknown }> = [];
+      const dispatch = (command: string, payload: unknown): { success: boolean; error?: string } | void => {
+        calls.push({ command, payload });
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'load_scene') return { success: false, error: 'Scene JSON too large' };
+        if (command === 'export_scene') {
+          const { requestId } = (payload ?? {}) as { requestId?: string };
+          window.dispatchEvent(
+            new CustomEvent(SCENE_EXPORTED_EVENT, {
+              detail: { json: JSON.stringify(LIVE_SCENE), name: LIVE_SCENE.metadata?.name, requestId },
+            })
+          );
+        }
+        return { success: true };
+      };
+      return { dispatch, calls };
+    }
+
+    it('keeps the outgoing scene active, unflagged, and fully savable', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { dispatch, calls } = refusingIncomingLoadDispatcher();
+      setSceneDispatcher(dispatch);
+
+      const outgoingId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second')!;
+      // Give the target real data so the switch dispatches `load_scene` (the
+      // rejection branch under test) rather than falling through to `newScene`.
+      const seeded = loadProjectScenes();
+      seeded.scenes.find((s) => s.id === target.id)!.data = LIVE_SCENE;
+      saveProjectScenes(seeded);
+
+      await store.getState().switchScene(target.id);
+
+      // The incoming scene was refused, so scene A is still active and trustworthy.
+      expect(loadProjectScenes().activeSceneId).toBe(outgoingId);
+      expect(store.getState().activeSceneId).not.toBe(target.id);
+      // The regression: a refused switch used to raise `sceneLoadError`, which
+      // gates every save path below.
+      expect(store.getState().sceneLoadError).toBeNull();
+
+      // Saving the still-live outgoing scene must still reach the engine.
+      calls.length = 0;
+      store.getState().saveScene('req_after_failed_switch');
+      expect(calls.filter((c) => c.command === 'export_scene')).toHaveLength(1);
+
+      // And a checkpoint of it must still be recordable, not refused.
+      const checkpoint = await store.getState().createCheckpoint('safety net');
+      expect(checkpoint).not.toBeNull();
+      expect(store.getState().checkpointError).toBeNull();
+      error.mockRestore();
+    });
   });
 });

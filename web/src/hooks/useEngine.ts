@@ -57,6 +57,12 @@ export type WasmModule = {
   handle_command_batch: (batch: unknown) => unknown;
   set_init_callback: (callback: (phase: string, message?: string, error?: string) => void) => void;
   set_event_callback: (callback: (event: unknown) => void) => void;
+  /**
+   * Arm/disarm per-frame system-timing emission (performance.FR-1.OP-01).
+   * Optional: engine bundles built before #9880 do not export it, so every
+   * caller must optional-chain the call.
+   */
+  set_system_timing_capture?: (active: boolean) => void;
 };
 
 let wasmModule: WasmModule | null = null;

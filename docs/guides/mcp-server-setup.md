@@ -57,8 +57,8 @@ The editor side is opt-in per tab (the `?mcp=` parameter), is off in production
 builds unless `NEXT_PUBLIC_MCP_BRIDGE=true`, and asks for your consent in the tab
 before it attaches — a small dialog naming what the agent can and cannot do.
 Once attached, a persistent indicator names each command that ran or was
-refused, with a one-click **Detach**. The bridge runs an **allowlist**: 311 of
-the 369 commands are permitted by name, and anything not enumerated — including
+refused, with a one-click **Detach**. The bridge runs an **allowlist**: 315 of
+the 373 commands are permitted by name, and anything not enumerated — including
 any command added to the manifest later — is refused. Scripting is denied
 outright: `create_script` source reaches `Function(...)` in the editor (see SEC-2
 in the root `CLAUDE.md`), as are commands that spend generation tokens, export,
@@ -243,7 +243,7 @@ Nine high-level tools that chain multiple commands in sequence:
 | `create_level_layout` | Generate a level layout with ground, walls, obstacles and spawn points |
 | `setup_game_from_description` | Scaffold a complete, playable game from a plain-text description |
 
-Use `list_doc_topics` or `search_docs` to discover the full set of 369 commands by category.
+Use `list_doc_topics` or `search_docs` to discover the full set of 373 commands by category.
 
 ## Available Resources
 
@@ -354,7 +354,7 @@ If a command times out, the error message will name the specific command. Retry 
 
 ## Command Reference
 
-For a complete list of all 369 commands with full parameter schemas, see:
+For a complete list of all 373 commands with full parameter schemas, see:
 
 - [Command Reference](../reference/commands.md)
 - Use the `search_docs` tool to find commands by keyword

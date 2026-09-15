@@ -422,7 +422,16 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
     const nameToId: Record<string, string> = {};
 
-    if (clearExisting) ctx.store.newScene();
+    // `newScene()` returns false when the engine refuses to clear the scene.
+    // Discarding it would spawn every entity below on top of the scene the user
+    // asked to replace, then report success — the same false-success class
+    // `newScene` was made boolean to close (#10056). Stop before spawning.
+    if (clearExisting && ctx.store.newScene() === false) {
+      return {
+        success: false,
+        error: 'The engine did not accept a new scene, so the existing scene was not cleared. Nothing was created.',
+      };
+    }
 
     if (envSettings) {
       if (envSettings.ambientColor || envSettings.ambientBrightness) {

@@ -80,6 +80,7 @@ pub mod snap;
 /// with the file rather than with this declaration.
 mod snapshot_producer_parity_tests;
 pub mod sprite;
+pub mod system_timing;
 pub mod terrain;
 pub mod tilemap;
 pub mod tileset;

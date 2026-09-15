@@ -672,6 +672,13 @@ export function EditorLayout() {
         };
       },
       () => {
+        // This ticker dispatches `export_scene` DIRECTLY rather than through
+        // the store's `saveScene`, so it does not inherit that action's refusal
+        // and needs its own: after a rejected scene load the engine holds an
+        // empty scene, and every SCENE_EXPORTED consumer (localStorage
+        // autosave, the IndexedDB cache, the sessionStorage panic backup) would
+        // record it as this project's recoverable state (#10056).
+        if (useEditorStore.getState().sceneLoadError) return;
         const dispatcher = getCommandDispatcher();
         // `export_scene`, not `save_scene`: only export emits SCENE_EXPORTED, which
         // is the sole thing that populates autoSave's scene-JSON cache. `save_scene`

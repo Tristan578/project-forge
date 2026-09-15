@@ -202,6 +202,23 @@ describe('sceneCreateExecutor', () => {
     vi.unstubAllGlobals();
   });
 
+  // #10056: `newScene()` was made boolean precisely so a refused new scene
+  // cannot be reported as success, but this executor discarded the result and
+  // returned `successResult` regardless — so the pipeline reported a created
+  // scene the engine never emptied, and every later step stacked the generated
+  // game on top of the starter Ground/Player/Sun.
+  it('fails the step when the engine refuses to clear the starter scene', async () => {
+    const ctx = makeCtx({ store: {
+      projectId: null, setScenes: vi.fn(), newScene: vi.fn(() => false), sceneGraph: { nodes: {} },
+    } });
+
+    const result = await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('COMMAND_FAILED');
+    expect(ctx.getStore().newScene).toHaveBeenCalled();
+  });
+
   it('aborts before touching persisted scenes', async () => {
     const controller = new AbortController();
     controller.abort();
