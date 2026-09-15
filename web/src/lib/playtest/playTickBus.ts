@@ -51,6 +51,8 @@ let latest: PlayTickSnapshot | null = null;
  *
  * Listeners must not throw — one bad listener would otherwise starve the rest
  * of the frame's fan-out — so each is invoked defensively by `publishPlayTick`.
+ * @param listener Observer called with each published engine snapshot.
+ * @returns An unsubscribe function that removes this observer.
  */
 export function subscribePlayTick(listener: Listener): () => void {
   listeners.add(listener);
@@ -59,7 +61,11 @@ export function subscribePlayTick(listener: Listener): () => void {
   };
 }
 
-/** Publish a play-tick snapshot to every subscriber and cache it as `latest`. */
+/**
+ * Cache a snapshot and deliver it to every subscriber.
+ * @param snapshot Current engine entities, evaluated input and elapsed play time.
+ * @returns Nothing; subscriber errors are reported without stopping delivery.
+ */
 export function publishPlayTick(snapshot: PlayTickSnapshot): void {
   latest = snapshot;
   for (const listener of listeners) {
@@ -74,7 +80,7 @@ export function publishPlayTick(snapshot: PlayTickSnapshot): void {
   }
 }
 
-/** The most recent published snapshot, or null if none since the last reset. */
+/** @returns The latest published snapshot, or null since the last reset. */
 export function getLatestPlayTick(): PlayTickSnapshot | null {
   return latest;
 }
@@ -83,6 +89,7 @@ export function getLatestPlayTick(): PlayTickSnapshot | null {
  * Drop the cached snapshot. Called when Play stops so a replay started in a
  * later session cannot read a stale final frame from the previous one. Active
  * subscriptions are left untouched — their owners manage their own lifetimes.
+ * @returns Nothing; clears only the cached snapshot.
  */
 export function resetPlayTickBus(): void {
   latest = null;

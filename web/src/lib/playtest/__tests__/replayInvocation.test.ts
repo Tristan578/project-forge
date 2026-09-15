@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDomKeyboardEnvironment } from '../replayInvocation';
+import { buildActionKeyResolver, createDomKeyboardEnvironment } from '../replayInvocation';
 import { publishPlayTick, resetPlayTickBus } from '../playTickBus';
 
 function environment() {
@@ -14,6 +14,19 @@ afterEach(() => {
 });
 
 describe('browser replay boundary', () => {
+  it('resolves digital and signed axis bindings without pressing the opposite direction', () => {
+    const resolve = buildActionKeyResolver([
+      { actionName: 'jump', actionType: 'digital', sources: ['Space'] },
+      { actionName: 'move', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'] },
+    ]);
+    expect(resolve('jump', { pressed: true })).toEqual(['Space']);
+    expect(resolve('move', { pressed: true, axis: 1 })).toEqual(['KeyD']);
+    expect(resolve('move', { pressed: true, axis: -1 })).toEqual(['KeyA']);
+    expect(resolve('move', { pressed: false, axis: 0 })).toEqual([]);
+    expect(resolve('move', { pressed: false })).toEqual([]);
+    expect(resolve('missing', { pressed: true })).toEqual([]);
+  });
+
   it('dispatches keyboard events to the canvas where winit listens', async () => {
     const canvas = document.createElement('canvas');
     canvas.id = 'forge-canvas';

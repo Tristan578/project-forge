@@ -24,7 +24,7 @@ import {
   type InputTraceFrame,
 } from './inputTrace';
 
-/** The single typed command both manual and AI replay invocations dispatch. */
+/** Command identifier returned by the shared replay runner; AI registration is pending #10007. */
 export const REPLAY_INPUT_TRACE_COMMAND = 'replay_input_trace' as const;
 
 /** Minimum world-unit displacement that counts as "the entity moved". */
@@ -42,7 +42,7 @@ export interface ReplayObservation {
 /**
  * The runtime boundary the runner drives. Every method is injectable so unit
  * tests can supply a deterministic fake engine, while the browser wires the
- * real DOM-keyboard channel, `requestAnimationFrame`, and the play-tick bus (see
+ * real DOM-keyboard channel and the play-tick bus (see
  * `replayInvocation.ts`).
  */
 export interface ReplayEnvironment {
@@ -51,15 +51,24 @@ export interface ReplayEnvironment {
    * `event.code`s currently bound to it. The `state` is passed so an AXIS
    * action presses only the direction it was recorded in (positive vs
    * negative) rather than both keys, which would cancel out.
+   * @param actionName Recorded action to resolve in current bindings.
+   * @param state Recorded digital/axis state for that action.
+   * @returns Bound key codes for the recorded direction, or an empty list.
    */
   resolveKeys(actionName: string, state: InputTraceFrame['actions'][string]): string[];
-  /** Press these key codes through the real runtime input path. */
+  /**
+   * @param codes Key codes to press through the input boundary.
+   * @returns Completion of input delivery, synchronously or asynchronously.
+   */
   pressKeys(codes: string[]): void | Promise<void>;
-  /** Release these key codes through the real runtime input path. */
+  /**
+   * @param codes Previously pressed key codes to release.
+   * @returns Completion of input delivery, synchronously or asynchronously.
+   */
   releaseKeys(codes: string[]): void | Promise<void>;
-  /** Advance the engine one frame, resolving once it has ticked. */
+  /** @returns Completion of one observed engine tick; rejects if the boundary stalls. */
   advanceFrame(): Promise<void>;
-  /** Read the latest observed runtime snapshot, or null if none yet. */
+  /** @returns The latest observed runtime snapshot, or null if none exists. */
   observe(): ReplayObservation | null;
   /** The entity whose displacement proves input reached the runtime. */
   playerEntityId: string;
@@ -127,10 +136,14 @@ function keysForFrame(frame: InputTraceFrame, env: ReplayEnvironment): Set<strin
  * observed-state verdict.
  *
  * The trace is re-validated here (identical `parseInputTrace` gate as the
- * recorder and the AI path), so an invalid trace throws BEFORE any input is
+ * recorder and invocation function), so an invalid trace throws BEFORE any input is
  * injected. Keys are diffed frame-to-frame — released when an action ends,
  * pressed when it begins, HELD across ticks that keep it down — which is what
  * makes a held-key trace behave like a held key rather than a burst of taps.
+ * @param trace Recording to validate before injecting any input.
+ * @param env Input injection, tick advancement and state observation boundary.
+ * @returns Movement and collection assertions evaluated from observed snapshots.
+ * @throws InputTraceValidationError for invalid traces; boundary failures propagate.
  */
 export async function replayInputTrace(
   trace: InputTrace,

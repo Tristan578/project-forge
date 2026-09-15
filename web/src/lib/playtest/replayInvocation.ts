@@ -38,6 +38,10 @@ export interface ReplayInvocationResult {
 /**
  * Run a replay with a caller-provided source label. Throws
  * `InputTraceValidationError` on an invalid trace before touching the engine.
+ * @param source Caller-provided origin label; does not imply AI registration.
+ * @param trace Bounded recording to validate and replay.
+ * @param env Input injection and observation boundary.
+ * @returns The replay outcome with its source label and command identifier.
  */
 export async function invokeReplay(
   source: ReplaySource,
@@ -52,7 +56,11 @@ export async function invokeReplay(
 // Real browser runtime boundary
 // ---------------------------------------------------------------------------
 
-/** Build an action → key-code resolver from the scene's input bindings. */
+/**
+ * Build an action-to-key resolver from the scene's bindings.
+ * @param bindings Current digital and signed-axis bindings.
+ * @returns A resolver yielding key codes for an action and direction, or none.
+ */
 export function buildActionKeyResolver(
   bindings: InputBinding[],
 ): ReplayEnvironment['resolveKeys'] {
@@ -107,9 +115,10 @@ function dispatchKey(type: 'keydown' | 'keyup', code: string): void {
 /**
  * Build the real DOM-keyboard runtime environment for a browser replay.
  *
- * Observation reads the play-tick bus's latest snapshot: entity positions prove
- * movement, and a `destroy_on_collect` collectible's ABSENCE from the snapshot
- * is its collection (the engine despawns it).
+ * Observations report positions and entity disappearance. The replay fixture
+ * must ensure disappearance represents collection, rather than another cause.
+ * @param config Current bindings and the player/collectible ids to observe.
+ * @returns A canvas-keyboard environment that advances on observed play ticks.
  */
 export function createDomKeyboardEnvironment(config: {
   bindings: InputBinding[];

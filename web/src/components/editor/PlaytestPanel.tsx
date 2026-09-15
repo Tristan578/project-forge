@@ -170,8 +170,8 @@ function MetricsTable({ report }: { report: PlaytestReport }) {
  *
  * Record captures the engine's per-tick named-action input into a bounded
  * `InputTrace`; Replay drives that same trace back through the real input path
- * via `invokeReplay('manual', ...)` — the identical typed command the AI path
- * uses — and reports an OBSERVED-state verdict (entity moved, one collectible
+ * via `invokeReplay('manual', ...)` and reports an observed-state verdict
+ * (entity moved, one collectible
  * collected). This is deliberately kept separate from, and never conflated
  * with, the heuristic "AI Playtest" rating above.
  */
@@ -181,6 +181,7 @@ function RuntimeReplaySection() {
   const inputBindings = useEditorStore((s) => s.inputBindings);
   const allGameComponents = useEditorStore((s) => s.allGameComponents);
   const sceneName = useEditorStore((s) => s.sceneName);
+  const selectedEntityName = useEditorStore((s) => primaryId ? s.sceneGraph.nodes[primaryId]?.name : undefined);
 
   const recorderRef = useRef<InputTraceRecorder | null>(null);
   const traceRef = useRef<InputTrace | null>(null);
@@ -272,10 +273,15 @@ function RuntimeReplaySection() {
         rating above.
       </p>
       {!isPlaying && (
-        <div className="text-xs text-zinc-500 italic mb-2">
+        <div className="text-xs text-zinc-400 italic mb-2">
           Enter Play mode to record and replay input.
         </div>
       )}
+      <p className="text-xs text-zinc-400 mb-2">
+        {primaryId
+          ? `Replay will observe ${selectedEntityName || primaryId}.`
+          : 'Select the player entity before replaying recorded input.'}
+      </p>
       <div className="flex gap-2">
         <button
           onClick={toggleRecord}
@@ -299,13 +305,13 @@ function RuntimeReplaySection() {
       </div>
 
       {error && (
-        <div className="mt-2 px-2.5 py-2 rounded border text-xs bg-red-500/20 text-red-400 border-red-500/30">
+        <div role="alert" className="mt-2 px-2.5 py-2 rounded border text-xs bg-red-500/20 text-red-400 border-red-500/30">
           {error}
         </div>
       )}
 
       {outcome && (
-        <div className="mt-2 space-y-1.5">
+        <div role="status" aria-live="polite" className="mt-2 space-y-1.5">
           <div
             className={`flex items-center gap-2 px-3 py-2 rounded border ${
               outcome.verdict === 'passed'

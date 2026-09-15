@@ -6,9 +6,9 @@
  * word: an unbounded recording of a runaway play session is a memory and replay
  * hazard, so the schema itself refuses anything past 120 ticks or 30 seconds of
  * wall-clock — the two caps the issue names — rather than trusting a producer to
- * stop. `parseInputTrace` is the ONE validator; both the manual UI and the AI
- * invocation path run traces through it, so they reject identical inputs with
- * identical errors.
+ * stop. `parseInputTrace` validates recordings and replay invocations. The
+ * invocation function also accepts an AI source label; chat registration is
+ * still tracked by #10007.
  *
  * The actions are NAMED (`move_right`, `jump`, …), not raw key codes: the same
  * trace replays through whatever keys currently bind those actions, and the
@@ -50,6 +50,7 @@ export const inputTraceFrameSchema = z
   })
   .strict();
 
+/** Complete trace schema, including duration, vocabulary and tick-order constraints. */
 export const inputTraceSchema = z
   .object({
     version: z.literal(INPUT_TRACE_VERSION),
@@ -96,8 +97,11 @@ export const inputTraceSchema = z
     });
   });
 
+/** Named digital/axis input state accepted by the action schema. */
 export type InputActionState = z.infer<typeof inputActionStateSchema>;
+/** One tick and its recorded named-action states. */
 export type InputTraceFrame = z.infer<typeof inputTraceFrameSchema>;
+/** Validated recording shape inferred from the canonical trace schema. */
 export type InputTrace = z.infer<typeof inputTraceSchema>;
 
 // ---------------------------------------------------------------------------
@@ -106,10 +110,11 @@ export type InputTrace = z.infer<typeof inputTraceSchema>;
 
 /**
  * Parse and validate an untrusted value as an `InputTrace`, THROWING a single
- * flattened error on failure. This is the shared gate: the manual Replay button
- * and the AI replay invocation both call it, so a trace that is malformed, over
- * 120 frames, over 30 s, or references an unbound action is rejected the same
- * way from either entry point.
+ * flattened error on failure. Rejects invalid bounds, ordering or names outside
+ * the trace vocabulary; it does not check the scene's current input bindings.
+ * @param value Untrusted trace data.
+ * @returns A validated trace with the supported schema version.
+ * @throws InputTraceValidationError when any schema constraint fails.
  */
 export function parseInputTrace(value: unknown): InputTrace {
   const result = inputTraceSchema.safeParse(value);
@@ -122,7 +127,11 @@ export function parseInputTrace(value: unknown): InputTrace {
   return result.data;
 }
 
-/** Non-throwing variant, mirroring Zod's `safeParse` return shape. */
+/**
+ * Validate a trace without throwing.
+ * @param value Untrusted trace data.
+ * @returns A discriminated result containing the trace or a readable error.
+ */
 export function safeParseInputTrace(
   value: unknown,
 ): { success: true; trace: InputTrace } | { success: false; error: string } {
@@ -139,6 +148,7 @@ export function safeParseInputTrace(
 /** Distinct error type so callers can tell a validation refusal from a runtime
  *  fault without string-matching. */
 export class InputTraceValidationError extends Error {
+  /** @param detail Flattened validation issue descriptions. */
   constructor(detail: string) {
     super(`Invalid input trace: ${detail}`);
     this.name = 'InputTraceValidationError';
@@ -185,12 +195,20 @@ export class InputTraceRecorder {
   private startElapsedMs = 0;
   private unsubscribe: (() => void) | null = null;
 
+  /**
+   * @param fixtureId Identity of the scene fixture being recorded.
+   * @param actionNames Allowed vocabulary copied into the recording.
+   * @param onComplete Called once when an active recording stops successfully.
+   */
   constructor(fixtureId: string, actionNames: string[], private readonly onComplete?: (trace: InputTrace) => void) {
     this.fixtureId = fixtureId;
     this.actionNames = [...actionNames];
   }
 
-  /** Begin capturing. Idempotent — a second call while recording is a no-op. */
+  /**
+   * Begin capturing; a second call while recording is a no-op.
+   * @returns Nothing; subscribes to engine ticks and resets the recording.
+   */
   start(): void {
     if (this.unsubscribe) return;
     this.frames = [];
@@ -219,12 +237,12 @@ export class InputTraceRecorder {
     if (this.tickCounter === MAX_TRACE_TICKS) this.stop();
   }
 
-  /** True while capturing. */
+  /** @returns Whether the recorder currently subscribes to engine ticks. */
   isRecording(): boolean {
     return this.unsubscribe !== null;
   }
 
-  /** Number of engine ticks seen so far (whether or not they carried input). */
+  /** @returns Number of captured ticks, including ticks without active input. */
   ticksCaptured(): number {
     return this.tickCounter;
   }
@@ -233,6 +251,8 @@ export class InputTraceRecorder {
    * Stop capturing and return the completed, VALIDATED trace. Runs the same
    * `parseInputTrace` gate the replay path uses, so a recording that somehow
    * violated a bound surfaces here rather than at replay time.
+   * @returns The completed trace, also delivered to the completion callback.
+   * @throws InputTraceValidationError when captured input violates the schema.
    */
   stop(): InputTrace {
     const wasRecording = this.unsubscribe !== null;
@@ -251,7 +271,10 @@ export class InputTraceRecorder {
     return trace;
   }
 
-  /** Release the subscription without delivering a result to an unmounted owner. */
+  /**
+   * Release the subscription without delivering a completion callback.
+   * @returns Nothing; the recorder stops receiving ticks.
+   */
   cancel(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
