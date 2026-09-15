@@ -36,16 +36,46 @@ import {
 
 vi.mock('server-only', () => ({}));
 
+import { queryWithResilience } from '@/lib/db/client';
+
 const harnessRef = vi.hoisted(() => ({ current: null as unknown as TestHarness }));
 function harness(): TestHarness {
   if (!harnessRef.current) throw new Error('harness not initialised');
   return harnessRef.current;
 }
 
+const databaseFaults = vi.hoisted(() => ({
+  loseNextCommitResponse: false,
+  failReferenceCheck: false,
+  awaitingReferenceCheck: false,
+  referenceCheckCount: 0,
+  commitAttempts: 0,
+}));
+
 vi.mock('@/lib/db/client', () => ({
   getDb: () => harness().db,
-  getNeonSql: () => harness().neonSql,
-  queryWithResilience: (fn: () => Promise<unknown>) => fn(),
+  getNeonSql: () => async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    // Execute the real atomic SQL first. Losing the response must not undo the
+    // committed row, snapshot, or tags as a pre-write rejection mock would.
+    databaseFaults.commitAttempts += 1;
+    const rows = await harness().neonSql(strings, ...values);
+    if (databaseFaults.loseNextCommitResponse) {
+      databaseFaults.loseNextCommitResponse = false;
+      databaseFaults.awaitingReferenceCheck = true;
+      throw new Error('Database commit response lost');
+    }
+    return rows;
+  },
+  queryWithResilience: vi.fn((fn: () => Promise<unknown>, _options?: { maxAttempts?: number }) => {
+    if (databaseFaults.awaitingReferenceCheck) {
+      databaseFaults.awaitingReferenceCheck = false;
+      databaseFaults.referenceCheckCount += 1;
+      if (databaseFaults.failReferenceCheck) {
+        throw new Error('Bundle reference lookup unavailable');
+      }
+    }
+    return fn();
+  }),
 }));
 
 // Whoever the middleware resolved; swapped per test.
@@ -64,7 +94,22 @@ vi.mock('@/lib/api/middleware', () => ({
   }),
 }));
 
-vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
+const captureExceptionSpy = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: captureExceptionSpy }));
+
+// The R2 transport is mocked at the storage-module boundary so these tests
+// exercise the publish route's mirror wiring (key/manifest passed, row columns
+// written, fail-open) against real Postgres, with no network. The existing
+// moderation-hold suite below never triggers it — PUBLISH_TO_R2 is unset there
+// and defaults off without an ASSET_BUCKET_NAME.
+const writeBundleSpy = vi.hoisted(() => vi.fn());
+const deleteBundleSpy = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/storage/publishedGameStorage', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/storage/publishedGameStorage')>(),
+  deletePublishedGameBundle: (...args: unknown[]) => deleteBundleSpy(...args),
+  writePublishedGameBundle: (...args: unknown[]) => writeBundleSpy(...args),
+  readPublishedGameBundle: vi.fn(),
+}));
 
 import { POST } from './route';
 
@@ -378,5 +423,224 @@ describe('POST /api/publish — moderation hold against real Postgres', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].status).toBe('published');
     });
+  });
+});
+
+describe('POST /api/publish — private snapshots against real Postgres', () => {
+  beforeAll(async () => {
+    harnessRef.current = await createTestHarness();
+  });
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    await harnessRef.current?.close();
+  });
+  beforeEach(async () => {
+    await harness().truncateAll();
+    writeBundleSpy.mockReset();
+    deleteBundleSpy.mockReset();
+    captureExceptionSpy.mockReset();
+    databaseFaults.loseNextCommitResponse = false;
+    databaseFaults.failReferenceCheck = false;
+    databaseFaults.awaitingReferenceCheck = false;
+    databaseFaults.referenceCheckCount = 0;
+    databaseFaults.commitAttempts = 0;
+    vi.mocked(queryWithResilience).mockClear();
+    vi.stubEnv('PUBLISH_TO_R2', 'true');
+    writeBundleSpy.mockImplementation(async (userId: string, slug: string) => ({
+      key: `games/${userId}/${slug}/${randomUUID()}/bundle.json`,
+    }));
+  });
+
+  async function stored(ownerId: string): Promise<QueryRow[]> {
+    return harness().neonSql`
+      SELECT slug, version, title, cdn_url, cdn_bundle_key, published_scene_data
+      FROM published_games WHERE user_id = ${ownerId}::uuid ORDER BY slug
+    `;
+  }
+
+  it('persists an immutable key and identical Postgres snapshot while retaining the /play share URL', async () => {
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    const scene = { entities: [{ id: 'published' }] };
+    await harness().neonSql`UPDATE projects SET scene_data = ${JSON.stringify(scene)}::jsonb WHERE id = ${projectId}::uuid`;
+
+    const res = await publish(owner, validBody({ projectId }));
+    expect(res.status).toBe(200);
+    const [row] = await stored(owner.id);
+    expect(row.cdn_url).toBe(`/play/${owner.clerkId}/my-awesome-game`);
+    expect(row.cdn_bundle_key).toMatch(/\/bundle\.json$/);
+    expect(row.published_scene_data).toEqual(scene);
+    expect(writeBundleSpy.mock.calls[0]).toEqual([
+      owner.clerkId, 'my-awesome-game', scene,
+      expect.objectContaining({ schemaVersion: 1, version: 1, userId: owner.clerkId, slug: 'my-awesome-game' }),
+    ]);
+    // The publish response contains neither the raw snapshot nor a private key.
+    expect(res.json.publication).not.toHaveProperty('publishedSceneData');
+    expect(res.json.publication).not.toHaveProperty('cdnBundleKey');
+  });
+
+  it.each(['off', 'failed'])('retains a publication snapshot with storage %s', async (mode) => {
+    if (mode === 'off') vi.stubEnv('PUBLISH_TO_R2', 'false');
+    else writeBundleSpy.mockRejectedValue(new Error('R2 unavailable'));
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    const res = await publish(owner, validBody({ projectId }));
+    expect(res.status).toBe(200);
+    const [row] = await stored(owner.id);
+    expect(row.cdn_bundle_key).toBeNull();
+    expect(row.published_scene_data).toEqual({});
+    expect(row.cdn_url).toBe(`/play/${owner.clerkId}/my-awesome-game`);
+    if (mode === 'off') expect(writeBundleSpy).not.toHaveBeenCalled();
+    else expect(captureExceptionSpy).toHaveBeenCalled();
+  });
+
+  it('only cleans up the prior object after a successful replacement commits', async () => {
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    await publish(owner, validBody({ projectId, tags: ['old'] }));
+    const [previous] = await stored(owner.id);
+    deleteBundleSpy.mockClear();
+    deleteBundleSpy.mockImplementation(async (key: string) => {
+      expect((await stored(owner.id))[0].cdn_bundle_key).not.toBe(key);
+    });
+    const res = await publish(owner, validBody({ projectId, tags: ['new', 'new'] }));
+    expect(res.status).toBe(200);
+    expect(res.json.publication?.version).toBe(2);
+    expect(deleteBundleSpy).toHaveBeenCalledWith(previous.cdn_bundle_key, owner.clerkId, 'my-awesome-game');
+    const tags = await harness().neonSql`SELECT tag FROM game_tags`;
+    expect(tags).toEqual([{ tag: 'new' }]);
+  });
+
+  it('rolls back the publication and deletes only its candidate object if tag replacement fails', async () => {
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    await publish(owner, validBody({ projectId, tags: ['old'] }));
+    const [previous] = await stored(owner.id);
+    deleteBundleSpy.mockClear();
+    await harness().neonSql`
+      CREATE FUNCTION reject_review_tag() RETURNS trigger AS $$
+      BEGIN IF NEW.tag = 'reject-this' THEN RAISE EXCEPTION 'tag write failed'; END IF; RETURN NEW; END;
+      $$ LANGUAGE plpgsql
+    `;
+    await harness().neonSql`CREATE TRIGGER review_tag BEFORE INSERT ON game_tags FOR EACH ROW EXECUTE FUNCTION reject_review_tag()`;
+    try {
+      const res = await publish(owner, validBody({ projectId, title: 'Failed revision', tags: ['reject-this'] }));
+      expect(res.status).toBe(500);
+      expect((await stored(owner.id))[0]).toEqual(previous);
+      expect(await harness().neonSql`SELECT tag FROM game_tags`).toEqual([{ tag: 'old' }]);
+      const cleanupKey = deleteBundleSpy.mock.calls[0][0];
+      expect(cleanupKey).not.toBe(previous.cdn_bundle_key);
+      expect(deleteBundleSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await harness().neonSql`DROP TRIGGER review_tag ON game_tags`;
+      await harness().neonSql`DROP FUNCTION reject_review_tag()`;
+    }
+  });
+
+  it('retains the committed bundle when its database response is lost', async () => {
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    const candidateKey = `games/${owner.clerkId}/my-awesome-game/${randomUUID()}/bundle.json`;
+    const scene = { entities: [{ id: 'committed-scene' }] };
+    await harness().neonSql`UPDATE projects SET scene_data = ${JSON.stringify(scene)}::jsonb WHERE id = ${projectId}::uuid`;
+    writeBundleSpy.mockResolvedValueOnce({ key: candidateKey });
+    databaseFaults.loseNextCommitResponse = true;
+    databaseFaults.commitAttempts = 0;
+    vi.mocked(queryWithResilience).mockClear();
+
+    const res = await publish(owner, validBody({ projectId, title: 'Committed revision', tags: ['committed'] }));
+
+    expect(res.status).toBe(500);
+    expect(await stored(owner.id)).toEqual([
+      expect.objectContaining({
+        version: 1, title: 'Committed revision',
+        cdn_bundle_key: candidateKey, published_scene_data: scene,
+      }),
+    ]);
+    expect(await harness().neonSql`SELECT tag FROM game_tags`).toEqual([{ tag: 'committed' }]);
+    expect(databaseFaults.referenceCheckCount).toBe(1);
+    expect(databaseFaults.commitAttempts).toBe(1);
+    // Replaying this version-guarded write after a lost response would return
+    // no row and make the route misidentify the committed object as a loser.
+    expect(queryWithResilience).toHaveBeenCalledWith(expect.any(Function), { maxAttempts: 1 });
+    expect(deleteBundleSpy).not.toHaveBeenCalled();
+    expect(captureExceptionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Database commit response lost' }),
+      expect.objectContaining({ route: '/api/publish', method: 'POST' }),
+    );
+    expect(captureExceptionSpy).not.toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ stage: 'r2-rollback-check' }),
+    );
+  });
+
+  it('retains the candidate and reports a failed reference check after a lost commit response', async () => {
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    const initial = await publish(owner, validBody({ projectId, tags: ['previous'] }));
+    expect(initial.status).toBe(200);
+    const [previous] = await stored(owner.id);
+    deleteBundleSpy.mockClear();
+    const candidateKey = `games/${owner.clerkId}/my-awesome-game/${randomUUID()}/bundle.json`;
+    writeBundleSpy.mockResolvedValueOnce({ key: candidateKey });
+    databaseFaults.loseNextCommitResponse = true;
+    databaseFaults.failReferenceCheck = true;
+
+    const res = await publish(owner, validBody({ projectId, title: 'Committed replacement', tags: ['replacement'] }));
+
+    expect(res.status).toBe(500);
+    expect(await stored(owner.id)).toEqual([
+      expect.objectContaining({
+        version: 2, title: 'Committed replacement',
+        cdn_bundle_key: candidateKey, published_scene_data: {},
+      }),
+    ]);
+    expect(candidateKey).not.toBe(previous.cdn_bundle_key);
+    expect(await harness().neonSql`SELECT tag FROM game_tags`).toEqual([{ tag: 'replacement' }]);
+    expect(databaseFaults.referenceCheckCount).toBe(1);
+    expect(deleteBundleSpy).not.toHaveBeenCalled();
+    expect(captureExceptionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Bundle reference lookup unavailable' }),
+      { route: '/api/publish', stage: 'r2-rollback-check', key: candidateKey },
+    );
+    expect(captureExceptionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Database commit response lost' }),
+      expect.objectContaining({ route: '/api/publish', method: 'POST' }),
+    );
+  });
+
+  it.each([false, true])('keeps the winning bundle, version and tags during concurrent publish (existing=%s)', async (existing) => {
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    if (existing) await publish(owner, validBody({ projectId }));
+    deleteBundleSpy.mockClear();
+    let release: (value: { key: string }) => void = () => {};
+    let started: () => void = () => {};
+    const waiting = new Promise<void>((resolve) => { started = resolve; });
+    const losingKey = `games/${owner.clerkId}/my-awesome-game/${randomUUID()}/bundle.json`;
+    writeBundleSpy.mockImplementationOnce(() => {
+      started();
+      return new Promise<{ key: string }>((resolve) => { release = resolve; });
+    });
+    const losing = publish(owner, validBody({ projectId, title: 'Losing revision', tags: ['loser'] }));
+    await waiting;
+    const winner = await publish(owner, validBody({ projectId, title: 'Winning revision', tags: ['winner'] }));
+    expect(winner.status).toBe(200);
+    const [winningRow] = await stored(owner.id);
+    release({ key: losingKey });
+    expect((await losing).status).toBe(409);
+    expect((await stored(owner.id))[0]).toEqual(winningRow);
+    expect(winningRow.version).toBe(existing ? 2 : 1);
+    expect(winningRow.title).toBe('Winning revision');
+    expect(await harness().neonSql`SELECT tag FROM game_tags`).toEqual([{ tag: 'winner' }]);
+    expect(deleteBundleSpy).toHaveBeenCalledWith(losingKey, owner.clerkId, 'my-awesome-game');
+    expect(deleteBundleSpy).not.toHaveBeenCalledWith(winningRow.cdn_bundle_key, owner.clerkId, 'my-awesome-game');
+  });
+
+  it('keeps the publication snapshot unchanged after a later editor save', async () => {
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+    await publish(owner, validBody({ projectId }));
+    await harness().neonSql`UPDATE projects SET scene_data = '{"secretDraft":true}'::jsonb WHERE id = ${projectId}::uuid`;
+    expect((await stored(owner.id))[0].published_scene_data).toEqual({});
   });
 });

@@ -96,6 +96,74 @@ export async function uploadToR2(
 }
 
 /**
+ * Bound the complete operation, including body consumption. The explicit race
+ * also releases the request when a transport does not honor AbortSignal.
+ */
+async function withR2Deadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs = 3000,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('R2 operation timed out'));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Write a private object without deriving or advertising a public CDN URL.
+ *
+ * @param key Exact destination key already validated by the caller.
+ * @param body Bytes to write to the configured private assets bucket.
+ * @param contentType MIME type recorded with the object.
+ * @returns Resolves after creation; an existing key is never overwritten and no CDN URL is generated.
+ * @throws On configuration, conditional-write, transport, or three-second deadline failure.
+ */
+export async function putPrivateObjectToR2(
+  key: string,
+  body: Buffer,
+  contentType: string,
+): Promise<void> {
+  await withR2Deadline((abortSignal) => getR2Client().send(
+    new PutObjectCommand({
+      Bucket: getBucket(), Key: key, Body: body, ContentType: contentType,
+      CacheControl: 'private, no-store',
+      IfNoneMatch: '*',
+    }),
+    { abortSignal },
+  ));
+}
+
+/** Read a small JSON object through authenticated S3 access within three seconds.
+ *
+ * @param key Exact object key already validated for ownership by the caller.
+ * @returns The complete response body as text; JSON parsing belongs to the caller.
+ * @throws On configuration, missing/unreadable object, transport, or three-second deadline failure.
+ */
+export async function getObjectFromR2(key: string): Promise<string> {
+  return withR2Deadline(async (abortSignal) => {
+    const response = await getR2Client().send(
+      new GetObjectCommand({ Bucket: getBucket(), Key: key }),
+      { abortSignal },
+    );
+    const body = response.Body;
+    if (!body || typeof body.transformToString !== 'function') {
+      throw new Error('R2 object returned no readable body');
+    }
+    return body.transformToString();
+  });
+}
+
+/**
  * S3/R2 hard limit on how many keys a single DeleteObjects request accepts.
  * Cloudflare R2 implements the S3 DeleteObjects API with the same 1000-key cap.
  */
@@ -177,12 +245,13 @@ export async function deleteManyFromR2(keys: string[]): Promise<R2DeleteSweepRes
   for (let i = 0; i < target.length; i += R2_DELETE_BATCH_SIZE) {
     const batch = target.slice(i, i + R2_DELETE_BATCH_SIZE);
     try {
-      const response = await r2.send(
+      const response = await withR2Deadline((abortSignal) => r2.send(
         new DeleteObjectsCommand({
           Bucket: bucket,
           Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
-        })
-      );
+        }),
+        { abortSignal },
+      ));
       const batchErrors = (response as { Errors?: { Key?: string; Code?: string; Message?: string }[] } | undefined)
         ?.Errors ?? [];
       for (const failure of batchErrors) {
