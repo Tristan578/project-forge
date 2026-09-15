@@ -115,19 +115,34 @@ export const worldBuildExecutor: ExecutorDefinition = {
     // has no scale field, so sizing always costs a second command — and that
     // second command CANNOT ride in the same frame as the spawn it resizes.
     // See `waitForEngineFrame` in ./engineDispatch for why.
+    // Captured once for the retry guard below; a context wired before #9899 (and
+    // every unit test that supplies none) leaves it undefined and keeps the
+    // legacy spawn-every-time behaviour.
+    const observe = ctx.observeEntity;
+
     const spawnCommands: Array<{ command: string; payload: unknown }> = [];
     const sizeCommands: Array<{ command: string; payload: unknown }> = [];
     for (let i = 0; i < entities.length; i += 1) {
       const entity = entities[i];
-      spawnCommands.push({
-        command: 'spawn_entity',
-        payload: {
-          entityType: entity.entityType,
-          name: entity.name,
-          position: [entity.position[0], entity.position[1], entity.position[2]],
-          id: entity.entityId,
-        },
-      });
+
+      // Reuse an entity positively identified by the observation cache when this
+      // executor is invoked again. The engine accepts duplicate caller-supplied
+      // ids, so an observed entity must not be spawned a second time.
+      // A cache miss cannot prove that an earlier spawn failed: confirmation
+      // timeouts below remain terminal because accepted commands may apply late.
+      // Always queue the absolute scale so an observed entity can be resized.
+      const alreadySpawned = observe ? observe(entity.entityId) !== undefined : false;
+      if (!alreadySpawned) {
+        spawnCommands.push({
+          command: 'spawn_entity',
+          payload: {
+            entityType: entity.entityType,
+            name: entity.name,
+            position: [entity.position[0], entity.position[1], entity.position[2]],
+            id: entity.entityId,
+          },
+        });
+      }
       sizeCommands.push({
         command: 'update_transform',
         payload: {
@@ -200,7 +215,7 @@ export const worldBuildExecutor: ExecutorDefinition = {
                 : `World geometry entity ${entity.entityId} was not confirmed at its requested scale `
                   + `(operation ${effect.operationId})`,
               this.userFacingErrorMessage,
-              effect.status === 'timed-out',
+              false, // Accepted spawns may still apply; replaying would create duplicates.
               { effect },
             ),
           );

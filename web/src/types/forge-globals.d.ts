@@ -134,8 +134,8 @@ declare global {
      * enabled (`e2eHooksEnabled()`).
      *
      * Returns the same typed `ObservedEntity` the orchestrator's `observeEntity`
-     * reads, or `undefined` while the engine has answered nothing for `entityId`
-     * (its own "does not exist yet" signal). Lets an `@engine` spec assert on
+     * reads, or `undefined` while no answer is cached for `entityId` (which
+     * does not establish whether the entity exists). Lets an `@engine` spec assert on
      * the confirmation the slice actually adds — the cached observation fed by
      * the real `QUERY_ENTITY_DETAILS` event — rather than an adjacent store
      * field such as `primaryTransform`.
