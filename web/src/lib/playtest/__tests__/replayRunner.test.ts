@@ -107,6 +107,28 @@ describe('replayInputTrace — simulated success path', () => {
     expect(released).toEqual([['KeyD']]);
   });
 
+  it.each([1, 2])('rejects when settlement tick %i stalls instead of reporting an unobserved result', async (settlementTick) => {
+    const { env, releaseLog, getPlayerX } = makeFakeEngine({ bound: true });
+    const advance = env.advanceFrame;
+    const observe = env.observe;
+    let framesAdvanced = 0;
+    let observations = 0;
+    env.advanceFrame = async () => {
+      framesAdvanced += 1;
+      if (framesAdvanced === 20 + settlementTick) throw new Error('settlement timed out');
+      await advance();
+    };
+    env.observe = () => {
+      observations += 1;
+      return observe();
+    };
+
+    await expect(replayInputTrace(moveRightTrace(20), env)).rejects.toThrow('settlement timed out');
+    expect(getPlayerX()).toBeGreaterThan(1);
+    expect(releaseLog).toEqual([['KeyD']]);
+    expect(observations).toBe(1);
+  });
+
   it('moves the entity and collects exactly one item (verdict passed)', async () => {
     const { env, getPlayerX } = makeFakeEngine({ bound: true });
     const outcome = await replayInputTrace(moveRightTrace(20), env);
