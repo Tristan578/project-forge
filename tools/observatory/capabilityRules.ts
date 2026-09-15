@@ -1,0 +1,216 @@
+/**
+ * Reviewed capability-mapping ruleset for the observatory scanner.
+ *
+ * This slice covers TWO domains end-to-end to prove the mechanism:
+ *   - `shell-stores` — the web shell's Zustand stores (`web/src/stores/`) and
+ *     the workspace/shell layer (`web/src/lib/workspace/`).
+ *   - `mcp`          — the MCP command manifest (`mcp-server/manifest/`).
+ *
+ * Every other domain named in the epic is listed in {@link COVERAGE_SCOPE} as
+ * NOT yet covered, so uncovered areas surface as an explicit `notYetCovered`
+ * entry rather than a silent omission. Extending coverage = add a covered scope
+ * here plus reviewed rules for it (see ./README.md).
+ *
+ * Confidence semantics:
+ *   - `reviewed`  a human asserted this file -> capability mapping is truth.
+ *   - `extracted` a candidate (e.g. a directory catch-all) that still needs a
+ *                 human to split it into reviewed capabilities.
+ */
+
+import type { CapabilityRule, ExclusionRule, PlannedCapability, CoverageScope } from './scan.ts';
+
+/** Path prefixes this slice claims to cover. Anything else is `notYetCovered`. */
+export const COVERED_SCOPES: string[] = [
+  'web/src/stores/',
+  'web/src/lib/workspace/',
+  'mcp-server/manifest/',
+];
+
+/**
+ * Ordered mapping rules. Order is precedence: the FIRST rule whose `own`
+ * patterns match a file becomes that file's single owner. Specific capabilities
+ * precede the domain catch-alls so a well-understood store is attributed to its
+ * reviewed capability, and only the remainder falls to the extracted sweep.
+ */
+export const CAPABILITY_RULES: CapabilityRule[] = [
+  {
+    capabilityId: 'shell-stores.chat',
+    domain: 'shell-stores',
+    confidence: 'reviewed',
+    primaryOwner: 'web/src/stores/chatStore.ts',
+    own: ['web/src/stores/chatStore.ts', 'web/src/stores/__tests__/chatStore*.test.ts'],
+  },
+  {
+    capabilityId: 'shell-stores.editor',
+    domain: 'shell-stores',
+    confidence: 'reviewed',
+    primaryOwner: 'web/src/stores/editorStore.ts',
+    own: [
+      'web/src/stores/editorStore.ts',
+      'web/src/stores/editorStore.test.ts',
+      'web/src/stores/__tests__/editorStore*.test.ts',
+    ],
+  },
+  {
+    capabilityId: 'shell-stores.generation',
+    domain: 'shell-stores',
+    confidence: 'reviewed',
+    primaryOwner: 'web/src/stores/generationStore.ts',
+    own: [
+      'web/src/stores/generationStore.ts',
+      'web/src/stores/generationHistoryStore.ts',
+      'web/src/stores/__tests__/generationStore.test.ts',
+      'web/src/stores/__tests__/generationHistoryStore.test.ts',
+    ],
+  },
+  {
+    capabilityId: 'shell-stores.scripting',
+    domain: 'shell-stores',
+    confidence: 'reviewed',
+    primaryOwner: 'web/src/stores/scriptLibraryStore.ts',
+    own: [
+      'web/src/stores/scriptDebugStore.ts',
+      'web/src/stores/scriptLibraryStore.ts',
+      'web/src/stores/scriptLibraryStore.test.ts',
+      'web/src/stores/__tests__/scriptDebugStore.test.ts',
+    ],
+  },
+  {
+    capabilityId: 'shell-stores.user',
+    domain: 'shell-stores',
+    confidence: 'reviewed',
+    primaryOwner: 'web/src/stores/userStore.ts',
+    own: ['web/src/stores/userStore.ts', 'web/src/stores/__tests__/userStore*.test.ts'],
+  },
+  {
+    capabilityId: 'shell-stores.scene-slices',
+    domain: 'shell-stores',
+    confidence: 'reviewed',
+    primaryOwner: 'web/src/stores/slices/index.ts',
+    own: ['web/src/stores/slices/**'],
+  },
+  {
+    capabilityId: 'shell-stores.workspace',
+    domain: 'shell-stores',
+    confidence: 'reviewed',
+    primaryOwner: 'web/src/lib/workspace/panelRegistry.ts',
+    own: ['web/src/lib/workspace/**'],
+  },
+  {
+    // Catch-all for the remaining top-level stores + their colocated tests.
+    // Extracted: honest that these are not yet split into reviewed capabilities,
+    // but still accounted for (and listed in the unmapped-report as candidates).
+    capabilityId: 'shell-stores.uncategorized',
+    domain: 'shell-stores',
+    confidence: 'extracted',
+    own: ['web/src/stores/**'],
+  },
+  {
+    capabilityId: 'mcp.command-manifest',
+    domain: 'mcp',
+    confidence: 'reviewed',
+    primaryOwner: 'mcp-server/manifest/commands.json',
+    own: ['mcp-server/manifest/**'],
+  },
+];
+
+/**
+ * Reasoned exclusions applied repo-wide. Each requires a category and a reason.
+ * Exclusions never override an explicit mapping rule (OWN > EXCLUDE), so they
+ * only ever explain files no capability owns.
+ */
+export const EXCLUSION_RULES: ExclusionRule[] = [
+  {
+    category: 'generated',
+    reason: 'Generated per-deploy mirror of mcp-server/manifest/commands.json (kept byte-identical by CI).',
+    patterns: ['web/src/data/commands.json', 'apps/docs/data/commands.json'],
+  },
+  {
+    category: 'generated',
+    reason: 'Generated OpenAPI document; regenerated from route definitions.',
+    patterns: ['docs/api/openapi.json'],
+  },
+  {
+    category: 'generated',
+    reason: 'Single-root npm lockfile; regenerated by npm, never hand-authored.',
+    patterns: ['package-lock.json'],
+  },
+  {
+    category: 'generated',
+    reason: 'Compiled gh-aw agentic-workflow lock; regenerated from its workflow source.',
+    patterns: ['.github/workflows/*.lock.yml'],
+  },
+  {
+    category: 'vendored',
+    reason: 'Vendored transform-gizmo fork; upstream code maintained out of tree.',
+    patterns: ['.transform-gizmo-fork/**'],
+  },
+  {
+    category: 'binary',
+    reason: 'Binary asset (image/audio/video/font/wasm/pdf); not source, not text-diffable.',
+    patterns: [
+      '**/*.png',
+      '**/*.jpg',
+      '**/*.jpeg',
+      '**/*.gif',
+      '**/*.webp',
+      '**/*.ico',
+      '**/*.wasm',
+      '**/*.ttf',
+      '**/*.woff',
+      '**/*.woff2',
+      '**/*.mp3',
+      '**/*.wav',
+      '**/*.ogg',
+      '**/*.mp4',
+      '**/*.pdf',
+    ],
+  },
+];
+
+/**
+ * Planned capabilities from the requirements registry that must retain a stable
+ * identity before any code exists. These own no files and are excused from the
+ * `capability-without-artifact` gap.
+ */
+export const PLANNED_CAPABILITIES: PlannedCapability[] = [
+  {
+    capabilityId: 'shell-stores.telemetry-denominator',
+    domain: 'shell-stores',
+    confidence: 'reviewed',
+    requirement:
+      'Per-capability telemetry-coverage denominator, tracked separately from the inventory denominator (issue #9752).',
+  },
+  {
+    capabilityId: 'mcp.dependency-edges',
+    domain: 'mcp',
+    confidence: 'reviewed',
+    requirement:
+      'Typed dependency edges (calls/emits/consumes/persists/serves) with source evidence — deferred; this slice is static file mapping only.',
+  },
+];
+
+/**
+ * Human-facing coverage summary embedded in unmapped-report.md. `notYetCovered`
+ * enumerates the epic domains this slice deliberately does not touch yet.
+ */
+export const COVERAGE_SCOPE: CoverageScope = {
+  covered: [
+    'shell-stores — web/src/stores/ (Zustand stores) + web/src/lib/workspace/ (shell layer)',
+    'mcp — mcp-server/manifest/ (MCP command manifest)',
+  ],
+  notYetCovered: [
+    'engine-core — engine/src/core/ (pure Rust ECS)',
+    'engine-bridge — engine/src/bridge/ (wasm-bindgen boundary)',
+    'rendering-2d-3d — engine 2D/3D systems, WebGPU/WebGL2 binaries',
+    'ai-chat-generation — web/src/lib/ai, generation providers',
+    'scripting-workers — web/src/lib/scripting, script workers/sandbox',
+    'save-load-assets — save/load, assets, export, publish pipelines',
+    'auth-billing — Clerk auth, Stripe billing',
+    'api-data-storage — web/src/app/api, database, storage',
+    'cdn-infrastructure — Cloudflare R2/Worker, deploy infra',
+    'packages — packages/* shared libraries',
+    'apps — apps/docs, apps/design',
+    'ci-build-tooling — .github/workflows, scripts/, developer tooling',
+  ],
+};

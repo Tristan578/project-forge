@@ -1,0 +1,36 @@
+{
+  "description": "Generated files must be excluded WITH a reason and category, not counted as unmapped — even when they sit inside a covered scope (OWN > EXCLUDE means an in-scope generated file the rules don't own is excluded, not flagged as a gap).",
+  "coveredScopes": ["src/"],
+  "files": ["src/hand.ts", "src/generated/api.gen.ts", "dist/bundle.js"],
+  "rules": [
+    {
+      "capabilityId": "src.hand",
+      "domain": "demo",
+      "confidence": "reviewed",
+      "primaryOwner": "src/hand.ts",
+      "own": ["src/hand.ts"]
+    }
+  ],
+  "exclusions": [
+    {
+      "category": "generated",
+      "reason": "Emitted by codegen; not authored by hand.",
+      "patterns": ["src/generated/**"]
+    },
+    {
+      "category": "generated",
+      "reason": "Build output bundle.",
+      "patterns": ["dist/**"]
+    }
+  ],
+  "expected": {
+    "trackedTotal": 3,
+    "ownedTotal": 1,
+    "excludedTotal": 2,
+    "unmappedTotal": 0,
+    "notYetCoveredTotal": 0,
+    "excludedInScopePath": "src/generated/api.gen.ts",
+    "excludedInScopeCategory": "generated",
+    "gapCount": 0
+  }
+}
