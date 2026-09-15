@@ -44,6 +44,7 @@ import type {
 } from '@/lib/game-creation/types';
 import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
 import { setWinnabilityStateReader } from '@/stores/slices';
+import { isSceneFileEnvelope } from '@/lib/scenes/sceneValidation';
 
 import { createTestHarness, type TestHarness } from '../harness';
 
@@ -339,6 +340,15 @@ async function runGame(h: TestHarness, gdd: OrchestratorGDD): Promise<RunResult>
   h.dispatch.mockImplementation((command: unknown, payload: unknown) => {
     if (typeof payload !== 'object' || payload === null) return;
     const p = payload as Payload;
+    // Model the non-mutating validator response at the engine boundary. Rust
+    // decoder tests own component-schema fidelity; this fake checks the wire envelope.
+    if (command === 'validate_scene') {
+      try {
+        return { success: typeof p.json === 'string' && isSceneFileEnvelope(JSON.parse(p.json)) };
+      } catch {
+        return { success: false };
+      }
+    }
     if (command === 'spawn_entity') {
       if (typeof p.id !== 'string' || typeof p.name !== 'string') return;
       h.simulateEntitySpawned({

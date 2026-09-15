@@ -8,15 +8,15 @@ relatedFiles:
 
 # Known Limitations & Workarounds
 
-This guide describes implemented features, current gaps, and available workarounds. Check the [capability matrix](../capability-matrix.md) for verification status through each entry point.
+SpawnForge has implemented feature areas with different levels of verification and completeness. This guide describes known gaps and available workarounds.
 
 ## Implemented feature areas
 
-These areas have implementations with different levels of verification and completeness:
+These areas have implementations; the capability matrix records their current workflow status.
 
 - **2D Engine**: Sprites, tilemaps, 2D physics (Rapier2D), joints, sprite animation, camera
 - **3D Engine**: PBR materials, skeletal animation, physics (Rapier3D), particles, terrain, CSG, LOD
-- **AI Creation**: 358 registered MCP commands, natural language chat, compound actions, and asset-generation integrations. Registration alone does not prove a working workflow; provider provisioning and artifact delivery require separate verification.
+- **AI Creation**: 363 registered MCP commands, natural language chat, compound actions, asset generation (3D models, textures, sound effects, voice; music generation is not available yet, see limitation 6)
 - **Audio**: Spatial audio, bus mixer, reverb zones, adaptive music, snapshots
 - **Scripting**: TypeScript + visual scripting with 73 node types
 - **Export**: HTML5 bundles, cloud publishing, mobile touch controls

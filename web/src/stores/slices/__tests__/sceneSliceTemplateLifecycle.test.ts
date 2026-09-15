@@ -284,11 +284,22 @@ describe('template load lifecycle through engine events', () => {
       });
     }
     const state = harness.store.getState();
-    const result = operation === 'template'
-      ? (await state.loadTemplate('2d-platformer', { timeoutMs: 50 })).success
-      : operation === 'load' ? state.loadScene(NEW_SCENE) : state.newScene();
-
-    expect(result).toBe(false);
+    if (operation === 'template') {
+      expect((await state.loadTemplate('2d-platformer', { timeoutMs: 50 })).success).toBe(false);
+    } else if (failure === 'throws') {
+      // `loadScene`/`newScene` rethrow a thrown dispatch error rather than
+      // folding it into their boolean contract — a harder failure than an
+      // explicit rejection, and the one `restoreCheckpoint`'s own recovery
+      // flow depends on being able to distinguish (see the parallel
+      // `sceneSliceTemplateCheckpointLifecycle.test.ts` coverage, #10050).
+      // The rollback below still must have happened before it propagated.
+      expect(() => operation === 'load' ? state.loadScene(NEW_SCENE) : state.newScene())
+        .toThrow('Engine dispatch failed');
+    } else if (operation === 'load') {
+      expect(state.loadScene(NEW_SCENE)).toBe(false);
+    } else {
+      expect(state.newScene()).toBe(false);
+    }
     expect(loadPrefabInstances()).toEqual([NEW_LINK]);
     if (operation !== 'template') {
       expect(harness.store.getState().sceneOperationRevision).toBe(acceptedRevision);

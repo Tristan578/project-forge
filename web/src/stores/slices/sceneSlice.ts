@@ -14,10 +14,17 @@ import {
   switchScene as switchSceneIn,
   saveCurrentSceneData,
   readPrefabInstances,
+  createCheckpoint as createCheckpointIn,
+  listCheckpoints as listCheckpointsIn,
+  restoreCheckpoint as restoreCheckpointIn,
+  deleteCheckpoint as deleteCheckpointIn,
   type ProjectScenes,
   type SceneFileData,
+  type SceneCheckpoint,
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, attachPrefabInstances, type SceneCapture } from '@/lib/scenes/captureScene';
+import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
+import { applyCheckpointScene, captureCheckpointScene } from '@/lib/scenes/checkpointRecovery';
 import {
   loadPrefabInstances,
   savePrefabInstancesToStorage,
@@ -58,6 +65,9 @@ export interface SceneSlice {
   terrainData: Record<string, TerrainDataState>;
   isExporting: boolean;
   projectId: string | null;
+  projectRevision: number;
+  checkpointBusy: boolean;
+  checkpointError: string | null;
   cloudSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   lastCloudSave: string | null;
 
@@ -71,7 +81,14 @@ export interface SceneSlice {
    * debounced autosave, the chat tool) can omit it.
    */
   saveScene: (requestId?: string) => void;
-  /** Return false when validation or engine dispatch rejects the load. */
+  /**
+   * Queue scene JSON in the engine. True means accepted for later application,
+   * not that the viewport changed. Recovery waits for SCENE_LOADED and a
+   * correlated export before committing its active save. Returns false when
+   * validation or engine dispatch rejects the load, in which case the prefab
+   * registry (and any merged definitions) are rolled back to what they were
+   * before this call.
+   */
   loadScene: (json: string) => boolean;
   /** Return false when no engine is available or it rejects the new scene. */
   newScene: () => boolean;
@@ -129,6 +146,24 @@ export interface SceneSlice {
   deleteScene: (sceneId: string) => void;
   /** Persist the live scene first, so duplicating the ACTIVE scene copies its current contents. */
   duplicateScene: (sceneId: string) => Promise<void>;
+  /**
+   * Capture a named recovery checkpoint of the whole project (scene.FR-3.OP-02).
+   * Reads the live scene back out of the engine first — same guard as switch /
+   * duplicate — so the snapshot reflects on-screen work. Returns the new
+   * checkpoint, or `null` if the capture failed or storage refused the write.
+   */
+  createCheckpoint: (label?: string) => Promise<SceneCheckpoint | null>;
+  /** List stored recovery checkpoints, newest first. */
+  listCheckpoints: () => SceneCheckpoint[];
+  /**
+   * Restore a checkpoint for this project. Resolves true after the engine
+   * confirms the scene and the active save is committed. Failure preserves
+   * the previous save and attempts to restore prior unsaved viewport data.
+   * checkpointError contains user-facing recovery guidance.
+   */
+  restoreCheckpoint: (checkpointId: string) => Promise<boolean>;
+  /** Delete a checkpoint by ID. */
+  deleteCheckpoint: (checkpointId: string) => SceneCheckpoint[];
 }
 
 /**
@@ -142,9 +177,13 @@ type DispatchResult = { success: boolean; error?: string } | void;
 let dispatchCommand: ((command: string, payload: unknown) => DispatchResult) | null = null;
 
 export function setSceneDispatcher(
-  dispatcher: (command: string, payload: unknown) => DispatchResult,
+  dispatcher: ((command: string, payload: unknown) => DispatchResult) | null,
 ): void {
   dispatchCommand = dispatcher;
+  setSceneValidator(dispatcher ? (json) => {
+    if (!dispatchCommand) return false;
+    return dispatchCommand('validate_scene', { json })?.success === true;
+  } : null);
 }
 
 /** Outcome of {@link SceneSlice.loadTemplate}. */
@@ -228,10 +267,10 @@ function watchForSceneApplied(
  * engine to ask, which `captureActiveScene` reads as "nothing to capture"
  * rather than "asked and got no answer".
  */
-export function requestSceneExport(): boolean {
+export function requestSceneExport(requestId?: string): boolean {
   if (!dispatchCommand) return false;
-  dispatchCommand('export_scene', {});
-  return true;
+  const result = dispatchCommand('export_scene', requestId ? { requestId } : {});
+  return result?.success !== false;
 }
 
 /**
@@ -315,6 +354,32 @@ function rollbackPrefabState(snapshot: PrefabRestoreSnapshot): void {
   savePrefabsToStorage(snapshot.prefabs);
 }
 
+/**
+ * Dispatch a load owned by the current recovery transaction — the shared
+ * audio-staging + dispatch primitive `loadScene`, `newScene`'s sibling paths,
+ * and checkpoint restoration all go through. Rolls the staged audio back
+ * (via the closure `stageSceneAudio` now returns) on an explicit engine
+ * rejection or a thrown dispatch error; the CALLER is responsible for its own
+ * additional state (the prefab registry/library via
+ * `restorePrefabInstances`/`rollbackPrefabState` above), since this primitive
+ * only owns the audio stash and the dispatch itself.
+ */
+function dispatchSceneLoad(json: string): boolean {
+  if (!dispatchCommand) return false;
+  const rollbackAudio = stageSceneAudio(json);
+  try {
+    const response = dispatchCommand('load_scene', { json });
+    if (response?.success === false) {
+      rollbackAudio();
+      return false;
+    }
+    return true;
+  } catch (error) {
+    rollbackAudio();
+    throw error;
+  }
+}
+
 export const createSceneSlice: StateCreator<
   SceneSlice & TemplateApplyDeps,
   [],
@@ -333,6 +398,9 @@ export const createSceneSlice: StateCreator<
   terrainData: {},
   isExporting: false,
   projectId: null,
+  projectRevision: 0,
+  checkpointBusy: false,
+  checkpointError: null,
   cloudSaveStatus: 'idle',
   lastCloudSave: null,
 
@@ -346,52 +414,48 @@ export const createSceneSlice: StateCreator<
     // The engine reveals a loaded scene's audio one selection at a time
     // (`emit_audio_on_selection`), and SCENE_LOADED carries only a name — so
     // this JSON is the only chance to know what the scene sounds like. Staged
-    // here, claimed by the SCENE_LOADED handler.
+    // here (inside `dispatchSceneLoad`), claimed by the SCENE_LOADED handler.
     //
     // Inside the guard: with no dispatcher the engine never loads and never
     // emits SCENE_LOADED, so a stash written here would sit until whatever
     // scene loads next claimed another scene's sounds. Staging only alongside
     // the dispatch keeps the stash and the pending load a single fact.
-    if (dispatchCommand) {
-      const rollbackAudio = stageSceneAudio(json);
-      // Restore the scene's linked prefab instances (and merge its embedded
-      // definitions) into the prefab store before the engine load. Done
-      // alongside the dispatch for the same reason audio is: with no
-      // dispatcher the engine never loads, so mutating the store here would
-      // desync it from what is actually rendered.
-      const snapshot = restorePrefabInstances(json);
-      if (!snapshot) {
-        rollbackAudio();
-        return false;
-      }
-      // A rejected load never emits SCENE_LOADED, so a stash left armed here
-      // waits for the NEXT scene's SCENE_LOADED and attaches this scene's
-      // sounds to it. `new_scene` already clears for the same reason; a
-      // rejection is the other way the stash outlives its load.
-      let response: DispatchResult;
-      try {
-        response = dispatchCommand('load_scene', { json });
-      } catch {
-        rollbackAudio();
-        rollbackPrefabState(snapshot);
-        return false;
-      }
-      if (response && response.success === false) {
-        rollbackAudio();
-        // The engine never adopted the incoming scene — the scene still on
-        // screen is the previous one, so its instance registry AND its prefab
-        // LIBRARY must both come back (scene.FR-1 N1 BUG-2/BUG-5): the merge
-        // above is not itself part of the rejected dispatch, so without this
-        // a rejected scene's embedded definitions would install permanently,
-        // and the next save would persist the wrong instances onto the scene
-        // that is actually still active.
-        rollbackPrefabState(snapshot);
-        return false;
-      }
-      set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1 }));
-      return true;
+    if (!dispatchCommand) return false;
+    // Restore the scene's linked prefab instances (and merge its embedded
+    // definitions) into the prefab store before the engine load. Done
+    // alongside the dispatch for the same reason audio is: with no
+    // dispatcher the engine never loads, so mutating the store here would
+    // desync it from what is actually rendered.
+    const snapshot = restorePrefabInstances(json);
+    if (!snapshot) return false;
+    let accepted: boolean;
+    try {
+      accepted = dispatchSceneLoad(json);
+    } catch (error) {
+      // `dispatchSceneLoad` already rolled its own (audio) state back; the
+      // prefab registry/library are this caller's state, so they roll back
+      // here before the error propagates (scene.FR-1 N1 BUG-2/BUG-5). A
+      // thrown dispatch error is a harder failure than an explicit
+      // `{success:false}` rejection, so it is rethrown rather than folded
+      // into the boolean contract — callers that need to distinguish it
+      // (`restoreCheckpoint`'s own recovery flow) rely on exactly this.
+      rollbackPrefabState(snapshot);
+      throw error;
     }
-    return false;
+    if (!accepted) {
+      // The engine never adopted the incoming scene — the scene still on
+      // screen is the previous one, so its instance registry AND its prefab
+      // LIBRARY must both come back (scene.FR-1 N1 BUG-2/BUG-5): the merge
+      // above is not itself part of the rejected dispatch, so without this
+      // a rejected scene's embedded definitions would install permanently,
+      // and the next save would persist the wrong instances onto the scene
+      // that is actually still active.
+      rollbackPrefabState(snapshot);
+      return false;
+    }
+    // A rejected request must not invalidate an unrelated recovery operation.
+    set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1 }));
+    return true;
   },
   newScene: () => {
     if (!dispatchCommand) {
@@ -401,8 +465,8 @@ export const createSceneSlice: StateCreator<
       // (scene.FR-1 N1 BUG-4).
       return false;
     }
-    // An accepted empty scene must consume no audio. Restore any pending load's
-    // staging if this command is rejected before it can replace that scene.
+    // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
+    // rejected would otherwise be adopted by this empty scene.
     const rollbackAudio = clearStagedSceneAudio();
     const previousInstances = loadPrefabInstances();
     // The new scene has no linked instances of its own — leaving the outgoing
@@ -413,24 +477,23 @@ export const createSceneSlice: StateCreator<
     // registry must already describe the empty scene the instant that event
     // could land.
     savePrefabInstancesToStorage([]);
-    let response: DispatchResult;
     try {
-      response = dispatchCommand('new_scene', {});
-    } catch {
+      const response = dispatchCommand('new_scene', {});
+      if (response?.success === false) {
+        rollbackAudio();
+        // The engine never accepted the new scene — the scene on screen is
+        // unchanged, so its registry must come back rather than stay cleared
+        // out from under it (scene.FR-1 N1 BUG-4).
+        savePrefabInstancesToStorage(previousInstances);
+        return false;
+      }
+      set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1 }));
+      return true;
+    } catch (error) {
       rollbackAudio();
       savePrefabInstancesToStorage(previousInstances);
-      return false;
+      throw error;
     }
-    if (response && response.success === false) {
-      rollbackAudio();
-      // The engine never accepted the new scene — the scene on screen is
-      // unchanged, so its registry must come back rather than stay cleared
-      // out from under it (scene.FR-1 N1 BUG-4).
-      savePrefabInstancesToStorage(previousInstances);
-      return false;
-    }
-    set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1 }));
-    return true;
   },
   setSceneName: (name) => set({ sceneName: name }),
   setSceneModified: (modified) => set({ sceneModified: modified }),
@@ -508,7 +571,10 @@ export const createSceneSlice: StateCreator<
     if (dispatchCommand) dispatchCommand('combine_meshes', { entityIds, deleteSources, name });
   },
   setExporting: (value) => set({ isExporting: value }),
-  setProjectId: (id) => set({ projectId: id }),
+  setProjectId: (id) => {
+    if (get().projectId === id) return;
+    set({ projectId: id, projectRevision: get().projectRevision + 1, scenes: [], activeSceneId: null, checkpointError: null });
+  },
   saveToCloud: (requestId) => {
     // Cloud save is orchestrated externally via SceneToolbar which listens for
     // the forge:scene-exported window event to obtain the scene JSON. This
@@ -525,7 +591,7 @@ export const createSceneSlice: StateCreator<
       return { success: false, error: 'The engine is not ready yet — try again in a moment.' };
     }
 
-    const operationRevision = get().sceneOperationRevision + 1;
+    let operationRevision = get().sceneOperationRevision + 1;
     set({ sceneOperationRevision: operationRevision });
     const supersededResult: TemplateLoadResult = {
       success: false,
@@ -568,6 +634,10 @@ export const createSceneSlice: StateCreator<
     const expectedEntityIds = template.sceneData.entities
       .filter((entity) => !skipped.has(entity.entityId))
       .map((entity) => entity.entityId);
+    // Imports can yield to a new checkpoint capture. Invalidate that recovery
+    // immediately before dispatch, while retaining this template's ownership.
+    operationRevision += 1;
+    set({ sceneOperationRevision: operationRevision });
     const { applied, abandon } = watchForSceneApplied(
       api,
       options?.timeoutMs ?? TEMPLATE_APPLY_TIMEOUT_MS,
@@ -670,8 +740,10 @@ export const createSceneSlice: StateCreator<
   // had no production caller at all, so every scene's `data` stayed null forever
   // — switching away discarded the outgoing scene's work AND loaded nothing back.
   switchScene: async (sceneId) => {
+    if (!dispatchCommand) return;
     const captured = withPrefabInstances(await captureActiveScene(requestSceneExport));
-    const project = withCapturedScene(loadProjectScenes(), captured);
+    if (!dispatchCommand) return;
+    const project = withCapturedScene(loadProjectScenes(get().projectId), captured);
     if (!project) {
       console.error(
         `[Scenes] Refusing to switch scenes: ${captured.status === 'failed' ? captured.reason : ''} ` +
@@ -687,26 +759,30 @@ export const createSceneSlice: StateCreator<
     if (!accepted) {
       // Retain the outgoing capture without relabelling the unchanged engine
       // scene as the rejected target.
-      saveProjectScenes(project);
+      saveProjectScenes(project, get().projectId);
       return;
     }
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, get().projectId);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
   createNewScene: (name) => {
-    const { project } = createSceneIn(loadProjectScenes(), name ?? 'New Scene');
-    saveProjectScenes(project);
+    if (!dispatchCommand) return;
+    const { project } = createSceneIn(loadProjectScenes(get().projectId), name ?? 'New Scene');
+    saveProjectScenes(project, get().projectId);
     get().setScenes(toSceneList(project), project.activeSceneId);
   },
   deleteScene: (sceneId) => {
-    const result = deleteSceneIn(loadProjectScenes(), sceneId);
+    if (!dispatchCommand) return;
+    const result = deleteSceneIn(loadProjectScenes(get().projectId), sceneId);
     if (result.error) return;
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, get().projectId);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
   duplicateScene: async (sceneId) => {
+    if (!dispatchCommand) return;
     const captured = withPrefabInstances(await captureActiveScene(requestSceneExport));
-    const project = withCapturedScene(loadProjectScenes(), captured);
+    if (!dispatchCommand) return;
+    const project = withCapturedScene(loadProjectScenes(get().projectId), captured);
     if (!project) {
       console.error(
         `[Scenes] Refusing to duplicate: ${captured.status === 'failed' ? captured.reason : ''} ` +
@@ -716,7 +792,89 @@ export const createSceneSlice: StateCreator<
     }
     const result = duplicateSceneIn(project, sceneId);
     if ('error' in result) return;
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, get().projectId);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
+  },
+  // Recovery checkpoints (scene.FR-3.OP-02). The chat handlers
+  // (`create_checkpoint` / `restore_checkpoint` / `list_checkpoints` /
+  // `delete_checkpoint`) drive the same sceneManager functions, so manual and
+  // AI paths persist identical state.
+  createCheckpoint: async (label) => {
+    if (get().checkpointBusy) return null;
+    const { projectId, projectRevision, sceneOperationRevision, activeSceneId } = get();
+    const isCurrent = () => get().projectId === projectId && get().projectRevision === projectRevision && get().sceneOperationRevision === sceneOperationRevision && get().activeSceneId === activeSceneId;
+    set({ checkpointBusy: true, checkpointError: null });
+    try {
+      const captured = await captureCheckpointScene(requestSceneExport);
+      if (!isCurrent()) throw new Error('The project or scene changed while capturing. Try again in the intended scene.');
+      const project = saveCurrentSceneData(loadProjectScenes(projectId), captured);
+      // A checkpoint is independent of the active save. Failure must not alter
+      // that save, and all scenes validate before any quota eviction occurs.
+      return createCheckpointIn(project, label, projectId).checkpoint;
+    } catch (error) {
+      set({ checkpointError: (error instanceof Error || error instanceof DOMException) ? error.message : 'The checkpoint could not be saved. Try again.' });
+      return null;
+    } finally {
+      set({ checkpointBusy: false });
+    }
+  },
+  listCheckpoints: () => listCheckpointsIn(get().projectId),
+  restoreCheckpoint: async (checkpointId) => {
+    if (get().checkpointBusy) return false;
+    const before = get();
+    const { projectId, projectRevision, activeSceneId } = before;
+    let sceneOperationRevision = before.sceneOperationRevision;
+    const isCurrent = () => get().projectId === projectId && get().projectRevision === projectRevision && get().sceneOperationRevision === sceneOperationRevision && get().activeSceneId === activeSceneId;
+    set({ checkpointBusy: true, checkpointError: null, autoSaveEnabled: false });
+    let prior: Awaited<ReturnType<typeof captureCheckpointScene>> | undefined;
+    let attempted = false;
+    try {
+      const result = restoreCheckpointIn(checkpointId, projectId);
+      if ('error' in result) throw new Error(result.error);
+      // A valid restore supersedes earlier template imports and pending setup.
+      sceneOperationRevision += 1;
+      set({ sceneOperationRevision });
+      // Preserve the live, possibly unsaved scene before sending any load.
+      prior = await captureCheckpointScene(requestSceneExport);
+      if (!isCurrent()) throw new Error('The project changed while restoring. Try again in the intended project.');
+      const active = result.project.scenes.find((scene) => scene.id === result.project.activeSceneId)!;
+      await applyCheckpointScene(active.data ?? emptySceneFile(active.name), (json) => {
+        attempted = true;
+        const accepted = dispatchSceneLoad(json);
+        attempted = accepted;
+        return accepted;
+      }, requestSceneExport, isCurrent);
+      if (!isCurrent()) throw new Error('The project changed while restoring.');
+      saveProjectScenes(result.project, projectId);
+      get().setScenes(toSceneList(result.project), result.project.activeSceneId);
+      set({ sceneModified: false });
+      return true;
+    } catch (error) {
+      let message = (error instanceof Error || error instanceof DOMException) ? error.message : 'The checkpoint could not be restored.';
+      if (attempted && prior && isCurrent()) {
+        try {
+          await applyCheckpointScene(prior, dispatchSceneLoad, requestSceneExport, isCurrent);
+          set({ sceneName: before.sceneName, sceneModified: before.sceneModified });
+        } catch {
+          message += ' The previous save is intact, but the viewport could not be recovered. Reload the project before editing.';
+        }
+      }
+      // Dispatch rejection restores its own staging. Accepted loads can still
+      // complete after timeout, so recovery must not clear their audio here.
+      set({ checkpointError: message });
+      return false;
+    } finally {
+      set({ checkpointBusy: false, autoSaveEnabled: before.autoSaveEnabled });
+    }
+  },
+  deleteCheckpoint: (checkpointId) => {
+    if (get().checkpointBusy) return listCheckpointsIn(get().projectId);
+    set({ checkpointError: null });
+    try {
+      return deleteCheckpointIn(checkpointId, get().projectId);
+    } catch (error) {
+      set({ checkpointError: (error instanceof Error || error instanceof DOMException) ? error.message : 'The checkpoint could not be deleted. Try again.' });
+      return listCheckpointsIn(get().projectId);
+    }
   },
 });

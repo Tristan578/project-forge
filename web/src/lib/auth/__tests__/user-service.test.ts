@@ -33,7 +33,7 @@ const mockUpdate = vi.fn().mockReturnValue({ set: mockUpdateSet });
 // We achieve this by making the chain object itself a thenable (has .then)
 // so it resolves when awaited directly, but also exposes .limit() for callers
 // that add an explicit limit.
-function buildSelectChain(rows: Partial<User>[]): unknown {
+function buildSelectChain(rows: Record<string, unknown>[]): unknown {
   const resolvedPromise = Promise.resolve(rows);
   const chain: Record<string, unknown> = {
     from: vi.fn().mockReturnThis(),
@@ -427,6 +427,47 @@ describe('deleteUserAccount', () => {
       errors: [],
       truncated: false,
     });
+  });
+
+  function deletedGameRows(key: string): unknown[] {
+    return mockNeonSql.mock.calls.map(([strings]) =>
+      strings.join('').includes('RETURNING cdn_bundle_key')
+        ? [{ cdn_bundle_key: key, slug: 'my-game', clerk_id: 'clerk_abc' }]
+        : [],
+    );
+  }
+
+  it('deletes the actual returned private snapshot after account removal, including a concurrent replacement', async () => {
+    const key = 'games/clerk_abc/my-game/7179eeca-ffba-48b3-9897-c598813a8bd5/bundle.json';
+    // Initial reads contain no key; RETURNING supplies the key actually removed.
+    mockSelect.mockImplementation(() => buildSelectChain([{ id: 'game-1' }]));
+    const order: string[] = [];
+    mockNeonSql.transaction.mockImplementation(async () => {
+      order.push('db');
+      return deletedGameRows(key);
+    });
+    mockDeleteManyFromR2.mockImplementation(async () => {
+      order.push('storage');
+      return { requested: 2, deleted: 2, failedKeys: [], errors: [], truncated: false };
+    });
+    await deleteUserAccount('user-uuid-1');
+    expect(mockDeleteManyFromR2).toHaveBeenCalledWith([key, key + '.status.json']);
+    expect(order).toEqual(['db', 'storage']);
+  });
+
+  it('never deletes another creator’s game object from a poisoned stored key', async () => {
+    mockSelect.mockImplementation(() => buildSelectChain([]));
+    mockNeonSql.transaction.mockImplementation(async () =>
+      deletedGameRows('games/clerk_other/my-game/7179eeca-ffba-48b3-9897-c598813a8bd5/bundle.json'));
+    await deleteUserAccount('user-uuid-1');
+    expect(mockDeleteManyFromR2).not.toHaveBeenCalled();
+  });
+
+  it('retains private game objects if the account transaction rolls back', async () => {
+    mockSelect.mockImplementation(() => buildSelectChain([{ id: 'game-1' }]));
+    mockNeonSql.transaction.mockRejectedValue(new Error('transaction failed'));
+    await expect(deleteUserAccount('user-uuid-1')).rejects.toThrow('transaction failed');
+    expect(mockDeleteManyFromR2).not.toHaveBeenCalled();
   });
 
   it('runs all deletes in a single neon transaction (PF-976)', async () => {

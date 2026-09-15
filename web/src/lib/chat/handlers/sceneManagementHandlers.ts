@@ -8,6 +8,7 @@ import type { ToolHandler, ExecutionResult, InputBinding } from './types';
 import { parseArgs } from './types';
 import { captureActiveScene, attachPrefabInstances, type SceneCapture } from '@/lib/scenes/captureScene';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
+import { isValidSceneFile } from '@/lib/scenes/sceneValidation';
 
 /**
  * Read the live scene back out of the engine before a mutation moves off it
@@ -39,6 +40,19 @@ async function foldPrefabInstances(capture: SceneCapture): Promise<SceneCapture>
 }
 
 export const sceneManagementHandlers: Record<string, ToolHandler> = {
+  validate_scene: async (args): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ json: z.string().min(1).max(50 * 1024 * 1024) }), args);
+    if (p.error) return p.error;
+    try {
+      if (isValidSceneFile(JSON.parse(p.data.json))) {
+        return { success: true, result: { valid: true } };
+      }
+    } catch {
+      return { success: false, error: 'Scene JSON is malformed.' };
+    }
+    return { success: false, error: 'Scene validation failed or the engine is unavailable.' };
+  },
+
   export_scene: async (_args, ctx): Promise<ExecutionResult> => {
     ctx.store.saveScene();
     return { success: true, result: { message: 'Scene export triggered' } };
@@ -130,9 +144,9 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ name: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { createScene, loadProjectScenes, saveProjectScenes } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     const result = createScene(project, p.data.name);
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
@@ -148,7 +162,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const failure = captureFailure(capture, 'switch scenes');
     if (failure) return failure;
 
-    let project = loadProjectScenes();
+    let project = loadProjectScenes(ctx.store.projectId);
     const capturedForSwitch = await foldPrefabInstances(capture);
     if (capturedForSwitch.status === 'captured') project = saveCurrentSceneData(project, capturedForSwitch.data);
     let targetId = p.data.sceneId;
@@ -162,10 +176,10 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad))
       : ctx.store.newScene();
     if (accepted === false) {
-      saveProjectScenes(project);
+      saveProjectScenes(project, ctx.store.projectId);
       return { success: false, error: 'The engine rejected the scene switch. The current scene is unchanged.' };
     }
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
@@ -181,7 +195,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const failure = captureFailure(capture, 'duplicate the scene');
     if (failure) return failure;
 
-    let project = loadProjectScenes();
+    let project = loadProjectScenes(ctx.store.projectId);
     const capturedForDup = await foldPrefabInstances(capture);
     if (capturedForDup.status === 'captured') project = saveCurrentSceneData(project, capturedForDup.data);
     let targetId = p.data.sceneId;
@@ -191,7 +205,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const result = duplicateScene(project, targetId, p.data.name);
     if ('error' in result) return { success: false, error: result.error };
 
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
@@ -203,7 +217,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { deleteScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
@@ -211,7 +225,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const result = deleteScene(project, targetId);
     if (result.error) return { success: false, error: result.error };
 
-    saveProjectScenes(result.project);
+    saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
@@ -223,13 +237,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ sceneId: z.string().min(1), name: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { renameScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
     const updated = renameScene(project, targetId, p.data.name);
-    saveProjectScenes(updated);
+    saveProjectScenes(updated, ctx.store.projectId);
     ctx.store.setScenes(
       updated.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       updated.activeSceneId
@@ -241,13 +255,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
     if (p.error) return p.error;
     const { setStartScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
     const updated = setStartScene(project, targetId);
-    saveProjectScenes(updated);
+    saveProjectScenes(updated, ctx.store.projectId);
     ctx.store.setScenes(
       updated.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       updated.activeSceneId
@@ -255,9 +269,9 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { message: 'Start scene updated' } };
   },
 
-  list_scenes: async (_args, _ctx): Promise<ExecutionResult> => {
+  list_scenes: async (_args, ctx): Promise<ExecutionResult> => {
     const { loadProjectScenes } = await import('@/lib/scenes/sceneManager');
-    const project = loadProjectScenes();
+    const project = loadProjectScenes(ctx.store.projectId);
     return {
       success: true,
       result: {
@@ -270,6 +284,58 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
         activeSceneId: project.activeSceneId,
       },
     };
+  },
+
+  // -------------------------------------------------------------------------
+  // Recovery checkpoints (scene.FR-3.OP-02)
+  //
+  // These drive the exact same sceneManager functions the manual Scene Browser
+  // controls use (`ctx.store.createCheckpoint` / `restoreCheckpoint` /
+  // `listCheckpoints` / `deleteCheckpoint`), so the AI and manual paths persist
+  // identical state — every manual checkpoint operation has an AI equal (F2).
+  // -------------------------------------------------------------------------
+
+  create_checkpoint: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ label: z.string().optional() }), args);
+    if (p.error) return p.error;
+    const checkpoint = await ctx.store.createCheckpoint(p.data.label);
+    if (!checkpoint) return { success: false, error: 'The checkpoint could not be captured or saved. Check the Scene Browser error and retry after the engine is ready.' };
+    return {
+      success: true,
+      result: { checkpointId: checkpoint.id, label: checkpoint.label, count: ctx.store.listCheckpoints().length, message: `Created checkpoint "${checkpoint.label}"` },
+    };
+  },
+
+  list_checkpoints: async (_args, ctx): Promise<ExecutionResult> => {
+    const checkpoints = ctx.store.listCheckpoints();
+    return {
+      success: true,
+      result: {
+        checkpoints: checkpoints.map((c) => ({
+          id: c.id, label: c.label, createdAt: c.createdAt, sceneCount: c.snapshot.scenes.length,
+        })),
+        count: checkpoints.length,
+      },
+    };
+  },
+
+  restore_checkpoint: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ checkpointId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    const restored = await ctx.store.restoreCheckpoint(p.data.checkpointId);
+    return restored
+      ? { success: true, result: { message: 'Restored checkpoint' } }
+      : { success: false, error: 'The checkpoint restore failed. The previous save is intact; check the Scene Browser error before editing.' };
+  },
+
+  delete_checkpoint: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ checkpointId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    const remaining = ctx.store.deleteCheckpoint(p.data.checkpointId);
+    if (remaining.some((checkpoint) => checkpoint.id === p.data.checkpointId)) {
+      return { success: false, error: 'The checkpoint could not be deleted. Wait for any recovery operation to finish and try again.' };
+    }
+    return { success: true, result: { message: 'Deleted checkpoint', count: remaining.length } };
   },
 
   load_scene_with_transition: async (args, ctx): Promise<ExecutionResult> => {

@@ -17,3 +17,20 @@ export const ASSET_STORAGE_ENV = {
 } as const;
 
 export type AssetStorageEnvKey = keyof typeof ASSET_STORAGE_ENV;
+
+/**
+ * Enable optional private publication snapshots in R2. Play still goes through
+ * the application API and falls back to the publication snapshot in Postgres.
+ *
+ * Explicit true/false takes precedence; an unset or unrecognized value uses
+ * bucket presence as the default. This does not enable public bucket access or
+ * CDN delivery. A failed storage operation leaves the Postgres path available.
+ *
+ * @returns Whether optional R2 publication writes/reads are enabled by PUBLISH_TO_R2 or, by default, ASSET_BUCKET_NAME. Does not verify credentials or bucket privacy.
+ */
+export function isPublishToR2Enabled(): boolean {
+  const raw = (process.env.PUBLISH_TO_R2 ?? '').trim().toLowerCase();
+  if (raw === 'false') return false;
+  if (raw === 'true') return true;
+  return Boolean(process.env[ASSET_STORAGE_ENV.bucketName]);
+}

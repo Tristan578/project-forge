@@ -241,6 +241,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "create_checkpoint",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "create_dialogue_tree",
       "category": "dialogue",
       "requiredScope": "scene:write"
@@ -348,6 +353,11 @@
     {
       "name": "delete_audio_bus",
       "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_checkpoint",
+      "category": "scene",
       "requiredScope": "scene:write"
     },
     {
@@ -836,6 +846,11 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "list_checkpoints",
+      "category": "query",
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "list_custom_materials",
       "category": "materials",
       "requiredScope": "scene:read"
@@ -1223,6 +1238,11 @@
     {
       "name": "resize_tilemap",
       "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "restore_checkpoint",
+      "category": "scene",
       "requiredScope": "scene:write"
     },
     {
@@ -1784,6 +1804,11 @@
       "name": "validate_project_security",
       "category": "security",
       "requiredScope": "security:read"
+    },
+    {
+      "name": "validate_scene",
+      "category": "scene",
+      "requiredScope": "scene:read"
     },
     {
       "name": "validate_wgsl",

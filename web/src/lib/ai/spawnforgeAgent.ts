@@ -90,7 +90,7 @@ function isAgentAdvertised(cmd: ManifestEntry): boolean {
  * Build AI SDK tool definitions from the MCP command manifest.
  *
  * Filter policy: includes available `:write`-scoped and `query`-category commands.
- * Read-only informational commands are excluded to reduce tool count (275 of 358)
+ * Read-only informational commands are excluded to reduce tool count (279 of 363)
  * and prevent the model from calling informational endpoints when it should be acting.
  *
  * Schemas go through `modelToolSchema`, which withholds the manifest parameters

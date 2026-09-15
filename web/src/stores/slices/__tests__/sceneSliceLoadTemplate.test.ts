@@ -45,6 +45,21 @@ describe('sceneSlice.loadTemplate', () => {
   });
 
   describe('applying a real template', () => {
+    it('invalidates recovery at dispatch after the asynchronous template read', async () => {
+      const fakeEngine = createFakeEngineDispatcher(harness.store);
+      let dispatchRevision = -1;
+      setSceneDispatcher((command, payload) => {
+        if (command === 'load_scene') dispatchRevision = harness.store.getState().sceneOperationRevision;
+        return fakeEngine(command, payload);
+      });
+      const loading = harness.store.getState().loadTemplate('2d-platformer');
+      // Recovery can start while the template module or data is being read.
+      const recoveryRevision = harness.store.getState().sceneOperationRevision;
+      const result = await loading;
+      expect(result.success).toBe(true);
+      expect(dispatchRevision).toBeGreaterThan(recoveryRevision);
+    });
+
     it('puts the templates entities in sceneGraph before it resolves', async () => {
       const dispatch = createFakeEngineDispatcher(harness.store);
       setSceneDispatcher(dispatch);

@@ -116,4 +116,17 @@ describe('describeToolAction', () => {
       describeToolAction('create_scene_from_description', { clearExisting: false }, noNames),
     ).not.toContain('Delete everything');
   });
+
+  it('distinguishes deleting a checkpoint from restoring one', () => {
+    // Both are gated, but the card must not read the same for a destroy and a
+    // rollback — delete_checkpoint permanently discards a recovery point.
+    const del = describeToolAction('delete_checkpoint', { checkpointId: 'cp-1' }, noNames);
+    expect(del).toContain('delete');
+    expect(del).toContain('cp-1');
+    expect(del).not.toContain('restore');
+
+    const restore = describeToolAction('restore_checkpoint', { checkpointId: 'cp-1' }, noNames);
+    expect(restore).toContain('restore');
+    expect(restore).not.toContain('delete');
+  });
 });

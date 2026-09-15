@@ -21,6 +21,7 @@ import {
   collectTransitivePrefabDefinitions,
 } from '@/lib/prefabs/prefabStore';
 import { writePrefabInstances, writePrefabDefinitions, type SceneFileData } from '@/lib/scenes/sceneManager';
+import { CHECKPOINT_EXPORT_PREFIX, SCENE_LOADED_EVENT } from '@/lib/scenes/checkpointRecovery';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
 
@@ -214,6 +215,16 @@ export function handleTransformEvent(
       // below is "the scene was exported", not "my request was answered", so
       // none of them may depend on it.
       const { json: rawJson, name, requestId } = payload;
+      // A checkpoint's own export request (#10050) re-dispatches the raw
+      // payload and returns immediately — it is not a user-facing save, so it
+      // must NOT run through autosave/panic-recovery/prefab-fold below, or a
+      // checkpoint capture would double as an (unwanted) autosave tick and
+      // would consume this requestId's staged prefab snapshot before the
+      // save it actually belongs to ever sees it.
+      if (requestId?.startsWith(CHECKPOINT_EXPORT_PREFIX)) {
+        window.dispatchEvent(new CustomEvent<SceneExportedDetail>(SCENE_EXPORTED_EVENT, { detail: payload }));
+        return true;
+      }
       const state = useEditorStore.getState();
 
       // Fold prefab instances/definitions in HERE, before any consumer below
@@ -291,6 +302,7 @@ export function handleTransformEvent(
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context
+      window.dispatchEvent(new CustomEvent(SCENE_LOADED_EVENT));
       return true;
     }
 
