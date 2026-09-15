@@ -79,7 +79,10 @@ interface UIElement {
 interface TilemapState {
   tileSize: [number, number];
   mapSize: [number, number];
-  layers: { tiles: (number | null)[] }[];
+  layers: {
+    tiles: (number | null)[];
+    collisionShapes?: ('none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight')[];
+  }[];
   origin: 'TopLeft' | 'Center';
 }
 

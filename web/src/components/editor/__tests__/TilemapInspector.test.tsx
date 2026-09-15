@@ -41,6 +41,7 @@ const baseTilemapData = {
 describe('TilemapInspector', () => {
   const mockSetTilemapData = vi.fn();
   const mockRemoveTilemapData = vi.fn();
+  const mockSetTileCollisionShape = vi.fn();
 
   function setupStore({
     primaryId = 'entity-1' as string | null,
@@ -59,6 +60,7 @@ describe('TilemapInspector', () => {
         projectType,
         setTilemapData: mockSetTilemapData,
         removeTilemapData: mockRemoveTilemapData,
+        setTileCollisionShape: mockSetTileCollisionShape,
       };
       return typeof selector === 'function' ? selector(state) : state;
     });
@@ -177,5 +179,38 @@ describe('TilemapInspector', () => {
     await vi.waitFor(() => {
       expect(mockRemoveTilemapData).toHaveBeenCalledWith('entity-1');
     });
+  });
+
+  // OP-04: per-tile collision shape picker
+  it('renders the collision shape picker with every shape option', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+    expect(screen.getByText('Tile Collision Shape')).toBeInTheDocument();
+    const shapeSelect = screen.getByRole('combobox', { name: 'Collision shape' });
+    const values = Array.from(shapeSelect.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(['none', 'full', 'halfTop', 'halfBottom', 'slopeLeft', 'slopeRight']);
+  });
+
+  it('dispatches setTileCollisionShape with the chosen cell and shape on Apply', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+
+    fireEvent.change(screen.getByLabelText('X'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Y'), { target: { value: '5' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Collision shape' }), {
+      target: { value: 'halfTop' },
+    });
+    fireEvent.click(screen.getByText('Apply Collision Shape'));
+
+    expect(mockSetTileCollisionShape).toHaveBeenCalledWith('entity-1', 0, 3, 5, 'halfTop');
+  });
+
+  it('offers no invalid shape option in the picker (only the known vocabulary)', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+    const shapeSelect = screen.getByRole('combobox', { name: 'Collision shape' }) as HTMLSelectElement;
+    const values = Array.from(shapeSelect.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
+    expect(values).not.toContain('wedge');
+    expect(values).not.toContain('');
   });
 });

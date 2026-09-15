@@ -737,6 +737,46 @@ describe('spriteSlice', () => {
       });
     });
 
+    describe('setTileCollisionShape', () => {
+      const seed = (): TilemapData => ({
+        tilesetAssetId: 'ts',
+        tileSize: [16, 16],
+        mapSize: [4, 1],
+        layers: [{ name: 'Ground', tiles: [null, null, null, null], visible: true, opacity: 1, isCollision: true }],
+        origin: 'TopLeft',
+      });
+
+      it('updates the store optimistically and dispatches the engine command', () => {
+        store.getState().setTilemapData('e1', seed());
+        store.getState().setTileCollisionShape('e1', 0, 2, 0, 'halfTop');
+
+        expect(store.getState().tilemaps.e1.layers[0].collisionShapes).toEqual([
+          'none', 'none', 'halfTop', 'none',
+        ]);
+        expect(mockDispatch).toHaveBeenCalledWith('set_tile_collision_shape', {
+          entityId: 'e1', layer: 0, x: 2, y: 0, shape: 'halfTop',
+        });
+      });
+
+      it('is a no-op with no dispatch when the entity has no tilemap', () => {
+        store.getState().setTileCollisionShape('missing', 0, 0, 0, 'full');
+        expect(mockDispatch).not.toHaveBeenCalledWith(
+          'set_tile_collision_shape',
+          expect.anything(),
+        );
+      });
+
+      it('is a no-op for an out-of-range cell (no corruption, no dispatch)', () => {
+        store.getState().setTilemapData('e1', seed());
+        store.getState().setTileCollisionShape('e1', 0, 9, 0, 'full');
+        expect(store.getState().tilemaps.e1.layers[0].collisionShapes).toBeUndefined();
+        expect(mockDispatch).not.toHaveBeenCalledWith(
+          'set_tile_collision_shape',
+          expect.anything(),
+        );
+      });
+    });
+
     describe('removeTilemapData', () => {
       it('should remove tilemap data and dispatch', () => {
         const data: TilemapData = { tilesetAssetId: 'dungeon' } as unknown as TilemapData;
