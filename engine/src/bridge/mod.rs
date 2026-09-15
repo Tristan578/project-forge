@@ -24,6 +24,7 @@ mod component_resync;
 mod core_systems;
 mod material;
 mod performance;
+mod observability_bridge;
 mod physics;
 mod audio;
 mod query;
@@ -84,7 +85,7 @@ use crate::core::{
 // NOT editor-only: `apply_reverb_zone_commands` is registered in the
 // always-active block, so this import cannot ride the `runtime`-gated group
 // below. The set carries ordering only, never a run condition.
-use crate::core::engine_mode::{ModeRestoreSet, Physics2dWriteSet, ResyncDrainSet};
+use crate::core::engine_mode::{ModeRestoreSet, Physics2dWriteSet, ResyncDrainSet, in_play_mode};
 
 // Editor-only imports
 #[cfg(not(feature = "runtime"))]
@@ -732,6 +733,94 @@ impl Plugin for SelectionPlugin {
                 skeleton2d::apply_skeleton2d_skin_sets,
                 skeleton2d::handle_skeleton2d_query,
             ));
+
+        // Per-system-group CPU timing (performance.FR-1.OP-01/OP-04, #9880).
+        // Always-present: a capture session stays inert until JS calls
+        // `set_system_timing_capture`, so idle overhead is a single branch per
+        // bracket per frame. Each bracket is ordered around the systems it
+        // actually measures via `.before`/`.after`; the brackets take no anchor
+        // resources, so they add no ordering edge beyond that pair and cannot
+        // perturb the order of the systems they wrap. Each group is named for
+        // exactly what its anchor covers:
+        //   - EntitySync   -> `emit_play_tick_system` (the per-frame entity-state
+        //                     emit; Rust-side serialization only, NOT user-script
+        //                     CPU, which runs off-frame in the JS Worker). Its
+        //                     own bracket is `run_if(in_play_mode)`: the wrapped
+        //                     system is a near-instant early return outside Play
+        //                     mode, so an unconditional bracket would still fire
+        //                     and record a fabricated near-zero value in Edit
+        //                     mode instead of leaving the group unmeasured.
+        //   - TransformApply -> `apply_pending_transforms` (that one JS->engine
+        //                     drain only, NOT every command drain).
+        //   - Physics      -> Rapier's `PhysicsSet` in `PostUpdate`, which is the
+        //                     schedule `RapierPhysicsPlugin` steps the simulation
+        //                     in (SyncBackend -> StepSimulation -> Writeback). An
+        //                     `Update` bracket ordered around `PlaySystemSet`
+        //                     would see only joint lifecycle / gameplay systems
+        //                     and never the solver, reporting a physics-heavy
+        //                     frame as cheap. When physics is not enabled the set
+        //                     has no members and the ordering is simply inert.
+        // Rendering/GPU (OP-02) is not instrumented, so it is never recorded and
+        // reaches the UI as "unknown", not 0.
+        app.init_resource::<crate::core::system_timing::SystemTimingBuffer>()
+            .init_resource::<observability_bridge::SystemTimingScratch>()
+            .add_systems(First, observability_bridge::apply_system_timing_capture_request)
+            // `.after(ModeRestoreSet)`: `apply_mode_change_requests` (in that
+            // set) is the system that mutates `EngineMode`, and it carries no
+            // ordering relationship to these two run_if(in_play_mode) brackets
+            // on its own — an unconstrained mode flip landing between them in
+            // the same frame would let `begin` see Play (recording a start)
+            // and `end` see the new Edit (its run_if false, so it never
+            // consumes that start). The stale start then survives to a LATER
+            // frame's `end`, which mistakes it for that frame's own begin and
+            // records an elapsed spanning many frames instead of the intended
+            // single-frame window. Ordering after `ModeRestoreSet` means both
+            // brackets observe the SAME already-settled mode for this frame, so
+            // they can never split across a transition (#9880).
+            .add_systems(
+                Update,
+                observability_bridge::begin_entity_sync_timing
+                    .before(scripts::emit_play_tick_system)
+                    .after(ModeRestoreSet)
+                    .run_if(in_play_mode),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::end_entity_sync_timing
+                    .after(scripts::emit_play_tick_system)
+                    .after(ModeRestoreSet)
+                    .run_if(in_play_mode),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::begin_transform_apply_timing
+                    .before(core_systems::apply_pending_transforms),
+            )
+            .add_systems(
+                Update,
+                observability_bridge::end_transform_apply_timing
+                    .after(core_systems::apply_pending_transforms),
+            )
+            // Both physics backends (3D `PhysicsPlugin`, 2D `Physics2dPlugin`)
+            // are always registered and each schedules its OWN `PhysicsSet`
+            // chain in `PostUpdate`, so the bracket orders before both
+            // SyncBackends and after both Writebacks — a 2D-only game would
+            // otherwise leave the rapier2d solver (its real cost) outside the
+            // window. Ordering against a set with no members (the unused backend
+            // in a given scene) is inert, so this adds no constraint there.
+            .add_systems(
+                PostUpdate,
+                observability_bridge::begin_physics_timing
+                    .before(bevy_rapier3d::prelude::PhysicsSet::SyncBackend)
+                    .before(bevy_rapier2d::prelude::PhysicsSet::SyncBackend),
+            )
+            .add_systems(
+                PostUpdate,
+                observability_bridge::end_physics_timing
+                    .after(bevy_rapier3d::prelude::PhysicsSet::Writeback)
+                    .after(bevy_rapier2d::prelude::PhysicsSet::Writeback),
+            )
+            .add_systems(Last, observability_bridge::commit_and_emit_system_timings);
 
         // Editor-only systems and observers
         #[cfg(not(feature = "runtime"))]
