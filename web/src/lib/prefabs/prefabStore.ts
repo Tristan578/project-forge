@@ -722,7 +722,9 @@ const MAX_MERGED_DEFINITIONS = 500;
 /**
  * Build the complete proposed library before writing anything. Existing and
  * built-in ids win. Explicit deletions also remove incoming references to the
- * deleted id. Missing references and cycles reject the entire proposed merge.
+ * deleted id. A missing reference or a cycle *within the subgraph this merge
+ * adds or depends on* rejects the entire proposed merge; corruption elsewhere
+ * in the existing library is pre-existing and does not (see below).
  */
 function prepareImportedDefinitions(definitions: unknown[]): Prefab[] | null {
   if (definitions.length > MAX_MERGED_DEFINITIONS + 1) return null;
@@ -747,13 +749,31 @@ function prepareImportedDefinitions(definitions: unknown[]): Prefab[] | null {
   const adjacency = new Map([...builtIns, ...proposed].map(
     (prefab) => [prefab.id, (prefab.children ?? []).map((child) => child.prefabId)] as const,
   ));
-  for (const children of adjacency.values()) {
-    if (children.some((id) => !adjacency.has(id))) return null;
+  // Validate only what this merge introduces or depends on: the additions plus
+  // everything reachable from them. Sweeping the WHOLE proposed library instead
+  // meant one pre-existing corrupt local prefab — an older build's leftover, a
+  // cross-tab write, hand-edited localStorage — rejected EVERY merge; and since
+  // `restorePrefabInstances` fails hard on a rejected merge, that reads to the
+  // user as "no scene carrying embedded prefabs opens at all", with the save
+  // gate down too. A dangling edge the merge neither adds nor relies on was
+  // already in the library and is not this merge's to refuse. One the merge
+  // WOULD rely on still fails here: an id with no `adjacency` entry is exactly
+  // an unresolvable reference, and the walk below stops on it.
+  const reachable = new Set<string>();
+  const pending = additions.map((prefab) => prefab.id);
+  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+    if (reachable.has(id)) continue;
+    reachable.add(id);
+    const children = adjacency.get(id);
+    if (!children) return null;
+    for (const child of children) pending.push(child);
   }
-  // A synthetic root checks every connected component in a single DFS.
+  // A synthetic root checks every addition's component in a single DFS. Rooted
+  // at the additions for the same reason as the reachability walk: a cycle that
+  // predates this merge and that no addition can reach is not introduced by it.
   let graphRoot = '__prefab_graph_root__';
   while (adjacency.has(graphRoot)) graphRoot += '_';
-  if (detectCycle(graphRoot, (id) => id === graphRoot ? Array.from(adjacency.keys()) : adjacency.get(id) ?? []).hasCycle) {
+  if (detectCycle(graphRoot, (id) => id === graphRoot ? additions.map((prefab) => prefab.id) : adjacency.get(id) ?? []).hasCycle) {
     return null;
   }
   return proposed;
@@ -762,7 +782,8 @@ function prepareImportedDefinitions(definitions: unknown[]): Prefab[] | null {
 /**
  * Merge a scene's embedded definitions without overwriting local definitions
  * or resurrecting deleted ids. Returns false for invalid, missing-target, or
- * cyclic graphs; rejection makes no writes. A valid merge writes once.
+ * cyclic graphs *that this merge adds or depends on*; rejection makes no
+ * writes. A valid merge writes once.
  *
  * @param definitions Untrusted embedded definitions, capped at MAX_MERGED_DEFINITIONS (500).
  * @returns True for an empty input or successful validated merge; false for invalid dependency graphs without writing.

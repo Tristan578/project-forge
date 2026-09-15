@@ -52,6 +52,39 @@ describe('atomic imported graphs', () => {
     expect(storage).not.toEqual(before);
   });
 
+  // #10056. `loadPrefabs()` is a raw localStorage read with no validation, so an
+  // older build, a hand edit or a concurrent tab can leave a LOCAL prefab
+  // pointing at an id that is no longer there. Validating the whole proposed
+  // library made that one stale edge reject every merge — and a rejected merge
+  // fails `restorePrefabInstances`, which fails `loadScene`, which raises
+  // `sceneLoadError` and locks saving. One corrupt prefab therefore locked the
+  // user out of every scene carrying embedded definitions, including scenes
+  // that had opened fine the day before.
+  it('does not let a pre-existing corrupt local prefab block an unrelated merge', () => {
+    savePrefabsToStorage([definition('Corrupt', ['vanished'])]);
+    expect(mergeImportedPrefabDefinitions([definition('Incoming')])).toBe(true);
+    expect(getPrefab('Incoming')).toBeDefined();
+    // The pre-existing corruption is left exactly as it was — not silently
+    // "repaired" into something the user never asked for.
+    expect(getPrefab('Corrupt')?.children?.[0].prefabId).toBe('vanished');
+  });
+
+  it('still rejects an import that DEPENDS on a corrupt existing prefab', () => {
+    savePrefabsToStorage([definition('Corrupt', ['vanished'])]);
+    const before = { ...storage };
+    expect(mergeImportedPrefabDefinitions([definition('Incoming', ['Corrupt'])])).toBe(false);
+    expect(storage).toEqual(before);
+  });
+
+  it('rejects a cycle the import closes through existing prefabs', () => {
+    // P -> Q -> New was merely dangling while New did not exist; the addition is
+    // what turns it into a loop, so this one IS the merge's to refuse.
+    savePrefabsToStorage([definition('P', ['Q']), definition('Q', ['New'])]);
+    const before = { ...storage };
+    expect(mergeImportedPrefabDefinitions([definition('New', ['P'])])).toBe(false);
+    expect(storage).toEqual(before);
+  });
+
   it('removes tombstoned dependencies from incoming parents without resurrecting them', () => {
     savePrefabsToStorage([definition('Deleted')]);
     expect(deletePrefab('Deleted')).toBe(true);

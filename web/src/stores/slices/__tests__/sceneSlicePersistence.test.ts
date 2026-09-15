@@ -11,14 +11,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSceneTestStore } from './sceneSliceTestStore';
 import { setSceneDispatcher } from '../sceneSlice';
-import { loadProjectScenes, saveProjectScenes, readPrefabInstances } from '@/lib/scenes/sceneManager';
+import { loadProjectScenes, saveProjectScenes, readPrefabInstances, readPrefabDefinitions } from '@/lib/scenes/sceneManager';
 import { SCENE_EXPORTED_EVENT, SCENE_CAPTURE_TIMEOUT_MS } from '@/lib/scenes/captureScene';
 import {
+  loadPrefabs,
   loadPrefabInstances,
   savePrefabsToStorage,
   savePrefabInstancesToStorage,
   type PrefabInstance,
 } from '@/lib/prefabs/prefabStore';
+import { foldExportedSceneJson } from '@/lib/prefabs/prefabSceneFold';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 
 const LIVE_SCENE = {
@@ -30,16 +32,31 @@ const LIVE_SCENE = {
   }],
 };
 
-/** A dispatcher that answers `export_scene` the way the engine bridge does. */
+/**
+ * A dispatcher that answers `export_scene` the way the engine bridge AND its
+ * `SCENE_EXPORTED` handler do together.
+ *
+ * The prefab fold is deliberately the real `foldExportedSceneJson` rather than
+ * a restatement of it: the store no longer folds the registry a second time on
+ * the way out of the capture (that second, later read is what let an instance
+ * reach `prefabInstances` while its definition stayed missing from
+ * `prefabDefinitions`), so a double that skipped the fold would be asserting
+ * against a pipeline production does not have.
+ */
 function answeringDispatcher() {
   const calls: Array<{ command: string; payload: unknown }> = [];
   const dispatch = (command: string, payload: unknown) => {
     calls.push({ command, payload });
     if (command === 'validate_scene') return { success: true };
     if (command === 'export_scene') {
+      const requestId = (payload as { requestId?: string } | undefined)?.requestId;
       window.dispatchEvent(
         new CustomEvent(SCENE_EXPORTED_EVENT, {
-          detail: { json: JSON.stringify(LIVE_SCENE), name: LIVE_SCENE.metadata?.name },
+          detail: {
+            json: foldExportedSceneJson(JSON.stringify(LIVE_SCENE), requestId),
+            name: LIVE_SCENE.metadata?.name,
+            requestId,
+          },
         })
       );
     }
@@ -226,6 +243,61 @@ describe('sceneSlice scene persistence', () => {
       expect(restored[0].prefabId).toBe('prefab_src');
       expect(restored[0].overrides).toEqual({ name: 'Overridden', entityType: 'sphere' });
       expect(restored[0].entityId).toBe('ent_1');
+    });
+
+    // #10056. The capture is an asynchronous round trip, and the store used to
+    // fold the prefab registry a SECOND time on the way out of it — a separate,
+    // later read of a registry that any scene load landing inside the window
+    // REPLACES wholesale (`restorePrefabInstances`). The outgoing scene's file
+    // then recorded the INCOMING scene's instances, paired against whatever
+    // definitions the other read collected. Staging at request time is what
+    // makes instances and definitions one snapshot taken before the ask.
+    it('persists the registry staged at request time, not one a mid-capture load installed', async () => {
+      const answers: Array<() => void> = [];
+      setSceneDispatcher((command, payload) => {
+        if (command === 'validate_scene') return { success: true };
+        if (command === 'export_scene') {
+          const requestId = (payload as { requestId?: string } | undefined)?.requestId;
+          answers.push(() => window.dispatchEvent(new CustomEvent(SCENE_EXPORTED_EVENT, {
+            detail: {
+              json: foldExportedSceneJson(JSON.stringify(LIVE_SCENE), requestId),
+              name: LIVE_SCENE.metadata?.name,
+              requestId,
+            },
+          })));
+        }
+        return undefined;
+      });
+
+      const originalId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second')!;
+      savePrefabInstancesToStorage([INSTANCE]);
+
+      const pending = store.getState().switchScene(target.id);
+      // Held rather than answered: this is the window a concurrent scene load
+      // lands in. Assert the request actually went out, so a switch that never
+      // exported cannot pass this test by inspecting nothing.
+      expect(answers).toHaveLength(1);
+      savePrefabsToStorage([
+        ...loadPrefabs(),
+        {
+          id: 'prefab_other', name: 'Other', category: 'test', description: '',
+          createdAt: '2026-09-15T00:00:00Z', updatedAt: '2026-09-15T00:00:00Z',
+          snapshot: { entityType: 'cube', name: 'Other', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+        },
+      ]);
+      savePrefabInstancesToStorage([{ instanceId: 'pfi_other', prefabId: 'prefab_other', overrides: {} }]);
+      answers[0]();
+      await pending;
+
+      const outgoing = loadProjectScenes().scenes.find((s) => s.id === originalId);
+      expect(readPrefabInstances(outgoing?.data)).toEqual([INSTANCE]);
+      // ...and every instance it did record resolves against the definitions
+      // written into the SAME file, which is the pairing the second read broke.
+      const definitionIds = new Set(readPrefabDefinitions(outgoing?.data).map((prefab) => prefab.id));
+      expect(definitionIds.has('prefab_src')).toBe(true);
+      expect(readPrefabInstances(outgoing?.data).map((i) => definitionIds.has(i.prefabId))).toEqual([true]);
     });
 
     it('carries the live registry into a duplicated scene', async () => {

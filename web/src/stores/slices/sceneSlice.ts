@@ -25,7 +25,8 @@ import {
   type SceneFileData,
   type SceneCheckpoint,
 } from '@/lib/scenes/sceneManager';
-import { captureActiveScene, attachPrefabInstances, type SceneCapture } from '@/lib/scenes/captureScene';
+import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
+import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
 import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
 import { applyCheckpointScene, captureCheckpointScene } from '@/lib/scenes/checkpointRecovery';
 import {
@@ -36,6 +37,8 @@ import {
   loadPrefabs,
   getBuiltInPrefabs,
   savePrefabsToStorage,
+  stagePrefabInstancesForExport,
+  discardStagedPrefabInstancesForExport,
   type Prefab,
 } from '@/lib/prefabs/prefabStore';
 import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
@@ -166,6 +169,22 @@ export interface SceneSlice {
    * user asked for deliberately IS trustworthy, so saving is allowed again.
    */
   newScene: () => boolean;
+  /**
+   * Is the engine's command dispatcher attached to this slice yet?
+   *
+   * The disambiguator for `newScene`'s (and `loadScene`'s) boolean, which is
+   * `false` for two unrelated facts: the engine REJECTED the request, or there
+   * was no engine to ask and the request was DEFERRED. The second is the normal
+   * cold open — the engine mounts after the editor page — so a UI surface that
+   * reports every `false` as a refusal accuses a healthy editor of an error it
+   * did not commit (#10056). Read this immediately after the call to tell them
+   * apart; both are synchronous, so nothing can change in between.
+   *
+   * NOT the same fact as `sceneLoadError`: a rejected `new_scene` deliberately
+   * leaves the (still trustworthy) outgoing scene's saves enabled and so sets
+   * no error, which is exactly why the boolean needs this rather than that.
+   */
+  isEngineAttached: () => boolean;
   setSceneName: (name: string) => void;
   setSceneModified: (modified: boolean) => void;
   setAutoSaveEnabled: (enabled: boolean) => void;
@@ -366,19 +385,44 @@ function withCapturedScene(project: ProjectScenes, capture: SceneCapture): Proje
 }
 
 /**
- * Fold the live prefab-instance registry into a capture before it is persisted
- * (scene.FR-1 N1). The engine export knows nothing about linked instances — they
- * live in the prefab store, not the ECS — so a scene switch/duplicate that only
- * captured the engine scene would drop every instance, override and link the
- * user built. `attachPrefabInstances` no-ops on a non-`captured` status, so the
- * "abort rather than overwrite" contract survives. Empty registry is left
- * un-attached so instance-free scenes stay byte-identical: `saveCurrentSceneData`
- * replaces the whole `data` with this fresh capture, so a scene that had
- * instances deleted persists as having none (no resurrection on reopen).
+ * Capture the live scene with its prefab registry folded in, ATOMICALLY.
+ *
+ * The engine export knows nothing about linked instances — they live in the
+ * prefab store, not the ECS — so a scene switch/duplicate that only captured
+ * the engine scene would drop every instance, override and link the user built
+ * (scene.FR-1 N1). The fold itself already happens once, in the SCENE_EXPORTED
+ * handler (`hooks/events/transformEvents.ts`), which is the only dispatcher of
+ * the `forge:scene-exported` event this capture awaits.
+ *
+ * This used to ask with NO request id and then fold a SECOND time on the way
+ * out, re-reading the live registry. Two reads of one registry either side of
+ * an up-to-5s engine round trip are not one fact: an instance of a prefab
+ * created inside that window landed in `prefabInstances` from the late read
+ * while `prefabDefinitions` still came from the early one, so the saved scene
+ * referenced a definition it did not carry and reopening dropped the link.
+ * Staging at REQUEST time and letting the single upstream fold consume that
+ * snapshot makes instances and their transitive definitions one read, taken
+ * before the request goes out — which is precisely what the staging mechanism
+ * exists for. Empty registry stages an empty snapshot, and the upstream fold
+ * leaves the JSON untouched for one, so instance-free scenes stay
+ * byte-identical.
+ *
+ * The request id is deliberately UN-prefixed: a checkpoint prefix would divert
+ * the export past autosave and the panic backup, and a scene switch's capture
+ * is a user-facing save that should still tick both.
  */
-function withPrefabInstances(capture: SceneCapture): SceneCapture {
-  const instances = loadPrefabInstances();
-  return instances.length ? attachPrefabInstances(capture, instances) : capture;
+async function capturePrefabAwareScene(): Promise<SceneCapture> {
+  const requestId = newSceneExportRequestId();
+  stagePrefabInstancesForExport(requestId, loadPrefabInstances());
+  const capture = await captureActiveScene(() => requestSceneExport(requestId));
+  // Unconditional: the fold consumes the entry synchronously while dispatching
+  // the event this await resolves on, so by here a consumed entry is already
+  // gone and discarding is a no-op. What this actually releases is the entry no
+  // fold ever reached — no engine, a timeout, an unusable answer, or an engine
+  // binary old enough not to echo the id back — which would otherwise sit in
+  // the staging map for the rest of the page's life.
+  discardStagedPrefabInstancesForExport(requestId);
+  return capture;
 }
 
 /**
@@ -638,6 +682,7 @@ export const createSceneSlice: StateCreator<
       throw error;
     }
   },
+  isEngineAttached: () => dispatchCommand !== null,
   setSceneName: (name) => set({ sceneName: name }),
   setSceneModified: (modified) => set({ sceneModified: modified }),
   setAutoSaveEnabled: (enabled) => set({ autoSaveEnabled: enabled }),
@@ -903,7 +948,7 @@ export const createSceneSlice: StateCreator<
       console.error(`[Scenes] Refusing to switch scenes: ${switchLoadError.reason}`);
       return;
     }
-    const captured = withPrefabInstances(await captureActiveScene(requestSceneExport));
+    const captured = await capturePrefabAwareScene();
     if (!dispatchCommand) return;
     const project = withCapturedScene(loadProjectScenes(get().projectId), captured);
     if (!project) {
@@ -954,7 +999,7 @@ export const createSceneSlice: StateCreator<
       console.error(`[Scenes] Refusing to duplicate: ${duplicateLoadError.reason}`);
       return;
     }
-    const captured = withPrefabInstances(await captureActiveScene(requestSceneExport));
+    const captured = await capturePrefabAwareScene();
     if (!dispatchCommand) return;
     const project = withCapturedScene(loadProjectScenes(get().projectId), captured);
     if (!project) {

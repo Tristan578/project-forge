@@ -64,6 +64,9 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
     saveScene: vi.fn(),
     loadScene: vi.fn(),
     newScene: vi.fn(),
+    // Default to an attached engine: every pre-existing test here describes a
+    // loaded editor. The deferral cases opt out explicitly.
+    isEngineAttached: vi.fn(() => true),
     setSceneName: vi.fn(),
     engineMode: 'edit',
     undo: vi.fn(),
@@ -308,6 +311,9 @@ describe('SceneToolbar', () => {
 
       expect(newScene).toHaveBeenCalledTimes(1);
       expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(showError)).toHaveBeenCalledWith(
+        'The engine did not accept a new scene. The current scene is unchanged.',
+      );
     });
 
     it('shows an error when newScene is rejected via the Ctrl+Shift+N shortcut', () => {
@@ -321,6 +327,41 @@ describe('SceneToolbar', () => {
 
       expect(newScene).toHaveBeenCalledTimes(1);
       expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(showError)).toHaveBeenCalledWith(
+        'The engine did not accept a new scene. The current scene is unchanged.',
+      );
+    });
+
+    // #10056: the toolbar renders as soon as the editor page does, while the
+    // dispatcher is attached only once the WASM engine finishes loading — so a
+    // fast click lands on a `newScene()` that returns false for "not here yet",
+    // not "refused". Reporting a refusal there accuses a healthy engine.
+    it('says the engine is not ready yet, not that it refused, when no dispatcher is attached', async () => {
+      const newScene = vi.fn(() => false);
+      mockEditorStore({ newScene, sceneModified: false, isEngineAttached: vi.fn(() => false) });
+      render(<SceneToolbar />);
+
+      await act(async () => {
+        screen.getByRole('button', { name: /new scene/i }).click();
+      });
+
+      expect(vi.mocked(showError)).toHaveBeenCalledWith(
+        'The engine is not ready yet — try again in a moment. The current scene is unchanged.',
+      );
+    });
+
+    it('says the engine is not ready yet for the Ctrl+Shift+N shortcut too', () => {
+      const newScene = vi.fn(() => false);
+      mockEditorStore({ newScene, isEngineAttached: vi.fn(() => false) });
+      render(<SceneToolbar />);
+
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'N', ctrlKey: true, shiftKey: true }));
+      });
+
+      expect(vi.mocked(showError)).toHaveBeenCalledWith(
+        'The engine is not ready yet — try again in a moment. The current scene is unchanged.',
+      );
     });
 
     it('does not show an error when newScene succeeds', async () => {

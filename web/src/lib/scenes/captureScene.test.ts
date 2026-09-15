@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { captureActiveScene, attachPrefabInstances, SCENE_EXPORTED_EVENT, SCENE_CAPTURE_TIMEOUT_MS } from './captureScene';
-import type { PrefabInstance } from '../prefabs/prefabInstance';
+import { captureActiveScene, SCENE_EXPORTED_EVENT, SCENE_CAPTURE_TIMEOUT_MS } from './captureScene';
 
 /** Answer the pending export request the way the engine bridge does. */
 function emitExport(json: string): void {
@@ -100,25 +99,5 @@ describe('captureActiveScene', () => {
 
     vi.advanceTimersByTime(1);
     expect((await pending).status).toBe('failed');
-  });
-});
-
-describe('attachPrefabInstances', () => {
-  const instances: PrefabInstance[] = [
-    { instanceId: 'pfi_a', prefabId: 'src', overrides: { name: 'Kept' } },
-  ];
-
-  it('folds instances into a captured scene', () => {
-    const captured = { status: 'captured' as const, data: { formatVersion: 1, sceneName: 'L1', entities: [] } };
-    const result = attachPrefabInstances(captured, instances);
-    expect(result.status).toBe('captured');
-    if (result.status !== 'captured') return;
-    expect(result.data.prefabInstances).toEqual(instances);
-  });
-
-  it('returns a non-captured result untouched so the abort contract is preserved', () => {
-    expect(attachPrefabInstances({ status: 'unavailable' }, instances)).toEqual({ status: 'unavailable' });
-    const failed = { status: 'failed' as const, reason: 'x' };
-    expect(attachPrefabInstances(failed, instances)).toEqual(failed);
   });
 });

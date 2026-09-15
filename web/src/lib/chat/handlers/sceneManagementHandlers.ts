@@ -6,7 +6,8 @@
 import { z } from 'zod';
 import type { ToolHandler, ExecutionResult, InputBinding } from './types';
 import { parseArgs } from './types';
-import { captureActiveScene, attachPrefabInstances, type SceneCapture } from '@/lib/scenes/captureScene';
+import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
+import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
 import { isValidSceneFile } from '@/lib/scenes/sceneValidation';
 
@@ -15,28 +16,31 @@ import { isValidSceneFile } from '@/lib/scenes/sceneValidation';
  * (PF-1100). `unavailable` means there is no engine and so no live scene to
  * lose; `failed` means one exists and could not be read, which must abort the
  * mutation rather than persist a stale copy over it.
+ *
+ * The prefab-instance registry is folded in by the SCENE_EXPORTED handler
+ * (`hooks/events/transformEvents.ts`), which consumes the snapshot staged
+ * below. Staging at REQUEST time is what makes the instances and their
+ * transitive definitions ONE read: this used to ask with no request id and then
+ * fold a second time on the way out, and an instance created during the engine
+ * round trip then reached `prefabInstances` without its definition reaching
+ * `prefabDefinitions`. Mirrors `sceneSlice.capturePrefabAwareScene` so the AI
+ * and Scene Browser paths persist identical state (scene.FR-1 N1).
  */
 async function captureBeforeMutating(): Promise<SceneCapture> {
-  return captureActiveScene(requestSceneExport);
+  const { loadPrefabInstances, stagePrefabInstancesForExport, discardStagedPrefabInstancesForExport } =
+    await import('@/lib/prefabs/prefabStore');
+  const requestId = newSceneExportRequestId();
+  stagePrefabInstancesForExport(requestId, loadPrefabInstances());
+  const capture = await captureActiveScene(() => requestSceneExport(requestId));
+  // Unconditional and a no-op once the fold has taken it — see the twin's
+  // comment in `sceneSlice.ts` for why that ordering holds.
+  discardStagedPrefabInstancesForExport(requestId);
+  return capture;
 }
 
 function captureFailure(capture: SceneCapture, action: string): ExecutionResult | null {
   if (capture.status !== 'failed') return null;
   return { success: false, error: `Could not ${action}: ${capture.reason}` };
-}
-
-/**
- * Fold the live prefab-instance registry into a capture before it is persisted
- * (scene.FR-1 N1), so an AI-driven scene switch/duplicate carries linked
- * instances and their overrides the same way the manual Scene Browser path does
- * (`sceneSlice.withPrefabInstances`). No-ops on a non-`captured` status and on an
- * empty registry so instance-free scenes stay byte-identical.
- */
-async function foldPrefabInstances(capture: SceneCapture): Promise<SceneCapture> {
-  if (capture.status !== 'captured') return capture;
-  const { loadPrefabInstances } = await import('@/lib/prefabs/prefabStore');
-  const instances = loadPrefabInstances();
-  return instances.length ? attachPrefabInstances(capture, instances) : capture;
 }
 
 export const sceneManagementHandlers: Record<string, ToolHandler> = {
@@ -190,8 +194,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     if (failure) return failure;
 
     let project = loadProjectScenes(ctx.store.projectId);
-    const capturedForSwitch = await foldPrefabInstances(capture);
-    if (capturedForSwitch.status === 'captured') project = saveCurrentSceneData(project, capturedForSwitch.data);
+    if (capture.status === 'captured') project = saveCurrentSceneData(project, capture.data);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
@@ -234,8 +237,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     if (failure) return failure;
 
     let project = loadProjectScenes(ctx.store.projectId);
-    const capturedForDup = await foldPrefabInstances(capture);
-    if (capturedForDup.status === 'captured') project = saveCurrentSceneData(project, capturedForDup.data);
+    if (capture.status === 'captured') project = saveCurrentSceneData(project, capture.data);
     let targetId = p.data.sceneId;
     const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;

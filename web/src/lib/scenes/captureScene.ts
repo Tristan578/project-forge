@@ -15,8 +15,6 @@
  * must refuse rather than overwrite a saved scene with a guess.
  */
 import type { SceneFileData } from './sceneManager';
-import { writePrefabInstances } from './sceneManager';
-import type { PrefabInstance } from '../prefabs/prefabInstance';
 
 /** Window event the bridge emits in answer to an `export_scene` command. */
 export const SCENE_EXPORTED_EVENT = 'forge:scene-exported';
@@ -91,19 +89,12 @@ export function captureActiveScene(
   });
 }
 
-/**
- * Fold the current prefab-instance registry into a capture result before it is
- * persisted. The engine export does not know about linked instances (they live
- * in the prefab store, not the ECS), so persisting them with the scene has to
- * happen on the way out of capture — here — rather than inside the engine
- * round trip. Only a successful capture carries a scene to attach to; every
- * other status is returned untouched so the "abort rather than overwrite"
- * contract above is preserved (scene.FR-1 N1).
- */
-export function attachPrefabInstances(
-  capture: SceneCapture,
-  instances: PrefabInstance[],
-): SceneCapture {
-  if (capture.status !== 'captured') return capture;
-  return { status: 'captured', data: writePrefabInstances(capture.data, instances) };
-}
+// `attachPrefabInstances` used to live here: a SECOND fold of the prefab
+// registry, applied on the way out of the capture. It is gone because folding
+// twice was never additive — the `SCENE_EXPORTED` handler
+// (`lib/prefabs/prefabSceneFold.ts`) has already folded the registry snapshot
+// staged when the export was REQUESTED, and re-reading the live registry
+// afterwards overwrote that with a later, unpaired read: an instance created
+// during the engine round trip reached `prefabInstances` while its definition
+// stayed out of `prefabDefinitions`, and reopening dropped the link. Callers
+// stage instead (`stagePrefabInstancesForExport`) and let the one fold run.

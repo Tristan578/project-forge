@@ -33,6 +33,7 @@ export function SceneToolbar() {
   const saveScene = useEditorStore((s) => s.saveScene);
   const loadScene = useEditorStore((s) => s.loadScene);
   const newScene = useEditorStore((s) => s.newScene);
+  const isEngineAttached = useEditorStore((s) => s.isEngineAttached);
   const setSceneName = useEditorStore((s) => s.setSceneName);
   const engineMode = useEditorStore((s) => s.engineMode);
   const undo = useEditorStore((s) => s.undo);
@@ -140,15 +141,32 @@ export function SceneToolbar() {
     }
   }, [loadScene]);
 
+  /**
+   * Report a `newScene()` that returned false, naming the RIGHT cause.
+   *
+   * The boolean is false for two unrelated facts, and this button is reachable
+   * during the window that produces the second: the toolbar renders as soon as
+   * the editor page does, while the dispatcher is only attached once the WASM
+   * engine has finished loading. Calling that "the engine did not accept a new
+   * scene" tells the user their engine refused them when it had simply not
+   * arrived yet — and the two want different reactions (retry in a moment vs.
+   * something is wrong). `isEngineAttached()` reads the fact the boolean drops.
+   */
+  const reportNewSceneFailure = useCallback(() => {
+    showError(
+      isEngineAttached()
+        // Parity with the AI/MCP `new_scene` handler.
+        ? 'The engine did not accept a new scene. The current scene is unchanged.'
+        : 'The engine is not ready yet — try again in a moment. The current scene is unchanged.',
+    );
+  }, [isEngineAttached]);
+
   const handleNew = useCallback(async () => {
     if (sceneModified) {
       if (!await confirm('Discard unsaved changes and create a new scene?')) return;
     }
-    if (newScene() === false) {
-      // Parity with the AI/MCP `new_scene` handler.
-      showError('The engine did not accept a new scene. The current scene is unchanged.');
-    }
-  }, [newScene, sceneModified, confirm]);
+    if (newScene() === false) reportNewSceneFailure();
+  }, [newScene, sceneModified, confirm, reportNewSceneFailure]);
 
   // Ctrl+S shortcut
   useEffect(() => {
@@ -166,14 +184,12 @@ export function SceneToolbar() {
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'N') {
         e.preventDefault();
-        if (newScene() === false) {
-          showError('The engine did not accept a new scene. The current scene is unchanged.');
-        }
+        if (newScene() === false) reportNewSceneFailure();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleSave, newScene, projectId, handleCloudSave]);
+  }, [handleSave, newScene, projectId, handleCloudSave, reportNewSceneFailure]);
 
   const handleExport = useCallback(() => {
     setShowExportDialog(true);
