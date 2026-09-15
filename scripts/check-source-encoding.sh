@@ -27,6 +27,33 @@
 # shell sources reject CR because it breaks execution. Other C0 bytes
 # are written as an escape (`\0`, `\t`) -- which is
 # what makes it reviewable. Hence no allowlist.
+#
+# WHY THIS GATE, AND NOT THE OTHER TWO OPTIONS (#9987)
+#
+# The run:-block backslash-n scan below was one of three directions #9987
+# weighed for stopping "verification steps that cannot fail". Recorded here so
+# the next person hitting this class does not re-derive the tradeoff:
+#
+#   (2) Extend this gate (implemented). The narrow mechanical win. The
+#       corruption is a single byte-exact signature, this gate already walks
+#       every tracked source file, so the marginal cost is one workflow-scoped
+#       pass -- and it runs in CI on every push with no human discipline
+#       required, which is exactly the property the ad-hoc yaml.safe_load / grep
+#       checks that let the bug through lacked. It lands regardless of the rest.
+#   (1) A general verify-* shell helper library (assert_no_literal_backslash_n,
+#       assert_yaml_step_command, ...). NOT done here. It is the broader fix and
+#       worth doing, but a larger surface (new library plus migrating the ad-hoc
+#       checks onto it) and, crucially, it only ever helps a check someone
+#       remembers to call -- it does not run unbidden in CI. Kept to its own
+#       change so this enforceable floor ships small and reviewable.
+#   (3) A lessons-learned entry with a Bash-command trigger in
+#       inject-lessons-learned.sh. NOT done here. It is cheap and complementary,
+#       but it WARNS a human before an action rather than failing an artifact,
+#       so it can never be the gate; and lessons 1 and 11 already carry the
+#       reasoning. Additive to an executable check, not a substitute for one.
+#
+# Net: (2) is the enforceable CI floor and belongs in the repo; (1) and (3) are
+# broader/advisory and are deferred to their own changes. Full framing: #9987.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

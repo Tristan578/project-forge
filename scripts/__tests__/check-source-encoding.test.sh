@@ -296,6 +296,28 @@ YAML
 # Insert shell tabs at runtime so the YAML fixture keeps its intended indentation.
 HERETAB="${HERETAB//<TAB>/$'\t'}"
 expect_workflow "tab-stripped heredoc terminates before corruption" 1 "$HERETAB"
+HERESTRING=$(cat <<'YAML'
+jobs:
+  build:
+    steps:
+      - run: |
+          cat <<< "some text"
+          echo bad \n argument
+YAML
+)
+# A here-string (<<<) is an ordinary shell word, NOT a heredoc opener. Without
+# the `<<<` special case in scan_shell the lexer mistakes it for a heredoc with
+# an unsupported delimiter, marks the rest of the run opaque, and the gate goes
+# GREEN on the collapsed continuation below (verified: deleting that one line
+# makes this fixture exit 0 reporting "unsupported heredoc delimiter"). The
+# corruption on the later line must still be caught and reported, not swallowed.
+expect_workflow "here-string is not a heredoc opener; later corruption still caught" 1 "$HERESTRING"
+RES="$(run_on_workflow "$HERESTRING" literal)"
+if grep -q 'suspicious unquoted literal backslash-n' <<<"$RES" && ! grep -q 'unsupported heredoc delimiter' <<<"$RES"; then
+  pass "the here-string run is scanned through, not swallowed as an unsupported heredoc"
+else
+  fail "a here-string was misparsed as a heredoc and the corruption was swallowed: $RES"
+fi
 OPAQUE=$(cat <<'YAML'
 jobs:
   build:
