@@ -276,6 +276,7 @@ pub struct PendingCommands {
     pub paint_tile_requests: Vec<PaintTileRequest>,
     pub erase_tile_requests: Vec<EraseTileRequest>,
     pub fill_tiles_requests: Vec<FillTilesRequest>,
+    pub set_tile_collision_shape_requests: Vec<SetTileCollisionShapeRequest>,
     pub set_grid_2d_requests: Vec<SetGrid2dRequest>,
     // scene domain
     pub scene_export_requests: Vec<SceneExportRequest>,

@@ -663,11 +663,12 @@ impl Plugin for SelectionPlugin {
             // Sorting layers (always-active): update SortingLayerConfig resource
             .add_systems(Update, sprite::apply_set_sorting_layers)
             .add_systems(Update, sprite::sync_sprite_z_with_sorting_config)
-            // Tile paint/erase/fill (always-active)
+            // Tile paint/erase/fill/collision-shape (always-active)
             .add_systems(Update, (
                 sprite::apply_paint_tile_requests,
                 sprite::apply_erase_tile_requests,
                 sprite::apply_fill_tiles_requests,
+                sprite::apply_set_tile_collision_shape_requests,
             ))
             // Animated tiles (always-active)
             .add_systems(Update, sprite::animate_tilemap_tiles)

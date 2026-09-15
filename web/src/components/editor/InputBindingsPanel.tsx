@@ -22,13 +22,18 @@ function formatKeyCode(code: string): string {
 
 export function InputBindingsPanel() {
   const inputBindings = useEditorStore((s) => s.inputBindings);
-  const inputPreset = useEditorStore((s) => s.inputPreset);
+  const inputPresetByPlayer = useEditorStore((s) => s.inputPresetByPlayer);
   const engineMode = useEditorStore((s) => s.engineMode);
   const setInputPreset = useEditorStore((s) => s.setInputPreset);
   const setInputBinding = useEditorStore((s) => s.setInputBinding);
   const removeInputBinding = useEditorStore((s) => s.removeInputBinding);
 
   const [collapsed, setCollapsed] = useState(true);
+  // Which local player's map is being authored (0 = Player 1, 1 = Player 2).
+  // Two local players each get an independently editable action map
+  // (physics.FR-1.OP-04); this selector picks the slot every control below
+  // reads and writes.
+  const [selectedPlayer, setSelectedPlayer] = useState(0);
   const [rebindTarget, setRebindTarget] = useState<{
     actionName: string;
     field: 'sources' | 'positiveKeys' | 'negativeKeys';
@@ -36,6 +41,11 @@ export function InputBindingsPanel() {
   const [addingNew, setAddingNew] = useState(false);
   const [newActionName, setNewActionName] = useState('');
   const [newActionType, setNewActionType] = useState<'digital' | 'axis'>('digital');
+
+  // Only the selected player's bindings are shown and edited. A binding with no
+  // `player` field is Player 1 (slot 0), so a single-player scene renders exactly
+  // as before.
+  const playerBindings = inputBindings.filter((b) => (b.player ?? 0) === selectedPlayer);
 
   // Listen for keydown when rebinding
   useEffect(() => {
@@ -51,14 +61,17 @@ export function InputBindingsPanel() {
         return;
       }
 
-      // Find the binding and update it
-      const binding = inputBindings.find((b) => b.actionName === rebindTarget.actionName);
+      // Find the binding within the SELECTED player's slot — player 2's action
+      // of the same name is a different row and must not be caught here.
+      const binding = inputBindings.find(
+        (b) => b.actionName === rebindTarget.actionName && (b.player ?? 0) === selectedPlayer,
+      );
       if (!binding) {
         setRebindTarget(null);
         return;
       }
 
-      const updated: InputBinding = { ...binding };
+      const updated: InputBinding = { ...binding, player: selectedPlayer };
       if (rebindTarget.field === 'sources') {
         updated.sources = [code];
       } else if (rebindTarget.field === 'positiveKeys') {
@@ -73,15 +86,15 @@ export function InputBindingsPanel() {
 
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [rebindTarget, inputBindings, setInputBinding]);
+  }, [rebindTarget, inputBindings, setInputBinding, selectedPlayer]);
 
   const handlePresetChange = useCallback(
     (value: string) => {
       if (value && value !== '') {
-        setInputPreset(value as 'fps' | 'platformer' | 'topdown' | 'racing');
+        setInputPreset(value as 'fps' | 'platformer' | 'topdown' | 'racing', selectedPlayer);
       }
     },
-    [setInputPreset]
+    [setInputPreset, selectedPlayer]
   );
 
   const handleAddAction = useCallback(() => {
@@ -93,12 +106,13 @@ export function InputBindingsPanel() {
       sources: [],
       positiveKeys: newActionType === 'axis' ? [] : undefined,
       negativeKeys: newActionType === 'axis' ? [] : undefined,
+      player: selectedPlayer,
     };
 
     setInputBinding(binding);
     setNewActionName('');
     setAddingNew(false);
-  }, [newActionName, newActionType, setInputBinding]);
+  }, [newActionName, newActionType, setInputBinding, selectedPlayer]);
 
   // Don't allow rebinding during Play mode
   const isEditing = engineMode === 'edit';
@@ -120,11 +134,38 @@ export function InputBindingsPanel() {
 
       {!collapsed && (
         <div className="mt-3 space-y-3">
+          {/* Local-player selector — each slot has its own editable action map. */}
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">Player</label>
+            <div className="flex gap-1" role="group" aria-label="Local player">
+              {[0, 1].map((slot) => (
+                <button
+                  key={slot}
+                  onClick={() => setSelectedPlayer(slot)}
+                  aria-pressed={selectedPlayer === slot}
+                  // A rebind capture resolves which action to rewrite against the
+                  // selected player at key-press time, so switching slots mid-capture
+                  // would silently retarget (or swallow) the keypress. Lock the
+                  // selector until the capture completes or is cancelled.
+                  disabled={rebindTarget !== null}
+                  title={rebindTarget !== null ? 'Finish or cancel the rebind first' : undefined}
+                  className={`flex-1 rounded px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
+                    selectedPlayer === slot
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                  }`}
+                >
+                  {`Player ${slot + 1}`}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Preset selector */}
           <div>
             <label className="mb-1 block text-xs text-zinc-400">Preset</label>
             <select
-              value={inputPreset ?? ''}
+              value={inputPresetByPlayer[selectedPlayer] ?? ''}
               onChange={(e) => handlePresetChange(e.target.value)}
               disabled={!isEditing}
               aria-label="Input preset"
@@ -139,12 +180,12 @@ export function InputBindingsPanel() {
             </select>
           </div>
 
-          {/* Bindings list */}
-          {inputBindings.length === 0 ? (
+          {/* Bindings list — the selected player's slot only */}
+          {playerBindings.length === 0 ? (
             <p className="text-xs text-zinc-400 italic">No bindings configured</p>
           ) : (
             <div className="space-y-2">
-              {inputBindings.map((binding) => (
+              {playerBindings.map((binding) => (
                 <div
                   key={binding.actionName}
                   className="rounded bg-zinc-800/50 px-2 py-1.5 text-xs"
@@ -155,7 +196,7 @@ export function InputBindingsPanel() {
                       <span className="text-zinc-400 text-[10px]">{binding.actionType}</span>
                       {isEditing && (
                         <button
-                          onClick={() => removeInputBinding(binding.actionName)}
+                          onClick={() => removeInputBinding(binding.actionName, selectedPlayer)}
                           aria-label={`Remove ${binding.actionName} binding`}
                           className="text-zinc-400 hover:text-red-400"
                           title="Remove binding"

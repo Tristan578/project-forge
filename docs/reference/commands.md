@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 359 MCP commands available in SpawnForge.
+Complete reference for all 360 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -39,7 +39,7 @@ Complete reference for all 359 MCP commands available in SpawnForge.
 - [Sprite](#sprite) (8 commands)
 - [Sprite_animation](#sprite_animation) (6 commands)
 - [Physics2d](#physics2d) (10 commands)
-- [Tilemap](#tilemap) (10 commands)
+- [Tilemap](#tilemap) (11 commands)
 - [Skeleton2d](#skeleton2d) (13 commands)
 - [Modeling](#modeling) (6 commands)
 - [Security](#security) (2 commands)
@@ -7402,6 +7402,36 @@ Set a single tile on one tilemap layer
     "layerIndex": 1,
     "x": 1,
     "y": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `set_tile_collision_shape`
+
+Author stored collision-shape metadata for one tilemap cell. These shapes do not affect play physics yet.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entityId` | string | Yes | Scene entity ID carrying the existing tilemap |
+| `layerIndex` | integer | Yes | Zero-based index of an existing tilemap layer |
+| `x` | integer | Yes | Zero-based column of an existing cell within the tilemap |
+| `y` | integer | Yes | Zero-based row of an existing cell within the tilemap |
+| `shape` | `"none"` \| `"full"` \| `"halfTop"` \| `"halfBottom"` \| `"slopeLeft"` \| `"slopeRight"` | Yes | Stored silhouette for the cell: none (unauthored), full, halfTop, halfBottom, slopeLeft or slopeRight. Runtime colliders are not implemented. |
+
+**Example:**
+```json
+{
+  "command": "set_tile_collision_shape",
+  "params": {
+    "entityId": "entity_1",
+    "layerIndex": 1,
+    "x": 1,
+    "y": 1,
+    "shape": "none"
   }
 }
 ```

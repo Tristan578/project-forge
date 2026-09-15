@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, within, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { TilemapInspector } from '../TilemapInspector';
 import { useEditorStore } from '@/stores/editorStore';
 
@@ -41,6 +41,7 @@ const baseTilemapData = {
 describe('TilemapInspector', () => {
   const mockSetTilemapData = vi.fn();
   const mockRemoveTilemapData = vi.fn();
+  const mockSetTileCollisionShape = vi.fn(() => 'queued');
 
   function setupStore({
     primaryId = 'entity-1' as string | null,
@@ -59,6 +60,7 @@ describe('TilemapInspector', () => {
         projectType,
         setTilemapData: mockSetTilemapData,
         removeTilemapData: mockRemoveTilemapData,
+        setTileCollisionShape: mockSetTileCollisionShape,
       };
       return typeof selector === 'function' ? selector(state) : state;
     });
@@ -115,7 +117,7 @@ describe('TilemapInspector', () => {
   it('renders tileset select with None option', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapInspector />);
-    expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+    expect(within(screen.getByRole('combobox', { name: 'Tileset' })).getByRole('option', { name: 'None' })).toBeInTheDocument();
   });
 
   it('shows available tilesets in select', () => {
@@ -177,5 +179,93 @@ describe('TilemapInspector', () => {
     await vi.waitFor(() => {
       expect(mockRemoveTilemapData).toHaveBeenCalledWith('entity-1');
     });
+  });
+
+  // OP-04: per-tile collision shape picker
+  it('renders the collision shape picker with every shape option', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+    expect(screen.getByText('Tile Collision Shape')).toBeInTheDocument();
+    const shapeSelect = screen.getByRole('combobox', { name: 'Collision shape' });
+    const values = Array.from(shapeSelect.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(['none', 'full', 'halfTop', 'halfBottom', 'slopeLeft', 'slopeRight']);
+  });
+
+  it('dispatches setTileCollisionShape with the chosen cell and shape on Apply', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+
+    fireEvent.change(screen.getByLabelText('X'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Y'), { target: { value: '5' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Collision shape' }), {
+      target: { value: 'halfTop' },
+    });
+    fireEvent.click(screen.getByText('Apply Collision Shape'));
+
+    expect(mockSetTileCollisionShape).toHaveBeenCalledWith('entity-1', 0, 3, 5, 'halfTop');
+  });
+
+  it('offers no invalid shape option in the picker (only the known vocabulary)', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+    const shapeSelect = screen.getByRole('combobox', { name: 'Collision shape' }) as HTMLSelectElement;
+    const values = Array.from(shapeSelect.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
+    expect(values).not.toContain('wedge');
+    expect(values).not.toContain('');
+  });
+
+  it('explains the authoring-only scope beside the shape controls', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+    expect(screen.getByText(/stored shapes do not affect play physics yet/)).toBeInTheDocument();
+    expect(screen.getByText('Authored shape: None')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply Collision Shape' }))
+      .toHaveAccessibleDescription(/do not affect play physics/);
+  });
+
+  it.each([
+    ['X', ''], ['Y', ''], ['X', '-1'], ['X', '1.5'], ['X', '999'],
+  ])('disables applying an invalid %s coordinate %j', (coordinate, value) => {
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+    fireEvent.change(screen.getByLabelText(coordinate), { target: { value } });
+    const button = screen.getByRole('button', { name: 'Apply Collision Shape' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(mockSetTileCollisionShape).not.toHaveBeenCalled();
+  });
+
+  it('shows queued feedback while the authored value waits for an engine update', () => {
+    setupStore({ tilemapData: baseTilemapData });
+    const { rerender } = render(<TilemapInspector />);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Collision Shape' }));
+
+    expect(screen.getByRole('status')).toHaveTextContent('The authored value updates when the engine confirms it.');
+    expect(screen.getByText('Authored shape: None')).toBeInTheDocument();
+
+    const confirmedTilemap = {
+      ...baseTilemapData,
+      layers: baseTilemapData.layers.map((layer) => ({
+        ...layer,
+        collisionShapes: ['full' as const],
+      })),
+    };
+    setupStore({ tilemapData: confirmedTilemap });
+    rerender(<TilemapInspector />);
+
+    expect(screen.getByText('Authored shape: Full cell')).toBeInTheDocument();
+    expect(mockSetTileCollisionShape).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows an engine rejection and keeps the confirmed stored value', () => {
+    mockSetTileCollisionShape.mockImplementationOnce(() => { throw new Error('The engine is not ready. Try again.'); });
+    setupStore({ tilemapData: baseTilemapData });
+    render(<TilemapInspector />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Collision Shape' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The engine is not ready');
+    expect(screen.getByText('Authored shape: None')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

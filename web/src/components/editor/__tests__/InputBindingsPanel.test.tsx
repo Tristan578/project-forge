@@ -34,6 +34,7 @@ describe('InputBindingsPanel', () => {
       const state = {
         inputBindings: defaultBindings,
         inputPreset: 'fps',
+        inputPresetByPlayer: { 0: 'fps' },
         engineMode: 'edit',
         setInputPreset: mockSetInputPreset,
         setInputBinding: mockSetInputBinding,
@@ -115,12 +116,13 @@ describe('InputBindingsPanel', () => {
     expect(screen.getByRole('button', { name: /remove movex binding/i })).toBeInTheDocument();
   });
 
-  it('calls removeInputBinding when remove button is clicked', () => {
+  it('calls removeInputBinding with the selected player slot', () => {
     render(<InputBindingsPanel />);
     fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
     fireEvent.click(screen.getByRole('button', { name: /remove jump binding/i }));
 
-    expect(mockRemoveInputBinding).toHaveBeenCalledWith('Jump');
+    // Player 1 (slot 0) is selected by default.
+    expect(mockRemoveInputBinding).toHaveBeenCalledWith('Jump', 0);
   });
 
   it('hides remove buttons in play mode', () => {
@@ -159,5 +161,96 @@ describe('InputBindingsPanel', () => {
 
     // formatKeyCode('KeyW') -> 'W'
     expect(screen.getByText('W')).toBeInTheDocument();
+  });
+
+  // OP-04: two local players each get an independently editable action map.
+  describe('player-slot selector (physics.FR-1.OP-04)', () => {
+    const twoPlayerBindings = [
+      { actionName: 'Jump', actionType: 'digital' as const, sources: ['Space'] },        // player 0 (absent)
+      { actionName: 'P2Attack', actionType: 'digital' as const, sources: ['Numpad0'], player: 1 },
+    ];
+
+    it('renders a Player 1 / Player 2 selector when expanded', () => {
+      render(<InputBindingsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
+
+      expect(screen.getByRole('button', { name: 'Player 1' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Player 2' })).toBeInTheDocument();
+    });
+
+    it('shows only the selected player\'s bindings', () => {
+      setupMock({ inputBindings: twoPlayerBindings });
+      render(<InputBindingsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
+
+      // Player 1 is selected by default: its binding shows, player 2's does not.
+      expect(screen.getByText('Jump')).toBeInTheDocument();
+      expect(screen.queryByText('P2Attack')).toBeNull();
+
+      // Switch to Player 2: now its binding shows and player 1's is hidden.
+      fireEvent.click(screen.getByRole('button', { name: 'Player 2' }));
+      expect(screen.getByText('P2Attack')).toBeInTheDocument();
+      expect(screen.queryByText('Jump')).toBeNull();
+    });
+
+    it('removes a binding on the selected player 2 slot', () => {
+      setupMock({ inputBindings: twoPlayerBindings });
+      render(<InputBindingsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
+      fireEvent.click(screen.getByRole('button', { name: 'Player 2' }));
+      fireEvent.click(screen.getByRole('button', { name: /remove p2attack binding/i }));
+
+      expect(mockRemoveInputBinding).toHaveBeenCalledWith('P2Attack', 1);
+    });
+
+    it('adds a new binding tagged with the selected player slot', () => {
+      setupMock({ inputBindings: twoPlayerBindings });
+      render(<InputBindingsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
+      fireEvent.click(screen.getByRole('button', { name: 'Player 2' }));
+      fireEvent.click(screen.getByRole('button', { name: /add binding/i }));
+      fireEvent.change(screen.getByRole('textbox', { name: /new action name/i }), {
+        target: { value: 'special' },
+      });
+      // The "Add" submit button inside the new-binding form.
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+      expect(mockSetInputBinding).toHaveBeenCalledWith(
+        expect.objectContaining({ actionName: 'special', player: 1 }),
+      );
+    });
+
+    it('shows player 2\'s applied preset in the dropdown, not a permanent blank', () => {
+      // Each slot's preset provenance lives in `inputPresetByPlayer`; the panel
+      // reads the selected slot's value so player 2 is inspectable, not blanked.
+      setupMock({
+        inputBindings: twoPlayerBindings,
+        inputPresetByPlayer: { 0: 'fps', 1: 'platformer' },
+      });
+      render(<InputBindingsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
+
+      const select = screen.getByRole('combobox', { name: /input preset/i }) as HTMLSelectElement;
+      expect(select.value).toBe('fps');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Player 2' }));
+      expect(select.value).toBe('platformer');
+    });
+
+    it('locks the player selector while a rebind capture is in flight', () => {
+      render(<InputBindingsPanel />);
+      fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
+
+      const player2 = screen.getByRole('button', { name: 'Player 2' }) as HTMLButtonElement;
+      expect(player2.disabled).toBe(false);
+
+      // Arm a rebind on Player 1's Jump action.
+      fireEvent.click(screen.getByRole('button', { name: /rebind jump/i }));
+
+      // Switching slots mid-capture would silently retarget the keypress, so the
+      // selector is disabled until the capture completes or is cancelled.
+      expect(player2.disabled).toBe(true);
+      expect((screen.getByRole('button', { name: 'Player 1' }) as HTMLButtonElement).disabled).toBe(true);
+    });
   });
 });
