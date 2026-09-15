@@ -12,6 +12,12 @@ import {
   exportPrefab,
   importPrefab,
   getBuiltInPrefabs,
+  createPrefabInstance,
+  getPrefabInstances,
+  deletePrefabInstance,
+  loadPrefabInstances,
+  addNestedPrefab,
+  applyPrefabToInstances,
   type PrefabSnapshot,
 } from './prefabStore';
 
@@ -300,5 +306,94 @@ describe('Edge Cases', () => {
   it('getPrefab returns undefined for nonexistent prefab', () => {
     const found = getPrefab('DoesNotExist');
     expect(found).toBeUndefined();
+  });
+});
+
+describe('Nested / linked prefab instances', () => {
+  it('createPrefabInstance links an existing source and persists it (OP-01)', () => {
+    const source = savePrefab('Source', 'cat', '', mockSnapshot);
+    const result = createPrefabInstance(source.id, { name: 'Instanced' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.prefabId).toBe(source.id);
+    expect(result.value.overrides).toEqual({ name: 'Instanced' });
+    expect(getPrefabInstances(source.id)).toHaveLength(1);
+    expect(loadPrefabInstances()).toHaveLength(1);
+  });
+
+  it('createPrefabInstance rejects a dangling link to a missing prefab', () => {
+    const result = createPrefabInstance('nope');
+    expect(result).toEqual({ ok: false, error: 'Prefab not found: nope' });
+    expect(loadPrefabInstances()).toHaveLength(0);
+  });
+
+  it('deletePrefabInstance removes by id', () => {
+    const source = savePrefab('Source', 'cat', '', mockSnapshot);
+    const created = createPrefabInstance(source.id);
+    if (!created.ok) throw new Error('setup failed');
+    expect(deletePrefabInstance(created.value.instanceId)).toBe(true);
+    expect(getPrefabInstances(source.id)).toHaveLength(0);
+    expect(deletePrefabInstance('missing')).toBe(false);
+  });
+
+  it('applyPrefabToInstances propagates source changes but preserves overrides (OP-04)', () => {
+    const source = savePrefab('Source', 'cat', '', { ...mockSnapshot, entityType: 'cube', name: 'Base' });
+    const created = createPrefabInstance(source.id, { name: 'Kept' });
+    if (!created.ok) throw new Error('setup failed');
+
+    // Update the source prefab: entityType changes, name changes.
+    updatePrefab(source.id, { ...mockSnapshot, entityType: 'sphere', name: 'NewBase' });
+
+    const applied = applyPrefabToInstances(source.id);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.value).toHaveLength(1);
+    const snap = applied.value[0].snapshot;
+    expect(snap.entityType).toBe('sphere'); // inherited from updated source
+    expect(snap.name).toBe('Kept'); // override preserved
+  });
+
+  it('applyPrefabToInstances rejects a missing prefab', () => {
+    expect(applyPrefabToInstances('nope')).toEqual({ ok: false, error: 'Prefab not found: nope' });
+  });
+
+  it('addNestedPrefab nests a child under a user prefab (OP-02)', () => {
+    const parent = savePrefab('Parent', 'cat', '', mockSnapshot);
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    const result = addNestedPrefab(parent.id, child.id);
+    expect(result.ok).toBe(true);
+    const updated = getPrefab(parent.id);
+    expect(updated?.children).toHaveLength(1);
+    expect(updated?.children?.[0].prefabId).toBe(child.id);
+  });
+
+  it('addNestedPrefab rejects a direct self-reference with the chain and no mutation (OP-02)', () => {
+    const prefab = savePrefab('SelfRef', 'cat', '', mockSnapshot);
+    const result = addNestedPrefab(prefab.id, prefab.id);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.cycle).toEqual([prefab.id, prefab.id]);
+    expect(getPrefab(prefab.id)?.children ?? []).toHaveLength(0); // unmutated
+  });
+
+  it('addNestedPrefab rejects a multi-level cycle (A->B->A) with no mutation (OP-02)', () => {
+    const a = savePrefab('A', 'cat', '', mockSnapshot);
+    const b = savePrefab('B', 'cat', '', mockSnapshot);
+    expect(addNestedPrefab(a.id, b.id).ok).toBe(true); // A contains B
+    const result = addNestedPrefab(b.id, a.id); // B contains A would close the loop
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.cycle?.[0]).toBe(b.id);
+    expect(result.cycle?.[result.cycle.length - 1]).toBe(b.id);
+    expect(getPrefab(b.id)?.children ?? []).toHaveLength(0); // B unmutated
+  });
+
+  it('addNestedPrefab rejects nesting into a built-in prefab', () => {
+    const builtIn = getBuiltInPrefabs()[0];
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    const result = addNestedPrefab(builtIn.id, child.id);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('built-in');
   });
 });

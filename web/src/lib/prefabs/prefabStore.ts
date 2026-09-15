@@ -1,4 +1,15 @@
 import type { MaterialData, LightData, PhysicsData, ScriptData, AudioData, ParticleData } from '@/stores/editorStore';
+import {
+  createInstance,
+  resolveInstance,
+  wouldCreateCycle,
+  type PrefabInstance,
+  type PrefabChildRef,
+  type PrefabOverrideMap,
+  type CycleCheckResult,
+} from './prefabInstance';
+
+export type { PrefabInstance, PrefabChildRef, PrefabOverrideMap } from './prefabInstance';
 
 export interface PrefabSnapshot {
   entityType: string;
@@ -24,6 +35,12 @@ export interface Prefab {
   snapshot: PrefabSnapshot;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Nested prefab instances this prefab contains (linked prefabs). Optional so
+   * every pre-existing flat prefab, and every built-in, stays a valid non-nested
+   * prefab with no migration.
+   */
+  children?: PrefabChildRef[];
 }
 
 const PREFAB_STORAGE_KEY = 'forge-prefabs';
@@ -130,4 +147,130 @@ import { BUILT_IN_PREFABS } from './builtInPrefabs';
 
 export function getBuiltInPrefabs(): Prefab[] {
   return BUILT_IN_PREFABS;
+}
+
+// ===========================================================================
+// Nested / linked prefab INSTANCES (scene.FR-1.OP-01 .. OP-04)
+//
+// Instances live in their own localStorage key, separate from the flat prefab
+// definitions, so the existing prefab CRUD above is untouched. Every operation
+// here delegates the actual data logic to the pure functions in
+// `prefabInstance.ts`; this layer only adds persistence and the store lookups
+// (source-prefab existence, the nesting graph) those functions need.
+// ===========================================================================
+
+const PREFAB_INSTANCES_STORAGE_KEY = 'forge-prefab-instances';
+
+/** Result of a mutating instance/nesting operation. */
+export type PrefabInstanceOpResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string; cycle?: string[] };
+
+/** Load the persisted instance registry. */
+export function loadPrefabInstances(): PrefabInstance[] {
+  try {
+    const stored = localStorage.getItem(PREFAB_INSTANCES_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch { return []; }
+}
+
+/** Persist the instance registry. */
+export function savePrefabInstancesToStorage(instances: PrefabInstance[]): void {
+  localStorage.setItem(PREFAB_INSTANCES_STORAGE_KEY, JSON.stringify(instances));
+}
+
+/** All instances linked to a given source prefab. */
+export function getPrefabInstances(prefabId: string): PrefabInstance[] {
+  return loadPrefabInstances().filter((i) => i.prefabId === prefabId);
+}
+
+/**
+ * Create and persist a linked instance of a source prefab (OP-01). Rejects when
+ * the source prefab does not exist rather than persisting a dangling link.
+ */
+export function createPrefabInstance(
+  prefabId: string,
+  overrides?: PrefabOverrideMap,
+  entityId?: string,
+): PrefabInstanceOpResult<PrefabInstance> {
+  const source = getPrefab(prefabId);
+  if (!source) return { ok: false, error: `Prefab not found: ${prefabId}` };
+  const instance = createInstance(source.id, overrides, entityId);
+  const instances = loadPrefabInstances();
+  instances.push(instance);
+  savePrefabInstancesToStorage(instances);
+  return { ok: true, value: instance };
+}
+
+/** Delete one instance by id. Returns whether anything was removed. */
+export function deletePrefabInstance(instanceId: string): boolean {
+  const instances = loadPrefabInstances();
+  const filtered = instances.filter((i) => i.instanceId !== instanceId);
+  if (filtered.length === instances.length) return false;
+  savePrefabInstancesToStorage(filtered);
+  return true;
+}
+
+/** The prefab ids a prefab directly nests — the nesting graph edge set. */
+function getChildPrefabIds(prefabId: string): string[] {
+  const prefab = getPrefab(prefabId);
+  return (prefab?.children ?? []).map((c) => c.prefabId);
+}
+
+/**
+ * Nest a child prefab inside a parent prefab (OP-02). Rejects — with the
+ * offending chain and WITHOUT mutating anything — when the edge would close a
+ * cycle in the prefab graph, at any depth.
+ */
+export function addNestedPrefab(
+  parentPrefabId: string,
+  childPrefabId: string,
+  overrides?: PrefabOverrideMap,
+): PrefabInstanceOpResult<Prefab> {
+  const child = getPrefab(childPrefabId);
+  if (!child) return { ok: false, error: `Child prefab not found: ${childPrefabId}` };
+
+  // Only user prefabs are persistable; built-ins are frozen definitions.
+  const userPrefabs = loadPrefabs();
+  const idx = userPrefabs.findIndex((p) => p.id === parentPrefabId);
+  if (idx === -1) {
+    return getPrefab(parentPrefabId)
+      ? { ok: false, error: `Cannot nest into a built-in prefab: ${parentPrefabId}` }
+      : { ok: false, error: `Parent prefab not found: ${parentPrefabId}` };
+  }
+
+  const cycle: CycleCheckResult = wouldCreateCycle(parentPrefabId, childPrefabId, getChildPrefabIds);
+  if (cycle.hasCycle) {
+    return {
+      ok: false,
+      error: `Cyclic prefab reference rejected: ${cycle.chain.join(' -> ')}`,
+      cycle: cycle.chain,
+    };
+  }
+
+  const childRef: PrefabChildRef = createInstance(childPrefabId, overrides);
+  const parent = userPrefabs[idx];
+  parent.children = [...(parent.children ?? []), childRef];
+  parent.updatedAt = new Date().toISOString();
+  savePrefabsToStorage(userPrefabs);
+  return { ok: true, value: parent };
+}
+
+/**
+ * Propagate the current source prefab onto all of its linked instances (OP-04)
+ * — the operation behind the manual "Apply to Instances" control and the
+ * equivalent AI command. Returns one resolved snapshot per instance: every
+ * non-overridden field reflects the source, every overridden field is
+ * preserved. Instances keep their durable override sets untouched.
+ */
+export function applyPrefabToInstances(
+  prefabId: string,
+): PrefabInstanceOpResult<Array<{ instanceId: string; snapshot: PrefabSnapshot }>> {
+  const source = getPrefab(prefabId);
+  if (!source) return { ok: false, error: `Prefab not found: ${prefabId}` };
+  const resolved = getPrefabInstances(prefabId).map((instance) => ({
+    instanceId: instance.instanceId,
+    snapshot: resolveInstance(instance, source),
+  }));
+  return { ok: true, value: resolved };
 }
