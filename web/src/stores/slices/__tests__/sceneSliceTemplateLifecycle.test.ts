@@ -206,7 +206,7 @@ describe('template load lifecycle through engine events', () => {
     const { result, json } = await queueTemplate();
     await vi.advanceTimersByTimeAsync(50);
     expect(await result).toMatchObject({
-      success: false, error: expect.stringContaining('may change after this timeout'),
+      success: false, error: expect.stringContaining('may appear without its scripts or gameplay setup'),
     });
 
     // A timeout unsubscribes the waiter; it cannot remove the Rust load request.

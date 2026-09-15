@@ -279,7 +279,7 @@ describe('sceneSlice.loadTemplate', () => {
 
       const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
 
-      expect(result).toMatchObject({ success: false, error: expect.stringContaining('may change after this timeout') });
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining('may appear without its scripts or gameplay setup') });
       expect(loadPrefabInstances()).toEqual([]);
     });
   });
