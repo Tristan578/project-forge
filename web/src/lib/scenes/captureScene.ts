@@ -88,3 +88,13 @@ export function captureActiveScene(
     if (!requestExport()) settle({ status: 'unavailable' });
   });
 }
+
+// `attachPrefabInstances` used to live here: a SECOND fold of the prefab
+// registry, applied on the way out of the capture. It is gone because folding
+// twice was never additive — the `SCENE_EXPORTED` handler
+// (`lib/prefabs/prefabSceneFold.ts`) has already folded the registry snapshot
+// staged when the export was REQUESTED, and re-reading the live registry
+// afterwards overwrote that with a later, unpaired read: an instance created
+// during the engine round trip reached `prefabInstances` while its definition
+// stayed out of `prefabDefinitions`, and reopening dropped the link. Callers
+// stage instead (`stagePrefabInstancesForExport`) and let the one fold run.

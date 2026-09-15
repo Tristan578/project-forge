@@ -4988,6 +4988,107 @@
       "visibility": "public"
     },
     {
+      "name": "create_prefab_instance",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "nest_prefab",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "parentPrefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "childPrefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "parentPrefabId",
+          "childPrefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "apply_prefab_to_instances",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "list_prefab_instances",
+      "description": "Inspect saved editor link metadata for a prefab by ID or name, including overridden field names. Records do not verify scene entity placement or propagation. This read is not advertised to the in-app chat model.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Source prefab whose instances to list"
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
       "name": "create_scene",
       "description": "Create a new empty scene in the project",
       "category": "scene",

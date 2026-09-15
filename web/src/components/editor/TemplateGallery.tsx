@@ -25,6 +25,7 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
   const [error, setError] = useState<string | null>(null);
   const loadTemplate = useEditorStore((s) => s.loadTemplate);
   const newScene = useEditorStore((s) => s.newScene);
+  const isEngineAttached = useEditorStore((s) => s.isEngineAttached);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -82,8 +83,21 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
 
   const handleSelectTemplate = async (templateId: string | null) => {
     if (templateId === null) {
-      // Blank project
-      newScene();
+      // Blank project. Firing GAME_CREATED and closing no matter what
+      // `newScene()` returned reported a blank project the engine never
+      // accepted — the same false success the template branch below guards
+      // (#10056). But the boolean alone cannot carry that accusation: it is
+      // ALSO false when there is no dispatcher yet, which is the ordinary cold
+      // open (the engine mounts after the editor page). Treating that as a
+      // refusal put an error on the gallery and trapped the user in it on the
+      // one path that has nothing to go wrong. `isEngineAttached()` is the
+      // disambiguator — read synchronously, immediately after the call, so
+      // nothing can have changed in between. Deferral: nothing was cleared and
+      // nothing needed to be, the editor is already blank, so proceed.
+      if (newScene() === false && isEngineAttached()) {
+        setError('The engine did not accept a new scene. Please try again.');
+        return;
+      }
       trackEvent(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
       onClose();
       return;
