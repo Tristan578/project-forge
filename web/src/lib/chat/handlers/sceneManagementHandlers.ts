@@ -71,6 +71,9 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       positiveKeys: z.array(z.string()).optional(),
       negativeKeys: z.array(z.string()).optional(),
       deadZone: z.number().optional(),
+      // Local-player slot (0 = primary). Non-negative integer; the AI path and
+      // the manual panel produce identical InputMap mutations for the same slot.
+      player: z.number().int().min(0).optional(),
     }), args);
     if (p.error) return p.error;
     const binding: InputBinding = {
@@ -80,24 +83,30 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       positiveKeys: p.data.positiveKeys,
       negativeKeys: p.data.negativeKeys,
       deadZone: p.data.deadZone,
+      player: p.data.player,
     };
     ctx.store.setInputBinding(binding);
-    return { success: true, result: { message: `Set binding: ${binding.actionName}` } };
+    const who = binding.player ? ` (player ${binding.player + 1})` : '';
+    return { success: true, result: { message: `Set binding: ${binding.actionName}${who}` } };
   },
 
   remove_input_binding: async (args, ctx): Promise<ExecutionResult> => {
-    const p = parseArgs(z.object({ actionName: z.string().min(1) }), args);
+    const p = parseArgs(z.object({
+      actionName: z.string().min(1),
+      player: z.number().int().min(0).optional(),
+    }), args);
     if (p.error) return p.error;
-    ctx.store.removeInputBinding(p.data.actionName);
+    ctx.store.removeInputBinding(p.data.actionName, p.data.player);
     return { success: true, result: { message: `Removed binding: ${p.data.actionName}` } };
   },
 
   set_input_preset: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       preset: z.enum(['fps', 'platformer', 'topdown', 'racing']),
+      player: z.number().int().min(0).optional(),
     }), args);
     if (p.error) return p.error;
-    ctx.store.setInputPreset(p.data.preset);
+    ctx.store.setInputPreset(p.data.preset, p.data.player);
     return { success: true, result: { message: `Applied input preset: ${p.data.preset}` } };
   },
 

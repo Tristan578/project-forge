@@ -75,12 +75,130 @@ pub struct ActionValue {
 /// `preset` records which starting set the map CAME from. It is provenance, not
 /// a constraint: a preset is a handful of rows written into `actions` once,
 /// after which it has no further say.
+///
+/// TWO LOCAL PLAYERS (OP-04). `actions`/`preset` are player 0 — the only player
+/// a single-player scene ever has, and the shape every scene authored before
+/// this carried. `players` holds slot 1 and up, each an independently editable
+/// action map with its own preset provenance. It is `#[serde(default,
+/// skip_serializing_if = "HashMap::is_empty")]` so a one-player scene serializes
+/// and loads byte-for-byte as it always did — the field simply is not there —
+/// and every existing template, saved project and remix keeps its bindings.
+/// Two local players share one physical keyboard, so independence comes from
+/// each slot binding its own keys (player 1 on WASD, player 2 on the arrows,
+/// say); `capture_input` evaluates every slot's map against the same key state
+/// into its own `InputState` slot, and nothing forces the two to agree.
 #[derive(Resource, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InputMap {
     pub actions: HashMap<String, ActionDef>,
     /// Which starting set produced these bindings (None = the creator's own).
     pub preset: Option<String>,
+    /// Additional local players (slot 1+). Slot 0 is `actions`/`preset` above.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub players: HashMap<u8, PlayerBindings>,
+}
+
+/// One local player's action map plus its preset provenance. Slot 0 lives on
+/// `InputMap` directly (`actions`/`preset`); slots 1+ are `PlayerBindings` so a
+/// second player's map is edited, rebound and persisted exactly like the first.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerBindings {
+    pub actions: HashMap<String, ActionDef>,
+    /// Which starting set produced this slot's bindings (None = the creator's own).
+    pub preset: Option<String>,
+}
+
+impl InputMap {
+    /// The action map for one local player slot (0 = the primary/top-level map).
+    /// `None` when slot >= 1 has never been given a binding.
+    pub fn actions_for(&self, player: u8) -> Option<&HashMap<String, ActionDef>> {
+        if player == 0 {
+            Some(&self.actions)
+        } else {
+            self.players.get(&player).map(|p| &p.actions)
+        }
+    }
+
+    /// Mutable action map for a slot, creating the slot for player >= 1 if absent.
+    fn actions_for_mut(&mut self, player: u8) -> &mut HashMap<String, ActionDef> {
+        if player == 0 {
+            &mut self.actions
+        } else {
+            &mut self.players.entry(player).or_default().actions
+        }
+    }
+
+    /// Write one binding into a slot and mark that slot the creator's own
+    /// (`preset = None`), exactly as the single-player path always has.
+    pub fn set_binding(&mut self, player: u8, def: ActionDef) {
+        self.actions_for_mut(player).insert(def.name.clone(), def);
+        self.set_preset(player, None);
+    }
+
+    /// Remove one binding from a slot. Returns whether anything was removed. A
+    /// slot that does not exist removes nothing and is not created. Removing a
+    /// player 1+ slot's LAST binding drops the whole `players` entry rather than
+    /// leaving an empty one behind — `player_slots()` reads `players.keys()`
+    /// directly, so a lingering empty entry reported a "ghost" occupied slot
+    /// with nothing bound to it.
+    pub fn remove_binding(&mut self, player: u8, name: &str) -> bool {
+        let removed = if player == 0 {
+            self.actions.remove(name).is_some()
+        } else if let Some(p) = self.players.get_mut(&player) {
+            p.actions.remove(name).is_some()
+        } else {
+            false
+        };
+        if removed {
+            let now_empty = player != 0
+                && self.players.get(&player).is_some_and(|p| p.actions.is_empty());
+            if now_empty {
+                self.players.remove(&player);
+            } else {
+                self.set_preset(player, None);
+            }
+        }
+        removed
+    }
+
+    /// Merge a preset's bindings into a slot. Additive — the preset's own
+    /// definitions win where names collide, and nothing already in the slot is
+    /// discarded — identical to the single-player merge in `InputPlugin`.
+    pub fn apply_preset(&mut self, player: u8, preset: InputPreset) {
+        let bindings = preset.default_bindings().actions;
+        let map = self.actions_for_mut(player);
+        for (name, action) in bindings {
+            map.insert(name, action);
+        }
+        self.set_preset(player, Some(preset.as_str().to_string()));
+    }
+
+    /// The preset provenance of a slot (`None` = the creator's own bindings).
+    pub fn preset_for(&self, player: u8) -> Option<&str> {
+        if player == 0 {
+            self.preset.as_deref()
+        } else {
+            self.players.get(&player).and_then(|p| p.preset.as_deref())
+        }
+    }
+
+    fn set_preset(&mut self, player: u8, preset: Option<String>) {
+        if player == 0 {
+            self.preset = preset;
+        } else {
+            self.players.entry(player).or_default().preset = preset;
+        }
+    }
+
+    /// Every occupied local-player slot, ascending, always including slot 0.
+    pub fn player_slots(&self) -> Vec<u8> {
+        let mut slots: Vec<u8> = self.players.keys().copied().collect();
+        slots.push(0);
+        slots.sort_unstable();
+        slots.dedup();
+        slots
+    }
 }
 
 impl Default for InputMap {
@@ -156,27 +274,56 @@ impl Default for InputMap {
             dead_zone: 0.1,
         });
 
-        Self { actions, preset: None }
+        Self { actions, preset: None, players: HashMap::new() }
     }
 }
 
 /// Per-frame evaluated input state. Updated by `capture_input` in PlaySystemSet.
+///
+/// `actions` is player 0. `players` holds slot 1+ so a script can ask for either
+/// local player's state; it is `#[serde(default, skip_serializing_if)]` so a
+/// single-player session's serialized state is unchanged. The `*_for(player, …)`
+/// accessors resolve any slot; the bare `is_action_active`/`get_axis` are player
+/// 0 shorthands kept so every existing caller reads exactly what it did before.
 #[derive(Resource, Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InputState {
     pub actions: HashMap<String, ActionValue>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub players: HashMap<u8, HashMap<String, ActionValue>>,
 }
 
 impl InputState {
+    /// The evaluated action values for one player slot (0 = primary).
+    fn slot(&self, player: u8) -> Option<&HashMap<String, ActionValue>> {
+        if player == 0 {
+            Some(&self.actions)
+        } else {
+            self.players.get(&player)
+        }
+    }
+
     pub fn is_action_active(&self, name: &str) -> bool {
-        self.actions.get(name).map_or(false, |v| v.pressed)
+        self.is_action_active_for(0, name)
+    }
+
+    pub fn is_action_active_for(&self, player: u8, name: &str) -> bool {
+        self.slot(player).and_then(|s| s.get(name)).map_or(false, |v| v.pressed)
     }
 
     pub fn is_action_just_pressed(&self, name: &str) -> bool {
-        self.actions.get(name).map_or(false, |v| v.just_pressed)
+        self.is_action_just_pressed_for(0, name)
+    }
+
+    pub fn is_action_just_pressed_for(&self, player: u8, name: &str) -> bool {
+        self.slot(player).and_then(|s| s.get(name)).map_or(false, |v| v.just_pressed)
     }
 
     pub fn get_axis(&self, name: &str) -> f32 {
-        self.actions.get(name).map_or(0.0, |v| v.axis_value)
+        self.get_axis_for(0, name)
+    }
+
+    pub fn get_axis_for(&self, player: u8, name: &str) -> f32 {
+        self.slot(player).and_then(|s| s.get(name)).map_or(0.0, |v| v.axis_value)
     }
 }
 
@@ -217,6 +364,7 @@ impl InputPreset {
         let mut map = InputMap {
             actions: HashMap::new(),
             preset: Some(self.as_str().to_string()),
+            players: HashMap::new(),
         };
 
         match self {
@@ -477,22 +625,23 @@ fn is_source_just_released(
 // System
 // ---------------------------------------------------------------------------
 
-/// Bevy system that reads keyboard/mouse state and evaluates InputMap → InputState.
-/// Runs in PlaySystemSet (only during active Play mode).
-pub fn capture_input(
-    input_map: Res<InputMap>,
-    mut input_state: ResMut<InputState>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-) {
-    input_state.actions.clear();
-
-    for (action_name, def) in &input_map.actions {
+/// Evaluate one action map against the current key/mouse state.
+///
+/// Shared by every local-player slot: two players' maps are evaluated by the
+/// same code against the same `ButtonInput`, so their independence is entirely a
+/// matter of binding different keys — nothing here couples one slot to another.
+fn evaluate_actions(
+    actions: &HashMap<String, ActionDef>,
+    keys: &ButtonInput<KeyCode>,
+    mouse: &ButtonInput<MouseButton>,
+) -> HashMap<String, ActionValue> {
+    let mut out = HashMap::with_capacity(actions.len());
+    for (action_name, def) in actions {
         let value = match &def.action_type {
             ActionType::Digital => {
-                let pressed = def.sources.iter().any(|s| is_source_pressed(s, &keys, &mouse));
-                let just_pressed = def.sources.iter().any(|s| is_source_just_pressed(s, &keys, &mouse));
-                let just_released = def.sources.iter().any(|s| is_source_just_released(s, &keys, &mouse));
+                let pressed = def.sources.iter().any(|s| is_source_pressed(s, keys, mouse));
+                let just_pressed = def.sources.iter().any(|s| is_source_just_pressed(s, keys, mouse));
+                let just_released = def.sources.iter().any(|s| is_source_just_released(s, keys, mouse));
                 ActionValue {
                     pressed,
                     just_pressed,
@@ -501,8 +650,8 @@ pub fn capture_input(
                 }
             }
             ActionType::Axis { positive, negative } => {
-                let pos = positive.iter().any(|s| is_source_pressed(s, &keys, &mouse));
-                let neg = negative.iter().any(|s| is_source_pressed(s, &keys, &mouse));
+                let pos = positive.iter().any(|s| is_source_pressed(s, keys, mouse));
+                let neg = negative.iter().any(|s| is_source_pressed(s, keys, mouse));
                 let raw: f32 = match (pos, neg) {
                     (true, false) => 1.0,
                     (false, true) => -1.0,
@@ -510,15 +659,38 @@ pub fn capture_input(
                 };
                 let axis_value: f32 = if raw.abs() < def.dead_zone { 0.0 } else { raw };
                 let pressed = axis_value.abs() > 0.0;
-                let just_pressed = (positive.iter().any(|s| is_source_just_pressed(s, &keys, &mouse)))
-                    || (negative.iter().any(|s| is_source_just_pressed(s, &keys, &mouse)));
-                let just_released = (positive.iter().any(|s| is_source_just_released(s, &keys, &mouse)))
-                    || (negative.iter().any(|s| is_source_just_released(s, &keys, &mouse)));
+                let just_pressed = (positive.iter().any(|s| is_source_just_pressed(s, keys, mouse)))
+                    || (negative.iter().any(|s| is_source_just_pressed(s, keys, mouse)));
+                let just_released = (positive.iter().any(|s| is_source_just_released(s, keys, mouse)))
+                    || (negative.iter().any(|s| is_source_just_released(s, keys, mouse)));
                 ActionValue { pressed, just_pressed, just_released, axis_value }
             }
         };
+        out.insert(action_name.clone(), value);
+    }
+    out
+}
 
-        input_state.actions.insert(action_name.clone(), value);
+/// Bevy system that reads keyboard/mouse state and evaluates InputMap → InputState.
+/// Runs in PlaySystemSet (only during active Play mode).
+///
+/// Every local-player slot is evaluated independently: player 0 into
+/// `input_state.actions`, each additional slot into `input_state.players`.
+pub fn capture_input(
+    input_map: Res<InputMap>,
+    mut input_state: ResMut<InputState>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+) {
+    input_state.actions = evaluate_actions(&input_map.actions, &keys, &mouse);
+
+    // Rebuild slots 1+ from scratch each frame so a slot whose bindings were all
+    // removed stops reporting stale values.
+    input_state.players.clear();
+    for (slot, bindings) in &input_map.players {
+        input_state
+            .players
+            .insert(*slot, evaluate_actions(&bindings.actions, &keys, &mouse));
     }
 }
 
@@ -694,5 +866,246 @@ mod tests {
         }
 
         assert_eq!(map.actions["jump"].sources, preset_jump.sources);
+    }
+
+    // -----------------------------------------------------------------------
+    // OP-04: two independent local-player input maps (physics.FR-1.OP-04)
+    // -----------------------------------------------------------------------
+
+    /// A FRESH MAP HAS ONLY PLAYER 0, AND THE OMITTED-PLAYER PATH RESOLVES TO IT.
+    ///
+    /// The whole backward-compatibility promise rests on this: a scene authored
+    /// before two-player support has no `players`, so slot 0 is the top-level
+    /// `actions` and any slot >= 1 is simply absent. A command or script that
+    /// names no player is player 0.
+    #[test]
+    fn op04_a_fresh_map_has_only_player_zero() {
+        let map = InputMap::default();
+        assert!(map.actions_for(0).is_some(), "slot 0 is always the top-level map");
+        assert!(map.actions_for(1).is_none(), "a fresh map has no second player");
+        assert_eq!(map.player_slots(), vec![0], "only slot 0 is occupied");
+        // The player-0 shorthand and the explicit slot-0 accessor are the same map.
+        assert_eq!(
+            map.actions_for(0).unwrap().len(),
+            map.actions.len(),
+        );
+    }
+
+    /// TWO PLAYERS EACH GET AN INDEPENDENTLY EDITABLE ACTION MAP.
+    ///
+    /// Writing player 2's `attack` must not touch player 1's, and vice versa —
+    /// the concrete OP-04 capability: two maps that are edited separately.
+    #[test]
+    fn op04_two_players_have_independent_action_maps() {
+        let mut map = InputMap::default();
+        map.set_binding(0, digital("attack", vec!["KeyF"]));
+        map.set_binding(1, digital("attack", vec!["Numpad0"]));
+
+        assert_eq!(
+            map.actions_for(0).unwrap()["attack"].sources,
+            vec![InputSource::Key("KeyF".into())],
+        );
+        assert_eq!(
+            map.actions_for(1).unwrap()["attack"].sources,
+            vec![InputSource::Key("Numpad0".into())],
+        );
+        assert_eq!(map.player_slots(), vec![0, 1]);
+    }
+
+    /// REBINDING PLAYER 1 DOES NOT MUTATE PLAYER 2's ActionDef.
+    #[test]
+    fn op04_rebinding_player_one_leaves_player_two_untouched() {
+        let mut map = InputMap::default();
+        map.set_binding(0, digital("attack", vec!["KeyA"]));
+        map.set_binding(1, digital("attack", vec!["KeyB"]));
+
+        // Player 1 (slot 0) rebinds attack to a third key.
+        map.set_binding(0, digital("attack", vec!["KeyC"]));
+
+        assert_eq!(
+            map.actions_for(0).unwrap()["attack"].sources,
+            vec![InputSource::Key("KeyC".into())],
+            "player 1's rebind takes effect",
+        );
+        assert_eq!(
+            map.actions_for(1).unwrap()["attack"].sources,
+            vec![InputSource::Key("KeyB".into())],
+            "player 2's binding must be untouched by player 1's rebind",
+        );
+    }
+
+    /// REMOVING A BINDING IS PER-SLOT.
+    #[test]
+    fn op04_removing_a_binding_is_scoped_to_its_slot() {
+        let mut map = InputMap::default();
+        map.set_binding(0, digital("grab", vec!["KeyE"]));
+        map.set_binding(1, digital("grab", vec!["KeyP"]));
+        // A second binding on player 2 so removing "grab" leaves the slot
+        // occupied — the empty-slot case has its own dedicated test below.
+        map.set_binding(1, digital("jump", vec!["KeyO"]));
+
+        assert!(map.remove_binding(1, "grab"), "player 2's grab is removed");
+        assert!(
+            map.actions_for(0).unwrap().contains_key("grab"),
+            "player 1's grab survives player 2's removal",
+        );
+        assert!(!map.actions_for(1).unwrap().contains_key("grab"));
+        // Removing from a slot that never existed removes nothing and creates nothing.
+        assert!(!map.remove_binding(5, "grab"));
+        assert!(map.actions_for(5).is_none());
+    }
+
+    /// REMOVING A SLOT'S LAST BINDING DROPS THE SLOT — NO GHOST ENTRY.
+    ///
+    /// Regression for a bug where `remove_binding` cleared a player 1+ slot's
+    /// `actions` map but left the (now-empty) `players` entry behind.
+    /// `player_slots()` reads `players.keys()` directly, so that empty entry
+    /// kept reporting the slot as occupied with nothing bound to it.
+    #[test]
+    fn op04_removing_the_last_binding_drops_the_ghost_slot() {
+        let mut map = InputMap::default();
+        map.set_binding(1, digital("grab", vec!["KeyP"]));
+        assert_eq!(map.player_slots(), vec![0, 1], "player 2 is occupied");
+
+        assert!(map.remove_binding(1, "grab"), "player 2's only binding is removed");
+
+        assert_eq!(
+            map.player_slots(),
+            vec![0],
+            "player 2's slot must not linger empty once its last binding is gone",
+        );
+        assert!(
+            map.actions_for(1).is_none(),
+            "an emptied slot reads exactly like one that was never bound",
+        );
+        assert_eq!(map.preset_for(1), None);
+    }
+
+    /// PRESSING PLAYER 1's KEY DOES NOT AFFECT PLAYER 2's ActionValue.
+    ///
+    /// This is the boundary scenario from the fixture, evaluated end to end
+    /// against a real `ButtonInput`. Both players name `attack`; player 1 binds
+    /// it to A, player 2 to the left arrow. Holding A lights player 1's `attack`
+    /// alone.
+    #[test]
+    fn op04_pressing_one_players_key_does_not_cross_to_the_other() {
+        let mut map = InputMap::default();
+        map.set_binding(0, digital("attack", vec!["KeyA"]));
+        map.set_binding(1, digital("attack", vec!["ArrowLeft"]));
+
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::KeyA);
+        let mouse = ButtonInput::<MouseButton>::default();
+
+        // Assemble state exactly as `capture_input` does.
+        let mut state = InputState::default();
+        state.actions = evaluate_actions(map.actions_for(0).unwrap(), &keys, &mouse);
+        for slot in map.player_slots().into_iter().filter(|s| *s != 0) {
+            state
+                .players
+                .insert(slot, evaluate_actions(map.actions_for(slot).unwrap(), &keys, &mouse));
+        }
+
+        assert!(state.is_action_active_for(0, "attack"), "player 1 pressed A");
+        assert!(
+            !state.is_action_active_for(1, "attack"),
+            "player 2 is on the arrow key and must read as not pressed",
+        );
+        // The bare shorthand is player 0.
+        assert!(state.is_action_active("attack"));
+    }
+
+    /// AXIS INDEPENDENCE: two players' analogue movement do not bleed together.
+    #[test]
+    fn op04_axis_values_are_per_player() {
+        let mut map = InputMap::default();
+        map.set_binding(0, axis("move", vec!["KeyD"], vec!["KeyA"]));
+        map.set_binding(1, axis("move", vec!["ArrowRight"], vec!["ArrowLeft"]));
+
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::KeyD); // player 1 right
+        keys.press(KeyCode::ArrowLeft); // player 2 left
+        let mouse = ButtonInput::<MouseButton>::default();
+
+        let mut state = InputState::default();
+        state.actions = evaluate_actions(map.actions_for(0).unwrap(), &keys, &mouse);
+        state
+            .players
+            .insert(1, evaluate_actions(map.actions_for(1).unwrap(), &keys, &mouse));
+
+        assert_eq!(state.get_axis_for(0, "move"), 1.0, "player 1 steers right");
+        assert_eq!(state.get_axis_for(1, "move"), -1.0, "player 2 steers left");
+    }
+
+    /// A PRESET APPLIED TO PLAYER 2 STAYS ON PLAYER 2.
+    #[test]
+    fn op04_apply_preset_is_scoped_to_its_slot() {
+        let mut map = InputMap::default();
+        map.set_binding(0, digital("grapple", vec!["KeyG"]));
+
+        map.apply_preset(1, InputPreset::Platformer);
+
+        assert!(
+            map.actions_for(1).unwrap().contains_key("attack"),
+            "the preset's bindings land on player 2",
+        );
+        assert!(
+            !map.actions_for(0).unwrap().contains_key("attack"),
+            "player 1 does not gain the preset's bindings",
+        );
+        assert!(
+            map.actions_for(0).unwrap().contains_key("grapple"),
+            "player 1 keeps its own vocabulary",
+        );
+        assert_eq!(map.preset_for(1), Some("platformer"));
+        assert_eq!(map.preset_for(0), None);
+    }
+
+    /// AN EDIT MARKS ONLY ITS OWN SLOT CUSTOM.
+    #[test]
+    fn op04_editing_one_slot_does_not_clear_the_others_preset() {
+        let mut map = InputMap::default();
+        map.apply_preset(0, InputPreset::FPS);
+        map.apply_preset(1, InputPreset::Platformer);
+        assert_eq!(map.preset_for(0), Some("fps"));
+        assert_eq!(map.preset_for(1), Some("platformer"));
+
+        map.set_binding(1, digital("attack", vec!["KeyZ"]));
+        assert_eq!(map.preset_for(1), None, "player 2 is now custom");
+        assert_eq!(map.preset_for(0), Some("fps"), "player 1's provenance is untouched");
+    }
+
+    /// PERSISTENCE / FRESH-SESSION REOPEN: a two-player map round-trips through
+    /// the exact serde path the scene file uses, and slots survive.
+    #[test]
+    fn op04_two_player_map_survives_a_serde_round_trip() {
+        let mut map = InputMap::default();
+        map.set_binding(1, digital("attack", vec!["ArrowUp"]));
+        map.apply_preset(1, InputPreset::Racing);
+
+        let json = serde_json::to_string(&map).expect("serialize");
+        assert!(json.contains("\"players\""), "the second player is persisted");
+
+        let restored: InputMap = serde_json::from_str(&json).expect("deserialize");
+        assert!(restored.actions_for(1).is_some(), "player 2 survives reopen");
+        assert!(restored.actions_for(1).unwrap().contains_key("throttle"));
+        assert_eq!(restored.preset_for(1), Some("racing"));
+    }
+
+    /// BACKWARD COMPATIBILITY: the shape every one-player scene carries has no
+    /// `players` key, parses to an empty player set, and re-serializes WITHOUT a
+    /// `players` key — so no existing scene's saved bytes change.
+    #[test]
+    fn op04_single_player_scene_shape_is_unchanged() {
+        let legacy = r#"{"actions":{},"preset":null}"#;
+        let map: InputMap = serde_json::from_str(legacy).expect("legacy shape must parse");
+        assert!(map.players.is_empty());
+        assert_eq!(map.player_slots(), vec![0]);
+
+        let json = serde_json::to_string(&map).expect("serialize");
+        assert!(
+            !json.contains("players"),
+            "an empty player set must not appear in the serialized scene",
+        );
     }
 }

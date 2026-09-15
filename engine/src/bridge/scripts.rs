@@ -59,31 +59,28 @@ pub(super) fn apply_input_binding_updates(
     // Clearing bindings is `remove_input_binding` — an explicit act, on a named
     // action, rather than a side effect of picking a starting point.
     for request in pending.input_preset_requests.drain(..) {
-        for (name, action) in request.preset.default_bindings().actions {
-            input_map.actions.insert(name, action);
-        }
-        // Provenance: which starting set was last applied. Any individual edit
-        // below clears it, because the map is then the creator's own.
-        input_map.preset = Some(request.preset.as_str().to_string());
+        // Scoped by player slot: applying a preset to player 2 merges into player
+        // 2 alone, and marks only that slot's provenance. `apply_preset` keeps
+        // the additive semantics — the preset's own definitions win on name
+        // collisions and nothing already in the slot is discarded.
+        input_map.apply_preset(request.player, request.preset);
         changed = true;
-        tracing::info!("Merged input preset: {:?}", request.preset);
+        tracing::info!("Merged input preset {:?} into player {}", request.preset, request.player);
     }
 
-    // Process individual binding updates
+    // Process individual binding updates (per player slot)
     for update in pending.input_binding_updates.drain(..) {
         let name = update.action_def.name.clone();
-        input_map.actions.insert(name.clone(), update.action_def);
-        input_map.preset = None; // Mark as custom
+        input_map.set_binding(update.player, update.action_def);
         changed = true;
-        tracing::info!("Updated input binding: {}", name);
+        tracing::info!("Updated input binding {} for player {}", name, update.player);
     }
 
-    // Process binding removals
+    // Process binding removals (per player slot)
     for removal in pending.input_binding_removals.drain(..) {
-        if input_map.actions.remove(&removal.action_name).is_some() {
-            input_map.preset = None;
+        if input_map.remove_binding(removal.player, &removal.action_name) {
             changed = true;
-            tracing::info!("Removed input binding: {}", removal.action_name);
+            tracing::info!("Removed input binding {} for player {}", removal.action_name, removal.player);
         }
     }
 
