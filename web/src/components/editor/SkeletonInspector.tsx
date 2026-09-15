@@ -52,6 +52,7 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
   const [newBoneName, setNewBoneName] = useState('');
   const [selectedSkin, setSelectedSkin] = useState(skeleton?.activeSkin ?? 'default');
   const [newAttachmentName, setNewAttachmentName] = useState('');
+  const [newAttachmentError, setNewAttachmentError] = useState<string | null>(null);
   const [meshDraft, setMeshDraft] = useState<MeshDraft | null>(null);
   const [meshError, setMeshError] = useState<string | null>(null);
 
@@ -120,6 +121,7 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
 
   const handleSkinChange = (skinName: string) => {
     setSelectedSkin(skinName);
+    setNewAttachmentError(null);
     setMeshDraft(null);
     setMeshError(null);
     setSkeleton2d(entityId, { ...skeleton, activeSkin: skinName });
@@ -167,9 +169,10 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
     const name = newAttachmentName.trim();
     if (!name) return;
     if (Object.hasOwn(activeSkinData?.attachments ?? {}, name)) {
-      setMeshError(`An attachment named "${name}" already exists in skin "${selectedSkin}".`);
+      setNewAttachmentError(`An attachment named "${name}" already exists in skin "${selectedSkin}".`);
       return;
     }
+    setNewAttachmentError(null);
     guardDiscardThen(() => {
       const firstBone = skeleton.bones[0]?.name ?? '';
       setMeshDraft({
@@ -207,6 +210,7 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
 
   const handleDeleteMeshAttachment = (name: string) => {
     if (!activeSkinData) return;
+    if (name === newAttachmentName.trim()) setNewAttachmentError(null);
     const { [name]: _removed, ...rest } = activeSkinData.attachments;
     setSkeleton2d(entityId, {
       ...skeleton,
@@ -538,7 +542,12 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
             id={attachmentNameId}
             type="text"
             value={newAttachmentName}
-            onChange={(e) => setNewAttachmentName(e.target.value)}
+            onChange={(e) => {
+              setNewAttachmentName(e.target.value);
+              setNewAttachmentError(null);
+            }}
+            aria-invalid={newAttachmentError ? true : undefined}
+            aria-describedby={newAttachmentError ? `${attachmentNameId}-error` : undefined}
             placeholder="Attachment name"
             className="flex-1 px-2 py-1 bg-zinc-800 rounded text-sm"
             onKeyDown={(e) => e.key === 'Enter' && handleAddMeshAttachment()}
@@ -553,16 +562,9 @@ function EntitySkeletonInspector({ entityId }: { entityId: string }) {
           </button>
         </div>
 
-        {/*
-          The add-time error (e.g. a duplicate attachment name) is set before any
-          draft exists and returns early, so it must render OUTSIDE the
-          `{meshDraft && ...}` gate below or it would never be shown — a silent
-          no-op on the collision. Guarded by `!meshDraft` so it and the in-draft
-          error never render at once (they share `meshError`).
-        */}
-        {!meshDraft && meshError && (
-          <div className="mt-1 text-xs text-red-400" role="alert">
-            {meshError}
+        {newAttachmentError && (
+          <div id={`${attachmentNameId}-error`} className="mt-1 text-xs text-red-400" role="alert">
+            {newAttachmentError}
           </div>
         )}
 

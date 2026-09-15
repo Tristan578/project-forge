@@ -765,10 +765,6 @@ describe('SkeletonInspector', () => {
   });
 
   it('shows the duplicate-name error and opens no draft when the name already exists', () => {
-    // The duplicate-name guard sets `meshError` and returns BEFORE creating a
-    // draft, so the message must render outside the `{meshDraft && ...}` gate.
-    // Before the fix it was a silent no-op: no draft, no error anywhere in the
-    // DOM. Covers the guard (setMeshError branch) and its rendering.
     setupStore({ skeleton: skeletonWithMesh });
     render(<SkeletonInspector entityId="entity-1" />);
     fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'cloak' } });
@@ -851,6 +847,45 @@ describe('SkeletonInspector', () => {
       },
     },
   };
+
+  it('shows duplicate-name errors beside Add without replacing the open draft or its validation error', () => {
+    setupStore({ skeleton: skeletonWithTwoMeshes });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    fireEvent.change(screen.getByLabelText('Vertex 1 X'), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 weight'), { target: { value: '0' } });
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    const draftError = screen.getByText(/zero total weight/i);
+
+    const nameInput = screen.getByRole('textbox', { name: 'Attachment name' });
+    fireEvent.change(nameInput, { target: { value: 'belt' } });
+    fireEvent.click(screen.getByLabelText('Add mesh attachment'));
+    const addError = screen.getByText(/already exists/i);
+    expect(nameInput).toHaveAttribute('aria-invalid', 'true');
+    expect(nameInput).toHaveAccessibleDescription(addError.textContent ?? '');
+    expect(nameInput.parentElement?.nextElementSibling).toBe(addError);
+    expect(screen.getByText('Mesh: cloak').parentElement).not.toContainElement(addError);
+    expect(draftError).toBeInTheDocument();
+    expect(screen.queryByText('Mesh: belt')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Vertex 1 X')).toHaveValue(9);
+    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+
+    fireEvent.change(nameInput, { target: { value: 'sash' } });
+    expect(addError).not.toBeInTheDocument();
+    expect(nameInput).not.toHaveAttribute('aria-invalid');
+    expect(nameInput).not.toHaveAttribute('aria-describedby');
+    expect(draftError).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 weight'), { target: { value: '0.5' } });
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.skins.default.attachments.cloak).toEqual(expect.objectContaining({
+      vertices: [[9, 1]],
+      weights: [{ bones: ['root'], weights: [0.5] }],
+    }));
+    expect(payload.skins.default.attachments.belt).toEqual(skeletonWithTwoMeshes.skins.default.attachments.belt);
+    expect(payload.skins.default.attachments).not.toHaveProperty('sash');
+  });
 
   it('does not prompt when the first mesh draft is opened (nothing to discard)', () => {
     setupStore({ skeleton: skeletonWithTwoMeshes });
