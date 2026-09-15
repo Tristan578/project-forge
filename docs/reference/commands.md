@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 354 MCP commands available in SpawnForge.
+Complete reference for all 358 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -13,7 +13,7 @@ Complete reference for all 354 MCP commands available in SpawnForge.
 - [Environment](#environment) (5 commands)
 - [Rendering](#rendering) (4 commands)
 - [Editor](#editor) (7 commands)
-- [Camera](#camera) (3 commands)
+- [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
 - [Query](#query) (15 commands)
 - [Runtime](#runtime) (12 commands)
@@ -27,7 +27,7 @@ Complete reference for all 354 MCP commands available in SpawnForge.
 - [Export](#export) (6 commands)
 - [Documentation](#documentation) (3 commands)
 - [Shaders](#shaders) (10 commands)
-- [Prefab](#prefab) (5 commands)
+- [Prefab](#prefab) (9 commands)
 - [Game_components](#game_components) (5 commands)
 - [Game_cameras](#game_cameras) (4 commands)
 - [Generation](#generation) (24 commands)
@@ -38,7 +38,7 @@ Complete reference for all 354 MCP commands available in SpawnForge.
 - [Publishing](#publishing) (8 commands)
 - [Sprite](#sprite) (8 commands)
 - [Sprite_animation](#sprite_animation) (6 commands)
-- [Physics2d](#physics2d) (8 commands)
+- [Physics2d](#physics2d) (10 commands)
 - [Tilemap](#tilemap) (10 commands)
 - [Skeleton2d](#skeleton2d) (13 commands)
 - [Modeling](#modeling) (6 commands)
@@ -1375,6 +1375,22 @@ Configure 2D camera settings (zoom, pixel-perfect rendering, bounds)
 ```
 
 Scope: `scene:write` | Token cost: 0
+
+---
+
+### `get_camera_2d`
+
+Query the scene's 2D camera settings
+
+**Example:**
+```json
+{
+  "command": "get_camera_2d",
+  "params": {}
+}
+```
+
+Scope: `scene:read` | Token cost: 0
 
 ---
 
@@ -4711,6 +4727,99 @@ Scope: `scene:read` | Token cost: 0
 
 ---
 
+### `create_prefab_instance`
+
+Create a linked instance of a source prefab with optional per-field overrides (inherited fields follow the source)
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Source prefab ID to link to |
+| `overrides` | object | No | Snapshot fields this instance overrides; everything else is inherited live from the source |
+| `entityId` | string | No | Scene entity to bind the instance to (optional) |
+
+**Example:**
+```json
+{
+  "command": "create_prefab_instance",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `nest_prefab`
+
+Nest a child prefab inside a parent prefab; rejects a cyclic reference with the offending chain and no mutation
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `parentPrefabId` | string | Yes | User prefab to nest into |
+| `childPrefabId` | string | Yes | Prefab to nest as a linked child |
+| `overrides` | object | No | Per-field overrides for the nested child (optional) |
+
+**Example:**
+```json
+{
+  "command": "nest_prefab",
+  "params": {
+    "parentPrefabId": "my_parentPrefabId",
+    "childPrefabId": "my_childPrefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `apply_prefab_to_instances`
+
+Propagate a source prefab onto all of its linked instances; non-overridden fields follow the source, overridden fields are preserved
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Source prefab whose instances to update |
+
+**Example:**
+```json
+{
+  "command": "apply_prefab_to_instances",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `list_prefab_instances`
+
+List the linked instances of a source prefab with the fields each one overrides
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Source prefab whose instances to list |
+
+**Example:**
+```json
+{
+  "command": "list_prefab_instances",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
 ## Game_components
 
 ### `add_game_component`
@@ -7161,6 +7270,44 @@ Cast a ray in the 2D physics world
     "directionX": 1,
     "directionY": 1
   }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `get_joint_2d`
+
+Query the 2D joint attached to an entity
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entityId` | string | Yes | Entity ID whose 2D joint to read |
+
+**Example:**
+```json
+{
+  "command": "get_joint_2d",
+  "params": {
+    "entityId": "entity_1"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `list_joints_2d`
+
+List every 2D joint in the scene
+
+**Example:**
+```json
+{
+  "command": "list_joints_2d",
+  "params": {}
 }
 ```
 
