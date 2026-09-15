@@ -100,6 +100,36 @@ describe('AudioInspector', () => {
     expect(screen.getByText('Remove Audio')).toBeInTheDocument();
   });
 
+  it('gives the migrated Volume and Pitch sliders their own accessible names', () => {
+    // Both sliders now come from the shared @spawnforge/ui SliderInput composite,
+    // which renders its own <label htmlFor>. getByLabelText resolves only through
+    // that association, so it fails if the composite ever stops wiring the label
+    // to the range input (the drift this dedupe removes). Each also carries its
+    // range role and value, proving the migrated control is the real slider.
+    mockEditorStore({
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 0.5,
+          pitch: 1.5,
+          loopAudio: false,
+          spatial: false,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    const volume = screen.getByLabelText('Volume');
+    const pitch = screen.getByLabelText('Pitch');
+    expect(volume).toHaveAttribute('type', 'range');
+    expect(volume).toHaveValue('0.5');
+    expect(pitch).toHaveAttribute('type', 'range');
+    expect(pitch).toHaveValue('1.5');
+  });
+
   it('reads the selected entity, not whichever entity reported audio last', () => {
     // The store used to keep one component for the whole scene, so selecting a
     // silent entity showed the other entity's sound and editing it wrote to the

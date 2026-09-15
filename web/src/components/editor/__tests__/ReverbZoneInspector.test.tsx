@@ -200,10 +200,18 @@ describe('ReverbZoneInspector', () => {
     for (const name of ['Shape', 'Type', 'Wet Mix', 'Decay Time', 'Pre-Delay', 'Priority']) {
       expect(screen.getByLabelText(name)).toBeInTheDocument();
     }
+    // The three sliders now come from the shared @spawnforge/ui SliderInput
+    // composite; pin that each still resolves to a real range input through its
+    // own htmlFor label, so a regression in the composite's label wiring fails
+    // here rather than silently shipping unlabelled sliders.
+    for (const name of ['Wet Mix', 'Decay Time', 'Pre-Delay']) {
+      expect(screen.getByLabelText(name)).toHaveAttribute('type', 'range');
+    }
     // Three inputs under one "Size" label — each axis needs its own name, or all
-    // three announce identically.
+    // three announce identically. These are the shared Vec3Input composite's
+    // per-axis number inputs.
     for (const axis of ['Size X', 'Size Y', 'Size Z']) {
-      expect(screen.getByLabelText(axis)).toBeInTheDocument();
+      expect(screen.getByLabelText(axis)).toHaveAttribute('type', 'number');
     }
   });
 
