@@ -322,12 +322,42 @@ export interface TilesetData {
   tiles: TileMetadata[];
 }
 
+/**
+ * Every collision shape, in picker order. This tuple is the single source of
+ * truth for the shape vocabulary: `CollisionShape` is derived from it, and the
+ * `set_tile_collision_shape` chat handler builds its Zod enum from it, so the
+ * command validation and the type cannot drift.
+ */
+export const TILE_COLLISION_SHAPES = [
+  'none',
+  'full',
+  'halfTop',
+  'halfBottom',
+  'slopeLeft',
+  'slopeRight',
+] as const;
+
+/**
+ * The collision silhouette of a single tile. Mirrors the engine's
+ * `CollisionShape` enum (`engine/src/core/tilemap.rs`); the wire strings are the
+ * single vocabulary shared by the `set_tile_collision_shape` engine command,
+ * its chat handler and the `forge.tilemap` script API.
+ */
+export type CollisionShape = (typeof TILE_COLLISION_SHAPES)[number];
+
 export interface TilemapLayer {
   name: string;
   tiles: (number | null)[];
   visible: boolean;
   opacity: number;
   isCollision: boolean;
+  /**
+   * Per-cell collision shape, parallel to `tiles`. Optional and absent by
+   * default: a layer with no authored shapes omits the field entirely, matching
+   * the engine's `#[serde(default)]` empty-vector default and keeping every
+   * pre-OP-04 scene byte-compatible.
+   */
+  collisionShapes?: CollisionShape[];
 }
 
 export interface TilemapData {

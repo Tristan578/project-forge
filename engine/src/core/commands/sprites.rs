@@ -1079,6 +1079,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "paint_tile" => Some(handle_paint_tile(payload.clone())),
         "erase_tile" => Some(handle_erase_tile(payload.clone())),
         "fill_tiles" => Some(handle_fill_tiles(payload.clone())),
+        "set_tile_collision_shape" => Some(handle_set_tile_collision_shape(payload.clone())),
         "set_grid_2d" => Some(handle_set_grid_2d(payload.clone())),
         _ => None,
     }
@@ -1263,6 +1264,54 @@ fn handle_fill_tiles(payload: serde_json::Value) -> super::CommandResult {
     let (entity_id, layer, tiles) = parse_fill_tiles(&payload)?;
 
     if queue_fill_tiles_from_bridge(FillTilesRequest { entity_id, layer, tiles }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Parse a `set_tile_collision_shape` payload:
+/// `{ entityId, layer, x, y, shape }`.
+///
+/// `shape` is validated against `CollisionShape::from_wire`, the SAME vocabulary
+/// the chat handler and script API use, so an unknown value is rejected with an
+/// actionable error rather than silently defaulting to a passable cell. Coords
+/// use `tile_field_u32` for the same wasm32 truncation reason `parse_paint_tile`
+/// documents. Extracted from the handler so it is testable natively — the
+/// handler needs the thread-local `PendingCommands`, which no unit test has.
+fn parse_set_tile_collision_shape(
+    payload: &serde_json::Value,
+) -> Result<SetTileCollisionShapeRequest, String> {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let layer = tile_field_u32(payload.get("layer"))
+        .ok_or("Missing or invalid layer")? as usize;
+
+    let x = tile_field_u32(payload.get("x"))
+        .ok_or("Missing or invalid x")? as usize;
+
+    let y = tile_field_u32(payload.get("y"))
+        .ok_or("Missing or invalid y")? as usize;
+
+    let shape_str = payload.get("shape")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing or invalid shape")?;
+    let shape = crate::core::tilemap::CollisionShape::from_wire(shape_str)
+        .ok_or_else(|| format!(
+            "Invalid collision shape '{}': expected one of none, full, halfTop, halfBottom, slopeLeft, slopeRight",
+            shape_str,
+        ))?;
+
+    Ok(SetTileCollisionShapeRequest { entity_id, layer, x, y, shape })
+}
+
+/// Handle set_tile_collision_shape command.
+/// Payload: { entityId, layer, x, y, shape }
+fn handle_set_tile_collision_shape(payload: serde_json::Value) -> super::CommandResult {
+    if queue_set_tile_collision_shape_from_bridge(parse_set_tile_collision_shape(&payload)?) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -1703,5 +1752,89 @@ mod tile_field_bounds_tests {
         assert_eq!(tiles[0].x, u32::MAX as usize);
         assert_eq!(tiles[0].y, u32::MAX as usize);
         assert_eq!(tiles[0].tile_index, Some(u32::MAX));
+    }
+}
+
+#[cfg(test)]
+mod set_tile_collision_shape_tests {
+    use super::parse_set_tile_collision_shape;
+    use crate::core::tilemap::CollisionShape;
+    use serde_json::json;
+
+    #[test]
+    fn parses_a_valid_payload() {
+        let req = parse_set_tile_collision_shape(&json!({
+            "entityId": "tm-1", "layer": 2, "x": 3, "y": 4, "shape": "halfTop",
+        }))
+        .expect("a well-formed payload parses");
+        assert_eq!(req.entity_id, "tm-1");
+        assert_eq!(req.layer, 2);
+        assert_eq!(req.x, 3);
+        assert_eq!(req.y, 4);
+        assert_eq!(req.shape, CollisionShape::HalfTop);
+    }
+
+    #[test]
+    fn accepts_every_shape_in_the_vocabulary() {
+        for (wire, expected) in [
+            ("none", CollisionShape::None),
+            ("full", CollisionShape::Full),
+            ("halfTop", CollisionShape::HalfTop),
+            ("halfBottom", CollisionShape::HalfBottom),
+            ("slopeLeft", CollisionShape::SlopeLeft),
+            ("slopeRight", CollisionShape::SlopeRight),
+        ] {
+            let req = parse_set_tile_collision_shape(&json!({
+                "entityId": "tm-1", "layer": 0, "x": 0, "y": 0, "shape": wire,
+            }))
+            .expect("every documented shape parses");
+            assert_eq!(req.shape, expected, "wire string {}", wire);
+        }
+    }
+
+    #[test]
+    fn refuses_an_unknown_shape_with_an_actionable_error() {
+        let err = parse_set_tile_collision_shape(&json!({
+            "entityId": "tm-1", "layer": 0, "x": 0, "y": 0, "shape": "wedge",
+        }))
+        .expect_err("an unknown shape must be refused, not silently defaulted");
+        assert!(err.contains("Invalid collision shape 'wedge'"), "got: {}", err);
+        assert!(err.contains("halfTop"), "error lists the vocabulary: {}", err);
+    }
+
+    #[test]
+    fn refuses_a_missing_shape() {
+        let err = parse_set_tile_collision_shape(&json!({
+            "entityId": "tm-1", "layer": 0, "x": 0, "y": 0,
+        }))
+        .expect_err("a missing shape must be refused");
+        assert_eq!(err, "Missing or invalid shape");
+    }
+
+    #[test]
+    fn refuses_a_missing_entity_id() {
+        let err = parse_set_tile_collision_shape(&json!({
+            "layer": 0, "x": 0, "y": 0, "shape": "full",
+        }))
+        .expect_err("a missing entityId must be refused");
+        assert_eq!(err, "Missing entityId");
+    }
+
+    #[test]
+    fn refuses_a_coordinate_above_u32_max() {
+        let over = u32::MAX as u64 + 1;
+        for (field, expected) in [
+            ("layer", "Missing or invalid layer"),
+            ("x", "Missing or invalid x"),
+            ("y", "Missing or invalid y"),
+        ] {
+            let mut payload = json!({
+                "entityId": "tm-1", "layer": 0, "x": 0, "y": 0, "shape": "full",
+            });
+            payload[field] = json!(over);
+            let err = parse_set_tile_collision_shape(&payload)
+                .expect_err("an out-of-range field must be refused");
+            assert_eq!(err, expected, "wrong error for {}", field);
+        }
     }
 }

@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 354 MCP commands available in SpawnForge.
+Complete reference for all 355 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -13,7 +13,7 @@ Complete reference for all 354 MCP commands available in SpawnForge.
 - [Environment](#environment) (5 commands)
 - [Rendering](#rendering) (4 commands)
 - [Editor](#editor) (7 commands)
-- [Camera](#camera) (3 commands)
+- [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
 - [Query](#query) (15 commands)
 - [Runtime](#runtime) (12 commands)
@@ -38,8 +38,8 @@ Complete reference for all 354 MCP commands available in SpawnForge.
 - [Publishing](#publishing) (8 commands)
 - [Sprite](#sprite) (8 commands)
 - [Sprite_animation](#sprite_animation) (6 commands)
-- [Physics2d](#physics2d) (8 commands)
-- [Tilemap](#tilemap) (10 commands)
+- [Physics2d](#physics2d) (10 commands)
+- [Tilemap](#tilemap) (11 commands)
 - [Skeleton2d](#skeleton2d) (13 commands)
 - [Modeling](#modeling) (6 commands)
 - [Security](#security) (2 commands)
@@ -1375,6 +1375,22 @@ Configure 2D camera settings (zoom, pixel-perfect rendering, bounds)
 ```
 
 Scope: `scene:write` | Token cost: 0
+
+---
+
+### `get_camera_2d`
+
+Query the scene's 2D camera settings
+
+**Example:**
+```json
+{
+  "command": "get_camera_2d",
+  "params": {}
+}
+```
+
+Scope: `scene:read` | Token cost: 0
 
 ---
 
@@ -7168,6 +7184,44 @@ Scope: `scene:read` | Token cost: 0
 
 ---
 
+### `get_joint_2d`
+
+Query the 2D joint attached to an entity
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entityId` | string | Yes | Entity ID whose 2D joint to read |
+
+**Example:**
+```json
+{
+  "command": "get_joint_2d",
+  "params": {
+    "entityId": "entity_1"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `list_joints_2d`
+
+List every 2D joint in the scene
+
+**Example:**
+```json
+{
+  "command": "list_joints_2d",
+  "params": {}
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
 ## Tilemap
 
 ### `create_tilemap`
@@ -7246,6 +7300,36 @@ Set a single tile on one tilemap layer
     "layerIndex": 1,
     "x": 1,
     "y": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `set_tile_collision_shape`
+
+Author the collision shape of a single tile on one tilemap layer
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entityId` | string | Yes | Tilemap entity ID |
+| `layerIndex` | integer | Yes | Layer index |
+| `x` | integer | Yes | Tile X coordinate |
+| `y` | integer | Yes | Tile Y coordinate |
+| `shape` | `"none"` \| `"full"` \| `"halfTop"` \| `"halfBottom"` \| `"slopeLeft"` \| `"slopeRight"` | Yes | Collision silhouette for the cell: none (passable), full (solid), halfTop, halfBottom, slopeLeft or slopeRight |
+
+**Example:**
+```json
+{
+  "command": "set_tile_collision_shape",
+  "params": {
+    "entityId": "entity_1",
+    "layerIndex": 1,
+    "x": 1,
+    "y": 1,
+    "shape": "none"
   }
 }
 ```

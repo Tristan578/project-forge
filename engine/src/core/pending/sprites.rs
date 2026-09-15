@@ -155,6 +155,15 @@ pub struct FillTilesRequest {
     pub tiles: Vec<TilePlacement>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SetTileCollisionShapeRequest {
+    pub entity_id: String,
+    pub layer: usize,
+    pub x: usize,
+    pub y: usize,
+    pub shape: crate::core::tilemap::CollisionShape,
+}
+
 // === Grid 2D Request Structs ===
 
 #[derive(Debug, Clone)]
@@ -261,6 +270,10 @@ impl PendingCommands {
         self.fill_tiles_requests.push(request);
     }
 
+    pub fn queue_set_tile_collision_shape(&mut self, request: SetTileCollisionShapeRequest) {
+        self.set_tile_collision_shape_requests.push(request);
+    }
+
     pub fn queue_set_grid_2d(&mut self, request: SetGrid2dRequest) {
         self.set_grid_2d_requests.push(request);
     }
@@ -346,6 +359,10 @@ pub fn queue_erase_tile_from_bridge(request: EraseTileRequest) -> bool {
 
 pub fn queue_fill_tiles_from_bridge(request: FillTilesRequest) -> bool {
     super::with_pending(|pc| pc.queue_fill_tiles(request)).is_some()
+}
+
+pub fn queue_set_tile_collision_shape_from_bridge(request: SetTileCollisionShapeRequest) -> bool {
+    super::with_pending(|pc| pc.queue_set_tile_collision_shape(request)).is_some()
 }
 
 pub fn queue_set_grid_2d_from_bridge(request: SetGrid2dRequest) -> bool {

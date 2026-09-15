@@ -30,7 +30,10 @@ use crate::core::{
         SpriteData, SpriteEnabled, SpriteSheetData, TransitionCondition,
         z_from_sorting, z_from_sorting_with_config,
     },
-    tilemap::{tile_flat_index, TilemapData, TilemapEnabled, TilemapOrigin, Grid2dConfig},
+    tilemap::{
+        set_layer_collision_shape, tile_flat_index, Grid2dConfig, TilemapData, TilemapEnabled,
+        TilemapOrigin,
+    },
     tileset::{TilesetData, TilesetRegistry},
 };
 use super::events;
@@ -1105,6 +1108,62 @@ pub(super) fn apply_fill_tiles_requests(
             // so one `fill_tiles` covers a rectangular clear (PF-1181).
             tilemap_data.layers[request.layer].tiles[tile_index] = placement.tile_index;
         }
+    }
+}
+
+/// System that applies pending `set_tile_collision_shape` requests: authors one
+/// cell's collision silhouette on a TilemapData layer.
+///
+/// Unlike `apply_paint_tile_requests`, this one records undo and re-reports to
+/// the browser, matching `apply_tilemap_data_updates`:
+///
+/// - It pushes `TilemapChange` so the edit is undoable through the same arm the
+///   full-replace path uses (no new undo arm, and — critically — no sibling
+///   `*Enabled` marker: the whole `TilemapData` is snapshotted, so undo restores
+///   the exact prior shapes without touching `TilemapEnabled`).
+/// - It emits `TILEMAP_CHANGED` so the Zustand mirror updates even when the edit
+///   originates from a script (`forge.tilemap.setCollisionShape`), where the
+///   store never optimistically applied it, and even when the tilemap entity is
+///   not the selected one — the selection-emit systems only cover the selection.
+///
+/// An out-of-range coordinate writes nothing (`set_layer_collision_shape`
+/// returns `false`), so no history entry and no event are produced for a
+/// refused edit — the "rejects or recovers from invalid work" scenario.
+pub(super) fn apply_set_tile_collision_shape_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut TilemapData)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for request in pending.set_tile_collision_shape_requests.drain(..) {
+        let found = query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id);
+        let Some((_, mut tilemap_data)) = found else { continue };
+
+        if request.layer >= tilemap_data.layers.len() {
+            continue;
+        }
+        let map_w = tilemap_data.map_size[0] as usize;
+        let map_h = tilemap_data.map_size[1] as usize;
+
+        let old_tilemap = tilemap_data.clone();
+        let wrote = set_layer_collision_shape(
+            &mut tilemap_data.layers[request.layer],
+            request.x,
+            request.y,
+            map_w,
+            map_h,
+            request.shape,
+        );
+        if !wrote {
+            continue;
+        }
+
+        let new_tilemap = tilemap_data.clone();
+        history.push(UndoableAction::TilemapChange {
+            entity_id: request.entity_id.clone(),
+            old_tilemap: Some(old_tilemap),
+            new_tilemap: Some(new_tilemap.clone()),
+        });
+        events::emit_tilemap_changed(&request.entity_id, Some(&new_tilemap));
     }
 }
 

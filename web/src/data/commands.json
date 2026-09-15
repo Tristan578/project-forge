@@ -10385,6 +10385,58 @@
       "visibility": "public"
     },
     {
+      "name": "set_tile_collision_shape",
+      "description": "Author the collision shape of a single tile on one tilemap layer",
+      "category": "tilemap",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Tilemap entity ID"
+          },
+          "layerIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Layer index"
+          },
+          "x": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Tile X coordinate"
+          },
+          "y": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Tile Y coordinate"
+          },
+          "shape": {
+            "type": "string",
+            "enum": [
+              "none",
+              "full",
+              "halfTop",
+              "halfBottom",
+              "slopeLeft",
+              "slopeRight"
+            ],
+            "description": "Collision silhouette for the cell: none (passable), full (solid), halfTop, halfBottom, slopeLeft or slopeRight"
+          }
+        },
+        "required": [
+          "entityId",
+          "layerIndex",
+          "x",
+          "y",
+          "shape"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
       "name": "fill_tiles",
       "description": "Fill an inclusive rectangular range of one tilemap layer with a single tile",
       "category": "tilemap",

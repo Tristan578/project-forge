@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Plus, Trash2, Eye, EyeOff, Shield } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { TILE_COLLISION_SHAPES } from '@/stores/slices/types';
+import type { CollisionShape } from '@/stores/slices/types';
 
 interface _TilemapLayer {
   name: string;
@@ -11,6 +13,16 @@ interface _TilemapLayer {
   opacity: number;
   isCollision: boolean;
 }
+
+/** Human-readable labels for the collision-shape picker, keyed by wire value. */
+const COLLISION_SHAPE_LABELS: Record<CollisionShape, string> = {
+  none: 'None (passable)',
+  full: 'Full (solid)',
+  halfTop: 'Half — Top',
+  halfBottom: 'Half — Bottom',
+  slopeLeft: 'Slope — Left',
+  slopeRight: 'Slope — Right',
+};
 
 export function TilemapInspector() {
   const primaryId = useEditorStore((s) => s.primaryId);
@@ -20,7 +32,21 @@ export function TilemapInspector() {
 
   const setTilemapData = useEditorStore((s) => s.setTilemapData);
   const removeTilemapData = useEditorStore((s) => s.removeTilemapData);
+  const setTileCollisionShape = useEditorStore((s) => s.setTileCollisionShape);
   const { confirm, ConfirmDialogPortal } = useConfirmDialog();
+
+  // Per-tile collision-shape authoring (OP-04). A single cell is targeted by
+  // layer + (x, y); Apply dispatches `set_tile_collision_shape` through the
+  // shared store action, so the edit is undoable and mirrored back.
+  const [shapeLayer, setShapeLayer] = useState(0);
+  const [shapeX, setShapeX] = useState(0);
+  const [shapeY, setShapeY] = useState(0);
+  const [shapeValue, setShapeValue] = useState<CollisionShape>('full');
+
+  const handleApplyCollisionShape = useCallback(() => {
+    if (!primaryId) return;
+    setTileCollisionShape(primaryId, shapeLayer, shapeX, shapeY, shapeValue);
+  }, [primaryId, setTileCollisionShape, shapeLayer, shapeX, shapeY, shapeValue]);
 
   const handleAddTilemap = useCallback(() => {
     if (!primaryId) return;
@@ -270,6 +296,67 @@ export function TilemapInspector() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Per-tile collision shape (OP-04) */}
+        <div className="space-y-2">
+          <label className="text-xs text-zinc-400">Tile Collision Shape</label>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label htmlFor="tcs-layer" className="text-xs text-zinc-400">Layer</label>
+              <select
+                id="tcs-layer"
+                value={shapeLayer}
+                onChange={(e) => setShapeLayer(parseInt(e.target.value, 10))}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+              >
+                {tilemapData.layers.map((layer, i) => (
+                  <option key={i} value={i}>{layer.name || `Layer ${i + 1}`}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="tcs-x" className="text-xs text-zinc-400">X</label>
+              <input
+                id="tcs-x"
+                type="number"
+                value={shapeX}
+                onChange={(e) => setShapeX(parseInt(e.target.value, 10) || 0)}
+                min={0}
+                max={Math.max(0, tilemapData.mapSize[0] - 1)}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+              />
+            </div>
+            <div>
+              <label htmlFor="tcs-y" className="text-xs text-zinc-400">Y</label>
+              <input
+                id="tcs-y"
+                type="number"
+                value={shapeY}
+                onChange={(e) => setShapeY(parseInt(e.target.value, 10) || 0)}
+                min={0}
+                max={Math.max(0, tilemapData.mapSize[1] - 1)}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+              />
+            </div>
+          </div>
+          <select
+            aria-label="Collision shape"
+            value={shapeValue}
+            onChange={(e) => setShapeValue(e.target.value as CollisionShape)}
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+          >
+            {TILE_COLLISION_SHAPES.map((shape) => (
+              <option key={shape} value={shape}>{COLLISION_SHAPE_LABELS[shape]}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleApplyCollisionShape}
+            className="w-full rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700"
+          >
+            Apply Collision Shape
+          </button>
         </div>
 
         {/* Grid & Collision Preview */}

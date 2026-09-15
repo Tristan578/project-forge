@@ -228,6 +228,31 @@ declare namespace forge {
      * values and anything above the shared upper bound throw.
      */
     function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
+    /**
+     * Read the authored collision shape of a cell. Returns 'none' for a cell
+     * with no shape authored, or null when the tilemap, layer or cell is
+     * unknown. Pure read - no command is dispatched.
+     */
+    function getCollisionShape(
+      tilemapId: string,
+      x: number,
+      y: number,
+      layer?: number,
+    ): 'none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight' | null;
+    /**
+     * Author a cell's collision shape (OP-04). Maps to the
+     * set_tile_collision_shape engine command: the edit is undoable and the
+     * change is mirrored back to the store. Coordinates are floored; the engine
+     * validates the shape and the coordinate, so an out-of-range cell is a
+     * no-op rather than a corruption.
+     */
+    function setCollisionShape(
+      tilemapId: string,
+      x: number,
+      y: number,
+      shape: 'none' | 'full' | 'halfTop' | 'halfBottom' | 'slopeLeft' | 'slopeRight',
+      layer?: number,
+    ): void;
     /** Convert world coordinates to tile coordinates */
     function worldToTile(tilemapId: string, worldX: number, worldY: number): [number, number];
     /** Convert tile coordinates to world coordinates */

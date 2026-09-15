@@ -812,6 +812,35 @@ function buildForgeApi(scriptEntityId: string) {
           y: tileInt(api, 'y', y),
         });
       },
+      // Read a cell's authored collision shape from the mirrored tilemap state.
+      // Pure JS, no command: `null` when the tilemap, layer or cell is unknown,
+      // and `'none'` for a layer that has no `collisionShapes` array yet.
+      getCollisionShape: (tilemapId: string, x: number, y: number, layer = 0): string | null => {
+        const tilemap = tilemapStates[tilemapId];
+        if (!tilemap) return null;
+        const layerData = tilemap.layers[layer];
+        if (!layerData) return null;
+        const [mapW] = tilemap.mapSize;
+        if (x < 0 || y < 0 || x >= mapW || y >= tilemap.mapSize[1]) return null;
+        const idx = y * mapW + x;
+        if (idx >= layerData.tiles.length) return null;
+        return layerData.collisionShapes?.[idx] ?? 'none';
+      },
+      // Author a cell's collision shape (OP-04). Maps to the `set_tile_collision_shape`
+      // engine command, which records undo and re-emits `TILEMAP_CHANGED`. The
+      // engine validates the shape string and the coordinate; an out-of-range
+      // cell is a no-op there, so a bad write cannot corrupt an existing cell.
+      setCollisionShape: (tilemapId: string, x: number, y: number, shape: string, layer = 0) => {
+        const api = 'forge.tilemap.setCollisionShape';
+        pendingCommands.push({
+          cmd: 'set_tile_collision_shape',
+          entityId: tilemapId,
+          layer: tileInt(api, 'layer', layer),
+          x: tileInt(api, 'x', x),
+          y: tileInt(api, 'y', y),
+          shape,
+        });
+      },
       worldToTile: (tilemapId: string, worldX: number, worldY: number): [number, number] => {
         const tilemap = tilemapStates[tilemapId];
         const tileW = tilemap?.tileSize[0] ?? 32;

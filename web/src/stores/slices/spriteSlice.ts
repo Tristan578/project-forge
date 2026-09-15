@@ -4,7 +4,8 @@
 
 import { StateCreator } from 'zustand';
 import { buildSetSpriteDataPayload } from '@/lib/sprite/sprite2dPayload';
-import type { ProjectType, SpriteData, Camera2dData, SortingLayerData, Grid2dSettings, SpriteSheetData, SpriteAnimatorData, AnimationStateMachineData, TilesetData, TilemapData } from './types';
+import type { ProjectType, SpriteData, Camera2dData, SortingLayerData, Grid2dSettings, SpriteSheetData, SpriteAnimatorData, AnimationStateMachineData, TilesetData, TilemapData, CollisionShape } from './types';
+import { applyCollisionShapeToLayers } from '@/lib/tilemap/collisionShapes';
 
 export interface SpriteSlice {
   projectType: ProjectType;
@@ -49,6 +50,14 @@ export interface SpriteSlice {
   setTileset: (assetId: string, data: TilesetData) => void;
   removeTileset: (assetId: string) => void;
   setTilemapData: (entityId: string, data: TilemapData) => void;
+  /**
+   * Author one cell's collision shape (OP-04). Updates the store optimistically
+   * and dispatches `set_tile_collision_shape` to the engine, which records undo
+   * and re-emits `TILEMAP_CHANGED`. A no-op (nothing dispatched) when the entity
+   * has no tilemap or the layer/coordinate is out of range, matching the
+   * engine's own rejection so an invalid edit corrupts nothing.
+   */
+  setTileCollisionShape: (entityId: string, layerIndex: number, x: number, y: number, shape: CollisionShape) => void;
   /**
    * State-only mirror of what the engine reports. `null` means the entity has
    * no tilemap (the engine's `Option<&TilemapData>` is `None`), so the entry is
@@ -191,6 +200,14 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
   setTilemapData: (entityId, data) => {
     set(state => ({ tilemaps: { ...state.tilemaps, [entityId]: data } }));
     if (dispatchCommand) dispatchCommand('set_tilemap_data', { entityId, ...data });
+  },
+  setTileCollisionShape: (entityId, layerIndex, x, y, shape) => {
+    const tilemap = get().tilemaps[entityId];
+    if (!tilemap) return;
+    const result = applyCollisionShapeToLayers(tilemap.layers, tilemap.mapSize, layerIndex, x, y, shape);
+    if (!result.changed) return;
+    set(state => ({ tilemaps: { ...state.tilemaps, [entityId]: { ...tilemap, layers: result.layers } } }));
+    if (dispatchCommand) dispatchCommand('set_tile_collision_shape', { entityId, layer: layerIndex, x, y, shape });
   },
   applyTilemapFromEngine: (entityId, data) => {
     set(state => {
