@@ -779,12 +779,22 @@ describe('SkeletonInspector', () => {
     render(<SkeletonInspector entityId="entity-1" />);
     fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
     expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Vertex 1 X'), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText('Vertex 1 influence 1 weight'), { target: { value: '0.5' } });
     fireEvent.click(screen.getByLabelText('Delete mesh attachment cloak'));
     await vi.waitFor(() => {
       expect(mockConfirm).toHaveBeenCalledWith('Discard unsaved mesh edits?');
     });
     expect(mockSetSkeleton2d).not.toHaveBeenCalled();
     expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
+    expect(screen.getByLabelText('Vertex 1 X')).toHaveValue(9);
+    expect(screen.getByLabelText('Vertex 1 influence 1 weight')).toHaveValue(0.5);
+    fireEvent.click(screen.getByText('Apply Mesh Attachment'));
+    const payload = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(payload.skins.default.attachments.cloak).toEqual(expect.objectContaining({
+      vertices: [[9, 1], [2, 2]],
+      weights: [{ bones: ['root'], weights: [0.5] }, { bones: ['root'], weights: [1] }],
+    }));
   });
 
   it('deletes an attachment with no confirmation when no draft is open for it', () => {
