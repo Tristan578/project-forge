@@ -663,6 +663,9 @@ jobs:
           npm install -g @lhci/cli
           npx puppeteer browsers install chrome
 
+      - name: Test Lighthouse report validation
+        run: node --test scripts/__tests__/lighthouse-delta.test.mjs
+
       - name: Build Next.js for baseline (effects off)
         working-directory: web
         env:
@@ -743,34 +746,30 @@ jobs:
           import { readdirSync, readFileSync, existsSync } from 'fs';
           import { join } from 'path';
 
+          const EXPECTED_RUNS = 3;
+          const MAX_DELTA = 0.10;
+
           function getMedianPerformance(dir) {
             if (!existsSync(dir)) {
-              console.error('Directory not found: ' + dir);
-              console.log('SKIP: Cannot compare — Lighthouse output missing');
-              return null;
+              throw new Error('Lighthouse report directory missing: ' + dir + '. Re-run collection before comparing.');
             }
             const files = readdirSync(dir).filter(f => f.endsWith('.json') && f.startsWith('lhr-'));
-            if (files.length === 0) {
-              console.error('No lhr-*.json files in ' + dir);
-              console.log('Available files:', readdirSync(dir));
-              return null;
+            if (files.length !== EXPECTED_RUNS) {
+              throw new Error('Expected ' + EXPECTED_RUNS + ' Lighthouse reports in ' + dir + ', found ' + files.length + '. Re-run collection.');
             }
             const scores = files.map(f => {
               const report = JSON.parse(readFileSync(join(dir, f), 'utf8'));
-              return report.categories && report.categories.performance
-                ? report.categories.performance.score
-                : 0;
+              const score = report?.categories?.performance?.score;
+              if (!Number.isFinite(score) || score < 0 || score > 1 || report.runtimeError) {
+                throw new Error('Invalid Lighthouse performance result in ' + join(dir, f) + '. Inspect collection errors and re-run.');
+              }
+              return score;
             }).sort((a, b) => a - b);
-            return scores[Math.floor(scores.length / 2)] || 0;
+            return scores[Math.floor(scores.length / 2)];
           }
 
           const baseScore = getMedianPerformance('.lhci-baseline');
           const testScore = getMedianPerformance('.lhci-effects');
-
-          if (baseScore === null || testScore === null) {
-            console.log('SKIP: Lighthouse data incomplete — cannot compare');
-            process.exit(0);
-          }
 
           const delta = baseScore - testScore;
 
@@ -782,7 +781,7 @@ jobs:
           // CSS animation overhead than the editor (/dev) since it has less JS content
           // to mask the animation impact. 10 points accommodates this while still
           // catching egregious performance regressions.
-          if (delta > 0.10) {
+          if (delta > MAX_DELTA + Number.EPSILON) {
             console.error('FAIL: Effects caused ' + (delta * 100).toFixed(1) + ' point regression (max allowed: 10)');
             process.exit(1);
           }
