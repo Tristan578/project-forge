@@ -46,12 +46,16 @@ const POST_impl = createGenerationHandler<
       return { ok: false, error: 'Duration must be between 15 and 120 seconds' };
     }
 
+    if (typeof instrumental !== 'boolean') {
+      return { ok: false, error: 'Instrumental must be true or false' };
+    }
+
     return {
       ok: true,
       params: {
         prompt: prompt as string,
         durationSeconds: durationSeconds as number,
-        instrumental: instrumental as boolean,
+        instrumental,
       },
     };
   },

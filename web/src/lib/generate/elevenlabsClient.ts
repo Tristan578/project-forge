@@ -1,5 +1,5 @@
 /**
- * ElevenLabs API client for SFX and voice generation.
+ * ElevenLabs API client for sound effects, voice, and music generation.
  *
  * Server-side only. Do NOT import in client components.
  *
@@ -8,6 +8,7 @@
 
 import { validateResourceId } from '@/lib/validation/resourceId';
 import { composeAbortSignal } from '@/lib/generate/abortComposition';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 
 export interface ElevenLabsConfig {
   apiKey: string;
@@ -131,7 +132,9 @@ export class ElevenLabsClient {
   async generateMusic(params: GenerateMusicParams): Promise<AudioResult> {
     // ElevenLabs bounds: 3000–600000 ms. The route validates 15–120s upstream;
     // clamp defensively so a stray value can never post an out-of-range length.
-    const requestedMs = params.musicLengthMs ?? 30000;
+    const requestedMs = typeof params.musicLengthMs === 'number' && Number.isFinite(params.musicLengthMs)
+      ? params.musicLengthMs
+      : 30000;
     const musicLengthMs = Math.min(600000, Math.max(3000, Math.round(requestedMs)));
 
     const response = await fetch(`${this.baseUrl}/music`, {
@@ -155,6 +158,9 @@ export class ElevenLabsClient {
     }
 
     const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) {
+      throw new EmptyArtifactError('Music', 'audio');
+    }
     const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
 
     return {

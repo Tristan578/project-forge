@@ -7,6 +7,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
+import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { refundTokens } from '@/lib/tokens/service';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import type { User } from '@/lib/db/schema';
@@ -105,6 +106,31 @@ describe('POST /api/generate/music', () => {
     expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.error).toContain('Duration must be between 15 and 120');
+  });
+
+  it.each([null, 'false', 1, {}, []])('rejects instrumental=%j before billing or generation', async (instrumental) => {
+    const res = await POST(makeRequest({ prompt: 'epic battle theme', instrumental }));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'Instrumental must be true or false' });
+    expect(resolveApiKey).not.toHaveBeenCalled();
+    expect(ElevenLabsClient).not.toHaveBeenCalled();
+  });
+
+  it('refunds and returns 503 when the provider delivers no music audio', async () => {
+    const { ElevenLabsClient: ActualElevenLabsClient } = await vi.importActual<
+      typeof import('@/lib/generate/elevenlabsClient')
+    >('@/lib/generate/elevenlabsClient');
+    const client = new ActualElevenLabsClient({ apiKey: 'test-key' });
+    vi.spyOn(client, 'generateMusic').mockRejectedValue(new EmptyArtifactError('Music', 'audio'));
+    vi.mocked(ElevenLabsClient).mockImplementation(function () {
+      return client;
+    });
+    const res = await POST(makeRequest({ prompt: 'epic battle theme' }));
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.error).toContain('Music generation produced no audio');
+    expect(data).not.toHaveProperty('audioBase64');
+    expect(refundTokens).toHaveBeenCalledWith('user_1', 'usage-1');
   });
 
   it('returns 402 when tokens insufficient', async () => {
