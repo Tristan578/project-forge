@@ -119,6 +119,11 @@ Freshness is source-specific. A `measured` value older than its TTL (from
 `observedAt`) becomes `stale`: it retains `lastObservedValue` for context but
 reports `value: null` on the health axis.
 
+The current foundation defines this transition but does not evaluate the clock.
+`deriveMetricValue` derives the observation's value; the consuming ingestion or
+snapshot builder must apply the TTL before reporting current health. Validation
+checks the declared state and registered TTL, not whether a record is fresh now.
+
 | Source | Metric | TTL |
 |---|---|---|
 | `capability-contract` | completeness | 24h |
@@ -133,12 +138,24 @@ reported number: completeness 1, friction 5, latency 20, uptime 10.
 
 ## Evidence record fields
 
-Every metric value carries, independent of the numeric value: `metric`, `unit`,
-`direction`, `numerator` / `denominator` (ratio metrics), `sampleSize`,
-`source`, `environment`, `releaseSha`, `observedAt`, `ingestedAt`, `window`,
-`freshnessTtl`, `applicability`, `confidence`, and `formulaVersion`. A serialized
-complete observation therefore always includes units, formula, denominator, time
-window and evidence references.
+Every metric value carries `metric`, `unit`, `direction`, `source`,
+`environment`, `releaseSha`, `observedAt`, `ingestedAt`, `window`,
+`applicability`, `confidence`, and `formulaVersion`, alongside `state` and
+`value`. Additional fields depend on the state:
+
+- `measured`: `numerator`, `denominator`, `sampleSize`, and
+  `freshnessTtlSeconds`. The validator requires counts for all four registered
+  ratio metrics.
+- `stale`: `lastObservedValue`, `lastObservedAt`, `sampleSize`, and
+  `freshnessTtlSeconds`.
+- `insufficient_sample`: `sampleSize` and `minimumSampleSize`.
+- `unknown` and `not_applicable`: no additional numeric fields.
+
+Raw `Observation` records carry `observationId`, subject and observation
+references in `evidence`, counts, and provenance. Their units, direction, and TTL
+come from the metric dictionary when deriving a value. The current `MetricValue`
+and `Snapshot` schemas do not retain evidence references; consumers must preserve
+the association with the raw observations separately for an auditable result.
 
 ## Versioned identity
 
@@ -181,10 +198,13 @@ change.
   registered value for that metric; rejected otherwise.
 - **Out-of-range value** ⇒ a measured `value` or stale `lastObservedValue`
   outside the range its `unit` permits (ratio: `[0,1]`) is rejected.
-- **Minimum sample vs. denominator** ⇒ the minimum-sample gate is applied to
-  the resolved denominator (eligible/resolved count), not a caller-supplied
-  `sampleSize` alone; `sampleSize` itself can never be less than the
-  denominator (or, for latency, `latencyDistribution.eligible`).
+- **Observation sample vs. denominator** ⇒ `deriveMetricValue` applies the
+  minimum-sample gate to the resolved denominator (eligible/resolved count),
+  not a caller-supplied `sampleSize` alone. Observation validation requires
+  `sampleSize` to be at least the denominator (or, for latency,
+  `latencyDistribution.eligible`). Direct metric-value validation does not
+  currently enforce this minimum-sample gate; consumers should derive values
+  from validated observations before reporting them.
 - **Schema version** ⇒ a snapshot's `schemaVersion` must equal the current
   `SCHEMA_VERSION`; any other value is rejected as a different wire contract.
 
