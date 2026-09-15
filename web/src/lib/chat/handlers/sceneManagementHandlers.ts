@@ -250,6 +250,93 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     };
   },
 
+  // -------------------------------------------------------------------------
+  // Recovery checkpoints (scene.FR-3.OP-02)
+  //
+  // These drive the exact same sceneManager functions the manual Scene Browser
+  // controls use (`ctx.store.createCheckpoint` / `restoreCheckpoint` /
+  // `listCheckpoints`), so the AI and manual paths persist identical state.
+  // -------------------------------------------------------------------------
+
+  create_checkpoint: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ label: z.string().optional() }), args);
+    if (p.error) return p.error;
+    const { createCheckpoint, loadProjectScenes, saveProjectScenes, saveCurrentSceneData } =
+      await import('@/lib/scenes/sceneManager');
+    // Capture the live scene first so the checkpoint reflects on-screen work,
+    // mirroring switch/duplicate. A failed capture aborts rather than snapshot
+    // a stale scene.
+    const capture = await captureBeforeMutating();
+    const failure = captureFailure(capture, 'create a checkpoint');
+    if (failure) return failure;
+
+    let project = loadProjectScenes();
+    if (capture.status === 'captured') {
+      project = saveCurrentSceneData(project, capture.data);
+      // Fold the captured live scene into the active project too, so the
+      // checkpoint and the on-disk project agree.
+      saveProjectScenes(project);
+    }
+    try {
+      const { checkpoint, checkpoints } = createCheckpoint(project, p.data.label);
+      return {
+        success: true,
+        result: {
+          checkpointId: checkpoint.id,
+          label: checkpoint.label,
+          count: checkpoints.length,
+          message: `Created checkpoint "${checkpoint.label}"`,
+        },
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: `Could not create checkpoint: ${err instanceof Error ? err.message : 'storage error'}`,
+      };
+    }
+  },
+
+  list_checkpoints: async (_args, _ctx): Promise<ExecutionResult> => {
+    const { listCheckpoints } = await import('@/lib/scenes/sceneManager');
+    const checkpoints = listCheckpoints();
+    return {
+      success: true,
+      result: {
+        checkpoints: checkpoints.map((c) => ({
+          id: c.id,
+          label: c.label,
+          createdAt: c.createdAt,
+          sceneCount: c.snapshot.scenes.length,
+        })),
+        count: checkpoints.length,
+      },
+    };
+  },
+
+  restore_checkpoint: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ checkpointId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    const { restoreCheckpoint } = await import('@/lib/scenes/sceneManager');
+    const result = restoreCheckpoint(p.data.checkpointId);
+    if ('error' in result) return { success: false, error: result.error };
+
+    const project = result.project;
+    ctx.store.setScenes(
+      project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+      project.activeSceneId
+    );
+    const active = project.scenes.find((s) => s.id === project.activeSceneId);
+    if (active?.data) {
+      ctx.store.loadScene(JSON.stringify(active.data));
+    } else {
+      ctx.store.newScene();
+    }
+    return {
+      success: true,
+      result: { message: 'Restored checkpoint', activeSceneId: project.activeSceneId },
+    };
+  },
+
   load_scene_with_transition: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       sceneName: z.string().min(1),

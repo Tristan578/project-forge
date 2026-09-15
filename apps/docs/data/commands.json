@@ -12185,6 +12185,58 @@
       "requiredScope": "scene:read",
       "destructive": false,
       "visibility": "public"
+    },
+    {
+      "name": "create_checkpoint",
+      "description": "Save a named recovery checkpoint of the whole project (a restorable snapshot of every scene)",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Optional label for the checkpoint; defaults to a timestamp"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "list_checkpoints",
+      "description": "List saved recovery checkpoints for the current project, newest first",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "restore_checkpoint",
+      "description": "Restore a recovery checkpoint by ID, replacing the active project with its snapshot",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "checkpointId": {
+            "type": "string",
+            "description": "ID of the checkpoint to restore"
+          }
+        },
+        "required": [
+          "checkpointId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": true,
+      "visibility": "public"
     }
   ],
   "resources": [

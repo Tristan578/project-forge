@@ -44,6 +44,7 @@ export const DESTRUCTIVE_COMMANDS: ReadonlySet<string> = new Set([
   'remove_tilemap_layer',
   'remove_ui_widget',
   'resize_tilemap',
+  'restore_checkpoint',
   'set_script',
   'setup_game_from_description',
   'start_from_idea',

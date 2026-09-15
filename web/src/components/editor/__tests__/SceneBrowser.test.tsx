@@ -18,6 +18,8 @@ vi.mock('lucide-react', () => ({
   Trash2: (props: Record<string, unknown>) => <span data-testid="trash-icon" {...props} />,
   Copy: (props: Record<string, unknown>) => <span data-testid="copy-icon" {...props} />,
   CheckCircle2: (props: Record<string, unknown>) => <span data-testid="check-icon" {...props} />,
+  Save: (props: Record<string, unknown>) => <span data-testid="save-icon" {...props} />,
+  RotateCcw: (props: Record<string, unknown>) => <span data-testid="restore-icon" {...props} />,
 }));
 
 // PF-1100: switching and duplicating now read the live scene back out of the
@@ -27,6 +29,11 @@ const mockSwitchScene = vi.fn(async () => {});
 const mockCreateNewScene = vi.fn();
 const mockDeleteScene = vi.fn();
 const mockDuplicateScene = vi.fn(async () => {});
+// scene.FR-3.OP-02 checkpoint actions.
+const mockCreateCheckpoint = vi.fn(async () => ({ id: 'ckpt_1', label: 'cp', createdAt: 't', snapshot: {} }));
+const mockListCheckpoints = vi.fn(() => [] as Array<{ id: string; label: string; createdAt: string; snapshot: unknown }>);
+const mockRestoreCheckpoint = vi.fn(() => true);
+const mockDeleteCheckpoint = vi.fn(() => []);
 
 function buildState(overrides: {
   scenes?: Array<{ id: string; name: string; isStartScene: boolean }>;
@@ -45,6 +52,10 @@ function buildState(overrides: {
     createNewScene: mockCreateNewScene,
     deleteScene: mockDeleteScene,
     duplicateScene: mockDuplicateScene,
+    createCheckpoint: mockCreateCheckpoint,
+    listCheckpoints: mockListCheckpoints,
+    restoreCheckpoint: mockRestoreCheckpoint,
+    deleteCheckpoint: mockDeleteCheckpoint,
   };
 }
 
@@ -203,5 +214,47 @@ describe('SceneBrowser', () => {
     const dialog = screen.getByRole('dialog');
     fireEvent.click(dialog);
     expect(mockOnClose).toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Recovery checkpoints — scene.FR-3.OP-02 (manual controls)
+  // -------------------------------------------------------------------------
+
+  it('reads the checkpoint list from storage when opened', () => {
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    expect(mockListCheckpoints).toHaveBeenCalled();
+    expect(screen.getByText(/No checkpoints yet/i)).toBeTruthy();
+  });
+
+  it('calls createCheckpoint when Save checkpoint is clicked', async () => {
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Save checkpoint'));
+    });
+    expect(mockCreateCheckpoint).toHaveBeenCalled();
+    // The list is re-read after creating so the new checkpoint appears.
+    expect(mockListCheckpoints.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('restores a checkpoint after confirmation', () => {
+    mockListCheckpoints.mockReturnValue([
+      { id: 'cp1', label: 'pre-change', createdAt: 't', snapshot: {} },
+    ]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Restore pre-change'));
+    // A confirm step guards the destructive restore.
+    fireEvent.click(screen.getByLabelText('Confirm restore pre-change'));
+    expect(mockRestoreCheckpoint).toHaveBeenCalledWith('cp1');
+    mockListCheckpoints.mockReturnValue([]);
+  });
+
+  it('deletes a checkpoint', () => {
+    mockListCheckpoints.mockReturnValue([
+      { id: 'cp1', label: 'scratch', createdAt: 't', snapshot: {} },
+    ]);
+    render(<SceneBrowser isOpen onClose={mockOnClose} />);
+    fireEvent.click(screen.getByLabelText('Delete checkpoint scratch'));
+    expect(mockDeleteCheckpoint).toHaveBeenCalledWith('cp1');
+    mockListCheckpoints.mockReturnValue([]);
   });
 });

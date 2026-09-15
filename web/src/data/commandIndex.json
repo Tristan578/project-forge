@@ -236,6 +236,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "create_checkpoint",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "create_dialogue_tree",
       "category": "dialogue",
       "requiredScope": "scene:write"
@@ -826,6 +831,11 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "list_checkpoints",
+      "category": "scene",
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "list_custom_materials",
       "category": "materials",
       "requiredScope": "scene:read"
@@ -1203,6 +1213,11 @@
     {
       "name": "resize_tilemap",
       "category": "tilemap",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "restore_checkpoint",
+      "category": "scene",
       "requiredScope": "scene:write"
     },
     {

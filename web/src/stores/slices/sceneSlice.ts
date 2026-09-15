@@ -13,7 +13,12 @@ import {
   duplicateScene as duplicateSceneIn,
   switchScene as switchSceneIn,
   saveCurrentSceneData,
+  createCheckpoint as createCheckpointIn,
+  listCheckpoints as listCheckpointsIn,
+  restoreCheckpoint as restoreCheckpointIn,
+  deleteCheckpoint as deleteCheckpointIn,
   type ProjectScenes,
+  type SceneCheckpoint,
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
@@ -113,6 +118,22 @@ export interface SceneSlice {
   deleteScene: (sceneId: string) => void;
   /** Persist the live scene first, so duplicating the ACTIVE scene copies its current contents. */
   duplicateScene: (sceneId: string) => Promise<void>;
+  /**
+   * Capture a named recovery checkpoint of the whole project (scene.FR-3.OP-02).
+   * Reads the live scene back out of the engine first — same guard as switch /
+   * duplicate — so the snapshot reflects on-screen work. Returns the new
+   * checkpoint, or `null` if the capture failed or storage refused the write.
+   */
+  createCheckpoint: (label?: string) => Promise<SceneCheckpoint | null>;
+  /** List stored recovery checkpoints, newest first. */
+  listCheckpoints: () => SceneCheckpoint[];
+  /**
+   * Restore a checkpoint by ID, replacing the active project and loading its
+   * active scene into the engine. Returns true on success.
+   */
+  restoreCheckpoint: (checkpointId: string) => boolean;
+  /** Delete a checkpoint by ID. */
+  deleteCheckpoint: (checkpointId: string) => SceneCheckpoint[];
 }
 
 /**
@@ -508,4 +529,41 @@ export const createSceneSlice: StateCreator<
     saveProjectScenes(result.project);
     get().setScenes(toSceneList(result.project), result.project.activeSceneId);
   },
+  // Recovery checkpoints (scene.FR-3.OP-02). The chat handlers
+  // (`create_checkpoint` / `restore_checkpoint` / `list_checkpoints`) drive the
+  // same sceneManager functions, so manual and AI paths persist identical state.
+  createCheckpoint: async (label) => {
+    const captured = await captureActiveScene(requestSceneExport);
+    const project = withCapturedScene(loadProjectScenes(), captured);
+    if (!project) {
+      console.error(
+        `[Scenes] Refusing to checkpoint: ${captured.status === 'failed' ? captured.reason : ''} ` +
+          'The checkpoint would capture stale scene data.'
+      );
+      return null;
+    }
+    // Fold captured live work into the active project so it and the checkpoint agree.
+    if (captured.status === 'captured') saveProjectScenes(project);
+    try {
+      return createCheckpointIn(project, label).checkpoint;
+    } catch (err) {
+      console.error('[Scenes] Failed to store checkpoint:', err);
+      return null;
+    }
+  },
+  listCheckpoints: () => listCheckpointsIn(),
+  restoreCheckpoint: (checkpointId) => {
+    const result = restoreCheckpointIn(checkpointId);
+    if ('error' in result) return false;
+    const project = result.project;
+    get().setScenes(toSceneList(project), project.activeSceneId);
+    const active = project.scenes.find((s) => s.id === project.activeSceneId);
+    if (active?.data) {
+      get().loadScene(JSON.stringify(active.data));
+    } else {
+      get().newScene();
+    }
+    return true;
+  },
+  deleteCheckpoint: (checkpointId) => deleteCheckpointIn(checkpointId),
 });

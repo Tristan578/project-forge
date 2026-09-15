@@ -21,6 +21,9 @@ const mockRenameScene = vi.fn();
 const mockSetStartScene = vi.fn();
 const mockGetSceneByName = vi.fn();
 const mockSaveCurrentSceneData = vi.fn();
+const mockCreateCheckpoint = vi.fn();
+const mockListCheckpoints = vi.fn();
+const mockRestoreCheckpoint = vi.fn();
 
 vi.mock('@/lib/scenes/sceneManager', () => ({
   loadProjectScenes: (...args: unknown[]) => mockLoadProjectScenes(...args),
@@ -33,6 +36,9 @@ vi.mock('@/lib/scenes/sceneManager', () => ({
   setStartScene: (...args: unknown[]) => mockSetStartScene(...args),
   getSceneByName: (...args: unknown[]) => mockGetSceneByName(...args),
   saveCurrentSceneData: (...args: unknown[]) => mockSaveCurrentSceneData(...args),
+  createCheckpoint: (...args: unknown[]) => mockCreateCheckpoint(...args),
+  listCheckpoints: (...args: unknown[]) => mockListCheckpoints(...args),
+  restoreCheckpoint: (...args: unknown[]) => mockRestoreCheckpoint(...args),
 }));
 
 // PF-1100: switching and duplicating first read the live scene back out of the
@@ -97,6 +103,13 @@ beforeEach(() => {
   mockGetSceneByName.mockReturnValue(undefined);
   // Default: no engine attached, so there is no live scene that could be lost
   mockCaptureActiveScene.mockResolvedValue({ status: 'unavailable' });
+  // Checkpoint defaults
+  mockCreateCheckpoint.mockReturnValue({
+    checkpoint: { id: 'ckpt_1', label: 'auto', createdAt: 't', snapshot: baseProject },
+    checkpoints: [{ id: 'ckpt_1', label: 'auto', createdAt: 't', snapshot: baseProject }],
+  });
+  mockListCheckpoints.mockReturnValue([]);
+  mockRestoreCheckpoint.mockReturnValue({ project: baseProject });
 });
 
 // ---------------------------------------------------------------------------
@@ -683,6 +696,122 @@ describe('list_scenes', () => {
     expect(scenes).toHaveLength(2);
     expect(scenes[0]).toMatchObject({ id: 'scene_1', name: 'Main', isStartScene: true, isActive: true });
     expect(scenes[1]).toMatchObject({ id: 'scene_2', name: 'Level 2', isStartScene: false, isActive: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recovery checkpoints — scene.FR-3.OP-02
+// (unit wiring; end-to-end manual/AI parity lives in the sibling
+//  sceneCheckpointParity.test.ts against the REAL sceneManager)
+// ---------------------------------------------------------------------------
+
+describe('create_checkpoint', () => {
+  it('snapshots the loaded project and returns the checkpoint id', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {
+      label: 'before boss fight',
+    });
+    expect(result.success).toBe(true);
+    expect(mockCreateCheckpoint).toHaveBeenCalledWith(baseProject, 'before boss fight');
+    expect((result.result as Record<string, unknown>).checkpointId).toBe('ckpt_1');
+  });
+
+  it('aborts without snapshotting when the live scene cannot be captured', async () => {
+    mockCaptureActiveScene.mockResolvedValueOnce({ status: 'failed', reason: 'engine busy' });
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {});
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('create a checkpoint');
+    expect(mockCreateCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('folds a captured live scene into the project before snapshotting', async () => {
+    const liveScene = { formatVersion: 3, sceneName: 'Live', entities: [{ id: 'e9' }] };
+    mockCaptureActiveScene.mockResolvedValueOnce({ status: 'captured', data: liveScene });
+    const foldedProject = { ...baseProject, folded: true };
+    mockSaveCurrentSceneData.mockReturnValueOnce(foldedProject);
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {});
+    expect(result.success).toBe(true);
+    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, liveScene);
+    // The folded project is both persisted and snapshotted.
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(foldedProject);
+    expect(mockCreateCheckpoint).toHaveBeenCalledWith(foldedProject, undefined);
+  });
+
+  it('surfaces a storage failure instead of reporting a phantom success', async () => {
+    mockCreateCheckpoint.mockImplementationOnce(() => {
+      throw new Error('Quota exceeded');
+    });
+    const { result } = await invokeHandler(sceneManagementHandlers, 'create_checkpoint', {});
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Quota exceeded');
+  });
+});
+
+describe('list_checkpoints', () => {
+  it('returns a lightweight view of the stored checkpoints', async () => {
+    mockListCheckpoints.mockReturnValueOnce([
+      { id: 'c1', label: 'one', createdAt: 't1', snapshot: { scenes: [{}, {}] } },
+      { id: 'c2', label: 'two', createdAt: 't2', snapshot: { scenes: [{}] } },
+    ]);
+    const { result } = await invokeHandler(sceneManagementHandlers, 'list_checkpoints');
+    expect(result.success).toBe(true);
+    const payload = result.result as { checkpoints: Array<Record<string, unknown>>; count: number };
+    expect(payload.count).toBe(2);
+    expect(payload.checkpoints[0]).toEqual({ id: 'c1', label: 'one', createdAt: 't1', sceneCount: 2 });
+  });
+});
+
+describe('restore_checkpoint', () => {
+  it('restores the snapshot and re-mirrors scenes into the store', async () => {
+    const restoredProject = {
+      version: '1.0',
+      activeSceneId: 'scene_1',
+      scenes: [
+        { id: 'scene_1', name: 'Main', isStartScene: true, data: { formatVersion: 3, sceneName: 'Main', entities: [] } },
+      ],
+    };
+    mockRestoreCheckpoint.mockReturnValueOnce({ project: restoredProject });
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
+      checkpointId: 'ckpt_1',
+    });
+    expect(result.success).toBe(true);
+    expect(mockRestoreCheckpoint).toHaveBeenCalledWith('ckpt_1');
+    expect(store.setScenes).toHaveBeenCalledWith(
+      [{ id: 'scene_1', name: 'Main', isStartScene: true }],
+      'scene_1'
+    );
+    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(restoredProject.scenes[0].data));
+  });
+
+  it('calls newScene when the active scene has no data', async () => {
+    const restoredProject = {
+      version: '1.0',
+      activeSceneId: 'scene_1',
+      scenes: [{ id: 'scene_1', name: 'Main', isStartScene: true, data: null }],
+    };
+    mockRestoreCheckpoint.mockReturnValueOnce({ project: restoredProject });
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
+      checkpointId: 'ckpt_1',
+    });
+    expect(result.success).toBe(true);
+    expect(store.newScene).toHaveBeenCalled();
+    expect(store.loadScene).not.toHaveBeenCalled();
+  });
+
+  it('returns a failure when the checkpoint is not found', async () => {
+    mockRestoreCheckpoint.mockReturnValueOnce({ error: 'Checkpoint not found' });
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {
+      checkpointId: 'nope',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Checkpoint not found');
+    expect(store.setScenes).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing checkpointId', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'restore_checkpoint', {});
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
+    expect(mockRestoreCheckpoint).not.toHaveBeenCalled();
   });
 });
 
