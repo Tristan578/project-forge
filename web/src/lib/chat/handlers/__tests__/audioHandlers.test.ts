@@ -481,6 +481,24 @@ describe('audioHandlers — music arrangement (in-app AI parity)', () => {
     expect(arr().arrangement.tracks).toHaveLength(0);
   });
 
+  // Parity with the MusicArrangementPanel Mute checkbox (setTrackMuted). Without
+  // an AI/MCP command the manual control had no in-app-AI equivalent.
+  it('arrangement_set_track_muted mutes and unmutes a real track', async () => {
+    const trackId = arr().addTrack();
+    const mute = await invokeHandler(audioHandlers, 'arrangement_set_track_muted', { trackId, muted: true });
+    expect(mute.result.success).toBe(true);
+    expect(arr().arrangement.tracks[0].muted).toBe(true);
+
+    await invokeHandler(audioHandlers, 'arrangement_set_track_muted', { trackId, muted: false });
+    expect(arr().arrangement.tracks[0].muted).toBe(false);
+  });
+
+  it('arrangement_set_track_muted reports a missing track instead of mutating', async () => {
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_set_track_muted', { trackId: 'ghost', muted: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('track not found');
+  });
+
   it('arrangement mutations from the AI path are undoable, sharing the panel history', async () => {
     const trackId = arr().addTrack();
     await invokeHandler(audioHandlers, 'arrangement_add_clip', { trackId, sourceUrl: 'a', sourceDurationSeconds: 10 });

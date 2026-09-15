@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 368 MCP commands available in SpawnForge.
+Complete reference for all 369 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -19,7 +19,7 @@ Complete reference for all 368 MCP commands available in SpawnForge.
 - [Runtime](#runtime) (12 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
-- [Audio](#audio) (36 commands)
+- [Audio](#audio) (37 commands)
 - [Particles](#particles) (8 commands)
 - [Animation](#animation) (20 commands)
 - [Mesh](#mesh) (11 commands)
@@ -1588,7 +1588,7 @@ Scope: `scene:read` | Token cost: 0
 
 ### `get_input_bindings`
 
-Get all current input action bindings and active preset
+Get all current input action bindings and active preset, including any additional local players' maps under `players`
 
 **Example:**
 ```json
@@ -1886,6 +1886,7 @@ Create or update an input action binding (e.g. map 'jump' to Space key)
 | `positiveKeys` | string[] | No | Positive direction keys for axis actions |
 | `negativeKeys` | string[] | No | Negative direction keys for axis actions |
 | `deadZone` | number | No | Dead zone for axis (default 0.1) |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -1909,6 +1910,7 @@ Remove an input action binding by name
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `actionName` | string | Yes | Name of the action to remove |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -1926,11 +1928,12 @@ Scope: `scene:write` | Token cost: 0
 
 ### `set_input_preset`
 
-Apply a built-in input preset (replaces all bindings)
+Merge a built-in input preset into a player's bindings (additive; the preset's own actions win on name collisions)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `preset` | `"fps"` \| `"platformer"` \| `"topdown"` \| `"racing"` | Yes | Preset name |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -3251,6 +3254,30 @@ Delete a music arrangement track and every clip on it. Undoable in the arrangeme
   "command": "arrangement_delete_track",
   "params": {
     "trackId": "my_trackId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_track_muted`
+
+Mute or unmute a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to mute or unmute |
+| `muted` | boolean | Yes | Whether the track is silenced in the arrangement |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_track_muted",
+  "params": {
+    "trackId": "my_trackId",
+    "muted": true
   }
 }
 ```

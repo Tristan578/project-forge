@@ -182,6 +182,17 @@ export const audioHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { message: `Deleted arrangement track ${p.data.trackId}.` } };
   },
 
+  arrangement_set_track_muted: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ trackId: z.string().min(1), muted: z.boolean() }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.tracks.some((t) => t.id === p.data.trackId)) {
+      return { success: false, error: `Arrangement track not found: ${p.data.trackId}` };
+    }
+    store.setTrackMuted(p.data.trackId, p.data.muted);
+    return { success: true, result: { message: `Set mute on track ${p.data.trackId} to ${p.data.muted}.` } };
+  },
+
   arrangement_add_clip: async (args, _ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       trackId: z.string().min(1),

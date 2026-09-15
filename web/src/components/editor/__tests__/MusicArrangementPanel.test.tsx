@@ -98,6 +98,20 @@ describe('MusicArrangementPanel — OP-01 arrangement', () => {
     expect(state().arrangement.tracks).toHaveLength(0);
     expect(state().arrangement.clips).toHaveLength(0);
   });
+
+  // The Mute checkbox is wired to setTrackMuted; this is the test that would
+  // have failed had the checkbox been unbound or the store action a no-op.
+  it('toggles a track mute through the Mute checkbox', () => {
+    render(<MusicArrangementPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add Track' }));
+    const mute = screen.getByLabelText('Mute Track 1') as HTMLInputElement;
+    expect(mute.checked).toBe(false);
+    expect(state().arrangement.tracks[0].muted).toBe(false);
+    fireEvent.click(mute);
+    expect(state().arrangement.tracks[0].muted).toBe(true);
+    fireEvent.click(mute);
+    expect(state().arrangement.tracks[0].muted).toBe(false);
+  });
 });
 
 describe('MusicArrangementPanel — OP-02 trim, loop, delete clip', () => {

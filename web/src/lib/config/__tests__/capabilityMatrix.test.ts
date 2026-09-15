@@ -575,6 +575,21 @@ describe('command counts quoted across the repo', () => {
     },
   );
 
+  // `web/src/lib/ai/spawnforgeAgent.ts` carries the same in-app-AI tool-count
+  // figure in a source comment ("tool count (N of M)"). It is deliberately NOT
+  // in `docs` above — that would sweep every unrelated number in a code file
+  // through the OTHER-count check below — so it went unpinned and rotted to a
+  // stale "287 of 367" while every doc here tracked the real count. Pin just
+  // that line against the derived counts so the comment cannot drift again.
+  it('spawnforgeAgent.ts comment quotes the derived chat-tool count', () => {
+    const src = read('web/src/lib/ai/spawnforgeAgent.ts');
+    expect(src.length, 'spawnforgeAgent.ts is missing or empty').toBeGreaterThan(0);
+    expect(
+      src,
+      `spawnforgeAgent.ts no longer says "tool count (${chatToolCount} of ${total})"`,
+    ).toContain(`tool count (${chatToolCount} of ${total})`);
+  });
+
   it('quotes no OTHER command or category count in any of them', () => {
     const allowedCommands = new Set([total, facts.publicCount, chatToolCount, bridgeCount]);
     const offenders: string[] = [];

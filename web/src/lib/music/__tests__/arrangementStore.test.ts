@@ -115,6 +115,18 @@ describe('music.FR-2.OP-01 — track/clip arrangement CRUD', () => {
     expect(s().arrangement.tracks).toHaveLength(0);
     expect(s().arrangement.clips).toHaveLength(0);
   });
+
+  it('mutes and unmutes a track, ignoring an unknown track id', () => {
+    const t1 = s().addTrack();
+    expect(s().arrangement.tracks[0].muted).toBe(false);
+    s().setTrackMuted(t1, true);
+    expect(s().arrangement.tracks[0].muted).toBe(true);
+    s().setTrackMuted(t1, false);
+    expect(s().arrangement.tracks[0].muted).toBe(false);
+    // Unknown track: no throw, no mutation.
+    s().setTrackMuted('ghost', true);
+    expect(s().arrangement.tracks[0].muted).toBe(false);
+  });
 });
 
 describe('music.FR-2.OP-02 — trim, loop points, boundaries', () => {

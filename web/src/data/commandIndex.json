@@ -146,6 +146,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "arrangement_set_track_muted",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "arrangement_trim_clip",
       "category": "audio",
       "requiredScope": "scene:write"
