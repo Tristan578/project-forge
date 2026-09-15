@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * Accessible manual editor for a native audio clip (#9903, operation
+ * Standalone prototype for a native audio clip (#9903, operation
  * `audio.FR-1.OP-02`): trim window, gain, fade in/out and loop bounds, with
  * undo/redo. Every control is a keyboard-reachable numeric input backed by the
  * SAME validated, pure commands the AI parity slice will call, so manual and AI
- * edits share identical validation and errors. The source asset's bytes are
- * never touched — edits only change the clip document.
+ * edits share identical validation and errors. This component is deliberately
+ * not mounted in AudioInspector until #9936 connects entity persistence,
+ * playback and export. Its local document is discarded on unmount.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -140,10 +141,8 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
 
   const apply = useCallback((result: CommandResult) => {
     if (result.ok) {
-      setDoc((prev) => {
-        historyRef.current.push(prev, result.data);
-        return result.data;
-      });
+      historyRef.current.push(doc, result.data);
+      setDoc(result.data);
       setErrors([]);
       userEditedRef.current = true;
       setCanUndo(historyRef.current.canUndo());
@@ -151,7 +150,7 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
     } else {
       setErrors(result.errors);
     }
-  }, []);
+  }, [doc]);
 
   const onUndo = useCallback(() => {
     const restored = historyRef.current.undo();

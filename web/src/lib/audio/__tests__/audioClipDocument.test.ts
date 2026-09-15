@@ -139,6 +139,14 @@ describe('audio.FR-1.OP-02 — Scenario: Manual and AI success', () => {
 });
 
 describe('audio.FR-1.OP-02 — Scenario: Negative case', () => {
+  it('restores a nonempty loop when trimming away the previous loop region', () => {
+    const looped = ok(setLoop(freshDoc('h'), { loopStartSec: 1.5, loopEndSec: 1.8 }, BOUNDS));
+    const trimmed = ok(setTrim(looped, { startSec: 0, endSec: 1 }, BOUNDS));
+    expect(trimmed.loopStartSec).toBe(0);
+    expect(trimmed.loopEndSec).toBe(1);
+    expect(setLoop(trimmed, { loopStartSec: trimmed.loopStartSec, loopEndSec: trimmed.loopEndSec }, BOUNDS).ok).toBe(true);
+  });
+
   it('rejects trim end <= start, naming the field and leaving the prior clip intact', () => {
     const prior = ok(setGain(freshDoc('h'), { gainDb: 3 }));
     const result = setTrim(prior, { startSec: 1.0, endSec: 1.0 }, BOUNDS);

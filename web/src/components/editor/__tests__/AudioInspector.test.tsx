@@ -4,6 +4,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@/test/utils/componentTestUtils';
 import { AudioInspector } from '../AudioInspector';
+import { ClipEditor } from '../ClipEditor';
+import { StrictMode } from 'react';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -374,13 +376,20 @@ function mockWithClip() {
   });
 }
 
-describe('AudioInspector clip editing (audio.FR-1.OP-02)', () => {
+describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanup());
 
-  it('renders accessible clip controls and a labelled waveform when a source asset is attached', () => {
+  it('does not offer clip edits in the inspector before persistence and playback are connected (#9936)', () => {
     mockWithClip();
     render(<AudioInspector />);
+    expect(screen.queryByLabelText('Trim start')).not.toBeInTheDocument();
+    expect(screen.getByText('Preview')).toBeInTheDocument();
+  });
+
+  it('renders accessible clip controls and a labelled waveform when a source asset is attached', () => {
+    mockWithClip();
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} />);
     expect(screen.getByText('Clip Editing')).toBeInTheDocument();
     expect(screen.getByLabelText('Trim start')).toBeInTheDocument();
     expect(screen.getByLabelText('Trim end')).toBeInTheDocument();
@@ -394,7 +403,7 @@ describe('AudioInspector clip editing (audio.FR-1.OP-02)', () => {
 
   it('applies a valid manual trim to the clip document', () => {
     mockWithClip();
-    render(<AudioInspector />);
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} />);
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
     fireEvent.change(end, { target: { value: '0.5' } });
     expect(end.value).toBe('0.5');
@@ -404,7 +413,7 @@ describe('AudioInspector clip editing (audio.FR-1.OP-02)', () => {
 
   it('rejects trim end <= start, showing a validation error and leaving the prior clip', () => {
     mockWithClip();
-    render(<AudioInspector />);
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} />);
     const start = screen.getByLabelText('Trim start') as HTMLInputElement;
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
     // Establish a valid window 0.6–1.0.
@@ -422,7 +431,7 @@ describe('AudioInspector clip editing (audio.FR-1.OP-02)', () => {
 
   it('undo restores the prior gain without touching trim', () => {
     mockWithClip();
-    render(<AudioInspector />);
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} />);
     const gain = screen.getByLabelText('Gain') as HTMLInputElement;
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
     fireEvent.change(end, { target: { value: '0.5' } });
@@ -433,5 +442,18 @@ describe('AudioInspector clip editing (audio.FR-1.OP-02)', () => {
     // The gain edit is undone; the earlier trim survives.
     expect(gain.value).toBe('0');
     expect(end.value).toBe('0.5');
+  });
+
+  it('records one undo entry per edit under StrictMode', () => {
+    mockWithClip();
+    render(<StrictMode><ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} /></StrictMode>);
+    const gain = screen.getByLabelText('Gain') as HTMLInputElement;
+    fireEvent.change(gain, { target: { value: '-6' } });
+    fireEvent.change(gain, { target: { value: '-12' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
+    expect(gain.value).toBe('-6');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo clip edit' }));
+    expect(gain.value).toBe('0');
+    expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
   });
 });

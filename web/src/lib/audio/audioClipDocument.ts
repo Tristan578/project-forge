@@ -1,15 +1,15 @@
 /**
  * Native audio clip document — the one reusable, editable description of how a
- * source audio asset is trimmed, gained, faded and looped.
+ * source audio asset can be trimmed, gained, faded and looped.
  *
  * Operation coverage: `audio.FR-1.OP-02` (#9903, parent #9850, program #9773).
  *
  * WHY A DOCUMENT, NOT A MUTATED BUFFER. The source asset's bytes are never
- * touched. Every creator edit — manual (AudioInspector) or, in a follow-up
+ * touched. Every edit in the standalone ClipEditor prototype or, in a follow-up
  * slice, typed AI command — is expressed as a change to this small document,
  * so trim/fade/gain/loop are lossless, reversible, and identical whether they
- * arrive by drag handle or by AI. The decoded source is rendered THROUGH the
- * document at play/export time; the file on disk is read-only.
+ * arrive by drag handle or by AI. Playback/export integration is tracked by
+ * #9936; these pure helpers describe the envelope without changing source bytes.
  *
  * SAMPLE-ACCURATE. All times are stored in seconds but are snapped to the
  * source's sample grid on every edit, so a "0.25s" trim on a 48 kHz clip is
@@ -221,9 +221,12 @@ function clampDerivedToWindow(doc: AudioClipDocument, sampleRate: number): Audio
     fadeIn = snapSecondsToSample((fadeIn / total) * windowLen, sampleRate);
     fadeOut = snapSecondsToSample(windowLen - fadeIn, sampleRate);
   }
-  const loopStart = Math.min(Math.max(doc.loopStartSec, doc.trimStartSec), doc.trimEndSec);
+  let loopStart = Math.min(Math.max(doc.loopStartSec, doc.trimStartSec), doc.trimEndSec);
   let loopEnd = Math.min(Math.max(doc.loopEndSec, doc.trimStartSec), doc.trimEndSec);
-  if (loopEnd <= loopStart) loopEnd = doc.trimEndSec;
+  if (loopEnd <= loopStart) {
+    loopStart = doc.trimStartSec;
+    loopEnd = doc.trimEndSec;
+  }
   return { ...doc, fadeInSec: fadeIn, fadeOutSec: fadeOut, loopStartSec: loopStart, loopEndSec: loopEnd };
 }
 
