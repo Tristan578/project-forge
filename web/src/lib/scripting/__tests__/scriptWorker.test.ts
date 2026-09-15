@@ -542,6 +542,65 @@ describe('scriptWorker', () => {
     );
   });
 
+  // OP-04: forge.input resolves per-local-player state via the optional slot.
+  it('forge.input(action, player) resolves each local player independently (physics.FR-1.OP-04)', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      // Both players name "attack"; only player 1 is pressing it this frame.
+      forge.log("p0:" + (forge.input.isPressed("attack", 0) ? "on" : "off"));
+      forge.log("p1:" + (forge.input.isPressed("attack", 1) ? "on" : "off"));
+      forge.log("default:" + (forge.input.isPressed("attack") ? "on" : "off"));
+      forge.log("axis0:" + forge.input.getAxis("move", 0).toString());
+      forge.log("axis1:" + forge.input.getAxis("move", 1).toString());
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      {
+        inputState: {
+          // Player 0 (primary): not attacking, steering right.
+          pressed: { attack: false },
+          justPressed: {},
+          justReleased: {},
+          axes: { move: 1 },
+          players: {
+            // Player 1 (second local player): attacking, steering left.
+            '1': {
+              pressed: { attack: true },
+              justPressed: {},
+              justReleased: {},
+              axes: { move: -1 },
+            },
+          },
+        },
+      }
+    ));
+
+    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log').map((c) => c[0].message);
+    expect(logs).toContain('p0:off');
+    expect(logs).toContain('p1:on');
+    expect(logs).toContain('default:off'); // no player arg == player 0
+    expect(logs).toContain('axis0:1');
+    expect(logs).toContain('axis1:-1');
+  });
+
+  it('forge.input for an unreported player slot reads as all-off, not a crash (physics.FR-1.OP-04)', async () => {
+    const handler = await setupWorker();
+    const code = `function onStart() {
+      forge.log("p2:" + (forge.input.isPressed("attack", 2) ? "on" : "off"));
+      forge.log("axis2:" + forge.input.getAxis("move", 2).toString());
+    }`;
+
+    await handler(initMsg(
+      [{ entityId: 'e1', enabled: true, source: code }],
+      { inputState: { pressed: { attack: true }, justPressed: {}, justReleased: {}, axes: { move: 1 } } }
+    ));
+
+    const logs = mockPostMessage.mock.calls.filter((c) => c[0]?.type === 'log').map((c) => c[0].message);
+    expect(logs).toContain('p2:off');
+    expect(logs).toContain('axis2:0');
+  });
+
   // ─── Forge Physics API ──────────────────────────────────────────
 
   it('forge.physics.applyForce and applyImpulse push correct commands', async () => {

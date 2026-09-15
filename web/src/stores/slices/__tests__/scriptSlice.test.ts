@@ -228,10 +228,11 @@ describe('scriptSlice', () => {
       expect(store.getState().inputBindings[0].sources).toEqual(['W']);
     });
 
-    it('should dispatch set_input_binding', () => {
+    it('should dispatch set_input_binding with the resolved player slot', () => {
       const binding = { actionName: 'fire', actionType: 'digital' as const, sources: ['Mouse0'] };
       store.getState().setInputBinding(binding);
-      expect(mockDispatch).toHaveBeenCalledWith('set_input_binding', binding);
+      // The dispatch normalises the slot: a binding with no `player` is player 0.
+      expect(mockDispatch).toHaveBeenCalledWith('set_input_binding', { ...binding, player: 0 });
     });
 
     it('should remove binding by actionName', () => {
@@ -243,9 +244,9 @@ describe('scriptSlice', () => {
       expect(store.getState().inputBindings[0].actionName).toBe('fire');
     });
 
-    it('should dispatch remove_input_binding', () => {
+    it('should dispatch remove_input_binding with the player slot', () => {
       store.getState().removeInputBinding('jump');
-      expect(mockDispatch).toHaveBeenCalledWith('remove_input_binding', { actionName: 'jump' });
+      expect(mockDispatch).toHaveBeenCalledWith('remove_input_binding', { actionName: 'jump', player: 0 });
     });
   });
 
@@ -255,9 +256,9 @@ describe('scriptSlice', () => {
       expect(store.getState().inputPreset).toBe('fps');
     });
 
-    it('should dispatch set_input_preset', () => {
+    it('should dispatch set_input_preset with the player slot', () => {
       store.getState().setInputPreset('platformer');
-      expect(mockDispatch).toHaveBeenCalledWith('set_input_preset', { preset: 'platformer' });
+      expect(mockDispatch).toHaveBeenCalledWith('set_input_preset', { preset: 'platformer', player: 0 });
     });
 
     it('should set bindings and preset together', () => {
@@ -266,6 +267,50 @@ describe('scriptSlice', () => {
 
       expect(store.getState().inputBindings).toEqual(bindings);
       expect(store.getState().inputPreset).toBe('topdown');
+    });
+  });
+
+  // OP-04: two local players each get an independently editable action map.
+  describe('per-player input maps (physics.FR-1.OP-04)', () => {
+    it('keeps player 1 and player 2 bindings of the same action as distinct rows', () => {
+      store.getState().setInputBinding({ actionName: 'attack', actionType: 'digital', sources: ['KeyF'], player: 0 });
+      store.getState().setInputBinding({ actionName: 'attack', actionType: 'digital', sources: ['Numpad0'], player: 1 });
+
+      const bindings = store.getState().inputBindings;
+      expect(bindings).toHaveLength(2);
+      const p1 = bindings.find((b) => b.actionName === 'attack' && (b.player ?? 0) === 0);
+      const p2 = bindings.find((b) => b.actionName === 'attack' && b.player === 1);
+      expect(p1?.sources).toEqual(['KeyF']);
+      expect(p2?.sources).toEqual(['Numpad0']);
+    });
+
+    it('rebinding player 1 does not mutate player 2', () => {
+      store.getState().setInputBinding({ actionName: 'attack', actionType: 'digital', sources: ['KeyA'], player: 0 });
+      store.getState().setInputBinding({ actionName: 'attack', actionType: 'digital', sources: ['KeyB'], player: 1 });
+      // Player 1 rebinds attack.
+      store.getState().setInputBinding({ actionName: 'attack', actionType: 'digital', sources: ['KeyC'], player: 0 });
+
+      const bindings = store.getState().inputBindings;
+      expect(bindings).toHaveLength(2);
+      expect(bindings.find((b) => (b.player ?? 0) === 0)?.sources).toEqual(['KeyC']);
+      expect(bindings.find((b) => b.player === 1)?.sources).toEqual(['KeyB']);
+    });
+
+    it('removes a binding from one slot only', () => {
+      store.getState().setInputBinding({ actionName: 'grab', actionType: 'digital', sources: ['KeyE'], player: 0 });
+      store.getState().setInputBinding({ actionName: 'grab', actionType: 'digital', sources: ['KeyP'], player: 1 });
+      store.getState().removeInputBinding('grab', 1);
+
+      const bindings = store.getState().inputBindings;
+      expect(bindings).toHaveLength(1);
+      expect(bindings[0].player ?? 0).toBe(0);
+      expect(bindings[0].sources).toEqual(['KeyE']);
+    });
+
+    it('dispatches the player slot for player 2 edits', () => {
+      const binding = { actionName: 'jump', actionType: 'digital' as const, sources: ['KeyL'], player: 1 };
+      store.getState().setInputBinding(binding);
+      expect(mockDispatch).toHaveBeenCalledWith('set_input_binding', { ...binding, player: 1 });
     });
   });
 });
