@@ -1,31 +1,16 @@
 /**
- * Clerk publishable-key gating for the docs app.
+ * Clerk configuration checks shared by the docs build and render guards.
  *
- * TWO DISTINCT STATES, DELIBERATELY TREATED DIFFERENTLY (#9044):
+ * Local development and CI may omit both Clerk keys. In that state the app
+ * skips ClerkProvider and shows the authentication-unavailable message.
+ * A truthy secret with no publishable key fails the build (#9721), as does a
+ * malformed publishable key (#9044). A usable publishable key retains the
+ * existing behavior when no secret is configured.
  *
- *  - MISSING. No key configured at all. Legitimate — local checkouts and CI run
- *    without Clerk credentials, and the app degrades to "auth is not set up
- *    here". Soft-skips the provider; never throws.
- *  - MALFORMED. A key IS configured but cannot possibly work. That is always a
- *    configuration mistake, never a legitimate state, so it fails the BUILD
- *    (see `next.config.ts`) rather than shipping.
- *
- * The distinction exists because collapsing the two — treating anything
- * non-conforming as "Clerk is not set up here" — is how docs.spawnforge.ai
- * shipped with authentication completely dead and no signal anywhere. The
- * Vercel env var held the literal string
- * `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...`: the whole `NAME=value`
- * assignment pasted in as the value. Clerk derives its script host by
- * base64-decoding the key, so that value decoded to an EMPTY host and clerk-js
- * was requested from `https:///npm/...`, which cannot resolve. Every sign-in on
- * the docs site was broken, silently, for as long as that value was set.
- *
- * The guard is also load-bearing for local development: @clerk/nextjs 7.8.0
- * added a `throwMissingPublishableKeyError()` to the keyless branch that used
- * to render fine without keys (#9378 / #9384).
- *
- * `NEXT_PUBLIC_*` is inlined at build time, so these read the same value on the
- * server and in the browser bundle.
+ * The key-shape check catches truncated values and pasted NAME=value
+ * assignments before Clerk derives an invalid script host from them.
+ * NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is inlined at build time; the secret-key
+ * check belongs to the server-side build configuration.
  */
 
 /** Prefixes Clerk accepts for a publishable key. */
@@ -174,6 +159,11 @@ export function clerkPublishableKeyHasSurroundingWhitespace(
  *
  * ABSENT-BOTH stays a supported state: local checkouts and CI build without any
  * Clerk credentials.
+ *
+ * @param raw Publishable key, defaulting to NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY.
+ * @param secretKey Server secret, defaulting to CLERK_SECRET_KEY.
+ * @returns Nothing when the configuration passes these build checks.
+ * @throws When the publishable key is malformed or a secret has no publishable key.
  */
 export function assertClerkPublishableKeyShape(
   raw: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
