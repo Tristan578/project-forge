@@ -204,6 +204,85 @@ describe('InputTraceRecorder', () => {
     expect(completed).toHaveLength(1);
   });
 
+  it.each(['tick', 'duration'] as const)(
+    'reports changed action vocabulary exactly once at the automatic %s cap',
+    (cap) => {
+      const completed: InputTrace[] = [];
+      const errors: InputTraceValidationError[] = [];
+      const recorder = new InputTraceRecorder(
+        'fx',
+        ['move_right'],
+        (trace) => completed.push(trace),
+        (error) => errors.push(error),
+      );
+      recorder.start();
+      publishPlayTick({
+        entities: {},
+        inputState: { pressed: { jump: true }, axes: {} },
+        elapsedMs: 16,
+      });
+      if (cap === 'tick') {
+        for (let tick = 2; tick <= MAX_TRACE_TICKS; tick++) {
+          publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: tick * 16 });
+        }
+      } else {
+        publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: MAX_TRACE_DURATION_MS + 1 });
+      }
+
+      expect(recorder.isRecording()).toBe(false);
+      expect(recorder.ticksCaptured()).toBe(cap === 'tick' ? MAX_TRACE_TICKS : 1);
+      expect(completed).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toBeInstanceOf(InputTraceValidationError);
+      expect(errors[0].message).toContain('action "jump" is not in the trace');
+      publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: MAX_TRACE_DURATION_MS + 2 });
+      expect(() => recorder.stop()).toThrow(InputTraceValidationError);
+      expect(errors).toHaveLength(1);
+      expect(completed).toEqual([]);
+    },
+  );
+
+  it('throws from manual invalid stop while notifying the owner once and unsubscribing', () => {
+    const completed: InputTrace[] = [];
+    const errors: InputTraceValidationError[] = [];
+    const recorder = new InputTraceRecorder(
+      'fx',
+      ['move_right'],
+      (trace) => completed.push(trace),
+      (error) => errors.push(error),
+    );
+    recorder.start();
+    publishPlayTick({ entities: {}, inputState: { pressed: { jump: true }, axes: {} }, elapsedMs: 16 });
+    expect(() => recorder.stop()).toThrow(InputTraceValidationError);
+    expect(recorder.isRecording()).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('action "jump" is not in the trace');
+    expect(completed).toEqual([]);
+    publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: 32 });
+    expect(recorder.ticksCaptured()).toBe(1);
+    expect(() => recorder.stop()).toThrow(InputTraceValidationError);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('cancels invalid captured input without notifying an unmounted owner', () => {
+    const completed: InputTrace[] = [];
+    const errors: InputTraceValidationError[] = [];
+    const recorder = new InputTraceRecorder(
+      'fx',
+      [],
+      (trace) => completed.push(trace),
+      (error) => errors.push(error),
+    );
+    recorder.start();
+    publishPlayTick({ entities: {}, inputState: { pressed: { jump: true }, axes: {} }, elapsedMs: 16 });
+    recorder.cancel();
+    publishPlayTick({ entities: {}, inputState: { pressed: {}, axes: {} }, elapsedMs: MAX_TRACE_DURATION_MS + 1 });
+    expect(recorder.isRecording()).toBe(false);
+    expect(recorder.ticksCaptured()).toBe(1);
+    expect(completed).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
   it('cancels its subscription without calling an unmounted owner', () => {
     const completed: InputTrace[] = [];
     const recorder = new InputTraceRecorder('fx', [], (trace) => completed.push(trace));

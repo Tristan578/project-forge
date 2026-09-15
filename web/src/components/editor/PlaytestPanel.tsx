@@ -203,6 +203,16 @@ function RuntimeReplaySection() {
     [allGameComponents],
   );
 
+  const failRecording = useCallback((cause: unknown) => {
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    traceRef.current = null;
+    setHasTrace(false);
+    setIsRecording(false);
+    console.error('Input recording failed:', cause);
+    setError('Recording could not be saved. Check your input bindings, then select Record to try again.');
+  }, []);
+
   const toggleRecord = useCallback(() => {
     setError(null);
     try {
@@ -210,23 +220,27 @@ function RuntimeReplaySection() {
         recorderRef.current.stop();
         return;
       }
-      const recorder = new InputTraceRecorder(sceneName || 'current-scene', actionNames, (trace) => {
-        traceRef.current = trace;
-        recorderRef.current = null;
-        setHasTrace(true);
-        setIsRecording(false);
-      });
+      const recorder = new InputTraceRecorder(
+        sceneName || 'current-scene',
+        actionNames,
+        (trace) => {
+          traceRef.current = trace;
+          recorderRef.current = null;
+          setHasTrace(true);
+          setIsRecording(false);
+        },
+        failRecording,
+      );
       recorder.start();
       recorderRef.current = recorder;
+      traceRef.current = null;
+      setHasTrace(false);
       setIsRecording(true);
       setOutcome(null);
     } catch (e) {
-      recorderRef.current?.cancel();
-      recorderRef.current = null;
-      setIsRecording(false);
-      setError(e instanceof Error ? e.message : String(e));
+      failRecording(e);
     }
-  }, [actionNames, sceneName]);
+  }, [actionNames, sceneName, failRecording]);
 
   useEffect(() => {
     if (!isPlaying) return;
