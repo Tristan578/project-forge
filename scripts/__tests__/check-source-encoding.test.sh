@@ -41,7 +41,11 @@ run_on_workflow() {
   dir="$(mktemp -d)"
   mkdir -p "$dir/.github/workflows"
   # shellcheck disable=SC2059  # the format IS the fixture under test
-  printf "$content_fmt" > "$dir/.github/workflows/fixture.yml"
+  if [ "${2:-}" = literal ]; then
+    printf '%s' "$content_fmt" > "$dir/.github/workflows/fixture.yml"
+  else
+    printf "$content_fmt" > "$dir/.github/workflows/fixture.yml"
+  fi
   printf '%s\n' "$dir/.github/workflows/fixture.yml" > "$dir/list"
   out="$(SOURCE_ENCODING_FILE_LIST="$dir/list" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
   rm -rf "$dir"
@@ -227,10 +231,176 @@ else
 fi
 
 echo ""
+
+echo "=== bounded workflow lexer regressions ==="
+expect_workflow() {
+  local label="$1" expected="$2" content="$3" result rc
+  result="$(run_on_workflow "$content" literal)"
+  rc="$(rc_of "$result")"
+  if [ "$rc" = "$expected" ]; then pass "$label"; else fail "$label: $result"; fi
+}
+UNNAMED=$(cat <<'YAML'
+jobs:
+  build:
+    steps:
+      - run: |
+          shellcheck scripts/*.sh \n --severity=error
+YAML
+)
+expect_workflow "unnamed block detects collapsed continuation" 1 "$UNNAMED"
+expect_workflow "unnamed CRLF block detects collapsed continuation" 1 "${UNNAMED//$'\n'/$'\r\n'}"
+expect_workflow "folded/chomp block detects collapsed continuation" 1 "${UNNAMED/run: |/run: >-}"
+expect_workflow "explicit indentation block detects collapsed continuation" 1 "${UNNAMED/run: |/run: |2-}"
+expect_workflow "unnamed inline detects collapsed continuation" 1 "${UNNAMED/run: |$'\n'          /run: }"
+NAMED="${UNNAMED/- run: /- name: scan$'\n'        run: }"
+expect_workflow "named CRLF block detects collapsed continuation" 1 "${NAMED//$'\n'/$'\r\n'}"
+expect_workflow "named inline detects collapsed continuation" 1 "${NAMED/run: |$'\n'          /run: }"
+RESTORED="${UNNAMED/\\n /\\$'\n'          }"
+expect_workflow "unnamed mutation restores real continuation" 0 "$RESTORED"
+
+LEGIT_QUOTES=$(cat <<'YAML'
+jobs:
+  build:
+    steps:
+      - run: |
+          printf 'hello \n'
+          printf "hello \n"
+          # a documented \n is not executable
+          printf 'multiline
+          quoted \n text'
+          printf "escaped \" quote \n"
+          cat <<'EOF'
+          heredoc \n data
+          EOF
+          cat <<FIRST <<SECOND
+          first \n data
+          FIRST
+          second \n data
+          SECOND
+          echo ok
+YAML
+)
+expect_workflow "quotes comments and multiple heredocs are opaque" 0 "$LEGIT_QUOTES"
+expect_workflow "detects corruption after quotes and heredocs close" 1 "$LEGIT_QUOTES"$'\n''          echo bad \n argument'
+HERETAB=$(cat <<'YAML'
+jobs:
+  build:
+    steps:
+      - run: |
+          cat <<-EOF
+          <TAB>heredoc \n data
+          <TAB>EOF
+          echo bad \n argument
+YAML
+)
+# Insert shell tabs at runtime so the YAML fixture keeps its intended indentation.
+HERETAB="${HERETAB//<TAB>/$'\t'}"
+expect_workflow "tab-stripped heredoc terminates before corruption" 1 "$HERETAB"
+OPAQUE=$(cat <<'YAML'
+jobs:
+  build:
+    env:
+      DATA: |
+        steps:
+          - run: |
+              echo data \n remains data
+    steps:
+      - name: quoted yaml
+        run: "printf 'hello \n'"
+      - run: &command echo value \n data
+      - run: |
+          echo ok
+YAML
+)
+expect_workflow "opaque YAML data and unsupported values never become shell findings" 0 "$OPAQUE"
+RES="$(run_on_workflow "$OPAQUE" literal)"
+if grep -q 'unexamined run text' <<<"$RES"; then
+  pass "unsupported YAML forms are reported honestly"
+else
+  fail "unsupported YAML forms were silently claimed as covered: $RES"
+fi
+MULTILINE_YAML=$(cat <<'YAML'
+jobs:
+  build:
+    env:
+      DATA: "text
+        steps:
+          - run: echo data \n stays data
+        end"
+    steps:
+      - run: echo ok
+YAML
+)
+expect_workflow "multiline quoted YAML is opaque to step recognition" 0 "$MULTILINE_YAML"
+MULTILINE_PLAIN=$(cat <<'YAML'
+jobs:
+  build:
+    steps:
+      - run: echo first
+          echo data \n remains unexamined
+YAML
+)
+RES="$(run_on_workflow "$MULTILINE_PLAIN" literal)"
+if [ "${RES##*|}" -eq 0 ] && grep -q 'multiline plain run continuation' <<<"$RES"; then
+  pass "multiline plain run continuations are disclosed as unexamined"
+else
+  fail "multiline plain run continuation was not disclosed: $RES"
+fi
+
+FOLDED_COMMENT=$(cat <<'YAML'
+jobs:
+  build:
+    steps:
+      - run: >
+          echo ok # starts a folded shell comment
+          documented \n text
+YAML
+)
+expect_workflow "folded comments do not create false positives on following lines" 0 "$FOLDED_COMMENT"
+
+# A helper failure must not be mistaken for an empty (clean) scanner result.
+d="$(mktemp -d)"
+mkdir -p "$d/bin" "$d/.github/workflows"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 9' > "$d/bin/perl"
+chmod +x "$d/bin/perl"
+printf '%s\n' 'jobs: {}' > "$d/.github/workflows/f.yml"
+printf '%s\n' "$d/.github/workflows/f.yml" > "$d/list"
+out="$(PATH="$d/bin:$PATH" SOURCE_ENCODING_FILE_LIST="$d/list" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+rm -rf "$d"
+if [ "$rc" -ne 0 ] && grep -q 'scanner failed' <<<"$out"; then
+  pass "scanner execution errors fail the gate"
+else
+  fail "scanner execution failure was treated as clean: $out"
+fi
+
+
+# Fail only the second scanner: the first (-ne) must genuinely finish.
+# Capture the real executable before introducing the wrapper into PATH.
+real_perl="$(command -v perl)"
+d="$(mktemp -d)"
+mkdir -p "$d/bin" "$d/.github/workflows"
+cat > "$d/bin/perl" <<'WRAPPER'
+#!/usr/bin/env bash
+if [ "${1:-}" = -e ]; then
+  exit 9
+fi
+exec "$SOURCE_ENCODING_TEST_REAL_PERL" "$@"
+WRAPPER
+chmod +x "$d/bin/perl"
+printf '%s\n' 'jobs: {}' > "$d/.github/workflows/f.yml"
+printf '%s\n' "$d/.github/workflows/f.yml" > "$d/list"
+out="$(PATH="$d/bin:$PATH" SOURCE_ENCODING_TEST_REAL_PERL="$real_perl" SOURCE_ENCODING_FILE_LIST="$d/list" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+rm -rf "$d"
+if [ "$rc" -ne 0 ] && grep -q 'workflow scanner failed' <<<"$out"; then
+  pass "workflow scanner failure independently fails the gate"
+else
+  fail "workflow scanner failure was treated as clean or misidentified: $out"
+fi
+
 echo "=== the real tree is clean ==="
 out="$(bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -eq 0 ]; then
-  pass "the tracked tree has no control bytes ($(grep -oE '[0-9]+ file' <<<"$out" | head -1))"
+  pass "the tracked tree has no prohibited control bytes ($(grep -oE '[0-9]+ file' <<<"$out" | head -1))"
 else
   fail "control bytes present in tracked source:"
   printf '%s\n' "$out" | head -10 | sed 's/^/      /'
