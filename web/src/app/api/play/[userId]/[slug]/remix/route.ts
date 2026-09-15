@@ -6,6 +6,7 @@ import { safeAuth } from '@/lib/auth/safe-auth';
 import { createProject } from '@/lib/projects/service';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { isPublishedSceneData } from '@/lib/storage/publishedGameStorage';
 import { quarantineRemixedScripts } from '@/lib/security/remixSanitizer';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
@@ -80,43 +81,48 @@ async function POST_impl(
           id: publishedGames.id,
           title: publishedGames.title,
           projectId: publishedGames.projectId,
+          status: publishedGames.status,
+          publishedSceneData: publishedGames.publishedSceneData,
         })
         .from(publishedGames)
         .where(
           and(
             eq(publishedGames.userId, creator.id),
-            eq(publishedGames.slug, slug)
+            eq(publishedGames.slug, slug),
+            eq(publishedGames.status, 'published')
           )
         )
         .limit(1)
     );
 
-    if (!game) {
+    if (!game || game.status !== 'published') {
       return NextResponse.json(
         { error: 'Game not found' },
         { status: 404 }
       );
     }
 
-    // Fetch the original project's scene data
-    const [sourceProject] = await queryWithResilience(() =>
-      getDb()
+    // Copy exactly the published revision, including when the creator has
+    // continued editing. Only legacy rows without a snapshot use project data.
+    let publishedScene: unknown = game.publishedSceneData;
+    if (publishedScene == null) {
+      const [sourceProject] = await queryWithResilience(() => getDb()
         .select({ sceneData: projects.sceneData })
         .from(projects)
-        .where(eq(projects.id, game.projectId))
-        .limit(1)
-    );
-
-    if (!sourceProject) {
-      return NextResponse.json(
-        { error: 'Game data not found' },
-        { status: 404 }
-      );
+        .where(and(eq(projects.id, game.projectId), eq(projects.userId, creator.id)))
+        .limit(1));
+      if (!sourceProject) {
+        return NextResponse.json({ error: 'Game data not found' }, { status: 404 });
+      }
+      publishedScene = sourceProject.sceneData;
+    }
+    if (!isPublishedSceneData(publishedScene)) {
+      throw new Error('Invalid publication snapshot');
     }
 
     // Disable the creator's scripts before the scene lands in someone else's
     // project. Source text is preserved; the remixer opts in to running it.
-    const { sceneData, quarantined } = quarantineRemixedScripts(sourceProject.sceneData);
+    const { sceneData, quarantined } = quarantineRemixedScripts(publishedScene);
 
     // Create the remixed project (respects tier-based project limits)
     const remixedProject = await createProject(
