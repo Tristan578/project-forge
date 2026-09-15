@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,6 +103,35 @@ describe('observatory CLI', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('observatory:');
     expect(result.stdout).not.toContain('observatory: wrote');
+  });
+
+  it.each([
+    ['missing aliases', {}],
+    ['null aliases', { aliases: null }],
+    ['object aliases', { aliases: {} }],
+    ['null document', null],
+    ['array document', []],
+    ['null entry', { aliases: [null] }],
+    ['missing target', { aliases: [{ from: 'old' }] }],
+    ['blank source', { aliases: [{ from: '  ', to: 'current' }] }],
+    ['nonstring target', { aliases: [{ from: 'old', to: 42 }] }],
+  ])('rejects invalid alias structure: %s', (_label, document) => {
+    const f = fixture();
+    writeFileSync(join(f.tool, 'aliases.json'), JSON.stringify(document));
+    const result = runCli(f);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('aliases.json');
+    expect(result.stdout).not.toContain('observatory: wrote');
+    expect(existsSync(join(f.out, 'inventory.json'))).toBe(false);
+    expect(existsSync(join(f.out, 'unmapped-report.md'))).toBe(false);
+  });
+
+  it('accepts an explicitly empty alias history', () => {
+    const f = fixture();
+    writeFileSync(join(f.tool, 'aliases.json'), JSON.stringify({ aliases: [] }));
+    const result = runCli(f);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(join(f.out, 'inventory.json'), 'utf8')).aliases).toEqual([]);
   });
 
   it('fails when the requested output directory does not exist', () => {

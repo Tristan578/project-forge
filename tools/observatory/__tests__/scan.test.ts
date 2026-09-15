@@ -60,6 +60,19 @@ describe('globToRegExp', () => {
     expect(globToRegExp('a/**/b.ts').test('a/x/y/b.ts')).toBe(true);
   });
 
+  it.each(['\n', '\r', '\u2028', '\u2029'])('matches recursive paths containing line separators: %j', (separator) => {
+    const file = `src/a${separator}b.ts`;
+    expect(globToRegExp('src/**').test(file)).toBe(true);
+    const result = scan({ files: [file], coveredScopes: ['src/'],
+      rules: [{ capabilityId: 'source', domain: 'test', confidence: 'reviewed', own: ['src/**'] }] });
+    expect(result.capabilities[0].members).toEqual([file]);
+    expect(result.unmapped).toEqual([]);
+    const excluded = scan({ files: [file], coveredScopes: ['src/'], rules: [],
+      exclusions: [{ category: 'generated', reason: 'Generated fixture', patterns: ['src/**'] }] });
+    expect(excluded.excluded.map((entry) => entry.path)).toEqual([file]);
+    expect(excluded.unmapped).toEqual([]);
+  });
+
   it('escapes regex metacharacters in literal segments', () => {
     expect(globToRegExp('a.b/c+d.ts').test('a.b/c+d.ts')).toBe(true);
     expect(globToRegExp('a.b/c+d.ts').test('aXb/cYd.ts')).toBe(false);
@@ -244,7 +257,9 @@ describe('real ruleset — the two covered domains reconcile with no in-scope ga
 
   it('owns 100% of files inside the covered scopes (no in-scope unmapped)', () => {
     const result = realScan();
+    expect(COVERED_SCOPES).toEqual(['web/src/stores/', 'web/src/lib/workspace/', 'mcp-server/manifest/']);
     const inScope = files.filter((f) => COVERED_SCOPES.some((s) => f.startsWith(s)));
+    expect(inScope.length).toBeGreaterThan(0);
     const owned = new Set(result.capabilities.flatMap((c) => c.members));
     for (const f of inScope) expect(owned.has(f)).toBe(true);
     expect(result.unmapped).toHaveLength(0);
@@ -301,6 +316,25 @@ describe('real ruleset — the two covered domains reconcile with no in-scope ga
 
 
 describe('scan — ownership and primary artifacts', () => {
+  it.each(['app/missing.ts', 'app/foreign.ts'])('retains primary-owner diagnostics when an existing capability is planned: %s', (primaryOwner) => {
+    const result = scan({
+      files: ['app/owned.ts', 'app/foreign.ts'], coveredScopes: ['app/'],
+      rules: [
+        { capabilityId: 'current', domain: 'app', confidence: 'reviewed', own: ['app/owned.ts'], primaryOwner },
+        { capabilityId: 'other', domain: 'app', confidence: 'reviewed', own: ['app/foreign.ts'] },
+      ],
+      planned: [{ capabilityId: 'current', domain: 'app', confidence: 'extracted', requirement: 'Finish the integration' }],
+    });
+    expect(findCapability(result, 'current')).toEqual({
+      capabilityId: 'current', domain: 'app', confidence: 'reviewed', planned: true,
+      requirement: 'Finish the integration', primaryOwner, members: ['app/owned.ts'], secondaryLinks: [],
+    });
+    expect(result.gaps).toEqual([primaryOwner === 'app/missing.ts'
+      ? { type: 'missing-primary-owner', capabilityId: 'current', path: primaryOwner }
+      : { type: 'primary-owner-not-owned', capabilityId: 'current', path: primaryOwner, actualOwner: 'other', bucket: 'owned' }]);
+  });
+
+
   it('deduplicates overlapping ownership and explicit links while preserving OWN over EXCLUDE', () => {
     const fixture = loadScenario('shared-helper');
     const result = scan({

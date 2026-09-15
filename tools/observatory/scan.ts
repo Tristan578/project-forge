@@ -147,7 +147,7 @@ export function globToRegExp(glob: string): RegExp {
           re += '(?:[^/]*/)*';
           i += 2;
         } else {
-          re += '.*';
+          re += '[\\s\\S]*';
           i += 1;
         }
       } else {
@@ -618,6 +618,22 @@ function listTrackedFiles(repoRoot: string): string[] {
     .sort(byString);
 }
 
+/** Validate the required alias array before it can affect persisted rename history. */
+function parseAliases(document: unknown): Alias[] {
+  if (document === null || typeof document !== 'object' || Array.isArray(document) ||
+      !('aliases' in document) || !Array.isArray(document.aliases)) {
+    throw new Error('aliases.json must contain an aliases array (use [] for an empty history).');
+  }
+  return document.aliases.map((entry: unknown, index: number) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry) ||
+        !('from' in entry) || typeof entry.from !== 'string' || entry.from.trim() === '' ||
+        !('to' in entry) || typeof entry.to !== 'string' || entry.to.trim() === '') {
+      throw new Error(`aliases.json entry ${index + 1} must have nonblank string from and to fields.`);
+    }
+    return { from: entry.from, to: entry.to };
+  });
+}
+
 async function main(): Promise<void> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: here })
@@ -625,9 +641,7 @@ async function main(): Promise<void> {
     .trim();
 
   const rulesMod = await import('./capabilityRules.ts');
-  const aliasesRaw = JSON.parse(fs.readFileSync(path.join(here, 'aliases.json'), 'utf8')) as {
-    aliases: Alias[];
-  };
+  const aliases = parseAliases(JSON.parse(fs.readFileSync(path.join(here, 'aliases.json'), 'utf8')));
 
   const files = listTrackedFiles(repoRoot);
   const result = scan({
@@ -635,7 +649,7 @@ async function main(): Promise<void> {
     rules: rulesMod.CAPABILITY_RULES,
     exclusions: rulesMod.EXCLUSION_RULES,
     planned: rulesMod.PLANNED_CAPABILITIES,
-    aliases: aliasesRaw.aliases,
+    aliases,
     coveredScopes: rulesMod.COVERED_SCOPES,
   });
 

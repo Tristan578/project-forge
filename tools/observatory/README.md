@@ -80,7 +80,10 @@ interface CapabilityRule {
 - Planned capabilities represent requirements before implementation. They do
   not need an artifact merely to appear in the inventory.
 
-`aliases.json` maps prior capability IDs to current IDs. Valid chains resolve
+`aliases.json` requires an `aliases` array with nonblank string `from` and `to`
+fields; use an empty array for an explicitly empty history. Invalid structure
+fails before any artifacts are written. The mappings connect prior capability
+IDs to current IDs. Valid chains resolve
 to their terminal target. Missing targets, cycles, and conflicting targets
 produce diagnostics. The exported `resolveCapabilityId` throws on cyclic or
 ambiguous resolution instead of returning an arbitrary ID.

@@ -1,7 +1,7 @@
 /**
  * Reviewed capability-mapping ruleset for the observatory scanner.
  *
- * This slice covers TWO domains end-to-end to prove the mechanism:
+ * This slice covers initial path scopes across two domains:
  *   - `shell-stores` — the web shell's Zustand stores (`web/src/stores/`) and
  *     the workspace/shell layer (`web/src/lib/workspace/`).
  *   - `mcp`          — the MCP command manifest (`mcp-server/manifest/`).
@@ -12,9 +12,9 @@
  * here plus reviewed rules for it (see ./README.md).
  *
  * Confidence semantics:
- *   - `reviewed`  a human asserted this file -> capability mapping is truth.
+ *   - `reviewed`  a declared mapping-confidence label, not runtime evidence.
  *   - `extracted` a candidate (e.g. a directory catch-all) that still needs a
- *                 human to split it into reviewed capabilities.
+ *                 review to split it into specific capabilities.
  */
 
 import type { CapabilityRule, ExclusionRule, PlannedCapability, CoverageScope } from './scan.ts';

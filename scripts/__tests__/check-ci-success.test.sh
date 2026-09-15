@@ -995,7 +995,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
     f && /^  [A-Za-z_][A-Za-z0-9_-]*:/ {exit}
     f {print}
   ' "$CI_YML" | grep -v '^[[:space:]]*#')"
-  obs_runs="$(grep -E '^[[:space:]]*run:' <<<"$obs_block")"
+  obs_runs="$(grep -E "^[[:space:]]*['\"]?run['\"]?:" <<<"$obs_block")"
   obs_expected_runs="$(cat <<'RUNS'
         run: npm ci
         run: npx tsc --noEmit -p tools/observatory/tsconfig.json
@@ -1014,7 +1014,7 @@ RUNS
   else
     fail "Observatory job condition drifted: $obs_if"
   fi
-  if grep -qE 'continue-on-error|^        if:' <<<"$obs_block"; then
+  if grep -qE "continue-on-error|^        ['\"]?if['\"]?:" <<<"$obs_block"; then
     fail "Observatory steps must not mask failures or conditionally skip required work"
   else
     pass "Observatory steps cannot skip or mask their required checks"
