@@ -25,8 +25,8 @@ vi.mock('@/stores/editorStore', () => ({
 }));
 
 beforeEach(() => {
-  // Reset the real store to empty before each test.
-  useMusicArrangementStore.setState({ arrangement: createEmptyArrangement() });
+  // Reset the real store to empty (including undo history) before each test.
+  useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
 });
 afterEach(() => cleanup());
 
@@ -127,5 +127,35 @@ describe('MusicArrangementPanel — OP-02 trim, loop, delete clip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add Clip' }));
     // Both clips at offset 0 over a 30s source -> overlap surfaced in the UI.
     expect(screen.getAllByText('(overlap)').length).toBeGreaterThan(0);
+  });
+});
+
+describe('MusicArrangementPanel — undo/redo', () => {
+  it('undo and redo buttons reverse and re-apply a delete', () => {
+    render(<MusicArrangementPanel />);
+    // Undo/redo start disabled with no history.
+    expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Redo' }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Track' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Clip' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete track Track 1' }));
+    expect(state().arrangement.tracks).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(state().arrangement.tracks).toHaveLength(1);
+    expect(state().arrangement.clips).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+    expect(state().arrangement.tracks).toHaveLength(0);
+    expect(state().arrangement.clips).toHaveLength(0);
+  });
+
+  it('Ctrl+Z undoes the last mutation from inside the panel', () => {
+    const { container } = render(<MusicArrangementPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add Track' }));
+    expect(state().arrangement.tracks).toHaveLength(1);
+    fireEvent.keyDown(container.firstChild as Element, { key: 'z', ctrlKey: true });
+    expect(state().arrangement.tracks).toHaveLength(0);
   });
 });

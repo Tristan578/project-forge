@@ -202,6 +202,79 @@ describe('generated/imported audio hand-off', () => {
   });
 });
 
+describe('undo / redo (music.FR-2 — required for OP-01/OP-02)', () => {
+  it('undoes and redoes an add-clip round trip', () => {
+    const trackId = s().addTrack();
+    const clipId = s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 })!;
+    expect(s().arrangement.clips).toHaveLength(1);
+    expect(s().canUndo()).toBe(true);
+
+    s().undo(); // undo the clip add
+    expect(s().arrangement.clips).toHaveLength(0);
+    expect(s().canRedo()).toBe(true);
+
+    s().redo(); // redo the clip add
+    expect(s().arrangement.clips.map((c) => c.id)).toEqual([clipId]);
+    expect(s().canRedo()).toBe(false);
+  });
+
+  it('starts with nothing to undo or redo', () => {
+    expect(s().canUndo()).toBe(false);
+    expect(s().canRedo()).toBe(false);
+    s().undo(); // no-op, must not throw or corrupt state
+    expect(s().arrangement.tracks).toHaveLength(0);
+  });
+
+  it('restores a deleted track and all its clips in a single undo', () => {
+    const trackId = s().addTrack('Lead');
+    s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 });
+    s().addClip({ trackId, sourceUrl: 'b', sourceDurationSeconds: 10 });
+    s().deleteTrack(trackId);
+    expect(s().arrangement.tracks).toHaveLength(0);
+    expect(s().arrangement.clips).toHaveLength(0);
+
+    s().undo();
+    expect(s().arrangement.tracks.map((t) => t.id)).toEqual([trackId]);
+    expect(s().arrangement.clips).toHaveLength(2);
+  });
+
+  it('undoes a whole generated clip (track + clip) in one step', () => {
+    s().addGeneratedClip({ sourceUrl: 'music-boss', durationSeconds: 45 });
+    expect(s().arrangement.tracks).toHaveLength(1);
+    expect(s().arrangement.clips).toHaveLength(1);
+    s().undo();
+    expect(s().arrangement.tracks).toHaveLength(0);
+    expect(s().arrangement.clips).toHaveLength(0);
+  });
+
+  it('a fresh mutation after an undo clears the redo stack', () => {
+    const trackId = s().addTrack();
+    s().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 });
+    s().undo(); // clip removed, redo available
+    expect(s().canRedo()).toBe(true);
+    s().addTrack('Branch'); // new mutation
+    expect(s().canRedo()).toBe(false);
+  });
+
+  it('records no history entry for a no-op mutation (unknown clip)', () => {
+    s().addTrack();
+    expect(s().canUndo()).toBe(true);
+    const undoDepthBefore = s().past.length;
+    s().trimClip('does-not-exist', { trimStart: 1 });
+    expect(s().past.length).toBe(undoDepthBefore);
+  });
+
+  it('hydrate resets history so undo cannot cross a project load', () => {
+    s().addTrack();
+    expect(s().canUndo()).toBe(true);
+    const other = createSliceStore(createArrangementSlice);
+    other.getState().addTrack('T');
+    other.getState().hydrate(other.getState().serialize());
+    expect(other.getState().canUndo()).toBe(false);
+    expect(other.getState().canRedo()).toBe(false);
+  });
+});
+
 describe('serialize / hydrate', () => {
   it('serialize returns null for an empty arrangement', () => {
     expect(s().serialize()).toBeNull();

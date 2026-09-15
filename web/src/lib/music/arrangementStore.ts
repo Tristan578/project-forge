@@ -64,6 +64,22 @@ export interface AddGeneratedClipInput {
 export interface ArrangementSlice {
   arrangement: MusicArrangement;
 
+  /**
+   * Undo/redo history for every arrangement mutation. `past`/`future` hold
+   * whole-arrangement snapshots (the model is small and value-typed, so a full
+   * snapshot is cheaper and safer than a per-action inverse). A single logical
+   * edit is one entry — `addGeneratedClip` creates its track and clip in one
+   * commit, so one `undo()` removes both, not just the clip.
+   */
+  past: MusicArrangement[];
+  future: MusicArrangement[];
+  /** Step back to the arrangement before the last mutation. */
+  undo: () => void;
+  /** Re-apply the mutation a prior `undo()` reverted. */
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+
   /** Add a track; returns its id. */
   addTrack: (name?: string) => string;
   /** Remove a track and every clip on it. */
@@ -111,163 +127,233 @@ function mapClip(
   return changed ? { ...arrangement, clips } : arrangement;
 }
 
+/** Cap on retained history entries so a long editing session cannot grow the
+ *  undo stack without bound. */
+const HISTORY_LIMIT = 100;
+
+/** Build a track without touching state (shared by addTrack + addGeneratedClip). */
+function buildTrack(name: string | undefined, existingTrackCount: number): MusicTrack {
+  return {
+    id: makeId('track'),
+    name: name && name.trim() ? name.trim() : `Track ${existingTrackCount + 1}`,
+    muted: false,
+  };
+}
+
+/** Build a clip without touching state (shared by addClip + addGeneratedClip). */
+function buildClip(input: AddClipInput): MusicClip {
+  const duration =
+    typeof input.sourceDurationSeconds === 'number' && Number.isFinite(input.sourceDurationSeconds)
+      ? Math.max(0, input.sourceDurationSeconds)
+      : 0;
+  const { trimStart, trimEnd } = clampTrimWindow(duration, 0, duration);
+  return {
+    id: makeId('clip'),
+    trackId: input.trackId,
+    sourceUrl: input.sourceUrl,
+    sourceDurationSeconds: duration,
+    startOffset: clampFinite(input.startOffset, 0, Number.MAX_SAFE_INTEGER, 0),
+    trimStart,
+    trimEnd,
+    loopEnabled: false,
+    name: input.name && input.name.trim() ? input.name.trim() : input.sourceUrl,
+  };
+}
+
 export const createArrangementSlice: StateCreator<ArrangementSlice, [], [], ArrangementSlice> = (
   set,
   get,
-) => ({
-  arrangement: createEmptyArrangement(),
+) => {
+  /**
+   * Apply a new arrangement and record the current one on the undo stack.
+   * A `next` referentially equal to the current arrangement (the no-op result
+   * of `mapClip` when nothing matched) records NOTHING, so undo never steps
+   * through mutations that changed nothing. Any real mutation clears the redo
+   * stack, matching every editor undo/redo in the app.
+   */
+  const commit = (next: MusicArrangement) => {
+    set((s) => {
+      if (next === s.arrangement) return s;
+      const past = s.past.length >= HISTORY_LIMIT
+        ? [...s.past.slice(1), s.arrangement]
+        : [...s.past, s.arrangement];
+      return { arrangement: next, past, future: [] };
+    });
+  };
 
-  addTrack: (name) => {
-    const id = makeId('track');
-    const track: MusicTrack = {
-      id,
-      name: name && name.trim() ? name.trim() : `Track ${get().arrangement.tracks.length + 1}`,
-      muted: false,
-    };
-    set((s) => ({ arrangement: { ...s.arrangement, tracks: [...s.arrangement.tracks, track] } }));
-    return id;
-  },
+  return {
+    arrangement: createEmptyArrangement(),
+    past: [],
+    future: [],
 
-  deleteTrack: (trackId) => {
-    set((s) => ({
-      arrangement: {
+    undo: () =>
+      set((s) => {
+        if (s.past.length === 0) return s;
+        const previous = s.past[s.past.length - 1];
+        return {
+          arrangement: previous,
+          past: s.past.slice(0, -1),
+          future: [s.arrangement, ...s.future],
+        };
+      }),
+
+    redo: () =>
+      set((s) => {
+        if (s.future.length === 0) return s;
+        const next = s.future[0];
+        return {
+          arrangement: next,
+          past: [...s.past, s.arrangement],
+          future: s.future.slice(1),
+        };
+      }),
+
+    canUndo: () => get().past.length > 0,
+    canRedo: () => get().future.length > 0,
+
+    addTrack: (name) => {
+      const s = get();
+      const track = buildTrack(name, s.arrangement.tracks.length);
+      commit({ ...s.arrangement, tracks: [...s.arrangement.tracks, track] });
+      return track.id;
+    },
+
+    deleteTrack: (trackId) => {
+      const s = get();
+      if (!s.arrangement.tracks.some((t) => t.id === trackId)) return;
+      commit({
         ...s.arrangement,
         tracks: s.arrangement.tracks.filter((t) => t.id !== trackId),
         // Deleting a track takes its clips with it — no orphaned clips.
         clips: s.arrangement.clips.filter((c) => c.trackId !== trackId),
-      },
-    }));
-  },
+      });
+    },
 
-  renameTrack: (trackId, name) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    set((s) => ({
-      arrangement: {
+    renameTrack: (trackId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const s = get();
+      if (!s.arrangement.tracks.some((t) => t.id === trackId)) return;
+      commit({
         ...s.arrangement,
         tracks: s.arrangement.tracks.map((t) => (t.id === trackId ? { ...t, name: trimmed } : t)),
-      },
-    }));
-  },
+      });
+    },
 
-  setTrackMuted: (trackId, muted) => {
-    set((s) => ({
-      arrangement: {
+    setTrackMuted: (trackId, muted) => {
+      const s = get();
+      if (!s.arrangement.tracks.some((t) => t.id === trackId)) return;
+      commit({
         ...s.arrangement,
         tracks: s.arrangement.tracks.map((t) => (t.id === trackId ? { ...t, muted } : t)),
-      },
-    }));
-  },
+      });
+    },
 
-  addClip: (input) => {
-    const state = get();
-    // A clip on an empty (unknown) track is a no-op, not a phantom clip.
-    if (!state.arrangement.tracks.some((t) => t.id === input.trackId)) return null;
+    addClip: (input) => {
+      const s = get();
+      // A clip on an empty (unknown) track is a no-op, not a phantom clip.
+      if (!s.arrangement.tracks.some((t) => t.id === input.trackId)) return null;
+      const clip = buildClip(input);
+      commit({ ...s.arrangement, clips: [...s.arrangement.clips, clip] });
+      return clip.id;
+    },
 
-    const duration =
-      typeof input.sourceDurationSeconds === 'number' && Number.isFinite(input.sourceDurationSeconds)
-        ? Math.max(0, input.sourceDurationSeconds)
-        : 0;
-    const { trimStart, trimEnd } = clampTrimWindow(duration, 0, duration);
-    const id = makeId('clip');
-    const clip: MusicClip = {
-      id,
-      trackId: input.trackId,
-      sourceUrl: input.sourceUrl,
-      sourceDurationSeconds: duration,
-      startOffset: clampFinite(input.startOffset, 0, Number.MAX_SAFE_INTEGER, 0),
-      trimStart,
-      trimEnd,
-      loopEnabled: false,
-      name: input.name && input.name.trim() ? input.name.trim() : input.sourceUrl,
-    };
-    set((s) => ({ arrangement: { ...s.arrangement, clips: [...s.arrangement.clips, clip] } }));
-    return id;
-  },
-
-  moveClip: (clipId, startOffset, trackId) => {
-    set((s) => {
+    moveClip: (clipId, startOffset, trackId) => {
+      const s = get();
       const targetTrackValid =
         trackId !== undefined && s.arrangement.tracks.some((t) => t.id === trackId);
-      return {
-        arrangement: mapClip(s.arrangement, clipId, (clip) => ({
+      commit(
+        mapClip(s.arrangement, clipId, (clip) => ({
           ...clip,
           startOffset: clampFinite(startOffset, 0, Number.MAX_SAFE_INTEGER, clip.startOffset),
           trackId: targetTrackValid ? trackId! : clip.trackId,
         })),
-      };
-    });
-  },
+      );
+    },
 
-  trimClip: (clipId, trim) => {
-    set((s) => ({
-      arrangement: mapClip(s.arrangement, clipId, (clip) => {
-        const { trimStart, trimEnd } = clampTrimWindow(
-          clip.sourceDurationSeconds,
-          trim.trimStart ?? clip.trimStart,
-          trim.trimEnd ?? clip.trimEnd,
-        );
-        return { ...clip, trimStart, trimEnd };
-      }),
-    }));
-  },
+    trimClip: (clipId, trim) => {
+      const s = get();
+      commit(
+        mapClip(s.arrangement, clipId, (clip) => {
+          const { trimStart, trimEnd } = clampTrimWindow(
+            clip.sourceDurationSeconds,
+            trim.trimStart ?? clip.trimStart,
+            trim.trimEnd ?? clip.trimEnd,
+          );
+          return { ...clip, trimStart, trimEnd };
+        }),
+      );
+    },
 
-  setLoopPoints: (clipId, loop) => {
-    set((s) => ({
-      arrangement: mapClip(s.arrangement, clipId, (clip) => {
-        const { trimStart, trimEnd } = clampTrimWindow(
-          clip.sourceDurationSeconds,
-          loop.trimStart ?? clip.trimStart,
-          loop.trimEnd ?? clip.trimEnd,
-        );
-        return { ...clip, loopEnabled: loop.loopEnabled, trimStart, trimEnd };
-      }),
-    }));
-  },
+    setLoopPoints: (clipId, loop) => {
+      const s = get();
+      commit(
+        mapClip(s.arrangement, clipId, (clip) => {
+          const { trimStart, trimEnd } = clampTrimWindow(
+            clip.sourceDurationSeconds,
+            loop.trimStart ?? clip.trimStart,
+            loop.trimEnd ?? clip.trimEnd,
+          );
+          return { ...clip, loopEnabled: loop.loopEnabled, trimStart, trimEnd };
+        }),
+      );
+    },
 
-  deleteClip: (clipId) => {
-    set((s) => ({
-      arrangement: { ...s.arrangement, clips: s.arrangement.clips.filter((c) => c.id !== clipId) },
-    }));
-  },
+    deleteClip: (clipId) => {
+      const s = get();
+      if (!s.arrangement.clips.some((c) => c.id === clipId)) return;
+      commit({ ...s.arrangement, clips: s.arrangement.clips.filter((c) => c.id !== clipId) });
+    },
 
-  addGeneratedClip: (input) => {
-    // Reuse the primitives so the generated hand-off is not a second code path:
-    // ensure a track, then addClip onto it.
-    let trackId = input.trackId && get().arrangement.tracks.some((t) => t.id === input.trackId)
-      ? input.trackId
-      : undefined;
-    if (!trackId) {
-      trackId = get().addTrack('Music');
-    }
-    const clipId = get().addClip({
-      trackId,
-      sourceUrl: input.sourceUrl,
-      sourceDurationSeconds: input.durationSeconds,
-      name: input.name ?? input.sourceUrl,
-    });
-    // addClip only returns null for an unknown track, which we just created.
-    return clipId as string;
-  },
+    addGeneratedClip: (input) => {
+      // Reuse the primitives so the generated hand-off is not a second code
+      // path, but land the new track (if any) and its clip in ONE history entry
+      // so a single undo removes the whole generated result.
+      const s = get();
+      const existing =
+        input.trackId && s.arrangement.tracks.some((t) => t.id === input.trackId)
+          ? input.trackId
+          : undefined;
+      let tracks = s.arrangement.tracks;
+      let trackId = existing;
+      if (!trackId) {
+        const track = buildTrack('Music', tracks.length);
+        trackId = track.id;
+        tracks = [...tracks, track];
+      }
+      const clip = buildClip({
+        trackId,
+        sourceUrl: input.sourceUrl,
+        sourceDurationSeconds: input.durationSeconds,
+        name: input.name ?? input.sourceUrl,
+      });
+      commit({ ...s.arrangement, tracks, clips: [...s.arrangement.clips, clip] });
+      return clip.id;
+    },
 
-  setTempoBpm: (bpm) => {
-    set((s) => ({
-      arrangement: {
-        ...s.arrangement,
-        tempoBpm: clampFinite(bpm, 20, 400, s.arrangement.tempoBpm || DEFAULT_TEMPO_BPM),
-      },
-    }));
-  },
+    setTempoBpm: (bpm) => {
+      const s = get();
+      const tempoBpm = clampFinite(bpm, 20, 400, s.arrangement.tempoBpm || DEFAULT_TEMPO_BPM);
+      if (tempoBpm === s.arrangement.tempoBpm) return;
+      commit({ ...s.arrangement, tempoBpm });
+    },
 
-  clearArrangement: () => set({ arrangement: createEmptyArrangement() }),
+    clearArrangement: () => set({ arrangement: createEmptyArrangement(), past: [], future: [] }),
 
-  serialize: () => {
-    const { arrangement } = get();
-    return isArrangementEmpty(arrangement) ? null : arrangement;
-  },
+    serialize: () => {
+      const { arrangement } = get();
+      return isArrangementEmpty(arrangement) ? null : arrangement;
+    },
 
-  hydrate: (arrangement) => set({ arrangement: arrangement ?? createEmptyArrangement() }),
-});
+    /**
+     * Replace the whole arrangement (project load). History resets: undo must
+     * never step back into a different project's arrangement, so a load is a
+     * fresh baseline, not an undoable mutation. `null` clears it.
+     */
+    hydrate: (arrangement) =>
+      set({ arrangement: arrangement ?? createEmptyArrangement(), past: [], future: [] }),
+  };
+};
 
 /** The app-wide music arrangement store. */
 export const useMusicArrangementStore = create<ArrangementSlice>()(createArrangementSlice);

@@ -7,6 +7,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { createEmptyArrangement } from '@/lib/music/arrangementTypes';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -1123,6 +1125,7 @@ describe('useGenerationPolling', () => {
   // ---------------------------------------------------------------------------
   it('imports audio and sets looping audio on entity when music completes with entityId', async () => {
     vi.useRealTimers();
+    useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
 
     mockJobs['m2'] = makeJob('m2', {
       type: 'music',
@@ -1177,6 +1180,16 @@ describe('useGenerationPolling', () => {
       spatial: false,
       volume: 0.7,
     }));
+
+    // #9854: the async/jobId completion path must also land the track as an
+    // editable clip in the Music Arrangement editor, not only attach it. Neither
+    // the status route nor the post-process metadata reported a duration here, so
+    // the clip takes the documented fallback length (30s).
+    await vi.waitFor(() => {
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1);
+    });
+    const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+    expect(clip).toMatchObject({ sourceUrl: 'TestAsset', sourceDurationSeconds: 30 });
 
     globalThis.FileReader = originalFileReader;
     vi.useFakeTimers();

@@ -1,7 +1,7 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
-import { Music, Plus, Trash2, Repeat } from 'lucide-react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Music, Plus, Trash2, Repeat, Undo2, Redo2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { EmptyState } from '@/components/ui/EmptyState';
 import {
@@ -118,9 +118,33 @@ export const MusicArrangementPanel = memo(function MusicArrangementPanel() {
   const trimClip = useMusicArrangementStore((s) => s.trimClip);
   const setLoopPoints = useMusicArrangementStore((s) => s.setLoopPoints);
   const deleteClip = useMusicArrangementStore((s) => s.deleteClip);
+  const undo = useMusicArrangementStore((s) => s.undo);
+  const redo = useMusicArrangementStore((s) => s.redo);
+  const canUndo = useMusicArrangementStore((s) => s.past.length > 0);
+  const canRedo = useMusicArrangementStore((s) => s.future.length > 0);
 
   const [pendingSource, setPendingSource] = useState<Record<string, string>>({});
   const [pendingLength, setPendingLength] = useState<Record<string, number>>({});
+
+  // Ctrl/Cmd+Z undoes, Shift+Ctrl/Cmd+Z (or Ctrl/Cmd+Y) redoes — the same
+  // binding every other editor surface uses. Scoped to this panel via the root
+  // handler + stopPropagation so it does not also fire the scene-graph undo.
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        undo();
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault();
+        e.stopPropagation();
+        redo();
+      }
+    },
+    [undo, redo],
+  );
 
   const audioAssets = useMemo(
     () => Object.values(assetRegistry).filter((a) => a.kind === 'audio'),
@@ -143,20 +167,42 @@ export const MusicArrangementPanel = memo(function MusicArrangementPanel() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-[var(--sf-bg-app)] text-zinc-200">
+    <div className="flex h-full flex-col bg-[var(--sf-bg-app)] text-zinc-200" onKeyDown={handleKeyDown}>
       <div className="flex items-center justify-between border-b border-[var(--sf-border)] px-3 py-2">
         <div className="flex items-center gap-2">
           <Music size={15} className="text-purple-400" aria-hidden="true" />
           <h2 className="text-sm font-semibold">Music Arrangement</h2>
         </div>
-        <button
-          type="button"
-          onClick={() => addTrack()}
-          className="flex items-center gap-1 rounded bg-purple-600 px-2 py-1 text-xs font-medium text-white hover:bg-purple-500"
-        >
-          <Plus size={12} aria-hidden="true" />
-          Add Track
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={undo}
+            disabled={!canUndo}
+            aria-label="Undo"
+            title="Undo (Ctrl/Cmd+Z)"
+            className="rounded p-1 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <Undo2 size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={redo}
+            disabled={!canRedo}
+            aria-label="Redo"
+            title="Redo (Shift+Ctrl/Cmd+Z)"
+            className="rounded p-1 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <Redo2 size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => addTrack()}
+            className="flex items-center gap-1 rounded bg-purple-600 px-2 py-1 text-xs font-medium text-white hover:bg-purple-500"
+          >
+            <Plus size={12} aria-hidden="true" />
+            Add Track
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 space-y-3 overflow-auto p-3">

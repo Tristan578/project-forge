@@ -6,6 +6,8 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { createMockStore } from './handlerTestUtils';
 import { generationHandlers } from '../generationHandlers';
 import { STATUS_ENDPOINTS } from '@/lib/generation/statusEndpoints';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { createEmptyArrangement } from '@/lib/music/arrangementTypes';
 
 // ---------------------------------------------------------------------------
 // Mock generationStore
@@ -557,6 +559,9 @@ describe('generationHandlers', () => {
   describe('generate_music - handler body with the #9117 gate bypassed', () => {
     beforeEach(() => {
       vi.mocked(getCapabilityUnavailability).mockReturnValue(null);
+      // The chat tool now hands the generated track to the shared arrangement
+      // (#9854), so reset that singleton between cases.
+      useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
     });
     afterEach(() => {
       // Back to the REAL table: vi.fn(impl).mockRestore() reinstates the wrapped
@@ -580,6 +585,37 @@ describe('generationHandlers', () => {
         loopAudio: true,
         autoplay: true,
       }));
+    });
+
+    it('adds the generated track to the Music Arrangement editor (in-app AI parity, #9854)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64music', durationSeconds: 42 }),
+      });
+      const { result } = await invoke('generate_music', {
+        prompt: 'epic battle theme',
+        durationSeconds: 55,
+      });
+      expect(result.success).toBe(true);
+      const arrangement = useMusicArrangementStore.getState().arrangement;
+      // One clip landed on a freshly created track, carrying the reported
+      // duration (42), NOT the requested 55 — `Number.isFinite`, not `||`.
+      expect(arrangement.tracks).toHaveLength(1);
+      expect(arrangement.clips).toHaveLength(1);
+      expect(arrangement.clips[0]).toMatchObject({
+        sourceUrl: expect.stringContaining('music-'),
+        sourceDurationSeconds: 42,
+      });
+    });
+
+    it('falls back to the requested duration when the response omits one', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ audioBase64: 'base64music' }),
+      });
+      await invoke('generate_music', { prompt: 'calm', durationSeconds: 25 });
+      const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+      expect(clip.sourceDurationSeconds).toBe(25);
     });
 
     it('tracks async job when no audioBase64', async () => {

@@ -111,6 +111,46 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "arrangement_add_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_add_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_delete_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_delete_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_move_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_set_loop",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_set_tempo",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_trim_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "array_entity",
       "category": "mesh",
       "requiredScope": "scene:write"

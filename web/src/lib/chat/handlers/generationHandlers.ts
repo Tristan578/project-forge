@@ -10,6 +10,7 @@ import { useGenerationStore } from '@/stores/generationStore';
 import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
 import { attachGeneratedAudio } from '@/lib/generate/attachGeneratedAudio';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 import { DIRECT_CAPABILITY_PROVIDER, getCapabilityUnavailability } from '@/lib/config/providers';
 import { STATUS_ENDPOINTS, resolveStatusEndpoint } from '@/lib/generation/statusEndpoints';
@@ -467,6 +468,19 @@ export const generationHandlers: Record<string, ToolHandler> = {
         audioBase64: data.audioBase64,
         entityId: musicEntityId && musicAutoPlace ? musicEntityId : undefined,
         sink: ctx.store,
+      });
+      // In-app AI parity with GenerateMusicDialog (#9854): the chat tool's
+      // generated track must land as an editable clip in the Music Arrangement
+      // editor, not only attach to an entity. `typeof`/`Number.isFinite`, not
+      // `||`, so a 0-length report cannot mask a real duration with the default.
+      const durationSeconds =
+        typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds)
+          ? data.durationSeconds
+          : p.data.durationSeconds ?? 30;
+      useMusicArrangementStore.getState().addGeneratedClip({
+        sourceUrl: assetName,
+        durationSeconds,
+        name: assetName,
       });
       return {
         success: true,

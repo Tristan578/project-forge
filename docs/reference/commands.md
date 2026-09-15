@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 354 MCP commands available in SpawnForge.
+Complete reference for all 362 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -13,13 +13,13 @@ Complete reference for all 354 MCP commands available in SpawnForge.
 - [Environment](#environment) (5 commands)
 - [Rendering](#rendering) (4 commands)
 - [Editor](#editor) (7 commands)
-- [Camera](#camera) (3 commands)
+- [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
 - [Query](#query) (15 commands)
 - [Runtime](#runtime) (12 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
-- [Audio](#audio) (28 commands)
+- [Audio](#audio) (36 commands)
 - [Particles](#particles) (8 commands)
 - [Animation](#animation) (20 commands)
 - [Mesh](#mesh) (11 commands)
@@ -38,7 +38,7 @@ Complete reference for all 354 MCP commands available in SpawnForge.
 - [Publishing](#publishing) (8 commands)
 - [Sprite](#sprite) (8 commands)
 - [Sprite_animation](#sprite_animation) (6 commands)
-- [Physics2d](#physics2d) (8 commands)
+- [Physics2d](#physics2d) (10 commands)
 - [Tilemap](#tilemap) (10 commands)
 - [Skeleton2d](#skeleton2d) (13 commands)
 - [Modeling](#modeling) (6 commands)
@@ -1375,6 +1375,22 @@ Configure 2D camera settings (zoom, pixel-perfect rendering, bounds)
 ```
 
 Scope: `scene:write` | Token cost: 0
+
+---
+
+### `get_camera_2d`
+
+Query the scene's 2D camera settings
+
+**Example:**
+```json
+{
+  "command": "get_camera_2d",
+  "params": {}
+}
+```
+
+Scope: `scene:read` | Token cost: 0
 
 ---
 
@@ -3091,6 +3107,195 @@ Enable or disable raycasting-based audio occlusion (low-pass filtering when geom
   "params": {
     "entityId": "entity_1",
     "enabled": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_add_track`
+
+Add a track (lane) to the music arrangement editor. Manual/AI parity with the Music Arrangement panel.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Optional track name; auto-named 'Track N' when omitted |
+
+**Example:**
+```json
+{
+  "command": "arrangement_add_track",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_delete_track`
+
+Delete a music arrangement track and every clip on it. Undoable in the arrangement editor.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to delete |
+
+**Example:**
+```json
+{
+  "command": "arrangement_delete_track",
+  "params": {
+    "trackId": "my_trackId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_add_clip`
+
+Place an imported or generated audio asset as a clip on a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Track to place the clip on |
+| `sourceUrl` | string | Yes | Audio asset name/id the clip plays from |
+| `sourceDurationSeconds` | number | Yes | Full source length in seconds (the trim ceiling) |
+| `startOffset` | number | No | Seconds along the timeline where the clip begins (default 0) |
+| `name` | string | No | Optional clip label; defaults to the source name |
+
+**Example:**
+```json
+{
+  "command": "arrangement_add_clip",
+  "params": {
+    "trackId": "my_trackId",
+    "sourceUrl": "my_sourceUrl",
+    "sourceDurationSeconds": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_move_clip`
+
+Move a music arrangement clip along its timeline and optionally to another track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to move |
+| `startOffset` | number | Yes | New timeline position in seconds (clamped to >= 0) |
+| `trackId` | string | No | Optional target track id; ignored when the track is unknown |
+
+**Example:**
+```json
+{
+  "command": "arrangement_move_clip",
+  "params": {
+    "clipId": "my_clipId",
+    "startOffset": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_trim_clip`
+
+Adjust a music arrangement clip's trimmed source window (clamped to legal bounds).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to trim |
+| `trimStart` | number | No | Seconds into the source where playback starts |
+| `trimEnd` | number | No | Seconds into the source where playback ends |
+
+**Example:**
+```json
+{
+  "command": "arrangement_trim_clip",
+  "params": {
+    "clipId": "my_clipId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_loop`
+
+Toggle looping on a music arrangement clip and optionally set its loop window.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to update |
+| `loopEnabled` | boolean | Yes | Whether the trimmed window repeats to fill its duration |
+| `trimStart` | number | No | Optional loop-window start in seconds |
+| `trimEnd` | number | No | Optional loop-window end in seconds |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_loop",
+  "params": {
+    "clipId": "my_clipId",
+    "loopEnabled": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_delete_clip`
+
+Delete a clip from the music arrangement. Undoable in the arrangement editor.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to delete |
+
+**Example:**
+```json
+{
+  "command": "arrangement_delete_clip",
+  "params": {
+    "clipId": "my_clipId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_tempo`
+
+Set the music arrangement tempo in beats per minute (clamped to 20-400).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `bpm` | number | Yes | Tempo in BPM (20-400) |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_tempo",
+  "params": {
+    "bpm": 1
   }
 }
 ```
@@ -7161,6 +7366,44 @@ Cast a ray in the 2D physics world
     "directionX": 1,
     "directionY": 1
   }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `get_joint_2d`
+
+Query the 2D joint attached to an entity
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entityId` | string | Yes | Entity ID whose 2D joint to read |
+
+**Example:**
+```json
+{
+  "command": "get_joint_2d",
+  "params": {
+    "entityId": "entity_1"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
+### `list_joints_2d`
+
+List every 2D joint in the scene
+
+**Example:**
+```json
+{
+  "command": "list_joints_2d",
+  "params": {}
 }
 ```
 
