@@ -234,7 +234,7 @@ describe('clip document persistence (audio.FR-1.OP-02)', () => {
       trimStartSec: 0,
       trimEndSec: 2,
       gainDb: 'loud',
-      fadeInSec: -5,
+      fadeInSec: undefined,
       fadeOutSec: NaN,
     });
     expect(clip).toEqual({
@@ -257,5 +257,27 @@ describe('clip document persistence (audio.FR-1.OP-02)', () => {
     );
     expect(clips).toEqual({});
     expect(Object.getPrototypeOf(clips)).toBe(Object.prototype);
+  });
+
+  it.each([
+    { version: 999 },
+    { version: '1' },
+    { trimStartSec: -1 },
+    { gainDb: -61 },
+    { gainDb: 25 },
+    { fadeInSec: -0.1 },
+    { fadeOutSec: -0.1 },
+    { fadeInSec: 1.4 }, // Existing fade-out makes the combined fades too long.
+    { fadeOutSec: 1.5 },
+    { loopStartSec: 0 },
+    { loopEndSec: 2 },
+    { loopStartSec: 1.5 }, // Equal loop boundaries.
+    { loopEndSec: 0.4 }, // Reversed loop.
+  ])('rejects an invalid clip field %j without adopting the document', (patch) => {
+    expect(readClipDocument({ ...FULL_CLIP, ...patch })).toBeNull();
+    expect(parseSceneClipDocuments(scene([
+      { entityId: 'valid', audioData: { clip: FULL_CLIP } },
+      { entityId: 'invalid', audioData: { clip: { ...FULL_CLIP, ...patch } } },
+    ]))).toEqual({ valid: FULL_CLIP });
   });
 });

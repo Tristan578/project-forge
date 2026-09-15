@@ -389,7 +389,7 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
 
   it('renders accessible clip controls and a labelled waveform when a source asset is attached', () => {
     mockWithClip();
-    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} />);
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
     expect(screen.getByText('Clip Editing')).toBeInTheDocument();
     expect(screen.getByLabelText('Trim start')).toBeInTheDocument();
     expect(screen.getByLabelText('Trim end')).toBeInTheDocument();
@@ -403,7 +403,7 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
 
   it('applies a valid manual trim to the clip document', () => {
     mockWithClip();
-    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} />);
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
     fireEvent.change(end, { target: { value: '0.5' } });
     expect(end.value).toBe('0.5');
@@ -413,7 +413,7 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
 
   it('rejects trim end <= start, showing a validation error and leaving the prior clip', () => {
     mockWithClip();
-    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} />);
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
     const start = screen.getByLabelText('Trim start') as HTMLInputElement;
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
     // Establish a valid window 0.6–1.0.
@@ -431,7 +431,7 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
 
   it('undo restores the prior gain without touching trim', () => {
     mockWithClip();
-    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} />);
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
     const gain = screen.getByLabelText('Gain') as HTMLInputElement;
     const end = screen.getByLabelText('Trim end') as HTMLInputElement;
     fireEvent.change(end, { target: { value: '0.5' } });
@@ -446,7 +446,7 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
 
   it('records one undo entry per edit under StrictMode', () => {
     mockWithClip();
-    render(<StrictMode><ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} /></StrictMode>);
+    render(<StrictMode><ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} /></StrictMode>);
     const gain = screen.getByLabelText('Gain') as HTMLInputElement;
     fireEvent.change(gain, { target: { value: '-6' } });
     fireEvent.change(gain, { target: { value: '-12' } });

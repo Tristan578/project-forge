@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Undo2, Redo2 } from 'lucide-react';
+import { Button, Input, cn } from '@spawnforge/ui';
 import type { AssetMetadata } from '@/stores/slices/types';
 import {
   AudioClipHistory,
@@ -28,13 +29,14 @@ import {
   type CommandResult,
   type ValidationError,
 } from '@/lib/audio/audioClipDocument';
-import { extractWaveformFromUrl } from '@/lib/audio/waveformExtractor';
+import { extractWaveform } from '@/lib/audio/waveformExtractor';
 
 const DEFAULT_SAMPLE_RATE = 48000;
-/** Fallback clip length used until the real source is decoded. */
+/** Internal placeholder only; unknown source bounds never enable editing. */
 const DEFAULT_DURATION_SEC = 1;
 const WAVEFORM_BUCKETS = 80;
 
+/** A labelled numeric edit control with field validation and availability state. */
 interface ClipNumberFieldProps {
   id: string;
   label: string;
@@ -44,35 +46,55 @@ interface ClipNumberFieldProps {
   step?: number;
   unit?: string;
   invalid?: boolean;
+  disabled?: boolean;
   onCommit: (v: number) => void;
 }
 
-function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invalid, onCommit }: ClipNumberFieldProps) {
+function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invalid, disabled, onCommit }: ClipNumberFieldProps) {
   return (
     <div className="flex items-center gap-2">
-      <label htmlFor={id} className="w-24 shrink-0 text-xs text-zinc-400">
+      <label htmlFor={id} className="w-24 shrink-0 text-xs text-[var(--sf-text-secondary)]">
         {label}
       </label>
-      <input
+      <Input
         id={id}
         type="number"
-        value={Number.isFinite(value) ? Number(value.toFixed(4)) : ''}
+        value={!disabled && Number.isFinite(value) ? Number(value.toFixed(4)) : ''}
         min={min}
         max={max}
         step={step}
+        disabled={disabled}
+        error={invalid}
         aria-invalid={invalid ? true : undefined}
         onChange={(e) => onCommit(parseFloat(e.target.value))}
-        className={`flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none focus:ring-1 ${
-          invalid ? 'ring-1 ring-red-500' : 'focus:ring-blue-500'
-        }`}
+        className={cn('min-w-0 flex-1 px-2 text-xs', invalid && 'ring-1 ring-[var(--sf-destructive)]')}
       />
-      {unit && <span className="w-6 text-right text-[10px] text-zinc-500">{unit}</span>}
+      {unit && <span className="w-6 text-right text-[10px] text-[var(--sf-text-secondary)]">{unit}</span>}
     </div>
   );
 }
 
-export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetMetadata }) {
-  const [bounds, setBounds] = useState<ClipBounds>({
+/** Source identity and optional measured bounds for the standalone clip prototype. */
+export interface ClipEditorProps {
+  assetId: string;
+  asset?: AssetMetadata;
+  /** Decoded bounds supplied by a host that already owns the source buffer. */
+  sourceBounds?: ClipBounds;
+}
+
+/**
+ * Render local clip edits once source bounds are known; edits are discarded on unmount.
+ * @param props Source asset and optional bounds measured by its host.
+ * @returns Clip controls, waveform metadata and source availability feedback.
+ */
+export function ClipEditor({ assetId, asset, sourceBounds }: ClipEditorProps) {
+  const initialBounds = sourceBounds && Number.isFinite(sourceBounds.durationSec) && sourceBounds.durationSec > 0
+    && Number.isFinite(sourceBounds.sampleRate) && sourceBounds.sampleRate > 0 ? sourceBounds : undefined;
+  const [boundsKnown, setBoundsKnown] = useState(Boolean(initialBounds));
+  const [decodeState, setDecodeState] = useState<'loading' | 'ready' | 'unavailable'>(
+    asset?.source.type === 'url' ? 'loading' : initialBounds ? 'ready' : 'unavailable',
+  );
+  const [bounds, setBounds] = useState<ClipBounds>(initialBounds ?? {
     durationSec: DEFAULT_DURATION_SEC,
     sampleRate: DEFAULT_SAMPLE_RATE,
   });
@@ -80,8 +102,8 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
     createAudioClipDocument({
       sourceAssetId: assetId,
       sourceHash: '',
-      durationSec: DEFAULT_DURATION_SEC,
-      sampleRate: DEFAULT_SAMPLE_RATE,
+      durationSec: initialBounds?.durationSec ?? DEFAULT_DURATION_SEC,
+      sampleRate: initialBounds?.sampleRate ?? DEFAULT_SAMPLE_RATE,
     }),
   );
   const [peaks, setPeaks] = useState<number[]>([]);
@@ -95,28 +117,37 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
   // reachable.
   const userEditedRef = useRef(false);
 
-  // Best-effort waveform + true duration from a URL-backed source. Fully
-  // guarded: absent Web Audio (jsdom, SSR) or a non-URL asset simply leaves the
-  // panel with its numeric controls and no waveform. Never throws to the user.
+  // Decode URL sources once. Until measured bounds exist, controls remain
+  // disabled and the waveform describes its unavailable state explicitly.
   useEffect(() => {
     if (!asset || asset.source.type !== 'url') return;
     const url = asset.source.url;
-    if (typeof window === 'undefined') return;
-    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx || typeof fetch === 'undefined') return;
-
     let cancelled = false;
-    const ctx = new Ctx();
+    const controller = new AbortController();
+    let ctx: AudioContext | undefined;
+    let closed = false;
+    const close = () => {
+      if (ctx && !closed) {
+        closed = true;
+        void ctx.close().catch(() => { /* Context may already be closed by the browser. */ });
+      }
+    };
     void (async () => {
       try {
-        const response = await fetch(url);
-        if (!response.ok) return;
+        const Ctx = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) throw new Error('Audio decoding unavailable');
+        ctx = new Ctx();
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error('Audio source unavailable');
         const buffer = await ctx.decodeAudioData(await response.arrayBuffer());
         if (cancelled) return;
-        const nextPeaks = await extractWaveformFromUrl(url, ctx, WAVEFORM_BUCKETS).catch(() => []);
-        if (cancelled) return;
-        setPeaks(nextPeaks);
+        if (!Number.isFinite(buffer.duration) || buffer.duration <= 0 || !Number.isFinite(buffer.sampleRate) || buffer.sampleRate <= 0) {
+          throw new Error('Audio source has invalid bounds');
+        }
+        setPeaks(extractWaveform(buffer, WAVEFORM_BUCKETS));
         setBounds({ durationSec: buffer.duration, sampleRate: buffer.sampleRate });
+        setBoundsKnown(true);
+        setDecodeState('ready');
         if (!userEditedRef.current) {
           setDoc(
             createAudioClipDocument({
@@ -128,14 +159,15 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
           );
         }
       } catch {
-        // Decode/network failure: keep the numeric editor usable.
+        if (!cancelled) setDecodeState('unavailable');
       } finally {
-        void ctx.close?.();
+        close();
       }
     })();
     return () => {
       cancelled = true;
-      void ctx.close?.();
+      controller.abort();
+      close();
     };
   }, [asset, assetId]);
 
@@ -190,61 +222,75 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
     return peaks;
   }, [peaks]);
 
-  const trimLabel = `Waveform, trim ${doc.trimStartSec.toFixed(2)} to ${doc.trimEndSec.toFixed(2)} seconds of ${bounds.durationSec.toFixed(2)} second source`;
+  const trimLabel = boundsKnown
+    ? `Waveform, trim ${doc.trimStartSec.toFixed(2)} to ${doc.trimEndSec.toFixed(2)} seconds of ${bounds.durationSec.toFixed(2)} second source`
+    : 'Waveform unavailable: source duration unknown';
 
   return (
-    <div className="space-y-2 rounded border border-zinc-800 bg-zinc-900/40 p-2">
+    <div className="space-y-2 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] p-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Clip Editing</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--sf-text-secondary)]">Clip Editing</span>
         <div className="flex gap-1">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             type="button"
             onClick={onUndo}
             disabled={!canUndo}
             aria-label="Undo clip edit"
-            className="rounded p-1 text-zinc-400 enabled:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-600"
+            className="w-8 px-1"
           >
             <Undo2 size={12} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             type="button"
             onClick={onRedo}
             disabled={!canRedo}
             aria-label="Redo clip edit"
-            className="rounded p-1 text-zinc-400 enabled:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-600"
+            className="w-8 px-1"
           >
             <Redo2 size={12} />
-          </button>
+          </Button>
         </div>
       </div>
+
+      {decodeState !== 'ready' && (
+        <p role="status" className="text-xs text-[var(--sf-text-secondary)]">
+          {decodeState === 'loading' ? 'Loading audio source…' : boundsKnown
+            ? 'Waveform unavailable. Supplied source bounds remain available.'
+            : 'Audio source unavailable. Clip editing requires a decoded source.'}
+        </p>
+      )}
 
       {/* Waveform with trim + loop overlays. role=img with a descriptive name so
           a screen reader gets the same trim state the sighted markers show. */}
       <div
         role="img"
         aria-label={trimLabel}
-        className="relative flex h-10 items-center gap-px overflow-hidden rounded bg-zinc-950/60"
+        className="relative flex h-10 items-center gap-px overflow-hidden rounded bg-[var(--sf-bg-app)]"
       >
         {bars.map((v, i) => (
           <span
             key={i}
             style={{ '--h': `${Math.round(Math.min(1, v) * 100)}%` } as React.CSSProperties}
-            className="h-[var(--h)] min-h-px flex-1 rounded-sm bg-zinc-600"
+            className="h-[var(--h)] min-h-px flex-1 rounded-sm bg-[var(--sf-text-muted)]"
           />
         ))}
         {/* Trimmed-away regions dimmed. */}
         <span
           style={{ '--w': pct(doc.trimStartSec) } as React.CSSProperties}
-          className="absolute inset-y-0 left-0 w-[var(--w)] bg-zinc-950/70"
+          className="absolute inset-y-0 left-0 w-[var(--w)] bg-[var(--sf-bg-app)]/70"
         />
         <span
           style={{ '--w': pct(bounds.durationSec - doc.trimEndSec) } as React.CSSProperties}
-          className="absolute inset-y-0 right-0 w-[var(--w)] bg-zinc-950/70"
+          className="absolute inset-y-0 right-0 w-[var(--w)] bg-[var(--sf-bg-app)]/70"
         />
         {/* Loop region marker. */}
         <span
           style={{ '--l': pct(doc.loopStartSec), '--r': pct(bounds.durationSec - doc.loopEndSec) } as React.CSSProperties}
-          className="pointer-events-none absolute inset-y-0 left-[var(--l)] right-[var(--r)] border-x border-blue-500/60"
+          className="pointer-events-none absolute inset-y-0 left-[var(--l)] right-[var(--r)] border-x border-[var(--sf-accent)]"
         />
       </div>
 
@@ -256,6 +302,7 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
         min={0}
         max={bounds.durationSec}
         invalid={fieldInvalid('trimStartSec')}
+        disabled={!boundsKnown}
         onCommit={(v) => apply(setTrim(doc, { startSec: v, endSec: doc.trimEndSec }, bounds))}
       />
       <ClipNumberField
@@ -266,6 +313,7 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
         min={0}
         max={bounds.durationSec}
         invalid={fieldInvalid('trimEndSec')}
+        disabled={!boundsKnown}
         onCommit={(v) => apply(setTrim(doc, { startSec: doc.trimStartSec, endSec: v }, bounds))}
       />
       <ClipNumberField
@@ -277,6 +325,7 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
         min={MIN_GAIN_DB}
         max={MAX_GAIN_DB}
         invalid={fieldInvalid('gainDb')}
+        disabled={!boundsKnown}
         onCommit={(v) => apply(setGain(doc, { gainDb: v }))}
       />
       <ClipNumberField
@@ -287,6 +336,7 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
         min={0}
         max={windowLen}
         invalid={fieldInvalid('fadeInSec')}
+        disabled={!boundsKnown}
         onCommit={(v) => apply(setFade(doc, { fadeInSec: v, fadeOutSec: doc.fadeOutSec }, bounds))}
       />
       <ClipNumberField
@@ -297,6 +347,7 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
         min={0}
         max={windowLen}
         invalid={fieldInvalid('fadeOutSec')}
+        disabled={!boundsKnown}
         onCommit={(v) => apply(setFade(doc, { fadeInSec: doc.fadeInSec, fadeOutSec: v }, bounds))}
       />
       <ClipNumberField
@@ -307,6 +358,7 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
         min={doc.trimStartSec}
         max={doc.trimEndSec}
         invalid={fieldInvalid('loopStartSec')}
+        disabled={!boundsKnown}
         onCommit={(v) => apply(setLoop(doc, { loopStartSec: v, loopEndSec: doc.loopEndSec }, bounds))}
       />
       <ClipNumberField
@@ -317,11 +369,12 @@ export function ClipEditor({ assetId, asset }: { assetId: string; asset?: AssetM
         min={doc.trimStartSec}
         max={doc.trimEndSec}
         invalid={fieldInvalid('loopEndSec')}
+        disabled={!boundsKnown}
         onCommit={(v) => apply(setLoop(doc, { loopStartSec: doc.loopStartSec, loopEndSec: v }, bounds))}
       />
 
       {errors.length > 0 && (
-        <div role="alert" className="rounded bg-red-950/40 px-2 py-1 text-[11px] text-red-300">
+        <div role="alert" className="rounded border border-[var(--sf-destructive)] px-2 py-1 text-[11px] text-[var(--sf-text)]">
           {errors.map((e, i) => (
             <div key={i}>{e.message}</div>
           ))}

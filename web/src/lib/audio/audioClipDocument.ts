@@ -37,7 +37,7 @@ export interface AudioClipDocument {
   version: number;
   /** Asset id of the immutable decoded source this clip reads. */
   sourceAssetId: string;
-  /** Hash of the decoded source captured at import; asserted unchanged after edits. */
+  /** Stored source identity hint captured at import; not proof of byte integrity. */
   sourceHash: string;
   /** Playback window start, in seconds from the source origin. */
   trimStartSec: number;
@@ -63,12 +63,14 @@ export interface ClipBounds {
   sampleRate: number;
 }
 
+/** A rejected clip edit's field-scoped validation message. */
 export interface ValidationError {
   /** The `AudioClipDocument` field the invalid value belongs to. */
   field: keyof AudioClipDocument;
   message: string;
 }
 
+/** A validated replacement document, or errors that leave the prior document intact. */
 export type CommandResult =
   | { ok: true; data: AudioClipDocument }
   | { ok: false; errors: ValidationError[] };
@@ -77,12 +79,22 @@ export type CommandResult =
 // Sample-time conversion
 // ---------------------------------------------------------------------------
 
-/** Convert seconds to a whole sample index at `sampleRate` (nearest sample). */
+/**
+ * Convert seconds to the nearest whole sample index.
+ * @param sec Time in seconds.
+ * @param sampleRate Source sample rate in samples per second.
+ * @returns Rounded sample index.
+ */
 export function secondsToSamples(sec: number, sampleRate: number): number {
   return Math.round(sec * sampleRate);
 }
 
-/** Convert a whole sample index back to seconds. */
+/**
+ * Convert a sample index back to seconds.
+ * @param samples Sample index.
+ * @param sampleRate Source sample rate in samples per second.
+ * @returns Time in seconds.
+ */
 export function samplesToSeconds(samples: number, sampleRate: number): number {
   return samples / sampleRate;
 }
@@ -93,6 +105,9 @@ export function samplesToSeconds(samples: number, sampleRate: number): number {
  * Storing snapped seconds (rather than raw floats) is what makes trim math
  * sample-exact: two snapped times differ by an integer number of samples, so
  * their difference converts back to a whole sample count with no drift.
+ * @param sec Time in seconds to snap.
+ * @param sampleRate Source sample rate in samples per second.
+ * @returns Time on the nearest sample boundary.
  */
 export function snapSecondsToSample(sec: number, sampleRate: number): number {
   return samplesToSeconds(secondsToSamples(sec, sampleRate), sampleRate);
@@ -105,6 +120,8 @@ export function snapSecondsToSample(sec: number, sampleRate: number): number {
 /**
  * Build the default document for a freshly imported/decoded source: the whole
  * clip, unity gain, no fades, loop spanning the full trim window.
+ * @param params Source identity and decoded duration/sample rate.
+ * @returns A new document spanning the source duration.
  */
 export function createAudioClipDocument(params: {
   sourceAssetId: string;
@@ -129,9 +146,11 @@ export function createAudioClipDocument(params: {
 
 /**
  * Deterministic 32-bit FNV-1a hash of decoded channel data, as an 8-char hex
- * string. Used to capture the source's identity at import and prove later that
- * no edit rewrote the bytes. Large buffers are sampled at a fixed stride so the
- * hash is cheap yet sensitive to any change in shape.
+ * string. Large buffers are sampled at a fixed stride, making this an identity
+ * hint. Unsampled changes and hash collisions can be missed; this is not a
+ * byte-integrity check or a cryptographic digest.
+ * @param channels Decoded channel sample arrays.
+ * @returns A sampled 32-bit identity hint encoded as eight hexadecimal digits.
  */
 export function hashChannelData(channels: Float32Array[]): string {
   let hash = 0x811c9dc5;
@@ -152,8 +171,11 @@ export function hashChannelData(channels: Float32Array[]): string {
 }
 
 /**
- * True iff `doc` still points at the same immutable source bytes as `expected`.
- * A command that ever changed this would be corrupting, not editing.
+ * Compare the document's stored source identity hint with an expected hint.
+ * This does not read or compare audio bytes and cannot prove byte integrity.
+ * @param doc Clip document whose stored identity is checked.
+ * @param expectedHash Previously stored source identity hint.
+ * @returns Whether the two stored strings match.
  */
 export function sourceUnchanged(doc: AudioClipDocument, expectedHash: string): boolean {
   return doc.sourceHash === expectedHash;
@@ -163,12 +185,20 @@ export function sourceUnchanged(doc: AudioClipDocument, expectedHash: string): b
 // Derived values (render/play/export read these)
 // ---------------------------------------------------------------------------
 
-/** Effective clip length, sample-exact, in seconds. */
+/**
+ * Effective clip length in seconds.
+ * @param doc Validated clip document.
+ * @returns Trim end minus trim start.
+ */
 export function effectiveDurationSec(doc: AudioClipDocument): number {
   return doc.trimEndSec - doc.trimStartSec;
 }
 
-/** Linear multiplier for the clip's gain in dB (0 dB → 1, +6 dB → ~2). */
+/**
+ * Convert clip gain in dB to a linear multiplier (0 dB → 1).
+ * @param doc Clip document containing the gain.
+ * @returns Linear amplitude multiplier.
+ */
 export function gainLinear(doc: AudioClipDocument): number {
   return Math.pow(10, doc.gainDb / 20);
 }
@@ -178,6 +208,9 @@ export function gainLinear(doc: AudioClipDocument): number {
  * trim-window start (0 = `trimStartSec`). Linear ramps: 0→1 across `fadeInSec`,
  * 1→0 across `fadeOutSec` ending at the window end, and 1 in between. Times
  * outside the window return 0.
+ * @param doc Validated clip document containing fade lengths.
+ * @param tSec Time relative to the trim start, in seconds.
+ * @returns Fade multiplier between zero and one.
  */
 export function fadeGainAt(doc: AudioClipDocument, tSec: number): number {
   const windowLen = effectiveDurationSec(doc);
@@ -193,7 +226,12 @@ export function fadeGainAt(doc: AudioClipDocument, tSec: number): number {
   return Math.max(0, gain);
 }
 
-/** Full amplitude multiplier at `tSec`: fade envelope × constant gain. */
+/**
+ * Combine the fade envelope and constant gain.
+ * @param doc Validated clip document.
+ * @param tSec Time relative to the trim start, in seconds.
+ * @returns Full amplitude multiplier at that time.
+ */
 export function amplitudeAt(doc: AudioClipDocument, tSec: number): number {
   return fadeGainAt(doc, tSec) * gainLinear(doc);
 }
@@ -230,7 +268,13 @@ function clampDerivedToWindow(doc: AudioClipDocument, sampleRate: number): Audio
   return { ...doc, fadeInSec: fadeIn, fadeOutSec: fadeOut, loopStartSec: loopStart, loopEndSec: loopEnd };
 }
 
-/** Set the trim window. Rejects a window that is empty, reversed or off the source. */
+/**
+ * Set the trim window, rejecting empty, reversed or off-source windows.
+ * @param doc Current clip document, left unchanged.
+ * @param patch Requested start and end in seconds.
+ * @param bounds Decoded source duration and sample rate.
+ * @returns A new document with adjusted fades/loop, or field validation errors.
+ */
 export function setTrim(
   doc: AudioClipDocument,
   patch: { startSec: number; endSec: number },
@@ -264,7 +308,12 @@ export function setTrim(
   return { ok: true, data: clampDerivedToWindow(trimmed, bounds.sampleRate) };
 }
 
-/** Set the output gain in decibels. Rejects non-finite or out-of-range values. */
+/**
+ * Set output gain, rejecting non-finite or out-of-range values.
+ * @param doc Current clip document, left unchanged.
+ * @param patch Requested gain in decibels.
+ * @returns A new document or field validation errors.
+ */
 export function setGain(doc: AudioClipDocument, patch: { gainDb: number }): CommandResult {
   if (!isFiniteNumber(patch.gainDb)) {
     return { ok: false, errors: [{ field: 'gainDb', message: 'Gain must be a finite number.' }] };
@@ -278,7 +327,13 @@ export function setGain(doc: AudioClipDocument, patch: { gainDb: number }): Comm
   return { ok: true, data: { ...doc, gainDb: patch.gainDb } };
 }
 
-/** Set fade-in and fade-out lengths. Rejects negatives or fades longer than the window. */
+/**
+ * Set fade lengths, rejecting negatives or a combined length beyond the window.
+ * @param doc Current clip document, left unchanged.
+ * @param patch Requested fade lengths in seconds.
+ * @param bounds Decoded source duration and sample rate.
+ * @returns A new document with snapped fades, or field validation errors.
+ */
 export function setFade(
   doc: AudioClipDocument,
   patch: { fadeInSec: number; fadeOutSec: number },
@@ -306,7 +361,13 @@ export function setFade(
   return { ok: true, data: { ...doc, fadeInSec: fadeIn, fadeOutSec: fadeOut } };
 }
 
-/** Set the loop region. Rejects a region that is empty, reversed or outside the trim window. */
+/**
+ * Set a loop region contained within the trim window.
+ * @param doc Current clip document, left unchanged.
+ * @param patch Requested loop boundaries in seconds.
+ * @param bounds Decoded source duration and sample rate.
+ * @returns A new document with a nonempty snapped loop, or validation errors.
+ */
 export function setLoop(
   doc: AudioClipDocument,
   patch: { loopStartSec: number; loopEndSec: number },
@@ -365,11 +426,17 @@ export class AudioClipHistory {
   /** Set whenever the stacks change, for UI enable/disable of undo/redo. */
   dirty = false;
 
+  /** @param maxSize Maximum number of undo or redo entries retained. */
   constructor(maxSize = 100) {
     this.maxSize = Math.max(1, maxSize);
   }
 
-  /** Record an edit. Clears redo (a new branch) and caps the undo stack. */
+  /**
+   * Record an edit, clearing redo and capping the undo stack.
+   * @param before Document before the edit.
+   * @param after Document after the edit.
+   * @returns Nothing; updates the bounded history.
+   */
   push(before: AudioClipDocument, after: AudioClipDocument): void {
     this.undoStack.push({ before, after });
     this.redoStack = [];
@@ -377,15 +444,17 @@ export class AudioClipHistory {
     while (this.undoStack.length > this.maxSize) this.undoStack.shift();
   }
 
+  /** @returns Whether an earlier document can be restored. */
   canUndo(): boolean {
     return this.undoStack.length > 0;
   }
 
+  /** @returns Whether an undone edit can be reapplied. */
   canRedo(): boolean {
     return this.redoStack.length > 0;
   }
 
-  /** Undo the most recent edit, returning the document to restore, or null. */
+  /** @returns The document before the most recent edit, or null if undo is unavailable. */
   undo(): AudioClipDocument | null {
     const edit = this.undoStack.pop();
     if (!edit) return null;
@@ -395,7 +464,7 @@ export class AudioClipHistory {
     return edit.before;
   }
 
-  /** Redo the most recently undone edit, returning the document to restore, or null. */
+  /** @returns The document after the most recently undone edit, or null if redo is unavailable. */
   redo(): AudioClipDocument | null {
     const edit = this.redoStack.pop();
     if (!edit) return null;
