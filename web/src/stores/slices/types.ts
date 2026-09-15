@@ -353,6 +353,10 @@ export interface InputBinding {
   positiveKeys?: string[];     // For axis: positive direction keys
   negativeKeys?: string[];     // For axis: negative direction keys
   deadZone?: number;
+  // Local-player slot this binding belongs to (0 = the primary player). Absent
+  // means player 0, so a single-player scene's bindings and every caller that
+  // predates two-player support behave exactly as before (physics.FR-1.OP-04).
+  player?: number;
 }
 
 // Input preset names

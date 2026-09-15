@@ -72,14 +72,21 @@ declare namespace forge {
   }
 
   namespace input {
-    /** Check if an action is currently pressed */
-    function isPressed(action: string): boolean;
-    /** Check if an action was just pressed this frame */
-    function justPressed(action: string): boolean;
-    /** Check if an action was just released this frame */
-    function justReleased(action: string): boolean;
-    /** Get axis value (-1 to 1) */
-    function getAxis(action: string): number;
+    /**
+     * Check if an action is currently pressed.
+     *
+     * `player` selects a local-player slot for two-player games (0 = the
+     * primary player, the default). `isPressed('jump', 1)` reads the second
+     * player's map; omitting it, or passing 0, is the single-player behaviour
+     * every existing script already has (physics.FR-1.OP-04).
+     */
+    function isPressed(action: string, player?: number): boolean;
+    /** Check if an action was just pressed this frame (optional local-player slot). */
+    function justPressed(action: string, player?: number): boolean;
+    /** Check if an action was just released this frame (optional local-player slot). */
+    function justReleased(action: string, player?: number): boolean;
+    /** Get axis value (-1 to 1) for an optional local-player slot (0 = primary). */
+    function getAxis(action: string, player?: number): number;
     /** Check if the current device supports touch input */
     function isTouchDevice(): boolean;
     /** Trigger haptic feedback (vibration pattern in ms) */

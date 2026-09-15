@@ -59,6 +59,16 @@ interface InputState {
   justPressed: Record<string, boolean>;
   justReleased: Record<string, boolean>;
   axes: Record<string, number>;
+  // Slots 1+ for local multiplayer (physics.FR-1.OP-04). Player 0 stays the
+  // flat maps above; each extra slot carries its own evaluated state, keyed by
+  // slot number. Absent for a single-player game, so `forge.input.isPressed`
+  // with no player reads exactly what it always did.
+  players?: Record<string, {
+    pressed: Record<string, boolean>;
+    justPressed: Record<string, boolean>;
+    justReleased: Record<string, boolean>;
+    axes: Record<string, number>;
+  }>;
 }
 
 interface EngineCommand {
@@ -99,6 +109,26 @@ let pendingCommands: EngineCommand[] = [];
 let entityStates: Record<string, EntityState> = {};
 let entityInfos: Record<string, EntityInfo> = {};
 let currentInput: InputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+
+/** The maps forge.input reads for one local-player slot. */
+type InputSlotMaps = {
+  pressed: Record<string, boolean>;
+  justPressed: Record<string, boolean>;
+  justReleased: Record<string, boolean>;
+  axes: Record<string, number>;
+};
+
+/**
+ * Resolve the input maps for a local-player slot. 0 or undefined is the primary
+ * player — the flat top-level maps — so every existing single-player call reads
+ * exactly what it did before. A slot the engine did not report reads as all-off
+ * rather than throwing, so a script that names player 2 in a one-player session
+ * simply gets no input (physics.FR-1.OP-04).
+ */
+function slotInput(player?: number): InputSlotMaps {
+  if (!player) return currentInput;
+  return currentInput.players?.[String(player)] ?? { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+}
 const timeData = { delta: 0, elapsed: 0 };
 let sharedState: Record<string, unknown> = {};
 // Touch capability is sent from the main thread in the 'init' message.
@@ -485,10 +515,10 @@ function buildForgeApi(scriptEntityId: string) {
     },
 
     input: {
-      isPressed: (action: string) => !!currentInput.pressed[action],
-      justPressed: (action: string) => !!currentInput.justPressed[action],
-      justReleased: (action: string) => !!currentInput.justReleased[action],
-      getAxis: (action: string) => currentInput.axes[action] ?? 0,
+      isPressed: (action: string, player?: number) => !!slotInput(player).pressed[action],
+      justPressed: (action: string, player?: number) => !!slotInput(player).justPressed[action],
+      justReleased: (action: string, player?: number) => !!slotInput(player).justReleased[action],
+      getAxis: (action: string, player?: number) => slotInput(player).axes[action] ?? 0,
       isTouchDevice: () => {
         // Touch capability is derived from the main thread's init message.
         // Workers cannot reliably access navigator.maxTouchPoints — it may be

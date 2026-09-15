@@ -1722,6 +1722,10 @@
           "deadZone": {
             "type": "number",
             "description": "Dead zone for axis (default 0.1)"
+          },
+          "player": {
+            "type": "integer",
+            "description": "Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player."
           }
         },
         "required": [
@@ -1744,6 +1748,10 @@
           "actionName": {
             "type": "string",
             "description": "Name of the action to remove"
+          },
+          "player": {
+            "type": "integer",
+            "description": "Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player."
           }
         },
         "required": [
@@ -1757,7 +1765,7 @@
     },
     {
       "name": "set_input_preset",
-      "description": "Apply a built-in input preset (replaces all bindings)",
+      "description": "Merge a built-in input preset into a player's bindings (additive; the preset's own actions win on name collisions)",
       "category": "runtime",
       "parameters": {
         "type": "object",
@@ -1771,6 +1779,10 @@
               "racing"
             ],
             "description": "Preset name"
+          },
+          "player": {
+            "type": "integer",
+            "description": "Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player."
           }
         },
         "required": [
@@ -1784,7 +1796,7 @@
     },
     {
       "name": "get_input_bindings",
-      "description": "Get all current input action bindings and active preset",
+      "description": "Get all current input action bindings and active preset, including any additional local players' maps under `players`",
       "category": "query",
       "parameters": {
         "type": "object",
