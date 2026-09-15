@@ -54,6 +54,12 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   export_scene: async (_args, ctx): Promise<ExecutionResult> => {
+    // `saveScene` refuses while a scene load stands rejected (#10056). Reporting
+    // success for a refusal would have the assistant tell the user their work is
+    // saved when nothing was even asked of the engine.
+    if (ctx.store.sceneLoadError) {
+      return { success: false, error: `${ctx.store.sceneLoadError.reason} Nothing was exported.` };
+    }
     ctx.store.saveScene();
     return { success: true, result: { message: 'Scene export triggered' } };
   },

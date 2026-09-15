@@ -276,6 +276,157 @@ describe('sceneSlice', () => {
     });
   });
 
+  /**
+   * #10056. `loadScene` gained rejection paths that return WITHOUT dispatching,
+   * and the editor page discards its boolean — so a rejected scene left an empty
+   * viewport with the project's name on it, and the next save wrote that empty
+   * scene over the project's stored `sceneData`.
+   *
+   * The boolean alone cannot fix it: it is also false on a healthy cold open
+   * (the engine dispatcher mounts after the editor page), so gating the UI on it
+   * would error on every working open. `sceneLoadError` is the field that
+   * separates REJECTION from DEFERRAL, which is what the first tests pin.
+   */
+  describe('sceneLoadError (#10056)', () => {
+    /** A definition whose only child edge points back at itself — a cycle. */
+    const cyclicDefinition = {
+      id: 'cycle', name: 'Cycle', category: 'test', description: '',
+      snapshot: { entityType: 'cube', name: 'Cycle', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      children: [{ instanceId: 'edge', prefabId: 'cycle' }],
+    };
+    const cyclicScene = JSON.stringify({ entities: [], prefabDefinitions: [cyclicDefinition] });
+    // A definition dropped by `readPrefabDefinitions` for exceeding the 256 KiB
+    // cap (SEC bound), nested by a second, otherwise-valid definition. The drop
+    // is fail-SOFT on its own, but leaves `parentDefinition.children` pointing
+    // at an id the merge no longer has — a dangling reference the graph-level
+    // check in `prepareImportedDefinitions` fail-HARD rejects.
+    const oversizedDefinition = {
+      id: 'oversized_child', name: 'Oversized', category: 'test', description: 'x'.repeat(300 * 1024),
+      snapshot: { entityType: 'cube', name: 'Oversized', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    };
+    const parentDefinition = {
+      id: 'parent', name: 'Parent', category: 'test', description: '',
+      snapshot: { entityType: 'cube', name: 'Parent', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      children: [{ instanceId: 'edge', prefabId: 'oversized_child' }],
+    };
+    const danglingReferenceScene = JSON.stringify({
+      entities: [], prefabDefinitions: [oversizedDefinition, parentDefinition],
+    });
+    const healthyScene = JSON.stringify({ entities: [] });
+
+    it('starts null', () => {
+      expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    it('records a reason and dispatches nothing when the embedded prefab graph is invalid', () => {
+      const dispatcher = vi.fn();
+      setSceneDispatcher(dispatcher);
+
+      expect(store.getState().loadScene(cyclicScene)).toBe(false);
+
+      expect(dispatcher).not.toHaveBeenCalled();
+      expect(store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('could not be opened'),
+        at: expect.any(Number),
+      });
+    });
+
+    it('records a reason and dispatches nothing when a nested definition references one dropped for being oversized', () => {
+      const dispatcher = vi.fn();
+      setSceneDispatcher(dispatcher);
+
+      expect(store.getState().loadScene(danglingReferenceScene)).toBe(false);
+
+      expect(dispatcher).not.toHaveBeenCalled();
+      expect(store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('could not be opened'),
+        at: expect.any(Number),
+      });
+    });
+
+    it('records a reason when the engine itself rejects the load', () => {
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      expect(store.getState().loadScene(healthyScene)).toBe(false);
+
+      expect(store.getState().sceneLoadError?.reason).toContain('the engine refused');
+    });
+
+    it('leaves sceneLoadError null with no dispatcher, because a deferred load is not an error', () => {
+      // THE regression this field exists for: the editor page calls `loadScene`
+      // before `EditorLayout` mounts the engine, so every healthy cold open
+      // takes this branch and returns false. Treating that as a rejection would
+      // put an error banner on a working editor and block all of its saves.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      expect(store.getState().loadScene(healthyScene)).toBe(false);
+
+      expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    it('clears sceneLoadError once a scene loads successfully', () => {
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+      store.getState().loadScene(healthyScene);
+      expect(store.getState().sceneLoadError).not.toBeNull();
+
+      setSceneDispatcher(createMockDispatch());
+      expect(store.getState().loadScene(healthyScene)).toBe(true);
+
+      expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    it('clears sceneLoadError when the user starts a new scene', () => {
+      // A deliberately empty scene IS trustworthy, so `newScene` is a way back
+      // out of the save lockout rather than a dead end.
+      store.getState().loadScene(cyclicScene);
+      expect(store.getState().sceneLoadError).not.toBeNull();
+
+      expect(store.getState().newScene()).toBe(true);
+
+      expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    it('keeps sceneLoadError set when the engine also rejects the new scene', () => {
+      store.getState().loadScene(cyclicScene);
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'PendingCommands resource not initialized' })));
+
+      expect(store.getState().newScene()).toBe(false);
+
+      // The untrustworthy scene is still on screen, so the lockout must stand.
+      expect(store.getState().sceneLoadError).not.toBeNull();
+    });
+
+    it('refuses to export the engine scene while a load stands rejected', () => {
+      // The data guard. Every persistence consumer downstream of SCENE_EXPORTED
+      // (localStorage autosave, the IndexedDB cache, the sessionStorage panic
+      // backup, the cloud PUT) writes whatever JSON comes back, so not ASKING is
+      // what keeps the engine's empty scene off the project's stored sceneData.
+      store.getState().loadScene(cyclicScene);
+      const dispatcher = createMockDispatch();
+      setSceneDispatcher(dispatcher);
+
+      store.getState().saveScene('req_1');
+      store.getState().saveToCloud('req_2');
+
+      expect(dispatcher).not.toHaveBeenCalledWith('export_scene', expect.anything());
+    });
+
+    it('exports again once the rejection clears', () => {
+      store.getState().loadScene(cyclicScene);
+      const dispatcher = createMockDispatch();
+      setSceneDispatcher(dispatcher);
+      store.getState().saveScene('req_blocked');
+      expect(dispatcher).not.toHaveBeenCalledWith('export_scene', expect.anything());
+
+      expect(store.getState().loadScene(healthyScene)).toBe(true);
+      store.getState().saveScene('req_allowed');
+      store.getState().saveToCloud('req_allowed_cloud');
+
+      expect(dispatcher).toHaveBeenCalledWith('export_scene', { requestId: 'req_allowed' });
+      expect(dispatcher).toHaveBeenCalledWith('export_scene', { requestId: 'req_allowed_cloud' });
+    });
+  });
+
   describe('scene metadata setters', () => {
     it('should set scene name', () => {
       store.getState().setSceneName('My Scene');

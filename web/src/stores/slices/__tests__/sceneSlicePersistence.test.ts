@@ -269,4 +269,56 @@ describe('sceneSlice scene persistence', () => {
     await store.getState().switchScene(target!.id);
     expect(localStorage.getItem('forge-project-scenes')).toBe(before);
   });
+
+  /**
+   * #10056. These two capture the LIVE engine scene and write it into stored
+   * project data. After a rejected load the engine is not holding this
+   * project's scene, so capturing would persist an empty scene over the
+   * outgoing one — the same data loss as the cloud-save path, one storage layer
+   * down. `captureActiveScene` also uses an un-prefixed request id, so its
+   * export would additionally tick autosave and the panic backup.
+   */
+  describe('refusing to capture a rejected scene (#10056)', () => {
+    /** Reject a load so `sceneLoadError` is set, then restore `dispatch`. */
+    function rejectALoad(restore: (command: string, payload: unknown) => unknown) {
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected')))).toBe(false);
+      expect(store.getState().sceneLoadError).not.toBeNull();
+      setSceneDispatcher(restore as (command: string, payload: unknown) => void);
+    }
+
+    it('switchScene neither exports nor overwrites the outgoing scene', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { dispatch, calls } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+      const outgoingId = loadProjectScenes().activeSceneId;
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+
+      rejectALoad(dispatch);
+      calls.length = 0;
+
+      await store.getState().switchScene(target!.id);
+
+      expect(calls.filter((c) => c.command === 'export_scene')).toHaveLength(0);
+      expect(loadProjectScenes().scenes.find((s) => s.id === outgoingId)?.data).not.toEqual(LIVE_SCENE);
+      // The switch did not happen either — a half-applied switch would be worse.
+      expect(loadProjectScenes().activeSceneId).toBe(outgoingId);
+      expect(error).toHaveBeenCalled();
+      error.mockRestore();
+    });
+
+    it('createCheckpoint refuses and reports why instead of recording an empty scene', async () => {
+      const { dispatch, calls } = answeringDispatcher();
+      setSceneDispatcher(dispatch);
+      rejectALoad(dispatch);
+      calls.length = 0;
+
+      const checkpoint = await store.getState().createCheckpoint('before refactor');
+
+      expect(checkpoint).toBeNull();
+      expect(calls.filter((c) => c.command === 'export_scene')).toHaveLength(0);
+      expect(store.getState().checkpointError).toContain('No checkpoint was saved');
+    });
+  });
 });

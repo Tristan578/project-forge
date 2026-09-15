@@ -151,6 +151,18 @@ describe('export_scene', () => {
     expect((result.result as Record<string, unknown>).message).toBe('Scene export triggered');
     expect(store.saveScene).toHaveBeenCalled();
   });
+
+  it('reports a rejected scene load instead of claiming the export happened (#10056)', async () => {
+    // The store's `saveScene` refuses outright in this state, so returning
+    // success would have the assistant tell the user their work is saved when
+    // nothing was even asked of the engine.
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'export_scene', {}, {
+      sceneLoadError: { reason: 'This scene could not be opened: bad prefab data.', at: 1 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be opened');
+    expect(store.saveScene).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

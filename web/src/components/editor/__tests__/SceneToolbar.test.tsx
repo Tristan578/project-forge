@@ -77,6 +77,7 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
     saveToCloud: vi.fn(),
     setCloudSaveStatus: vi.fn(),
     setLastCloudSave: vi.fn(),
+    sceneLoadError: null,
     ...overrides,
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -332,6 +333,61 @@ describe('SceneToolbar', () => {
       });
 
       expect(newScene).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(showError)).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #10056. The store's `saveScene`/`saveToCloud` refuse outright while a scene
+   * load stands rejected, so the toolbar's job is to say WHY instead of leaving
+   * a button that visibly does nothing — and, for the cloud path, to avoid
+   * arming a pending-request ref for an export the store will never dispatch
+   * (which would strand the indicator on 'saving' forever).
+   */
+  describe('save refusal after a rejected scene load (#10056)', () => {
+    const sceneLoadError = { reason: 'This scene could not be opened: bad prefab data.', at: 1 };
+
+    it('refuses the Save button and names the reason', () => {
+      const saveScene = vi.fn();
+      mockEditorStore({ saveScene, sceneLoadError });
+      render(<SceneToolbar />);
+
+      screen.getByRole('button', { name: /save/i }).click();
+
+      expect(saveScene).not.toHaveBeenCalled();
+      expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('could not be opened'));
+    });
+
+    it('refuses a cloud save and never arms a pending export', () => {
+      const saveToCloud = vi.fn();
+      mockEditorStore({ saveToCloud, projectId: 'proj_1', sceneLoadError });
+      render(<SceneToolbar />);
+
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }));
+      });
+
+      expect(saveToCloud).not.toHaveBeenCalled();
+      expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('left untouched'));
+
+      // Nothing was armed, so an unrelated export landing afterwards must not
+      // be mistaken for this save's answer and PUT over the project.
+      act(() => {
+        window.dispatchEvent(new CustomEvent(SCENE_EXPORTED_EVENT, {
+          detail: { json: '{"entities":[]}', name: 'Empty' },
+        }));
+      });
+      expect(mockSaveSceneToCloud).not.toHaveBeenCalled();
+    });
+
+    it('saves normally once no rejection stands', () => {
+      const saveScene = vi.fn();
+      mockEditorStore({ saveScene, sceneLoadError: null });
+      render(<SceneToolbar />);
+
+      screen.getByRole('button', { name: /save/i }).click();
+
+      expect(saveScene).toHaveBeenCalledTimes(1);
       expect(vi.mocked(showError)).not.toHaveBeenCalled();
     });
   });

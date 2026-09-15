@@ -46,6 +46,11 @@ export function SceneToolbar() {
   const saveToCloud = useEditorStore((s) => s.saveToCloud);
   const setCloudSaveStatus = useEditorStore((s) => s.setCloudSaveStatus);
   const setLastCloudSave = useEditorStore((s) => s.setLastCloudSave);
+  // Set while the engine is holding a scene it REJECTED rather than this
+  // project's. `saveScene`/`saveToCloud` already refuse in that state, but a
+  // silent refusal from a button press reads as a broken button — this is what
+  // turns the store's data guard into an answer for the user (#10056).
+  const sceneLoadError = useEditorStore((s) => s.sceneLoadError);
 
   const { confirm, ConfirmDialogPortal } = useConfirmDialog();
   const [editing, setEditing] = useState(false);
@@ -90,13 +95,17 @@ export function SceneToolbar() {
   }, [projectId, setCloudSaveStatus, setLastCloudSave]);
 
   const handleSave = useCallback(() => {
+    if (sceneLoadError) {
+      showError(`${sceneLoadError.reason} Saving is disabled until a scene loads successfully.`);
+      return;
+    }
     const requestId = newSceneExportRequestId();
     pendingDownloadRef.current = requestId;
     // Stage the registry as it stands RIGHT NOW, before the async round trip —
     // not whatever it holds when the answer lands (scene.FR-1 N1 BUG-3).
     stagePrefabInstancesForExport(requestId, loadPrefabInstances());
     saveScene(requestId);
-  }, [saveScene]);
+  }, [saveScene, sceneLoadError]);
 
   /**
    * Trigger a cloud save. Records the request id so the matching
@@ -104,12 +113,19 @@ export function SceneToolbar() {
    */
   const handleCloudSave = useCallback(() => {
     if (!projectId) return;
+    if (sceneLoadError) {
+      // Same refusal as `handleSave`, and the consequential one: without it the
+      // pending-ref would be armed for an export the store never dispatches, so
+      // the cloud-save indicator would sit on 'saving' forever (#10056).
+      showError(`${sceneLoadError.reason} Your saved project was left untouched.`);
+      return;
+    }
     const requestId = newSceneExportRequestId();
     pendingCloudSaveRef.current = requestId;
     // Same request-time staging as `handleSave` — see its comment.
     stagePrefabInstancesForExport(requestId, loadPrefabInstances());
     saveToCloud(requestId);
-  }, [projectId, saveToCloud]);
+  }, [projectId, saveToCloud, sceneLoadError]);
 
   const handleLoad = useCallback(async () => {
     const json = await openSceneFilePicker();

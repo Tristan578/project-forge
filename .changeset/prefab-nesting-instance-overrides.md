@@ -8,3 +8,5 @@ Preserve saved prefab link metadata and its source definitions during scene chan
 The Prefabs panel can inspect saved links and overridden field names. Linked scene placement, nested entity creation, and propagation are unavailable; their controls are disabled and compatibility commands return explicit errors. Existing flat prefab copies remain available. This change does not complete the linked prefab engine workflow tracked in #9811.
 
 Tab navigation now moves keyboard focus with Arrow, Home, and End keys while preventing page scrolling. The Prefabs panel uses labeled, themed controls with readable tab states and mobile touch targets.
+
+A scene the editor cannot open now says so instead of leaving a blank editor, and every save path — manual save, cloud save, autosave, checkpoints, scene switch and duplicate, and game export — refuses while that rejection stands, so an empty editor can no longer overwrite the project it failed to open.

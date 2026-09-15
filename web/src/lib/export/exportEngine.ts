@@ -116,6 +116,15 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
 }
 
 async function getSceneData(signal?: AbortSignal): Promise<unknown> {
+  // Checked BEFORE any listener is armed. `store.saveScene` below refuses while
+  // a scene load stands rejected (#10056), so without this the export would sit
+  // through the full 5 s timeout and then blame the engine for not responding —
+  // and worse, fall through to `buildSceneFromStore()` and ship a game built
+  // from a scene the engine never accepted.
+  const sceneLoadError = useEditorStore.getState().sceneLoadError;
+  if (sceneLoadError) {
+    throw new Error(`${sceneLoadError.reason} Load the scene successfully before exporting.`);
+  }
   return new Promise((resolve, reject) => {
     // eslint-disable-next-line prefer-const -- timeoutId must be declared before cleanup but assigned after
     let timeoutId: ReturnType<typeof setTimeout>;

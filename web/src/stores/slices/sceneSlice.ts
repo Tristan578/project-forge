@@ -47,6 +47,39 @@ function toSceneList(project: ProjectScenes) {
   return project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene }));
 }
 
+/**
+ * A scene the editor asked the engine to load and that was REJECTED — the
+ * viewport therefore does not show the scene the caller asked for (#10056).
+ *
+ * Deliberately NOT the same fact as `loadScene` returning `false`: that boolean
+ * conflates rejection with *deferral*, because `loadScene` also returns false
+ * when there is no dispatcher yet (the engine mounts after the editor page, so
+ * a healthy cold open takes that branch every time). Only the rejection branches
+ * set this, which is what makes it safe to gate saving and to show an error on.
+ */
+export interface SceneLoadError {
+  /** User-facing sentence naming what went wrong. Never blank. */
+  reason: string;
+  /** `Date.now()` at rejection, so a repeat rejection is a distinguishable value. */
+  at: number;
+}
+
+/**
+ * The scene JSON could not be turned into prefab state — malformed or
+ * non-array `prefabDefinitions`, or a definition graph with a missing
+ * reference or a cycle (`mergeImportedPrefabDefinitions` fail-hard rejects
+ * those; individual malformed entries are dropped fail-soft before it).
+ */
+const PREFAB_LOAD_REJECTION =
+  'This scene could not be opened: its prefab data is invalid or its prefab references form a cycle.';
+
+/** The engine itself answered `{ success: false }` — e.g. the scene JSON is too large. */
+const ENGINE_LOAD_REJECTION =
+  'This scene could not be opened: the engine refused to load it.';
+
+/** The dispatch threw. The message is appended so the cause is not swallowed. */
+const ENGINE_LOAD_THREW = 'This scene could not be opened: the engine failed while loading it.';
+
 export interface SceneSlice {
   sceneName: string;
   sceneModified: boolean;
@@ -71,6 +104,19 @@ export interface SceneSlice {
   checkpointError: string | null;
   cloudSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   lastCloudSave: string | null;
+  /**
+   * Set while the scene the editor last asked for was REJECTED, so what the
+   * engine holds is NOT this project's scene; null whenever the viewport is
+   * trustworthy. See {@link SceneLoadError} for why this exists alongside
+   * `loadScene`'s boolean rather than instead of it.
+   *
+   * Two consumers, and both are load-bearing: `SceneLoadErrorNotice` renders
+   * the rejection instead of leaving an empty viewport unexplained, and every
+   * save path refuses while it is set — otherwise the next Ctrl+S, cloud save
+   * or autosave tick would serialize the engine's (empty) scene over the
+   * project's stored `sceneData` (#10056).
+   */
+  sceneLoadError: SceneLoadError | null;
 
   /**
    * Ask the engine to serialize the current scene.
@@ -80,6 +126,10 @@ export interface SceneSlice {
    * on that event so a listener can tell its own answer from an export someone
    * else triggered (PF-1103). Callers that just want the scene persisted (the
    * debounced autosave, the chat tool) can omit it.
+   *
+   * No-ops while {@link sceneLoadError} is set: the engine is not holding this
+   * project's scene, so exporting it would write an empty scene over the stored
+   * one (#10056).
    */
   saveScene: (requestId?: string) => void;
   /**
@@ -89,9 +139,18 @@ export interface SceneSlice {
    * validation or engine dispatch rejects the load, in which case the prefab
    * registry (and any merged definitions) are rolled back to what they were
    * before this call.
+   *
+   * A `false` return is NOT by itself an error: it also means "no dispatcher
+   * yet", which is the normal cold-open path. {@link sceneLoadError} is the
+   * field that distinguishes a rejection, and only the rejection branches set
+   * it. A `true` return clears it.
    */
   loadScene: (json: string) => boolean;
-  /** Return false when no engine is available or it rejects the new scene. */
+  /**
+   * Return false when no engine is available or it rejects the new scene.
+   * A successful new scene clears {@link sceneLoadError}: an empty scene the
+   * user asked for deliberately IS trustworthy, so saving is allowed again.
+   */
   newScene: () => boolean;
   setSceneName: (name: string) => void;
   setSceneModified: (modified: boolean) => void;
@@ -413,8 +472,16 @@ export const createSceneSlice: StateCreator<
   checkpointError: null,
   cloudSaveStatus: 'idle',
   lastCloudSave: null,
+  sceneLoadError: null,
 
   saveScene: (requestId) => {
+    // A rejected load leaves the engine holding something that is NOT this
+    // project's scene. Every persistence consumer downstream of the resulting
+    // SCENE_EXPORTED event (localStorage autosave, the IndexedDB cache, the
+    // sessionStorage panic backup, the cloud PUT) writes whatever JSON comes
+    // back, so refusing to ASK is what keeps an empty scene from overwriting
+    // the project's stored `sceneData` (#10056).
+    if (get().sceneLoadError) return;
     // Built conditionally rather than `{ requestId }`: the engine validates a
     // `requestId` key that is present, and an explicit `undefined` can survive
     // as `null` depending on how the payload is marshalled.
@@ -430,6 +497,12 @@ export const createSceneSlice: StateCreator<
     // emits SCENE_LOADED, so a stash written here would sit until whatever
     // scene loads next claimed another scene's sounds. Staging only alongside
     // the dispatch keeps the stash and the pending load a single fact.
+    //
+    // `sceneLoadError` is deliberately NOT set here. No dispatcher means the
+    // load is DEFERRED, not rejected — the editor page calls this before
+    // `EditorLayout` (and therefore `useEngineEvents`' `setCommandDispatcher`)
+    // has mounted, so every healthy cold open takes this branch. Flagging it
+    // would put an error banner on a working editor and block its saves.
     if (!dispatchCommand) return false;
     // Restore the scene's linked prefab instances (and merge its embedded
     // definitions) into the prefab store before the engine load. Done
@@ -437,7 +510,10 @@ export const createSceneSlice: StateCreator<
     // dispatcher the engine never loads, so mutating the store here would
     // desync it from what is actually rendered.
     const snapshot = restorePrefabInstances(json);
-    if (!snapshot) return false;
+    if (!snapshot) {
+      set({ sceneLoadError: { reason: PREFAB_LOAD_REJECTION, at: Date.now() } });
+      return false;
+    }
     let accepted: boolean;
     try {
       accepted = dispatchSceneLoad(json);
@@ -450,6 +526,12 @@ export const createSceneSlice: StateCreator<
       // into the boolean contract — callers that need to distinguish it
       // (`restoreCheckpoint`'s own recovery flow) rely on exactly this.
       rollbackPrefabState(snapshot);
+      set({
+        sceneLoadError: {
+          reason: `${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`,
+          at: Date.now(),
+        },
+      });
       throw error;
     }
     if (!accepted) {
@@ -461,10 +543,14 @@ export const createSceneSlice: StateCreator<
       // and the next save would persist the wrong instances onto the scene
       // that is actually still active.
       rollbackPrefabState(snapshot);
+      set({ sceneLoadError: { reason: ENGINE_LOAD_REJECTION, at: Date.now() } });
       return false;
     }
     // A rejected request must not invalidate an unrelated recovery operation.
-    set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1 }));
+    // Clearing `sceneLoadError` here is the ONLY way saving comes back after a
+    // rejection: the engine has now accepted a scene, so serializing it is
+    // once again describing the project rather than overwriting it.
+    set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
     return true;
   },
   newScene: () => {
@@ -497,7 +583,11 @@ export const createSceneSlice: StateCreator<
         savePrefabInstancesToStorage(previousInstances);
         return false;
       }
-      set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1 }));
+      // An empty scene the user asked for deliberately IS a trustworthy scene,
+      // so this is a recovery route out of a rejected load: saving is allowed
+      // again from here (#10056). A REJECTED new_scene leaves any existing
+      // `sceneLoadError` standing, because the untrustworthy scene is still up.
+      set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
       return true;
     } catch (error) {
       rollbackAudio();
@@ -586,6 +676,9 @@ export const createSceneSlice: StateCreator<
     set({ projectId: id, projectRevision: get().projectRevision + 1, scenes: [], activeSceneId: null, checkpointError: null });
   },
   saveToCloud: (requestId) => {
+    // Same refusal as `saveScene`, and the one that matters most: this path
+    // PUTs straight over the project's stored `sceneData` (#10056).
+    if (get().sceneLoadError) return;
     // Cloud save is orchestrated externally via SceneToolbar which listens for
     // the forge:scene-exported window event to obtain the scene JSON. This
     // action triggers the engine export; SceneToolbar is responsible for calling
@@ -706,6 +799,12 @@ export const createSceneSlice: StateCreator<
       };
     }
 
+    // The engine has adopted a scene the editor built, so whatever rejection
+    // preceded this no longer describes the viewport — same clear as
+    // `loadScene`'s accepted path, and the reason a template load is a way out
+    // of a rejected scene rather than a banner that never leaves (#10056).
+    set({ sceneLoadError: null });
+
     // Only now that the entities exist can anything be attached to them.
     // Scripts and game components go through the store's own actions rather
     // than riding inside the scene JSON: the engine only re-emits either one
@@ -751,6 +850,16 @@ export const createSceneSlice: StateCreator<
   // — switching away discarded the outgoing scene's work AND loaded nothing back.
   switchScene: async (sceneId) => {
     if (!dispatchCommand) return;
+    // Capturing here would export the engine's scene and `saveCurrentSceneData`
+    // it over the OUTGOING scene's stored data — and `captureActiveScene` uses
+    // an un-prefixed request id, so the export also ticks autosave and the
+    // panic backup. After a rejected load that scene is not the project's, so
+    // refuse rather than persist it (#10056).
+    const switchLoadError = get().sceneLoadError;
+    if (switchLoadError) {
+      console.error(`[Scenes] Refusing to switch scenes: ${switchLoadError.reason}`);
+      return;
+    }
     const captured = withPrefabInstances(await captureActiveScene(requestSceneExport));
     if (!dispatchCommand) return;
     const project = withCapturedScene(loadProjectScenes(get().projectId), captured);
@@ -790,6 +899,12 @@ export const createSceneSlice: StateCreator<
   },
   duplicateScene: async (sceneId) => {
     if (!dispatchCommand) return;
+    // Same refusal as `switchScene` — see its comment (#10056).
+    const duplicateLoadError = get().sceneLoadError;
+    if (duplicateLoadError) {
+      console.error(`[Scenes] Refusing to duplicate: ${duplicateLoadError.reason}`);
+      return;
+    }
     const captured = withPrefabInstances(await captureActiveScene(requestSceneExport));
     if (!dispatchCommand) return;
     const project = withCapturedScene(loadProjectScenes(get().projectId), captured);
@@ -811,6 +926,14 @@ export const createSceneSlice: StateCreator<
   // AI paths persist identical state.
   createCheckpoint: async (label) => {
     if (get().checkpointBusy) return null;
+    // A checkpoint of a scene the engine never accepted would record an empty
+    // scene as this project's recoverable state — the opposite of a safety net
+    // (#10056). Surfaced through the existing `checkpointError` channel.
+    const loadError = get().sceneLoadError;
+    if (loadError) {
+      set({ checkpointError: `${loadError.reason} No checkpoint was saved.` });
+      return null;
+    }
     const { projectId, projectRevision, sceneOperationRevision, activeSceneId } = get();
     const isCurrent = () => get().projectId === projectId && get().projectRevision === projectRevision && get().sceneOperationRevision === sceneOperationRevision && get().activeSceneId === activeSceneId;
     set({ checkpointBusy: true, checkpointError: null });
