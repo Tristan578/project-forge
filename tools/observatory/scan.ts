@@ -472,17 +472,19 @@ function summarizeByTopDir(files: string[]): Array<{ prefix: string; count: numb
 
 /** Escape data as Markdown text, keeping control characters visible on one line. */
 function reportLiteral(value: string): string {
-  return value
-    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, (character) => {
-      if (character === '\n') return '\\n';
-      if (character === '\r') return '\\r';
-      if (character === '\t') return '\\t';
-      return '\\u' + character.charCodeAt(0).toString(16).padStart(4, '0');
-    })
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/[\\\x60*_{}\[\]()#+.!|~-]/g, '\\$&');
+  const controls = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/;
+  return value.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff&<>\\\x60*_{}\[\]()#+.!|~-]/g, (character) => {
+    if (controls.test(character)) {
+      const visible = character === '\n' ? 'n' : character === '\r' ? 'r'
+        : character === '\t' ? 't' : 'u' + character.charCodeAt(0).toString(16).padStart(4, '0');
+      // Two source backslashes render one literal backslash in Markdown.
+      return '\\\\' + visible;
+    }
+    if (character === '&') return '&amp;';
+    if (character === '<') return '&lt;';
+    if (character === '>') return '&gt;';
+    return '\\' + character;
+  });
 }
 
 /** Every structural gap gets a reference and a concrete repair in the report. */
