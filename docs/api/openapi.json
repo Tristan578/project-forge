@@ -1921,7 +1921,7 @@
       "post": {
         "tags": ["Asset Generation"],
         "summary": "Generate background music",
-        "description": "Starts an async music generation job. Returns a `jobId` to poll at `/api/generate/music/status`. Currently declared unavailable (#9522: the Suno provider has no public API and music is moving to ElevenLabs): every authenticated request is refused with 503 `SERVICE_UNAVAILABLE` immediately after authentication — before rate limits, validation, key resolution or any token deduction. `details` carries `{ capability, issue }`.",
+        "description": "Synchronous — returns audio data immediately (no polling required). Uses ElevenLabs `/v1/music` (#9522: replaced Suno). One key, `PLATFORM_ELEVENLABS_KEY`, now serves sfx, voice and music.",
         "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
@@ -1940,18 +1940,24 @@
           }
         },
         "responses": {
-          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "402": { "$ref": "#/components/responses/PaymentRequired" },
-          "422": { "description": "Validation error" },
-          "503": {
-            "description": "Capability declared unavailable (no provisionable provider). `code` is `SERVICE_UNAVAILABLE`, `error` is the user-facing reason, and `details.issue` is the tracking issue. Nothing is charged.",
+          "201": {
+            "description": "Generated audio",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "audioBase64": { "type": "string", "description": "Base64-encoded MP3 audio data" },
+                    "durationSeconds": { "type": "number" },
+                    "provider": { "type": "string", "example": "elevenlabs" }
+                  }
+                }
               }
             }
-          }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Validation error" }
         }
       }
     },
@@ -2215,22 +2221,22 @@
       }
     },
     "/api/keys/{provider}": {
-      "parameters": [
-        {
-          "name": "provider",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs", "suno"]
-          }
-        }
-      ],
       "put": {
         "tags": ["Keys"],
         "summary": "Store or update a BYOK provider key",
-        "description": "Encrypts and stores an API key for the specified provider. Requires hobbyist tier or above.",
+        "description": "Encrypts and stores an API key for the specified provider. Requires hobbyist tier or above. Retired providers (Suno) can no longer be added, so this enum omits them — it mirrors BYOK_PROVIDERS in web/src/lib/config/providers.ts.",
         "security": [{ "ClerkSession": [] }],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs"]
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2269,7 +2275,19 @@
       "delete": {
         "tags": ["Keys"],
         "summary": "Remove a BYOK provider key",
+        "description": "Removes a stored BYOK key. Retired providers (Suno) can no longer be added but a stale stored key must stay removable, so this enum retains them — it mirrors REMOVABLE_BYOK_PROVIDERS in web/src/lib/config/providers.ts.",
         "security": [{ "ClerkSession": [] }],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs", "suno"]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Key removed",

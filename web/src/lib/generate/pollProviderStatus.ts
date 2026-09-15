@@ -21,9 +21,19 @@
  */
 
 import { MeshyClient } from '@/lib/generate/meshyClient';
-import { SunoClient } from '@/lib/generate/sunoClient';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+
+/**
+ * Terminal message for a music-job poll (PF-1301 / #9522). Music routes to
+ * ElevenLabs `/v1/music`, which returns audio inline, so there is no async task
+ * to poll: `POST /api/generate/music` resolves synchronously. If a music job is
+ * ever polled anyway, both this poller and `/api/generate/music/status` return
+ * this exact terminal message — the parity suite pins them together.
+ */
+export const MUSIC_SYNC_TERMINAL_MESSAGE = withRetryGuidance(
+  'Music generation completes inline and has no job to poll',
+);
 
 /**
  * Async generation types that have a status route and a `generation_jobs` row.
@@ -98,7 +108,7 @@ export async function pollProviderStatus(
     case 'skybox':
       return pollMeshySkybox(providerJobId, apiKey);
     case 'music':
-      return pollSuno(providerJobId, apiKey);
+      return pollElevenLabsMusic();
     case 'sprite':
     case 'sprite_sheet':
     case 'tileset':
@@ -165,23 +175,19 @@ async function pollMeshySkybox(jobId: string, apiKey: string): Promise<Normalize
   return { status: 'pending', progress: status.progress, succeededButEmpty: false };
 }
 
-// --- music (Suno) — mirrors generate/music/status/route.ts ---
-async function pollSuno(jobId: string, apiKey: string): Promise<NormalizedProviderStatus> {
-  const status = await new SunoClient({ apiKey }).getStatus(jobId);
-
-  if (status.status === 'completed' || status.status === 'succeeded') {
-    if (status.audioUrl) {
-      return { status: 'completed', progress: status.progress, resultUrl: status.audioUrl, succeededButEmpty: false };
-    }
-    return { status: 'failed', progress: status.progress, succeededButEmpty: true, errorMessage: withRetryGuidance('Music generation produced no audio') };
-  }
-  if (status.status === 'failed' || status.status === 'error') {
-    return { status: 'failed', progress: status.progress, succeededButEmpty: false, errorMessage: withRetryGuidance('Music generation failed') };
-  }
-  if (status.status === 'processing' || status.status === 'generating') {
-    return { status: 'processing', progress: status.progress, succeededButEmpty: false };
-  }
-  return { status: 'pending', progress: status.progress, succeededButEmpty: false };
+// --- music (ElevenLabs) — mirrors generate/music/status/route.ts ---
+// ElevenLabs `/v1/music` returns audio inline (no async task), so the generate
+// route resolves synchronously and nothing enqueues a music job for polling. A
+// poll reaching here is defensive: report a single terminal `failed` state so a
+// phantom job is refunded rather than left in flight. Takes no provider call —
+// there is no music status endpoint to hit.
+function pollElevenLabsMusic(): NormalizedProviderStatus {
+  return {
+    status: 'failed',
+    progress: 0,
+    succeededButEmpty: false,
+    errorMessage: MUSIC_SYNC_TERMINAL_MESSAGE,
+  };
 }
 
 // --- sprite / sprite_sheet / tileset (Replicate SDXL) — mirrors the three sprite status routes ---

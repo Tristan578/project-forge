@@ -47,11 +47,10 @@ describe('buildPlan', () => {
     );
   });
 
-  it('routes music as unavailable regardless of keys', () => {
-    const r = rows({ PLATFORM_SUNO_KEY: 'x' });
-    expect(r.music.route).toBe('unavailable');
-    expect(r.music.configured).toBe(false);
-    expect(r.music.detail).toContain('#9522');
+  it('routes music through the platform ElevenLabs key (#9522)', () => {
+    const r = rows({ PLATFORM_ELEVENLABS_KEY: 'x' });
+    expect(r.music.route).toBe('platform-key');
+    expect(r.music.configured).toBe(true);
   });
 
   it('routes chat through the gateway when AI_GATEWAY_API_KEY is set', () => {
@@ -126,8 +125,9 @@ describe('PROVIDER_PROBES', () => {
   });
 
   it('has no probe for providers that can never be served by a platform key', () => {
-    expect(PROVIDER_PROBES.suno).toBeNull();
+    // Suno was removed entirely (#9522); hyper3d has no credit-free probe.
     expect(PROVIDER_PROBES.hyper3d).toBeNull();
+    expect(Object.keys(PROVIDER_PROBES)).not.toContain('suno');
   });
 
   it('probes the gateway credits endpoint with Bearer auth', () => {
@@ -214,12 +214,14 @@ describe('runVerification', () => {
     expect(model3d?.detail).toContain('401');
   });
 
-  it('reports missing without a request when the key is absent, and unavailable for music', async () => {
+  it('reports missing without a request when the key is absent, music included (#9522)', async () => {
     const fetchImpl = okFetch();
     const results = await runVerification(buildPlan({}), { fetchImpl, env: {} });
     const byCap = Object.fromEntries(results.map((r) => [r.capability, r]));
     expect(byCap.model3d.status).toBe('missing');
-    expect(byCap.music.status).toBe('unavailable');
+    // #9522: music now shares the ElevenLabs platform key, so with no key it is
+    // 'missing' like the other platform capabilities, not 'unavailable'.
+    expect(byCap.music.status).toBe('missing');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

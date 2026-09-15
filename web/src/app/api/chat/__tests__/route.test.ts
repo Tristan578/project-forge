@@ -871,24 +871,27 @@ describe('POST /api/chat', () => {
       expect(blocks[1]?.text).toContain('## Scene\nEmpty');
     });
 
-    it('restores the soundtrack instruction once music is no longer declared unavailable (#9117)', async () => {
-      // The available branch of the MUSIC_* prompt clauses: what the prompt
-      // reverts to when #9522 removes `music` from UNAVAILABLE_CAPABILITIES.
+    it('withholds the soundtrack instruction while music is declared unavailable (#9117)', async () => {
+      // The unavailable branch of the MUSIC_* prompt clauses. #9522 made music
+      // available by default (the #8546 test below pins that branch), so this
+      // exercises the OTHER branch by declaring generate_music unavailable —
+      // the machinery must still steer the model away from a withheld tool if a
+      // future capability is retired.
       vi.doMock('@/lib/config/providers', async (importOriginal) => ({
         ...(await importOriginal<typeof import('@/lib/config/providers')>()),
-        isCommandAvailable: () => true,
+        isCommandAvailable: (name: string) => name !== 'generate_music',
       }));
       vi.resetModules();
       try {
-        const { POST: postWithMusic } = await import('../route');
-        const res = await postWithMusic(makeRequest(validBody()));
+        const { POST: postWithoutMusic } = await import('../route');
+        const res = await postWithoutMusic(makeRequest(validBody()));
         await res.text();
         const call = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
         const blocks = (call?.instructions ?? []) as Array<{ text: string }>;
         const basePrompt = blocks[0]?.text ?? '';
-        expect(basePrompt).toContain('generate_music (`targetEntityId`');
-        expect(basePrompt).toMatch(/Soundtrack\*\* - generate_music/);
-        expect(basePrompt).not.toMatch(/do not call generate_music/);
+        expect(basePrompt).toMatch(/do not call generate_music/);
+        expect(basePrompt).not.toContain('generate_music (`targetEntityId`');
+        expect(basePrompt).not.toMatch(/Soundtrack\*\* - generate_music/);
       } finally {
         vi.doUnmock('@/lib/config/providers');
         vi.resetModules();
@@ -909,13 +912,14 @@ describe('POST /api/chat', () => {
       // Generation tools are named so the model knows to call them.
       expect(basePrompt).toContain('generate_3d_model');
       expect(basePrompt).toContain('generate_texture');
-      // #9117: music is declared unavailable, so the prompt must tell the model
-      // NOT to call generate_music (the tool is withheld from its set) and must
-      // not carry the original call instruction — a bare `toContain` would
-      // pass on the negation and read as the opposite (lesson 11).
-      expect(basePrompt).toMatch(/do not call generate_music/);
-      expect(basePrompt).not.toContain('generate_music (`targetEntityId`');
-      expect(basePrompt).not.toMatch(/Soundtrack\*\* - generate_music/);
+      // #9522: music now routes to ElevenLabs and is offered by default, so the
+      // prompt names generate_music in the soundtrack step and carries the
+      // spatial-source call instruction — and must NOT tell the model to avoid
+      // it. A bare `toContain` would pass on the negation and read as the
+      // opposite (lesson 11), so the soundtrack step is matched positively.
+      expect(basePrompt).toMatch(/Soundtrack\*\* - generate_music/);
+      expect(basePrompt).toContain('generate_music (`targetEntityId`');
+      expect(basePrompt).not.toMatch(/do not call generate_music/);
       expect(basePrompt).toContain('generate_skybox');
       // The entity-id pattern that wires a generated asset onto a placeholder.
       expect(basePrompt).toContain('targetEntityId');

@@ -76,16 +76,15 @@ describe('GET /api/capabilities availability', () => {
     vi.unstubAllEnvs();
   });
 
-  it('reports music unavailable even when PLATFORM_SUNO_KEY is set, with the reason as hint and the issue separate', async () => {
-    vi.stubEnv('PLATFORM_SUNO_KEY', 'suno_fake');
+  it('reports music available when PLATFORM_ELEVENLABS_KEY is set (#9522: moved off Suno)', async () => {
+    vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'el_fake');
     const { body } = await call();
     const music = status(body, 'music');
-    expect(music.available).toBe(false);
-    expect(music.unprovisionable).toBe(true);
-    expect(music.issue).toBe(9522);
-    expect(music.hint).toMatch(/not available yet/i);
-    expect(music.hint).not.toMatch(/#\d+|PLATFORM_|Suno/);
-    expect(body.unavailable).toContain('music');
+    expect(music.available).toBe(true);
+    // No longer unprovisionable — it shares ElevenLabs with sfx/voice.
+    expect(music.unprovisionable).toBeFalsy();
+    expect(music.issue).toBeUndefined();
+    expect(body.unavailable ?? []).not.toContain('music');
   });
 
   it('resolves the Clerk id to the internal user id before querying BYOK keys', async () => {
@@ -107,7 +106,7 @@ describe('GET /api/capabilities availability', () => {
     expect(status(body, 'model3d').available).toBe(false);
   });
 
-  it('does not let a BYOK key override an unprovisionable capability', async () => {
+  it('a retired-provider (Suno) BYOK key does not enable music — it needs ElevenLabs now (#9522)', async () => {
     signedInWithByok(['suno']);
     const { body } = await call();
     expect(status(body, 'music').available).toBe(false);
@@ -230,7 +229,8 @@ describe('GET /api/capabilities availability', () => {
   it.each([
     ['sfx', true],
     ['model3d', true],
-    ['music', undefined],
+    // #9522: music now resolves to ElevenLabs (a BYOK provider) like sfx.
+    ['music', true],
     ['sprite', false],
     ['image', false],
     ['bg_removal', false],
