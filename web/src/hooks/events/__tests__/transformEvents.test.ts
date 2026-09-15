@@ -23,6 +23,10 @@ import { useEditorStore } from '@/stores/editorStore';
 import { releaseEntityAudio } from '@/lib/audio/entityAudioGraph';
 import { handleTransformEvent } from '../transformEvents';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import {
+  readEntityObservation,
+  clearEntityObservations,
+} from '@/lib/game-creation/engineObservation';
 
 describe('handleTransformEvent', () => {
   let actions: ReturnType<typeof createMockActions>;
@@ -43,6 +47,27 @@ describe('handleTransformEvent', () => {
       mockSetGet.get
     );
     expect(result).toBe(false);
+  });
+
+  // #9899: the answer to a `get_entity_details` query lands here and feeds the
+  // confirmed-effect cache the orchestrator's `observeEntity` reads.
+  describe('QUERY_ENTITY_DETAILS', () => {
+    beforeEach(() => clearEntityObservations());
+
+    it('records the queried entity into the observation cache and consumes the event', () => {
+      const result = handleTransformEvent(
+        'QUERY_ENTITY_DETAILS',
+        { entityId: 'crate-1', position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(readEntityObservation('crate-1')).toEqual({
+        entityId: 'crate-1',
+        transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+    });
   });
 
   describe('SELECTION_CHANGED', () => {

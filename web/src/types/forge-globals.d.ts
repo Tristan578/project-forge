@@ -1,19 +1,19 @@
 /**
  * TypeScript declarations for SpawnForge window globals.
  *
- * The store-surface globals (`__EDITOR_STORE`, `__CHAT_STORE`, `__FORGE_DISPATCH`,
- * `__FORGE_SET_DISPATCH`) are injected by EditorLayout.tsx ONLY when E2E hooks are enabled (see
+ * Store, dispatch, replay and observation hooks are injected by EditorLayout.tsx
+ * ONLY when E2E hooks are enabled (see
  * `e2eHooksEnabled` in `@/lib/e2e/testHooks`): always in dev/test, and in a
  * production build ONLY when `NEXT_PUBLIC_E2E_HOOKS=true` is set at build time
  * (the strict interactive-journey CI gate). A normal production deploy never sets
- * that flag, so those four are never attached to window in shipped builds.
+ * that flag, so these hooks are never attached to window in shipped builds.
  *
  * `__REACT_HYDRATED`, `__FORGE_ENGINE_READY`, and `__SKIP_ENGINE` are NOT gated by
  * `e2eHooksEnabled()` — they carry no sensitive surface and are set unconditionally
  * (see the per-field notes below).
  *
- * Security: A2 — explicit declare global prevents accidental usage in
- * production code paths; TypeScript strict mode will catch missing guards.
+ * Optional declarations describe hook availability. Runtime installation and
+ * access checks enforce the boundary; TypeScript declarations do not gate access.
  */
 
 declare global {
@@ -99,6 +99,57 @@ declare global {
      * engine loading. Used by @ui E2E tests that don't need the engine.
      */
     __SKIP_ENGINE?: boolean;
+
+    /**
+     * Feeds a `get_entity_details` answer into the confirmed spawn/transform
+     * observation cache (#9899, `lib/game-creation/engineObservation.ts`).
+     * Available only when E2E hooks are enabled (`e2eHooksEnabled()`).
+     *
+     * Real engine builds populate that cache asynchronously, off the
+     * `QUERY_ENTITY_DETAILS` event `useEngineEvents` receives from
+     * `wasmModule.set_event_callback` — a callback the strict journey gate
+     * never registers, since it builds no WASM and installs a recording
+     * stand-in through `__FORGE_SET_DISPATCH` instead. Without this, every
+     * `entity_setup` step's confirmed-observation poll (`observeEngineEffect`)
+     * runs out its 5s deadline against an always-empty cache and the step
+     * reports `EFFECT_TIMED_OUT` — a real gate failure caused by the stand-in
+     * being unable to answer a query, not by the pipeline. This lets a
+     * stand-in dispatcher answer `get_entity_details` the same way a real
+     * engine's event eventually would.
+     *
+     * @param payload - Same shape as the engine's `QUERY_ENTITY_DETAILS`
+     *                  payload: `{ entityId, position?, rotation?, scale? }`.
+     */
+    __FORGE_RECORD_ENTITY_OBSERVATION?: (payload: {
+      entityId: string;
+      position?: [number, number, number];
+      rotation?: [number, number, number];
+      scale?: [number, number, number];
+    }) => void;
+
+    /**
+     * Reads the confirmed spawn/transform observation cache back (#9899,
+     * `lib/game-creation/engineObservation.ts`) — the mirror of
+     * `__FORGE_RECORD_ENTITY_OBSERVATION`. Available only when E2E hooks are
+     * enabled (`e2eHooksEnabled()`).
+     *
+     * Returns the same typed `ObservedEntity` the orchestrator's `observeEntity`
+     * reads, or `undefined` while the engine has answered nothing for `entityId`
+     * (its own "does not exist yet" signal). Lets an `@engine` spec assert on
+     * the confirmation the slice actually adds — the cached observation fed by
+     * the real `QUERY_ENTITY_DETAILS` event — rather than an adjacent store
+     * field such as `primaryTransform`.
+     *
+     * @param entityId - The id to read the latest observation for.
+     */
+    __FORGE_READ_ENTITY_OBSERVATION?: (entityId: string) => {
+      entityId: string;
+      transform?: {
+        position: [number, number, number];
+        rotation: [number, number, number];
+        scale: [number, number, number];
+      };
+    } | undefined;
   }
 }
 
