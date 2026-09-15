@@ -178,6 +178,53 @@ describe('sceneSlice', () => {
       );
       expect(getPrefab(local.id)?.name).toBe('LocalName');
     });
+
+    it('rolls back an embedded definition too when the engine rejects the load', () => {
+      // `mergeImportedPrefabDefinitions` is not itself part of the rejected
+      // dispatch — without rolling it back, a rejected scene's definitions
+      // would install into the library permanently even though the engine
+      // never actually loaded that scene (scene.FR-1 N1 BUG-5).
+      expect(getPrefab('prefab_rejected')).toBeUndefined();
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabDefinitions: [{
+            id: 'prefab_rejected', name: 'Rejected', category: 'cat', description: '',
+            snapshot: { entityType: 'cube', name: 'Rejected', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          }],
+        })
+      );
+
+      expect(getPrefab('prefab_rejected')).toBeUndefined();
+    });
+
+    it('newScene restores the PREVIOUS registry when the engine rejects new_scene', () => {
+      // scene.FR-1 N1 BUG-4: `new_scene` can fail too (e.g. the engine's
+      // PendingCommands resource is not yet initialized) — a failed dispatch
+      // must not still clear the registry describing the UNCHANGED scene.
+      const previous = [{ instanceId: 'pfi_prev', prefabId: 'prev', overrides: {} }];
+      savePrefabInstancesToStorage(previous);
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'PendingCommands resource not initialized' })));
+
+      store.getState().newScene();
+
+      expect(loadPrefabInstances()).toEqual(previous);
+    });
+
+    it('newScene leaves the registry untouched when there is no dispatcher at all', () => {
+      // No engine means the scene never actually changed — clearing here would
+      // describe a scene that is still showing its old instances.
+      const previous = [{ instanceId: 'pfi_prev', prefabId: 'prev', overrides: {} }];
+      savePrefabInstancesToStorage(previous);
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      store.getState().newScene();
+
+      expect(loadPrefabInstances()).toEqual(previous);
+    });
   });
 
   describe('scene metadata setters', () => {

@@ -214,4 +214,16 @@ describe('sanitizeInstanceRecord (SEC — untrusted scene-file input)', () => {
     };
     expect(sanitizeInstanceRecord(raw)).toBeNull();
   });
+
+  it('rejects a record whose overrides hide an oversized UNKNOWN key (SEC)', () => {
+    // `bogus` is not a real snapshot field, so `sanitizeOverrides` drops it —
+    // the size bound must be checked against the RAW map (before that drop),
+    // or this multi-megabyte payload would measure as `{}` and pass.
+    const raw = {
+      instanceId: 'pfi_1',
+      prefabId: 'prefab_1',
+      overrides: { bogus: 'x'.repeat(MAX_OVERRIDE_MAP_BYTES + 1) },
+    };
+    expect(sanitizeInstanceRecord(raw)).toBeNull();
+  });
 });

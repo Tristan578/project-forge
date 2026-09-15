@@ -146,7 +146,13 @@ function isBoundedString(value: unknown, maxLength: number = MAX_ID_LENGTH): val
  * Returns `null` (the whole record dropped) for a malformed id/entityId or an
  * overrides map that exceeds `MAX_OVERRIDE_MAP_BYTES`; unknown override KEYS
  * are silently dropped by `sanitizeOverrides` rather than invalidating the
- * record, matching that function's existing "extra fields are inert" contract.
+ * record, matching that function's existing "extra fields are inert" contract
+ * — but the size bound is checked against the RAW map, BEFORE those unknown
+ * keys are dropped. Checking the cleaned map instead would let a crafted
+ * record hide an arbitrarily large payload under an unknown key: it gets
+ * silently stripped by `sanitizeOverrides` either way, so checking after
+ * stripping would measure `{}` and accept a record whose actual size on the
+ * wire was unbounded.
  */
 export function sanitizeInstanceRecord(raw: unknown): PrefabInstance | null {
   if (typeof raw !== 'object' || raw === null) return null;
@@ -158,8 +164,8 @@ export function sanitizeInstanceRecord(raw: unknown): PrefabInstance | null {
   if (rawOverrides !== undefined && (typeof rawOverrides !== 'object' || rawOverrides === null || Array.isArray(rawOverrides))) {
     return null;
   }
+  if (!isOverrideMapWithinSizeLimit(rawOverrides as PrefabOverrideMap | undefined)) return null;
   const overrides = sanitizeOverrides(rawOverrides as PrefabOverrideMap | undefined);
-  if (!isOverrideMapWithinSizeLimit(overrides)) return null;
   return {
     instanceId: candidate.instanceId,
     prefabId: candidate.prefabId,

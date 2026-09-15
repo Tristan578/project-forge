@@ -11,7 +11,7 @@ import { exportAsZip, type ZipExportOptions } from './zipExporter';
 import type { LoadingScreenConfig } from './loadingScreen';
 import type { ExportFormat, ExportPreset } from './presets';
 import type { CompressionConfig } from './textureCompression';
-import { stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
+import { stagePrefabInstancesForExport, discardStagedPrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
 
 export interface ExportOptions {
   title: string;
@@ -129,6 +129,13 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
       clearTimeout(timeoutId);
       window.removeEventListener(SCENE_EXPORTED_EVENT, handler);
       signal?.removeEventListener('abort', onAbort);
+      // The success path already consumed this via `takeStagedPrefabInstancesForExport`
+      // inside the SCENE_EXPORTED handler (a no-op discard here then); a
+      // timeout/abort/pre-aborted exit never reaches that handler, so without
+      // this the empty snapshot staged below would sit in the map for the rest
+      // of the page's life (scene.FR-1 N1 — bounded further by the map's own
+      // eviction cap, this closes the leak at its actual source).
+      discardStagedPrefabInstancesForExport(requestId);
     };
 
     // Listen for the export response event

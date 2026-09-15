@@ -25,7 +25,7 @@
  * the FR-1 follow-up child issue.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Boxes, Link2, RefreshCw, Layers } from 'lucide-react';
 import {
   listAllPrefabs,
@@ -33,6 +33,7 @@ import {
   createPrefabInstance,
   addNestedPrefab,
   applyPrefabToInstances,
+  subscribeToPrefabChanges,
   type Prefab,
   type PrefabInstance,
 } from '@/lib/prefabs/prefabStore';
@@ -58,14 +59,26 @@ function InstanceRow({ instance }: { instance: PrefabInstance }) {
 }
 
 export function PrefabLibraryPanel() {
-  const prefabs = useMemo(() => listAllPrefabs(), []);
-  const [selectedId, setSelectedId] = useState<string>(() => prefabs[0]?.id ?? '');
-  const [childId, setChildId] = useState<string>('');
-  // The store (localStorage) is the source of truth. Bumping `revision` after a
-  // mutating call re-reads it below; `revision` is a genuine input to the memo,
-  // not an effect, so the list stays a pure derivation of store + selection.
+  // The store (localStorage) is the source of truth. Bumping `revision` after
+  // a mutating call re-reads it below; `revision` is a genuine input to the
+  // memos, not an effect, so both lists stay a pure derivation of store +
+  // selection.
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((r) => r + 1), []);
+
+  // scene.FR-1 N1: re-read whenever ANY entry point mutates the store — not
+  // just this panel's own actions. A prefab created, imported, or deleted via
+  // chat (or another mounted panel) previously stayed missing/selectable here
+  // until this component remounted, because `prefabs` below was memoized with
+  // an empty dependency array and never re-derived from anything external.
+  useEffect(() => subscribeToPrefabChanges(refresh), [refresh]);
+
+  const prefabs = useMemo(() => {
+    void revision; // re-read whenever a mutation (local or external) bumps the revision
+    return listAllPrefabs();
+  }, [revision]);
+  const [selectedId, setSelectedId] = useState<string>(() => prefabs[0]?.id ?? '');
+  const [childId, setChildId] = useState<string>('');
 
   const instances = useMemo<PrefabInstance[]>(() => {
     void revision; // re-read whenever a mutation bumps the revision

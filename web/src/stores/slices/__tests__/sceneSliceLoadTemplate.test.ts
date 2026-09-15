@@ -18,6 +18,7 @@ import {
   takeStagedSceneAudio,
   clearStagedSceneAudio,
 } from '@/lib/audio/sceneAudioManifest';
+import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
 
 type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
 
@@ -242,6 +243,44 @@ describe('sceneSlice.loadTemplate', () => {
       const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
 
       expect(result.success).toBe(false);
+    });
+  });
+
+  // scene.FR-1 N1 (Sentry): `loadTemplate` used to dispatch `load_scene`
+  // directly, bypassing the prefab-instance registry entirely — the OUTGOING
+  // scene's linked instances rode along into the template, and an autosave
+  // afterward folded them into the template's scene data as ghost references.
+  describe('prefab-instance registry (scene.FR-1 N1)', () => {
+    const STALE = [{ instanceId: 'pfi_stale', prefabId: 'stale_source', overrides: {} }];
+
+    it('clears the registry when a template loads successfully', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(true);
+      expect(loadPrefabInstances()).toEqual([]);
+    });
+
+    it('restores the previous registry when the engine rejects the load', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(vi.fn<Dispatcher>(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(false);
+      expect(loadPrefabInstances()).toEqual(STALE);
+    });
+
+    it('restores the previous registry when the engine acknowledges but never applies', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(silentDispatcher());
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
+
+      expect(result.success).toBe(false);
+      expect(loadPrefabInstances()).toEqual(STALE);
     });
   });
 });

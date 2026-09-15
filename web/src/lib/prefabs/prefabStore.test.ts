@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   savePrefab,
   loadPrefabs,
+  savePrefabsToStorage,
   deletePrefab,
   getPrefab,
   updatePrefab,
@@ -22,6 +23,9 @@ import {
   mergeImportedPrefabDefinitions,
   stagePrefabInstancesForExport,
   takeStagedPrefabInstancesForExport,
+  discardStagedPrefabInstancesForExport,
+  sanitizePrefabDefinition,
+  subscribeToPrefabChanges,
   type PrefabSnapshot,
 } from './prefabStore';
 import { MAX_OVERRIDE_MAP_BYTES } from './prefabInstance';
@@ -595,5 +599,171 @@ describe('export-request staging (scene.FR-1 N1 race fix)', () => {
     const taken = takeStagedPrefabInstancesForExport('req-2');
     expect(taken).toHaveLength(1);
     expect(taken?.[0].prefabId).toBe(a.id);
+  });
+
+  it('discardStagedPrefabInstancesForExport removes an entry without treating it as taken', () => {
+    stagePrefabInstancesForExport('req-3', [{ instanceId: 'i', prefabId: 'p', overrides: {} }]);
+    discardStagedPrefabInstancesForExport('req-3');
+    expect(takeStagedPrefabInstancesForExport('req-3')).toBeUndefined();
+  });
+
+  it('discarding an unstaged/already-taken requestId is a harmless no-op', () => {
+    expect(() => discardStagedPrefabInstancesForExport('never-staged')).not.toThrow();
+  });
+
+  it('evicts the OLDEST entry once the bound is reached, rather than growing unbounded (SEC)', () => {
+    // MAX_STAGED_EXPORTS is 50 — fill past it and confirm the earliest request
+    // is gone while the most recent ones survive.
+    for (let i = 0; i < 60; i++) {
+      stagePrefabInstancesForExport(`req-${i}`, [{ instanceId: `i${i}`, prefabId: 'p', overrides: {} }]);
+    }
+    expect(takeStagedPrefabInstancesForExport('req-0')).toBeUndefined(); // evicted
+    expect(takeStagedPrefabInstancesForExport('req-59')).toBeDefined(); // most recent survives
+  });
+});
+
+describe('deletePrefab tombstones an id so it cannot resurrect (scene.FR-1 N1)', () => {
+  it('mergeImportedPrefabDefinitions refuses to re-add a definition whose id was deleted', () => {
+    const prefab = savePrefab('ToDelete', 'cat', '', mockSnapshot);
+    const embeddedCopy = getPrefab(prefab.id)!; // as a saved-but-inactive scene would carry it
+    expect(deletePrefab(prefab.id)).toBe(true);
+    expect(getPrefab(prefab.id)).toBeUndefined();
+
+    mergeImportedPrefabDefinitions([embeddedCopy]);
+    expect(getPrefab(prefab.id)).toBeUndefined(); // still gone — not resurrected
+  });
+
+  it('does not tombstone a DIFFERENT prefab', () => {
+    const kept = savePrefab('Kept', 'cat', '', mockSnapshot);
+    const keptCopy = getPrefab(kept.id)!;
+    const deleted = savePrefab('Deleted', 'cat', '', mockSnapshot);
+    deletePrefab(deleted.id);
+
+    // `kept` is now only known via an embedded copy (as if a scene carrying
+    // it were opened somewhere that never had it locally) — clear only the
+    // library, leaving the tombstone set (and everything else) untouched.
+    savePrefabsToStorage([]);
+    mergeImportedPrefabDefinitions([keptCopy]);
+    expect(getPrefab(kept.id)).toBeDefined();
+  });
+});
+
+describe('exportPrefab / importPrefab carry nested definitions (scene.FR-1 N1)', () => {
+  it('exportPrefab embeds the transitive definitions of nested children', () => {
+    const grandchild = savePrefab('Grandchild', 'cat', '', mockSnapshot);
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    addNestedPrefab(child.id, grandchild.id);
+    const parent = savePrefab('Parent', 'cat', '', mockSnapshot);
+    addNestedPrefab(parent.id, child.id);
+
+    const json = exportPrefab(parent.id);
+    const parsed = JSON.parse(json!);
+    const nestedIds = parsed.nestedDefinitions.map((d: { id: string }) => d.id).sort();
+    expect(nestedIds).toEqual([child.id, grandchild.id].sort());
+  });
+
+  it('exportPrefab omits nestedDefinitions entirely for a flat prefab (byte-identical to before)', () => {
+    const flat = savePrefab('Flat', 'cat', '', mockSnapshot);
+    const json = exportPrefab(flat.id);
+    expect(JSON.parse(json!).nestedDefinitions).toBeUndefined();
+  });
+
+  it('importPrefab installs nested definitions so a reimported nested prefab actually resolves', () => {
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    const parent = savePrefab('Parent', 'cat', '', mockSnapshot);
+    addNestedPrefab(parent.id, child.id);
+    const json = exportPrefab(parent.id);
+
+    storage = {}; // fresh browser — nothing local
+    const imported = importPrefab(json!);
+    expect(imported).toBeDefined();
+    expect(imported?.children).toHaveLength(1);
+    const childId = imported!.children![0].prefabId;
+    // The point of the fix: the child's DEFINITION is now resolvable locally,
+    // not just a dangling id reference.
+    expect(getPrefab(childId)).toBeDefined();
+    expect(getPrefab(childId)?.name).toBe('Child');
+  });
+
+  it('importPrefab never overwrites a local definition with a same-id nested one', () => {
+    const child = savePrefab('Child', 'cat', '', mockSnapshot);
+    addNestedPrefab(savePrefab('Parent', 'cat', '', mockSnapshot).id, child.id);
+    const json = exportPrefab(loadPrefabs().find((p) => p.name === 'Parent')!.id);
+
+    // `updatePrefab` only touches `snapshot` (the top-level `name` is set once
+    // at creation) — edit the entity name it carries and confirm that survives.
+    updatePrefab(child.id, { ...mockSnapshot, name: 'Locally Edited' });
+    importPrefab(json!);
+    expect(getPrefab(child.id)?.snapshot.name).toBe('Locally Edited');
+  });
+});
+
+describe('sanitizePrefabDefinition (scene.FR-1 N1 SEC — structural validation)', () => {
+  const validSnapshot: PrefabSnapshot = mockSnapshot;
+
+  it('accepts a well-formed definition', () => {
+    const def = {
+      id: 'prefab_x', name: 'X', category: 'cat', description: '',
+      snapshot: validSnapshot, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    expect(sanitizePrefabDefinition(def)).toEqual(def);
+  });
+
+  it.each([
+    ['not an object', 'x'],
+    ['null', null],
+    ['missing id', { name: 'X', snapshot: validSnapshot }],
+    ['missing name', { id: 'p', snapshot: validSnapshot }],
+    ['missing snapshot', { id: 'p', name: 'X' }],
+    ['snapshot missing transform', { id: 'p', name: 'X', snapshot: { entityType: 'cube', name: 'X' } }],
+    ['snapshot with a non-vec3 position', { id: 'p', name: 'X', snapshot: { entityType: 'cube', name: 'X', transform: { position: [0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } } }],
+    ['snapshot with a non-finite position', { id: 'p', name: 'X', snapshot: { entityType: 'cube', name: 'X', transform: { position: [0, 0, Infinity], rotation: [0, 0, 0], scale: [1, 1, 1] } } }],
+  ])('rejects: %s', (_label, raw) => {
+    expect(sanitizePrefabDefinition(raw)).toBeNull();
+  });
+
+  it('rejects a definition whose overall serialized size exceeds the bound (SEC)', () => {
+    const huge = {
+      id: 'prefab_x', name: 'X',
+      snapshot: { ...validSnapshot, script: { source: 'x'.repeat(300 * 1024) } },
+    };
+    expect(sanitizePrefabDefinition(huge)).toBeNull();
+  });
+
+  it('validates nested children through the same untrusted-child sanitizer', () => {
+    const def = {
+      id: 'prefab_x', name: 'X', snapshot: validSnapshot,
+      children: [{ prefabId: 'child_1' }, { notAPrefabId: true }],
+    };
+    const sanitized = sanitizePrefabDefinition(def);
+    expect(sanitized?.children).toHaveLength(1);
+    expect(sanitized?.children?.[0].prefabId).toBe('child_1');
+  });
+});
+
+describe('subscribeToPrefabChanges notifies on every mutation (scene.FR-1 N1)', () => {
+  it('notifies on a prefab-library write', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeToPrefabChanges(listener);
+    savePrefab('X', 'cat', '', mockSnapshot);
+    expect(listener).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('notifies on an instance-registry write', () => {
+    const source = savePrefab('X', 'cat', '', mockSnapshot);
+    const listener = vi.fn();
+    const unsubscribe = subscribeToPrefabChanges(listener);
+    createPrefabInstance(source.id);
+    expect(listener).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('stops notifying after unsubscribe', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeToPrefabChanges(listener);
+    unsubscribe();
+    savePrefab('X', 'cat', '', mockSnapshot);
+    expect(listener).not.toHaveBeenCalled();
   });
 });

@@ -23,6 +23,9 @@ import {
   loadPrefabInstances,
   savePrefabInstancesToStorage,
   mergeImportedPrefabDefinitions,
+  loadPrefabs,
+  savePrefabsToStorage,
+  type Prefab,
 } from '@/lib/prefabs/prefabStore';
 import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
@@ -245,6 +248,12 @@ function withPrefabInstances(capture: SceneCapture): SceneCapture {
   return instances.length ? attachPrefabInstances(capture, instances) : capture;
 }
 
+/** The prefab-store state a scene-load mutates, snapshotted so it can be rolled back. */
+interface PrefabRestoreSnapshot {
+  instances: PrefabInstance[];
+  prefabs: Prefab[];
+}
+
 /**
  * Restore a loaded scene's prefab-instance registry into the prefab store
  * (scene.FR-1 N1) so `PrefabLibraryPanel` and the AI instance commands see the
@@ -255,15 +264,18 @@ function withPrefabInstances(capture: SceneCapture): SceneCapture {
  * library first, so a linked instance from a portable scene (another browser,
  * a remixed project) resolves instead of dangling.
  *
- * Returns the registry that was active BEFORE this call. `loadScene` installs
- * this eagerly — before the engine confirms the load, for the same reason
- * audio is staged early — so a caller whose dispatch then REJECTS can pass
- * this back to `savePrefabInstancesToStorage` and put the previous scene's
- * registry back rather than leave the rejected scene's registry installed
- * over a scene that never actually changed (scene.FR-1 N1 BUG-2).
+ * Returns a snapshot of BOTH storage keys as they stood BEFORE this call.
+ * `loadScene` installs the new state eagerly — before the engine confirms the
+ * load, for the same reason audio is staged early — so a caller whose dispatch
+ * then REJECTS can pass this to `rollbackPrefabState` and put the previous
+ * scene's registry AND library back, rather than leave either one installed
+ * over a scene that never actually changed (scene.FR-1 N1 BUG-2/BUG-5): the
+ * library snapshot matters too, because `mergeImportedPrefabDefinitions` is
+ * NOT part of the rejected dispatch and would otherwise permanently install a
+ * foreign scene's definitions even though the engine never loaded it.
  */
-function restorePrefabInstances(json: string): PrefabInstance[] {
-  const previous = loadPrefabInstances();
+function restorePrefabInstances(json: string): PrefabRestoreSnapshot {
+  const snapshot: PrefabRestoreSnapshot = { instances: loadPrefabInstances(), prefabs: loadPrefabs() };
   try {
     const parsed = JSON.parse(json) as SceneFileData;
     mergeImportedPrefabDefinitions(readPrefabDefinitions(parsed));
@@ -271,7 +283,13 @@ function restorePrefabInstances(json: string): PrefabInstance[] {
   } catch {
     savePrefabInstancesToStorage([]);
   }
-  return previous;
+  return snapshot;
+}
+
+/** Roll BOTH prefab-store storage keys back to a snapshot `restorePrefabInstances` took. */
+function rollbackPrefabState(snapshot: PrefabRestoreSnapshot): void {
+  savePrefabInstancesToStorage(snapshot.instances);
+  savePrefabsToStorage(snapshot.prefabs);
 }
 
 export const createSceneSlice: StateCreator<
@@ -312,11 +330,12 @@ export const createSceneSlice: StateCreator<
     // the dispatch keeps the stash and the pending load a single fact.
     if (dispatchCommand) {
       stageSceneAudio(json);
-      // Restore the scene's linked prefab instances into the prefab store
-      // before the engine load. Done alongside the dispatch for the same reason
-      // audio is: with no dispatcher the engine never loads, so mutating the
-      // registry here would desync it from what is actually rendered.
-      const previousInstances = restorePrefabInstances(json);
+      // Restore the scene's linked prefab instances (and merge its embedded
+      // definitions) into the prefab store before the engine load. Done
+      // alongside the dispatch for the same reason audio is: with no
+      // dispatcher the engine never loads, so mutating the store here would
+      // desync it from what is actually rendered.
+      const snapshot = restorePrefabInstances(json);
       // A rejected load never emits SCENE_LOADED, so a stash left armed here
       // waits for the NEXT scene's SCENE_LOADED and attaches this scene's
       // sounds to it. `new_scene` already clears for the same reason; a
@@ -325,11 +344,13 @@ export const createSceneSlice: StateCreator<
       if (response && response.success === false) {
         clearStagedSceneAudio();
         // The engine never adopted the incoming scene — the scene still on
-        // screen is the previous one, so its instance registry must come back
-        // rather than stay overwritten by the rejected scene's (scene.FR-1 N1
-        // BUG-2): the next save would otherwise persist the wrong instances
-        // onto the scene that is actually still active.
-        savePrefabInstancesToStorage(previousInstances);
+        // screen is the previous one, so its instance registry AND its prefab
+        // LIBRARY must both come back (scene.FR-1 N1 BUG-2/BUG-5): the merge
+        // above is not itself part of the rejected dispatch, so without this
+        // a rejected scene's embedded definitions would install permanently,
+        // and the next save would persist the wrong instances onto the scene
+        // that is actually still active.
+        rollbackPrefabState(snapshot);
       }
     }
   },
@@ -337,11 +358,29 @@ export const createSceneSlice: StateCreator<
     // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
     // rejected would otherwise be adopted by this empty scene.
     clearStagedSceneAudio();
+    if (!dispatchCommand) {
+      // No engine to change scenes at all — the scene, and therefore its
+      // registry, is unchanged. Clearing here (as the dispatched path below
+      // does) would describe a scene that never actually went empty
+      // (scene.FR-1 N1 BUG-4).
+      return;
+    }
+    const previousInstances = loadPrefabInstances();
     // The new scene has no linked instances of its own — leaving the outgoing
     // scene's registry in place would attach its instances to this empty
-    // scene on the next save (scene.FR-1 N1 BUG-1).
+    // scene on the next save (scene.FR-1 N1 BUG-1). Cleared BEFORE dispatch,
+    // mirroring `restorePrefabInstances`' "install eagerly, roll back on
+    // rejection" contract: `new_scene` also emits SCENE_LOADED, so the
+    // registry must already describe the empty scene the instant that event
+    // could land.
     savePrefabInstancesToStorage([]);
-    if (dispatchCommand) dispatchCommand('new_scene', {});
+    const response = dispatchCommand('new_scene', {});
+    if (response && response.success === false) {
+      // The engine never accepted the new scene — the scene on screen is
+      // unchanged, so its registry must come back rather than stay cleared
+      // out from under it (scene.FR-1 N1 BUG-4).
+      savePrefabInstancesToStorage(previousInstances);
+    }
   },
   setSceneName: (name) => set({ sceneName: name }),
   setSceneModified: (modified) => set({ sceneModified: modified }),
@@ -473,9 +512,17 @@ export const createSceneSlice: StateCreator<
     // it runs even though no template currently declares audio, and the reason
     // neither failure path below needs its own clear.
     stageSceneAudio(sceneJson);
+    // Same registry handling as `loadScene` (scene.FR-1 N1) — this used to
+    // dispatch `load_scene` directly and never touch the prefab-instance
+    // registry at all, so the OUTGOING scene's instances rode along into the
+    // template. A template's freshly-built `sceneJson` carries no
+    // `prefabInstances`, so this clears the registry outright; any failure
+    // path below restores exactly what the outgoing scene had.
+    const snapshot = restorePrefabInstances(sceneJson);
     const response = dispatchCommand('load_scene', { json: sceneJson });
     if (response && response.success === false) {
       abandon();
+      rollbackPrefabState(snapshot);
       return {
         success: false,
         error: response.error ?? `The engine refused to load template "${templateId}".`,
@@ -483,6 +530,7 @@ export const createSceneSlice: StateCreator<
     }
 
     if (!(await applied)) {
+      rollbackPrefabState(snapshot);
       return {
         success: false,
         error: `Template "${templateId}" was sent to the engine but no entities appeared. The scene was not changed.`,

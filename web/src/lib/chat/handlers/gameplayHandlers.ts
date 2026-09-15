@@ -366,11 +366,18 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
   },
 
   list_prefab_instances: async (args, _ctx) => {
-    const { getPrefabInstances } = await import('@/lib/prefabs/prefabStore');
+    const { getPrefab, getPrefabInstances } = await import('@/lib/prefabs/prefabStore');
     const { getOverriddenFields } = await import('@/lib/prefabs/prefabInstance');
     const p = parseArgs(z.object({ prefabId: z.string().min(1) }), args);
     if (p.error) return p.error;
-    const instances = getPrefabInstances(p.data.prefabId).map((i) => ({
+    // Resolve first — every other new prefab operation rejects a missing
+    // source, and without this a deleted/unknown id filters the registry to
+    // nothing and reads exactly like a real prefab with zero instances.
+    const source = getPrefab(p.data.prefabId);
+    if (!source) return { success: false, error: `Prefab not found: ${p.data.prefabId}` };
+    // Canonical `source.id` — `p.data.prefabId` may be a NAME, and every
+    // stored `PrefabInstance.prefabId` is a canonical id.
+    const instances = getPrefabInstances(source.id).map((i) => ({
       instanceId: i.instanceId,
       prefabId: i.prefabId,
       entityId: i.entityId,

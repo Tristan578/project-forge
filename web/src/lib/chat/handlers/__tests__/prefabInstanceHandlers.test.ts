@@ -132,6 +132,24 @@ describe('list_prefab_instances (OP-03 inspection)', () => {
     expect(instances).toHaveLength(1);
     expect(instances[0].overriddenFields).toEqual(['name']);
   });
+
+  it('resolves a prefab passed by NAME, matching every other prefab command', async () => {
+    const src = savePrefab('NamedSrc', 'test', '', snap());
+    await invokeHandler(gameplayHandlers, 'create_prefab_instance', { prefabId: src.id });
+    const { result } = await invokeHandler(gameplayHandlers, 'list_prefab_instances', { prefabId: 'NamedSrc' });
+    expect(result.success).toBe(true);
+    expect((result.result as { instances: unknown[] }).instances).toHaveLength(1);
+  });
+
+  it('rejects a missing prefab instead of reporting an empty success (scene.FR-1 N1)', async () => {
+    // Every other new prefab operation rejects a missing source; this used to
+    // filter the (empty) registry and return `{ success: true, instances: [] }`
+    // — identical to a real prefab with zero instances, hiding a typo'd or
+    // deleted id from the caller.
+    const { result } = await invokeHandler(gameplayHandlers, 'list_prefab_instances', { prefabId: 'does-not-exist' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Prefab not found');
+  });
 });
 
 describe('manual/AI parity (F2 shared contract)', () => {
