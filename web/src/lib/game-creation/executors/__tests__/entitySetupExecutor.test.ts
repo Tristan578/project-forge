@@ -489,6 +489,7 @@ describe('entitySetupExecutor', () => {
 
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe('EFFECT_TIMED_OUT');
+      expect(result.error?.retryable).toBe(false);
       const effect = (result.error?.details as { effect?: { status?: string; operationId?: string } }).effect;
       expect(effect?.status).toBe('timed-out');
       expect(effect?.operationId).toBe('ai.FR-1.OP-01');
@@ -562,13 +563,8 @@ describe('entitySetupExecutor', () => {
       expect(result.output).not.toHaveProperty('effectStatus');
     });
 
-    // `pipelineRunner` retries the whole executor when `EFFECT_TIMED_OUT` is
-    // reported (that branch marks it retryable) — a retry is exactly a second
-    // `execute()` call for the same planned entityId, on the SAME shared
-    // observation cache. Confirmation arriving late but before the retry
-    // checks is what this simulates: `observeEntity` already answers for
-    // `ID` on the very first call, before any command has been sent.
-    it('does not redispatch spawn_entity when a retry finds the entity already observed', async () => {
+    // Reusing a confirmed entity is safe; an unconfirmed timeout is terminal.
+    it('does not redispatch spawn_entity when the entity is already observed', async () => {
       const observeEntity = vi.fn().mockReturnValue({
         entityId: ID,
         transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
@@ -595,11 +591,9 @@ describe('entitySetupExecutor', () => {
       expect(observeEntity).toHaveBeenCalledWith(ID);
     });
 
-    it('still spawns on a genuine retry (never observed, a real failure)', async () => {
-      // Every check before the entity exists returns undefined — this is the
-      // "real failure, not a slow confirmation" case, where redispatching is
-      // correct and required. Fake timers so the 5s deadline this then runs
-      // out does not make the test actually take 5s.
+    it('dispatches once when there is no observation and reports an uncertain timeout', async () => {
+      // Absence from the cache permits the initial dispatch, but cannot prove
+      // that an accepted spawn failed and should be repeated.
       vi.useFakeTimers();
       const observeEntity = vi.fn().mockReturnValue(undefined);
       const ctx = makeCtx({ observeEntity } as never);

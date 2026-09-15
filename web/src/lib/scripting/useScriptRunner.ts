@@ -20,6 +20,7 @@ import { resetRaycast2dQueue } from '@/lib/scripting/raycast2dRegistry';
 import { collider2dHalfHeight } from '@/lib/scripting/collider2dExtent';
 import { isScriptAllowedCommand } from '@/lib/scripting/scriptAllowlist';
 import { handleLocalScriptCommand } from '@/lib/scripting/localScriptCommands';
+import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
 
 /**
  * The Y scale the engine reported for one entity this tick, or 1.
@@ -503,6 +504,27 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           inputState: unknown;
         };
 
+        // Fan the raw engine play-tick out to the record/replay bus (#9902).
+        // This is the ONE place a per-frame engine snapshot exists on the main
+        // thread; the input-trace recorder and the replay observer read it here
+        // rather than each opening a second bridge to the engine. Publishing is
+        // best-effort and defensively isolated inside the bus, so it can never
+        // fault the play loop.
+        publishPlayTick({
+          entities: tickData.entities as Record<
+            string,
+            { position: [number, number, number] }
+          >,
+          inputState: (tickData.inputState ?? {
+            pressed: {},
+            axes: {},
+          }) as {
+            pressed: Record<string, boolean>;
+            axes: Record<string, number>;
+          },
+          elapsedMs: elapsedRef.current * 1000,
+        });
+
         // Start watchdog — if Worker doesn't respond in 5s, terminate it
         if (!watchdogRef.current) {
           watchdogRef.current = setTimeout(() => {
@@ -682,6 +704,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         routerRef.current = null;
       }
       clearGroundedStates();
+      resetPlayTickBus();
       // Any 2D raycast still awaiting an engine answer will never get one:
       // the worker is being terminated. Dropping the slots rejects those
       // promises now instead of leaving a restarted session inheriting the
@@ -722,6 +745,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         workerRef.current = null;
       }
       clearGroundedStates();
+      resetPlayTickBus();
       // Any 2D raycast still awaiting an engine answer will never get one:
       // the worker is being terminated. Dropping the slots rejects those
       // promises now instead of leaving a restarted session inheriting the

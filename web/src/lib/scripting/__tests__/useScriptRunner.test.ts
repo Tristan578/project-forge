@@ -68,6 +68,15 @@ let mockGameWon = false;
 const mockSetGameWon = vi.fn();
 const mockSetGameScore = vi.fn();
 let mockPlayTickCallback: ((data: unknown) => void) | null = null;
+// Spies for the record/replay fan-out bus the play-tick callback publishes into
+// (#9902). Declared via `vi.hoisted` so they are initialized before the hoisted
+// `vi.mock` factory that closes over them runs (a plain const sits in the TDZ at
+// that point, since ESM imports execute first). Call history is wiped by
+// `vi.clearAllMocks()` in `beforeEach`.
+const { mockPublishPlayTick, mockResetPlayTickBus } = vi.hoisted(() => ({
+  mockPublishPlayTick: vi.fn(),
+  mockResetPlayTickBus: vi.fn(),
+}));
 
 // Dialogue trees the `dialogue_set_variable` branch looks up. Held in a `let` so a
 // test can seed a tree without re-mocking the store.
@@ -156,6 +165,16 @@ vi.mock('@/lib/audio/audioManager', () => ({
     fadeIn: vi.fn(),
     fadeOut: vi.fn(),
   },
+}));
+
+// The play-tick fan-out bus is the record/replay observation seam (#9902). The
+// hook is the ONLY production writer into it — `publishPlayTick` per tick,
+// `resetPlayTickBus` on stop/unmount — so it is mocked here to assert the hook
+// publishes the correct snapshot shape and clears the bus on teardown. Only the
+// two symbols the hook imports are provided.
+vi.mock('@/lib/playtest/playTickBus', () => ({
+  publishPlayTick: mockPublishPlayTick,
+  resetPlayTickBus: mockResetPlayTickBus,
 }));
 
 import { useScriptRunner, getScriptCollisionCallback, getScriptGameEventCallback } from '../useScriptRunner';
@@ -1118,5 +1137,97 @@ describe('useScriptRunner', () => {
     unmount();
 
     expect(getGroundedStates()).toEqual({});
+  });
+
+  // ---------------------------------------------------------------------------
+  // Record/replay play-tick fan-out (#9902)
+  //
+  // The per-tick callback is the ONLY production callsite that publishes the
+  // engine snapshot onto the shared record/replay bus, and stop/unmount are the
+  // only places that reset it. Every playtest-directory test stubs the bus
+  // directly, so without these, a regression in this wiring — a dropped `*1000`
+  // conversion, a renamed field, a missing default, a bus that is never reset —
+  // would leave the entire downstream record/replay feature broken with a green
+  // suite. `performance.now` is pinned so the elapsed math is exact and a
+  // mutation to the conversion turns the assertion red rather than flaky.
+  // ---------------------------------------------------------------------------
+  it('publishes the engine snapshot onto the record/replay bus with elapsed in milliseconds', () => {
+    mockEngineMode = 'play';
+    // Play start reads `lastTickRef` at 1000ms; the tick below reads 1500ms, so
+    // the accumulated dt is exactly 0.5s and the published `elapsedMs` must be
+    // 500 — a dropped `* 1000` conversion would surface 0.5 here instead.
+    let nowMs = 1000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    nowMs = 1500;
+    act(() => {
+      mockPlayTickCallback!({
+        entities: { 'player-1': { position: [1, 2, 3] } },
+        entityInfos: {},
+        inputState: { pressed: { move_right: true }, axes: { move_x: 1 } },
+      });
+    });
+
+    expect(mockPublishPlayTick).toHaveBeenCalledTimes(1);
+    // toHaveBeenCalledWith is a deep equal on the whole snapshot: a renamed or
+    // extra field fails it, not just a wrong value.
+    expect(mockPublishPlayTick).toHaveBeenCalledWith({
+      entities: { 'player-1': { position: [1, 2, 3] } },
+      inputState: { pressed: { move_right: true }, axes: { move_x: 1 } },
+      elapsedMs: 500,
+    });
+
+    nowSpy.mockRestore();
+  });
+
+  it('defaults the published input state when the engine tick omits it', () => {
+    mockEngineMode = 'play';
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => 0);
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    act(() => {
+      mockPlayTickCallback!({
+        entities: {},
+        entityInfos: {},
+        // inputState deliberately absent: the engine can emit a tick before its
+        // first evaluated input frame, and the bus contract requires a concrete
+        // { pressed, axes } shape rather than undefined.
+      });
+    });
+
+    expect(mockPublishPlayTick).toHaveBeenCalledWith(
+      expect.objectContaining({ inputState: { pressed: {}, axes: {} } }),
+    );
+
+    nowSpy.mockRestore();
+  });
+
+  it('resets the record/replay bus when play stops', () => {
+    const { rerender } = renderHook(
+      ({ mode }) => {
+        mockEngineMode = mode;
+        return useScriptRunner({ wasmModule: mockWasmModule });
+      },
+      { initialProps: { mode: 'play' as string } },
+    );
+
+    // Entering play must not reset the bus — only teardown does.
+    expect(mockResetPlayTickBus).not.toHaveBeenCalled();
+
+    rerender({ mode: 'edit' });
+
+    expect(mockResetPlayTickBus).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets the record/replay bus on unmount', () => {
+    mockEngineMode = 'play';
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+    expect(mockResetPlayTickBus).not.toHaveBeenCalled();
+
+    unmount();
+
+    expect(mockResetPlayTickBus).toHaveBeenCalledTimes(1);
   });
 });

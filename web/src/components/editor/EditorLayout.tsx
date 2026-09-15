@@ -610,6 +610,29 @@ export function EditorLayout() {
       ) => {
         setCommandDispatcher(dispatch);
       };
+      // Runtime input-trace replay (#9902). The engine-replay spec drives the
+      // REAL replay runner through this: it builds the same DOM-keyboard runtime
+      // boundary the manual Replay button uses, runs `invokeReplay('manual', …)`
+      // and returns the JSON-serializable observed-state outcome. Same build-time gate as the
+      // hooks above; never attached in a normal production build.
+      window.__FORGE_REPLAY = async (
+        trace: unknown,
+        config: { playerEntityId: string; collectibleEntityIds: string[] },
+      ) => {
+        const [{ invokeReplay, createDomKeyboardEnvironment }, { parseInputTrace }] =
+          await Promise.all([
+            import('@/lib/playtest/replayInvocation'),
+            import('@/lib/playtest/inputTrace'),
+          ]);
+        const validated = parseInputTrace(trace);
+        const env = createDomKeyboardEnvironment({
+          bindings: useEditorStore.getState().inputBindings,
+          playerEntityId: config.playerEntityId,
+          collectibleEntityIds: config.collectibleEntityIds,
+        });
+        const result = await invokeReplay('manual', validated, env);
+        return result.outcome;
+      };
       // Feeds a `get_entity_details` answer into the confirmed spawn/transform
       // observation cache (#9899). Same gate and rationale as
       // `__FORGE_SET_DISPATCH` above: the strict journey gate's stand-in
@@ -623,8 +646,7 @@ export function EditorLayout() {
       // (`lib/game-creation/engineObservation.ts`) — it adds no new way to
       // observe or mutate scene state beyond what `__EDITOR_STORE` already
       // exposes, only a way to answer a query the real engine would.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__FORGE_RECORD_ENTITY_OBSERVATION = recordEntityObservation;
+      window.__FORGE_RECORD_ENTITY_OBSERVATION = recordEntityObservation;
       // Reads the confirmed spawn/transform observation cache back (#9899), the
       // mirror of the recorder above. Same build-time gate. A real engine build
       // populates that cache off the `QUERY_ENTITY_DETAILS` event, so this lets
@@ -633,8 +655,7 @@ export function EditorLayout() {
       // rather than an adjacent store field like `primaryTransform`. Read-only:
       // it exposes no way to observe or mutate scene state beyond what
       // `__EDITOR_STORE` already does.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__FORGE_READ_ENTITY_OBSERVATION = readEntityObservation;
+      window.__FORGE_READ_ENTITY_OBSERVATION = readEntityObservation;
     }
   }, []);
 

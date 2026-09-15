@@ -74,24 +74,10 @@ export const entitySetupExecutor: ExecutorDefinition = {
     const entityType = resolveEntityShape(entity.role, entity.appearance, projectType);
     const operationId = SPAWN_TRANSFORM_OPERATION;
 
-    // Idempotency guard for a RETRY (`pipelineRunner` reruns the whole executor
-    // when the observation below reports `timed-out`, which is retryable — see
-    // that branch's comment). A timeout means the CONFIRMATION was slow, not
-    // that the spawn failed: the engine does not reject a caller-supplied `id`
-    // already in use (core/entity_factory.rs has no such check), so blindly
-    // redispatching `spawn_entity` on retry would create a SECOND entity
-    // carrying the identical `EntityId`, and every later step addressing this
-    // id would then hit whichever of the two duplicates the engine's query/
-    // update path happens to find first (#9997 review). The observation cache
-    // is a per-RUN singleton (cleared once, at `runPipelineFromPlan`'s start —
-    // see `clearEntityObservations`), so a confirmation that arrived just after
-    // the first attempt's deadline is already sitting in it by the time a
-    // retry checks: this reads as "already spawned" and skips straight to
-    // confirming, rather than spawning a duplicate.
-    //
-    // Gated on `!ctx.signal.aborted` too: an already-cancelled call must reach
-    // the engine exactly as often as before this guard existed (zero times),
-    // not once more for a check whose answer it will never act on.
+    // Reuse an entity already confirmed in this run. A cache miss does not
+    // prove absence: a query answer may still be in flight. Consequently, an
+    // accepted spawn that times out below is terminal, never automatically
+    // replayed by the pipeline.
     const alreadySpawned =
       ctx.observeEntity !== undefined && entityId !== undefined && !ctx.signal.aborted
         ? ctx.observeEntity(entityId) !== undefined
@@ -157,7 +143,7 @@ export const entitySetupExecutor: ExecutorDefinition = {
               ? 'Spawn observation cancelled before the entity was confirmed'
               : `Spawned entity was not observed before the deadline (operation ${operationId})`,
             this.userFacingErrorMessage,
-            effect.status === 'timed-out',
+            false, // Accepted spawns may still apply; replaying would create duplicates.
             { effect },
           ),
         );

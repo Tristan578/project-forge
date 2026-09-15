@@ -122,9 +122,9 @@ export function handleTransformEvent(
     /**
      * The answer to a `get_entity_details` query (#9899). Recorded into the
      * confirmed-effect cache so the orchestrator's `observeEntity` can read the
-     * engine's REAL post-apply state for a spawn/transform. The engine emits
-     * this ONLY when the entity exists (engine/src/bridge/query.rs), so a miss
-     * is itself the "not yet" answer — nothing else here needs to change.
+     * engine's observed state for a spawn/transform. The engine emits this
+     * only when the entity exists (engine/src/bridge/query.rs). No cached
+     * reply can mean either an absent entity or a response still in flight.
      *
      * `return true` consumes the event: no store handler downstream reads it,
      * and it must not fall through to be logged as unhandled.
