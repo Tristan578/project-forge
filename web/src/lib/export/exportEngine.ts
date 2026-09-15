@@ -11,6 +11,7 @@ import { exportAsZip, type ZipExportOptions } from './zipExporter';
 import type { LoadingScreenConfig } from './loadingScreen';
 import type { ExportFormat, ExportPreset } from './presets';
 import type { CompressionConfig } from './textureCompression';
+import { loadPrefabInstances, stagePrefabInstancesForExport, discardStagedPrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
 
 export interface ExportOptions {
   title: string;
@@ -115,6 +116,15 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
 }
 
 async function getSceneData(signal?: AbortSignal): Promise<unknown> {
+  // Checked BEFORE any listener is armed. `store.saveScene` below refuses while
+  // a scene load stands rejected (#10056), so without this the export would sit
+  // through the full 5 s timeout and then blame the engine for not responding —
+  // and worse, fall through to `buildSceneFromStore()` and ship a game built
+  // from a scene the engine never accepted.
+  const sceneLoadError = useEditorStore.getState().sceneLoadError;
+  if (sceneLoadError) {
+    throw new Error(`${sceneLoadError.reason} Load the scene successfully before exporting.`);
+  }
   return new Promise((resolve, reject) => {
     // eslint-disable-next-line prefer-const -- timeoutId must be declared before cleanup but assigned after
     let timeoutId: ReturnType<typeof setTimeout>;
@@ -128,6 +138,13 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
       clearTimeout(timeoutId);
       window.removeEventListener(SCENE_EXPORTED_EVENT, handler);
       signal?.removeEventListener('abort', onAbort);
+      // The success path already consumed this via `takeStagedPrefabDataForExport`
+      // inside the SCENE_EXPORTED handler (a no-op discard here then); a
+      // timeout/abort/pre-aborted exit never reaches that handler, so without
+      // this the snapshot staged below would sit in the map for the rest
+      // of the page's life (scene.FR-1 N1 — bounded further by the map's own
+      // eviction cap, this closes the leak at its actual source).
+      discardStagedPrefabInstancesForExport(requestId);
     };
 
     // Listen for the export response event
@@ -137,6 +154,10 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
       cleanup();
       try {
         const sceneData = JSON.parse(customEvent.detail.json);
+        // The shared export event also feeds autosave and recovery. Strip
+        // editor metadata only from this consumer's parsed game-bundle copy.
+        delete sceneData.prefabInstances;
+        delete sceneData.prefabDefinitions;
         const uiData = injectUIData(sceneData);
         resolve(uiData);
       } catch (err) {
@@ -171,9 +192,16 @@ async function getSceneData(signal?: AbortSignal): Promise<unknown> {
       ));
     }, 5000);
 
-    // Trigger export_scene command
-    const store = useEditorStore.getState();
-    store.saveScene(requestId);
+    // Recovery and autosave consume this same response. Preserve the complete
+    // editor snapshot there; the handler above removes it only from the game.
+    try {
+      stagePrefabInstancesForExport(requestId, loadPrefabInstances());
+      const store = useEditorStore.getState();
+      store.saveScene(requestId);
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
   });
 }
 

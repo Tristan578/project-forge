@@ -477,3 +477,50 @@ describe('handler registration uniqueness', () => {
     expect(registrations.get('get_tilemap')).toEqual(['handlers2d.ts']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// UI widget layout-constraint commands (ui.FR-1.OP-01, #9868)
+// ---------------------------------------------------------------------------
+//
+// Scoped to the two commands that carry the `constraints` object rather than
+// the whole `ui` category (which still has the pre-existing drift the SCOPE
+// note above describes). These two shipped a handler-validated `constraints`
+// field that the manifest never declared, so `getChatTools()` built an
+// `input_schema` without it and the in-app AI could neither see nor set the
+// parameter — invisible to the model, not merely undocumented. This pins the
+// two sources together so that class of drift fails in CI instead of silently.
+describe('ui widget layout-constraint commands match their handler schema', () => {
+  const UI_CONSTRAINT_COMMANDS = ['add_ui_widget', 'update_ui_widget'] as const;
+
+  it.each(UI_CONSTRAINT_COMMANDS)('%s declares a constraints property', (name) => {
+    const cmd = commands.find((c) => c.name === name);
+    expect(cmd, `${name} missing from manifest`).toBeDefined();
+    expect(Object.keys(cmd!.parameters?.properties ?? {})).toContain('constraints');
+  });
+
+  it.each(UI_CONSTRAINT_COMMANDS)(
+    '%s declares exactly the properties its handler validates',
+    (name) => {
+      const cmd = commands.find((c) => c.name === name);
+      const schema = schemas.get(name);
+      expect(schema, `no handler schema found for ${name}`).toBeDefined();
+      const declared = Object.keys(cmd!.parameters?.properties ?? {}).sort();
+      const validated = [...(schema as ParsedHandler).props.keys()].sort();
+      expect(declared).toEqual(validated);
+    },
+  );
+
+  it.each(UI_CONSTRAINT_COMMANDS)(
+    '%s marks exactly the non-optional schema fields as required',
+    (name) => {
+      const cmd = commands.find((c) => c.name === name);
+      const schema = schemas.get(name) as ParsedHandler;
+      const declared = [...(cmd!.parameters?.required ?? [])].sort();
+      const validated = [...schema.props.entries()]
+        .filter(([, required]) => required)
+        .map(([propName]) => propName)
+        .sort();
+      expect(declared).toEqual(validated);
+    },
+  );
+});

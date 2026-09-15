@@ -83,7 +83,6 @@ describe('buildSceneContext', () => {
       ['PointLight', 'point_light'],
       ['DirectionalLight', 'directional_light'],
       ['SpotLight', 'spot_light'],
-      ['SpriteData', 'sprite'],
       ['Mesh3d', 'mesh'],
     ];
 
@@ -99,24 +98,40 @@ describe('buildSceneContext', () => {
       });
     }
 
-    it('falls back to "entity" for unknown components', () => {
+    // PF-1162: after collapsing onto the shared helper, a node whose only
+    // recognisable component is Sprite/SpriteData no longer classifies as
+    // 'sprite' — the engine wire contract emits neither name, so the branch was
+    // dead. It falls through to the shared 'unknown' fallback.
+    for (const spriteComponent of ['Sprite', 'SpriteData']) {
+      it(`falls back to "unknown" for a node carrying only "${spriteComponent}"`, () => {
+        const store = makeStore({
+          sceneGraph: makeGraph({
+            e1: makeNode('e1', 'Sprite', [spriteComponent]),
+          }),
+        });
+        const ctx = buildSceneContext(store);
+        expect(ctx.entities[0].type).toBe('unknown');
+      });
+    }
+
+    it('falls back to "unknown" for unknown components (PF-1162)', () => {
       const store = makeStore({
         sceneGraph: makeGraph({
           e1: makeNode('e1', 'Unknown', ['SomeUnknownComponent']),
         }),
       });
       const ctx = buildSceneContext(store);
-      expect(ctx.entities[0].type).toBe('entity');
+      expect(ctx.entities[0].type).toBe('unknown');
     });
 
-    it('falls back to "entity" for nodes with no components', () => {
+    it('falls back to "unknown" for nodes with no components (PF-1162)', () => {
       const store = makeStore({
         sceneGraph: makeGraph({
           e1: makeNode('e1', 'Empty', []),
         }),
       });
       const ctx = buildSceneContext(store);
-      expect(ctx.entities[0].type).toBe('entity');
+      expect(ctx.entities[0].type).toBe('unknown');
     });
 
     it('uses first matching rule when node has multiple components', () => {
@@ -205,7 +220,10 @@ describe('buildSceneContext', () => {
     expect(ctx.entities).toHaveLength(3);
     const types = ctx.entities.map((e) => e.type);
     expect(types).toContain('point_light');
-    expect(types).toContain('sprite');
-    expect(types).toContain('entity');
+    // PF-1162: SpriteData (b) and the empty node (c) both classify as 'unknown'
+    // under the shared helper — 'sprite' and 'entity' are no longer produced.
+    expect(types.filter((t) => t === 'unknown')).toHaveLength(2);
+    expect(types).not.toContain('sprite');
+    expect(types).not.toContain('entity');
   });
 });

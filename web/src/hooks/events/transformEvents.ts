@@ -14,6 +14,7 @@ import { applyWhenPrimary } from './primaryGate';
 import { SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
 import { recordEntityObservation } from '@/lib/game-creation/engineObservation';
+import { foldExportedSceneJson } from '@/lib/prefabs/prefabSceneFold';
 import { CHECKPOINT_EXPORT_PREFIX, SCENE_LOADED_EVENT } from '@/lib/scenes/checkpointRecovery';
 
 const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
@@ -188,12 +189,27 @@ export function handleTransformEvent(
       // when the running engine binary predates the change — every side effect
       // below is "the scene was exported", not "my request was answered", so
       // none of them may depend on it.
-      const { json, name, requestId } = payload;
+      const { json: rawJson, name, requestId } = payload;
+      // A checkpoint's own export request (#10050) re-dispatches the raw
+      // payload and returns immediately — it is not a user-facing save, so it
+      // must NOT run through autosave/panic-recovery/prefab-fold below, or a
+      // checkpoint capture would double as an (unwanted) autosave tick and
+      // would consume this requestId's staged prefab snapshot before the
+      // save it actually belongs to ever sees it.
       if (requestId?.startsWith(CHECKPOINT_EXPORT_PREFIX)) {
         window.dispatchEvent(new CustomEvent<SceneExportedDetail>(SCENE_EXPORTED_EVENT, { detail: payload }));
         return true;
       }
       const state = useEditorStore.getState();
+
+      // Fold prefab instances/definitions in HERE, before any consumer below
+      // sees the JSON (scene.FR-1 N1). The engine export knows nothing about
+      // linked instances — they live in the prefab store, not the ECS — so
+      // recovering any of these consumers (autosave, panic recovery) used to
+      // silently drop every instance and override. This is the single choke
+      // point every one of them passes through; `foldExportedSceneJson` owns
+      // which registry snapshot it folds, and why.
+      const json = foldExportedSceneJson(rawJson, requestId);
 
       // Cache for periodic IndexedDB auto-save
       setLastExportedScene(json, name);

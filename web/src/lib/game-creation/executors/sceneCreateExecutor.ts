@@ -95,7 +95,22 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // Phase 1 runs before Phase 3, so this despawn cannot wipe the world
     // geometry `world_build` spawns — that ordering is why the geometry is a
     // separate step rather than part of this one.
-    ctx.getStore().newScene();
+    //
+    // `newScene()` returns false when the engine refuses to clear the starter
+    // scene. Discarding it (this executor's own PF-1097 defect, one layer up)
+    // reports a created scene the engine never emptied, so every later step
+    // then stacks the generated game on top of Ground/Player/Sun. Fail the step
+    // instead — the same false-success class this campaign's acceptance
+    // criterion 3 targets (#10056).
+    if (ctx.getStore().newScene() === false) {
+      return failResult(
+        makeStepError(
+          'COMMAND_FAILED',
+          'Engine refused new_scene while clearing the starter scene',
+          this.userFacingErrorMessage,
+        ),
+      );
+    }
 
     // The step must not return until the engine has actually applied the
     // despawn, because JS step order is not engine frame order. `new_scene` and
