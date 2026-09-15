@@ -14,6 +14,7 @@ import {
   switchScene as switchSceneIn,
   saveCurrentSceneData,
   readPrefabInstances,
+  readPrefabDefinitions,
   createCheckpoint as createCheckpointIn,
   listCheckpoints as listCheckpointsIn,
   restoreCheckpoint as restoreCheckpointIn,
@@ -335,7 +336,16 @@ function restorePrefabInstances(json: string): PrefabRestoreSnapshot | null {
     if (parsed.prefabDefinitions !== undefined && !Array.isArray(parsed.prefabDefinitions)) {
       throw new Error('Invalid prefab definitions');
     }
-    if (!mergeImportedPrefabDefinitions(parsed.prefabDefinitions ?? [])) {
+    // Sanitize/bound the embedded definitions through `readPrefabDefinitions`
+    // BEFORE merging. That funnel is fail-SOFT on an individual entry (a
+    // malformed or oversized definition is dropped, e.g. a prefab snapshot
+    // carrying a >256 KiB `script`), so one bad entry no longer rejects the
+    // ENTIRE scene load the way passing the raw array to
+    // `mergeImportedPrefabDefinitions` did (`prepareImportedDefinitions`
+    // returns null on the first `sanitizePrefabDefinition` rejection). The
+    // merge still fail-HARD rejects graph-level problems (missing references,
+    // cycles); a dropped entry that others depend on surfaces there.
+    if (!mergeImportedPrefabDefinitions(readPrefabDefinitions(parsed))) {
       throw new Error('Invalid prefab dependency graph');
     }
     const availableIds = new Set([...loadPrefabs(), ...getBuiltInPrefabs()].map((prefab) => prefab.id));

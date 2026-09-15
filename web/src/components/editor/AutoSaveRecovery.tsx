@@ -5,6 +5,7 @@ import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
+import { showError } from '@/lib/toast';
 import {
   loadAutoSaveEntry,
   deleteAutoSaveEntry,
@@ -86,7 +87,15 @@ export function AutoSaveRecovery() {
     // permanently lost even though the scene was never loaded (PF-587).
     if (!engineReady) return;
 
-    loadScene(entry.sceneJson);
+    // `loadScene` returns false when the engine rejects the scene or its
+    // embedded prefab metadata is invalid — WITHOUT ever dispatching the load.
+    // Deleting the backup on that path would permanently lose the very work
+    // this banner exists to protect (PF-587), so surface the failure and keep
+    // both the auto-save entry and the banner so the user can try again.
+    if (loadScene(entry.sceneJson) === false) {
+      showError('The saved scene could not be restored. Its data may be invalid or the engine is not ready — try again.');
+      return;
+    }
     setSceneName(entry.sceneName);
 
     // Only delete the auto-save entry after successfully dispatching the load.

@@ -28,6 +28,10 @@ vi.mock('@/lib/sceneFile', () => ({
   openSceneFilePicker: vi.fn(),
 }));
 
+vi.mock('@/lib/toast', () => ({
+  showError: vi.fn(),
+}));
+
 // scene.FR-1 N1: the prefab-instance fold itself now happens upstream (the
 // single `SCENE_EXPORTED` choke point in `transformEvents.ts`, covered in its
 // own test file) — the toolbar's job is to STAGE the registry as it stands at
@@ -50,7 +54,8 @@ vi.mock('@/lib/projects/cloudSave', () => ({
 }));
 
 import { useEditorStore } from '@/stores/editorStore';
-import { downloadSceneFile } from '@/lib/sceneFile';
+import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
+import { showError } from '@/lib/toast';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -256,6 +261,78 @@ describe('SceneToolbar', () => {
       emitExport({ json: JSON.stringify(FOLDED_SCENE), name: 'S', requestId });
 
       expect(mockSaveSceneToCloud).toHaveBeenCalledExactlyOnceWith('proj_1', 'S', JSON.stringify(FOLDED_SCENE));
+    });
+  });
+
+  // Manual-vs-AI parity: the AI/MCP `load_scene`/`new_scene` handlers surface a
+  // rejection; the equivalent manual toolbar controls must too, instead of
+  // discarding the boolean and vanishing into a silent no-op.
+  describe('surfaces load/new rejections (manual/AI parity)', () => {
+    it('shows an error when a picked scene is rejected by loadScene', async () => {
+      vi.mocked(openSceneFilePicker).mockResolvedValue('{"entities":[]}');
+      const loadScene = vi.fn(() => false);
+      mockEditorStore({ loadScene });
+      render(<SceneToolbar />);
+
+      await act(async () => {
+        screen.getByRole('button', { name: /load scene/i }).click();
+      });
+
+      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}');
+      expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not show an error when a picked scene loads successfully', async () => {
+      vi.mocked(openSceneFilePicker).mockResolvedValue('{"entities":[]}');
+      const loadScene = vi.fn(() => true);
+      mockEditorStore({ loadScene });
+      render(<SceneToolbar />);
+
+      await act(async () => {
+        screen.getByRole('button', { name: /load scene/i }).click();
+      });
+
+      expect(loadScene).toHaveBeenCalledWith('{"entities":[]}');
+      expect(vi.mocked(showError)).not.toHaveBeenCalled();
+    });
+
+    it('shows an error when newScene is rejected via the New Scene button', async () => {
+      const newScene = vi.fn(() => false);
+      mockEditorStore({ newScene, sceneModified: false });
+      render(<SceneToolbar />);
+
+      await act(async () => {
+        screen.getByRole('button', { name: /new scene/i }).click();
+      });
+
+      expect(newScene).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows an error when newScene is rejected via the Ctrl+Shift+N shortcut', () => {
+      const newScene = vi.fn(() => false);
+      mockEditorStore({ newScene });
+      render(<SceneToolbar />);
+
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'N', ctrlKey: true, shiftKey: true }));
+      });
+
+      expect(newScene).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not show an error when newScene succeeds', async () => {
+      const newScene = vi.fn(() => true);
+      mockEditorStore({ newScene, sceneModified: false });
+      render(<SceneToolbar />);
+
+      await act(async () => {
+        screen.getByRole('button', { name: /new scene/i }).click();
+      });
+
+      expect(newScene).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(showError)).not.toHaveBeenCalled();
     });
   });
 });

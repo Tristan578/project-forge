@@ -5,6 +5,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
 import { saveSceneToCloud } from '@/lib/projects/cloudSave';
 import { loadPrefabInstances, stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
+import { showError } from '@/lib/toast';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
 import { SceneBrowser } from './SceneBrowser';
@@ -112,8 +113,11 @@ export function SceneToolbar() {
 
   const handleLoad = useCallback(async () => {
     const json = await openSceneFilePicker();
-    if (json) {
-      loadScene(json);
+    if (json && loadScene(json) === false) {
+      // Parity with the AI/MCP `load_scene` handler, which surfaces the same
+      // rejection: without this the scene silently vanishes into a no-op when
+      // its embedded prefab graph is rejected or the engine is not ready.
+      showError('The scene was not loaded. Check its prefab metadata and that the engine is ready, then try again.');
     }
   }, [loadScene]);
 
@@ -121,7 +125,10 @@ export function SceneToolbar() {
     if (sceneModified) {
       if (!await confirm('Discard unsaved changes and create a new scene?')) return;
     }
-    newScene();
+    if (newScene() === false) {
+      // Parity with the AI/MCP `new_scene` handler.
+      showError('The engine did not accept a new scene. The current scene is unchanged.');
+    }
   }, [newScene, sceneModified, confirm]);
 
   // Ctrl+S shortcut
@@ -140,7 +147,9 @@ export function SceneToolbar() {
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'N') {
         e.preventDefault();
-        newScene();
+        if (newScene() === false) {
+          showError('The engine did not accept a new scene. The current scene is unchanged.');
+        }
       }
     };
     window.addEventListener('keydown', handler);

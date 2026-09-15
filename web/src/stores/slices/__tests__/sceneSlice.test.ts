@@ -171,6 +171,34 @@ describe('sceneSlice', () => {
       expect(getPrefab('prefab_embedded')?.name).toBe('Embedded');
     });
 
+    it('drops a single malformed embedded definition rather than rejecting the whole scene load', () => {
+      // Routed through `readPrefabDefinitions`, an individual malformed or
+      // oversized entry is dropped (fail-soft) instead of one bad definition
+      // rejecting the ENTIRE scene load — which is what passing the raw array
+      // straight to `mergeImportedPrefabDefinitions` did.
+      expect(getPrefab('prefab_ok')).toBeUndefined();
+      const loaded = store.getState().loadScene(
+        JSON.stringify({
+          entities: [],
+          prefabInstances: [{ instanceId: 'pfi_ok', prefabId: 'prefab_ok', overrides: {} }],
+          prefabDefinitions: [
+            {
+              id: 'prefab_ok', name: 'Ok', category: 'cat', description: '',
+              snapshot: { entityType: 'cube', name: 'Ok', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+            },
+            // Structurally invalid — no `snapshot`; `sanitizePrefabDefinition`
+            // rejects it, so `readPrefabDefinitions` drops it before the merge.
+            { id: 'prefab_bad', name: 'Bad', category: 'cat', description: '' },
+          ],
+        })
+      );
+      expect(loaded).toBe(true);
+      expect(getPrefab('prefab_ok')?.name).toBe('Ok');
+      expect(getPrefab('prefab_bad')).toBeUndefined();
+      // The valid instance survives; nothing dangled it out.
+      expect(loadPrefabInstances()).toEqual([{ instanceId: 'pfi_ok', prefabId: 'prefab_ok', overrides: {} }]);
+    });
+
     it('never overwrites a local prefab definition with an embedded one of the same id', () => {
       const local = savePrefab('LocalName', 'cat', '', {
         entityType: 'cube', name: 'LocalName', transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
